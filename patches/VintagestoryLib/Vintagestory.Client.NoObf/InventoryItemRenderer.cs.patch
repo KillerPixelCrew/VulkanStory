@@ -1,124 +1,40 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-index 35bb9ac..8193b14 100644
+index 0a45eb1..1315a97 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-@@ -13,10 +13,16 @@ namespace Vintagestory.Client.NoObf;
- 
- public class InventoryItemRenderer : IRenderer, IDisposable
- {
- 	private ClientMain game;
- 
-+	// Issue #74: per-render-thread scratch ItemRenderInfo reused by the GUI item
-+	// render path to avoid a fresh allocation per visible slot per frame. Never
-+	// escapes the synchronous RenderItemstackToGui call.
-+	[System.ThreadStatic]
-+	private static ItemRenderInfo optimumGuiRenderInfoScratch;
-+
- 	private Dictionary<string, LoadedTexture> StackSizeTextures;
- 
- 	private MeshRef quadModelRef;
- 
- 	private CairoFont stackSizeFont;
-@@ -243,11 +249,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
- 	public void RenderItemstackToGui(ItemSlot inSlot, double posX, double posY, double posZ, float size, int color, float dt, bool shading = true, bool origRotate = false, bool showStackSize = true)
- 	{
- 		try
+@@ -189,11 +189,34 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+ 		if (clearPixels == null || clearPixels.Length < size * size)
  		{
- 			ItemStack itemstack = inSlot.Itemstack;
--			ItemRenderInfo itemStackRenderInfo = GetItemStackRenderInfo(game, inSlot, EnumItemRenderTarget.Gui, dt);
-+			bool __itemProf = Vintagestory.API.Config.OptimumDiagnostics.ItemRenderProfileEnabled;
-+			long __itemAlloc0 = __itemProf ? System.GC.GetAllocatedBytesForCurrentThread() : 0L;
-+			ItemRenderInfo itemStackRenderInfo;
-+			if (Vintagestory.API.Config.OptimumConfig.ItemRenderInfoReuseEnabled)
-+			{
-+				// Reuse a per-thread scratch instead of allocating per slot per frame.
-+				// The scratch never escapes this synchronous call; FillItemStackRenderInfo
-+				// resets it and runs the identical vanilla logic + mod hooks.
-+				ItemRenderInfo __scratch = optimumGuiRenderInfoScratch;
-+				if (__scratch == null)
-+				{
-+					__scratch = (optimumGuiRenderInfoScratch = new ItemRenderInfo());
-+				}
-+				itemStackRenderInfo = FillItemStackRenderInfo(game, inSlot, EnumItemRenderTarget.Gui, dt, __scratch);
-+			}
-+			else
-+			{
-+				itemStackRenderInfo = GetItemStackRenderInfo(game, inSlot, EnumItemRenderTarget.Gui, dt);
-+			}
-+			if (__itemProf)
-+			{
-+				Vintagestory.API.Config.OptimumDiagnostics.RecordItemRender(System.GC.GetAllocatedBytesForCurrentThread() - __itemAlloc0);
-+			}
- 			if (itemStackRenderInfo.ModelRef == null)
- 			{
- 				return;
- 			}
- 			bool flag = dt == -1.0125f;
-@@ -352,17 +380,31 @@ public class InventoryItemRenderer : IRenderer, IDisposable
- 		cairoFont.UnscaledFontsize *= fontSizeMultiplier;
- 		return game.api.guiapi.TextTexture.GenTextTexture(stackSize.ToString() ?? "", cairoFont);
- 	}
- 
- 	public static ItemRenderInfo GetItemStackRenderInfo(ClientMain game, ItemSlot inSlot, EnumItemRenderTarget target, float dt)
-+	{
-+		// Public API path: always hand back a fresh instance so mods that call
-+		// capi.Render.GetItemStackRenderInfo(...) and hold the result are unaffected.
-+		return FillItemStackRenderInfo(game, inSlot, target, dt, new ItemRenderInfo());
-+	}
-+
-+	// Issue #74: fill a caller-provided ItemRenderInfo instead of always allocating.
-+	// Resets every public field to the same defaults `new ItemRenderInfo()` would have,
-+	// then runs the identical vanilla logic and mod hooks. Used by the per-slot GUI
-+	// render path with a thread-local scratch instance to remove the ~104 B/slot/frame
-+	// allocation. The collectible OnBeforeRender hook takes `ref`, so a mod may still
-+	// swap in its own instance; that path simply returns the replacement.
-+	internal static ItemRenderInfo FillItemStackRenderInfo(ClientMain game, ItemSlot inSlot, EnumItemRenderTarget target, float dt, ItemRenderInfo renderinfo)
- 	{
- 		ItemStack itemstack = inSlot.Itemstack;
- 		if (itemstack == null || itemstack.Collectible.Code == null)
- 		{
--			return new ItemRenderInfo();
-+			ResetItemRenderInfo(renderinfo);
-+			return renderinfo;
+ 			clearPixels = new int[size * size];
  		}
--		ItemRenderInfo renderinfo = new ItemRenderInfo();
-+		ResetItemRenderInfo(renderinfo);
- 		renderinfo.dt = dt;
- 		switch (target)
- 		{
- 		case EnumItemRenderTarget.Ground:
- 			renderinfo.Transform = itemstack.Collectible.GroundTransform;
-@@ -431,10 +473,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
- 		inSlot.OnBeforeRender(renderinfo);
- 		itemstack.Collectible.OnBeforeRender(game.api, itemstack, target, ref renderinfo);
- 		return renderinfo;
+ 		game.guiShaderProg.SepiaLevel = task.SepiaLevel;
+-		GL.TexSubImage2D<int>((TextureTarget)3553, 0, (int)num, (int)num2, size, size, (PixelFormat)32993, (PixelType)5121, clearPixels);
++		// Blanks this item's slot in the atlas before drawing into it. The GL
++		// form writes to whatever CreateFrameBuffer left bound; the device takes
++		// the atlas texture by id, which TexPos already carries. The pixels are
++		// all zero, so channel order does not matter.
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			System.Runtime.InteropServices.GCHandle optimumPin =
++				System.Runtime.InteropServices.GCHandle.Alloc(clearPixels,
++					System.Runtime.InteropServices.GCHandleType.Pinned);
++			try
++			{
++				optimumDevice.UploadTexture2D(task.TexPos.atlasTextureId, 0, (int)num, (int)num2,
++					size, size, EnumTexturePixelFormat.Rgba, optimumPin.AddrOfPinnedObject());
++			}
++			finally
++			{
++				optimumPin.Free();
++			}
++		}
++		else
++		{
++			GL.TexSubImage2D<int>((TextureTarget)3553, 0, (int)num, (int)num2, size, size, (PixelFormat)32993, (PixelType)5121, clearPixels);
++		}
+ 		game.api.renderapi.inventoryItemRenderer.RenderItemstackToGui(dummySlot, num + (float)size / 2f, num2 + (float)size / 2f, 500.0, (float)(size / 2) * task.Scale, task.Color, shading: true, origRotate: false, showStackSize: false);
  	}
  
-+	// Reset every public field to the defaults a freshly-constructed ItemRenderInfo has.
-+	// TextureSize is reused in place (never replaced), so its Width/Height are cleared.
-+	// OverlayTexture is left as-is: it is a lazily-created LoadedTexture reused across
-+	// frames (SetRotOverlay only ever refills it), and OverlayOpacity=0 disables it, so
-+	// keeping the instance matches vanilla behaviour without churning textures.
-+	private static void ResetItemRenderInfo(ItemRenderInfo ri)
-+	{
-+		ri.ModelRef = null;
-+		ri.Transform = null;
-+		ri.CullFaces = false;
-+		ri.TextureId = 0;
-+		ri.TextureSize.Width = 0;
-+		ri.TextureSize.Height = 0;
-+		ri.AlphaTest = 0f;
-+		ri.HalfTransparent = false;
-+		ri.NormalShaded = false;
-+		ri.ApplyColor = false;
-+		ri.OverlayOpacity = 0f;
-+		ri.DamageEffect = 0f;
-+		ri.InSlot = null;
-+		ri.dt = 0f;
-+	}
-+
- 	public static TextureAtlasPosition GetTextureAtlasPosition(ClientMain game, IItemStack itemstack)
+ 	public void DisposeFrameBuffer(FrameBufferRef fb)
  	{
- 		int index = BlockFacing.UP.Index;
- 		if (itemstack.Collectible.Code == null)
- 		{
