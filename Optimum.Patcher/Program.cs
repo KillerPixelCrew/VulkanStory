@@ -86,6 +86,11 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "SetOptimumMotionUniforms",
     },
+    // TAA P4: the decal motion writer's previous-frame uniforms.
+    ["Vintagestory.Client.NoObf.SystemRenderDecals"] = new()
+    {
+        "SetOptimumMotionUniforms",
+    },
     ["Vintagestory.Client.NoObf.SystemRenderPlayerEffects"] = new()
     {
         "GetOptimumLightRadius",
@@ -187,6 +192,10 @@ var membersToInject = new Dictionary<string, List<string>>
         // which contributes the transparent layer's coverage to the reactive
         // channel without touching the vector or the writer depth under it.
         "ApplyOptimumMotionAccumulateBlendState",
+        // TAA P4: the sky / volumetric-cloud motion and reactive pass and the
+        // reactive constant it stamps.
+        "RenderOptimumSkyMotion",
+        "OptimumCloudReactive",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -205,6 +214,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "TaaResolve",
         // TAA P4: the liquid velocity pass program.
         "ChunkLiquidMotion",
+        // TAA P4: the sky / volumetric-cloud motion pass program.
+        "TaaSkyMotion",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
@@ -783,6 +794,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "MergeTransparentRenderPass", 0),
     // TAA P4: the cube-particle motion window and its uniforms.
     new("Vintagestory.Client.NoObf.SystemRenderParticles", "OnRenderFrame3D", 1),
+    // TAA P4: the decal motion window.
+    new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
