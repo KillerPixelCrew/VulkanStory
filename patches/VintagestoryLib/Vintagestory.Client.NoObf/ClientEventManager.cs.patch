@@ -1,28 +1,20 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
-index 11a0fd0..34d04b1 100644
+index 5e61808..a7b3f2f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
-@@ -181,15 +181,21 @@ public class ClientEventManager : EventManager
- 				ScreenManager.FrameProfiler.Mark(list[i].ProfilingName);
- 			}
- 		}
- 		else
- 		{
--			for (int j = 0; j < list.Count; j++)
-+			for (int i = 0; i < list.Count; i++)
- 			{
--				list[j].Renderer.OnRenderFrame(dt, stage);
-+				list[i].Renderer.OnRenderFrame(dt, stage);
- 			}
- 		}
-+		// Issue #74: log the item-render profiler summary at the final render stage
-+		// (diagnostic only, gated by OPTIMUM_ITEM_PROFILE).
-+		if (stage == EnumRenderStage.Done && Vintagestory.API.Config.OptimumDiagnostics.ItemRenderEndFrame())
-+		{
-+			Logger.Notification("[Optimum] " + Vintagestory.API.Config.OptimumDiagnostics.GetItemRenderProfileSummary());
-+		}
- 	}
- 
- 	public void TriggerLightingUpdate(int oldBlockId, int newBlockId, BlockPos pos, Dictionary<BlockPos, BlockUpdate> blockUpdatesBulk = null)
+@@ -483,10 +483,15 @@ public class ClientEventManager : EventManager
  	{
- 		Trigger(OnUpdateLighting?.GetInvocationList(), "OnUpdateLighting", delegate(UpdateLightingDelegate dele)
+ 		if (ShaderRegistry.SupressShaderAndBufferReloads)
+ 		{
+ 			return true;
+ 		}
++		// Optimum TAA: every shader reload path funnels through here (escape menu,
++		// hotkey, .debug commands, ShaderAPI, the ssaoQuality/minbrightness watchers).
++		// Programs and often the framebuffers are rebuilt, so the temporal history no
++		// longer matches what the next frame writes.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.ShaderReload);
+ 		bool flag = true;
+ 		foreach (ActionBoolReturn onReloadShader in OnReloadShaders)
+ 		{
+ 			try
+ 			{
