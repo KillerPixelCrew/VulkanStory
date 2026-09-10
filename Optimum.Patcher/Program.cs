@@ -171,6 +171,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "EndMotionWrite",
         "ApplyOptimumMotionBlendState",
         "InstallOptimumMotionWriteHooks",
+        "optimumMotionDrawBuffersOn",
+        "optimumMotionDrawBuffersOff",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
