@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..4412c43 100644
+index 6edf0c9..38aeda2 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -779,7 +779,7 @@ index 6edf0c9..4412c43 100644
 +	/// render systems assume when they index FrameBuffers by EnumFrameBuffer.
 +	/// </summary>
 +	private List<FrameBufferRef> SetupOptimumFrameBuffers(Vintagestory.API.Config.IOptimumGraphicsDevice device)
- 	{
++	{
 +		SetupSSAO = ClientSettings.SSAOQuality > 0;
 +		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
 +		for (int i = 0; i <= 24; i++)
@@ -1446,7 +1446,7 @@ index 6edf0c9..4412c43 100644
 +		return readback;
 +	}
 +
- 	public List<FrameBufferRef> SetupDefaultFrameBuffers()
++	public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()
  	{
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumSetupDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		if (optimumSetupDevice != null)
@@ -1637,7 +1637,7 @@ index 6edf0c9..4412c43 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
-+	{
+ 	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -1689,7 +1689,7 @@ index 6edf0c9..4412c43 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
- 	{
++	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
