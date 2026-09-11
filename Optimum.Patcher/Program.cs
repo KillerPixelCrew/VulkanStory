@@ -220,23 +220,28 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
-        // Vulkan backend: the device-path framebuffer setup and its helpers.
-        "SetupOptimumFrameBuffers",
-        "CreateOptimumColorTarget",
-        "SetupOptimumTextureSampler",
-        "CreateOptimumDepthTarget",
-        "CreateOptimumPlaceholderTarget",
-        "CreateOptimumFramebuffer",
-        // Vulkan backend: GL state the device takes as call arguments instead,
-        // so the routed bodies need somewhere to remember it.
-        "optimumClearR",
-        "optimumClearG",
-        "optimumClearB",
-        "optimumClearA",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).
         "OptimumRenderSsao",
+        "OptimumAdoptFrameBufferSettings",
+        "OptimumTaaRequested",
+        "OptimumSsaoKernel",
+        "SetOptimumMotionAttachmentIndex",
+        "OptimumAdoptTaaTargets",
+        "OptimumFinishDeviceFrameBufferSetup",
+        // Phase 1A step 4: GL halves of the framebuffer binding, clears and post-chain pass state.
+        "BindCurrentFrameBuffer",
+        "BindCurrentFrameBufferKeepViewport",
+        "ClearBoundFrameBuffer",
+        "ClearFrameBufferPass",
+        "ApplyTransparentPassBlendState",
+        "SelectBackDrawBuffer",
+        "SetBlendEnabled",
+        "ApplyTransparentMergeBlendState",
+        "ClearSsaoTarget",
+        "BeginFinalCompositionDrawBuffers",
+        "RestoreWorldDrawBuffers",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
@@ -250,7 +255,6 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumMotionWriteActive",
         "optimumTaaDisabled",
         "TaaHistory",
-        "CreateOptimumHistoryTarget",
         "CreateOptimumHistoryTargetGl",
         "DisableOptimumTaa",
         "optimumTaaShaderReloadPending",
@@ -842,12 +846,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBufferKeepVw", 1),
     // The scissor flag is read back by the runtime atlas upload; the device
     // keeps no queryable state, so the routed setter remembers it.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateFramebuffer", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 4),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnloadFrameBuffer", 1,
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
@@ -867,7 +868,6 @@ var targets = new List<MethodTarget>
     // menu reaches it, and TextureAtlas.Upload only runs once a world loads.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateTextureFromPixels", 6),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Load3DTextureCube", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearColorRgbaf", 4),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),
