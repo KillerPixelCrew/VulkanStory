@@ -305,6 +305,16 @@ unknown from the next.
 - HDR interacts: DLSS-G forbids FP16/scRGB, so an HDR path that wants frame generation must be RGB10A2.
   That decision belongs with the HDR item, not this one.
 
+## Last of all: documentation and comment cleanup
+
+Deliberately the final item (user, 2026-09-12: "We do Code documentation and comment cleanup at the very
+end"). Until then comments stay as they are and are only ever moved, never trimmed - most of them record
+what a defect cost and several carry measured numbers (the 1.05 % leaf rejection, the 0.37 -> 0.02 px
+jitter residual, why the NGX shutdown gate exists, why the acquire wait stage may never be ALL_COMMANDS).
+Tidying those away before the work is finished would delete the reasoning while the code that needs it is
+still moving. When the renderer settles, do one pass: prune what has gone stale, keep every "why", and make
+the entry points readable for someone arriving new.
+
 ## Known debt
 
 - `TransientAllocator` is implemented but not driven by the frame graph (aliasing is off by default).
