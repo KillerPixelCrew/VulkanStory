@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Vintagestory.API.Config;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -21,6 +22,14 @@ namespace Optimum.Tests;
 /// The honest-state rule has its own cases: a machine with no upscaler must be
 /// told so rather than offered a choice the frame would not honour, and the
 /// preset row must be dead while nothing is upscaling.
+///
+/// The setting the rows write is asserted here too (DLSS plan, Phase 2 step 3):
+/// "Upscaler" (off|dlss) and a quality preset live in OptimumConfig with the usual
+/// defensive load - an unrecognised upscaler means off, an unrecognised preset means
+/// quality, and neither can fail the parse - and the renderer can stand the upscaler
+/// down for the session without touching the persisted value. A row and the field it
+/// writes are one subject: a default that moves under a row nobody re-read is how a
+/// tab starts lying about the frame.
 /// </summary>
 public class UpscalerSettingsUiCoverageTests
 {
@@ -508,6 +517,98 @@ public class UpscalerSettingsUiCoverageTests
         foreach (string key in asked)
         {
             Assert.Contains("\"" + key + "\":", lang);
+        }
+    }
+
+    // ---- (e) the setting the rows write ------------------------------------
+
+    [Fact]
+    public void TheSettingIsDeclaredPersistedAndDefensivelyParsed()
+    {
+        foreach (string config in new[]
+        {
+            Read("VintagestoryApi/Config/OptimumConfig.cs"),
+            Read("sources/VintagestoryApi/Config/OptimumConfig.cs"),
+        })
+        {
+            // Off by default, in the live value and in the persisted data object, so a
+            // config that never mentions the setting comes up with the old render chain.
+            Assert.Contains("public static string Upscaler = \"off\";", config);
+            Assert.Contains("public string Upscaler { get; set; } = \"off\";", config);
+            Assert.Contains("public static string UpscalerQuality = \"quality\";", config);
+            Assert.Contains("public string UpscalerQuality { get; set; } = \"quality\";", config);
+
+            Assert.Contains("(nameof(OptimumConfigData.Upscaler), Upscaler),", config);
+            Assert.Contains("(nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),", config);
+            Assert.Contains("Upscaler = Upscaler,", config);
+            Assert.Contains("UpscalerQuality = UpscalerQuality,", config);
+
+            // Defensive load, the same shape the renderer selection uses.
+            Assert.Contains("string requestedUpscaler = data.Upscaler?.Trim() ?? \"\";", config);
+            Assert.Contains("string requestedUpscalerQuality = data.UpscalerQuality?.Trim() ?? \"\";", config);
+
+            // A runtime stand-down that never touches the persisted value, and reports
+            // itself exactly once so the renderer logs one line.
+            Assert.Contains("public static bool UpscalerRuntimeDisabled { get; private set; }", config);
+            Assert.Contains("public static bool DisableUpscalerAtRuntime()", config);
+            Assert.Contains("public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? \"off\" : Upscaler;", config);
+            // Every upscaler that owns the resolve, not DLSS alone: the passthrough
+            // upscaler takes the identical path and stands the in-house resolve, the
+            // sharpen pass and the FSR blit down exactly as DLSS does.
+            Assert.Contains(
+                "public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss || EffectiveUpscalerIsPassthrough;",
+                config);
+        }
+    }
+
+    /// <summary>
+    /// The round trip through a real optimum.json: the default is off, a config that
+    /// never mentions the setting comes up off, an explicit value survives load and
+    /// save, and an unknown one degrades instead of failing the parse.
+    /// </summary>
+    [Theory]
+    [InlineData("\"dlss\"", "\"performance\"", "dlss", "performance")]
+    [InlineData("\"DLSS\"", "\"ULTRAPERFORMANCE\"", "dlss", "ultraperformance")]
+    [InlineData("\"  dlss  \"", "\"  dlaa  \"", "dlss", "dlaa")]
+    [InlineData("\"off\"", "\"balanced\"", "off", "balanced")]
+    [InlineData("\"xess\"", "\"nonsense\"", "off", "quality")]
+    [InlineData("null", "null", "off", "quality")]
+    [InlineData(null, null, "off", "quality")]
+    public void TheUpscalerRoundTripsThroughOptimumJson(
+        string? upscalerJson, string? qualityJson, string expectedUpscaler, string expectedQuality)
+    {
+        string originalUpscaler = OptimumConfig.Upscaler;
+        string originalQuality = OptimumConfig.UpscalerQuality;
+        string dataPath = Path.Combine(Path.GetTempPath(), "optimum-upscaler-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // A scan report that succeeded and disabled nothing leaves the assembly's
+            // shader-compatibility state exactly as a fresh process has it.
+            Directory.CreateDirectory(Path.Combine(dataPath, ".optimum"));
+            File.WriteAllText(Path.Combine(dataPath, ".optimum", "shader-compatibility.json"),
+                "{ \"ScanFailed\": false, \"DisabledFeatures\": [] }");
+
+            OptimumConfig.SetDataPath(dataPath);
+            string configPath = Path.Combine(dataPath, "ModConfig", "optimum.json");
+            File.WriteAllText(configPath, upscalerJson == null
+                ? "{}"
+                : "{ \"Upscaler\": " + upscalerJson + ", \"UpscalerQuality\": " + qualityJson + " }");
+
+            OptimumConfig.Upscaler = "dlss";
+            OptimumConfig.UpscalerQuality = "ultraperformance";
+            OptimumConfig.Load();
+            Assert.Equal(expectedUpscaler, OptimumConfig.Upscaler);
+            Assert.Equal(expectedQuality, OptimumConfig.UpscalerQuality);
+
+            string written = File.ReadAllText(configPath);
+            Assert.Contains("\"Upscaler\": \"" + expectedUpscaler + "\"", written);
+            Assert.Contains("\"UpscalerQuality\": \"" + expectedQuality + "\"", written);
+        }
+        finally
+        {
+            OptimumConfig.Upscaler = originalUpscaler;
+            OptimumConfig.UpscalerQuality = originalQuality;
+            try { Directory.Delete(dataPath, recursive: true); } catch (IOException) { }
         }
     }
 
