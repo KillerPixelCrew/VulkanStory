@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..e541b39 100644
+index 6edf0c9..d65b704 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -115,7 +115,7 @@ index 6edf0c9..e541b39 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +182,131 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +182,203 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -150,6 +150,14 @@ index 6edf0c9..e541b39 100644
 +	// Primary is that target, exactly as it always was.
 +	private const int OptimumUpscaledSceneIndex = 22;
 +
++	// Optimum (DLSS-FG design, step 2): the HUD-less snapshot of the composited
++	// scene - the guide's pHudless. RenderFinalComposition copies the composited
++	// colour into it before RenderAfterFinalComposition draws the world-space
++	// overlays onto the composite, so the one moment the scene exists without any
++	// overlay and without the GUI is captured instead of lost. Display-resolution,
++	// colour only; null whenever nothing wants it.
++	private const int OptimumSceneNoHudIndex = 23;
++
 +	// Optimum (DLSS plan, Phase 3): whether an upscaler produced this frame's
 +	// display-resolution scene colour. Set once per frame by
 +	// RenderPostprocessingEffects and read by everything downstream, so the whole
@@ -158,6 +166,70 @@ index 6edf0c9..e541b39 100644
 +	private bool optimumUpscaledThisFrame;
 +
 +	private const int OptimumGlR32f = 0x822E;
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): the framebuffer slot that holds this
++	/// frame's HUD-less composited scene colour, or -1 when the snapshot is not
++	/// allocated - which is every frame that no upscaler and no frame generation
++	/// asked for. Published the way <see cref="MotionAttachmentIndex" /> is: the
++	/// index is the contract, and every consumer asks it before it indexes
++	/// FrameBuffers.
++	/// </summary>
++	public int SceneNoHudFrameBufferIndex
++	{
++		get
++		{
++			return optimumSceneNoHudIndex;
++		}
++	}
++
++	private int optimumSceneNoHudIndex = -1;
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): whether anything wants the HUD-less
++	/// snapshot this build. Today that is an upscaler; frame generation joins this
++	/// disjunction when its setting lands (design step 5), and it is the only place
++	/// that has to change. False means the target is never allocated and
++	/// RenderFinalComposition copies nothing, so a normal frame pays nothing.
++	/// </summary>
++	public bool OptimumSceneNoHudRequested
++	{
++		get
++		{
++			return Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): the snapshot target, or null when the slot
++	/// is not allocated. The one accessor consumers need; the index above is what
++	/// the parity dump and the tests name.
++	/// </summary>
++	public FrameBufferRef OptimumSceneNoHudFrameBuffer
++	{
++		get
++		{
++			if (optimumSceneNoHudIndex < 0 || frameBuffers == null) return null;
++			if (frameBuffers.Count <= optimumSceneNoHudIndex) return null;
++			return frameBuffers[optimumSceneNoHudIndex];
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): whether the last composition really wrote
++	/// the snapshot. False on a frame with no snapshot target, and false when the
++	/// copy was refused - a consumer that reads the slot anyway would be reading the
++	/// previous frame's image.
++	/// </summary>
++	public bool OptimumSceneNoHudCaptured
++	{
++		get
++		{
++			return optimumSceneNoHudCaptured;
++		}
++	}
++
++	private bool optimumSceneNoHudCaptured;
 +
 +	/// <summary>
 +	/// Optimum: the Primary colour-attachment index that holds per-pixel motion
@@ -247,7 +319,7 @@ index 6edf0c9..e541b39 100644
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -109,10 +319,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -109,10 +391,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private bool RenderFXAA;
  
@@ -266,7 +338,7 @@ index 6edf0c9..e541b39 100644
  	private int ShadowMapQuality;
  
  	private float ssaaLevel;
-@@ -200,11 +418,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -200,11 +490,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return audio.MasterSoundLevel;
  		}
@@ -283,7 +355,7 @@ index 6edf0c9..e541b39 100644
  
  	public override AssetManager AssetManager => assetManager;
  
-@@ -256,10 +478,180 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -256,10 +550,180 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -464,7 +536,7 @@ index 6edf0c9..e541b39 100644
  		get
  		{
  			return serverRunning;
-@@ -278,34 +670,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,34 +742,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -527,7 +599,7 @@ index 6edf0c9..e541b39 100644
  	public override bool GlDebugMode
  	{
  		get
-@@ -379,10 +791,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -379,10 +863,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public void StartAudio()
  	{
  		if (audio == null)
@@ -547,7 +619,7 @@ index 6edf0c9..e541b39 100644
  
  	public override void AddAudioSettingsWatchers()
  	{
-@@ -478,40 +899,170 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,40 +971,170 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -724,7 +796,7 @@ index 6edf0c9..e541b39 100644
  	}
  
  	public void LogAndTestHardwareInfosStage1()
-@@ -531,11 +1082,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -531,11 +1154,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
@@ -737,7 +809,7 @@ index 6edf0c9..e541b39 100644
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
-@@ -702,24 +1253,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1325,50 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -780,13 +852,17 @@ index 6edf0c9..e541b39 100644
 +			// one of the buffers just disposed, so no reader may still be told the
 +			// frame has one. The next RenderPostprocessingEffects sets it again.
 +			optimumUpscaledThisFrame = false;
++			// Optimum (DLSS-FG design, step 2): the snapshot the flag described was one
++			// of the buffers just disposed. SetupDefaultFrameBuffers already republished
++			// the slot for the new set; only the per-frame capture flag is stale here.
++			optimumSceneNoHudCaptured = false;
 +			OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
  		}
  	}
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1369,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1445,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -806,7 +882,7 @@ index 6edf0c9..e541b39 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -841,28 +1423,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -841,28 +1499,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public unsafe override void SetDirectMouseMode(bool enabled)
  	{
  		GLFW.SetInputMode(((NativeWindow)window).WindowPtr, (RawMouseMotionAttribute)208901, enabled);
@@ -884,7 +960,7 @@ index 6edf0c9..e541b39 100644
  	public override BitmapRef GrabScreenshot(int width, int height, bool scaleScreenshot, bool flip, bool withAlpha = false)
  	{
  		screenshot.d_GameWindow = (GameWindow)(object)window;
-@@ -1023,11 +1650,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1023,11 +1726,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -897,7 +973,7 @@ index 6edf0c9..e541b39 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1150,88 +1777,854 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,71 +1853,900 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -1012,36 +1088,10 @@ index 6edf0c9..e541b39 100644
 +			{
 +				OptimumHeadlessRunCommands(game);
 +			}
- 		}
--		CurrentFrameBufferKeepVw = frameBufferRef3;
--		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
--		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
--		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
--		GL.DepthFunc((DepthFunction)513);
--		frameBufferRef3.ColorTextureIds = ArrayUtil.CreateFilled(SetupSSAO ? 4 : 2, (int n) => GL.GenTexture());
--		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
--		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
--		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
--		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[1]);
--		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5121, (IntPtr)IntPtr.Zero);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
--		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
--		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[1], 0);
--		if (SetupSSAO)
++		}
 +
 +		if (optimumHeadlessCaptureDone || !OptimumHeadless.CaptureEnabled)
- 		{
--			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[2]);
--			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
++		{
 +			return;
 +		}
 +		if (OptimumHeadless.ShouldCapture(worldFrame))
@@ -1260,6 +1310,8 @@ index 6edf0c9..e541b39 100644
 +			return "OptimumTaaSharpen";
 +		case OptimumUpscaledSceneIndex:
 +			return "OptimumUpscaledScene";
++		case OptimumSceneNoHudIndex:
++			return "OptimumSceneNoHud";
 +		default:
 +			return "Slot" + slot;
 +		}
@@ -1652,6 +1704,63 @@ index 6edf0c9..e541b39 100644
 +		optimumMotionAttachmentIndex = index;
 +	}
 +
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): publishes the HUD-less snapshot's slot as
++	/// soon as its target exists, and -1 when it does not. Both framebuffer setups
++	/// call it - the GL one below and the device one in VulkanClientPlatform - so the
++	/// index is published from one place on either backend.
++	/// </summary>
++	public void SetOptimumSceneNoHudIndex(int index)
++	{
++		optimumSceneNoHudIndex = index;
++		optimumSceneNoHudCaptured = false;
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): takes the HUD-less snapshot. Called at the
++	/// very end of <see cref="RenderFinalComposition" />, which is the one moment the
++	/// composited image holds the scene and nothing else: the next stage
++	/// (RenderAfterFinalComposition) draws selection boxes and work-item guides onto
++	/// that same image, and the GUI follows after the blit.
++	///
++	/// Does nothing at all when the slot is not allocated, which is every frame no
++	/// upscaler and no frame generation asked for.
++	/// </summary>
++	public void OptimumCaptureSceneNoHud()
++	{
++		optimumSceneNoHudCaptured = false;
++		if (optimumSceneNoHudIndex < 0 || frameBuffers == null) return;
++		if (frameBuffers.Count <= optimumSceneNoHudIndex) return;
++		FrameBufferRef snapshot = frameBuffers[optimumSceneNoHudIndex];
++		FrameBufferRef composite = OptimumCompositeFrameBuffer;
++		if (snapshot == null || composite == null) return;
++		if (snapshot.ColorTextureIds == null || snapshot.ColorTextureIds.Length == 0) return;
++		if (composite.ColorTextureIds == null || composite.ColorTextureIds.Length == 0) return;
++		optimumSceneNoHudCaptured = CopyOptimumSceneNoHud(composite, snapshot);
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 2): the GL half of the snapshot copy - one
++	/// framebuffer blit of colour attachment 0, nearest, which is exact whenever the
++	/// two are the same size. They only differ on the frame an upscaler stood down
++	/// after its display-resolution targets were already built, and then a magnifying
++	/// copy is the honest answer rather than no snapshot at all.
++	///
++	/// The binding is handed back exactly as it was found: the composition left the
++	/// composite target bound and the overlays that follow draw into it.
++	/// </summary>
++	public virtual bool CopyOptimumSceneNoHud(FrameBufferRef source, FrameBufferRef destination)
++	{
++		// GL_READ_FRAMEBUFFER / GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++		// GL_COLOR_BUFFER_BIT, GL_NEAREST.
++		GL.BindFramebuffer((FramebufferTarget)36008, source.FboId);
++		GL.BindFramebuffer((FramebufferTarget)36009, destination.FboId);
++		GL.ReadBuffer((ReadBufferMode)36064);
++		GL.BlitFramebuffer(0, 0, source.Width, source.Height, 0, 0, destination.Width, destination.Height, (ClearBufferMask)16384, (BlitFramebufferFilter)9728);
++		BindCurrentFrameBufferKeepViewport(curFb);
++		return true;
++	}
++
 +	/// <summary>Optimum TAA: the targets are ready once the motion attachment and both history slots exist.</summary>
 +	public void OptimumAdoptTaaTargets(List<FrameBufferRef> list, bool taaRequested)
 +	{
@@ -1718,6 +1827,10 @@ index 6edf0c9..e541b39 100644
 +		for (int i = 0; i <= 24; i++)
 +		{
 +			list.Add(null);
++		// Optimum (DLSS-FG design, step 2): this build owns the snapshot slot, so it
++		// starts unpublished - the allocation below republishes it, and every early
++		// return leaves -1 rather than an index into a list that has no target.
++		SetOptimumSceneNoHudIndex(-1);
 +		}
 +		ShadowMapQuality = ClientSettings.ShadowMapQuality;
 +		ssaaLevel = ClientSettings.SSAA;
@@ -1782,44 +1895,28 @@ index 6edf0c9..e541b39 100644
 +		if (frameBufferRef3.FboId == 0)
 +		{
 +			base.XPlatInterface.ShowMessageBox("Fatal error", "Unable to generate a new framebuffer. This shouldn't happen, ever. Maybe a restart resolves the problem?");
-+		}
-+		CurrentFrameBufferKeepVw = frameBufferRef3;
-+		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
-+		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
-+		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
-+		GL.DepthFunc((DepthFunction)513);
+ 		}
+ 		CurrentFrameBufferKeepVw = frameBufferRef3;
+ 		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
+ 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
+ 		GL.DepthFunc((DepthFunction)513);
+-		frameBufferRef3.ColorTextureIds = ArrayUtil.CreateFilled(SetupSSAO ? 4 : 2, (int n) => GL.GenTexture());
 +		frameBufferRef3.ColorTextureIds = new int[SetupSSAO ? 4 : 2];
 +		for (int j = 0; j < frameBufferRef3.ColorTextureIds.Length; j++)
 +		{
 +			frameBufferRef3.ColorTextureIds[j] = GL.GenTexture();
 +		}
-+		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
-+		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
-+		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-+		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[1]);
-+		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5121, (IntPtr)IntPtr.Zero);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
-+		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
-+		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[1], 0);
-+		if (SetupSSAO)
-+		{
-+			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[2]);
-+			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
- 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33069);
- 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33069);
- 			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36066, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[2], 0);
- 			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[3]);
- 			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)IntPtr.Zero);
-@@ -1251,10 +2644,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
+ 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
+@@ -1251,10 +2783,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
@@ -1860,7 +1957,7 @@ index 6edf0c9..e541b39 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1364,82 +2787,190 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1364,82 +2926,220 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			}
  		}
  		frameBufferRef = (list[2] = new FrameBufferRef
@@ -2066,12 +2163,42 @@ index 6edf0c9..e541b39 100644
 +				DisableOptimumUpscaler("the upscaled scene target (GL) is incomplete");
 +			}
 +		}
++		// Optimum (DLSS-FG design, step 2): the HUD-less snapshot, at the display
++		// size, colour only - nothing ever renders into it, the composition copies
++		// into it. Allocated only when something wants it; a failure costs the
++		// snapshot and nothing else, so it stands nothing down and leaves the
++		// published index at -1.
++		if (OptimumSceneNoHudRequested)
++		{
++			FrameBufferRef optimumSceneNoHud = (list[OptimumSceneNoHudIndex] = new FrameBufferRef
++			{
++				FboId = GL.GenFramebuffer(),
++				Width = displayWidth,
++				Height = displayHeight
++			});
++			CurrentFrameBufferKeepVw = optimumSceneNoHud;
++			optimumSceneNoHud.ColorTextureIds = new int[1] { GL.GenTexture() };
++			setupAttachment(optimumSceneNoHud, displayWidth, displayHeight, 0, val, (PixelInternalFormat)32856);
++			GL.DrawBuffer((DrawBufferMode)36064);
++			FramebufferErrorCode optimumSceneNoHudStatus = GL.CheckFramebufferStatus((FramebufferTarget)36160);
++			if ((int)optimumSceneNoHudStatus != 36053)
++			{
++				logger.Error("Optimum disabled the HUD-less scene snapshot: its target returned {0}.", optimumSceneNoHudStatus);
++				GL.DeleteTexture(optimumSceneNoHud.ColorTextureIds[0]);
++				GL.DeleteFramebuffer(optimumSceneNoHud.FboId);
++				list[OptimumSceneNoHudIndex] = null;
++			}
++			else
++			{
++				SetOptimumSceneNoHudIndex(OptimumSceneNoHudIndex);
++			}
++		}
  		frameBufferRef = (list[5] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +3079,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +3248,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -2086,7 +2213,7 @@ index 6edf0c9..e541b39 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +3102,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +3271,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -2100,7 +2227,7 @@ index 6edf0c9..e541b39 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
-+	{
+ 	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -2152,7 +2279,7 @@ index 6edf0c9..e541b39 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
- 	{
++	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
@@ -2181,7 +2308,7 @@ index 6edf0c9..e541b39 100644
  			}
  		}
  	}
-@@ -1591,11 +3196,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +3365,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -2200,7 +2327,7 @@ index 6edf0c9..e541b39 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1619,27 +3231,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1619,27 +3400,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -2287,7 +2414,7 @@ index 6edf0c9..e541b39 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +3340,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +3509,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -2393,7 +2520,7 @@ index 6edf0c9..e541b39 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1752,40 +3436,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1752,40 +3605,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.Primary:
@@ -2486,7 +2613,7 @@ index 6edf0c9..e541b39 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +3524,306 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +3693,306 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2803,7 +2930,7 @@ index 6edf0c9..e541b39 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,156 +3838,282 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,156 +4007,282 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -3145,7 +3272,7 @@ index 6edf0c9..e541b39 100644
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
  			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
-@@ -1987,27 +4128,60 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +4297,62 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -3176,9 +3303,14 @@ index 6edf0c9..e541b39 100644
 -				GL.DrawBuffers(2, array);
 +				RestoreWorldDrawBuffers(RenderSSAO);
  			}
- 		}
- 	}
- 
++			// Optimum (DLSS-FG design, step 2): the HUD-less snapshot. Here and nowhere
++			// else: the composited image holds the scene alone for exactly this long -
++			// the next stage draws the world-space overlays onto it, and the GUI onto
++			// the backbuffer after the blit. Costs nothing when nothing asked for it.
++			OptimumCaptureSceneNoHud();
++		}
++	}
++
 +	/// <summary>Optimum (Phase 1A step 4): the GL half of the final composition's pass state.</summary>
 +	public override void BeginFinalCompositionDrawBuffers()
 +	{
@@ -3207,15 +3339,12 @@ index 6edf0c9..e541b39 100644
 +				(DrawBuffersEnum)36065
 +			};
 +			GL.DrawBuffers(2, array);
-+		}
-+	}
-+
+ 		}
+ 	}
+ 
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
- 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0006: Invalid comparison between Unknown and I4
- 		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-@@ -2023,27 +4197,490 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +4371,490 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3708,7 +3837,7 @@ index 6edf0c9..e541b39 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4839,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +5013,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3748,7 +3877,7 @@ index 6edf0c9..e541b39 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +5237,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5411,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3801,7 +3930,7 @@ index 6edf0c9..e541b39 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5332,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5506,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3846,7 +3975,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5369,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5543,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3867,7 +3996,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5388,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5562,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3888,7 +4017,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5407,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5581,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3909,7 +4038,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5426,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5600,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3930,7 +4059,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5449,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5623,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3951,7 +4080,7 @@ index 6edf0c9..e541b39 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +6011,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +6185,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3975,7 +4104,7 @@ index 6edf0c9..e541b39 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6370,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6544,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

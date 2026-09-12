@@ -394,6 +394,21 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumCompositeFrameBuffer",
         "OptimumUpscaledThisFrame",
         "OptimumBindCompositeForCapture",
+        // DLSS-FG design, step 2: the HUD-less scene snapshot - its slot, the
+        // published index and its field, the "does anything want it" gate, the
+        // target accessor, the per-frame capture flag, the publisher both
+        // framebuffer setups call, the capture RenderFinalComposition ends with and
+        // the GL half of the copy VulkanClientPlatform overrides.
+        "OptimumSceneNoHudIndex",
+        "SceneNoHudFrameBufferIndex",
+        "optimumSceneNoHudIndex",
+        "OptimumSceneNoHudRequested",
+        "OptimumSceneNoHudFrameBuffer",
+        "OptimumSceneNoHudCaptured",
+        "optimumSceneNoHudCaptured",
+        "SetOptimumSceneNoHudIndex",
+        "OptimumCaptureSceneNoHud",
+        "CopyOptimumSceneNoHud",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.

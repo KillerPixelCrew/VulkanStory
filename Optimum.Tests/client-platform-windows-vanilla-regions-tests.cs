@@ -57,6 +57,12 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumUpscaleSsaoApplied", "ApplyOptimumUpscaleSsao",
         "OptimumTryPlanUpscaleRenderSize", "RenderOptimumUpscale", "OptimumCompositeFrameBuffer",
         "OptimumUpscaledThisFrame", "OptimumBindCompositeForCapture",
+        // DLSS-FG design, step 2: the HUD-less scene snapshot - the slot, the
+        // published index, the gate, the accessors and the copy.
+        "OptimumSceneNoHudIndex", "SceneNoHudFrameBufferIndex", "optimumSceneNoHudIndex",
+        "OptimumSceneNoHudRequested", "OptimumSceneNoHudFrameBuffer", "OptimumSceneNoHudCaptured",
+        "optimumSceneNoHudCaptured", "SetOptimumSceneNoHudIndex", "OptimumCaptureSceneNoHud",
+        "CopyOptimumSceneNoHud",
         "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",

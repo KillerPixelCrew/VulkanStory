@@ -151,6 +151,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(false, "get_OptimumUpscalerActive", Array.Empty<string>()),
         new(false, "OptimumTryPlanUpscaleRenderSize", new[] { "Int32", "Int32", "Int32&", "Int32&" }),
         new(false, "RenderOptimumUpscale", Array.Empty<string>()),
+        // DLSS-FG design, step 2: the HUD-less snapshot's copy, injected into
+        // ClientPlatformWindows virtual for the same reason.
+        new(false, "CopyOptimumSceneNoHud", new[] { "FrameBufferRef", "FrameBufferRef" }),
         // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
