@@ -126,7 +126,10 @@ public class DlssgFoundationMergeCoverageTests
         // The capture itself is a no-op when the slot was never published, which is
         // what "a normal frame pays nothing" means on the lib side.
         Assert.Contains("if (optimumSceneNoHudIndex < 0 || frameBuffers == null) return;", lib);
-        Assert.Contains("private int optimumSceneNoHudIndex = -1;", lib);
+        // No initializer - Cecil injects the field but not the constructor, so it is 0 at
+        // runtime; SetOptimumSceneNoHudIndex(-1) is what actually unpublishes the slot.
+        Assert.Contains("private int optimumSceneNoHudIndex;", lib);
+        Assert.Contains("SetOptimumSceneNoHudIndex(-1);", lib);
     }
 
     private static string Read(string relativePath) =>

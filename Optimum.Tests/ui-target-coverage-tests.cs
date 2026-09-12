@@ -138,7 +138,13 @@ public class UiTargetCoverageTests
         Assert.Contains("if (OptimumUiTargetRequested)", vulkan);
         Assert.Contains("SetOptimumUiTargetIndex(-1);", vulkan);
 
-        Assert.Contains("private int optimumUiTargetIndex = -1;", platform);
+        // No initializer: an injected field's initializer never runs in the patched DLL
+        // (Cecil copies no constructor IL), so the field really starts at 0 and the
+        // unpublish call below is the only thing that makes it -1. Asserting the old
+        // "= -1" was asserting something that was never true at runtime.
+        Assert.Contains("private int optimumUiTargetIndex;", platform);
+        Assert.DoesNotContain("private int optimumUiTargetIndex = ", platform);
+        Assert.Contains("SetOptimumUiTargetIndex(-1);", platform);
 
         // The bind pays nothing with no slot published: no LoadFrameBuffer, no clear.
         string bind = MethodBody(platform, "public void OptimumBindUiTarget()");
@@ -182,7 +188,12 @@ public class UiTargetCoverageTests
 
         // Transparent black on the way in: a cleared alpha of 1 would make the compose
         // cover the world everywhere the GUI drew nothing.
-        Assert.Contains("private float[] optimumUiTargetClearColor = new float[4] { 0f, 0f, 0f, 0f };", platform);
+        // Declared without an initializer and allocated at its use site: a Cecil-injected
+        // field is null at runtime whatever the declaration says, which crashed the first
+        // frame of the main menu on 2026-09-12. All-zero is transparent black already.
+        Assert.Contains("private float[] optimumUiTargetClearColor;", platform);
+        Assert.DoesNotContain("optimumUiTargetClearColor = new float[4] {", platform);
+        Assert.Contains("optimumUiTargetClearColor = new float[4];", platform);
 
         // The GL target: colour plus a depth attachment, at the native window size.
         Assert.Contains("setupAttachment(optimumUiTarget, uiNativeWidth, uiNativeHeight, 0, val, (PixelInternalFormat)32856);", platform);

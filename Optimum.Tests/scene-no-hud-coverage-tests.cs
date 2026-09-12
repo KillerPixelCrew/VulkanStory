@@ -64,7 +64,10 @@ public class SceneNoHudCoverageTests
         string platform = Platform();
 
         Assert.Contains("private const int OptimumSceneNoHudIndex = 23;", platform);
-        Assert.Contains("private int optimumSceneNoHudIndex = -1;", platform);
+        // No initializer - Cecil injects the field but not the constructor, so it is 0 at
+        // runtime; SetOptimumSceneNoHudIndex(-1) is what actually unpublishes the slot.
+        Assert.Contains("private int optimumSceneNoHudIndex;", platform);
+        Assert.Contains("SetOptimumSceneNoHudIndex(-1);", platform);
         Assert.Contains("public int SceneNoHudFrameBufferIndex", platform);
         Assert.Contains("public void SetOptimumSceneNoHudIndex(int index)", platform);
 

@@ -113,7 +113,10 @@ public class PlatformTaaVirtualsCoverageTests
 
         // The state members read private fields, and nothing hides them with a
         // non-virtual declaration of the same name.
-        Assert.Contains("private int optimumMotionAttachmentIndex = -1;", platform);
+        // No initializer - Cecil injects the field but not the constructor. Both framebuffer
+        // setups assign it before any frame renders, and DisableOptimumTaa resets it to -1.
+        Assert.Contains("private int optimumMotionAttachmentIndex;", platform);
+        Assert.Contains("optimumMotionAttachmentIndex = -1;", platform);
         Assert.Contains("private bool optimumMotionWriteActive;", platform);
         Assert.Contains("private bool optimumTaaTargetsReady;", platform);
         Assert.Contains("private bool optimumTaaResolvedThisFrame;", platform);
