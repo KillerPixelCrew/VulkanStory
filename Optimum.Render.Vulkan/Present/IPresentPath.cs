@@ -29,7 +29,18 @@ internal interface IPresentPath
     /// </summary>
     LatencyBackendKind[] SupportedLatencyBackends { get; }
 
-    void Record(CommandBuffer commandBuffer, in PresentTarget target);
+    /// <summary>
+    /// Records the present of <paramref name="source" /> into
+    /// <paramref name="target" />'s acquired image.
+    ///
+    /// The source is per call rather than a property of the path: frame
+    /// generation presents more than one image per frame - the generated frame,
+    /// and the real one it was interpolated towards - and which image a present
+    /// carries is a property of that present, not of the path it takes to the
+    /// screen. A null source records the barriers and nothing else, which is what
+    /// a frame with no default colour image does.
+    /// </summary>
+    void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source);
 }
 
 /// <summary>
@@ -84,7 +95,6 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
 {
     private readonly VulkanContext _context;
     private readonly TextureManager _textures;
-    private readonly Func<VulkanTexture?> _source;
     /// <summary>Created at the first record, so a path built for its stage table alone needs no texture table.</summary>
     private BarrierBatcher? _barriers;
 
@@ -97,11 +107,10 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
     /// <summary>The blit recorded before <see cref="LastRecordedBlit" />. Tests only.</summary>
     internal PresentBlitRecord PreviousRecordedBlit { get; private set; }
 
-    public BlitPresentPath(VulkanContext context, TextureManager textures, Func<VulkanTexture?> source)
+    public BlitPresentPath(VulkanContext context, TextureManager textures)
     {
         _context = context;
         _textures = textures;
-        _source = source;
     }
 
     public PipelineStageFlags AcquireWaitStage => PresentWaitStages.BlitAcquireWait;
@@ -121,7 +130,7 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         LatencyBackendKind.AmdAntiLag,
     };
 
-    public void Record(CommandBuffer commandBuffer, in PresentTarget target)
+    public void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source)
     {
         Image destination = target.Image;
 
@@ -134,7 +143,6 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
             ResourceUsage.TransferDst, discard: true);
 
-        VulkanTexture? source = _source();
         if (source != null) _textures.Require(barriers, commandBuffer, source, ResourceUsage.TransferSrc);
         barriers.Flush(commandBuffer);
 

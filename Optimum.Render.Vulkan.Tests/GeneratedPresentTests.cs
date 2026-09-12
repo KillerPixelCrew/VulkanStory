@@ -171,6 +171,12 @@ public class GeneratedPresentTests
                 BlitPresentPath path = device.BlitPresentPathForTests!;
                 PresentBlitRecord real = path.PreviousRecordedBlit;
                 PresentBlitRecord copy = path.LastRecordedBlit;
+
+                // Step 1: the source is per call now, and every caller still
+                // passes the default colour image.
+                Assert.Equal(device.DefaultColorImageForTests, real.SourceImage);
+                Assert.Equal(device.DefaultColorImageForTests, copy.SourceImage);
+
                 if (real.SourceImage != 0 && real.SourceImage == copy.SourceImage &&
                     real.SourceWidth == copy.SourceWidth && real.SourceHeight == copy.SourceHeight &&
                     real.DestinationExtent.Width == copy.DestinationExtent.Width &&

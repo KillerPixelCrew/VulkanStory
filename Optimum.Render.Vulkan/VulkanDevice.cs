@@ -644,7 +644,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             // and its feature were actually enabled, which is what the capability
             // says; chaining it otherwise is a validation error.
             _swapchain.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
-            _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
+            _presentPath = new BlitPresentPath(_context, _textures);
             CreateDefaultFramebuffer((uint)width, (uint)height);
         }
 
@@ -1134,13 +1134,17 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         bool generated = GeneratedPresentEnabled && _swapchain.TryAcquire(out generatedTarget);
         if (!generated) generatedTarget = default;
 
+        // Which image a present carries is a property of that present: step 0's
+        // generated present is the same picture, later steps hand over another.
+        VulkanTexture? presentSource = DefaultColorTexture();
+
         CommandBuffer presentCommands = _frames.BeginPresentCommands();
         Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
-        _presentPath.Record(presentCommands, target);
+        _presentPath.Record(presentCommands, target, presentSource);
         if (generated)
         {
             Checkpoint(presentCommands, CheckpointMarker.PresentBlit(generatedTarget.ImageIndex, _frameCounter));
-            _presentPath.Record(presentCommands, generatedTarget);
+            _presentPath.Record(presentCommands, generatedTarget, presentSource);
         }
         ulong presentValue = _frames.SubmitPresent(
             target.AcquireSemaphore, generated ? generatedTarget.AcquireSemaphore : default,
@@ -1227,6 +1231,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     /// <summary>The present path as the blit path it is, for its recorded blits. Tests only.</summary>
     internal BlitPresentPath? BlitPresentPathForTests => _presentPath as BlitPresentPath;
+
+    /// <summary>The image every present is sourced from today. Tests only.</summary>
+    internal ulong DefaultColorImageForTests => DefaultColorTexture()?.Image.Handle ?? 0;
 
     /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
     internal readonly record struct PresentTimings(
