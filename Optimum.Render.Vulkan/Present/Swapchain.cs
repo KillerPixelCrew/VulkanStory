@@ -119,7 +119,8 @@ internal readonly struct PresentTarget
 
 /// <summary>
 /// One vkCreateSwapchainKHR result and everything that belongs to it: images,
-/// views, the acquire-semaphore free list (<c>imageCount + 1</c>) and one present
+/// views, the acquire-semaphore free list
+/// (<see cref="AcquireSemaphoreFreeList.CapacityFor" />) and one present
 /// semaphore per image. Created by <see cref="Swapchain" /> and retired as one
 /// unit through <see cref="SwapchainRetirement" /> once the last present
 /// submission that used it completed, so its semaphores die with it.
@@ -133,8 +134,12 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     private readonly AcquireSemaphoreFreeList _freeAcquire;
     private bool _disposed;
 
+    /// <param name="pressure">
+    /// How many presents can be outstanding at once; sizes the acquire-semaphore
+    /// free list (<see cref="AcquireSemaphoreFreeList.CapacityFor" />).
+    /// </param>
     public SwapchainSlot(VulkanContext context, KhrSwapchain api, SwapchainKHR handle,
-        Extent2D extent, Format format, PresentModeKHR presentMode)
+        Extent2D extent, Format format, PresentModeKHR presentMode, PresentPressure pressure)
     {
         _context = context;
         _api = api;
@@ -174,7 +179,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         // re-acquired. A counter-indexed semaphore could be re-signalled while an
         // earlier present still waits on it.
         _presentSemaphores = CreateSemaphores((int)count);
-        _acquireSemaphores = CreateSemaphores(AcquireSemaphoreFreeList.CapacityFor(count));
+        _acquireSemaphores = CreateSemaphores(AcquireSemaphoreFreeList.CapacityFor(count, pressure));
         var handles = new ulong[_acquireSemaphores.Length];
         for (int i = 0; i < handles.Length; i++) handles[i] = _acquireSemaphores[i].Handle;
         _freeAcquire = new AcquireSemaphoreFreeList(handles);
@@ -272,6 +277,7 @@ internal sealed unsafe class Swapchain : IDisposable
     private readonly SurfaceKHR _surface;
     private readonly SwapchainRetirement _retirement;
     private readonly ITimelineClock _clock;
+    private readonly PresentPressure _pressure;
     private readonly bool _relaxedAllowed;
 
     private SwapchainSlot? _current;
@@ -294,6 +300,9 @@ internal sealed unsafe class Swapchain : IDisposable
 
     /// <summary>Swapchains created so far, the first included.</summary>
     public int Creations { get; private set; }
+
+    /// <summary>How many presents this chain sizes its acquire semaphores for.</summary>
+    internal PresentPressure Pressure => _pressure;
 
     /// <summary>Replaced slots still waiting for the GPU.</summary>
     public int RetiredPending => _retirement.PendingCount;
@@ -337,8 +346,9 @@ internal sealed unsafe class Swapchain : IDisposable
     internal PresentIdMap PresentIds { get; } = new();
 
     private Swapchain(VulkanContext context, KhrSurface surfaceApi, KhrSwapchain swapchainApi, SurfaceKHR surface,
-        ITimelineClock clock)
+        ITimelineClock clock, PresentPressure pressure)
     {
+        _pressure = pressure;
         _context = context;
         _surfaceApi = surfaceApi;
         _swapchainApi = swapchainApi;
@@ -356,7 +366,7 @@ internal sealed unsafe class Swapchain : IDisposable
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync, ITimelineClock clock,
         out Swapchain? swapchain, out string? failureReason, ILatencyBackend? latency = null,
-        SwapchainCreateChain? createChain = null)
+        SwapchainCreateChain? createChain = null, PresentPressure? pressure = null)
     {
         swapchain = null;
         failureReason = null;
@@ -390,7 +400,8 @@ internal sealed unsafe class Swapchain : IDisposable
             return false;
         }
 
-        var created = new Swapchain(context, surfaceApi, swapchainApi, surface, clock);
+        var created = new Swapchain(context, surfaceApi, swapchainApi, surface, clock,
+            pressure ?? PresentPressure.ForFrames(FrameRing.DefaultFramesInFlight));
         // Before the first Build, so the backend is told about the first
         // swapchain exactly as it is told about every later one.
         if (latency != null) created._latency = latency;
@@ -489,7 +500,7 @@ internal sealed unsafe class Swapchain : IDisposable
             return false;
         }
 
-        _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode);
+        _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode, _pressure);
         Extent = extent;
         PresentMode = presentMode;
         Creations++;

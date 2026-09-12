@@ -282,8 +282,16 @@ public class PerDrawCostTests
 
             int texture = SolidTexture(seam, 40, 120, 200);
             int cachedBefore = device.CachedDescriptorSets;
-            long[] allocationsBefore = { device.DescriptorArenaForTests(0).Allocations, device.DescriptorArenaForTests(1).Allocations };
-            int[] poolsAfterFirstUse = { -1, -1 };
+            // One entry per frame slot: the ring's depth is configurable
+            // (OPTIMUM_VULKAN_FRAMES_IN_FLIGHT), so nothing here may assume two.
+            int slots = device.FramesInFlightForTests;
+            var allocationsBefore = new long[slots];
+            var poolsAfterFirstUse = new int[slots];
+            for (int i = 0; i < slots; i++)
+            {
+                allocationsBefore[i] = device.DescriptorArenaForTests(i).Allocations;
+                poolsAfterFirstUse[i] = -1;
+            }
 
             for (int frame = 0; frame < window + 4; frame++)
             {
@@ -333,8 +341,11 @@ public class PerDrawCostTests
 
             // Per-frame allocation, not accumulation: each slot wrote its set once
             // per young frame and the pools never grew.
-            long written = device.DescriptorArenaForTests(0).Allocations - allocationsBefore[0] +
-                           device.DescriptorArenaForTests(1).Allocations - allocationsBefore[1];
+            long written = 0;
+            for (int i = 0; i < slots; i++)
+            {
+                written += device.DescriptorArenaForTests(i).Allocations - allocationsBefore[i];
+            }
             Assert.InRange(written, window - 1, window);
 
             GpuTest.AssertClean(seam);
@@ -444,13 +455,19 @@ public class PerDrawCostTests
             Assert.Equal(40UL, device.IndirectRingForTests.CapacityOf(slot0));
             seam.Present();
 
-            // Frame 2 (slot 1): its buffer is created at the busiest frame's size.
-            seam.BeginFrame();
-            DrawStrips(seam, second, program, mesh);
-            Assert.Equal(2, device.IndirectOverflowsForTests);
-            seam.Present();
+            // Every other slot in turn: its buffer is created at the busiest
+            // frame's size. One frame per remaining slot, so this holds at any ring
+            // depth rather than only at two.
+            for (int slot = 1; slot < device.FramesInFlightForTests; slot++)
+            {
+                seam.BeginFrame();
+                Assert.NotEqual(slot0, device.CurrentSlotForTests);
+                DrawStrips(seam, second, program, mesh);
+                Assert.Equal(2, device.IndirectOverflowsForTests);
+                seam.Present();
+            }
 
-            // Frame 3 (slot 0 again): grown at the boundary, nothing overflows.
+            // Back on slot 0: grown at the boundary, nothing overflows.
             seam.BeginFrame();
             Assert.Equal(slot0, device.CurrentSlotForTests);
             Assert.Equal(1, device.IndirectGrowthsForTests);

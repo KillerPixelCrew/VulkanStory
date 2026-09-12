@@ -99,7 +99,7 @@ public class SwapchainRecreationTests
                 Assert.Equal(0, swapchain.RetiredPending);
 
                 SwapchainSlot slot = swapchain.CurrentSlotForTests!;
-                Assert.Equal(AcquireSemaphoreFreeList.CapacityFor(slot.ImageCount), slot.AcquireSemaphoreCount);
+                Assert.Equal(AcquireSemaphoreFreeList.CapacityFor(slot.ImageCount, swapchain.Pressure), slot.AcquireSemaphoreCount);
                 // Nothing leaked: every semaphore is free or parked behind a submitted present.
                 Assert.Equal(slot.AcquireSemaphoreCount, slot.FreeAcquireSemaphores + slot.PendingAcquireSemaphores);
 

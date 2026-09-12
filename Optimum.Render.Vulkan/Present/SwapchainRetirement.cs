@@ -158,8 +158,39 @@ internal static class SwapchainPolicy
 }
 
 /// <summary>
-/// A slot's acquire semaphores: <c>imageCount + 1</c> binary semaphores, taken for
-/// each vkAcquireNextImageKHR.
+/// How much presentation pressure the acquire-semaphore free list has to survive:
+/// how deep the frame ring is, and how many times one rendered frame presents.
+///
+/// Both are one number today (<see cref="FrameRing.FramesInFlight" /> and one
+/// present per frame), but they enter the bound differently - the ring depth says
+/// how many frames' presents can still be in flight, the presents per frame say
+/// how many acquires each of those frames made - so they are carried separately
+/// rather than multiplied at the call site.
+/// </summary>
+internal readonly record struct PresentPressure(int FramesInFlight, int PresentsPerFrame)
+{
+    /// <summary>One present per rendered frame: the path before frame generation.</summary>
+    public const int SinglePresentPerFrame = 1;
+
+    /// <summary>
+    /// What DLSS frame generation will ask for: the generated frame and the
+    /// retained real one, presented from the same rendered frame.
+    /// </summary>
+    public const int GeneratedPlusRealPerFrame = 2;
+
+    public static PresentPressure ForFrames(int framesInFlight, int presentsPerFrame = SinglePresentPerFrame) =>
+        new(Math.Max(1, framesInFlight), Math.Max(1, presentsPerFrame));
+
+    /// <summary>
+    /// The most acquire semaphores that can be held at once, derived below and
+    /// used by <see cref="AcquireSemaphoreFreeList.CapacityFor" />.
+    /// </summary>
+    public int PeakHeldAcquireSemaphores => Math.Max(1, FramesInFlight) * Math.Max(1, PresentsPerFrame);
+}
+
+/// <summary>
+/// A slot's acquire semaphores, taken for each vkAcquireNextImageKHR; how many
+/// there are is <see cref="CapacityFor" />.
 ///
 /// A semaphore whose acquire failed is untouched and returns at once
 /// (<see cref="Return" />). One whose signal a present submission waits on stays
@@ -169,9 +200,6 @@ internal static class SwapchainPolicy
 /// submission's Frame value (<see cref="ReturnAfter" />) and reclaimed by a later
 /// <see cref="Take" /> once the Frame counter passed it. A semaphore whose acquire
 /// succeeded but was never submitted is never returned; it dies with the slot.
-///
-/// The ring paces on frame n - FramesInFlight, so at most FramesInFlight - 1 present
-/// submissions are uncompleted when an acquire starts; imageCount + 1 covers that.
 /// </summary>
 internal sealed class AcquireSemaphoreFreeList
 {
@@ -188,7 +216,49 @@ internal sealed class AcquireSemaphoreFreeList
     public int FreeCount => _free.Count;
     public int PendingCount => _pending.Count;
 
-    public static int CapacityFor(uint imageCount) => (int)imageCount + 1;
+    /// <summary>
+    /// How many semaphores a slot is created with.
+    ///
+    /// The derivation, redone for design step 4 (FramesInFlight 2 -> 3) because
+    /// the old one - "the ring paces on frame n - FramesInFlight, so at most
+    /// FramesInFlight - 1 present submissions are uncompleted when an acquire
+    /// starts; imageCount + 1 covers that" - was stated in terms of one present
+    /// per frame, which frame generation breaks.
+    ///
+    /// Write F for the ring depth and P for the presents of one rendered frame.
+    /// A semaphore is held from <see cref="Take" /> until either the acquire
+    /// failed (<see cref="Return" />, at once) or the present submission that
+    /// waits on it completed on the GPU (<see cref="ReturnAfter" />, reclaimed by
+    /// a later Take). So the question is how many present submissions can be
+    /// uncompleted at the moment of a Take.
+    ///
+    /// <c>FrameRing.BeginFrame</c> waits for the newest value its slot signalled,
+    /// and a frame's present submission is the last submission it makes into that
+    /// slot. So when frame n begins, every submission of frame n - F, including
+    /// all P of its presents, has completed. What can still be outstanding when
+    /// frame n takes its p-th acquire semaphore (p counted from 0) is therefore
+    /// the presents of frames n-F+1 .. n-1 - (F - 1) x P of them - plus the p
+    /// presents frame n has already submitted. Take then removes one more, and
+    /// the peak is at p = P - 1:
+    ///
+    ///     (F - 1) x P + (P - 1) + 1  =  F x P
+    ///
+    /// At F = 2, P = 1 that is 2, which is why a bound of imageCount + 1 never
+    /// showed the assumption. At F = 3, P = 2 it is 6 - above imageCount + 1 on
+    /// any ordinary swapchain (3 or 4 images), which is exactly the case the
+    /// design said to re-derive rather than recompile.
+    ///
+    /// imageCount + 1 is kept as a floor rather than replaced. It is not part of
+    /// the derivation; it is the slack the free list has always had for the one
+    /// case the derivation does not cover - a semaphore whose acquire succeeded
+    /// and whose frame never submitted a present (an abandoned frame, a teardown
+    /// between acquire and submit), which is never returned and dies with the
+    /// slot. Keeping the larger of the two means this change can only add
+    /// semaphores, never take slack away. Each one is a binary semaphore: a
+    /// handful of bytes, created once per swapchain.
+    /// </summary>
+    public static int CapacityFor(uint imageCount, PresentPressure pressure) =>
+        Math.Max((int)imageCount, pressure.PeakHeldAcquireSemaphores) + 1;
 
     /// <summary>A free semaphore; parked ones whose submission completed (Frame counter <paramref name="frameCompleted" />) are reclaimed first when none is free.</summary>
     public ulong Take(ulong frameCompleted)

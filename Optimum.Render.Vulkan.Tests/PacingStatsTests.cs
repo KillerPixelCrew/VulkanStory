@@ -116,8 +116,9 @@ public class PacingStatsTests
     public void NewStatsLinesCarryStableKeyValueTokens()
     {
         Assert.Equal(
-            "stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=3",
-            VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 16.66666, 17.1, 18.3, 0.42, 3)));
+            "stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=3 " +
+            "frames_in_flight=3",
+            VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 16.66666, 17.1, 18.3, 0.42, 3), 3));
 
         var counts = new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
         // No midpoints: F1 rounding of an exact x.x5 is not something to pin.
@@ -263,7 +264,7 @@ public class PacingStatsTests
 
         static string Sample(long blockingUploads) =>
             VulkanStats.FormatIntervalLine(1.0, 120, 0, 812, 0, 0, 0, 0, 0, 0) + "\n" +
-            VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 8.3, 9.8, 10.7, 0.6, 0)) + "\n" +
+            VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 8.3, 9.8, 10.7, 0.6, 0), 3) + "\n" +
             VulkanStats.FormatWaitsLine(new long[VulkanStats.WaitSiteCount], new double[VulkanStats.WaitSiteCount]) + "\n" +
             VulkanStats.FormatCountersLine(new CounterSample(blockingUploads, 0, 2640, 240, 0, 168000, 402112, 16777216));
     }

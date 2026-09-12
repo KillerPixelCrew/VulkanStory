@@ -270,7 +270,7 @@ unchanged from earlier builds; the other six carry stable `key=value` tokens:
 
 ```
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
-stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
+stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n> frames_in_flight=<n>
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
@@ -283,6 +283,9 @@ stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> lease
   queue, and `uploads` every texture upload or mip generation requested, waiting or not.
 - `stats.pacing`: CPU frame interval (start of one frame to the start of the next) over a ring
   of the last 512 frames, not reset per sample; `stutters` counts intervals above 2 x `p50_ms`.
+  `frames_in_flight` is the frame ring's depth (`OPTIMUM_VULKAN_FRAMES_IN_FLIGHT`, default 3):
+  deeper buffering moves `p99_ms` and `stddev_ms` on its own, so two pacing captures are only
+  comparable when this token matches.
 - `stats.waits`: count (`_n`) and milliseconds (`_ms`) of CPU waits in the interval, per site:
   `frame_pacing` (slot fence at frame start), `upload_submit` (upload setup fence),
   `flush_frame` (slot fence inside a mid-frame flush), `device_wait_idle`, `readback`
