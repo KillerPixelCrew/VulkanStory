@@ -175,7 +175,10 @@ public partial class VulkanClientPlatform
 
     public override void GlToggleBlend(bool on, EnumBlendMode blendMode = EnumBlendMode.Standard)
     {
-        device.SetBlend(on, blendMode);
+        // OptimumUiTargetBound is the scope the HUD-less frame's UI target opens;
+        // it only changes Standard's alpha factors, and only while that target is
+        // bound. See ClientPlatformWindows.OptimumUiTargetBound.
+        device.SetBlend(on, blendMode, OptimumUiTargetBound);
         if (on && OptimumRenderSsao)
         {
             // SSAO writes its position and normal attachments unblended, and
