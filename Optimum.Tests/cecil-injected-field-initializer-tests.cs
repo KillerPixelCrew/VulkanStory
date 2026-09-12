@@ -85,6 +85,48 @@ namespace Optimum.Tests;
 /// cost - a server that shut itself down, every mob pathless, truncated
 /// worldgen, a black main menu - because that is what stops someone "tidying"
 /// the lazy initialisers back into declarations.
+///
+/// <para>Turning that general rule on found five more, cleared on 2026-09-13.</para>
+/// GuiCompositeSettings.oButtonBounds/uButtonBounds looked like it disproved the
+/// rule - both are dereferenced with no guard at all in ComposerHeader and
+/// updateButtonBounds, yet the Optimum and Optimum-upscaling tabs work in the
+/// shipped game. Reading the emitted IL of VintagestoryLib-patched.dll settled it:
+/// the patched .ctor is the vanilla one and assigns the seven vanilla
+/// *ButtonBounds and none of ours, so both fields really are null after
+/// construction - and the only ldfld/stfld for either one in the entire patched
+/// assembly is inside _AddOptimumTab, which already allocates them behind an
+/// explicit null check. ComposerHeader and updateButtonBounds are neither
+/// transplant targets nor injected members (ComposerHeader only takes an IL hook
+/// that appends the call to _AddOptimumTab), so their Optimum-added lines are
+/// donor-source-only and never reach the game. The tabs work by design, not by
+/// accident, and the rule holds exactly as written - the initializer was simply a
+/// claim the shipped DLL never honoured. The declarations are now bare and
+/// updateButtonBounds allocates lazily, so the donor source stays correct if those
+/// methods are ever promoted to transplant targets.
+/// EntityBehaviorCollectEntities.OptimumCollectStrideInterval was live: a
+/// <c>public static int = 3</c> that read 0, so <c>stride &gt; 1</c> was false on
+/// every tick of every item-collecting entity and the spatial-query throttle the
+/// field exists for had never once run. Note the two copies - the
+/// patches/VSEssentials fork source is normally compiled and keeps its
+/// initializer; only the patches/runtime Cecil copy is fixed, with 0 meaning
+/// "unset" and the default applied at the use site.
+/// EventManager.optimumCachedClimateInvocations/optimumCachedWindInvocations were
+/// latent, not live: the rebuild branch is entered whenever the cached delegate
+/// does not match, and the cached delegate starts null while <c>current</c> is
+/// known non-null, so the first call through either trigger always assigns the
+/// array before the loop reads it. What it did risk was the multi-threaded read -
+/// climate queries run off worldgen threads - where a second thread could observe
+/// the published delegate before the array store. Both readers now snapshot the
+/// field into a local and rebuild when that local is null, which fixes the null
+/// and the ordering together.
+/// WeatherSimulationParticles.optimumLastHeightmapCenterX/Z was a real behaviour
+/// difference: an <c>int.MinValue</c> "never sampled" sentinel that was 0, so a
+/// player spawning within 4 blocks of x=0 or z=0 got the first low-res rain
+/// heightmap refresh skipped entirely. Fixed by moving the sentinel into a
+/// <c>bool optimumHeightmapSampled</c>, whose CLR default of false IS the state
+/// wanted - the general lesson from all nine: an injected field may only use the
+/// CLR zero/null default as its starting value, so pick the encoding that makes
+/// that default correct.
 /// </summary>
 public class CecilInjectedFieldInitializerTests
 {
@@ -187,6 +229,100 @@ public class CecilInjectedFieldInitializerTests
     }
 
     /// <summary>
+    /// The settings-screen tab buttons. The initializer never ran - the patched
+    /// .ctor is vanilla's and assigns only the seven vanilla *ButtonBounds - and the
+    /// unguarded dereferences in ComposerHeader/updateButtonBounds never shipped,
+    /// because neither method is a transplant target. _AddOptimumTab, which is
+    /// injected and is the only code in the patched assembly that touches either
+    /// field, allocates both behind a null check. Both facts are asserted here so a
+    /// later "tidy the initializer back" or "transplant ComposerHeader too" is
+    /// caught by a test rather than by an NRE on the settings screen.
+    /// </summary>
+    [Fact]
+    public void GuiCompositeSettingsTabButtonBoundsHaveNoInitializer()
+    {
+        string patch = Read("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
+
+        Assert.DoesNotMatch(new Regex(@"ElementBounds\s+oButtonBounds\s*="), patch);
+        Assert.DoesNotMatch(new Regex(@"ElementBounds\s+uButtonBounds\s*="), patch);
+        Assert.Contains("private ElementBounds oButtonBounds;", patch);
+        Assert.Contains("private ElementBounds uButtonBounds;", patch);
+
+        // _AddOptimumTab is injected and is the one shipping writer of both.
+        Assert.Contains("if (oButtonBounds == null)", patch);
+        Assert.Contains("if (uButtonBounds == null)", patch);
+
+        // updateButtonBounds runs first thing in ComposerHeader; the Optimum lines in
+        // both are donor-source-only today, but they must not become a landmine for
+        // whoever transplants those methods next.
+        Assert.Contains("oButtonBounds ??= ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);", patch);
+        Assert.Contains("uButtonBounds ??= ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);", patch);
+    }
+
+    /// <summary>
+    /// The collect-stride throttle. Two copies, and only one of them is broken by
+    /// the Cecil rule: the fork source under patches/VSEssentials is a normally
+    /// compiled C# class whose constructor really does run, so its
+    /// <c>= 3</c> is correct and must stay; the patches/runtime copy is
+    /// Cecil-injected and must not carry one. Asserting both directions is the point
+    /// - the obvious "fix" is to copy the fork spelling into the runtime patch.
+    /// </summary>
+    [Fact]
+    public void EntityBehaviorCollectEntitiesStrideIntervalHasNoInitializerInTheRuntimeCopy()
+    {
+        string runtime = Read("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs.patch");
+
+        Assert.DoesNotMatch(new Regex(@"OptimumCollectStrideInterval\s*=\s*3\s*;"), runtime);
+        Assert.Contains("public static int OptimumCollectStrideInterval;", runtime);
+        // 0 means "unset", so the default lives at the use site in OnGameTick.
+        Assert.Contains("int stride = OptimumCollectStrideInterval;", runtime);
+        Assert.Matches(new Regex(@"if \(stride == 0\)\s*\n\+\s*\{\s*\n\+\s*stride = 3;"), runtime);
+
+        // The fork source is compiled normally. Its initializer is not the bug.
+        string fork = Read("patches/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs.patch");
+        Assert.Contains("public static int OptimumCollectStrideInterval = 3;", fork);
+    }
+
+    /// <summary>
+    /// The cached invocation lists. Latent rather than live (the rebuild branch
+    /// always runs on the first call, because the cached delegate starts null and
+    /// <c>current</c> is known non-null), but null all the same, and read from more
+    /// than one thread. Both readers snapshot into a local and rebuild when the
+    /// snapshot is null, which covers the null and the store ordering at once.
+    /// </summary>
+    [Fact]
+    public void EventManagerCachedInvocationListsHaveNoInitializer()
+    {
+        string patch = Read("patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch");
+
+        Assert.DoesNotMatch(new Regex(@"optimumCached(Climate|Wind)Invocations\s*=\s*Array\.Empty<Delegate>\(\);"), patch);
+        Assert.Contains("private Delegate[] optimumCachedClimateInvocations;", patch);
+        Assert.Contains("private Delegate[] optimumCachedWindInvocations;", patch);
+
+        Assert.Contains("if (invocationList == null || !ReferenceEquals(current, optimumCachedClimateDelegate))", patch);
+        Assert.Contains("if (invocationList == null || !ReferenceEquals(current, optimumCachedWindDelegate))", patch);
+    }
+
+    /// <summary>
+    /// The low-res rain heightmap refresh gate. An <c>int.MinValue</c> sentinel on
+    /// an injected field is not a sentinel - it is 0 - so the first refresh was
+    /// skipped for anyone spawning within 4 blocks of x=0 or z=0. The "never
+    /// sampled" state moved to a bool, where the CLR default is the right one.
+    /// </summary>
+    [Fact]
+    public void WeatherSimulationParticlesHeightmapGateUsesTheClrDefaultAsItsSentinel()
+    {
+        string patch = Read("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs.patch");
+
+        Assert.DoesNotMatch(new Regex(@"optimumLastHeightmapCenter(X|Z)\s*=\s*int\.MinValue;"), patch);
+        Assert.Contains("private int optimumLastHeightmapCenterX;", patch);
+        Assert.Contains("private int optimumLastHeightmapCenterZ;", patch);
+        Assert.Contains("private bool optimumHeightmapSampled;", patch);
+        Assert.Contains("if (!optimumHeightmapSampled || Math.Abs(centerPos.X - optimumLastHeightmapCenterX) >= 4", patch);
+        Assert.Contains("optimumHeightmapSampled = true;", patch);
+    }
+
+    /// <summary>
     /// The general rule, enforced rather than remembered: no field named in any
     /// patcher injection manifest may carry a field initializer.
     ///
@@ -261,65 +397,15 @@ public class CecilInjectedFieldInitializerTests
         Assert.True(typesChecked >= 3,
             "found source for " + typesChecked + " injected types; the layout changed and this test went blind");
 
-        // Pinned exactly, both ways, like OwnedRegions: a NEW offender fails, and so
-        // does fixing one of these without striking it off. See KnownUnfixed for what
-        // each is and why it is still here.
-        var unexpected = new List<string>();
-        var fixedAlready = new List<string>(KnownUnfixed);
-        foreach (string offender in offenders)
-        {
-            string field = offender.Substring(offender.IndexOf(' ') + 1);
-            if (!fixedAlready.Remove(field)) unexpected.Add(offender);
-        }
-
-        Assert.True(unexpected.Count == 0,
+        // No allowance list: the five instances that were in the tree when this rule
+        // was written were cleared on 2026-09-13 (see the class doc), so any offender
+        // at all is a new one.
+        Assert.True(offenders.Count == 0,
             "these injected fields carry an initializer the Cecil transplant never runs, so they hold the CLR default"
                 + " (null, or 0) at runtime no matter what the source says. Drop the initializer and allocate lazily at"
                 + " each use, or assign from a transplanted method that provably runs first:"
-                + Environment.NewLine + string.Join(Environment.NewLine, unexpected));
-        Assert.True(fixedAlready.Count == 0,
-            "these are listed in KnownUnfixed but no longer carry an initializer - strike them off the list:"
-                + Environment.NewLine + string.Join(Environment.NewLine, fixedAlready));
+                + Environment.NewLine + string.Join(Environment.NewLine, offenders));
     }
-
-    /// <summary>
-    /// The instances that were already in the tree when the general rule above was
-    /// written (2026-09-12), each one a field that is null or 0 at runtime while its
-    /// source says otherwise. They are listed rather than fixed here because fixing
-    /// each one needs its own reading of the use sites and its own verification in
-    /// the running game, which the change that added this test could not do:
-    ///
-    /// <list type="bullet">
-    /// <item>GuiCompositeSettings.oButtonBounds / uButtonBounds - the Optimum and
-    /// Optimum-upscaling settings tab buttons. Dereferenced unguarded
-    /// (<c>oButtonBounds.ParentBounds = ...</c>), so the reasoning says the settings
-    /// screen should throw - and the tabs demonstrably work, so something here is not
-    /// what it looks like and it needs reading, not a blind fix.</item>
-    /// <item>EventManager.optimumCachedClimateInvocations / optimumCachedWindInvocations
-    /// - <c>Array.Empty&lt;Delegate&gt;()</c> becomes null. The one read is preceded by an
-    /// assignment on the same path, which is why it has not bitten.</item>
-    /// <item>EntityBehaviorCollectEntities.OptimumCollectStrideInterval - a static
-    /// <c>= 3</c> that is 0 at runtime, so the collect stride is 0 rather than 3 and
-    /// the optimisation it exists for does nothing.</item>
-    /// <item>WeatherSimulationParticles.optimumLastHeightmapCenterX / Z - an
-    /// <c>int.MinValue</c> sentinel that is 0, so the first heightmap refresh is
-    /// skipped whenever the player happens to start within 4 blocks of x=0 or z=0.</item>
-    /// </list>
-    /// </summary>
-    private static readonly string[] KnownUnfixed =
-    {
-        "private ElementBounds oButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);",
-        "private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);",
-        "private ElementBounds oButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);",
-        "private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);",
-        "private Delegate[] optimumCachedClimateInvocations = Array.Empty<Delegate>();",
-        "private Delegate[] optimumCachedWindInvocations = Array.Empty<Delegate>();",
-        "private Delegate[] optimumCachedClimateInvocations = Array.Empty<Delegate>();",
-        "private Delegate[] optimumCachedWindInvocations = Array.Empty<Delegate>();",
-        "public static int OptimumCollectStrideInterval = 3;",
-        "private int optimumLastHeightmapCenterX = int.MinValue;",
-        "private int optimumLastHeightmapCenterZ = int.MinValue;",
-    };
 
     /// <summary>
     /// Pulls <c>["Namespace.Type"] = new() { "a", "b" }</c> and its

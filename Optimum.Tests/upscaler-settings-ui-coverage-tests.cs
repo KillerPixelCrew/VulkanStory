@@ -136,8 +136,13 @@ public class UpscalerSettingsUiCoverageTests
     {
         string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
 
-        // The bounds, beside the Extra tab's own.
-        Assert.Contains("private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0)", gui);
+        // The bounds, beside the Extra tab's own. No initializer: the field is
+        // Cecil-injected and the vanilla .ctor never assigns it, so it is allocated
+        // lazily (see CecilInjectedFieldInitializerTests). In the shipped DLL the tab
+        // row is added by the injected _AddOptimumTab hook; ComposerHeader and
+        // updateButtonBounds below are donor source, not transplant targets.
+        Assert.Contains("private ElementBounds uButtonBounds;", gui);
+        Assert.Contains("uButtonBounds ??= ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0)", gui);
         Assert.Contains("uButtonBounds.ParentBounds = elementBounds;", gui);   // main menu
         Assert.Contains("uButtonBounds.ParentBounds = elementBounds3;", gui);  // in game
 

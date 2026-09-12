@@ -94,6 +94,11 @@ public static class ModPatcher
                 ],
                 ["Vintagestory.GameContent.WeatherSimulationParticles"] =
                 [
+                    // The "never sampled yet" flag the two coordinates used to
+                    // carry as an int.MinValue sentinel. Injected fields get no
+                    // constructor, so a sentinel that is not the CLR default is
+                    // not a sentinel at all; false is.
+                    "optimumHeightmapSampled",
                     "optimumLastHeightmapCenterX",
                     "optimumLastHeightmapCenterZ",
                 ],

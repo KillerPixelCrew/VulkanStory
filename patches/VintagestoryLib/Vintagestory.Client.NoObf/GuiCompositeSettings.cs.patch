@@ -1,26 +1,37 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..91b6558 100644
+index 4d08f84..17deee8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-@@ -46,10 +46,17 @@ public class GuiCompositeSettings : GuiComposite
+@@ -46,10 +46,28 @@ public class GuiCompositeSettings : GuiComposite
  
  	private ElementBounds iButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private ElementBounds dButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
-+	private ElementBounds oButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
++	// Optimum: no initializer, unlike every vanilla *ButtonBounds above. These two
++	// are Cecil-injected (Optimum.Patcher/Program.cs membersToInject), and
++	// GuiCompositeSettings' .ctor is NOT a transplant target - the patched DLL keeps
++	// the vanilla constructor, which knows nothing about these fields. A field
++	// initializer is lowered into the constructor, so it would never run and the
++	// source would be claiming a value the shipped game does not have. Both are
++	// allocated lazily in _AddOptimumTab below, which is the only code in the
++	// patched assembly that touches them (verified against the emitted IL of
++	// VintagestoryLib-patched.dll: the only stfld/ldfld for either field is in
++	// _AddOptimumTab; ComposerHeader and updateButtonBounds ship as their vanilla
++	// bodies because neither is in the transplant target list).
++	private ElementBounds oButtonBounds;
 +
 +	// Optimum (DLSS plan, Phase 6, PR #3 follow-up): the upscaling tab's own button.
 +	// Upscaling is four rows plus a live-plan readout and does not fit beside the
 +	// twenty-two Extra rows inside the fixed 740px dialog; it gets its own page.
-+	private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
++	private ElementBounds uButtonBounds;
 +
  	private ElementBounds backButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
  
  	private bool mousecontrolsTabActive;
-@@ -142,19 +149,23 @@ public class GuiCompositeSettings : GuiComposite
+@@ -142,19 +160,23 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds;
  			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
@@ -45,7 +56,7 @@ index 4d08f84..91b6558 100644
  		{
  			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
  			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
-@@ -168,10 +179,12 @@ public class GuiCompositeSettings : GuiComposite
+@@ -168,10 +190,12 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds3;
  			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
@@ -58,7 +69,7 @@ index 4d08f84..91b6558 100644
  			{
  				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
  				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
-@@ -185,10 +198,12 @@ public class GuiCompositeSettings : GuiComposite
+@@ -185,10 +209,12 @@ public class GuiCompositeSettings : GuiComposite
  				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
@@ -71,7 +82,7 @@ index 4d08f84..91b6558 100644
  					clickedItemIndex = null;
  					hotkeyCapturer?.EndCapture(wasCancelled: true);
  					return handler.OnBackPressed();
-@@ -199,10 +214,12 @@ public class GuiCompositeSettings : GuiComposite
+@@ -199,10 +225,12 @@ public class GuiCompositeSettings : GuiComposite
  		result.GetToggleButton("controls").SetValue(currentTab == "controls");
  		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
@@ -84,7 +95,7 @@ index 4d08f84..91b6558 100644
  
  	private void updateButtonBounds()
  	{
-@@ -235,30 +252,41 @@ public class GuiCompositeSettings : GuiComposite
+@@ -235,30 +263,50 @@ public class GuiCompositeSettings : GuiComposite
  		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -104,6 +115,15 @@ index 4d08f84..91b6558 100644
  		iButtonBounds.WithFixedWidth(width6).FixedRightOf(sButtonBounds, 15.0);
  		dButtonBounds.WithFixedWidth(width7).FixedRightOf(iButtonBounds, 15.0);
 -		backButtonBounds.WithFixedWidth(width8).FixedRightOf(ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds, 25.0);
++		// Optimum: oButtonBounds/uButtonBounds are Cecil-injected and therefore null
++		// until something allocates them - the constructor that carries every other
++		// *ButtonBounds initializer is the vanilla one and never assigns these. In the
++		// shipped DLL that allocation happens in _AddOptimumTab and this method keeps
++		// its vanilla body, so these two lines are donor-source-only; the lazy
++		// allocation is here so they stay correct if updateButtonBounds (or its caller
++		// ComposerHeader, which calls this first) is ever added to the transplant list.
++		oButtonBounds ??= ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
++		uButtonBounds ??= ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
 +		oButtonBounds.WithFixedWidth(width9).FixedRightOf(ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds, 15.0);
 +		uButtonBounds.WithFixedWidth(width10).FixedRightOf(oButtonBounds, 15.0);
 +		backButtonBounds.WithFixedWidth(width8).FixedRightOf(uButtonBounds, 25.0);
@@ -127,7 +147,7 @@ index 4d08f84..91b6558 100644
  			DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
  			if (shaderUniforms != null)
  			{
-@@ -1740,10 +1768,551 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1788,551 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -679,7 +699,7 @@ index 4d08f84..91b6558 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2387,87 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2407,87 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

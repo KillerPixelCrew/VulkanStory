@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/EventManager.cs b/VintagestoryLib/Vintagestory.Common/EventManager.cs
-index 842d31f..7309654 100644
+index 842d31f..4a3ca6f 100644
 --- a/VintagestoryLib/Vintagestory.Common/EventManager.cs
 +++ b/VintagestoryLib/Vintagestory.Common/EventManager.cs
-@@ -27,10 +27,26 @@ public abstract class EventManager
+@@ -27,10 +27,33 @@ public abstract class EventManager
  
  	internal Dictionary<BlockPos, DelayedCallbackBlock> SingleDelayedCallbacksBlock = new Dictionary<BlockPos, DelayedCallbackBlock>();
  
@@ -19,17 +19,24 @@ index 842d31f..7309654 100644
 +
 +	// Optimum: cache GetInvocationList results. Multicast delegates are immutable:
 +	// comparing the delegate reference detects handler add/remove.
++	// No initializers on any of these four: they are Cecil-injected
++	// (Optimum.Patcher/Program.cs membersToInject) and EventManager's .ctor is not a
++	// transplant target, so an `= Array.Empty<Delegate>()` would never run and the
++	// arrays would be null regardless. Both readers below snapshot the field into a
++	// local and rebuild when that local is null, which is also what makes the pair of
++	// fields safe to read from more than one thread: a reader can never see a
++	// published delegate paired with an array that is still null.
 +	private OnGetClimateDelegate optimumCachedClimateDelegate;
-+	private Delegate[] optimumCachedClimateInvocations = Array.Empty<Delegate>();
++	private Delegate[] optimumCachedClimateInvocations;
 +	private OnGetWindSpeedDelegate optimumCachedWindDelegate;
-+	private Delegate[] optimumCachedWindInvocations = Array.Empty<Delegate>();
++	private Delegate[] optimumCachedWindInvocations;
 +
  	public abstract ILogger Logger { get; }
  
  	public abstract string CommandPrefix { get; }
  
  	public abstract long InWorldEllapsedMs { get; }
-@@ -88,15 +104,22 @@ public abstract class EventManager
+@@ -88,15 +111,25 @@ public abstract class EventManager
  		}
  	}
  
@@ -42,19 +49,22 @@ index 842d31f..7309654 100644
  			return;
  		}
 -		Delegate[] invocationList = this.OnGetClimate.GetInvocationList();
-+		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
-+		if (!ReferenceEquals(current, optimumCachedClimateDelegate))
++		// Optimum: cache the invocation list. Rebuild only when the delegate reference
++		// changes, or when the cache is still null - the field is Cecil-injected, so it
++		// starts null rather than empty and no initializer can change that.
++		Delegate[] invocationList = optimumCachedClimateInvocations;
++		if (invocationList == null || !ReferenceEquals(current, optimumCachedClimateDelegate))
 +		{
-+			optimumCachedClimateInvocations = current.GetInvocationList();
++			invocationList = current.GetInvocationList();
++			optimumCachedClimateInvocations = invocationList;
 +			optimumCachedClimateDelegate = current;
 +		}
-+		Delegate[] invocationList = optimumCachedClimateInvocations;
  		for (int i = 0; i < invocationList.Length; i++)
  		{
  			OnGetClimateDelegate onGetClimateDelegate = (OnGetClimateDelegate)invocationList[i];
  			try
  			{
-@@ -110,15 +133,22 @@ public abstract class EventManager
+@@ -110,15 +143,25 @@ public abstract class EventManager
  		}
  	}
  
@@ -67,19 +77,22 @@ index 842d31f..7309654 100644
  			return;
  		}
 -		Delegate[] invocationList = this.OnGetWindSpeed.GetInvocationList();
-+		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
-+		if (!ReferenceEquals(current, optimumCachedWindDelegate))
++		// Optimum: cache the invocation list. Rebuild only when the delegate reference
++		// changes, or when the cache is still null - the field is Cecil-injected, so it
++		// starts null rather than empty and no initializer can change that.
++		Delegate[] invocationList = optimumCachedWindInvocations;
++		if (invocationList == null || !ReferenceEquals(current, optimumCachedWindDelegate))
 +		{
-+			optimumCachedWindInvocations = current.GetInvocationList();
++			invocationList = current.GetInvocationList();
++			optimumCachedWindInvocations = invocationList;
 +			optimumCachedWindDelegate = current;
 +		}
-+		Delegate[] invocationList = optimumCachedWindInvocations;
  		for (int i = 0; i < invocationList.Length; i++)
  		{
  			OnGetWindSpeedDelegate onGetWindSpeedDelegate = (OnGetWindSpeedDelegate)invocationList[i];
  			try
  			{
-@@ -182,19 +212,24 @@ public abstract class EventManager
+@@ -182,19 +225,24 @@ public abstract class EventManager
  			}
  		}
  		Dictionary<BlockPos, DelayedCallbackBlock> singleDelayedCallbacksBlock = SingleDelayedCallbacksBlock;
@@ -105,7 +118,7 @@ index 842d31f..7309654 100644
  	}
  
  	public virtual void TriggerGameTickDebug(long ellapsedMilliseconds, IWorldAccessor world)
-@@ -249,20 +284,25 @@ public abstract class EventManager
+@@ -249,20 +297,25 @@ public abstract class EventManager
  		Dictionary<BlockPos, DelayedCallbackBlock> singleDelayedCallbacksBlock = SingleDelayedCallbacksBlock;
  		if (singleDelayedCallbacksBlock.Count <= 0)
  		{

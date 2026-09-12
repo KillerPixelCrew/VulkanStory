@@ -1,13 +1,20 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 --- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
-@@ -9,10 +9,14 @@ using Vintagestory.API.Server;
+@@ -9,10 +9,21 @@ using Vintagestory.API.Server;
  namespace Vintagestory.GameContent;
  
  [DocumentAsJson]
  public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entity)
  {
-+	public static int OptimumCollectStrideInterval = 3;
++	// Optimum: no initializer. This field is Cecil-injected into the already
++	// compiled EntityBehaviorCollectEntities (Optimum.Patcher/mod-patcher.cs
++	// Members) and the type's .cctor is not a transplant target, so a `= 3` here
++	// would never execute and the field would read 0 - which switches the stride
++	// off entirely and makes the optimisation this field exists for do nothing.
++	// 0 therefore means "unset" and OnGameTick applies the default of 3; set this
++	// to 1 to disable striding.
++	public static int OptimumCollectStrideInterval;
 +
 +	private float optimumAccumulatedDelta;
 +
@@ -16,13 +23,17 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
  	private int lastCollectedEntityIndex;
  
  	private Vec3d tmp = new Vec3d();
-@@ -45,15 +49,28 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
+@@ -45,15 +56,32 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
  		{
  			if (waitTicks-- > 0 || (player != null && player.WorldData.CurrentGameMode == EnumGameMode.Spectator))
  			{
  				return;
  			}
 +			int stride = OptimumCollectStrideInterval;
++			if (stride == 0)
++			{
++				stride = 3;
++			}
 +			if (stride > 1)
 +			{
 +				long tickIndex = base.entity.World.ElapsedMilliseconds / 33L;
