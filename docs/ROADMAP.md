@@ -274,6 +274,84 @@ unknown from the next.
 6. **The present thread and its spacing pacer, last.** It has the least existing scaffolding and is the
    hardest thing here to verify.
 
+### Status: steps 0, 1, 2 and 4 landed (2026-09-12, `feat/dlss-g` at 54a685e)
+
+Three parallel streams, one integration, one adversarial review. Build 0 errors; `Optimum.Tests` 1341
+passed / 34 pre-existing skips; GPU suite 895 passed, 0 skips, zero `SYNC-` lines; patches regenerate
+byte-exact (158 applied), Cecil 205/205 with the dispatch verifier clean.
+
+- **Step 0** (`OPTIMUM_DLSSG_DOUBLE_PRESENT=1`, off by default): a second acquire and a second
+  `vkQueuePresentKHR` per rendered frame, same image, same latency frame id, stamped through the reserved
+  out-of-band markers. Both blits deliberately ride **one** present command buffer and one submit: the
+  first blit is what transitions the frame image to `TRANSFER_SRC`, and submission order is not a
+  dependency, so a second command buffer would read it in that layout with nothing guaranteeing the
+  transition happened. `FrameSlot.Submit` gained a second binary wait and signal semaphore instead. This
+  is precisely what step 6's present thread must solve for real - it cannot inherit that shared buffer.
+- **Step 1**: `IPresentPath.Record` takes a per-call `VulkanTexture?` source; the captured delegate is gone.
+- **Step 2**: the `SceneNoHud` snapshot, gated on `OptimumSceneNoHudRequested`, created once in the
+  framebuffer setup (not per frame slot, not a transient), 512/1024 pixels differ once an overlay draws.
+- **Step 4**: `FramesInFlight` 3 by default. It was **not** the constant flip the text above guessed: the
+  uniform ring divided a fixed 32 MiB by the slot count (three slots would have silently cut per-frame
+  uniform capacity by a third) and three GPU tests encoded "two" structurally. Cost measured at
+  1024x1024 with 12 heavy draws, 120 measured frames: +48.0 MiB heap, p50 unchanged (3.959 vs 3.958 ms);
+  the tail direction is run-to-run noise across repeats, so three-deep buffering is neutral on throughput
+  here and the real number must come from `pacing-gate.sh` in game.
+- The acquire bound is `max(imageCount, FramesInFlight x presentsPerFrame) + 1`, **sized unconditionally**
+  rather than gated on the double-present switch: the switch is a runtime property while the semaphores are
+  created once per swapchain, so sizing for "off" is one flip away from a mid-frame throw. At the shipped
+  F=3, P=2, 3 images that is 7, with the doubled run holding at most 6.
+
+### What the review found (all fixed except where noted)
+
+Two of the three hazards below were live; the third is sound by construction.
+
+1. **Lifetime, at the window between the frame's two acquires (HIGH).** The second `TryAcquire` could
+   rebuild the swapchain while the frame already held an image and a semaphore from the old slot and
+   before `NotePresentSubmitted` ran - so `Build` retired that slot against the *previous* frame's present
+   value, and the next `Collect` destroyed its semaphores, images and `VkSwapchainKHR` while this frame's
+   present was still pending. Deterministic on every `SUBOPTIMAL` first acquire, and invisible to the
+   tests because none of them resized. Fixed: `TryAcquire(out target, bool allowRebuild = true)`, the
+   second acquire passes `false`. A frame with a rebuild pending presents once, as before step 0.
+2. **A second acquire can exceed what the WSI guarantees (HIGH).** An application may hold
+   `imageCount - caps.min + 1` acquired images before `vkAcquireNextImageKHR` may block indefinitely; a
+   surface with `min == max` (real on some drivers and compositors) yields a limit of 1, and step 0 asked
+   for a second image with an infinite timeout that nothing in flight could release - a hang, not a slow
+   frame. Fixed with `SwapchainPolicy.SimultaneousAcquireLimit`; the image count is deliberately **not**
+   grown for the feature, because that would cost a display-resolution image on every ordinary run.
+3. **`vkQueueNotifyOutOfBandNV` on the shared graphics queue (MEDIUM).** The extension marks the *queue*,
+   not a submission, and nothing marks it back - so declaring the device's own graphics queue an
+   out-of-band present queue takes every later in-band render submission out of Reflex's accounting.
+   Fixed: the backend refuses `_context.GraphicsQueue` and counts the refusal; the call site stays for
+   step 6, whose present thread has a queue of its own.
+4. **Poison mode was not a reliable diagnostic (MEDIUM).** The poison clear and the first upload of a
+   fresh texture are both `TRANSFER` writes into the same image in the same batch, and the batcher emits
+   nothing when the usage does not change (`TransferDst` to `TransferDst`) - so a driver may run the clear
+   last and leave poison where the uploaded texels belong. This was the "5 sync hazards per poison run"
+   that had been written off as a syncval false positive; it was our missing barrier. Fixed at the poison
+   site: 5 and 5 reports become 0 and 0.
+5. `SetOptimumSceneNoHudIndex(-1)` sat inside the framebuffer fill loop (LOW, fixed).
+6. `PresentIdMap` is a fixed 64 entries, so two presents per frame halve its history to 32 frames
+   (LOW, **not fixed**): harmless for the latency reports it serves, but it should be sized from
+   presents-per-frame when step 6's pacer lands.
+
+Sound, checked by construction rather than by the tests passing: the acquire-semaphore bound (peak
+outstanding at the p-th Take is `(F-1)P + (P-1) + 1 = F x P`); command-pool threading (nothing records
+from another context yet); "off is vanilla" (one acquire, one present, no second semaphore, no snapshot
+target, unchanged image count - the only always-on costs are three binary semaphores and the third frame
+slot); and the frame-id to present-id mapping with two presents.
+
+### Carried into step 5 and step 6
+
+- The snapshot's gate is `OptimumConfig.UpscalerReplacesTaa` alone. **Step 5 must add frame generation to
+  that disjunction** or FG finds the slot unallocated and `OptimumSceneNoHudCaptured` false.
+- Under FIFO the second present halves the presented frame rate, because step 0 presents a duplicate with
+  no pacer. Expected, behind the switch. Hazard 3 below is still untouched: nothing measures
+  present-to-present spacing, and the missed-vsync detector's interval now also contains the generated
+  present's `vkQueuePresentKHR`.
+- Nothing in this wave has been seen on a real frame: the `SceneNoHud` snapshot has never rendered in
+  game on either backend, and the in-game half of the two-versus-three measurement
+  (`pacing-gate.sh` on the fixed scene at both depths) is missing. Both come before step 5 adds generation.
+
 ### The three things most likely to go wrong
 
 1. **Resource lifetime past Present.** The generated frame and the retained real frame must survive until
@@ -324,3 +402,7 @@ the entry points readable for someone arriving new.
   planned (`CLAUDE.md`, Known debt).
 - The item atlas is not LOD-biased under an upscaler, because the GUI draws inventory icons from it at
   display resolution; fixing it properly needs a per-draw or per-unit bias.
+- `BarrierBatcher` inserts no dependency for a write-after-write of the *same* usage (`TransferDst` to
+  `TransferDst`). The poison/upload case that bites today is fixed at its own site, not in the batcher, so
+  any future path recording two transfer writes into one image in one batch has the same gap. Whoever owns
+  the batcher should decide whether same-usage write-after-write ought to barrier by default.
