@@ -634,10 +634,19 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             // The acquire-semaphore free list is sized from what can be
             // outstanding, so it has to know the ring depth this device chose
             // (AcquireSemaphoreFreeList.CapacityFor).
+            //
+            // Presents per frame is GeneratedPlusRealPerFrame, not one, and it is
+            // not conditional on GeneratedPresentEnabled: that switch is a runtime
+            // property (the env var reads it at construction, the GPU test flips it
+            // between frames) while the semaphores are created once per swapchain.
+            // Sizing for the generated present always costs a handful of binary
+            // semaphores; sizing for one present and then flipping the switch would
+            // throw out of AcquireSemaphoreFreeList.Take mid-frame.
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
                     out Swapchain? swapchain, out string? swapchainError, Latency,
                     (Latency as NvLowLatency2Backend)?.SwapchainCreateChain,
-                    PresentPressure.ForFrames(_frames.FramesInFlight)))
+                    PresentPressure.ForFrames(
+                        _frames.FramesInFlight, PresentPressure.GeneratedPlusRealPerFrame)))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
