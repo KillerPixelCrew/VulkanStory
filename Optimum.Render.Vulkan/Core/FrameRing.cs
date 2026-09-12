@@ -413,9 +413,14 @@ internal sealed unsafe class FrameSlot : IDisposable
 /// <summary>
 /// Rotates through a small number of frame slots, paced by the Frame timeline.
 ///
-/// Two in flight is the default: enough to keep the GPU fed while the CPU records
-/// the next frame, few enough that input latency stays close to what the OpenGL
-/// path had. Frame generation will want a third later.
+/// Three in flight is the default since the frame-generation design's step 4
+/// (ROADMAP, "DLSS frame generation: the design"): frame generation presents a
+/// rendered frame more than once, so the render thread has to be able to run
+/// ahead of presentation by more than one frame. Two is still a supported
+/// configuration - <see cref="FramesInFlightVariable" /> selects it - because
+/// the third slot costs memory (a staging region and a uniform region per slot)
+/// and one frame of input latency, and the design wants that cost measured
+/// separately from the cost of generation.
 ///
 /// Frames use the slots in turn. Before a frame starts, it waits for the newest
 /// Frame value its slot signalled: the end of the frame that last used it (or of
@@ -424,7 +429,12 @@ internal sealed unsafe class FrameSlot : IDisposable
 /// in steady state.
 ///
 /// The uniform ring is one buffer for the whole ring rather than one per slot,
-/// with each slot bump-allocating inside its own slice. That is what lets
+/// with each slot bump-allocating inside its own slice. It is sized per slot
+/// (<see cref="DefaultUniformPerFrame" /> x FramesInFlight) rather than as a
+/// fixed total, so a frame has the same uniform capacity at two slots as at
+/// three: splitting a fixed 32 MiB three ways would have made "three in flight"
+/// also mean "a third less uniform space per frame", and a ring overflow would
+/// have been read as a cost of the deeper buffering. That lets
 /// descriptor sets be written once and reused forever: the set names the buffer,
 /// and the per-draw offset travels as a dynamic offset instead. A buffer per slot
 /// would mean rewriting every set every frame, which is the cost this design
@@ -442,9 +452,57 @@ internal sealed class FrameRing : IDisposable
     private int _index = -1;
     private bool _disposed;
 
-    public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024,
+    /// <summary>
+    /// OPTIMUM_VULKAN_FRAMES_IN_FLIGHT=2|3|4 overrides how many frame slots the
+    /// ring has. Anything unparseable or out of range keeps the default, so a
+    /// typo degrades to the shipped configuration rather than to a broken one.
+    /// </summary>
+    public const string FramesInFlightVariable = "OPTIMUM_VULKAN_FRAMES_IN_FLIGHT";
+
+    /// <summary>Slots the ring has unless the environment says otherwise (design step 4).</summary>
+    public const int DefaultFramesInFlight = 3;
+
+    /// <summary>Below two the CPU waits for the GPU inside every frame.</summary>
+    public const int MinFramesInFlight = 2;
+
+    /// <summary>
+    /// Four slots is as deep as the override goes. Each slot is a full staging
+    /// region plus a full uniform region, and past three the added latency buys
+    /// nothing frame generation needs (it presents twice per rendered frame, not
+    /// three times).
+    /// </summary>
+    public const int MaxFramesInFlight = 4;
+
+    /// <summary>
+    /// Uniform ring bytes per slot; the ring buffer is this times the slot count.
+    /// The historical value, which was a 32 MiB total over two slots.
+    /// </summary>
+    public const ulong DefaultUniformPerFrame = 16UL * 1024 * 1024;
+
+    /// <summary>The slot count <see cref="FramesInFlightVariable" /> asks for, or the default.</summary>
+    public static int FramesInFlightFromEnvironment() =>
+        ParseFramesInFlight(Environment.GetEnvironmentVariable(FramesInFlightVariable));
+
+    /// <summary>The parse behind <see cref="FramesInFlightFromEnvironment" />, as a pure function.</summary>
+    internal static int ParseFramesInFlight(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return DefaultFramesInFlight;
+        if (!int.TryParse(value.Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out int frames))
+        {
+            return DefaultFramesInFlight;
+        }
+        if (frames < MinFramesInFlight || frames > MaxFramesInFlight) return DefaultFramesInFlight;
+        return frames;
+    }
+
+    /// <param name="framesInFlight">Slots in the ring; see <see cref="FramesInFlightFromEnvironment" />.</param>
+    /// <param name="uniformRingSize">Total uniform ring bytes; 0 means <see cref="DefaultUniformPerFrame" /> per slot.</param>
+    public FrameRing(VulkanContext context, int framesInFlight = DefaultFramesInFlight, ulong uniformRingSize = 0,
         ulong stagingPerSlot = UploadManager.DefaultStagingPerSlot)
     {
+        if (framesInFlight < 1) throw new ArgumentOutOfRangeException(nameof(framesInFlight));
+        if (uniformRingSize == 0) uniformRingSize = DefaultUniformPerFrame * (ulong)framesInFlight;
         _timeline = new FrameTimeline(context);
         _retired = new RetireQueue(_timeline);
         _uploads = new UploadManager(context, _timeline, _retired, framesInFlight, stagingPerSlot);
@@ -466,6 +524,10 @@ internal sealed class FrameRing : IDisposable
             _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i,
                 _latency);
         }
+
+        // The pacing numbers of a run are only comparable against numbers taken at
+        // the same depth, so the stats line carries the depth that produced them.
+        VulkanStats.FramesInFlight = framesInFlight;
     }
 
     public int FramesInFlight => _slots.Length;

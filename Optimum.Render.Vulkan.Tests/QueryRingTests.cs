@@ -157,11 +157,12 @@ public class QueryRingTests
             Assert.Equal(frames, VulkanStats.WaitCount(WaitSite.QueueSubmit) - submitsBefore);
             Assert.Equal((ulong)frames, device.TimelineForTests.FrameSignalled - signalledBefore);
 
-            // Two frames in flight: frame f+2 reuses f's slot and starts only once
-            // f finished, so no result takes longer than two frames and a cycle
-            // (query to next query) lasts at most two.
+            // FramesInFlight frames in flight: frame f + FramesInFlight reuses f's
+            // slot and starts only once f finished, so no result takes longer than
+            // that many frames, whatever depth the ring was built with.
+            int depth = device.FramesInFlightForTests;
             Assert.True(latencies.Count >= frames / 2 - 1, "only " + latencies.Count + " results in " + frames + " frames");
-            foreach (int latency in latencies) Assert.InRange(latency, 1, 2);
+            foreach (int latency in latencies) Assert.InRange(latency, 1, depth);
 
             GpuTest.AssertClean(seam);
         }

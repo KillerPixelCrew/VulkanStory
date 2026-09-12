@@ -202,7 +202,7 @@ public class SwapchainRetirementTests
     public void TheAcquireFreeListHoldsImageCountPlusOneAndNeverHandsOutASemaphoreTwice()
     {
         const uint imageCount = 3;
-        int capacity = AcquireSemaphoreFreeList.CapacityFor(imageCount);
+        int capacity = AcquireSemaphoreFreeList.CapacityFor(imageCount, PresentPressure.ForFrames(2));
         Assert.Equal(4, capacity);
 
         var handles = new ulong[capacity];

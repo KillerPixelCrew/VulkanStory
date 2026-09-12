@@ -575,7 +575,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // Uploads never wait: they ride the next frame submission, recorded from
         // any thread into the ring's upload batch (or inline into the frame when
         // it already used the destination; see UploadManager).
-        _frames = new FrameRing(_context);
+        _frames = new FrameRing(_context, FramesInFlightOverride ?? FrameRing.FramesInFlightFromEnvironment());
         // Seams S4 and S7: whatever backend is installed tags this ring's submits
         // and feeds the stats.latency line. A later stage replaces it through
         // SetLatencyBackend before the swapchain is built.
@@ -631,9 +631,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             // Seam S5: a backend with a per-swapchain create struct (NV's
             // VkSwapchainLatencyCreateInfoNV) hands it over here, so the first
             // swapchain is created with it exactly as every rebuild is.
+            // The acquire-semaphore free list is sized from what can be
+            // outstanding, so it has to know the ring depth this device chose
+            // (AcquireSemaphoreFreeList.CapacityFor).
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
                     out Swapchain? swapchain, out string? swapchainError, Latency,
-                    (Latency as NvLowLatency2Backend)?.SwapchainCreateChain))
+                    (Latency as NvLowLatency2Backend)?.SwapchainCreateChain,
+                    PresentPressure.ForFrames(_frames.FramesInFlight)))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
@@ -1678,6 +1682,18 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     /// <summary>Forces transient aliasing on or off before Initialize (default: <c>OPTIMUM_VULKAN_ALIAS</c>).</summary>
     internal bool? TransientAliasingOverride { get; set; }
+
+    /// <summary>
+    /// Frame slots the ring is built with, set before Initialize (default:
+    /// <c>OPTIMUM_VULKAN_FRAMES_IN_FLIGHT</c>, then
+    /// <see cref="FrameRing.DefaultFramesInFlight" />). For the test that
+    /// measures two against three in one process, where an environment variable
+    /// would leak into every other device the run creates.
+    /// </summary>
+    internal int? FramesInFlightOverride { get; set; }
+
+    /// <summary>The ring depth this device came up with. Tests only.</summary>
+    internal int FramesInFlightForTests => _frames.FramesInFlight;
 
     private int CreateReadSelfCopy(Graph.FeedbackCopyDesc desc) =>
         _textures.Create(desc.Width, desc.Height, desc.Format, layers: desc.Layers, cube: desc.Cube,

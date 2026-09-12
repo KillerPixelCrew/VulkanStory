@@ -31,7 +31,9 @@ public class LatencyIntegrationCoverageTests
 
         int context = initialize.IndexOf("_context = context!;", StringComparison.Ordinal);
         int install = initialize.IndexOf("InstallSelectedLatencyBackend();", StringComparison.Ordinal);
-        int ring = initialize.IndexOf("_frames = new FrameRing(_context);", StringComparison.Ordinal);
+        // The ring takes its depth from the environment or a test override, so the
+        // call is matched by its prefix rather than by the whole line.
+        int ring = initialize.IndexOf("_frames = new FrameRing(_context", StringComparison.Ordinal);
         int swapchain = initialize.IndexOf("Swapchain.TryCreate(", StringComparison.Ordinal);
 
         Assert.True(context >= 0, "Initialize must take the context:\n" + initialize);

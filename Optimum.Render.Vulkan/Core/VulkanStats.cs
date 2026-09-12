@@ -81,7 +81,7 @@ internal enum WaitSite
 /// (<c>scripts/dev/pacing-gate.sh</c>):
 /// <code>
 /// stats 1.0s: 60 frames (16.7 ms/frame), ...
-/// stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=0
+/// stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=0 frames_in_flight=3
 /// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ... queue_submit_n=60 queue_submit_ms=1.9
 /// stats.counters blocking_uploads=0 uploads=0 scopes=900 barriers=12 rebar_fallbacks=0 dynamic_state=12600 uniform_ring_used=412800 uniform_ring_capacity=16777216
 /// stats.latency backend=off mode=off sleep_n=0 sleep_ms=0.0 frames=60 input_mean_ms=0.02 input_p99_ms=0.04 ... total_mean_ms=16.60 total_p99_ms=18.20
@@ -421,7 +421,7 @@ internal static class VulkanStats
 
         return FormatIntervalLine(elapsed, frames, allocations, VulkanMemory.LiveAllocations,
                    uploads, uploadMs, created, deleted, dropped, overflows) + "\n" +
-               FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
+               FormatPacingLine(FrameIntervals.Snapshot(), FramesInFlight) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
                FormatCountersLine(counters) + "\n" +
                LatencyLine(waitCounts[(int)WaitSite.LatencySleep], waitMs[(int)WaitSite.LatencySleep]) + "\n" +
@@ -608,10 +608,19 @@ internal static class VulkanStats
             uploads, uploadMs, uploadMs / (elapsed * 1000.0) * 100.0, created, deleted, dropped, overflows);
     }
 
-    public static string FormatPacingLine(FramePacingSnapshot pacing) =>
+    /// <summary>
+    /// Frame slots the live ring has (<see cref="FrameRing.FramesInFlight" />),
+    /// 0 before a ring exists. On the pacing line because two captures are only
+    /// comparable at the same depth: three-deep buffering moves p99 and stddev on
+    /// its own, before any frame generation exists to be blamed for it.
+    /// </summary>
+    public static volatile int FramesInFlight;
+
+    public static string FormatPacingLine(FramePacingSnapshot pacing, int framesInFlight = 0) =>
         string.Format(CultureInfo.InvariantCulture,
-            "stats.pacing samples={0} p50_ms={1:F3} p95_ms={2:F3} p99_ms={3:F3} stddev_ms={4:F3} stutters={5}",
-            pacing.Samples, pacing.P50, pacing.P95, pacing.P99, pacing.StdDev, pacing.Stutters);
+            "stats.pacing samples={0} p50_ms={1:F3} p95_ms={2:F3} p99_ms={3:F3} stddev_ms={4:F3} stutters={5} " +
+            "frames_in_flight={6}",
+            pacing.Samples, pacing.P50, pacing.P95, pacing.P99, pacing.StdDev, pacing.Stutters, framesInFlight);
 
     public static string FormatWaitsLine(long[] counts, double[] milliseconds)
     {
