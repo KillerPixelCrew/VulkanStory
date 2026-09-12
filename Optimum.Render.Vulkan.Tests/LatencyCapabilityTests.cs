@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Optimum.Render.Vulkan;
 using Optimum.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
 using Xunit;
@@ -14,6 +15,31 @@ namespace Optimum.Render.Vulkan.Tests;
 /// really reaches VkDeviceCreateInfo, that asking for something the driver does
 /// not have is a note rather than a failed device, and that the colour-write
 /// tier - whose own tests pin it - comes out the same with contributors in play.
+///
+/// <para><b>The join (S1 -> S2-S7).</b> The selection made while the device is
+/// created has to be the backend the frame actually runs on. Stage A owns the lib
+/// hook, stage B the selection and stage C the markers; the only thing that joins
+/// them is <c>VulkanDevice.InstallSelectedLatencyBackend</c>. Since wave 3 all four
+/// backends exist, so a selection resolves to its own kind or to a rung further down
+/// the degrade ladder. Whichever it is, with the mode off the installed backend
+/// sleeps nowhere and owns no frame cap - "nothing on screen changes" is exactly that
+/// assertion. (The shipped default is on since 2026-09-12; those tests pin the mode
+/// themselves.)</para>
+///
+/// <para><b>"Off is off" on a real device.</b> A device that comes up with nobody
+/// selecting a latency backend has the None backend, and driving the whole backend
+/// interface across real frames neither paces the frame nor produces a validation
+/// message. This is the check the later stages regress against.</para>
+///
+/// <para><b>The ladder.</b> All four backend kinds are constructible from the one
+/// switch in <c>VulkanDevice.CreateLatencyBackend</c>, and a forced kind the device
+/// cannot host degrades down the documented ladder
+/// (<see cref="LatencyBackendSelector.Degrade" />: NV and AMD to Native, Native to
+/// None) instead of silently becoming None or failing the device. The three backend
+/// stages each tested their own backend against real hardware; what none of them
+/// could test is that the merged switch still constructs the other two, so these run
+/// headless and assert against the ladder rather than against one vendor's
+/// hardware.</para>
 /// </summary>
 public class LatencyCapabilityTests
 {
@@ -329,5 +355,352 @@ public class LatencyCapabilityTests
             ValidationAssert.NoErrors(messages);
             ValidationAssert.NoSyncHazards(messages);
         }
+    }
+
+    // ---- the selection reaches the frame (S1 -> S2-S7) ---------------------
+
+    [SkippableFact]
+    public void TheDeviceRunsTheBackendItsCapabilitiesSelected()
+    {
+        // The setting ships on since 2026-09-12, so "off is off" is asked for here.
+        using LatencyModeScope mode = LatencyModeScope.Off();
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            VulkanCapabilities capabilities = device!.ContextForTests.Capabilities;
+            _output.WriteLine(capabilities.LatencySummary);
+
+            // Either the selection is implemented and installed, or it is not
+            // implemented yet and the device fell back to None. Nothing else.
+            Assert.True(
+                device.Latency.Kind == capabilities.LatencyBackend ||
+                device.Latency.Kind == LatencyBackendKind.None,
+                "selected " + LatencyBackends.Token(capabilities.LatencyBackend) +
+                " but installed " + LatencyBackends.Token(device.Latency.Kind));
+
+            // The stats source is the very instance the frame uses, so the line
+            // cannot report a backend the frame is not running.
+            Assert.Same(device.Latency, VulkanStats.LatencySource);
+
+            // With the mode off, whichever backend was installed never takes the
+            // client's FPS limiter away.
+            Assert.False(device.Latency.OwnsFrameCap);
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    [SkippableFact]
+    public void TheStatsLineNamesTheInstalledBackendAndItsRevision()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            // The revision token comes from the same capability the selection read.
+            Assert.Equal(device!.ContextForTests.Capabilities.LatencySupport.NvLowLatency2SpecVersion, VulkanStats.LatencyRevision);
+
+            VulkanStats.SampleIfDue(TimeSpan.Zero);
+            string? sample = VulkanStats.SampleIfDue(TimeSpan.Zero);
+            Assert.NotNull(sample);
+
+            string latency = LineStartingWith(sample!, "stats.latency ");
+            _output.WriteLine(latency);
+            Assert.Contains("backend=" + LatencyBackends.Token(device.Latency.Kind), latency);
+            Assert.Contains(
+                "rev=" + device.ContextForTests.Capabilities.LatencySupport.NvLowLatency2SpecVersion.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                latency);
+            Assert.Contains("mode=" + VulkanStats.ModeToken(device.Latency.Settings.Mode), latency);
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    [SkippableFact]
+    public void DisposingTheDeviceLeavesNoStaleBackendBehindTheStatsLine()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        device!.Dispose();
+
+        Assert.Null(VulkanStats.LatencySource);
+        Assert.Equal(0u, VulkanStats.LatencyRevision);
+    }
+
+    /// <summary>Present ids may only be chained where the feature was enabled.</summary>
+    [SkippableFact]
+    public void PresentIdsAreOnlyChainedWhenTheFeatureWasEnabled()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            // A headless device has no swapchain at all, so the only thing to
+            // assert here is the capability the wiring copies from: it is false
+            // unless a vendor backend that needs it was selected on a presentable
+            // device, and the swapchain copies exactly this value.
+            Assert.False(device!.ContextForTests.Capabilities.PresentIdEnabled);
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    private static string LineStartingWith(string sample, string prefix)
+    {
+        foreach (string line in sample.Split('\n'))
+        {
+            if (line.StartsWith(prefix, StringComparison.Ordinal)) return line;
+        }
+
+        throw new Xunit.Sdk.XunitException("no line starting with '" + prefix + "' in:\n" + sample);
+    }
+
+    // ---- off is off, on a real device --------------------------------------
+
+    [SkippableFact]
+    public void AFreshDeviceRunsTheNoneBackendAndNeverPacesTheFrame()
+    {
+        // The setting ships on since 2026-09-12, so "off is off" asks for off.
+        using LatencyModeScope mode = LatencyModeScope.Off();
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            ILatencyBackend latency = device!.Latency;
+            _output.WriteLine("latency backend: " + LatencyBackends.Token(latency.Kind));
+
+            // With the mode off the installed backend - None, or the Native
+            // one auto-selection lands on where no vendor path exists - is disabled:
+            // it sleeps nowhere and owns no frame cap. "Off is off" is that, not the
+            // identity of the instance.
+            Assert.False(latency.OwnsFrameCap);
+            Assert.Equal(LatencyMode.Off, latency.Settings.Mode);
+            Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
+
+            for (ulong frame = 1; frame <= 3; frame++)
+            {
+                // The frame as the seams will drive it (ILatencyBackend's call map).
+                Assert.Equal(0UL, latency.Sleep(frame));
+                latency.Marker(frame, LatencyMarker.InputSample);
+                latency.Marker(frame, LatencyMarker.SimulationStart);
+
+                device.BeginFrame();
+                latency.Marker(frame, LatencyMarker.SimulationEnd);
+                latency.Marker(frame, LatencyMarker.RenderSubmitStart);
+                latency.Marker(frame, LatencyMarker.RenderSubmitEnd);
+
+                latency.Marker(frame, LatencyMarker.PresentStart);
+                // Headless: Present submits the frame, there is no swapchain.
+                device.Present();
+                latency.Marker(frame, LatencyMarker.PresentEnd);
+                latency.OnPresent(frame, presentId: frame);
+            }
+
+            LatencyFrameReport[] reports = latency.TakeReports();
+            Assert.Equal(3, reports.Length);
+            for (int i = 0; i < reports.Length; i++)
+            {
+                LatencyFrameReport report = reports[i];
+                _output.WriteLine($"frame {report.FrameId} present {report.PresentId}: " +
+                    $"input {report.InputUs}us sim {report.SimulationUs}us submit {report.RenderSubmitUs}us " +
+                    $"present {report.PresentUs}us total {report.TotalUs}us");
+                Assert.Equal((ulong)(i + 1), report.FrameId);
+                Assert.Equal((ulong)(i + 1), report.PresentId);
+                // Real clock, real frame: the whole frame took some measurable time,
+                // and a CPU-timestamp backend reports nothing about the driver.
+                Assert.True(report.TotalUs > 0, "the report's total must come off the clock");
+                Assert.Equal(0UL, report.DriverUs);
+                Assert.Equal(0UL, report.OsRenderQueueUs);
+                Assert.Equal(0UL, report.GpuUs);
+            }
+            // Drained: the stats sample sees each frame exactly once.
+            Assert.Empty(latency.TakeReports());
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    /// <summary>
+    /// The decision of 2026-09-12: latency reduction ships on, on every GPU. A device
+    /// that comes up with the shipped setting untouched therefore has an enabled
+    /// backend that owns the client's frame cap, and the cap the lib hands over
+    /// through <c>SetLatencyFrameCap</c> reaches it as the matching minimum interval -
+    /// including the small background-window cap, which is the number an unfocused
+    /// window would otherwise stop being paced by.
+    /// </summary>
+    [SkippableFact]
+    public void TheShippedDefaultPacesTheFrameAndTakesTheClientsFrameCap()
+    {
+        using LatencyModeScope mode = LatencyModeScope.Of(LatencyModeScope.ShippedDefault);
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            ILatencyBackend latency = device!.Latency;
+            _output.WriteLine("latency backend: " + LatencyBackends.Token(latency.Kind) +
+                " mode " + latency.Settings.Mode);
+
+            // On by default means: a real backend, enabled, owning the frame cap.
+            Assert.NotEqual(LatencyBackendKind.None, latency.Kind);
+            Assert.Equal(LatencyMode.On, latency.Settings.Mode);
+            Assert.True(latency.OwnsFrameCap);
+            // The device installs no cap of its own; the client's is the only source.
+            Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
+
+            var platform = new Platform.VulkanClientPlatform(null!);
+            platform.LatencyBackendOverride = latency;
+
+            // The background-window cap (OptimumBgMaxFps = 30 after sustained focus loss).
+            platform.SetLatencyFrameCap(30);
+            Assert.Equal(33333UL, latency.Settings.MinimumIntervalUs);
+            Assert.Equal(30u, latency.Settings.MaxFps);
+            Assert.Equal(LatencyMode.On, latency.Settings.Mode);
+
+            // Repeating it changes nothing, so nothing is re-applied to the driver.
+            LatencySettings unchanged = latency.Settings;
+            for (int frame = 0; frame < 4; frame++) platform.SetLatencyFrameCap(30);
+            Assert.Equal(unchanged, latency.Settings);
+
+            // Focused again: the foreground cap, and then uncapped.
+            platform.SetLatencyFrameCap(144);
+            Assert.Equal(LatencySettings.IntervalUsForFps(144), latency.Settings.MinimumIntervalUs);
+            platform.SetLatencyFrameCap(0);
+            Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    [SkippableFact]
+    public void TheForcedBackendOptionReachesTheContextOptions()
+    {
+        using LatencyModeScope mode = LatencyModeScope.Off();
+        VulkanDevice device = GpuTest.NewDevice();
+        Action<VulkanContextOptions>? suite = device.ConfigureContextOptions;
+        LatencyBackendKind? seen = null;
+        device.ConfigureContextOptions = options =>
+        {
+            suite?.Invoke(options);
+            options.LatencyBackend = LatencyBackendKind.Native;
+            seen = options.LatencyBackend;
+        };
+
+        if (!device.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
+        {
+            device.Dispose();
+            Skip.If(true, "No usable Vulkan device: " + failureReason);
+        }
+
+        using (device)
+        {
+            Assert.Equal(LatencyBackendKind.Native, seen);
+            // Whatever was installed, with the mode off it paces nothing.
+            Assert.False(device.Latency.OwnsFrameCap);
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    // ---- every forced kind is constructible, or degrades down the ladder ----
+
+    /// <summary>
+    /// Every kind the env override (<c>OPTIMUM_VULKAN_LATENCY</c>) can name
+    /// reaches the device and comes back as either that kind or a kind on its
+    /// degrade ladder. None is on every ladder, so the assertion has teeth only
+    /// because it also asserts the ladder never skips a rung upwards.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(0)] // None
+    [InlineData(1)] // Native
+    [InlineData(2)] // NvLowLatency2
+    [InlineData(3)] // AmdAntiLag
+    public void EveryForcedBackendIsConstructibleOrDegradesDownTheLadder(int forcedKind)
+    {
+        // The setting ships on since 2026-09-12; this test is about the ladder, so it
+        // pins the mode off and keeps its "takes no FPS limiter away" assertion.
+        using LatencyModeScope mode = LatencyModeScope.Off();
+        // LatencyBackendKind is internal, so the theory data is its numeric value.
+        var forced = (LatencyBackendKind)forcedKind;
+        VulkanDevice device = GpuTest.NewDevice();
+        Action<VulkanContextOptions>? suite = device.ConfigureContextOptions;
+        device.ConfigureContextOptions = options =>
+        {
+            suite?.Invoke(options);
+            options.LatencyBackend = forced;
+        };
+
+        if (!device.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
+        {
+            device.Dispose();
+            Skip.If(true, "Vulkan unavailable: " + failureReason);
+        }
+
+        using (device)
+        {
+            LatencyBackendKind installed = device.Latency.Kind;
+            _output.WriteLine("forced " + LatencyBackends.Token(forced) +
+                " -> selected " + LatencyBackends.Token(device.ContextForTests.Capabilities.LatencyBackend) +
+                " -> installed " + LatencyBackends.Token(installed) +
+                " (" + device.ContextForTests.Capabilities.LatencySummary + ")");
+
+            Assert.Contains(installed, Ladder(forced));
+
+            // Forcing off means off: no other kind is reachable from None.
+            if (forced == LatencyBackendKind.None) Assert.Equal(LatencyBackendKind.None, installed);
+
+            // The instance the frame runs on is the instance the stats line and
+            // the frame ring were handed - the merge must not have split them.
+            Assert.Same(device.Latency, VulkanStats.LatencySource);
+
+            // With the mode off, no installed backend takes the client's FPS
+            // limiter away, whichever kind it turned out to be.
+            Assert.False(device.Latency.OwnsFrameCap);
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    /// <summary>
+    /// Auto selection is the plan's order: NV where the device really offers it,
+    /// then AMD, then Native, and never None (only an explicit "off" yields None).
+    /// Asserted against what this device advertises, so it holds on any hardware.
+    /// </summary>
+    [SkippableFact]
+    public void AutoSelectionTakesNvThenAmdThenNativeAndNeverNone()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            LatencyDeviceSupport support = device!.ContextForTests.Capabilities.LatencySupport;
+            _output.WriteLine(support.ToString());
+
+            LatencyBackendKind expected = support.NvUsable
+                ? LatencyBackendKind.NvLowLatency2
+                : support.AmdUsable ? LatencyBackendKind.AmdAntiLag : LatencyBackendKind.Native;
+
+            Assert.Equal(expected, LatencyBackends.SelectBackend(support.NvUsable, support.AmdUsable, null));
+            Assert.NotEqual(LatencyBackendKind.None, LatencyBackends.SelectBackend(false, false, null));
+
+            // And the table the present-path filter walks is that same order.
+            Assert.Equal(
+                new[]
+                {
+                    LatencyBackendKind.NvLowLatency2,
+                    LatencyBackendKind.AmdAntiLag,
+                    LatencyBackendKind.Native,
+                    LatencyBackendKind.None,
+                },
+                LatencyBackendSelector.AllowedBackends(LatencyPresentPath.BlitFromOwned));
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
+    /// <summary>The kinds a forced kind may legitimately end up as, best first.</summary>
+    private static List<LatencyBackendKind> Ladder(LatencyBackendKind forced)
+    {
+        var rungs = new List<LatencyBackendKind> { forced };
+        LatencyBackendKind rung = forced;
+        while (rung != LatencyBackendKind.None)
+        {
+            rung = LatencyBackendSelector.Degrade(rung);
+            rungs.Add(rung);
+        }
+
+        return rungs;
     }
 }

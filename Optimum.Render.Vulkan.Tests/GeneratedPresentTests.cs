@@ -12,12 +12,21 @@ namespace Optimum.Render.Vulkan.Tests;
 /// composited image, with no vendor code anywhere.
 ///
 /// The question this isolates is mechanical - does the acquire-semaphore free
-/// list (<c>imageCount + 1</c>, derived from "at most FramesInFlight - 1 present
-/// submissions outstanding") and the Frame timeline bookkeeping survive twice the
-/// present pressure. So it runs many frames with a present between them and no
-/// readback inside the loop, which is the only shape that can see a lifetime or
-/// bookkeeping bug at all, and judges it on numbers: presents per frame, present
-/// ids, what the free list held, and the validation log under sync,best.
+/// list and the Frame timeline bookkeeping survive twice the present pressure. So
+/// it runs many frames with a present between them and no readback inside the
+/// loop, which is the only shape that can see a lifetime or bookkeeping bug at
+/// all, and judges it on numbers: presents per frame, present ids, what the free
+/// list held, and the validation log under sync,best.
+///
+/// <para><b>Since the foundation merge this is also the integration proof of the
+/// two halves.</b> It was written when the free list was <c>imageCount + 1</c> and
+/// the ring was two deep; it now runs at the shipped depth (three) against the
+/// re-derived bound <c>max(imageCount, F x P) + 1</c>, with <c>P = 2</c> passed at
+/// swapchain creation unconditionally. Those are the two things that had to meet:
+/// the second present that step 0 introduced against the bound step 4 re-derived.
+/// If either side regresses - the device sizing for one present again, or the
+/// bound going back to the image count - this test takes the semaphore free list
+/// to exhaustion inside <c>Take</c> and fails here rather than in a game.</para>
 /// </summary>
 public class GeneratedPresentTests
 {
@@ -38,6 +47,8 @@ public class GeneratedPresentTests
         public int GeneratedPresents;
         public int AcquireSemaphoreCapacity;
         public uint ImageCount;
+        public int FramesInFlight;
+        public PresentPressure Pressure;
         public int Presents;
         public int IdenticalBlits;
         public int DistinctDestinations;
@@ -54,7 +65,9 @@ public class GeneratedPresentTests
             Run single = Present((IntPtr)window, generated: false);
             Run doubled = Present((IntPtr)window, generated: true);
 
-            _output.WriteLine($"swapchain images {doubled.ImageCount}, acquire semaphores {doubled.AcquireSemaphoreCapacity}");
+            _output.WriteLine($"frames in flight {doubled.FramesInFlight}, presents per frame " +
+                $"{doubled.Pressure.PresentsPerFrame} (sized for), swapchain images {doubled.ImageCount}, " +
+                $"acquire semaphores {doubled.AcquireSemaphoreCapacity}");
             _output.WriteLine($"presents: single {single.Presents} in {Frames} frames, doubled {doubled.Presents} ({doubled.GeneratedPresents} generated)");
             _output.WriteLine($"free acquire semaphores at present: single min {Min(single.FreeAcquireSemaphores)} max {Max(single.FreeAcquireSemaphores)}, " +
                 $"doubled min {Min(doubled.FreeAcquireSemaphores)} max {Max(doubled.FreeAcquireSemaphores)}");
@@ -96,7 +109,21 @@ public class GeneratedPresentTests
                         $"semaphores of {run.AcquireSemaphoreCapacity}");
                 }
             }
-            Assert.Equal((int)doubled.ImageCount + 1, doubled.AcquireSemaphoreCapacity);
+
+            // The bound the swapchain was actually built with, re-derived rather
+            // than recompiled: max(imageCount, F x P) + 1 with P = 2, not
+            // imageCount + 1. Asserted against the live PresentPressure the device
+            // handed Swapchain.TryCreate, so a device that quietly went back to one
+            // present per frame fails here and not only in the numbers.
+            PresentPressure pressure = doubled.Pressure;
+            Assert.Equal(PresentPressure.GeneratedPlusRealPerFrame, pressure.PresentsPerFrame);
+            Assert.Equal(doubled.FramesInFlight, pressure.FramesInFlight);
+            Assert.Equal(
+                AcquireSemaphoreFreeList.CapacityFor(doubled.ImageCount, pressure),
+                doubled.AcquireSemaphoreCapacity);
+            Assert.Equal(
+                Math.Max((int)doubled.ImageCount, doubled.FramesInFlight * 2) + 1,
+                doubled.AcquireSemaphoreCapacity);
         }
         finally
         {
@@ -142,6 +169,8 @@ public class GeneratedPresentTests
 
                 Swapchain? swapchain = device.SwapchainForTests;
                 SwapchainSlot? slot = swapchain?.CurrentSlotForTests;
+                run.FramesInFlight = device.FramesInFlightForTests;
+                if (swapchain != null) run.Pressure = swapchain.Pressure;
                 if (slot != null)
                 {
                     run.ImageCount = slot.ImageCount;
