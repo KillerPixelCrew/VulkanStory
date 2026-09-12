@@ -1,7 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Optimum.Render.Vulkan;
+using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Platform;
+using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
+using Vintagestory.API.MathTools;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -20,8 +26,25 @@ namespace Optimum.Render.Vulkan.Tests;
 /// consecutive frames, and with it off (TAAMOTION 0) it does not change at all - the
 /// override has to be byte-identical to vanilla there, because a per-frame-varying
 /// dither with nothing accumulating behind it is strictly worse than a fixed one.
+///
+/// <para><b>The noise texture's alpha.</b> A parity gap from the Phase 0 and Phase 1
+/// dumps: framebuffer slot 13 (SSAO) colour attachment 1, the 16x16 rotation-noise
+/// texture, read alpha 1.0 in every texel on OpenGL and 0.0 on Vulkan. Not a masked
+/// write (no shader renders into that texture): the GL path allocates GL_RGBA32F and
+/// uploads GL_RGB float data, and GL's pixel transfer fills the absent alpha with 1.
+/// The device path uploaded four channels with a padding 0, and the device copies
+/// channels verbatim. The fix is in the data
+/// (<see cref="VulkanClientPlatform.BuildOptimumSsaoNoise" />); those tests read the
+/// texture back through the parity dump's own readback, inside a frame, with sync +
+/// best-practices validation on.</para>
+///
+/// <para><b>AO under an upscaler.</b> The jittered AO is one of the upscaler's inputs,
+/// so it is multiplied into the scene colour before the reconstruction and into
+/// nothing else: the last section drives the real upscale-ssao program over eight
+/// frames and requires every other attachment, and the depth, to come back
+/// untouched.</para>
 /// </summary>
-public class SsaoTemporalDitherTests(ITestOutputHelper output)
+public class SsaoDeviceTests(ITestOutputHelper output)
 {
     private const int Size = 128;
     private const int GlRgba32f = 0x8814;
@@ -256,5 +279,198 @@ public class SsaoTemporalDitherTests(ITestOutputHelper output)
             if (a[texel * 4] != b[texel * 4]) count++;
         }
         return count;
+    }
+
+    // ---- the rotation-noise texture and its alpha --------------------------
+
+    private const int NoiseSize = 16;
+
+    /// <summary>
+    /// The GL path's generation verbatim (ClientPlatformWindows.SetupDefaultFrameBuffers):
+    /// three floats per texel, uploaded as GL_RGB.
+    /// </summary>
+    private static float[] GlRgbNoise(Random random)
+    {
+        float[] rgb = new float[NoiseSize * NoiseSize * 3];
+        Vec3f direction = new Vec3f();
+        for (int texel = 0; texel < NoiseSize * NoiseSize; texel++)
+        {
+            direction.Set((float)random.NextDouble() * 2f - 1f, (float)random.NextDouble() * 2f - 1f, 0f).Normalize();
+            rgb[texel * 3] = direction.X;
+            rgb[texel * 3 + 1] = direction.Y;
+            rgb[texel * 3 + 2] = direction.Z;
+        }
+        return rgb;
+    }
+
+    /// <summary>
+    /// Same colour values and the same random draws as the GL path, alpha 1 where GL fills
+    /// it, and the stream position afterwards unchanged, so the kernel drawn next matches.
+    /// </summary>
+    [Fact]
+    public void NoiseMatchesTheGlUploadIncludingTheFilledAlpha()
+    {
+        var glRandom = new Random(5);
+        var deviceRandom = new Random(5);
+        float[] rgb = GlRgbNoise(glRandom);
+        float[] rgba = VulkanClientPlatform.BuildOptimumSsaoNoise(deviceRandom, NoiseSize);
+
+        Assert.Equal(NoiseSize * NoiseSize * 4, rgba.Length);
+        for (int texel = 0; texel < NoiseSize * NoiseSize; texel++)
+        {
+            Assert.Equal(rgb[texel * 3], rgba[texel * 4]);
+            Assert.Equal(rgb[texel * 3 + 1], rgba[texel * 4 + 1]);
+            Assert.Equal(rgb[texel * 3 + 2], rgba[texel * 4 + 2]);
+            Assert.Equal(1f, rgba[texel * 4 + 3]);
+        }
+        Assert.Equal(glRandom.NextDouble(), deviceRandom.NextDouble());
+    }
+
+    /// <summary>
+    /// GPU readback through <see cref="VulkanDevice.ReadTextureForParity" />, the path that
+    /// writes 13-SSAO-color1-rgba32f.alpha.pfm. The platform's noise reads alpha 1.0 in all
+    /// 256 texels with the GL colour values; the pre-fix upload (identical colour, padding
+    /// alpha 0) on the same device reads 0.0, which is the Vulkan dump before the fix.
+    /// </summary>
+    [SkippableFact]
+    public void SsaoNoiseTextureReadsAlphaOneLikeOpenGl()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        float[] noise = VulkanClientPlatform.BuildOptimumSsaoNoise(new Random(5), NoiseSize);
+        float[] preFix = (float[])noise.Clone();
+        for (int texel = 0; texel < NoiseSize * NoiseSize; texel++) preFix[texel * 4 + 3] = 0f;
+        float[] glRgb = GlRgbNoise(new Random(5));
+
+        using (device)
+        {
+            VulkanDevice seam = device!;
+            int fixedTexture = Upload(seam, noise);
+            int preFixTexture = Upload(seam, preFix);
+
+            seam.BeginFrame();
+            OptimumTextureReadback? fixedReadback = seam.ReadTextureForParity(fixedTexture);
+            OptimumTextureReadback? preFixReadback = seam.ReadTextureForParity(preFixTexture);
+            seam.Present();
+            GpuTest.AssertClean(seam);
+
+            Assert.NotNull(fixedReadback);
+            Assert.NotNull(preFixReadback);
+            Assert.Equal(GlRgba32f, fixedReadback!.GlInternalFormat);
+            Assert.Equal(NoiseSize, fixedReadback.Width);
+            Assert.Equal(NoiseSize, fixedReadback.Height);
+            Assert.NotNull(fixedReadback.Floats);
+            Assert.NotNull(preFixReadback!.Floats);
+
+            int alphaOne = 0;
+            int preFixAlphaZero = 0;
+            for (int texel = 0; texel < NoiseSize * NoiseSize; texel++)
+            {
+                Assert.Equal(glRgb[texel * 3], fixedReadback.Floats![texel * 4]);
+                Assert.Equal(glRgb[texel * 3 + 1], fixedReadback.Floats[texel * 4 + 1]);
+                Assert.Equal(glRgb[texel * 3 + 2], fixedReadback.Floats[texel * 4 + 2]);
+                if (fixedReadback.Floats[texel * 4 + 3] == 1f) alphaOne++;
+                if (preFixReadback.Floats![texel * 4 + 3] == 0f) preFixAlphaZero++;
+            }
+            output.WriteLine("alpha 1.0 texels: " + alphaOne + "/256; pre-fix upload alpha 0.0 texels: " + preFixAlphaZero + "/256");
+            Assert.Equal(NoiseSize * NoiseSize, preFixAlphaZero);
+            Assert.Equal(NoiseSize * NoiseSize, alphaOne);
+        }
+    }
+
+    private static int Upload(VulkanDevice seam, float[] texels)
+    {
+        GCHandle handle = GCHandle.Alloc(texels, GCHandleType.Pinned);
+        try
+        {
+            return seam.CreateTexture2DRaw(NoiseSize, NoiseSize, GlRgba32f, handle.AddrOfPinnedObject(), 16);
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    // ---- the AO an upscaler consumes ---------------------------------------
+
+    [SkippableTheory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public unsafe void OcclusionMultipliesOnlySceneColorBeforeReconstruction(int quality)
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No Vulkan device");
+        using (device)
+        {
+            VulkanDevice seam = device!;
+            const int size = 8, frames = 8;
+            var files = ShaderCorpus.LoadShaderFiles();
+            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, files["upscale-ssao.vsh"],
+                files["upscale-ssao.fsh"].Replace("#version 330 core", "#version 330 core\n#define SSAOLEVEL " + quality));
+            var ao = new byte[size * size * 4];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+                for (int c = 0; c < 4; c++) ao[(y * size + x) * 4 + c] = (byte)(y % 2 == 0 ? 64 : 192);
+            int occlusion;
+            fixed (byte* data = ao) occlusion = seam.CreateTexture2DRaw(size, size, 0x8058, (IntPtr)data, 4);
+            var colors = new int[frames][];
+            var depths = new int[frames];
+            var targets = new int[frames];
+            for (int i = 0; i < frames; i++)
+            {
+                targets[i] = seam.CreateFramebuffer(size, size);
+                colors[i] = new int[5];
+                for (int slot = 0; slot < 5; slot++)
+                {
+                    colors[i][slot] = seam.CreateTexture2DRaw(size, size, 0x8058, IntPtr.Zero, 4);
+                    seam.AttachTexture(targets[i], (EnumFramebufferAttachment)(36064 + slot), colors[i][slot], 0);
+                }
+                depths[i] = seam.CreateUpscaleTexture(size, size, Format.D32Sfloat, storage: false);
+                seam.AttachTexture(targets[i], EnumFramebufferAttachment.DepthAttachment, depths[i], 0);
+            }
+            seam.SetViewport(0, 0, size, size);
+            seam.SetCullFace(false);
+            seam.SetDepthTest(false);
+            seam.SetSamplerUnit(program, "ssaoScene", 0);
+            seam.SetUniform(program, seam.GetUniformLocation(program, "invRenderHeight"), 1f / size);
+            for (int i = 0; i < frames; i++)
+            {
+                seam.BeginFrame();
+                seam.BindFramebuffer(targets[i]);
+                seam.SetDrawBuffers(targets[i], 31);
+                seam.ClearColor(0, (i + 1) / 16f, (i + 1) / 16f, (i + 1) / 16f, 1);
+                for (int slot = 1; slot < 5; slot++) seam.ClearColor(slot, slot / 8f, slot / 8f, slot / 8f, 1);
+                seam.ClearDepth(0.375f);
+                seam.SetDrawBuffers(targets[i], 1);
+                seam.SetBlend(true, EnumBlendMode.Multiply);
+                seam.UseProgram(program);
+                seam.BindTexture(0, occlusion);
+                seam.DrawFullscreenTriangle();
+                seam.SetBlend(true, EnumBlendMode.Standard);
+                seam.SetDrawBuffers(targets[i], 31);
+                seam.Present();
+            }
+            // The sequence is complete before any readback or CPU wait.
+            seam.BeginFrame();
+            for (int i = 0; i < frames; i++)
+            {
+                for (int slot = 0; slot < 5; slot++)
+                {
+                    byte[] pixels = seam.ReadBackLevel0ForTests(colors[i][slot]);
+                    for (int y = 0; y < size; y++)
+                    for (int x = 0; x < size; x++)
+                    {
+                        double factor = quality == 2 || y % 2 == 0 ? 64 : 192;
+                        double expected = slot == 0 ? Math.Round((i + 1) / 16.0 * 255) * factor / 255 : slot / 8.0 * 255;
+                        int offset = (y * size + x) * 4;
+                        for (int c = 0; c < 3; c++) Assert.InRange((double)pixels[offset + c], expected - 1.1, expected + 1.1);
+                        Assert.Equal(255, pixels[offset + 3]);
+                    }
+                }
+                foreach (float depth in MemoryMarshal.Cast<byte, float>(seam.ReadBackLevel0ForTests(depths[i])))
+                    Assert.Equal(0.375f, depth);
+            }
+            seam.Present();
+            GpuTest.AssertClean(seam);
+        }
     }
 }
