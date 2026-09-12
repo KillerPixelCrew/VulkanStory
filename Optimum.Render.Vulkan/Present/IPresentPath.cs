@@ -33,6 +33,16 @@ internal interface IPresentPath
 }
 
 /// <summary>
+/// What one <see cref="IPresentPath.Record" /> put into the command buffer, for
+/// tests: which image was copied, at what size, into which acquired image. Two
+/// presents of the same frame are "the same picture" exactly when their records
+/// name the same source image and the same source extent, with nothing between
+/// them that writes it.
+/// </summary>
+internal readonly record struct PresentBlitRecord(
+    ulong SourceImage, uint SourceWidth, uint SourceHeight, ulong DestinationImage, Extent2D DestinationExtent);
+
+/// <summary>
 /// The wait stages of the present submission, checked in one place.
 ///
 /// Submit B waits on two things: the Frame timeline at the value Submit A
@@ -80,6 +90,12 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
 
     /// <summary>The acquired image's state; reset per frame, since its contents are discarded.</summary>
     private readonly ResourceStateTracker _swapchainImage = new(1, 1, depth: false);
+
+    /// <summary>The last blit this path recorded. Tests only.</summary>
+    internal PresentBlitRecord LastRecordedBlit { get; private set; }
+
+    /// <summary>The blit recorded before <see cref="LastRecordedBlit" />. Tests only.</summary>
+    internal PresentBlitRecord PreviousRecordedBlit { get; private set; }
 
     public BlitPresentPath(VulkanContext context, TextureManager textures, Func<VulkanTexture?> source)
     {
@@ -141,6 +157,11 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
                 destination, ImageLayout.TransferDstOptimal,
                 1, &blit, Filter.Linear);
         }
+
+        PreviousRecordedBlit = LastRecordedBlit;
+        LastRecordedBlit = new PresentBlitRecord(
+            source?.Image.Handle ?? 0, source?.Width ?? 0, source?.Height ?? 0,
+            destination.Handle, target.Extent);
 
         // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC (BOTTOM_OF_PIPE, no access).
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,

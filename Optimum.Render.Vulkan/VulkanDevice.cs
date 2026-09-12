@@ -1128,12 +1128,26 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             return;
         }
 
+        // Frame generation step 0: a second image for the generated present, taken
+        // before anything is recorded, so both blits ride the one command buffer.
+        PresentTarget generatedTarget = default;
+        bool generated = GeneratedPresentEnabled && _swapchain.TryAcquire(out generatedTarget);
+        if (!generated) generatedTarget = default;
+
         CommandBuffer presentCommands = _frames.BeginPresentCommands();
         Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
         _presentPath.Record(presentCommands, target);
+        if (generated)
+        {
+            Checkpoint(presentCommands, CheckpointMarker.PresentBlit(generatedTarget.ImageIndex, _frameCounter));
+            _presentPath.Record(presentCommands, generatedTarget);
+        }
         ulong presentValue = _frames.SubmitPresent(
-            target.AcquireSemaphore, _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
+            target.AcquireSemaphore, generated ? generatedTarget.AcquireSemaphore : default,
+            _presentPath.AcquireWaitStage, renderValue,
+            target.PresentSemaphore, generated ? generatedTarget.PresentSemaphore : default);
         _swapchain.NotePresentSubmitted(target, presentValue);
+        if (generated) _swapchain.NotePresentSubmitted(generatedTarget, presentValue);
         long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
         // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself,
@@ -1145,6 +1159,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
+        PresentGeneratedFrame(generated, generatedTarget);
 
         long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_lastPresentReturn != 0 && _vsync &&
@@ -1155,6 +1170,63 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         }
         _lastPresentReturn = presentReturn;
     }
+
+    /// <summary>
+    /// OPTIMUM_DLSSG_DOUBLE_PRESENT=1 turns the second present of every frame on
+    /// (frame generation, step 0). Off by default: a normal run presents once.
+    /// </summary>
+    internal const string GeneratedPresentVariable = "OPTIMUM_DLSSG_DOUBLE_PRESENT";
+
+    /// <summary>
+    /// Step 0 of the frame-generation design: every frame is presented twice, the
+    /// second time from the same composited image, tagged as a generated frame.
+    ///
+    /// It exists to answer one mechanical question before any vendor code does -
+    /// whether the acquire-semaphore free list and the Frame timeline bookkeeping
+    /// survive twice the present pressure - so the second present is deliberately
+    /// the same picture, submitted from the same command buffer as the real one
+    /// and presented from the same thread. The generated frame's own image, the
+    /// pacer and the present thread are later steps.
+    /// </summary>
+    internal bool GeneratedPresentEnabled { get; set; } =
+        Environment.GetEnvironmentVariable(GeneratedPresentVariable)?.Trim() == "1";
+
+    /// <summary>
+    /// The generated frame's <c>vkQueuePresentKHR</c>. Its image was acquired and
+    /// blitted with the real one, in the present submission that already
+    /// completed its recording, so all that is left here is the present itself.
+    ///
+    /// It is stamped through the out-of-band latency markers rather than
+    /// PresentStart/PresentEnd: those belong to the frame's one real present, and
+    /// a generated present is by definition not part of the frame's latency
+    /// chain. The frame id is the real frame's, which is what makes the present id
+    /// map carry both presents against one frame.
+    /// </summary>
+    private void PresentGeneratedFrame(bool generated, in PresentTarget generatedTarget)
+    {
+        if (!generated || _swapchain == null) return;
+
+        // vkQueueNotifyOutOfBandNV tells the driver this queue submission is not
+        // part of a frame; only the NV backend has it, and only while its
+        // swapchain is live.
+        (Latency as NvLowLatency2Backend)?.NotifyOutOfBandPresent(_context.GraphicsQueue);
+
+        Latency.Marker(_latencyFrameId, LatencyMarker.OutOfBandPresentStart);
+        ulong generatedPresentId = _swapchain.Present(generatedTarget, _latencyFrameId);
+        Latency.Marker(_latencyFrameId, LatencyMarker.OutOfBandPresentEnd);
+
+        LastGeneratedPresentIdForTests = generatedPresentId;
+        GeneratedPresentsForTests++;
+    }
+
+    /// <summary>The present id of the last generated present, 0 before the first. Tests only.</summary>
+    internal ulong LastGeneratedPresentIdForTests { get; private set; }
+
+    /// <summary>How many generated presents have been made. Tests only.</summary>
+    internal int GeneratedPresentsForTests { get; private set; }
+
+    /// <summary>The present path as the blit path it is, for its recorded blits. Tests only.</summary>
+    internal BlitPresentPath? BlitPresentPathForTests => _presentPath as BlitPresentPath;
 
     /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
     internal readonly record struct PresentTimings(
