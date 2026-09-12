@@ -315,8 +315,19 @@ internal sealed class GlStateTracker
     /// <summary>
     /// Applies one of the game's named blend modes to every attachment, matching
     /// the factor pairs ClientPlatformWindows.GlToggleBlend selects.
+    ///
+    /// <paramref name="uiTargetBound" /> is the Vulkan half of
+    /// ClientPlatformWindows.OptimumUiTargetBound (DLSS frame generation, design
+    /// step 3): while the HUD-less frame's UI target is the bound framebuffer,
+    /// Standard resolves to the separate-alpha form - rgb SRC_ALPHA /
+    /// ONE_MINUS_SRC_ALPHA exactly as before, alpha ONE / ONE_MINUS_SRC_ALPHA. The
+    /// GUI writes straight alpha, so vanilla's non-separate factors would square the
+    /// alpha of every layer accumulated into a target cleared to (0,0,0,0) and the
+    /// premultiplied compose would then show the world through the HUD. It defaults
+    /// to false and only Standard is affected, so every other caller in the engine
+    /// keeps the factors it has today.
     /// </summary>
-    public void SetBlend(bool enabled, EnumBlendMode mode)
+    public void SetBlend(bool enabled, EnumBlendMode mode, bool uiTargetBound = false)
     {
         (BlendFactor srcColor, BlendFactor dstColor, BlendFactor srcAlpha, BlendFactor dstAlpha) = mode switch
         {
@@ -330,8 +341,13 @@ internal sealed class GlStateTracker
                 BlendFactor.One, BlendFactor.Zero),
             EnumBlendMode.Overlay => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
                 BlendFactor.One, BlendFactor.One),
-            _ => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
-                BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha),
+            // Standard. Non-separate in vanilla; the over-operator on the alpha
+            // channel only while the UI target is the bound framebuffer.
+            _ => uiTargetBound
+                ? (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
+                    BlendFactor.One, BlendFactor.OneMinusSrcAlpha)
+                : (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
+                    BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha),
         };
 
         for (int i = 0; i < _blend.Length; i++)

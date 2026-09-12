@@ -451,6 +451,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "UnbindUBO",
         "UpdateUBO",
         "DeleteUBO",
+        // DLSS frame generation, design step 3: the scope the HUD-less frame's UI
+        // target opens around the Ortho stage. GlToggleBlend's Standard mode reads
+        // it to switch the alpha channel to the over-operator; nothing else does.
+        "OptimumUiTargetBound",
+        "optimumUiTargetBound",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;

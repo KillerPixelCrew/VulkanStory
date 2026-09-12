@@ -85,6 +85,9 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
         "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
         "OptimumHeadlessExitIfDone", "optimumHeadlessExitRequested",
+        // DLSS frame generation, design step 3: the UI-target blend scope read by
+        // GlToggleBlend (which is already a transplant target below).
+        "OptimumUiTargetBound", "optimumUiTargetBound",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),

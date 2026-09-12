@@ -1338,7 +1338,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     public void SetCullFace(bool enabled) => _state.SetCullEnabled(enabled);
     public void SetCullFaceMode(bool back) => _state.SetCullBack(back);
 
-    public void SetBlend(bool enabled, EnumBlendMode mode) => _state.SetBlend(enabled, mode);
+    /// <summary>
+    /// <paramref name="uiTargetBound" /> forwards ClientPlatformWindows.OptimumUiTargetBound;
+    /// see <see cref="GlStateTracker.SetBlend" /> for what it changes and why.
+    /// </summary>
+    public void SetBlend(bool enabled, EnumBlendMode mode, bool uiTargetBound = false) =>
+        _state.SetBlend(enabled, mode, uiTargetBound);
 
     public void SetBlendEnabled(bool enabled) => _state.SetBlendEnabled(enabled);
 
