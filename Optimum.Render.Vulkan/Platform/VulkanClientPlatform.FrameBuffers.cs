@@ -23,6 +23,8 @@ public partial class VulkanClientPlatform
     private const int OptimumTaaHistoryIndexB = 20;
     private const int OptimumTaaSharpenIndex = 21;
     private const int OptimumUpscaledSceneIndex = 22;
+    // DLSS-FG design, step 2: the HUD-less scene snapshot.
+    private const int OptimumSceneNoHudIndex = 23;
     private const int OptimumGlR32f = 0x822E;
 
     // GL keeps the clear colour in driver state and applies it at glClear; the device
@@ -45,6 +47,10 @@ public partial class VulkanClientPlatform
     public override List<FrameBufferRef> SetupDefaultFrameBuffers()
     {
         OptimumAdoptFrameBufferSettings();
+        // DLSS-FG design, step 2: this build owns the snapshot slot, so it starts
+        // unpublished - the allocation below republishes it, and every path that leaves
+        // without one leaves -1 rather than an index into a list with no target.
+        SetOptimumSceneNoHudIndex(-1);
         bool setupSsao = ClientSettings.SSAOQuality > 0;
         List<FrameBufferRef> list = new List<FrameBufferRef>(31);
         for (int i = 0; i <= 24; i++)
@@ -272,6 +278,28 @@ public partial class VulkanClientPlatform
                 list[OptimumUpscaledSceneIndex] = null;
                 DisposeFrameBuffers(list);
                 return SetupDefaultFrameBuffers();
+            }
+        }
+
+        // DLSS-FG design, step 2: the HUD-less snapshot, at the display size, colour
+        // only. Never a transient and never a render target: RenderFinalComposition
+        // copies the composited image into it with one blit, and it has to survive from
+        // there to whatever consumes it, which with frame generation is past the end of
+        // the frame that produced it. Allocated only when something wants it - a frame
+        // with no upscaler and no frame generation pays neither the memory nor the copy.
+        // A failure costs the snapshot and nothing else: the published index stays -1
+        // and every consumer asks that index first.
+        if (OptimumSceneNoHudRequested)
+        {
+            try
+            {
+                list[OptimumSceneNoHudIndex] = CreateOptimumSceneNoHudTarget(displayWidth, displayHeight);
+                SetOptimumSceneNoHudIndex(OptimumSceneNoHudIndex);
+            }
+            catch (Exception error)
+            {
+                Logger.Error("Optimum disabled the HUD-less scene snapshot: {0}", error.Message);
+                list[OptimumSceneNoHudIndex] = null;
             }
         }
 
@@ -562,6 +590,39 @@ public partial class VulkanClientPlatform
         if (!device.CheckFramebufferComplete(target.FboId, out string status))
         {
             throw new Exception("Optimum TAA history FBO: " + status);
+        }
+        return target;
+    }
+
+    /// <summary>
+    /// DLSS-FG design, step 2: the HUD-less snapshot target - one display-resolution
+    /// RGBA8 colour image, the format the composited image is in, and no depth: nothing
+    /// renders into it.
+    ///
+    /// Plain, not transient. The transient pool may hand a slot's image to another slot
+    /// once aliasing is on, and this image is written by a transfer in one pass and read
+    /// by whatever consumes the snapshot much later - with frame generation, after the
+    /// frame that produced it has ended.
+    /// </summary>
+    private FrameBufferRef CreateOptimumSceneNoHudTarget(int width, int height)
+    {
+        FrameBufferRef target = new FrameBufferRef();
+        target.Width = width;
+        target.Height = height;
+        target.FboId = device.CreateFramebuffer(width, height);
+        target.ColorTextureIds = new int[1];
+        target.ColorTextureIds[0] = device.CreateTexture2D(width, height,
+            EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        // Same filtering and edge policy as every other composited-image target
+        // (setupAttachment on the GL side): a consumer that samples it at a fractional
+        // offset gets the same texels either backend.
+        SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
+        device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0,
+            target.ColorTextureIds[0], 0);
+        device.SetDrawBuffers(target.FboId, 1);
+        if (!device.CheckFramebufferComplete(target.FboId, out string status))
+        {
+            throw new Exception("Optimum SceneNoHud FBO: " + status);
         }
         return target;
     }
