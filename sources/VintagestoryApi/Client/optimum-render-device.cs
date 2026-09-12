@@ -326,6 +326,28 @@ public static class OptimumHeadless
     public static readonly bool CaptureEnabled = FrameDirectory != null && Frames.Length > 0;
 
     /// <summary>
+    /// True when <c>OPTIMUM_HEADLESS_EXIT_WHEN_DONE</c> asks the client to close
+    /// itself once the capture (and the parity dump, if one was asked for) has
+    /// finished, instead of waiting to be signalled.
+    ///
+    /// <para>Why this exists.</para> A headless window is never mapped, so the
+    /// clean close a human gets - the window manager's close event - cannot be
+    /// delivered to it: <c>scripts/dev/kill-client.sh</c> finds nothing to send
+    /// alt+F4 to and falls through to SIGTERM. SIGTERM lands on a signal-handler
+    /// thread, which calls <c>WindowExit</c> - and therefore <c>Close()</c> - from
+    /// off the render thread, while that thread is still inside a frame. The
+    /// result is a shutdown race that writes a crash report on every run
+    /// (2026-09-12: <c>ShaderProgramBase.Use</c> dereferencing a program whose
+    /// graphics were already torn down), which is exactly the noise that makes a
+    /// harness useless as evidence - nobody can tell that crash from a real one.
+    ///
+    /// <para>Closing from here instead is the path the main menu's quit button
+    /// already takes: <c>WindowExit</c> on the render thread, between frames, with
+    /// the game loop agreeing to stop rather than being interrupted.</para>
+    /// </summary>
+    public static readonly bool ExitWhenDone = ResolveFlag("OPTIMUM_HEADLESS_EXIT_WHEN_DONE");
+
+    /// <summary>
     /// True when the client has to do anything at all per frame for the harness.
     /// The single test the render loop makes.
     /// </summary>

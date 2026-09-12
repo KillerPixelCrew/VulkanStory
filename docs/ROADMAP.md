@@ -348,9 +348,16 @@ slot); and the frame-id to present-id mapping with two presents.
   no pacer. Expected, behind the switch. Hazard 3 below is still untouched: nothing measures
   present-to-present spacing, and the missed-vsync detector's interval now also contains the generated
   present's `vkQueuePresentKHR`.
-- Nothing in this wave has been seen on a real frame: the `SceneNoHud` snapshot has never rendered in
-  game on either backend, and the in-game half of the two-versus-three measurement
-  (`pacing-gate.sh` on the fixed scene at both depths) is missing. Both come before step 5 adds generation.
+- **The snapshot has now been seen on a real frame** (2026-09-12, headless, Vulkan, DLSS Balanced
+  742x493 -> 1280x850): every differing pixel between it and the presented frame lies inside the HUD's
+  bounding box, and outside that box the two are bit-identical - 0 differing bytes over 571 532 pixels.
+  Numbers and method in `docs/vulkan-acceptance.md`. Taking it also exposed and fixed a harness defect:
+  a headless run used to end in a crash report every time, because an unmapped window can only be stopped
+  with SIGTERM and its handler closed the window from a signal thread mid-frame. The client now closes
+  itself from the render thread (`OPTIMUM_HEADLESS_EXIT_WHEN_DONE`).
+- Still missing: the in-game half of the two-versus-three measurement (`pacing-gate.sh` on the fixed scene
+  at both frame-ring depths). It cannot come from a headless run - an unfocused window falls under the
+  client's 30 FPS background cap, so pacing numbers from one are meaningless. It comes before step 5.
 
 ### The three things most likely to go wrong
 

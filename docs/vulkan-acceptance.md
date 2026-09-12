@@ -315,6 +315,48 @@ vsync off, `MANGOHUD=0`. Three 60 s Vulkan runs, one per mode, logs in
   vendor path (Intel on Vulkan, AMD without the Mesa layer) also get the latency win at that frame-rate
   cost. Auto order: NV, AMD, Native, None; `OPTIMUM_VULKAN_LATENCY=off|native|nv|amd` forces one.
 
+### HUD-less scene snapshot, first frame on screen (2026-09-12, `feat/dlss-g` at 3aa764a)
+
+The DLSS-FG design's step 2 had passed a GPU test but had never rendered in the real client. Taken
+headless - the real client and the real renderer, window never mapped, so it cost the desktop nothing:
+
+```
+MANGOHUD=0 scripts/dev/headless-capture.sh --renderer vulkan --world "serene cave world" \
+    --out <dir> --commands <time/weather script> --count 4 --stride 10 --parity-dump
+```
+
+Renderer line confirmed Vulkan. DLSS Super Resolution active, 742x493 -> 1280x850 Balanced (scale 0.58,
+LOD bias -1.79, 24 jitter phases). The parity dump wrote 33 attachments including slot 23,
+`OptimumSceneNoHud`, which is the first look at it on a real frame.
+
+| | value |
+|---|---|
+| snapshot vs the presented frame of the same in-world frame | 380 751 of 1 088 000 pixels differ (35.0 %) |
+| bounding box of **every** differing pixel | x 12..1169, y 0..445 of 1280x850 |
+| pixels differing outside that box | **0** |
+
+The box is exactly the HUD: hotbar, health and hunger bars, and the chat panel (GL row order, so the
+HUD is at the top of the dumped image). Outside it the snapshot is **bit-identical** to what was
+presented - not approximately, zero differing bytes across 571 532 pixels. That is the whole claim step 2
+makes, and it also says that nothing between the snapshot and present touched the scene in this frame:
+the composite is captured before `RenderAfterFinalComposition`, and this scene drew no world-space
+overlay. NGX shut down `Success` at the end of the run.
+
+### The headless harness closes itself (2026-09-12, same run)
+
+The first capture above ended in two crash reports (`ShaderProgramBase.Use` dereferencing a program whose
+graphics were already torn down) and wrote `client-crash.log`. Cause: a never-mapped window cannot be sent
+a close event, so `kill-client.sh` found no window and fell through to SIGTERM, whose handler calls
+`WindowExit` - and therefore `Close()` - from a signal thread while the render thread was still inside a
+frame. That is noise no harness can afford: nobody can tell that crash from a real one.
+
+`OPTIMUM_HEADLESS_EXIT_WHEN_DONE=1` (set by the capture script) makes the client call `WindowExit` from
+the per-frame tick, on the render thread, once **both** the capture and the parity dump are written - the
+same path the main menu's quit button takes. The script now waits for that exit and only signals if it
+does not come, and reports which happened. Re-run of the same capture: `shutdown closed itself`, 0 lines
+matching `Critical error occurred`, 0 `[Client Error]`/`[Client Fatal]`, no crash log written, NGX
+`Shutdown1: Success`.
+
 ## 3. Methods
 
 ### Parity dump and SSIM

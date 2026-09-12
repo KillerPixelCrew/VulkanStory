@@ -6,8 +6,13 @@
 # window is created with StartVisible/StartFocused false - a real window with a
 # real surface and swapchain, never mapped and never focused), waits for the
 # world, requires the matching renderer line in the log, waits for the client's
-# "[Optimum] headless: <n> frames -> <dir>" line, and closes the client through
-# scripts/dev/kill-client.sh.
+# "[Optimum] headless: <n> frames -> <dir>" line, and then waits for the client to
+# close itself: OPTIMUM_HEADLESS_EXIT_WHEN_DONE makes it call WindowExit from the
+# render thread once the capture and the parity dump are written. That is the only
+# clean close a never-mapped window has - no window manager can send a close event
+# to it, so the fallback is SIGTERM, whose handler closes the window from a signal
+# thread while the render thread is still inside a frame and ends the run in a crash
+# report. scripts/dev/kill-client.sh stays as the fallback if it does not go.
 #
 # Frames are written by the client itself through ReadDefaultFramebuffer - the
 # same polymorphic call the in-game screenshot makes, a device-side readback on
@@ -224,6 +229,12 @@ else
   if [[ -n "$FIRST" ]]; then export OPTIMUM_HEADLESS_FIRST_FRAME="$FIRST"; fi
 fi
 if [[ "$FIXED_DT" != "0" ]]; then export OPTIMUM_HEADLESS_FIXED_DT="$FIXED_DT"; fi
+# The client closes itself from the render thread once the capture and the dump
+# are written. Without this the only way to stop an unmapped window is SIGTERM,
+# whose handler closes the window from a signal thread while the render thread is
+# mid-frame, and every run ends in a crash report that nobody can tell from a real
+# one. kill-client.sh stays as the fallback in cleanup().
+export OPTIMUM_HEADLESS_EXIT_WHEN_DONE=1
 if (( PARITY_DUMP == 1 )); then
   export OPTIMUM_PARITY_DUMP="$OUT_DIR"
   export OPTIMUM_PARITY_FRAME="$PARITY_FRAME"
@@ -268,8 +279,19 @@ CAPTURE_LINE="$(grep -m1 -F " frames -> " "$LOG" || true)"
 COMMAND_LINE="$(grep -m1 -F " commands dispatched" "$LOG" || true)"
 
 # 5. Close the client before reporting: never leave the game running (rule 5).
-bash "$REPO/scripts/dev/kill-client.sh"
-CLOSED=1
+#    OPTIMUM_HEADLESS_EXIT_WHEN_DONE means the client is already closing itself
+#    cleanly from the render thread, so wait for that first and only signal it if
+#    it does not go. Signalling a client that is already tearing down is what put
+#    a crash report at the end of every headless run.
+if wait_for_exit 60; then
+  CLOSED=1
+  CLOSE_HOW="closed itself"
+else
+  echo "the client did not close itself within 60 s; signalling it" >&2
+  bash "$REPO/scripts/dev/kill-client.sh"
+  CLOSED=1
+  CLOSE_HOW="signalled"
+fi
 
 FILES=$(find "$OUT_DIR" -maxdepth 1 -type f -name 'frame-*.ppm' | wc -l)
 echo ""
@@ -278,6 +300,13 @@ if [[ -n "$COMMAND_LINE" ]]; then echo "commands   $COMMAND_LINE"; fi
 echo "capture    $CAPTURE_LINE"
 echo "frames     $FILES in $OUT_DIR"
 echo "log        $LOG"
+echo "shutdown   $CLOSE_HOW"
+# A crash report in the log is the one thing that makes a capture untrustworthy
+# without looking at it: report it here rather than letting it sit in the log.
+CRASHES=$(grep -c "Critical error occurred" "$LOG" || true)
+if (( CRASHES > 0 )); then
+  echo "crashes    $CRASHES critical error(s) in the log - the frames may still be fine, the shutdown was not" >&2
+fi
 if (( FILES == 0 )); then
   echo "the capture line appeared but no frames were written" >&2
   exit 1

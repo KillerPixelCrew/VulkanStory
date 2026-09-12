@@ -443,6 +443,62 @@ public class HeadlessHarnessCoverageTests
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"set_MasterSoundLevel\", 1", patcher);
     }
 
+    /// <summary>
+    /// The harness closes the client itself, and it does it from the render thread.
+    ///
+    /// <para>A never-mapped window cannot be sent a close event, so before this the
+    /// only way to stop a capture was SIGTERM - and its handler calls WindowExit,
+    /// and therefore Close(), from a signal thread while the render thread is still
+    /// inside a frame. Every headless run ended in a crash report (2026-09-12:
+    /// ShaderProgramBase.Use on a program whose graphics were already gone), which
+    /// is what makes a harness useless as evidence: nobody can tell that crash from
+    /// a real one. The exit therefore has to sit in the per-frame tick, and it has
+    /// to wait for both artefacts - the parity dump's frame can be later than the
+    /// last captured one.</para>
+    /// </summary>
+    [Fact]
+    public void TheHarnessClosesItselfFromTheRenderThreadAndOnlyOnceBothArtefactsAreWritten()
+    {
+        string platform = ReadPatchedOrSource(PlatformPatch, PlatformSource);
+
+        // The exit is reached from the per-frame tick, which runs on the render
+        // thread inside window_RenderFrame - not from a signal handler.
+        Assert.Contains("OptimumHeadlessExitIfDone();", platform);
+        Assert.Contains("private void OptimumHeadlessExitIfDone()", platform);
+        Assert.Contains("WindowExit(\"headless capture finished\", EnumExitMode.SoftExit)", platform);
+
+        // Opt-in, and it fires once.
+        Assert.Contains("if (!OptimumHeadless.ExitWhenDone || optimumHeadlessExitRequested)", platform);
+        Assert.Contains("optimumHeadlessExitRequested = true;", platform);
+
+        // Both artefacts gate it, and a run that asked for neither never exits here.
+        Assert.Contains("if (OptimumHeadless.CaptureEnabled && !optimumHeadlessCaptureDone)", platform);
+        Assert.Contains(
+            "if (Vintagestory.API.Config.OptimumParityDump.Enabled && !optimumParityDumpDone)", platform);
+        Assert.Contains(
+            "if (!OptimumHeadless.CaptureEnabled && !Vintagestory.API.Config.OptimumParityDump.Enabled)",
+            platform);
+
+        // The flag exists on the API side and is read from the environment.
+        string api = Read("sources/VintagestoryApi/Client/optimum-render-device.cs");
+        Assert.Contains("ExitWhenDone = ResolveFlag(\"OPTIMUM_HEADLESS_EXIT_WHEN_DONE\")", api);
+
+        // The patcher carries the new members, or the transplant drops them silently.
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"optimumHeadlessExitRequested\"", patcher);
+        Assert.Contains("\"OptimumHeadlessExitIfDone\"", patcher);
+
+        // The capture script asks for it, waits for the clean exit before signalling,
+        // and says which of the two happened.
+        string script = Read("scripts/dev/headless-capture.sh");
+        Assert.Contains("export OPTIMUM_HEADLESS_EXIT_WHEN_DONE=1", script);
+        Assert.Contains("if wait_for_exit 60; then", script);
+        Assert.Contains("CLOSE_HOW=\"closed itself\"", script);
+        Assert.Contains("CLOSE_HOW=\"signalled\"", script);
+        // And it reports a crash report rather than leaving it in the log.
+        Assert.Contains("Critical error occurred", script);
+    }
+
     private static string ReadPatchedOrSource(string patchPath, string sourcePath)
     {
         string? resolvedPatch = TryFind(patchPath);

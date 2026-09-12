@@ -84,6 +84,7 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumHeadlessTick", "OptimumHeadlessRunCommands", "OptimumHeadlessRunCommand",
         "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
         "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
+        "OptimumHeadlessExitIfDone", "optimumHeadlessExitRequested",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),
