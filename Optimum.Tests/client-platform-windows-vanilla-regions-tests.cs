@@ -63,6 +63,14 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumSceneNoHudRequested", "OptimumSceneNoHudFrameBuffer", "OptimumSceneNoHudCaptured",
         "optimumSceneNoHudCaptured", "SetOptimumSceneNoHudIndex", "OptimumCaptureSceneNoHud",
         "CopyOptimumSceneNoHud",
+        // DLSS-FG design, step 3: the UI target - the slot, the GUI depth clear, the
+        // published index, the gate, the accessors, the scoped-blend flag (read by
+        // GlToggleBlend, which is already a transplant target below), the clear
+        // colour, the publisher, the bind and the compose.
+        "OptimumUiTargetIndex", "OptimumUiTargetDepthClear", "UiTargetFrameBufferIndex",
+        "optimumUiTargetIndex", "OptimumUiTargetRequested", "OptimumUiTargetFrameBuffer",
+        "OptimumUiTargetBound", "optimumUiTargetBound", "optimumUiTargetClearColor",
+        "SetOptimumUiTargetIndex", "OptimumBindUiTarget", "OptimumComposeUiTarget",
         "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",
@@ -85,9 +93,6 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
         "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
         "OptimumHeadlessExitIfDone", "optimumHeadlessExitRequested",
-        // DLSS frame generation, design step 3: the UI-target blend scope read by
-        // GlToggleBlend (which is already a transplant target below).
-        "OptimumUiTargetBound", "optimumUiTargetBound",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),

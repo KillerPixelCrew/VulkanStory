@@ -92,6 +92,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // DLSS-FG design, step 3: the compose ClientMain.RenderToDefaultFramebuffer
+        // calls between the Ortho and Done stages. Neutral body here - a platform with
+        // no UI target has nothing to compose; ClientPlatformWindows overrides it.
+        "OptimumComposeUiTarget",
         // Headless render harness: the channel order ReadDefaultFramebuffer leaves
         // in the caller's buffer (GL_BGRA on the OpenGL path, RGBA on the device's
         // R8G8B8A8 default target, which VulkanClientPlatform overrides).
@@ -409,6 +413,26 @@ var membersToInject = new Dictionary<string, List<string>>
         "SetOptimumSceneNoHudIndex",
         "OptimumCaptureSceneNoHud",
         "CopyOptimumSceneNoHud",
+        // DLSS-FG design, step 3: the UI target - its slot, the depth clear both the
+        // bind and the compose use, the published index and its field, the "does
+        // anything want it" gate, the target accessor, the scoped-blend flag and its
+        // field (GlToggleBlend's Standard mode reads it to switch the alpha channel
+        // to the over-operator; nothing else does), the transparent-black clear
+        // colour, the publisher both framebuffer
+        // setups call, the bind BlitPrimaryToDefault ends with and the compose
+        // ClientMain runs between the Ortho and Done stages.
+        "OptimumUiTargetIndex",
+        "OptimumUiTargetDepthClear",
+        "UiTargetFrameBufferIndex",
+        "optimumUiTargetIndex",
+        "OptimumUiTargetRequested",
+        "OptimumUiTargetFrameBuffer",
+        "OptimumUiTargetBound",
+        "optimumUiTargetBound",
+        "optimumUiTargetClearColor",
+        "SetOptimumUiTargetIndex",
+        "OptimumBindUiTarget",
+        "OptimumComposeUiTarget",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -451,11 +475,6 @@ var membersToInject = new Dictionary<string, List<string>>
         "UnbindUBO",
         "UpdateUBO",
         "DeleteUBO",
-        // DLSS frame generation, design step 3: the scope the HUD-less frame's UI
-        // target opens around the Ortho stage. GlToggleBlend's Standard mode reads
-        // it to switch the alpha channel to the over-operator; nothing else does.
-        "OptimumUiTargetBound",
-        "optimumUiTargetBound",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -479,6 +498,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.
         "TaaSkyMotion",
+        // DLSS-FG design, step 3: the UI compose pass program.
+        "UiCompose",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
@@ -1011,6 +1032,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
     new("Vintagestory.Client.NoObf.ClientMain", "OrthoMode", 3),
     new("Vintagestory.Client.NoObf.ClientMain", "PerspectiveMode", 0),
+    // DLSS-FG design, step 3: the UI target is composed back over the display image
+    // here, after the Ortho stage and before TriggerRenderStage(Done) - the with-HUD
+    // screenshot and the AVI writer are registered at Done, so this is the last
+    // position that still records the finished frame rather than the HUD-less one.
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderToDefaultFramebuffer", 1),
     new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemStackToFrameBuffer", 3),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleLevelFinalize", 1),
     new("Vintagestory.ClientNative.Screenshot", "GrabScreenshot", 4),

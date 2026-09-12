@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..6dba7c3 100644
+index 67feafa..88fbf4a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -496,7 +496,30 @@ index 67feafa..6dba7c3 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1683,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1224,10 +1487,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			guiShaderProg.Stop();
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("rendOrthoDone");
+ 		PerspectiveMode();
+ 		Platform.GlDepthFunc(EnumDepthFunction.Less);
++		// Optimum (DLSS-FG design, step 3): the UI target goes back over the display
++		// image here - after the Ortho stage, so the whole GUI is in it, and before the
++		// Done stage, because the with-HUD screenshot (SystemScreenshot) and the AVI
++		// writer (SystemVideoRecorder) are both registered at Done and the parity dump
++		// and the headless capture read once this call chain returns. Composing after
++		// any of them would make every one of those capture paths record the HUD-less
++		// image as the final frame.
++		//
++		// Outside the ShouldRender2DOverlays block above on purpose: a frame that draws
++		// no 2D overlays still has whatever the AfterBlit stage put in the target.
++		// Does nothing at all when no UI target was bound.
++		Platform.OptimumComposeUiTarget();
+ 		TriggerRenderStage(EnumRenderStage.Done, dt);
+ 		ScreenManager.FrameProfiler.Mark("finfr");
+ 		tickSummary = ScreenManager.FrameProfiler.summary;
+ 	}
+ 
+@@ -1420,10 +1695,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -511,7 +534,7 @@ index 67feafa..6dba7c3 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1832,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1844,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -535,7 +558,7 @@ index 67feafa..6dba7c3 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2391,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2403,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -560,7 +583,7 @@ index 67feafa..6dba7c3 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2296,10 +2573,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2296,10 +2585,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityAtlasManager.ResumeRegenMipmaps();
  		foreach (Block block in Blocks)
  		{
@@ -576,7 +599,7 @@ index 67feafa..6dba7c3 100644
  	public int WhiteTexture()
  	{
  		if (whitetexture == -1)
-@@ -2543,10 +2825,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2837,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -590,7 +613,7 @@ index 67feafa..6dba7c3 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3816,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3828,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

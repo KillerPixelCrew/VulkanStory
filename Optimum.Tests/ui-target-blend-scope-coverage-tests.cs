@@ -64,10 +64,11 @@ public class UiTargetBlendScopeCoverageTests
             "GL.BlendFuncSeparate((BlendingFactorSrc)770, (BlendingFactorDest)771, (BlendingFactorSrc)1, (BlendingFactorDest)1);",
             body);
 
-        // Nothing but GlToggleBlend reads the scope: it is a blend-state switch, not a
-        // mode other code may branch on. Four mentions of the backing field - the
-        // declaration, the getter, the setter, and the one branch above.
-        Assert.Equal(4, Occurrences(platform, "optimumUiTargetBound"));
+        // GlToggleBlend reads the scope in exactly one place: it is a blend-state switch,
+        // not a mode the rest of the method may branch on a second time. (Who is allowed
+        // to WRITE the field is TheScopeIsOneFlagWrittenOnlyByTheUiTarget, below - that
+        // pair of counts is what the two streams' merge had to get right.)
+        Assert.Equal(1, Occurrences(body, "optimumUiTargetBound"));
     }
 
     /// <summary>
@@ -105,9 +106,55 @@ public class UiTargetBlendScopeCoverageTests
         Assert.True(flag > 0);
         string doc = platform.Substring(Math.Max(0, flag - 3000), Math.Min(3000, flag));
 
-        Assert.Contains("after the LoadFrameBuffer call that binds the UI target", doc);
-        Assert.Contains("It is a scope, not a mode", doc);
+        Assert.Contains("OptimumBindUiTarget", doc);
+        Assert.Contains("OptimumComposeUiTarget", doc);
         Assert.Contains("src_a*src_a", doc);
+    }
+
+    /// <summary>
+    /// There is exactly one such flag, and only the UI target's own bind, compose,
+    /// publisher and the resize teardown write it.
+    ///
+    /// <para>Why this is a test.</para> The scope was built by one stream and consumed
+    /// by another, each of which had to assume the flag existed; a merge that kept both
+    /// declarations would compile, and the reader and the writer would then be different
+    /// fields - the branch in GlToggleBlend would simply never fire and the HUD would
+    /// come back alpha-squared with nothing failing anywhere.
+    /// </summary>
+    [Fact]
+    public void TheScopeIsOneFlagWrittenOnlyByTheUiTarget()
+    {
+        string platform = VulkanPlatformSource.ReadClientPlatformWindows();
+
+        Assert.Equal(1, Occurrences(platform, "private bool optimumUiTargetBound;"));
+        Assert.Equal(1, Occurrences(platform, "public bool OptimumUiTargetBound"));
+
+        // Writes, and the member each one lives in: the publisher, the resize teardown
+        // (the buffers it described were just disposed), the bind and the compose. A
+        // fifth write means someone gave the scope a second owner.
+        Assert.Equal(4, Occurrences(platform, "optimumUiTargetBound = false;"));
+        Assert.Equal(1, Occurrences(platform, "optimumUiTargetBound = true;"));
+
+        foreach (string owner in new[]
+        {
+            "public void SetOptimumUiTargetIndex(int index)",
+            "public void OptimumBindUiTarget()",
+            "public override void OptimumComposeUiTarget()",
+        })
+        {
+            Assert.Contains("optimumUiTargetBound", MethodBody(platform, owner));
+        }
+
+        // The bind arms it last, so nothing between the clear and that statement can draw
+        // under the scoped factors, and the compose disarms it first, so an early return
+        // in the compose cannot leave it armed for the rest of the frame.
+        string bind = MethodBody(platform, "public void OptimumBindUiTarget()");
+        Assert.EndsWith("optimumUiTargetBound = true;\n\t}", bind.Replace("\r\n", "\n").TrimEnd());
+        string compose = MethodBody(platform, "public override void OptimumComposeUiTarget()");
+        int guard = compose.IndexOf("if (!optimumUiTargetBound) return;", StringComparison.Ordinal);
+        int disarm = compose.IndexOf("optimumUiTargetBound = false;", StringComparison.Ordinal);
+        Assert.True(guard >= 0 && disarm > guard);
+        Assert.True(disarm < compose.IndexOf("RenderFullscreenTriangle", StringComparison.Ordinal));
     }
 
     /// <summary>

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-index f19d524..17bfc7e 100644
+index f19d524..c7d4470 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-@@ -40,10 +40,35 @@ public static class ShaderPrograms
+@@ -40,10 +40,44 @@ public static class ShaderPrograms
  
  	public static ShaderProgramEntityanimated Entityanimated;
  
@@ -32,6 +32,15 @@ index f19d524..17bfc7e 100644
 +	// Registered like the other Optimum-only programs, so a failed compile marks
 +	// LoadError instead of failing the whole shader load.
 +	public static ShaderProgram TaaSkyMotion;
++
++	// Optimum (DLSS-FG design, step 3): the UI compose pass (ui-compose), which puts
++	// the UI target back over the display image. Its own program rather than
++	// ShaderPrograms.Blit because blit.fsh forces alpha to 1, which under
++	// premultiplied blending would cover the whole world with the UI image.
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load - and the compose then
++	// stands the UI target down rather than dropping the GUI.
++	public static ShaderProgram UiCompose;
 +
  	public static ShaderProgramFindbright Findbright;
  
