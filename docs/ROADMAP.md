@@ -222,9 +222,25 @@ unknown from the next.
    `RenderFinalComposition` and before `RenderAfterFinalComposition`, published the way
    `MotionAttachmentIndex` is. Verifiable alone - it equals the composited image on a frame with no
    overlays and no GUI, and provably differs once either draws.
-3. **Decide how `pUI` is built.** A second premultiplied-alpha GUI pass (roughly 2x GUI draw cost) or
-   differencing the composite against `SceneNoHud` (cheaper, wrong wherever GUI and world colours
-   coincide). This is a design decision for the user, not an engineering unknown - settle it before code.
+3. **The HUD renders into its own target and is composed afterwards** (decided by the user, 2026-09-12:
+   "All of these are Ductape Jobs, We geniuenly need to Render the Frame Hudless and recompose the hud
+   afterwards. This is the cleanest solution and best practice."). Neither a second GUI pass nor
+   differencing the composite: the frame is genuinely rendered HUD-less, and the HUD is composed onto it
+   at the end.
+   The structure is already most of the way there - the GUI draws last, in the Ortho stage, after
+   `BlitPrimaryToDefault`. What is wrong is only that it draws *onto* the presented image. So: give the
+   Ortho stage an owned RGBA target cleared to transparent, let the existing GUI draws go there unchanged
+   (one pass, not two), and compose it onto the display image with a single fullscreen blend before
+   present. That yields both vendor inputs without inventing either - `pHudless` is the display image
+   before the compose, `pUI` *is* the target, premultiplied by construction - and it is the structure every
+   engine with an upscaler ends up with, because the UI must never enter the image the reconstruction
+   consumes.
+   Consequences to settle while implementing: the GUI's blend state has to produce premultiplied alpha in
+   the target rather than blending against the world behind it; anything that samples the framebuffer
+   *during* the Ortho stage (dialog blur-behind, if any) now reads the pre-compose image and must be
+   pointed at it explicitly; and the screenshot paths must capture after the compose, not before. With no
+   upscaler and no frame generation the compose is the only added cost and can be skipped entirely by
+   drawing the GUI straight onto the display image as today, so "off is vanilla" still holds.
 4. **`FramesInFlight` 2 -> 3, on its own.** Every arena already sizes off `_frames.FramesInFlight`, so this
    is close to a constant flip - except `AcquireSemaphoreFreeList`'s `imageCount + 1`, which is derived
    from "at most FramesInFlight - 1 presents outstanding", an assumption frame generation breaks. Re-derive
