@@ -159,6 +159,28 @@ AO work below.
   denoiser as the cross-vendor fallback. Depends on native shaders, a stable temporal contract, HDR range
   and the headless harness.
 
+## A HUD-less frame and the HUD as its own resource: a requirement of every frame generator
+
+Not a DLSS-G detail - an architectural requirement for the frame-generation slot as a whole (user,
+2026-09-12: "This Hudless frame and the Hud as a seperate ressource is a requirement for all FG solutions,
+As Framgenning the UI is Ugly af"). Every vendor asks for exactly these two inputs and says so:
+
+- **DLSS-G** lists HUD-less colour and UI as critical, with the UI premultiplied
+  (DLSS-FG Programming Guide §5.1).
+- **XeFG** specifies the composition itself: `UIonly.RGB + (1 - UIonly.A) * HUDless.RGB`.
+- **FSR frame interpolation** exposes UI composition as an explicit option for the same reason.
+
+The failure mode is worse than it sounds and is why no vendor treats this as optional: a HUD is static
+while the world moves, so an interpolator given a composited image smears the crosshair and hotbar against
+world motion - and the eye is tracking exactly those static elements, so it is the most visible artefact a
+generated frame can have.
+
+So the renderer renders the world genuinely HUD-less and composes the HUD afterwards (see step 3 of the
+design below for the shape). That structure is vendor-neutral: it is built once, in our own frame, and
+every frame-generation backend - DLSS-G now, XeFG and FSR later - reads the same two handles. It also
+belongs in the temporal contract, which already reserves the rows for `SceneNoHud` and a UI target
+(`docs/temporal-frame-contract.md` §8) rather than leaving each backend to invent them.
+
 ## DLSS frame generation: the design
 
 Written from a read-only map of the present path, the frame ring and the render-stage call order against
