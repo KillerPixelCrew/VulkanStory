@@ -18,11 +18,22 @@ namespace Optimum.Tests;
 /// Every clause of that is a place a later change can quietly get wrong - a size read from
 /// the wrong member, a pass left reading Primary - so each is pinned here against the
 /// shipped source.
+///
+/// The second half of the file is the sizing rule that decides what "the render size" is
+/// for the frame being built (PR #3, item A) - the setting in force, asked before the host
+/// is asked anything - together with the two failure paths that keep a refused upscale from
+/// leaving the frame the wrong shape: a refused depth upscale clears the display depth, and
+/// a failed upscaled-scene target rolls the whole framebuffer build back. Placement and
+/// sizing are one subject: every one of these defects showed up as a pass reading a target
+/// of the wrong resolution.
 /// </summary>
 public class UpscalerPlacementCoverageTests
 {
     private const string PlatformSource =
         "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs";
+    private const string UpscalerSource = "Optimum.Render.Vulkan/Upscale/DlssUpscaler.cs";
+    private const string UpscalePlatform = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Upscale.cs";
+    private const string FrameBuffers = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs";
 
     /// <summary>
     /// The allocator's old product is the display size, and the render size is the
@@ -289,7 +300,233 @@ public class UpscalerPlacementCoverageTests
         Assert.Contains("new(false, \"RenderOptimumUpscale\"", selfCheck);
     }
 
+    // ------------------------------------------------- the render-size rule
+    //
+    // PR #3, item A: "the DLSS quality profile's render scale also applies to TAA
+    // when DLSS is switched off while not on DLAA."
+    //
+    // The sizing question - what to allocate the frame buffers at - was answered
+    // from the upscaler host's liveness. The host outlives a settings change by
+    // design (NGX allows one lifetime per process, and the player may switch back
+    // on), so on the rebuild that stood the upscaler down Primary was still built at
+    // the vendor's reduced size, and the in-house TAA resolve then resolved a
+    // 1707x993 frame into a 2560x1490 chain. DLAA hid it because its ratio is 1.
+    //
+    // The rule these tests pin: the answer comes from the setting in force for the
+    // frame being built, asked *before* the host is asked anything at all, and the
+    // feature is retired before the rebuild that follows it. The numeric proof that
+    // the allocator's size really goes back to the display size on every preset is
+    // the GPU test Optimum.Render.Vulkan.Tests.UpscalerRenderSizeSwitchTests.
+
+    /// <summary>
+    /// One place decides, and it reads the setting first. A host check before the
+    /// setting check would be the bug again: an active host is exactly the state a
+    /// switch-off leaves behind.
+    /// </summary>
+    [Fact]
+    public void TheSizingRuleAsksTheSettingBeforeItAsksTheHost()
+    {
+        string upscaler = Read(UpscalerSource);
+        string rule = Between(upscaler, "public static bool TryPlanForFrame(", "\n    }");
+
+        // The no-upscaler answer is the display size, unconditionally, before
+        // anything can return early.
+        Assert.Contains("renderWidth = displayWidth;", rule);
+        Assert.Contains("renderHeight = displayHeight;", rule);
+
+        // Requested, not UpscalerReplacesTaa: the slot holds more than one upscaler
+        // and they own the resolve alike, so the DLSS host must answer no while
+        // another of them is selected. Requested still goes false on a runtime
+        // stand-down, which is the property this rule is really about.
+        int setting = rule.IndexOf("if (!Requested) return false;", StringComparison.Ordinal);
+        int host = rule.IndexOf("if (host == null || !host.Active) return false;", StringComparison.Ordinal);
+        int plan = rule.IndexOf("host.TryPlan(", StringComparison.Ordinal);
+        Assert.True(setting >= 0, "the setting in force must decide the render size");
+        Assert.True(host > setting, "the host's liveness must be asked after the setting, never instead of it");
+        Assert.True(plan > host, "nothing is planned before both checks have passed");
+
+        // The preset comes from the same config the switch writes, so a preset
+        // change and a switch-off are the same question asked twice.
+        Assert.Contains("OptimumConfig.UpscalerQuality", rule);
+    }
+
+    /// <summary>
+    /// The platform's override is that rule and nothing else - no second copy of
+    /// the condition that could drift away from it.
+    /// </summary>
+    [Fact]
+    public void ThePlatformOverrideDelegatesToTheOneRule()
+    {
+        string platform = Read(UpscalePlatform);
+        string body = Between(
+            platform,
+            "public override bool OptimumTryPlanUpscaleRenderSize(",
+            "\n    }");
+
+        Assert.Contains("DlssUpscaler.TryPlanForFrame(", body);
+        // The old condition, which answered from liveness alone, must not come back.
+        Assert.DoesNotContain("if (upscaler == null || !upscaler.Active) return false;", body);
+        Assert.DoesNotContain("upscaler.TryPlan(", body);
+    }
+
+    /// <summary>
+    /// Standing the upscaler down happens before the rebuild that follows it: the
+    /// live feature is retired first, and only then does the base rebuild every
+    /// framebuffer and re-ask the sizing question.
+    /// </summary>
+    [Fact]
+    public void TheFeatureIsRetiredBeforeTheRebuild()
+    {
+        string platform = Read(UpscalePlatform);
+        string apply = Between(platform, "public override void ApplyOptimumUpscalerSettings()", "\n    }");
+
+        int retire = apply.IndexOf("upscaler.RetireFeature();", StringComparison.Ordinal);
+        int rebuild = apply.IndexOf("base.ApplyOptimumUpscalerSettings();", StringComparison.Ordinal);
+        Assert.True(retire >= 0 && rebuild > retire,
+            "the feature must be retired before the rebuild re-plans the render size");
+    }
+
+    /// <summary>
+    /// The frame-side gate keeps its own copy of the same idea: the setting, not
+    /// the host, decides whether the frame evaluates through an upscaler, so a
+    /// switch-off cannot leave a resolve running over a history it did not make.
+    /// </summary>
+    [Fact]
+    public void TheFrameGateAlsoAnswersFromTheSetting()
+    {
+        string platform = Read(UpscalePlatform);
+        Assert.Contains(
+            "(UpscalerActive || PassthroughUpscaler.Requested) &&\n" +
+            "        OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0",
+            platform);
+
+        // The passthrough upscaler answers the same question the same way and one
+        // step earlier: it asks no host anything at all, which is what lets it plan
+        // on a machine with no NGX.
+        string passthrough = Read("Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs");
+        string plan = Between(passthrough, "public static bool TryPlanForFrame(", "\n    }");
+        Assert.Contains("renderWidth = displayWidth;", plan);
+        Assert.Contains("if (!Requested) return false;", plan);
+    }
+
+    /// <summary>
+    /// And the client's own body still stands the upscaler down when it cannot
+    /// plan one, which is the other half of the same contract: the setting alone
+    /// silences the in-house resolve.
+    /// </summary>
+    [Fact]
+    public void TheFrameBufferSetupStillStandsAnUnplannableUpscalerDown()
+    {
+        string setup = Read(FrameBuffers);
+        Assert.Contains(
+            "if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)",
+            setup);
+        Assert.Contains("DisableOptimumUpscaler(", setup);
+    }
+
+    /// <summary>
+    /// A refused depth upscale leaves the display-resolution depth undefined on the
+    /// frame the image was created and a frame stale afterwards, and the late 3D
+    /// overlays test against it either way. The frame clears it to the far plane
+    /// instead, every affected frame - not once, behind the one-shot log flag.
+    /// </summary>
+    [Fact]
+    public void ARefusedDepthUpscaleClearsTheDisplayDepthEveryFrame()
+    {
+        string upscale = Read(UpscalePlatform);
+        string refusal = Between(upscale, "// The overlays' depth, once per frame", "return true;");
+
+        Assert.Contains("device.ClearDepthImageToFar(target.DepthTextureId);", refusal);
+        // The clear is outside the once-per-session log guard: the guard only wraps
+        // the log line, so the branch that clears cannot be the branch that logs.
+        int clear = refusal.IndexOf("ClearDepthImageToFar", StringComparison.Ordinal);
+        int guard = refusal.IndexOf("if (!upscaleDepthRefused)", StringComparison.Ordinal);
+        Assert.True(clear >= 0 && guard > clear,
+            "the clear must run before, and outside, the one-shot log guard");
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.Dlss.cs");
+        Assert.Contains("internal bool ClearDepthImageToFar(int destinationTexture)", device);
+        Assert.Contains("CmdClearDepthStencilImage", device);
+        Assert.Contains("new ClearDepthStencilValue(1f, 0)", device);
+    }
+
+    /// <summary>
+    /// A failed upscaled-scene target leaves the whole set the wrong shape - Primary
+    /// and everything sharing its size are at the vendor's reduced render size while
+    /// the post chain is display-sized - so the build is rolled back and repeated
+    /// with the upscaler stood down, and the target's own partial resources are
+    /// released rather than orphaned outside the list.
+    /// </summary>
+    [Fact]
+    public void AFailedUpscaledSceneTargetRollsTheFrameBufferBuildBack()
+    {
+        string buffers = Read(FrameBuffers);
+        string rollback = Between(buffers,
+            "list[OptimumUpscaledSceneIndex] = CreateOptimumUpscaledSceneTarget(", "// Optimum: TAA history");
+
+        Assert.Contains("DisableOptimumUpscaler(\"the upscaled scene target (device): \"", rollback);
+        Assert.Contains("DisposeFrameBuffers(list);", rollback);
+        Assert.Contains("return SetupDefaultFrameBuffers();", rollback);
+
+        // The retry terminates because the stand-down clears the setting the sizing
+        // rule reads first - for either upscaler in the slot, since both read the
+        // effective setting and a stand-down makes that "off". The rules themselves
+        // are pinned by TheSizingRuleAsksTheSettingBeforeItAsksTheHost above.
+        Assert.Contains("if (!Requested) return false;", Read(UpscalerSource));
+        Assert.Contains(
+            "if (!Requested) return false;",
+            Read("Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs"));
+
+        // And the target creation is all-or-nothing: nothing it made reaches the
+        // caller's list until the last line, so a partial build is the one thing
+        // DisposeFrameBuffers cannot reach afterwards.
+        string create = Between(buffers,
+            "private FrameBufferRef CreateOptimumUpscaledSceneTarget(", "/// <summary>A depth-only target");
+        Assert.Contains("catch", create);
+        Assert.Contains("device.DeleteTexture(target.ColorTextureIds[0]);", create);
+        Assert.Contains("device.DeleteTexture(target.DepthTextureId);", create);
+        Assert.Contains("device.DeleteFramebuffer(target.FboId);", create);
+        Assert.Contains("throw;", create);
+    }
+
+    // --------------------------------------------------- SSAO under the upscaler
+
+    /// <summary>
+    /// The jittered AO is composed into the scene before the evaluate - it is one of
+    /// the upscaler's inputs, not a display-resolution effect - and the final
+    /// composition is told so, so it is never applied a second time.
+    /// </summary>
+    [Fact]
+    public void JitteredAoIsComposedBeforeTheUpscalerAndIsNotAppliedTwice()
+    {
+        string platform = Read(PlatformSource);
+        int start = platform.IndexOf("public override void RenderPostprocessingEffects");
+        string post = platform[start..platform.IndexOf("public override void ClearSsaoTarget", start)];
+        Assert.True(post.IndexOf("ssao.Use();") < post.IndexOf("ApplyOptimumUpscaleSsao();"));
+        Assert.True(post.IndexOf("ApplyOptimumUpscaleSsao();") < post.IndexOf("RenderOptimumUpscale();"));
+        Assert.Contains("OptimumUpscalerActive && RenderSSAO && projectMatrix != null", post);
+        Assert.Contains("optimumUpscaleSsaoApplied = false;", post);
+        Assert.Contains("final.Uniform(\"optimumSsaoInScene\", optimumUpscaleSsaoApplied ? 1 : 0)", platform);
+        Assert.Contains("if (optimumSsaoInScene == 0)", Read("sources/shaders/final.fsh"));
+        Assert.Contains("\"optimumUpscaleSsaoApplied\"", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"ApplyOptimumUpscaleSsao\"", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"UpscaleSsao\"", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("RegisterOptimumShaderProgram(\"upscale-ssao\"", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs"));
+        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
+        Assert.Contains("Name = \"UpscaleSsao/0\"", graph);
+        Assert.Contains("ColorSlots = 1u", graph);
+    }
+
     // --------------------------------------------------------------- helpers
+
+    private static string Between(string text, string start, string end)
+    {
+        int from = text.IndexOf(start, StringComparison.Ordinal);
+        Assert.True(from >= 0, "not found: " + start);
+        int to = text.IndexOf(end, from + start.Length, StringComparison.Ordinal);
+        Assert.True(to >= 0, "not found after " + start + ": " + end);
+        return text[from..to];
+    }
 
     /// <summary>
     /// The donor source, not the patch: these assertions read whole method bodies, and a
