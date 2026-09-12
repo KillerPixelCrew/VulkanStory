@@ -200,7 +200,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     public ulong SubmitPartial()
     {
         ulong submitted = FrameValue;
-        Submit(default, default, default, 0);
+        Submit(default, default, default, default, default, 0);
         PartialSubmits++;
         FrameValue = _timeline.ReserveFrame();
         StartCommandBuffer();
@@ -218,7 +218,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     public ulong EndFrameAndSubmit()
     {
         ulong submitted = FrameValue;
-        Submit(default, default, default, 0);
+        Submit(default, default, default, default, default, 0);
         VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
         return submitted;
     }
@@ -278,32 +278,63 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// semaphore and the Frame timeline. Returns the Frame value signalled.
     /// </summary>
     public ulong SubmitPresent(Semaphore acquireSemaphore, PipelineStageFlags acquireStage,
-        ulong renderValue, Semaphore presentSemaphore)
+        ulong renderValue, Semaphore presentSemaphore) =>
+        SubmitPresent(acquireSemaphore, default, acquireStage, renderValue, presentSemaphore, default);
+
+    /// <summary>
+    /// Submits a present command buffer that writes <em>two</em> acquired images
+    /// (frame generation step 0: the real frame and the generated one). Both
+    /// blits are recorded into this one command buffer on purpose - a second
+    /// command buffer would read the frame image after the first one transitioned
+    /// it to TRANSFER_SRC, and nothing but submission order would keep the two in
+    /// order, which is not a dependency. One submit waits on both acquire
+    /// semaphores at the same stage and signals both present semaphores; the two
+    /// vkQueuePresentKHR calls then wait on one each.
+    ///
+    /// The second pair is <c>default</c> for an ordinary single present, which is
+    /// what the four-argument overload passes.
+    /// </summary>
+    public ulong SubmitPresent(Semaphore acquireSemaphore, Semaphore secondAcquireSemaphore,
+        PipelineStageFlags acquireStage, ulong renderValue,
+        Semaphore presentSemaphore, Semaphore secondPresentSemaphore)
     {
         PresentWaitStages.RequireAcquireStage(acquireStage);
         ulong submitted = FrameValue;
-        Submit(acquireSemaphore, acquireStage, presentSemaphore, renderValue);
+        Submit(acquireSemaphore, secondAcquireSemaphore, acquireStage, presentSemaphore, secondPresentSemaphore,
+            renderValue);
         return submitted;
     }
 
     /// <param name="waitSemaphore">A binary semaphore to wait on (the acquire semaphore), or none.</param>
-    /// <param name="waitStage">The stage <paramref name="waitSemaphore" /> is waited on at.</param>
+    /// <param name="secondWaitSemaphore">A second acquire semaphore, waited on at the same stage, or none.</param>
+    /// <param name="waitStage">The stage the acquire semaphores are waited on at.</param>
     /// <param name="signalSemaphore">A binary semaphore to signal (the present semaphore), or none.</param>
+    /// <param name="secondSignalSemaphore">A second present semaphore to signal, or none.</param>
     /// <param name="frameWaitValue">A Frame timeline value to wait on at COLOR_ATTACHMENT_OUTPUT, or 0.</param>
-    private void Submit(Semaphore waitSemaphore, PipelineStageFlags waitStage, Semaphore signalSemaphore,
+    private void Submit(Semaphore waitSemaphore, Semaphore secondWaitSemaphore, PipelineStageFlags waitStage,
+        Semaphore signalSemaphore, Semaphore secondSignalSemaphore,
         ulong frameWaitValue)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         api.EndCommandBuffer(commandBuffer);
 
-        Semaphore* waits = stackalloc Semaphore[2];
-        ulong* waitValues = stackalloc ulong[2];
-        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[2];
+        // Two acquire semaphores at most (the real present and the generated one),
+        // plus the Frame timeline.
+        Semaphore* waits = stackalloc Semaphore[3];
+        ulong* waitValues = stackalloc ulong[3];
+        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[3];
         uint waitCount = 0;
         if (waitSemaphore.Handle != 0)
         {
             waits[waitCount] = waitSemaphore;
+            waitValues[waitCount] = 0;
+            waitStages[waitCount] = waitStage;
+            waitCount++;
+        }
+        if (secondWaitSemaphore.Handle != 0)
+        {
+            waits[waitCount] = secondWaitSemaphore;
             waitValues[waitCount] = 0;
             waitStages[waitCount] = waitStage;
             waitCount++;
@@ -316,10 +347,10 @@ internal sealed unsafe class FrameSlot : IDisposable
             waitCount++;
         }
 
-        // Binary present semaphore first (its value is ignored), then the Frame
-        // timeline, then the Transfer timeline when an upload batch rides along.
-        Semaphore* signals = stackalloc Semaphore[3];
-        ulong* signalValues = stackalloc ulong[3];
+        // Binary present semaphores first (their values are ignored), then the
+        // Frame timeline, then the Transfer timeline when an upload batch rides along.
+        Semaphore* signals = stackalloc Semaphore[4];
+        ulong* signalValues = stackalloc ulong[4];
         CommandBuffer* commandBuffers = stackalloc CommandBuffer[2];
 
         // The queue is shared with the swapchain's present and between-frames
@@ -335,6 +366,12 @@ internal sealed unsafe class FrameSlot : IDisposable
             if (signalSemaphore.Handle != 0)
             {
                 signals[signalCount] = signalSemaphore;
+                signalValues[signalCount] = 0;
+                signalCount++;
+            }
+            if (secondSignalSemaphore.Handle != 0)
+            {
+                signals[signalCount] = secondSignalSemaphore;
                 signalValues[signalCount] = 0;
                 signalCount++;
             }
@@ -526,6 +563,13 @@ internal sealed class FrameRing : IDisposable
     public ulong SubmitPresent(Semaphore acquireSemaphore, PipelineStageFlags acquireStage,
         ulong renderValue, Semaphore presentSemaphore) =>
         Current.SubmitPresent(acquireSemaphore, acquireStage, renderValue, presentSemaphore);
+
+    /// <summary>Submits a present command buffer that writes two acquired images; see <see cref="FrameSlot.SubmitPresent(Semaphore,Semaphore,PipelineStageFlags,ulong,Semaphore,Semaphore)" />.</summary>
+    public ulong SubmitPresent(Semaphore acquireSemaphore, Semaphore secondAcquireSemaphore,
+        PipelineStageFlags acquireStage, ulong renderValue,
+        Semaphore presentSemaphore, Semaphore secondPresentSemaphore) =>
+        Current.SubmitPresent(acquireSemaphore, secondAcquireSemaphore, acquireStage, renderValue,
+            presentSemaphore, secondPresentSemaphore);
 
     /// <summary>
     /// Queues a resource for destruction once the GPU is done with it.

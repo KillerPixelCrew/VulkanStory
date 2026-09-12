@@ -29,8 +29,29 @@ internal interface IPresentPath
     /// </summary>
     LatencyBackendKind[] SupportedLatencyBackends { get; }
 
-    void Record(CommandBuffer commandBuffer, in PresentTarget target);
+    /// <summary>
+    /// Records the present of <paramref name="source" /> into
+    /// <paramref name="target" />'s acquired image.
+    ///
+    /// The source is per call rather than a property of the path: frame
+    /// generation presents more than one image per frame - the generated frame,
+    /// and the real one it was interpolated towards - and which image a present
+    /// carries is a property of that present, not of the path it takes to the
+    /// screen. A null source records the barriers and nothing else, which is what
+    /// a frame with no default colour image does.
+    /// </summary>
+    void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source);
 }
+
+/// <summary>
+/// What one <see cref="IPresentPath.Record" /> put into the command buffer, for
+/// tests: which image was copied, at what size, into which acquired image. Two
+/// presents of the same frame are "the same picture" exactly when their records
+/// name the same source image and the same source extent, with nothing between
+/// them that writes it.
+/// </summary>
+internal readonly record struct PresentBlitRecord(
+    ulong SourceImage, uint SourceWidth, uint SourceHeight, ulong DestinationImage, Extent2D DestinationExtent);
 
 /// <summary>
 /// The wait stages of the present submission, checked in one place.
@@ -74,18 +95,22 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
 {
     private readonly VulkanContext _context;
     private readonly TextureManager _textures;
-    private readonly Func<VulkanTexture?> _source;
     /// <summary>Created at the first record, so a path built for its stage table alone needs no texture table.</summary>
     private BarrierBatcher? _barriers;
 
     /// <summary>The acquired image's state; reset per frame, since its contents are discarded.</summary>
     private readonly ResourceStateTracker _swapchainImage = new(1, 1, depth: false);
 
-    public BlitPresentPath(VulkanContext context, TextureManager textures, Func<VulkanTexture?> source)
+    /// <summary>The last blit this path recorded. Tests only.</summary>
+    internal PresentBlitRecord LastRecordedBlit { get; private set; }
+
+    /// <summary>The blit recorded before <see cref="LastRecordedBlit" />. Tests only.</summary>
+    internal PresentBlitRecord PreviousRecordedBlit { get; private set; }
+
+    public BlitPresentPath(VulkanContext context, TextureManager textures)
     {
         _context = context;
         _textures = textures;
-        _source = source;
     }
 
     public PipelineStageFlags AcquireWaitStage => PresentWaitStages.BlitAcquireWait;
@@ -105,7 +130,7 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         LatencyBackendKind.AmdAntiLag,
     };
 
-    public void Record(CommandBuffer commandBuffer, in PresentTarget target)
+    public void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source)
     {
         Image destination = target.Image;
 
@@ -118,7 +143,6 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
             ResourceUsage.TransferDst, discard: true);
 
-        VulkanTexture? source = _source();
         if (source != null) _textures.Require(barriers, commandBuffer, source, ResourceUsage.TransferSrc);
         barriers.Flush(commandBuffer);
 
@@ -141,6 +165,11 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
                 destination, ImageLayout.TransferDstOptimal,
                 1, &blit, Filter.Linear);
         }
+
+        PreviousRecordedBlit = LastRecordedBlit;
+        LastRecordedBlit = new PresentBlitRecord(
+            source?.Image.Handle ?? 0, source?.Width ?? 0, source?.Height ?? 0,
+            destination.Handle, target.Extent);
 
         // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC (BOTTOM_OF_PIPE, no access).
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,

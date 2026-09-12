@@ -21,7 +21,7 @@ public class PresentWaitStageTests
     [Fact]
     public void TheBlitPathWaitsForTheAcquiredImageAtTransfer()
     {
-        IPresentPath blit = new BlitPresentPath(null!, null!, () => null);
+        IPresentPath blit = new BlitPresentPath(null!, null!);
         Assert.Equal(PipelineStageFlags.TransferBit, blit.AcquireWaitStage);
         Assert.Equal(blit.AcquireWaitStage, PresentWaitStages.RequireAcquireStage(blit.AcquireWaitStage));
     }
@@ -56,6 +56,10 @@ public class PresentWaitStageTests
         Assert.Contains("PresentWaitStages.RequireAcquireStage(acquireStage);", ring);
 
         string device = File.ReadAllText(Path.Combine(root, "VulkanDevice.cs"));
-        Assert.Contains("_presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);", device);
+        // One stage for both acquire semaphores of the submission (the real
+        // present's and, when frame generation's step 0 is on, the generated
+        // one's): the path's own, never a hand-written stage.
+        Assert.Contains("_presentPath.AcquireWaitStage, renderValue,", device);
+        Assert.Contains("target.PresentSemaphore, generated ? generatedTarget.PresentSemaphore : default);", device);
     }
 }

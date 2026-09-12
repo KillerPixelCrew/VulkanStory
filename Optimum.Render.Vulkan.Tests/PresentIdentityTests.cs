@@ -163,7 +163,7 @@ public class PresentIdentityTests
     [Fact]
     public void TheBlitPresentPathSupportsEveryVulkanSwapchainBackend()
     {
-        IPresentPath path = new BlitPresentPath(null!, null!, static () => null);
+        IPresentPath path = new BlitPresentPath(null!, null!);
         Assert.Equal(
             new[]
             {

@@ -357,6 +357,31 @@ internal sealed unsafe class NvLowLatency2Backend : ILatencyBackend
     }
 
     /// <summary>
+    /// Marks the next work on <paramref name="queue" /> as an out-of-band present,
+    /// so the driver does not attribute it to a frame. Used by the generated
+    /// present of frame generation, which is presented against the real frame's id
+    /// but is not part of its latency chain.
+    ///
+    /// Called immediately before the present it describes, never speculatively:
+    /// today the generated present shares the graphics queue with the frame's own
+    /// work, and the notification applies to the queue rather than to one
+    /// submission. Once the present thread of the design's step 6 exists, this
+    /// moves to that thread's own queue, which is what the extension expects.
+    /// </summary>
+    public void NotifyOutOfBandPresent(Queue queue)
+    {
+        if (_disposed || !Settings.Enabled || _swapchain.Handle == 0 || queue.Handle == 0) return;
+
+        var info = new OutOfBandQueueTypeInfoNV
+        {
+            SType = StructureType.OutOfBandQueueTypeInfoNV,
+            PNext = null,
+            QueueType = OutOfBandQueueTypeNV.PresentNV,
+        };
+        _functions.QueueNotifyOutOfBand(queue, ref info);
+    }
+
+    /// <summary>
     /// Settles the present id the frame's markers and submit tags use. One frame
     /// presents once, and present ids are handed out in order by
     /// <see cref="PresentIdCounter" />, so the next one is this frame's;
