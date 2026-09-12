@@ -25,6 +25,8 @@ public partial class VulkanClientPlatform
     private const int OptimumUpscaledSceneIndex = 22;
     // DLSS-FG design, step 2: the HUD-less scene snapshot.
     private const int OptimumSceneNoHudIndex = 23;
+    // DLSS-FG design, step 3: the UI target - the guide's pUI.
+    private const int OptimumUiTargetIndex = 24;
     private const int OptimumGlR32f = 0x822E;
 
     // GL keeps the clear colour in driver state and applies it at glClear; the device
@@ -51,6 +53,8 @@ public partial class VulkanClientPlatform
         // unpublished - the allocation below republishes it, and every path that leaves
         // without one leaves -1 rather than an index into a list with no target.
         SetOptimumSceneNoHudIndex(-1);
+        // DLSS-FG design, step 3: and the UI target's slot, for the same reason.
+        SetOptimumUiTargetIndex(-1);
         bool setupSsao = ClientSettings.SSAOQuality > 0;
         List<FrameBufferRef> list = new List<FrameBufferRef>(31);
         for (int i = 0; i <= 24; i++)
@@ -300,6 +304,28 @@ public partial class VulkanClientPlatform
             {
                 Logger.Error("Optimum disabled the HUD-less scene snapshot: {0}", error.Message);
                 list[OptimumSceneNoHudIndex] = null;
+            }
+        }
+
+        // DLSS-FG design, step 3: the UI target, at the native window size - the size of
+        // the image the GUI is laid out in and composed back over, which is the window,
+        // not the SSAA render size everything above is built at. Allocated only when
+        // something wants it; a failure costs the separate UI image and nothing else -
+        // the published index stays -1, the bind site does nothing, and the GUI draws
+        // straight onto the display image exactly as it always has.
+        if (OptimumUiTargetRequested)
+        {
+            try
+            {
+                int uiWidth = ((NativeWindow)window).ClientSize.X;
+                int uiHeight = ((NativeWindow)window).ClientSize.Y;
+                list[OptimumUiTargetIndex] = CreateOptimumUiTarget(uiWidth, uiHeight);
+                SetOptimumUiTargetIndex(OptimumUiTargetIndex);
+            }
+            catch (Exception error)
+            {
+                Logger.Error("Optimum disabled the separate UI target: {0}", error.Message);
+                list[OptimumUiTargetIndex] = null;
             }
         }
 
@@ -623,6 +649,61 @@ public partial class VulkanClientPlatform
         if (!device.CheckFramebufferComplete(target.FboId, out string status))
         {
             throw new Exception("Optimum SceneNoHud FBO: " + status);
+        }
+        return target;
+    }
+
+    /// <summary>
+    /// DLSS-FG design, step 3: the UI target - one native-window-resolution RGBA8 colour
+    /// image, which is the format the display image is in and all the compose's
+    /// premultiplied blend needs, plus a depth attachment.
+    ///
+    /// The depth is not optional: ScreenManager clears it to 20000 right after the blit
+    /// and the GUI depth-sorts itself over that range, so a colour-only target would pass
+    /// every depth test and draw dialogs in submission order instead. The clear that used
+    /// to land on the window lands here, which is exactly the redirect.
+    ///
+    /// Plain, not transient, for the same reason the HUD-less snapshot is: the transient
+    /// pool may hand a slot's image to another slot once aliasing is on, and with frame
+    /// generation the vendor reads this image after the frame that produced it has ended.
+    /// </summary>
+    private FrameBufferRef CreateOptimumUiTarget(int width, int height)
+    {
+        FrameBufferRef target = new FrameBufferRef();
+        target.Width = width;
+        target.Height = height;
+        target.ColorTextureIds = new int[1];
+        try
+        {
+            target.FboId = device.CreateFramebuffer(width, height);
+            target.ColorTextureIds[0] = device.CreateTexture2D(width, height,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            // The compose samples it one texel for one, so the filter never interpolates;
+            // linear and clamped anyway, like every other composited-image target, so a
+            // later consumer that does sample it at an offset gets the same texels on
+            // either backend.
+            SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
+            device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0,
+                target.ColorTextureIds[0], 0);
+
+            target.DepthTextureId = device.CreateTexture2D(width, height,
+                EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent,
+                IntPtr.Zero, false);
+            SetupOptimumTextureSampler(target.DepthTextureId, 9728, 33071);
+            device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment,
+                target.DepthTextureId, 0);
+            device.SetDrawBuffers(target.FboId, 1);
+            if (!device.CheckFramebufferComplete(target.FboId, out string status))
+            {
+                throw new Exception("Optimum UI target FBO: " + status);
+            }
+        }
+        catch
+        {
+            if (target.ColorTextureIds[0] > 0) device.DeleteTexture(target.ColorTextureIds[0]);
+            if (target.DepthTextureId > 0) device.DeleteTexture(target.DepthTextureId);
+            if (target.FboId > 0) device.DeleteFramebuffer(target.FboId);
+            throw;
         }
         return target;
     }

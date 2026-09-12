@@ -254,6 +254,33 @@ public static class OptimumParityDump
 }
 
 /// <summary>
+/// DLSS-FG design, step 3: the UI target - the guide's <c>pUI</c>, premultiplied UI
+/// colour with real coverage in alpha, drawn into its own image instead of onto the
+/// world.
+///
+/// Nothing in the product turns this on yet. Frame generation ORs itself into the
+/// platform's <c>OptimumUiTargetRequested</c> when its setting lands (design step 5),
+/// and this switch is what lets the target be tested and looked at in game before then:
+/// <c>OPTIMUM_UI_TARGET=1</c>. Resolved once, the way every other Optimum environment
+/// flag is, so a run that does not set it pays one static bool read and the frame is
+/// bit-for-bit the frame it always was - no extra bind, no clear, no compose, no
+/// allocation.
+/// </summary>
+public static class OptimumUiTarget
+{
+    /// <summary>True when <c>OPTIMUM_UI_TARGET</c> asks for the separate UI image.</summary>
+    public static readonly bool Enabled = ResolveFlag("OPTIMUM_UI_TARGET");
+
+    private static bool ResolveFlag(string name)
+    {
+        string value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        value = value.Trim();
+        return value != "0" && !value.Equals("false", StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>
 /// The headless render harness: the real client and the real renderer, no visible
 /// window, frames on disk.
 ///

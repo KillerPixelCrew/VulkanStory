@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..909e395 100644
+index d6eb844..185cebd 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,576 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,588 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -164,6 +164,18 @@ index d6eb844..909e395 100644
 +	}
 +
 +	public virtual void DisableOptimumTaa(string reason)
++	{
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG design, step 3): composes the UI target back over the display
++	/// image, called by ClientMain.RenderToDefaultFramebuffer between the Ortho stage
++	/// and TriggerRenderStage(Done). Neutral here - a platform with no UI target has
++	/// nothing to compose, and ClientPlatformWindows overrides it. It is a platform
++	/// virtual rather than a cast at the call site for the same reason every other
++	/// Phase 1A member is: the renderers talk to the platform they were handed.
++	/// </summary>
++	public virtual void OptimumComposeUiTarget()
 +	{
 +	}
 +

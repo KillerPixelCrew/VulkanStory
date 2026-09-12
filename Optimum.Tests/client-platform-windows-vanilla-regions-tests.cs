@@ -63,6 +63,13 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumSceneNoHudRequested", "OptimumSceneNoHudFrameBuffer", "OptimumSceneNoHudCaptured",
         "optimumSceneNoHudCaptured", "SetOptimumSceneNoHudIndex", "OptimumCaptureSceneNoHud",
         "CopyOptimumSceneNoHud",
+        // DLSS-FG design, step 3: the UI target - the slot, the GUI depth clear, the
+        // published index, the gate, the accessors, the scoped-blend flag, the clear
+        // colour, the publisher, the bind and the compose.
+        "OptimumUiTargetIndex", "OptimumUiTargetDepthClear", "UiTargetFrameBufferIndex",
+        "optimumUiTargetIndex", "OptimumUiTargetRequested", "OptimumUiTargetFrameBuffer",
+        "OptimumUiTargetBound", "optimumUiTargetBound", "optimumUiTargetClearColor",
+        "SetOptimumUiTargetIndex", "OptimumBindUiTarget", "OptimumComposeUiTarget",
         "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",
