@@ -154,6 +154,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // DLSS-FG design, step 2: the HUD-less snapshot's copy, injected into
         // ClientPlatformWindows virtual for the same reason.
         new(false, "CopyOptimumSceneNoHud", new[] { "FrameBufferRef", "FrameBufferRef" }),
+        // DLSS-FG design, step 3: the UI compose. The body is shared - Vulkan overrides it
+        // only to declare the pass and its read of the UI target, the way the blit and the
+        // final composition are wrapped.
+        new(true, "OptimumComposeUiTarget", Array.Empty<string>()),
         // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),

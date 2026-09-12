@@ -235,6 +235,18 @@ public partial class VulkanClientPlatform
             AddColour(reads, OptimumTaaHistoryIndexB, 1);
             AddColour(reads, SsaoBlurVerticalIndex, 0);
             break;
+        case "UiCompose":
+            // DLSS-FG design, step 3: the compose samples the UI target's colour while
+            // the default framebuffer is bound. Without this the pass declares no reads
+            // at all and the image is still in its colour-attachment layout when the
+            // draw binds it; the per-draw safety net in VulkanDevice then ends the
+            // rendering scope and barriers it mid-pass, which is correct but splits the
+            // pass every single frame. Declared, the pass opens with it readable.
+            // Guarded on the target: the first declaration of this context lands while
+            // the UI target is still bound, and an attachment of the bound framebuffer
+            // must never be declared as a read of its own pass.
+            if (target != OptimumUiTargetIndex) AddColour(reads, OptimumUiTargetIndex, 0);
+            break;
         case "Blit":
             AddColour(reads, PrimaryIndex, 0);
             AddColour(reads, OptimumFsrFramebufferIndex, 0);
@@ -357,5 +369,32 @@ public partial class VulkanClientPlatform
         SetPassContext("Blit", PassFlags.None);
         base.BlitPrimaryToDefault();
         SetPassContext("Frame", PassFlags.AllowSplit);
+    }
+
+    /// <summary>
+    /// DLSS-FG design, step 3: the UI compose is its own pass - it binds the default
+    /// framebuffer and samples the UI target, and the context is what carries that read
+    /// into the declaration (see PassReads). The wrapper restores whatever context it
+    /// interrupted rather than assuming "Frame", because the compose is called from two
+    /// places: ClientMain.RenderToDefaultFramebuffer (context "Frame", the Ortho stage
+    /// having just ended) and ScreenManager.Render one statement later on a menu screen.
+    ///
+    /// Off, and on the second of those two calls, this must declare nothing at all: a
+    /// SetPassContext pair with a new name renames the pass and forces a split on every
+    /// frame of a client that never asked for a UI target. The base body's first
+    /// statement is the same flag test, so the guard costs one field read.
+    /// </summary>
+    public override void OptimumComposeUiTarget()
+    {
+        if (!OptimumUiTargetBound)
+        {
+            base.OptimumComposeUiTarget();
+            return;
+        }
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        SetPassContext("UiCompose", PassFlags.None);
+        base.OptimumComposeUiTarget();
+        SetPassContext(outer, outerFlags);
     }
 }

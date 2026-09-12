@@ -130,9 +130,11 @@ public class UiTargetBlendScopeCoverageTests
         Assert.Equal(1, Occurrences(platform, "public bool OptimumUiTargetBound"));
 
         // Writes, and the member each one lives in: the publisher, the resize teardown
-        // (the buffers it described were just disposed), the bind and the compose. A
-        // fifth write means someone gave the scope a second owner.
-        Assert.Equal(4, Occurrences(platform, "optimumUiTargetBound = false;"));
+        // (the buffers it described were just disposed), the bind, the compose, and the
+        // frame's first clear, which heals a frame that threw between the bind and the
+        // compose and never closed the scope. A sixth write means someone gave the scope
+        // another owner.
+        Assert.Equal(5, Occurrences(platform, "optimumUiTargetBound = false;"));
         Assert.Equal(1, Occurrences(platform, "optimumUiTargetBound = true;"));
 
         foreach (string owner in new[]

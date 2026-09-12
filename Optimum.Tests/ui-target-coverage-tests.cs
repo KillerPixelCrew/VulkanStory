@@ -251,6 +251,89 @@ public class UiTargetCoverageTests
     }
 
     /// <summary>
+    /// The scope is GL state as well as a flag, and the compose has three give-up returns.
+    ///
+    /// Clearing <c>optimumUiTargetBound</c> only changes what the NEXT GlToggleBlend picks;
+    /// the factors themselves are still the ones ScreenManager set two statements after the
+    /// bind. A compose that returns before its tail restore - no target, no colour texture, no
+    /// linked program - would leave the separate-alpha factors armed for the Done stage and
+    /// for the next frame up to its first GlToggleBlend. So the restore has to come before the
+    /// first of those returns, which is an ordering claim, not a "the call is in there" one.
+    /// </summary>
+    [Fact]
+    public void TheComposeRestoresVanillaBlendBeforeEveryGiveUpReturn()
+    {
+        string compose = WithoutComments(MethodBody(Platform(), "public override void OptimumComposeUiTarget()"));
+
+        int scopeClosed = compose.IndexOf("optimumUiTargetBound = false;", StringComparison.Ordinal);
+        Assert.True(scopeClosed >= 0, "the compose no longer closes the scope");
+        int restore = compose.IndexOf("GlToggleBlend(on: true);", scopeClosed, StringComparison.Ordinal);
+        Assert.True(restore > scopeClosed, "the compose never restores vanilla Standard");
+
+        // Every return after the scope is closed - all three give-up guards and any later one.
+        int searched = scopeClosed;
+        int returns = 0;
+        while (true)
+        {
+            int next = compose.IndexOf("return;", searched, StringComparison.Ordinal);
+            if (next < 0) break;
+            returns++;
+            Assert.True(restore < next,
+                "a give-up return leaves the scoped alpha factors armed for the rest of the frame");
+            searched = next + 1;
+        }
+        Assert.Equal(3, returns);
+    }
+
+    /// <summary>
+    /// Nothing re-arms the scope between the compose and the next frame's blit, and nothing
+    /// guarantees the compose is reached: eventManager.TriggerRenderStage catches nothing, so
+    /// a GUI renderer that throws at AfterBlit or Ortho unwinds past both compose call sites
+    /// and the whole of the next frame's world pass blends on the UI factors. The frame's
+    /// first clear heals it, beside the motion-window reset that is there for the same reason.
+    /// The number this is really made of is in
+    /// Optimum.Render.Vulkan.Tests/UiTargetComposeTests.TheScopeIsHealedByTheNextFrameWhenNothingEverComposed.
+    /// </summary>
+    [Fact]
+    public void TheFrameStartsWithTheScopeClosed()
+    {
+        string clear = WithoutComments(MethodBody(Platform(),
+            "public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)"));
+        int primary = clear.IndexOf("case EnumFrameBuffer.Primary:", StringComparison.Ordinal);
+        Assert.True(primary >= 0, "the Primary clear case is gone");
+        int heal = clear.IndexOf("optimumUiTargetBound = false;", primary, StringComparison.Ordinal);
+        int pass = clear.IndexOf("ClearFrameBufferPass(framebuffer);", primary, StringComparison.Ordinal);
+        Assert.True(heal > primary, "the frame's first clear does not close the UI scope");
+        Assert.True(heal < pass, "the heal must happen before the clear itself, not after it");
+
+        // Both backends run this body, and it only ships if the patcher carries it.
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1",
+            Read("Optimum.Patcher/Program.cs"));
+    }
+
+    /// <summary>
+    /// The compose is its own Vulkan pass, declaring the UI target as a read - and declares
+    /// nothing at all when there is no UI target, because a SetPassContext pair with a new
+    /// name renames the pass and forces a split on every frame of a client that never asked
+    /// for one. The read itself is measured in
+    /// Optimum.Render.Vulkan.Tests/UiTargetComposeTests.TheComposePassDeclaresTheUiTargetAsItsRead.
+    /// </summary>
+    [Fact]
+    public void TheVulkanComposeIsItsOwnPassAndCostsNothingWhenOff()
+    {
+        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
+        string wrapper = MethodBody(graph, "public override void OptimumComposeUiTarget()");
+        int guard = wrapper.IndexOf("if (!OptimumUiTargetBound)", StringComparison.Ordinal);
+        int context = wrapper.IndexOf("SetPassContext(\"UiCompose\"", StringComparison.Ordinal);
+        Assert.True(guard >= 0, "the off path declares a pass it does not need");
+        Assert.True(context > guard, "the guard must come before any declaration");
+        // The context it interrupted is restored, not assumed to be "Frame": the compose is
+        // called from ClientMain and, one statement later, from ScreenManager on a menu screen.
+        Assert.Contains("SetPassContext(outer, outerFlags);", wrapper);
+        Assert.Contains("case \"UiCompose\":", graph);
+    }
+
+    /// <summary>
     /// Every new or changed lib member is a Cecil target; a member missing from the patcher
     /// compiles here and is absent from the shipped DLL.
     /// </summary>
@@ -287,6 +370,22 @@ public class UiTargetCoverageTests
     }
 
     private static string Platform() => Read(PlatformSource);
+
+    /// <summary>
+    /// Ordering assertions read statements, and these bodies carry long "why" comments that
+    /// quote the very calls being located - the compose's restore is explained by a paragraph
+    /// that names GlToggleBlend(on: true) several lines above the statement itself.
+    /// </summary>
+    private static string WithoutComments(string source)
+    {
+        var kept = new System.Text.StringBuilder();
+        foreach (string line in source.Split('\n'))
+        {
+            if (line.TrimStart().StartsWith("//", StringComparison.Ordinal)) continue;
+            kept.Append(line).Append('\n');
+        }
+        return kept.ToString();
+    }
 
     private static string MethodBody(string source, string signature)
     {

@@ -324,6 +324,131 @@ public class UiTargetComposeTests
     }
 
     /// <summary>
+    /// The compose is its own frame-graph pass, and the UI target is its declared read.
+    ///
+    /// Without the declaration the compose runs under the enclosing "Frame" context, whose
+    /// reads are empty and which does not carry <c>PassFlags.OpenSampling</c> - so
+    /// <c>PassRecorder.Prepare</c> queues no pass-entry barrier for the image, and the UI
+    /// target is still in its colour-attachment layout when the draw binds it. The per-draw
+    /// safety net in <c>VulkanDevice</c> catches that and is why it renders correctly, but it
+    /// catches it by ending the rendering scope mid-pass: one extra split every frame the UI
+    /// target is on. Declared, the pass opens with the image already shader-readable.
+    ///
+    /// No device: this is the declaration the recorder is driven by, and it is a pure function
+    /// of the context and the framebuffer list.
+    /// </summary>
+    [Fact]
+    public void TheComposePassDeclaresTheUiTargetAsItsRead()
+    {
+        var platform = new WindowSizedPlatform();
+        var uiTarget = new FrameBufferRef { Width = Size, Height = Size, ColorTextureIds = new[] { 77 } };
+        InstallFrameBuffers(platform, uiTarget);
+
+        // Bound target = the default framebuffer, which is where the compose draws.
+        Assert.Equal(new[] { 77 }, platform.PassReads("UiCompose", -1));
+        // The context is set one statement before the compose rebinds, while the UI target is
+        // still bound: an attachment of the bound framebuffer must never be its own pass read.
+        Assert.Empty(platform.PassReads("UiCompose", UiTargetSlot));
+        // And the context the compose used to run under declares nothing - the regression.
+        Assert.Empty(platform.PassReads("Frame", -1));
+    }
+
+    /// <summary>
+    /// The frame that never composes, which is the leak the two-call design does not cover.
+    ///
+    /// <para>Why this frame exists.</para> <c>OptimumBindUiTarget</c> arms the scope at the
+    /// blit and the two <c>OptimumComposeUiTarget</c> call sites close it two stages later -
+    /// but nothing guarantees either is reached. <c>eventManager.TriggerRenderStage</c>
+    /// catches nothing (ClientMain.cs:1286-1297), so a GUI renderer that throws at AfterBlit
+    /// or Ortho unwinds out of <c>ScreenManager.Render</c> past both of them. Nothing re-arms
+    /// the flag before the next frame's world pass either: the bind is not reached again
+    /// until that frame's blit, which is after everything the world draws. Every unqualified
+    /// <c>GlToggleBlend(on: true)</c> in between - world transparency, particles, decals,
+    /// OIT - would take the scoped separate-alpha factors with no UI target bound at all.
+    ///
+    /// So the frame's first clear heals it, next to the motion-window reset that is there for
+    /// the same reason (<c>ClearFrameBuffer(EnumFrameBuffer.Primary)</c>). Measured, not read:
+    /// the layer drawn after that clear must carry vanilla's squared coverage, 41/255, and not
+    /// the scope's 102/255. Before the heal this test reads 102.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void TheScopeIsHealedByTheNextFrameWhenNothingEverComposed()
+    {
+        Skip.IfNot(SwapchainTests.TryCreateWindow(_output, Size, Size, out Window* window),
+            "No usable window system.");
+
+        string dataPath = Path.Combine(Path.GetTempPath(), "optimum-ui-heal-test-" + Guid.NewGuid().ToString("N"));
+        var platform = new WindowSizedPlatform
+        {
+            DeviceFactory = GpuTest.NewDevice,
+            CrashMarkerDataPath = dataPath,
+        };
+        try
+        {
+            bool installed = platform.InitializeGraphics((IntPtr)window, Size, Size, out string reason);
+            if (!installed) _output.WriteLine("Vulkan unavailable: " + reason);
+            Skip.IfNot(installed, "No usable Vulkan device.");
+            VulkanDevice seam = platform.GraphicsDevice!;
+
+            FrameBufferRef uiTarget = platform.CreateFramebuffer(ColorTarget("ui-target"));
+            InstallFrameBuffers(platform, uiTarget);
+            platform.SetOptimumUiTargetIndex(UiTargetSlot);
+
+            int uiProgram = VulkanDeviceIntegrationTests.LinkProgram(
+                seam, FullscreenVertex, StraightAlphaFragment, "ui-target-straight-alpha");
+
+            // Frame 1, the frame that threw: bound, drawn into, never composed.
+            platform.BeginFrame();
+            PaintDisplay(platform, Scene);
+            platform.OptimumBindUiTarget();
+            Assert.True(platform.OptimumUiTargetBound, "the bind refused the UI target");
+            DrawStraightAlphaLayer(platform, uiProgram);
+            platform.EndFrame();
+
+            // Frame 2, the world frame. The scope really is still open on the way in - that
+            // is the hazard, and asserting it here is what keeps this test honest if someone
+            // later closes the flag somewhere else and calls the leak fixed.
+            platform.BeginFrame();
+            Assert.True(platform.OptimumUiTargetBound,
+                "nothing re-arms the scope between frames, so it must still be open here");
+
+            // ScreenManager.Render's second statement, before anything in this frame draws.
+            PaintDisplay(platform, Scene);
+            platform.ClearFrameBuffer(EnumFrameBuffer.Primary);
+            Assert.False(platform.OptimumUiTargetBound,
+                "the frame's first clear left the scope armed - the world blends on the UI factors");
+
+            platform.ClearFrameBuffer(uiTarget, new[] { 0f, 0f, 0f, 0f });
+            platform.GlViewport(0, 0, Size, Size);
+            DrawStraightAlphaLayer(platform, uiProgram);
+            byte[] healed = seam.ReadBackLevel0ForTests(uiTarget.ColorTextureIds[0]);
+            platform.EndFrame();
+
+            _output.WriteLine("alpha in the frame after the leak: " + healed[3] + " (vanilla 41, scoped 102)");
+            Assert.InRange(healed[3], 40, 42);
+            // The rgb factors were never in the scope's remit, so they are the same number
+            // either way: src_rgb * src_a = 0.8 * 0.4 = 0.32.
+            Assert.InRange(healed[0], 81, 83);
+
+            seam.DeleteProgram(uiProgram);
+            platform.DisposeFrameBuffer(uiTarget);
+            GpuTest.AssertClean(seam);
+        }
+        finally
+        {
+            platform.ShutdownGraphics();
+            GLFW.DestroyWindow(window);
+            try
+            {
+                Directory.Delete(dataPath, true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
     /// What gui.fsh writes: straight (non-premultiplied) alpha. Under Standard that is the
     /// draw whose result differs between the scoped and the unscoped factors.
     /// </summary>
