@@ -1143,8 +1143,24 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
         // Frame generation step 0: a second image for the generated present, taken
         // before anything is recorded, so both blits ride the one command buffer.
+        //
+        // Two conditions, both of them about what this second acquire must not be
+        // allowed to do while the first acquire's image and semaphore are already
+        // held and its present submission is not yet noted:
+        //   - it may not rebuild the chain (allowRebuild: false), because Build
+        //     retires the slot the real target came from against the previous
+        //     frame's present value, which lets the retirement queue destroy the
+        //     semaphores this frame's present submission waits on;
+        //   - it may not be made at all unless the chain can hand out two images
+        //     at once, because past that limit vkAcquireNextImageKHR may block
+        //     until an image is presented and neither is presented until both
+        //     have been acquired.
+        // Either way the frame presents once, which is what it did before step 0.
+        BetweenPresentAcquiresForTests?.Invoke();
         PresentTarget generatedTarget = default;
-        bool generated = GeneratedPresentEnabled && _swapchain.TryAcquire(out generatedTarget);
+        bool generated = GeneratedPresentEnabled
+            && _swapchain.SimultaneousAcquireLimit >= PresentPressure.GeneratedPlusRealPerFrame
+            && _swapchain.TryAcquire(out generatedTarget, allowRebuild: false);
         if (!generated) generatedTarget = default;
 
         // Which image a present carries is a property of that present: step 0's
@@ -1247,6 +1263,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     /// <summary>The image every present is sourced from today. Tests only.</summary>
     internal ulong DefaultColorImageForTests => DefaultColorTexture()?.Image.Handle ?? 0;
+
+    /// <summary>
+    /// Called between the frame's two acquires. Tests only: the window between
+    /// them is the one place a rebuild would retire a slot whose image and
+    /// acquire semaphore this frame already holds, and it cannot be reached from
+    /// outside Present any other way.
+    /// </summary>
+    internal Action? BetweenPresentAcquiresForTests { get; set; }
 
     /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
     internal readonly record struct PresentTimings(

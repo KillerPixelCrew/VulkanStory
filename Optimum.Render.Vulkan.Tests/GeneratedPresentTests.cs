@@ -133,6 +133,108 @@ public class GeneratedPresentTests
     }
 
     /// <summary>
+    /// The lifetime hazard the design names first, at the one place step 0 opened
+    /// it: the window between the frame's two acquires.
+    ///
+    /// The frame's first acquire already holds an image of the current swapchain
+    /// slot and one of its acquire semaphores, and its present submission has not
+    /// been made yet - so the slot's LastPresentValue is still the previous
+    /// frame's. If the second acquire is allowed to rebuild there, Build retires
+    /// that slot against that stale value and the next Collect destroys its
+    /// semaphores while this frame's present submission is still waiting on them.
+    /// It is a use-after-free that no single-frame readback can see and that only
+    /// appears when a resize or a SUBOPTIMAL acquire lands inside that window.
+    ///
+    /// Many frames, poison on, a present between them and no readback in the
+    /// loop; a rebuild is requested between the two acquires of every frame,
+    /// which is the window itself. The proof is that no swapchain was created
+    /// during a Present - Creations may only move at the NEXT frame's first
+    /// acquire, where it always moved - and that the run is validation-clean
+    /// under sync,best.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void ARebuildBetweenTheTwoAcquiresNeverRetiresTheSlotTheFrameIsPresenting()
+    {
+        Skip.IfNot(SwapchainTests.TryCreateWindow(_output, Width, Height, out Window* window),
+            "No usable window system.");
+
+        try
+        {
+            VulkanDevice device = GpuTest.NewDevice();
+            device.ConfigureContextOptions += options => options.Poison = true;
+            if (!device.Initialize((IntPtr)window, Width, Height, out string failureReason))
+            {
+                device.Dispose();
+                Skip.If(true, "Vulkan presentation unavailable: " + failureReason);
+            }
+
+            int rebuildsRequested = 0;
+            int creationsDuringPresent = 0;
+            int generatedPresents = 0;
+            using (device)
+            {
+                VulkanDevice seam = device;
+                device.GeneratedPresentEnabled = true;
+                int programId = SwapchainTests.LinkFullscreenProgram(seam);
+
+                Swapchain swapchain = device.SwapchainForTests!;
+                int creationsAtAcquire = -1;
+                device.BetweenPresentAcquiresForTests = () =>
+                {
+                    creationsAtAcquire = swapchain.Creations;
+                    swapchain.RequestRebuild(Width, Height, vsync: true);
+                    rebuildsRequested++;
+                };
+
+                for (int frame = 0; frame < Frames; frame++)
+                {
+                    seam.BeginFrame();
+                    seam.BindDefaultFramebuffer();
+                    seam.ClearColor(0, 0.1f, frame / (float)Frames, 0.3f, 1f);
+                    seam.UseProgram(programId);
+                    seam.SetViewport(0, 0, Width, Height);
+                    seam.SetDepthTest(false);
+                    seam.SetCullFace(false);
+                    seam.DrawFullscreenTriangle();
+
+                    int generatedBefore = device.GeneratedPresentsForTests;
+                    creationsAtAcquire = -1;
+                    seam.Present();
+                    // Only a frame whose first acquire succeeded entered the window.
+                    if (creationsAtAcquire >= 0 && swapchain.Creations != creationsAtAcquire) creationsDuringPresent++;
+                    if (device.GeneratedPresentsForTests != generatedBefore) generatedPresents++;
+                }
+
+                _output.WriteLine($"{Frames} frames, poison on, a rebuild requested between the two acquires of " +
+                    $"every frame: rebuilds requested {rebuildsRequested}, swapchains created during a Present " +
+                    $"{creationsDuringPresent}, swapchain creations in total {swapchain.Creations}, " +
+                    $"generated presents {generatedPresents}, retired slots still pending {swapchain.RetiredPending}");
+
+                // The window was actually entered, so a zero below is a real
+                // result rather than a test that never ran.
+                Assert.True(rebuildsRequested > 0, "no frame reached the window between the two acquires");
+
+                // The fix, stated as the thing that must not happen: no swapchain
+                // is created between the frame's two acquires. Before it, every
+                // one of these frames rebuilt there and retired the slot it was
+                // about to present from.
+                Assert.Equal(0, creationsDuringPresent);
+
+                // A refused second acquire costs that frame its generated present
+                // and nothing else - the frame still presented once.
+                Assert.Equal(0, generatedPresents);
+
+                GpuTest.AssertClean(seam);
+            }
+        }
+        finally
+        {
+            GLFW.DestroyWindow(window);
+            GLFW.Terminate();
+        }
+    }
+
+    /// <summary>
     /// <paramref name="generated" /> frames, presented, with no readback in the
     /// loop: a readback would drain the queue every frame and hide exactly the
     /// bookkeeping this is about.

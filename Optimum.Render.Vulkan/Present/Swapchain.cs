@@ -286,6 +286,8 @@ internal sealed unsafe class Swapchain : IDisposable
     private bool _vsync;
     private bool _relaxedPromoted;
     private bool _disposed;
+    /// <summary>The surface's VkSurfaceCapabilitiesKHR::minImageCount at the last Build.</summary>
+    private uint _surfaceMinImageCount = 1;
 
     public Format Format { get; private set; } = Format.B8G8R8A8Unorm;
     public Extent2D Extent { get; private set; }
@@ -303,6 +305,17 @@ internal sealed unsafe class Swapchain : IDisposable
 
     /// <summary>How many presents this chain sizes its acquire semaphores for.</summary>
     internal PresentPressure Pressure => _pressure;
+
+    /// <summary>
+    /// How many images may be held acquired at once on the current chain
+    /// (<see cref="SwapchainPolicy.SimultaneousAcquireLimit" />). 0 with no chain.
+    /// The second acquire of a generated present is made only while this is at
+    /// least 2: past the limit vkAcquireNextImageKHR is allowed to block until an
+    /// image is presented, and neither acquired image is presented until both were
+    /// taken, so exceeding it is a hang rather than a slow frame.
+    /// </summary>
+    public int SimultaneousAcquireLimit =>
+        _current == null ? 0 : SwapchainPolicy.SimultaneousAcquireLimit(_current.ImageCount, _surfaceMinImageCount);
 
     /// <summary>Replaced slots still waiting for the GPU.</summary>
     public int RetiredPending => _retirement.PendingCount;
@@ -447,6 +460,10 @@ internal sealed unsafe class Swapchain : IDisposable
             _vsync, _relaxedPromoted && _relaxedAllowed, SupportedPresentModes());
         uint imageCount = SwapchainPolicy.ChooseImageCount(
             capabilities.MinImageCount, capabilities.MaxImageCount, presentMode);
+        // Kept so SimultaneousAcquireLimit can say how many images may be held at
+        // once: the second acquire of a generated present is made only while that
+        // is at least two.
+        _surfaceMinImageCount = capabilities.MinImageCount;
 
         SwapchainSlot? old = _current;
         var createInfo = new SwapchainCreateInfoKHR
@@ -608,13 +625,26 @@ internal sealed unsafe class Swapchain : IDisposable
     /// (<see cref="RebuildFailure" />). A resize or a monitor change is ordinary,
     /// never an error; a lost device throws.
     /// </summary>
-    public bool TryAcquire(out PresentTarget target)
+    /// <param name="allowRebuild">
+    /// False forbids this acquire from rebuilding the chain, and so from retiring
+    /// the current slot. The second acquire of a frame passes false: the first
+    /// acquire's <see cref="PresentTarget" /> already holds one of this slot's
+    /// images and one of its acquire semaphores, and its present submission has
+    /// not been noted yet - a rebuild here would retire the slot against the
+    /// <em>previous</em> frame's LastPresentValue and let <see cref="Collect" />
+    /// destroy those semaphores while the present submission still waits on them.
+    /// A refused second acquire costs that frame its generated present and
+    /// nothing else; the rebuild happens at the next frame's first acquire, which
+    /// is where it always happened.
+    /// </param>
+    public bool TryAcquire(out PresentTarget target, bool allowRebuild = true)
     {
         target = default;
-        _retirement.Collect();
+        if (allowRebuild) _retirement.Collect();
 
         if (NeedsRecreation || _current == null)
         {
+            if (!allowRebuild) return false;
             if (!Build(out _)) return false;
         }
 
@@ -646,6 +676,10 @@ internal sealed unsafe class Swapchain : IDisposable
                 case AcquireAction.RebuildAndRetry:
                     slot.ReturnAcquireSemaphore(acquire);
                     NeedsRecreation = true;
+                    // Not allowed to rebuild: the caller holds an image of this
+                    // slot already (see allowRebuild), so the rebuild waits for
+                    // the next frame's first acquire.
+                    if (!allowRebuild) return false;
                     if (!Build(out _)) return false;
                     continue;
 

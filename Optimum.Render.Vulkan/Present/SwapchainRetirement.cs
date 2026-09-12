@@ -105,12 +105,37 @@ internal static class SwapchainPolicy
     /// <c>max(caps.min + 1, mailbox ? 3 : 2)</c>, clamped to the surface maximum
     /// (0 means unbounded). Mailbox wants a third image so a finished frame can
     /// replace the queued one while another is on screen.
+    ///
+    /// Deliberately NOT grown for frame generation's second present, so that a
+    /// run with the feature off allocates exactly the images main allocates. What
+    /// a second acquire needs is not more images but the guarantee that it may be
+    /// made at all, and that is <see cref="SimultaneousAcquireLimit" />: at
+    /// <c>caps.min + 1</c> it is exactly 2, which is what the frame takes.
     /// </summary>
     public static uint ChooseImageCount(uint capabilitiesMin, uint capabilitiesMax, PresentModeKHR mode)
     {
         uint wanted = Math.Max(capabilitiesMin + 1, mode == PresentModeKHR.MailboxKhr ? 3u : 2u);
         if (capabilitiesMax > 0 && wanted > capabilitiesMax) wanted = capabilitiesMax;
         return wanted;
+    }
+
+    /// <summary>
+    /// How many images may be held acquired at once without risking an acquire
+    /// that never returns: <c>imageCount - caps.min + 1</c>, the WSI's own rule.
+    ///
+    /// Frame generation acquires both of a frame's images before it presents
+    /// either, so a chain whose limit is below the presents of one frame must
+    /// present fewer times that frame: past the limit vkAcquireNextImageKHR is
+    /// allowed to block until an image is presented, and neither of this frame's
+    /// images is presented until both have been acquired - a hang, not a slow
+    /// frame. The usual <c>caps.min + 1</c> gives exactly 2; a surface whose
+    /// maximum clamps the count back to <c>caps.min</c> gives 1, and there the
+    /// generated present is simply never made.
+    /// </summary>
+    public static int SimultaneousAcquireLimit(uint imageCount, uint capabilitiesMin)
+    {
+        long limit = (long)imageCount - capabilitiesMin + 1;
+        return limit < 1 ? 1 : (int)limit;
     }
 
     /// <summary>

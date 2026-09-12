@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..d65b704 100644
+index 6edf0c9..3640d7b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -1824,13 +1824,13 @@ index 6edf0c9..d65b704 100644
 +			ClientSettings.SSAA = 0.5f;
 +		}
 +		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
-+		for (int i = 0; i <= 24; i++)
-+		{
-+			list.Add(null);
 +		// Optimum (DLSS-FG design, step 2): this build owns the snapshot slot, so it
 +		// starts unpublished - the allocation below republishes it, and every early
 +		// return leaves -1 rather than an index into a list that has no target.
 +		SetOptimumSceneNoHudIndex(-1);
++		for (int i = 0; i <= 24; i++)
++		{
++			list.Add(null);
 +		}
 +		ShadowMapQuality = ClientSettings.ShadowMapQuality;
 +		ssaaLevel = ClientSettings.SSAA;

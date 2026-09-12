@@ -356,21 +356,38 @@ internal sealed unsafe class NvLowLatency2Backend : ILatencyBackend
         _functions.SetLatencyMarker(_context.Device, _swapchain, ref info);
     }
 
+    /// <summary>How many out-of-band present notifications were refused because the queue was the shared graphics queue.</summary>
+    public int OutOfBandNotifiesRefused { get; private set; }
+
+    /// <summary>How many out-of-band present notifications actually reached the driver.</summary>
+    public int OutOfBandNotifiesSent { get; private set; }
+
     /// <summary>
     /// Marks the next work on <paramref name="queue" /> as an out-of-band present,
     /// so the driver does not attribute it to a frame. Used by the generated
     /// present of frame generation, which is presented against the real frame's id
     /// but is not part of its latency chain.
     ///
-    /// Called immediately before the present it describes, never speculatively:
-    /// today the generated present shares the graphics queue with the frame's own
-    /// work, and the notification applies to the queue rather than to one
-    /// submission. Once the present thread of the design's step 6 exists, this
-    /// moves to that thread's own queue, which is what the extension expects.
+    /// The extension marks the QUEUE, not one submission, and there is no call
+    /// that marks it back: a queue told it is an out-of-band present queue stays
+    /// one. So the device's own graphics queue is refused here rather than
+    /// marked - marking it would take every later in-band render submission of
+    /// every frame out of Reflex's accounting, which is a worse bug than the
+    /// mis-attributed generated present it was meant to avoid, and it would
+    /// happen to any player with Reflex on the moment the double-present switch
+    /// was set. The call becomes real with the present thread of the design's
+    /// step 6, which has a queue of its own; until then the refusal is counted
+    /// (<see cref="OutOfBandNotifiesRefused" />) rather than silent.
     /// </summary>
     public void NotifyOutOfBandPresent(Queue queue)
     {
         if (_disposed || !Settings.Enabled || _swapchain.Handle == 0 || queue.Handle == 0) return;
+        if (queue.Handle == _context.GraphicsQueue.Handle)
+        {
+            OutOfBandNotifiesRefused++;
+            return;
+        }
+        OutOfBandNotifiesSent++;
 
         var info = new OutOfBandQueueTypeInfoNV
         {

@@ -180,6 +180,33 @@ public class SwapchainRetirementTests
         uint min, uint max, PresentModeKHR mode, uint expected) =>
         Assert.Equal(expected, SwapchainPolicy.ChooseImageCount(min, max, mode));
 
+    /// <summary>
+    /// Frame generation acquires both of a frame's images before it presents
+    /// either, so what decides whether it may is how many images the WSI lets the
+    /// application hold at once: <c>imageCount - caps.min + 1</c>. The ordinary
+    /// chain gives exactly two, which is what a generated present takes - so the
+    /// image count stays what it was and a run with the feature off allocates
+    /// what main allocates. A surface whose maximum clamps the count back to
+    /// caps.min gives one, and there the second acquire would block with nothing
+    /// in flight that could unblock it: that is the case the device's guard
+    /// refuses rather than hangs on.
+    /// </summary>
+    [Theory]
+    // caps.min, caps.max, mode, image count, images acquirable at once.
+    [InlineData(1u, 0u, PresentModeKHR.FifoKhr, 2u, 2)]
+    [InlineData(2u, 0u, PresentModeKHR.FifoKhr, 3u, 2)]
+    [InlineData(3u, 0u, PresentModeKHR.MailboxKhr, 4u, 2)]
+    [InlineData(1u, 0u, PresentModeKHR.MailboxKhr, 3u, 3)]
+    [InlineData(2u, 2u, PresentModeKHR.FifoKhr, 2u, 1)]
+    [InlineData(3u, 3u, PresentModeKHR.FifoKhr, 3u, 1)]
+    public void HowManyImagesMayBeHeldAtOnceIsWhatDecidesWhetherAFrameCanPresentTwice(
+        uint min, uint max, PresentModeKHR mode, uint expectedImages, int expectedAcquirable)
+    {
+        uint images = SwapchainPolicy.ChooseImageCount(min, max, mode);
+        Assert.Equal(expectedImages, images);
+        Assert.Equal(expectedAcquirable, SwapchainPolicy.SimultaneousAcquireLimit(images, min));
+    }
+
     [Fact]
     public void PresentModesFollowVsyncAndTheRelaxedPromotion()
     {

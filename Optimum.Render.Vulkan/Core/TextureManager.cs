@@ -457,6 +457,30 @@ internal sealed unsafe class TextureManager : IDisposable
                 _context.Api.CmdClearColorImage(commandBuffer, texture.Image,
                     ImageLayout.TransferDstOptimal, &color, 1, &range);
             }
+
+            // The poison fill is a TRANSFER write, and the very next thing a fresh
+            // texture usually gets is another TRANSFER write - the upload of its
+            // real texels, recorded into this same batch. The barrier batcher sees
+            // no usage change (TransferDst to TransferDst) and emits nothing, so
+            // without this the clear and the copy are unordered: a driver free to
+            // run the clear last leaves poison where the uploaded image should be,
+            // and synchronization validation reports the WRITE_AFTER_WRITE.
+            // Poison mode only, once per created image.
+            var afterPoison = new ImageMemoryBarrier
+            {
+                SType = StructureType.ImageMemoryBarrier,
+                SrcAccessMask = AccessFlags.TransferWriteBit,
+                DstAccessMask = AccessFlags.TransferWriteBit | AccessFlags.TransferReadBit,
+                OldLayout = ImageLayout.TransferDstOptimal,
+                NewLayout = ImageLayout.TransferDstOptimal,
+                SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                Image = texture.Image,
+                SubresourceRange = new ImageSubresourceRange(texture.Aspect, 0, texture.MipLevels, 0, texture.Layers),
+            };
+            _context.Api.CmdPipelineBarrier(commandBuffer,
+                PipelineStageFlags.TransferBit, PipelineStageFlags.TransferBit,
+                0, 0, null, 0, null, 1, &afterPoison);
         }
         finally
         {
