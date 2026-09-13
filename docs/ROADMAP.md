@@ -292,6 +292,46 @@ stays the render thread's - presents the generated frame immediately and the rea
 and stamps the out-of-band present markers. Spacing is measured present to present. Where the graphics family has
 only one queue, frame generation stands down with a log line rather than presenting unpaced.
 
+### The paced present: the design (2026-09-13, from the present-thread map)
+
+Settled by the session owner from a read-only map of queues, swapchain ownership, command recording, retirement,
+Reflex and shutdown. It replaces steps 5 and 6 with one deliverable.
+
+**Two owners, no shared swapchain state.**
+- *Render thread*: Reflex sleep, input, simulation, render, DLSS SR, the UI compose, and the DLSS-G evaluate into
+  an (interpolated, real) output pair taken from a pool of `FramesInFlight` pairs (`OutputReal` retains the real
+  frame, as the guide recommends). It stamps `PresentStart`/`PresentEnd` around the handoff and reserves the real
+  frame's present id at the handoff, in render order - which keeps Reflex's present-id prediction true once
+  presentation is asynchronous.
+- *Present thread*: owns the swapchain outright - acquire, present, rebuild, slot retirement - on its own queue
+  from the graphics family, marked `vkQueueNotifyOutOfBandNV(PRESENT)`, with its own command pool, and stamps the
+  out-of-band present markers. Every acquire-record-submit-present cycle is sequential on that one thread, so the
+  step-0 hazard of a rebuild between two acquires cannot recur. The render thread asks for a resize or a vsync change
+  through a locked request record, never by writing swapchain fields.
+
+**Lifetime without a second retire model.** The present thread's submissions signal a present timeline of their
+own. A pair's present submission waits on the Frame-timeline value that completes its evaluate; a pair is reused
+only after the present thread has submitted its read, and the next evaluate into it waits on that present-timeline
+value inside its submit - a GPU dependency, not a CPU wait. When no pair is free the render thread blocks for one,
+which is the back-pressure; the present thread never waits on the render thread's CPU progress, so the two cannot
+wait on each other. Rebuilding the pool (a resize) is a handshake: quiesce the present thread, drop stale pairs, wait
+its timeline, rebuild, resume. Shutdown stops and drains the present thread before `NgxLifetime.ShutDown` and device
+teardown; the headless self-exit takes the same path.
+
+**The pacer.** A deterministic class with an injected clock. The generated frame is presented as soon as its pair
+arrives; the real frame at +1/2 of the smoothed rendered-frame interval, or immediately when the next pair is already
+due. Present-to-present intervals get their own stats ring, which is what `pacing-gate.sh` judges. Present modes:
+never MAILBOX with frame generation (it replaces the queued generated frame with the real one); FIFO with vsync on,
+with Reflex's rendered-frame cap at twice the refresh interval so two presents fit each refresh pair; IMMEDIATE with
+vsync off, where the pacer owns the spacing.
+
+**Refusals, not degradation.** A graphics family with one queue, a latency backend other than `NvLowLatency2`, or
+NGX refusing the feature: frame generation stands down with one log line. `OPTIMUM_DLSSG_DOUBLE_PRESENT` stays as
+the test switch and now drives the present thread with duplicate images, so the pacer can be measured on any GPU.
+
+**What a capture means.** `ReadDefaultFramebuffer`, the screenshot and the headless harness keep capturing the real
+composed frame; generated frames are not captured.
+
 ### Status: steps 0, 1, 2 and 4 landed (2026-09-12, `feat/dlss-g` at 54a685e)
 
 Three parallel streams, one integration, one adversarial review. Build 0 errors; `Optimum.Tests` 1341
