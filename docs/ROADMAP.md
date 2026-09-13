@@ -303,7 +303,8 @@ every decision; anything marked *reasoning* has no source and is an open questio
 | XE | XeSS `doc/xess_fg_developer_guide_english.md`, Programming Guide and "Connect with XeLL" |
 | RSF | ReScaleFrame `docs/research/architecture.md` lines 99-101 |
 | VK | `vulkaninfo` on this machine, RTX 4070 Laptop, driver 615.71.09 |
-| BB | Blur Busters forum threads on Reflex with G-SYNC; secondary, not NVIDIA documentation |
+| VK-FLR | `VK_EXT_present_mode_fifo_latest_ready` reference page, docs.vulkan.org |
+| BB | Blur Busters forum threads on Reflex with G-SYNC, including the Reflex/ULLM cap formula; secondary, not NVIDIA documentation |
 
 **Decisions**
 
@@ -329,14 +330,19 @@ every decision; anything marked *reasoning* has no source and is an open questio
    presentation falls behind, a real frame never. [SL-G section 13: "DLSS-G will always present real frame ... but the
    interpolated frame can be dropped if presents go out of sync"; AMD-SRC lines 736-744, latest entry wins]
 6. **Present modes on this driver.** FIFO for vsync on, IMMEDIATE for vsync off - the equivalent of SyncInterval 1 and
-   0. [SL-G section 22; VK: the NVIDIA X11 surface offers FIFO, IMMEDIATE and FIFO_LATEST_READY, no MAILBOX]
-   FIFO_LATEST_READY is not used with frame generation - *reasoning*: it discards older ready images, which would drop
-   generated frames the way MAILBOX would.
+   0, both supported with frame generation. [SL-G section 22; AMD-SC documents both fixed-refresh cases; VK: the NVIDIA
+   X11 surface offers FIFO, IMMEDIATE and FIFO_LATEST_READY, no MAILBOX] **FIFO_LATEST_READY is never used with frame
+   generation**: at each vblank it "dequeues consecutive present requests until the latest ready is found", so a
+   generated and a real frame ready inside one refresh interval would lose the generated one; the spec calls it
+   "useful when using a time-based present API", which this surface does not offer. [VK-FLR: VK_EXT_present_mode_fifo_latest_ready]
 7. **Render cap.** Rendered frames just under half the output rate; with vsync on this limit is implicit at half the
    refresh. [AMD-SC: "The application should ensure that the rendered frame rate is slightly below half the desired
    output frame rate. When VSync is enabled, the render performance will be implicitly limited to half the monitors
-   maximum refresh rate"] The Reflex cap follows it. How far below: Reflex's own limit with G-SYNC and vsync sits about
-   7 % under refresh (224 fps at 240 Hz) [BB, secondary]; the margin is to be measured, not assumed.
+   maximum refresh rate"] The margin is Reflex's own: with vsync on the output is capped at
+   `refresh - refresh^2/3600` (224 at 240 Hz, 138 at 144 Hz, 59 at 60 Hz) and rendered frames at half of that, lowered
+   further when the user's own frame cap is below it. [BB: the community-derived Reflex/ULLM cap formula; secondary,
+   so the in-game acceptance measures that the output never exceeds refresh] With vsync off there is no refresh-derived
+   cap; the user's cap applies to the output.
 8. **Reflex.** Required. [NV-FG lines 143-147; SL-G section 8: "It is required"; XE: XeLL mandatory for XeFG] The
    render thread keeps the sleep, input and render markers and stamps PresentStart/PresentEnd around the handoff with
    the frame id carried in the handoff [SL-G section 8: the present markers "must provide correct frame index"; RSF:
@@ -359,18 +365,27 @@ every decision; anything marked *reasoning* has no source and is an open questio
     windowed mode ... DLSS-G must be turned off"] Toggling frame generation itself is restart-required initially. [RSF]
 11. **Frames that cannot be interpolated are not.** A reset (camera cut, teleport, first frame after a rebuild)
     presents the real frame alone. [RSF: "Ambiguous frames should skip interpolation"; NV-FG `reset` parameter]
-12. **Input rate.** Best results at 60 fps rendered and above; below 30 fps frame generation should stand down.
-    [AMD-SC: "designed to give optimal results with an input framerate of 60 FPS or higher ... at least 30 FPS"; XE:
-    "60 FPS recommended"] Thresholds and hysteresis are an open question.
+12. **Input rate and suspension.** Frame generation suspends when the smoothed rendered rate stays below 30 fps for
+    two seconds and resumes above 36 fps for two seconds. [AMD-SC: "designed to give optimal results with an input
+    framerate of 60 FPS or higher. The implementation will function with framerates of at least 30 FPS" and "it may be
+    preferable ... [to disable] if the frame rate consistently drops below that threshold"; XE: "60 FPS recommended"]
+    The 20 % hysteresis and the two-second window are tuning values to be measured, not sourced. It also suspends while
+    a fullscreen menu or a GUI screen covering the frame is open. [SL-G section 6.4: "DLSSG should be disabled in any
+    full-screen menus ... or when a UI element is overlaid over the majority of the screen"] Suspension keeps the
+    feature's resources, so resuming does not stutter; only turning the setting off frees them. [SL-G section 6.4,
+    `eRetainResourcesWhenOff`]
 13. **Environment limits.** VRR and tearing only exist in fullscreen; windowed, the compositor presents. [AMD-SC] On
     X11 that means judging pacing in unredirected fullscreen.
 14. **Submission granularity.** A frame made of several command submissions lets presents be scheduled on time.
     [AMD-SC: "it is recommended to ensure the frame consists of multiple command list submissions"] Our render frame is
     one Submit A; splitting it at stage boundaries under frame generation is to be measured first.
 
-**Open questions for the user**: FIFO_LATEST_READY (decision 6), the render-cap margin (7), the input-rate stand-down
-thresholds (12), whether the presenter should also serve the vsync-off IMMEDIATE path or frame generation should
-require vsync, and whether the pacing thread and presenter thread merge into one on Linux.
+15. **Two threads, not one.** A pacing thread waits for the evaluate to complete and releases the render thread's next
+    handoff at once, while the presenter may still be spinning toward the previous frame's real present; merged, either
+    the render thread would wait on the presenter's spin (latency) or the presenter would wait on the GPU (late
+    presents). [AMD-SRC lines 803-806 and 856: `interpolationThread` waits the interpolation fence and signals
+    `interpolationEvent`; `presenterThread` at THREAD_PRIORITY_HIGHEST paces and presents. XE uses one high-priority
+    background thread but documents no internals; AMD is the only implementation whose internals are published.]
 
 **Salvage from the stopped workflow** (worktrees kept, nothing merged): the present-queue stream and the setting and
 gates stream committed and are likely reusable; the NGX DLSS-G feature stream left uncommitted work that is likely
