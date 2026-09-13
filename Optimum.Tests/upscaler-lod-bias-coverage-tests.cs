@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Vintagestory.API.Config;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -474,6 +475,45 @@ public class UpscalerLodBiasCoverageTests
         // anywhere else for the same reason.
         Assert.Contains("OptimumConfig.InvalidateTerrainLodBias();", registry);
         Assert.Contains("ApplyOptimumLodBias();", registry);
+    }
+
+    /// <summary>
+    /// The stand-down re-applies the bias only once the game is running - and the reason is
+    /// not the bias. ShaderRegistry's static constructor runs registerDefaultShaderProgramsPre,
+    /// which publishes a fresh, uncompiled program into every ShaderPrograms.* field,
+    /// ShaderPrograms.Gui included. Vanilla first touches the type in
+    /// ScreenManager.DoGameInitStage2; the startup stand-down (the GL framebuffer setup with the
+    /// setting on "dlss", or NGX refusing on Vulkan) runs long before that, so an unguarded call
+    /// ran the constructor early and the loading screen's next ShaderProgramBase.Use() found
+    /// ShaderPrograms.Gui with no uniforms compiled: KeyNotFoundException 'lightPosition', and
+    /// OpenGL with an upscaler configured never reached a world (2026-09-13 - 3 of 3 runs
+    /// crashed, and the same build with only this call removed reached the world). A string
+    /// test is the right tool here: the defect is a type-initialisation order inside the
+    /// patched client, which no device test can see, and the in-game A/B above is the evidence
+    /// that the guard is what fixes it.
+    /// </summary>
+    [Fact]
+    public void TheStandDownReachesShaderRegistryOnlyFromTheRunningGame()
+    {
+        string platform = PatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        int start = platform.IndexOf("public void DisableOptimumUpscaler(string reason)", StringComparison.Ordinal);
+        Assert.True(start > 0, "DisableOptimumUpscaler not found");
+        // PatchedOrSource hands back the raw patch when it exists, so every line may carry
+        // its diff prefix: the method's closing brace is "+\t}" there and "\t}" in the source.
+        Match close = new Regex(@"\n[+ ]?\t\}").Match(platform, start);
+        Assert.True(close.Success, "DisableOptimumUpscaler has no closing brace");
+        string body = platform.Substring(start, close.Index - start);
+
+        int guard = body.IndexOf(
+            "screenManager.CurrentScreen is Vintagestory.Client.GuiScreenRunningGame", StringComparison.Ordinal);
+        int apply = body.IndexOf("ShaderRegistry.ApplyOptimumLodBias();", StringComparison.Ordinal);
+        Assert.True(guard > 0, "the re-apply must sit behind the running-game guard");
+        Assert.True(apply > guard, "nothing may reach ShaderRegistry before the guard");
+        // One touch of the type, and it is the guarded one.
+        Assert.Equal(1, Count(body, "ShaderRegistry."));
     }
 
     [Fact]
