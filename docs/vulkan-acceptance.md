@@ -396,8 +396,21 @@ launches never share the scene - wind, foliage and TAA state differ, so a full-f
 Opaque UI is bit-identical, which is the losslessness claim. The translucent panel carries **no systematic
 offset** - the alpha-squared error the scoped blend state exists to prevent would show there as tens of levels in
 one direction behind every translucent element; what remains is the foliage noise behind the panel, attenuated by
-it. On Vulkan the same claim is carried by `UiTargetComposeTests` (0 of 2048 wrong composed pixels at 1/255) plus
-the in-game frame judged by eye on 2026-09-12; an in-game Vulkan region table is still to take.
+it. On Vulkan the same claim is carried by `UiTargetComposeTests` (0 of 2048 wrong composed pixels at 1/255) and by
+the same in-game table, taken the same way (headless, two launches, frame 40, DLSS planning
+427x283 -> 1280x850 Ultra Performance in both):
+
+| region (upright 1280x850) | pixels | differing | mean abs d | mean signed d, composed - direct (R/G/B) | worst |
+|---|---|---|---|---|---|
+| opaque hotbar slot interior | 1681 | 0.00 % | 0.00 | +0.00 / +0.00 / +0.00 | 0 |
+| opaque hotbar frame | 280 | 0.00 % | 0.00 | +0.00 / +0.00 / +0.00 | 0 |
+| translucent chat panel | 179561 | 43.72 % | 0.33 | +0.02 / +0.01 / +0.01 | 12 |
+| control: sky, no HUD | 123921 | 29.15 % | 0.15 | +0.04 / +0.03 / +0.03 | 3 |
+| control: foliage, no HUD | 84281 | 70.73 % | 2.30 | +0.24 / +0.23 / +0.09 | 63 |
+
+Same verdict: opaque UI bit-identical, and the panel's signed offset is below the sky control's. The noise floor is
+higher than on OpenGL because the upscaler's temporal state also differs between launches, which is why the controls
+are part of the table.
 
 ## 3. Methods
 
