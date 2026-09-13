@@ -14,23 +14,23 @@ Status: **done** = merged to `main` and accepted in game · **in progress** = on
 | done | **TAA** with a jitter-stable resolve: 3x3 nearest-depth disocclusion, motion from the nearest-depth tap, luminance anti-flicker weighting | `docs/taa-acceptance.md`, `scripts/dev/taa-rejection.py` (distant-leaf rejection 1.05 %, was 3.7 %) |
 | done | **Native Vulkan backend, Milestone 1**: platform substitution (`VulkanClientPlatform : ClientPlatformWindows`), timeline semaphores, asynchronous uploads, split present, usage-derived barriers, streaming frame graph, transient allocator | `docs/vulkan-acceptance.md` "Milestone 1 exit results"; blocking uploads 0, passes == scopes, validation clean |
 | done | **Latency reduction**, on by default: the sleep moved before input sampling, NVIDIA Reflex (`VK_NV_low_latency2`), AMD anti-lag (`VK_AMD_anti_lag`) and Optimum's own completion pacing | `docs/vulkan-acceptance.md` "Latency acceptance"; input-to-present 7.67 ms -> 1.85 ms on an RTX 4070, free with Reflex |
+| done | **DLSS Super Resolution**: NGX through a native C shim (NGX resolves its caller from the return address, so no P/Invoke stub may call it, and no shim function may tail-call), the upscaler slot with the post chain at display resolution, its own Optimum settings tab, presets and live switching | merged in PR #3 (`5cb8ec5`); judged in game by the user on the RTX 4070 (about 50 FPS between DLAA and Ultra Performance). The shimmer at Performance and below had three causes, all fixed: the raster jitter sign, SSAO composited after the upscale, and the AO dither - the horizon swimming went with them, confirmed by the user |
+| done | **A headless render harness**: the real client and renderer with the window never mapped, a chat-command script for the scene, selected in-world frames written as PPM, and a clean self-close from the render thread | merged in PR #3; run end to end on both backends since 2026-09-12 (every capture in `docs/vulkan-acceptance.md` from that date on came through it). No camera path is checked in yet |
 
-## Landed on `feat/dlss`, not yet seen in game
+## Merged, not yet judged in game
 
-Built, tested and merged into the branch by the 2026-09-12 roadmap wave. Every one of these is proven by
-the GPU suite on a real device and by source coverage, and **none of it has been run in the client** - the
-wave's stages had no launch permission. That is the gap between this table and the one above, and it is why
-these rows are not "done": by this file's own legend, done means accepted in game.
+Merged to `main` in PR #3. Each is proven by the GPU suite on a real device and by source coverage; none has
+been judged on its own in a session. By this file's legend that is the gap to "done".
 
 | | What | Evidence | What is unproven |
 |---|---|---|---|
-| landed | **A headless render harness**: `OPTIMUM_HEADLESS` runs the real client and the real renderer with the window never mapped, a chat-command script sets the scene and drives vanilla's keyframed camera, and the selected in-world frames are written as PPM through the backend-agnostic readback | `scripts/dev/headless-capture.sh`, `Optimum.Render.Vulkan.Tests/HeadlessCaptureTests.cs` (frames off a device with no surface at all, and display-resolution frames while an upscaler runs), `Optimum.Tests/headless-harness-coverage-tests.cs` | The whole end-to-end run. Nobody has yet driven a live client through it; the hidden-window presentation path is proven by the GPU suite and by inspection. No camera path is checked in |
 | landed | **The orchestrator's slot coupling**: the latency backend follows the pair (upscaler vendor, GPU vendor), not the device alone - DLSS on NVIDIA takes Reflex, FSR on AMD anti-lag, XeSS on Intel means XeLL and so Native on every Vulkan path, every cross-vendor pair and the vendor-less passthrough slot take Optimum's own pacing, and no upscaler at all leaves the device auto order untouched | `Optimum.Render.Vulkan/Latency/LatencySlotCoupling.cs`; the full vendor table plus the override precedence in `LatencySlotCouplingTests` (53 cases) | Whether the chosen backend is the right one for frame times in a real session, on anything but this dev box |
 | landed | **A passthrough upscaler**: the slot that plans exactly like DLSS - same render size, same jitter, same LOD bias - and reconstructs with a magnifying blit instead. Both the diagnostic that separates our rendering from the vendor's and the fallback upscaler for a GPU with no vendor path | `Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs`, `PassthroughUpscalerTests` (the plan matches NGX's own answer size for size at all five presets) | The magnified frame on screen, and the overlays' depth upscale behind it - shared code that has never run behind a magnifying blit |
 | landed | **SSAO temporal dither** (the GTAO item's step 2): vanilla's screen-locked Bayer-128 dither advances by the golden ratio per frame under `TAAMOTION`, so successive frames rotate the kernel instead of re-rolling the same screen-fixed one | `sources/shaders/ssao.fsh`, `SsaoTemporalDitherTests` (AO differs per frame with the temporal pipeline on, bit-identical with it off, bit-identical when the frame index repeats) | The pay-off. AO that converges instead of fighting the accumulator is the claim; it has not been judged in game or on a parity dump |
 
-The next session's first job, before adding anything: run the client on both backends, confirm the renderer
-from the log, and look. The harness exists precisely so that is a script invocation now.
+The SSAO dither row is the closest to done: the user saw the AO shimmer disappear in the DLSS sessions of
+2026-09-12, but the dither landed together with the placement fix, so the effect cannot be attributed to it
+alone.
 
 ### The headless render harness, honestly
 
@@ -65,11 +65,7 @@ combination. No camera path is checked in yet - one has to be authored per scene
 
 | | What | Where |
 |---|---|---|
-| in progress | **DLSS Super Resolution**: NGX through a native shim, the upscaler slot with the post chain at display resolution, its own settings tab, presets and live switching | branch `feat/dlss`, PR #3 |
-
-Open on that branch: shimmer at Performance and Ultra Performance (the raster jitter sign was one cause and
-is fixed; SSAO placement was another; a distance-dependent "swimming" remains under investigation), and the
-AO work below.
+| in progress | **DLSS Frame Generation groundwork**: two presents per frame (step 0), a per-call present source (1), the HUD-less scene snapshot (2), the HUD in its own target composed before present (3), three frames in flight (4) - all landed and verified; NGX DLSS-FG bring-up (5) is being mapped; the present thread and spacing pacer (6) come last | branch `feat/dlss-g`; status and review findings under "DLSS frame generation: the design" |
 
 ## Planned
 
@@ -83,7 +79,7 @@ AO work below.
   libraries; AMD's current SDK has no Vulkan backend, so FSR is a shader port. The coupling above already
   maps their setting tokens, so they need no latency work when they land - only `UpscalerNames` grows.
 
-(The slot coupling that used to sit here has landed; see "Landed on `feat/dlss`".)
+(The slot coupling that used to sit here has merged; see "Merged, not yet judged in game".)
 
 ### Quality and tooling
 
@@ -184,7 +180,7 @@ belongs in the temporal contract, which already reserves the rows for `SceneNoHu
 ## DLSS frame generation: the design
 
 Written from a read-only map of the present path, the frame ring and the render-stage call order against
-the DLSS-FG Programming Guide v310.7.0 (2026-09-12). Nothing here is implemented. The point of this section
+the DLSS-FG Programming Guide v310.7.0 (2026-09-12). Steps 0 to 4 are implemented since; the status subsections below say what landed and what it cost. The point of this section
 is that the next session starts from the order of work and the three hazards, not from the guide.
 
 ### What the present path can and cannot do today
