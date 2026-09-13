@@ -40,6 +40,32 @@ internal static partial class ValidationAssert
     public static bool IsSynchronization(string message) =>
         MessageId(message) is string id && id.StartsWith("SYNC-", StringComparison.Ordinal);
 
+    /// <summary>What the layer appends to the last report of an id it will not report again.</summary>
+    public const string DuplicateLimitNotice = "which is the duplicate_message_limit value";
+
+    /// <summary>
+    /// Synchronization ids whose last report (the layer's duplicate-limit notice, by
+    /// default the 10th per id per instance) lies before <paramref name="mark" />.
+    /// On a device shared by several tests - the NGX fixture - a vendor hazard that
+    /// repeats every evaluate uses the limit up in the first test that evaluates, and
+    /// every later test sees nothing for that id whatever it does (measured
+    /// 2026-09-13: DLSS-G's backbuffer copy, 9 reports in the first test, the notice
+    /// in the second, none in the third).
+    /// </summary>
+    public static List<string> SilencedIds(IReadOnlyList<string> all, int mark)
+    {
+        var ids = new List<string>();
+        int end = Math.Min(mark, all.Count);
+        for (int i = 0; i < end; i++)
+        {
+            string message = all[i];
+            if (!IsSynchronization(message) || !message.Contains(DuplicateLimitNotice, StringComparison.Ordinal)) continue;
+            string id = MessageId(message)!;
+            if (!ids.Contains(id)) ids.Add(id);
+        }
+        return ids;
+    }
+
     public static bool IsBestPractices(string message) =>
         MessageId(message) is string id && id.Contains("BestPractices", StringComparison.Ordinal);
 
@@ -48,8 +74,17 @@ internal static partial class ValidationAssert
     /// does not pin for the running test. Best-practices messages are counted
     /// into <see cref="SyncHazardLedger" /> and printed by the ledger test, never
     /// failed. Call it wherever <see cref="NoErrors" /> is called.
+    ///
+    /// <para><paramref name="silenced" /> are ids the layer had already stopped
+    /// reporting before these messages began (see <see cref="SilencedIds" />). They
+    /// count as observed for the ledger: a test cannot show that a hazard went away
+    /// when the layer would not have told it either way, so its pinned entry must not
+    /// turn stale just because an earlier test on the same instance used up the
+    /// duplicate limit.</para>
     /// </summary>
-    public static void NoSyncHazards(IReadOnlyCollection<string> messages, [CallerFilePath] string callerFile = "")
+    public static void NoSyncHazards(
+        IReadOnlyCollection<string> messages, [CallerFilePath] string callerFile = "",
+        IReadOnlyCollection<string>? silenced = null)
     {
         List<string> snapshot = Snapshot(messages);
         (string testClass, string testMethod) = SyncHazardLedger.CurrentTest(callerFile);
@@ -67,6 +102,7 @@ internal static partial class ValidationAssert
                 : (1, message);
         }
 
+        if (silenced != null) seen.UnionWith(silenced);
         SyncHazardLedger.Observe(testClass, testMethod, seen);
         SyncHazardLedger.Tally(messages, snapshot, testClass);
 

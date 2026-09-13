@@ -278,6 +278,9 @@ public class NgxAvailabilityTests
             ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMajor);
             ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMinor);
             ReportInt(parameters, NgxParameterNames.FrameGenerationFeatureInitResult);
+            // DLSS 4's multi-frame ceiling (3 for 4x); 2x generation needs only 1, and a
+            // driver that does not set it supports 2x alone.
+            ReportUInt(parameters, NgxParameterNames.DlssgMultiFrameCountMax);
 
             Assert.Equal(1u, superSampling);
             Assert.Equal(1u, frameGeneration);

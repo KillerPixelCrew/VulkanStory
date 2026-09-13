@@ -81,6 +81,105 @@ internal static class NgxParameterNames
     public const string DlssInputBiasCurrentColorSubrectBaseY = "DLSS.Input.Bias.Current.Color.Subrect.Base.Y";
     public const string DlssOutputSubrectBaseX = "DLSS.Output.Subrect.Base.X";
     public const string DlssOutputSubrectBaseY = "DLSS.Output.Subrect.Base.Y";
+
+    // ------------------------------------------------ DLSS frame generation
+    // nvsdk_ngx_defs_dlssg.h (SDK 310.9.1), the strings verbatim. What
+    // NGX_VK_CREATE_DLSSG and NGX_VK_EVALUATE_DLSSG (nvsdk_ngx_helpers_dlssg_vk.h)
+    // set, plus the DLSS 4 create-time UI recomposition switch the helper does not
+    // know about. The helper is inline C, so these are the whole of it.
+
+    public const string DlssgBackbufferFormat = "DLSSG.BackbufferFormat";
+    public const string DlssgBackbuffer = "DLSSG.Backbuffer";
+    public const string DlssgMVecs = "DLSSG.MVecs";
+    public const string DlssgDepth = "DLSSG.Depth";
+    public const string DlssgBidirectionalDistortionField = "DLSSG.BidirectionalDistortionField";
+    public const string DlssgHudless = "DLSSG.HUDLess";
+    public const string DlssgUi = "DLSSG.UI";
+    public const string DlssgUiAlpha = "DLSSG.UIAlpha";
+    public const string DlssgOutputInterpolated = "DLSSG.OutputInterpolated";
+    public const string DlssgOutputReal = "DLSSG.OutputReal";
+    public const string DlssgOutputDisableInterpolation = "DLSSG.OutputDisableInterpolation";
+    public const string DlssgResourceAlwaysProvidedFlags = "DLSSG.ResourceAlwaysProvidedFlags";
+    public const string DlssgResourceNeverProvidedFlags = "DLSSG.ResourceNeverProvidedFlags";
+    public const string DlssgWidth = "DLSSG.Width";
+    public const string DlssgHeight = "DLSSG.Height";
+
+    // Matrices: float[4][4] passed as void*, and none of them may carry TAA jitter.
+    public const string DlssgCameraViewToClip = "DLSSG.CameraViewToClip";
+    public const string DlssgClipToCameraView = "DLSSG.ClipToCameraView";
+    public const string DlssgClipToLensClip = "DLSSG.ClipToLensClip";
+    public const string DlssgClipToPrevClip = "DLSSG.ClipToPrevClip";
+    public const string DlssgPrevClipToClip = "DLSSG.PrevClipToClip";
+
+    public const string DlssgJitterOffsetX = "DLSSG.JitterOffsetX";
+    public const string DlssgJitterOffsetY = "DLSSG.JitterOffsetY";
+    public const string DlssgMvecScaleX = "DLSSG.MvecScaleX";
+    public const string DlssgMvecScaleY = "DLSSG.MvecScaleY";
+    public const string DlssgCameraPinholeOffsetX = "DLSSG.CameraPinholeOffsetX";
+    public const string DlssgCameraPinholeOffsetY = "DLSSG.CameraPinholeOffsetY";
+    public const string DlssgCameraPosX = "DLSSG.CameraPosX";
+    public const string DlssgCameraPosY = "DLSSG.CameraPosY";
+    public const string DlssgCameraPosZ = "DLSSG.CameraPosZ";
+    public const string DlssgCameraUpX = "DLSSG.CameraUpX";
+    public const string DlssgCameraUpY = "DLSSG.CameraUpY";
+    public const string DlssgCameraUpZ = "DLSSG.CameraUpZ";
+    public const string DlssgCameraRightX = "DLSSG.CameraRightX";
+    public const string DlssgCameraRightY = "DLSSG.CameraRightY";
+    public const string DlssgCameraRightZ = "DLSSG.CameraRightZ";
+    public const string DlssgCameraFwdX = "DLSSG.CameraFwdX";
+    public const string DlssgCameraFwdY = "DLSSG.CameraFwdY";
+    public const string DlssgCameraFwdZ = "DLSSG.CameraFwdZ";
+    public const string DlssgCameraNear = "DLSSG.CameraNear";
+    public const string DlssgCameraFar = "DLSSG.CameraFar";
+    public const string DlssgCameraFov = "DLSSG.CameraFOV";
+    public const string DlssgCameraAspectRatio = "DLSSG.CameraAspectRatio";
+    public const string DlssgColorBuffersHdr = "DLSSG.ColorBuffersHDR";
+    public const string DlssgDepthInverted = "DLSSG.DepthInverted";
+    public const string DlssgCameraMotionIncluded = "DLSSG.CameraMotionIncluded";
+    public const string DlssgReset = "DLSSG.Reset";
+    public const string DlssgAutomodeOverrideReset = "DLSSG.AutomodeOverrideReset";
+    public const string DlssgNotRenderingGameFrames = "DLSSG.NotRenderingGameFrames";
+    public const string DlssgOrthoProjection = "DLSSG.OrthoProjection";
+    public const string DlssgMvecInvalidValue = "DLSSG.MvecInvalidValue";
+    public const string DlssgMvecDilated = "DLSSG.MvecDilated";
+    public const string DlssgMenuDetectionEnabled = "DLSSG.MenuDetectionEnabled";
+    public const string DlssgMinRelativeLinearDepthObjectSeparation = "DLSSG.MinRelativeLinearDepthObjectSeparation";
+
+    public const string DlssgInputBackbufferSubrectBaseX = "DLSSG.InputBackbufferSubrectBaseX";
+    public const string DlssgInputBackbufferSubrectBaseY = "DLSSG.InputBackbufferSubrectBaseY";
+    public const string DlssgInputBackbufferSubrectWidth = "DLSSG.InputBackbufferSubrectWidth";
+    public const string DlssgInputBackbufferSubrectHeight = "DLSSG.InputBackbufferSubrectHeight";
+    public const string DlssgMVecsSubrectBaseX = "DLSSG.MVecsSubrectBaseX";
+    public const string DlssgMVecsSubrectBaseY = "DLSSG.MVecsSubrectBaseY";
+    public const string DlssgMVecsSubrectWidth = "DLSSG.MVecsSubrectWidth";
+    public const string DlssgMVecsSubrectHeight = "DLSSG.MVecsSubrectHeight";
+    public const string DlssgDepthSubrectBaseX = "DLSSG.DepthSubrectBaseX";
+    public const string DlssgDepthSubrectBaseY = "DLSSG.DepthSubrectBaseY";
+    public const string DlssgDepthSubrectWidth = "DLSSG.DepthSubrectWidth";
+    public const string DlssgDepthSubrectHeight = "DLSSG.DepthSubrectHeight";
+    public const string DlssgHudlessSubrectBaseX = "DLSSG.HUDLessSubrectBaseX";
+    public const string DlssgHudlessSubrectBaseY = "DLSSG.HUDLessSubrectBaseY";
+    public const string DlssgHudlessSubrectWidth = "DLSSG.HUDLessSubrectWidth";
+    public const string DlssgHudlessSubrectHeight = "DLSSG.HUDLessSubrectHeight";
+    public const string DlssgUiSubrectBaseX = "DLSSG.UISubrectBaseX";
+    public const string DlssgUiSubrectBaseY = "DLSSG.UISubrectBaseY";
+    public const string DlssgUiSubrectWidth = "DLSSG.UISubrectWidth";
+    public const string DlssgUiSubrectHeight = "DLSSG.UISubrectHeight";
+    public const string DlssgOutputInterpolatedSubrectBaseX = "DLSSG.OutputInterpolatedSubrectBaseX";
+    public const string DlssgOutputInterpolatedSubrectBaseY = "DLSSG.OutputInterpolatedSubrectBaseY";
+    public const string DlssgOutputInterpolatedSubrectWidth = "DLSSG.OutputInterpolatedSubrectWidth";
+    public const string DlssgOutputInterpolatedSubrectHeight = "DLSSG.OutputInterpolatedSubrectHeight";
+    public const string DlssgOutputRealSubrectBaseX = "DLSSG.OutputRealSubrectBaseX";
+    public const string DlssgOutputRealSubrectBaseY = "DLSSG.OutputRealSubrectBaseY";
+    public const string DlssgOutputRealSubrectWidth = "DLSSG.OutputRealSubrectWidth";
+    public const string DlssgOutputRealSubrectHeight = "DLSSG.OutputRealSubrectHeight";
+
+    public const string DlssgEvalFlags = "DLSSG.EvalFlags";
+    public const string DlssgMultiFrameCountMax = "DLSSG.MultiFrameCountMax";
+    public const string DlssgMultiFrameCount = "DLSSG.MultiFrameCount";
+    public const string DlssgMultiFrameIndex = "DLSSG.MultiFrameIndex";
+    public const string DlssgBackbufferFrameId = "DLSSG.BackbufferFrameID";
+    public const string DlssgUserInterfaceRecompositionEnabled = "DLSSG.UserInterfaceRecompositionEnabled";
 }
 
 /// <summary>

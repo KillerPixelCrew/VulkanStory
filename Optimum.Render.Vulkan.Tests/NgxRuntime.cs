@@ -91,6 +91,70 @@ public sealed class NgxRuntime : IDisposable
         }
         Initialized = true;
         WarmUpVendorInternalClear();
+        if (Unavailable == null) WarmUpFrameGenerationInternalClear();
+    }
+
+    /// <summary>
+    /// The DLSS-G counterpart of <see cref="WarmUpVendorInternalClear" />: one throwaway
+    /// frame generation feature, evaluated once and released, before any test takes its
+    /// message mark.
+    ///
+    /// NGX's frame generation snippet clears its own internal images on its first
+    /// evaluate, and that <c>vkCmdClearColorImage</c> races the layout transition its own
+    /// <c>vkCmdPipelineBarrier</c> made for the same image - both inside
+    /// <c>nv.ngx.dlssg.Evaluate</c>, on images named <c>nv.ngx.dlssg.resource</c> that NGX
+    /// allocates on our device and never shows us (measured 2026-09-13, driver 615.71.09,
+    /// DLSS SDK 310.9.1: 10+ SYNC-HAZARD-WRITE-AFTER-WRITE on the first feature of the
+    /// process, none on the second and third features created at the same size). The
+    /// size is the one <c>NgxDlssgEvaluateTests</c> uses, because the SR warm-up showed the
+    /// clear is per internal allocation size.
+    ///
+    /// Failures are logged and ignored, as for the SR warm-up; a frame left open is closed.
+    /// </summary>
+    private void WarmUpFrameGenerationInternalClear()
+    {
+        const int renderWidth = 640, renderHeight = 360;
+        const int displayWidth = 1280, displayHeight = 720;
+
+        VulkanDevice device = _device!;
+        bool frameOpen = false;
+        try
+        {
+            int backbuffer = device.CreateUpscaleTexture(displayWidth, displayHeight, Format.R8G8B8A8Unorm, storage: false);
+            int hudless = device.CreateUpscaleTexture(displayWidth, displayHeight, Format.R8G8B8A8Unorm, storage: false);
+            int ui = device.CreateUpscaleTexture(displayWidth, displayHeight, Format.R8G8B8A8Unorm, storage: false);
+            int depth = device.CreateUpscaleTexture(renderWidth, renderHeight, Format.R32Sfloat, storage: false);
+            int motion = device.CreateUpscaleTexture(renderWidth, renderHeight, Format.R16G16Sfloat, storage: false);
+            int interpolated = device.CreateUpscaleTexture(displayWidth, displayHeight, Format.R8G8B8A8Unorm, storage: true);
+            int real = device.CreateUpscaleTexture(displayWidth, displayHeight, Format.R8G8B8A8Unorm, storage: true);
+
+            device.BeginFrame();
+            frameOpen = true;
+            NgxResult evaluated = device.EvaluateFrameGeneration(
+                new FrameGenerationImages(backbuffer, depth, motion, hudless, ui, interpolated, real),
+                new NgxDlssgEvaluation { Reset = true });
+            Log("frame generation warm-up (absorbs NGX's own first-feature clear hazard): create " +
+                NgxInterop.Describe(device.LastFrameGenerationCreateResult) + ", evaluate " +
+                NgxInterop.Describe(evaluated));
+            device.RetireFrameGeneration();
+            device.Present();
+            frameOpen = false;
+            device.DrainDeferredDeletions();
+        }
+        catch (Exception error)
+        {
+            Log("frame generation warm-up did not run: " + error.Message);
+            try
+            {
+                device.RetireFrameGeneration();
+                if (frameOpen) device.DrainDeferredDeletions();
+            }
+            catch (Exception cleanup)
+            {
+                Unavailable = "the frame generation warm-up left the shared device unusable: " + cleanup.Message;
+                Log(Unavailable);
+            }
+        }
     }
 
     /// <summary>

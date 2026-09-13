@@ -89,6 +89,35 @@ public class SyncHazardLedgerTests
     }
 
     /// <summary>
+    /// An id whose duplicate-limit notice came before a test's mark was silenced by
+    /// the layer for that test: it counts as observed, so its entry cannot go stale,
+    /// while an id silenced only after the mark, or never, is judged as usual.
+    /// </summary>
+    [Fact]
+    public void AnIdTheLayerSilencedBeforeTheMarkCannotMakeAnEntryStale()
+    {
+        const string testClass = nameof(SyncHazardLedgerTests) + "Silenced";
+        var all = new List<string>
+        {
+            "[error] [SYNC-HAZARD-READ-AFTER-WRITE] synthetic hazard",
+            "[error] [SYNC-HAZARD-READ-AFTER-WRITE] (Warning - This VUID has now been reported 10 times, " +
+                ValidationAssert.DuplicateLimitNotice + ", this will be the last time reporting it).",
+            "[warning] [BestPractices-synthetic] (" + ValidationAssert.DuplicateLimitNotice + ")",
+            "[error] [SYNC-HAZARD-WRITE-AFTER-WRITE] (" + ValidationAssert.DuplicateLimitNotice + ")",
+        };
+
+        Assert.Equal(new[] { "SYNC-HAZARD-READ-AFTER-WRITE" }, ValidationAssert.SilencedIds(all, 3));
+        Assert.Empty(ValidationAssert.SilencedIds(all, 1));
+
+        var entries = new[]
+        {
+            new KnownSyncHazard("SYNC-HAZARD-READ-AFTER-WRITE", testClass, "Silenced", "synthetic", "vendor"),
+        };
+        SyncHazardLedger.Observe(testClass, "Silenced", ValidationAssert.SilencedIds(all, 3));
+        Assert.Empty(SyncHazardLedger.StaleEntries(entries));
+    }
+
+    /// <summary>
     /// An unpinned synchronization message fails NoSyncHazards and is left out
     /// of NoErrors; a best-practices warning fails neither.
     /// </summary>

@@ -38,11 +38,36 @@ internal static class KnownSyncHazards
         "deliberately creates a second feature at a second size - the resize test below. Every other DLSS " +
         "test therefore asserts a genuinely clean run.";
 
+    private const string DlssgBackbufferCopy =
+        "inside NGX's frame generation evaluate: vkCmdCopyImage reads the backbuffer we hand it as " +
+        "DLSSG.Backbuffer, after a layout transition of that same image by NGX's own vkCmdPipelineBarrier " +
+        "inside the nv.ngx.dlssg.Evaluate debug scope. Our side of that image is one barrier to " +
+        "SHADER_READ_ONLY_OPTIMAL (ResourceUsage.SampleExternal) before the call, which is the layout the " +
+        "guide asks for; NGX then moves the image itself and copies from it with a destination stage that " +
+        "does not name the transfer, and the copy is not ours: the only copies the test records are the " +
+        "readbacks of the two outputs, whose handles differ. Measured 2026-09-13 on driver 615.71.09 with " +
+        "DLSS SDK 310.9.1, NgxDlssgEvaluateTests logging the scene's handles: the two images named " +
+        "(0x3ad.. and 0x3b0.. in one run, 0x3c5.. and 0x3c8.. in the next) are backbuffer A and backbuffer B, " +
+        "on every evaluate, not only the first - so unlike the internal clear it cannot be absorbed by a " +
+        "warm-up, and the in-game frame generation path will report it every frame under sync validation. " +
+        "It repeats every evaluate, so the layer's duplicate limit (10 per id per instance) runs out in " +
+        "whichever DLSS-G test evaluates first; every DLSS-G GPU test is pinned so the ledger does not " +
+        "depend on test order, and ValidationAssert.SilencedIds keeps the later ones from looking stale.";
+
     public static readonly KnownSyncHazard[] Entries =
     {
         new("SYNC-HAZARD-WRITE-AFTER-WRITE", nameof(DlssUpscalerTests),
             nameof(DlssUpscalerTests.AResizeRebuildsTheFeatureWithoutLeakingIt),
             DlssInternalClear, "vendor"),
+        new("SYNC-HAZARD-READ-AFTER-WRITE", nameof(NgxDlssgEvaluateTests),
+            nameof(NgxDlssgEvaluateTests.FrameGenerationEvaluatesAcrossFramesAndBothOutputsCarryTheirFrames),
+            DlssgBackbufferCopy, "vendor"),
+        new("SYNC-HAZARD-READ-AFTER-WRITE", nameof(NgxDlssgEvaluateTests),
+            nameof(NgxDlssgEvaluateTests.UiRecompositionIsACreateTimeSwitchAndItsEffectIsMeasured),
+            DlssgBackbufferCopy, "vendor"),
+        new("SYNC-HAZARD-READ-AFTER-WRITE", nameof(NgxDlssgEvaluateTests),
+            nameof(NgxDlssgEvaluateTests.AResizeRebuildsTheFrameGenerationFeatureWithoutLeakingIt),
+            DlssgBackbufferCopy, "vendor"),
     };
 
     public static bool Covers(string id, string testClass, string testMethod)

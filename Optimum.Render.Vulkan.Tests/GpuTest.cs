@@ -121,7 +121,8 @@ internal static class GpuTest
         List<string> all = MessagesOf(seam);
         List<string> messages = mark <= 0 ? all : Since(all, mark);
         ValidationAssert.NoErrors(messages);
-        ValidationAssert.NoSyncHazards(messages, callerFile);
+        ValidationAssert.NoSyncHazards(messages, callerFile,
+            mark <= 0 ? null : ValidationAssert.SilencedIds(ValidationAssert.Snapshot(all), mark));
 
         string? diagnostics = seam.GetError();
         if (string.IsNullOrEmpty(diagnostics)) return;
