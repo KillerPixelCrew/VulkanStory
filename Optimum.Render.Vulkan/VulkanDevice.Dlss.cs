@@ -118,6 +118,10 @@ public sealed unsafe partial class VulkanDevice
     /// back to the initial state.</para>
     internal int DrainDeferredDeletions()
     {
+        // The drain waits on the render thread's timeline only; the present thread's
+        // submissions and its read of the DLSS-G outputs are invisible to it. So the
+        // thread is stopped and drained first, never drained around.
+        ShutDownPacedPresent();
         int collected = _frames.DrainRetirements();
         _frameActive = false;
         return collected;

@@ -18,13 +18,16 @@ namespace Optimum.Render.Vulkan.Core;
 /// completed, and vkQueuePresentKHR, which is synchronous on the CPU, returned
 /// before the slot could be replaced. No vkDeviceWaitIdle is involved.
 ///
-/// Render thread only: slots are created, presented and retired there.
+/// Owner thread only - the render thread, or the present thread while paced
+/// presentation runs: slots are created, presented and retired by the swapchain's
+/// owner, and ownership moves only through <see cref="Rebase" /> while neither thread
+/// presents.
 /// </summary>
 internal sealed class SwapchainRetirement
 {
     private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue);
 
-    private readonly ITimelineClock _clock;
+    private ITimelineClock _clock;
     private readonly List<Entry> _entries = new();
 
     public SwapchainRetirement(ITimelineClock clock) => _clock = clock;
@@ -58,6 +61,24 @@ internal sealed class SwapchainRetirement
         }
         _entries.RemoveRange(kept, _entries.Count - kept);
         return destroyed;
+    }
+
+    /// <summary>
+    /// Ownership moved to <paramref name="clock" /> after every submission of the old
+    /// clock completed. Values of the old clock mean nothing on the new one, so every
+    /// slot that was waiting is re-keyed onto <paramref name="firstNewValue" />, the
+    /// first submission the new clock will carry - queued after every old present,
+    /// which is the proof <see cref="SwapchainPolicy.RetireAfter" /> asks for. A slot that
+    /// never presented (0) stays destroyable at once.
+    /// </summary>
+    public void Rebase(ITimelineClock clock, ulong firstNewValue)
+    {
+        _clock = clock;
+        for (int i = 0; i < _entries.Count; i++)
+        {
+            Entry entry = _entries[i];
+            if (entry.LastPresentValue != 0) _entries[i] = entry with { LastPresentValue = firstNewValue };
+        }
     }
 
     /// <summary>Teardown only, after the GPU finished every submission.</summary>
@@ -159,8 +180,26 @@ internal static class SwapchainPolicy
     /// a whole interval). Without vsync: MAILBOX (drops frames, never tears), then
     /// IMMEDIATE, then FIFO, the only mode every driver must have.
     /// </summary>
-    public static PresentModeKHR ChoosePresentMode(bool vsync, bool relaxedPromoted, IReadOnlyList<PresentModeKHR> supported)
+    public static PresentModeKHR ChoosePresentMode(bool vsync, bool relaxedPromoted, IReadOnlyList<PresentModeKHR> supported) =>
+        ChoosePresentMode(vsync, relaxedPromoted, supported, frameGeneration: false);
+
+    /// <summary>
+    /// The same, with the frame-generation rule (ROADMAP, "The paced present: the
+    /// design"): never MAILBOX, because MAILBOX replaces the queued generated frame
+    /// with the real one presented right after it and the generated frame is never
+    /// seen; never FIFO_RELAXED, because a late generated frame would tear into its
+    /// real one. So vsync on is FIFO, and vsync off is IMMEDIATE - the only mode where
+    /// the pacer, not the display, owns the spacing - falling back to FIFO, which
+    /// every driver has, when the surface offers no IMMEDIATE.
+    /// </summary>
+    public static PresentModeKHR ChoosePresentMode(bool vsync, bool relaxedPromoted,
+        IReadOnlyList<PresentModeKHR> supported, bool frameGeneration)
     {
+        if (frameGeneration)
+        {
+            if (vsync) return PresentModeKHR.FifoKhr;
+            return Contains(supported, PresentModeKHR.ImmediateKhr) ? PresentModeKHR.ImmediateKhr : PresentModeKHR.FifoKhr;
+        }
         if (vsync)
         {
             return relaxedPromoted && Contains(supported, PresentModeKHR.FifoRelaxedKhr)
@@ -240,6 +279,30 @@ internal sealed class AcquireSemaphoreFreeList
     public int Capacity { get; }
     public int FreeCount => _free.Count;
     public int PendingCount => _pending.Count;
+
+    /// <summary>The smallest submission value a parked semaphore waits for; 0 when none is parked.</summary>
+    public ulong OldestPendingValue
+    {
+        get
+        {
+            ulong oldest = 0;
+            foreach ((ulong _, ulong frameValue) in _pending)
+            {
+                if (oldest == 0 || frameValue < oldest) oldest = frameValue;
+            }
+            return oldest;
+        }
+    }
+
+    /// <summary>
+    /// Every submission a parked semaphore waited for has completed (the owner
+    /// changed clocks after waiting for the old one): all of them are free again.
+    /// </summary>
+    public void ReleaseAllPending()
+    {
+        foreach ((ulong handle, ulong _) in _pending) _free.Push(handle);
+        _pending.Clear();
+    }
 
     /// <summary>
     /// How many semaphores a slot is created with.

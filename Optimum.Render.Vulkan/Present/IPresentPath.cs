@@ -130,6 +130,32 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         LatencyBackendKind.AmdAntiLag,
     };
 
+    /// <summary>
+    /// The flipped copy of a TRANSFER_SRC source into a TRANSFER_DST swapchain image,
+    /// and nothing else. Shared with the present thread, which records its own barriers
+    /// (it may not touch this path's trackers) but must flip exactly as this path does,
+    /// or the paced present would be upside down against the synchronous one.
+    /// </summary>
+    internal static void RecordFlippedBlit(Vk api, CommandBuffer commandBuffer, Image source, uint sourceWidth,
+        uint sourceHeight, Image destination, Extent2D destinationExtent)
+    {
+        var blit = new ImageBlit
+        {
+            SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+            DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+        };
+        // Source Y runs backwards: this is the flip.
+        blit.SrcOffsets.Element0 = new Offset3D(0, (int)sourceHeight, 0);
+        blit.SrcOffsets.Element1 = new Offset3D((int)sourceWidth, 0, 1);
+        blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
+        blit.DstOffsets.Element1 = new Offset3D((int)destinationExtent.Width, (int)destinationExtent.Height, 1);
+
+        api.CmdBlitImage(commandBuffer,
+            source, ImageLayout.TransferSrcOptimal,
+            destination, ImageLayout.TransferDstOptimal,
+            1, &blit, Filter.Linear);
+    }
+
     public void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source)
     {
         Image destination = target.Image;
@@ -148,22 +174,8 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
 
         if (source != null)
         {
-
-            var blit = new ImageBlit
-            {
-                SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-                DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-            };
-            // Source Y runs backwards: this is the flip.
-            blit.SrcOffsets.Element0 = new Offset3D(0, (int)source.Height, 0);
-            blit.SrcOffsets.Element1 = new Offset3D((int)source.Width, 0, 1);
-            blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
-            blit.DstOffsets.Element1 = new Offset3D((int)target.Extent.Width, (int)target.Extent.Height, 1);
-
-            _context.Api.CmdBlitImage(commandBuffer,
-                source.Image, ImageLayout.TransferSrcOptimal,
-                destination, ImageLayout.TransferDstOptimal,
-                1, &blit, Filter.Linear);
+            RecordFlippedBlit(_context.Api, commandBuffer, source.Image, source.Width, source.Height,
+                destination, target.Extent);
         }
 
         PreviousRecordedBlit = LastRecordedBlit;

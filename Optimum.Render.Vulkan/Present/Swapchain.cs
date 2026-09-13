@@ -202,6 +202,20 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 
     public int PendingAcquireSemaphores => _freeAcquire.PendingCount;
 
+    /// <summary>The oldest submission value a parked acquire semaphore waits for; 0 when none is parked.</summary>
+    public ulong OldestPendingAcquireValue => _freeAcquire.OldestPendingValue;
+
+    /// <summary>
+    /// Ownership moved to another clock (<see cref="Swapchain.HandOver" />), and every
+    /// submission under the old one completed: parked semaphores are free again, and
+    /// the slot's last present is re-keyed onto the new clock's first value.
+    /// </summary>
+    internal void RebaseAfterHandOver(ulong firstNewValue)
+    {
+        _freeAcquire.ReleaseAllPending();
+        if (LastPresentValue != 0) LastPresentValue = firstNewValue;
+    }
+
     /// <summary>A semaphore for the next acquire; <paramref name="frameCompleted" /> releases those whose present submission finished.</summary>
     public Semaphore TakeAcquireSemaphore(ulong frameCompleted) => new(_freeAcquire.Take(frameCompleted));
 
@@ -253,6 +267,57 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 }
 
 /// <summary>
+/// A rebuild request - a window size and a vsync setting - posted from any thread
+/// and taken by whichever thread owns the swapchain, before its next acquire.
+///
+/// It exists because the swapchain has two possible owners: the render thread, and
+/// the present thread while paced presentation runs. The render thread still learns
+/// about resizes and vsync toggles, and used to write <c>_width</c>, <c>_height</c>,
+/// <c>_vsync</c> and the recreation flag as plain fields; read from another thread's
+/// Build that is a torn size or a lost request, and synchronization validation cannot
+/// see it because no Vulkan object is involved at the moment of the race. So the
+/// three values travel together under one lock, and only as a whole.
+/// </summary>
+internal sealed class SwapchainRequestRecord
+{
+    internal readonly record struct Request(uint Width, uint Height, bool Vsync);
+
+    private readonly object _lock = new();
+
+    // Both guarded by _lock.
+    private Request _request;
+    private bool _pending;
+
+    /// <summary>Replaces any request not yet taken; the newest one wins, whole.</summary>
+    public void Post(uint width, uint height, bool vsync)
+    {
+        lock (_lock)
+        {
+            _request = new Request(width, height, vsync);
+            _pending = true;
+        }
+    }
+
+    /// <summary>A request is waiting to be taken.</summary>
+    public bool Pending
+    {
+        get { lock (_lock) return _pending; }
+    }
+
+    /// <summary>Takes the waiting request, if any. Owner thread.</summary>
+    public bool TryTake(out Request request)
+    {
+        lock (_lock)
+        {
+            request = _request;
+            if (!_pending) return false;
+            _pending = false;
+            return true;
+        }
+    }
+}
+
+/// <summary>
 /// The presentation chain.
 ///
 /// Recreation follows the Khronos swapchain_recreation sample: the current
@@ -265,6 +330,15 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 ///
 /// The one flip of the image happens in the present path
 /// (<see cref="BlitPresentPath" />), not here.
+///
+/// <para><b>Ownership.</b> Exactly one thread owns a swapchain at a time: the render
+/// thread, or the present thread while paced presentation runs
+/// (<see cref="Optimum.Render.Vulkan.Present.PresentThread" />). Acquire, present,
+/// rebuild and slot retirement are the owner's alone. Another thread may only post a
+/// rebuild (<see cref="RequestRebuild" />, a locked record) and read
+/// <see cref="Extent" />, <see cref="Creations" /> and <see cref="RebuildFailure" />,
+/// which are published atomically. Ownership moves only through
+/// <see cref="HandOver" />, while neither thread is presenting.</para>
 /// </summary>
 internal sealed unsafe class Swapchain : IDisposable
 {
@@ -276,32 +350,77 @@ internal sealed unsafe class Swapchain : IDisposable
     private readonly KhrSwapchain _swapchainApi;
     private readonly SurfaceKHR _surface;
     private readonly SwapchainRetirement _retirement;
-    private readonly ITimelineClock _clock;
     private readonly PresentPressure _pressure;
     private readonly bool _relaxedAllowed;
 
+    /// <summary>Any thread posts, the owner takes; see <see cref="SwapchainRequestRecord" />.</summary>
+    private readonly SwapchainRequestRecord _requests = new();
+
+    // Owner thread only, and replaced only by HandOver while no thread presents:
+    // the clock acquire semaphores and retired slots are keyed on, the queue
+    // vkQueuePresentKHR goes to and the lock that guards it, and the wait the owner
+    // makes when every acquire semaphore is still waited on.
+    private ITimelineClock _clock;
+    private Queue _presentQueue;
+    private object _presentQueueLock;
+    private Action<ulong>? _waitForClockValue;
+    private bool _frameGeneration;
+    private bool _immediateFallbackLogged;
+
+    // Owner thread only.
     private SwapchainSlot? _current;
     private uint _width;
     private uint _height;
     private bool _vsync;
     private bool _relaxedPromoted;
+    private bool _needsRecreation;
     private bool _disposed;
     /// <summary>The surface's VkSurfaceCapabilitiesKHR::minImageCount at the last Build.</summary>
     private uint _surfaceMinImageCount = 1;
 
+    // Published to other threads: Interlocked / Volatile, never a plain field.
+    private long _extentPacked;
+    private int _creations;
+    private string? _rebuildFailure;
+
     public Format Format { get; private set; } = Format.B8G8R8A8Unorm;
-    public Extent2D Extent { get; private set; }
+
+    /// <summary>The current chain's extent. Any thread: packed into one Interlocked word, so never torn.</summary>
+    public Extent2D Extent
+    {
+        get
+        {
+            long packed = System.Threading.Interlocked.Read(ref _extentPacked);
+            return new Extent2D((uint)(packed >> 32), (uint)packed);
+        }
+        private set => System.Threading.Interlocked.Exchange(
+            ref _extentPacked, ((long)value.Width << 32) | value.Height);
+    }
+
     public PresentModeKHR PresentMode { get; private set; } = PresentModeKHR.FifoKhr;
     public uint ImageCount => _current?.ImageCount ?? 0;
 
-    /// <summary>Set when the chain is stale; the next acquire rebuilds it first.</summary>
-    public bool NeedsRecreation { get; private set; }
+    /// <summary>Set when the chain is stale, or a rebuild was posted; the next acquire rebuilds it first.</summary>
+    public bool NeedsRecreation => _needsRecreation || _requests.Pending;
 
     /// <summary>The surface has zero extent; nothing is acquired or presented until it grows.</summary>
     public bool Parked { get; private set; }
 
-    /// <summary>Swapchains created so far, the first included.</summary>
-    public int Creations { get; private set; }
+    /// <summary>Swapchains created so far, the first included. Any thread.</summary>
+    public int Creations => System.Threading.Volatile.Read(ref _creations);
+
+    /// <summary>
+    /// Whether the chain is built for frame generation: never MAILBOX, never
+    /// FIFO_RELAXED (<see cref="SwapchainPolicy.ChoosePresentMode(bool, bool, IReadOnlyList{PresentModeKHR}, bool)" />).
+    /// Owner thread; changed through <see cref="HandOver" />.
+    /// </summary>
+    internal bool FrameGenerationPresentModes => _frameGeneration;
+
+    /// <summary>Where the present-mode fallback and similar one-off facts are logged. Set before any hand-over.</summary>
+    internal Action<string>? Log { get; set; }
+
+    /// <summary>Called by the owner with every rebuild request it takes, whole. Tests only; set before any hand-over.</summary>
+    internal Action<SwapchainRequestRecord.Request>? RequestTakenForTests { get; set; }
 
     /// <summary>How many presents this chain sizes its acquire semaphores for.</summary>
     internal PresentPressure Pressure => _pressure;
@@ -309,10 +428,10 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>
     /// How many images may be held acquired at once on the current chain
     /// (<see cref="SwapchainPolicy.SimultaneousAcquireLimit" />). 0 with no chain.
-    /// The second acquire of a generated present is made only while this is at
-    /// least 2: past the limit vkAcquireNextImageKHR is allowed to block until an
-    /// image is presented, and neither acquired image is presented until both were
-    /// taken, so exceeding it is a hang rather than a slow frame.
+    /// Step 0 made a generated present's second acquire only while this was at
+    /// least 2, because past the limit vkAcquireNextImageKHR may block until an image
+    /// is presented. The present thread holds one image at a time, so it needs 1,
+    /// which every chain has.
     /// </summary>
     public int SimultaneousAcquireLimit =>
         _current == null ? 0 : SwapchainPolicy.SimultaneousAcquireLimit(_current.ImageCount, _surfaceMinImageCount);
@@ -320,8 +439,8 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>Replaced slots still waiting for the GPU.</summary>
     public int RetiredPending => _retirement.PendingCount;
 
-    /// <summary>Why the last rebuild failed; null after a successful one.</summary>
-    public string? RebuildFailure { get; private set; }
+    /// <summary>Why the last rebuild failed; null after a successful one. Any thread.</summary>
+    public string? RebuildFailure => System.Threading.Volatile.Read(ref _rebuildFailure);
 
     /// <summary>The slot being acquired from. Tests only.</summary>
     internal SwapchainSlot? CurrentSlotForTests => _current;
@@ -367,6 +486,8 @@ internal sealed unsafe class Swapchain : IDisposable
         _swapchainApi = swapchainApi;
         _surface = surface;
         _clock = clock;
+        _presentQueue = context.GraphicsQueue;
+        _presentQueueLock = context.QueueLock;
         _retirement = new SwapchainRetirement(clock);
         _relaxedAllowed = Environment.GetEnvironmentVariable(FifoRelaxedVariable)?.Trim() != "0";
     }
@@ -450,19 +571,27 @@ internal sealed unsafe class Swapchain : IDisposable
         if (SwapchainPolicy.IsParked(extent))
         {
             Parked = true;
-            NeedsRecreation = true;
+            _needsRecreation = true;
             return false;
         }
         Parked = false;
 
         Format = ChooseFormat(out ColorSpaceKHR colorSpace);
+        PresentModeKHR[] supportedModes = SupportedPresentModes();
         PresentModeKHR presentMode = SwapchainPolicy.ChoosePresentMode(
-            _vsync, _relaxedPromoted && _relaxedAllowed, SupportedPresentModes());
+            _vsync, _relaxedPromoted && _relaxedAllowed, supportedModes, _frameGeneration);
+        if (_frameGeneration && !_vsync && presentMode != PresentModeKHR.ImmediateKhr && !_immediateFallbackLogged)
+        {
+            // Frame generation with vsync off wants the pacer to own the spacing, and
+            // only IMMEDIATE lets it; FIFO still presents every frame, in order, but
+            // lets the display interval decide when. Logged once, not per rebuild.
+            _immediateFallbackLogged = true;
+            Log?.Invoke("paced present: the surface has no IMMEDIATE present mode; frame generation with vsync " +
+                "off falls back to " + presentMode);
+        }
         uint imageCount = SwapchainPolicy.ChooseImageCount(
             capabilities.MinImageCount, capabilities.MaxImageCount, presentMode);
-        // Kept so SimultaneousAcquireLimit can say how many images may be held at
-        // once: the second acquire of a generated present is made only while that
-        // is at least two.
+        // Kept so SimultaneousAcquireLimit can say how many images may be held at once.
         _surfaceMinImageCount = capabilities.MinImageCount;
 
         SwapchainSlot? old = _current;
@@ -512,21 +641,21 @@ internal sealed unsafe class Swapchain : IDisposable
         if (result != Result.Success)
         {
             failureReason = "vkCreateSwapchainKHR failed with " + result;
-            RebuildFailure = failureReason;
-            NeedsRecreation = true;
+            System.Threading.Volatile.Write(ref _rebuildFailure, failureReason);
+            _needsRecreation = true;
             return false;
         }
 
         _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode, _pressure);
         Extent = extent;
         PresentMode = presentMode;
-        Creations++;
+        System.Threading.Interlocked.Increment(ref _creations);
         // Exactly once per created swapchain, and only for one that exists: a
         // failed creation returned above. The sleep mode a backend set on the old
         // handle does not carry over, so this is where it is re-applied.
         _latency.OnSwapchainCreated(handle);
-        NeedsRecreation = false;
-        RebuildFailure = null;
+        _needsRecreation = false;
+        System.Threading.Volatile.Write(ref _rebuildFailure, null);
         return true;
     }
 
@@ -595,14 +724,56 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>
     /// Asks for a rebuild at the next acquire (a resize, a vsync toggle). Cheap
     /// and repeatable: a resize storm costs one rebuild per presented frame at most.
+    /// Any thread: the request is posted whole to <see cref="SwapchainRequestRecord" />
+    /// and applied by the owner before its next acquire.
     /// </summary>
-    public void RequestRebuild(uint width, uint height, bool vsync)
+    public void RequestRebuild(uint width, uint height, bool vsync) => _requests.Post(width, height, vsync);
+
+    /// <summary>The owner applies a posted request, if any, before it acquires.</summary>
+    private void TakePostedRequest()
     {
-        if (vsync != _vsync) _relaxedPromoted = false;
-        _width = width;
-        _height = height;
-        _vsync = vsync;
-        NeedsRecreation = true;
+        if (!_requests.TryTake(out SwapchainRequestRecord.Request request)) return;
+        RequestTakenForTests?.Invoke(request);
+        if (request.Vsync != _vsync) _relaxedPromoted = false;
+        _width = request.Width;
+        _height = request.Height;
+        _vsync = request.Vsync;
+        _needsRecreation = true;
+    }
+
+    /// <summary>
+    /// Moves ownership of the chain to another thread's clock and queue: the render
+    /// thread's Frame timeline and graphics queue, or the present thread's own
+    /// timeline and present queue. Called by the thread giving ownership up or taking
+    /// it back, while neither presents.
+    ///
+    /// <para>Precondition: every present submission made under the previous clock has
+    /// completed (the caller waited for it). That is what lets every acquire semaphore
+    /// still parked against an old value go back to the free list, and it is why the
+    /// retired slots and the current slot's last present are re-keyed rather than
+    /// destroyed: a completed submission does not prove its vkQueuePresentKHR was
+    /// processed by the WSI (see <see cref="SwapchainPolicy.RetireAfter" />), so they
+    /// retire after the first submission the new clock will carry, which is queued
+    /// after every old present.</para>
+    ///
+    /// <para>A change of <paramref name="frameGeneration" /> rebuilds the chain at the
+    /// next acquire, because it changes which present modes are allowed.</para>
+    /// </summary>
+    internal void HandOver(ITimelineClock clock, Queue presentQueue, object presentQueueLock,
+        Action<ulong>? waitForClockValue, bool frameGeneration)
+    {
+        ulong firstNewValue = clock.FrameRecorded + 1;
+        _retirement.Rebase(clock, firstNewValue);
+        _current?.RebaseAfterHandOver(firstNewValue);
+        _clock = clock;
+        _presentQueue = presentQueue;
+        _presentQueueLock = presentQueueLock;
+        _waitForClockValue = waitForClockValue;
+        if (frameGeneration != _frameGeneration)
+        {
+            _frameGeneration = frameGeneration;
+            _needsRecreation = true;
+        }
     }
 
     /// <summary>
@@ -611,10 +782,12 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     public bool PromoteToRelaxedFifo()
     {
-        if (!_vsync || _relaxedPromoted || !_relaxedAllowed) return false;
+        // Frame generation never presents FIFO_RELAXED: a late generated frame would
+        // tear into its real one, and the design says FIFO with vsync on.
+        if (!_vsync || _relaxedPromoted || !_relaxedAllowed || _frameGeneration) return false;
         if (Array.IndexOf(SupportedPresentModes(), PresentModeKHR.FifoRelaxedKhr) < 0) return false;
         _relaxedPromoted = true;
-        NeedsRecreation = true;
+        _needsRecreation = true;
         return true;
     }
 
@@ -624,33 +797,40 @@ internal sealed unsafe class Swapchain : IDisposable
     /// was still out of date after one rebuild, or the rebuild failed
     /// (<see cref="RebuildFailure" />). A resize or a monitor change is ordinary,
     /// never an error; a lost device throws.
+    ///
+    /// <para>Owner thread only. Step 0 needed an <c>allowRebuild: false</c> second
+    /// acquire here, because the render thread held one image of a frame while it
+    /// acquired the other and a rebuild in between retired the slot the first image
+    /// came from against the previous frame's present value. The present thread
+    /// presents each image before it acquires the next - acquire, record, submit,
+    /// present, one after another on one thread - so that window no longer exists,
+    /// and neither does the parameter.</para>
     /// </summary>
-    /// <param name="allowRebuild">
-    /// False forbids this acquire from rebuilding the chain, and so from retiring
-    /// the current slot. The second acquire of a frame passes false: the first
-    /// acquire's <see cref="PresentTarget" /> already holds one of this slot's
-    /// images and one of its acquire semaphores, and its present submission has
-    /// not been noted yet - a rebuild here would retire the slot against the
-    /// <em>previous</em> frame's LastPresentValue and let <see cref="Collect" />
-    /// destroy those semaphores while the present submission still waits on them.
-    /// A refused second acquire costs that frame its generated present and
-    /// nothing else; the rebuild happens at the next frame's first acquire, which
-    /// is where it always happened.
-    /// </param>
-    public bool TryAcquire(out PresentTarget target, bool allowRebuild = true)
+    public bool TryAcquire(out PresentTarget target)
     {
         target = default;
-        if (allowRebuild) _retirement.Collect();
+        TakePostedRequest();
+        _retirement.Collect();
 
         if (NeedsRecreation || _current == null)
         {
-            if (!allowRebuild) return false;
             if (!Build(out _)) return false;
         }
 
         for (int attempt = 0; attempt < 2; attempt++)
         {
             SwapchainSlot slot = _current!;
+            // The present thread can run ahead of the GPU by more present submissions
+            // than AcquireSemaphoreFreeList.CapacityFor derives for the render thread
+            // (that bound leans on the ring's pacing wait, which the present thread
+            // does not make). So when every semaphore is still waited on, an owner
+            // that installed a wait blocks - on its own timeline, never on the render
+            // thread - until the oldest of them completed, instead of throwing out of Take.
+            if (slot.FreeAcquireSemaphores == 0 && _waitForClockValue != null)
+            {
+                ulong oldest = slot.OldestPendingAcquireValue;
+                if (oldest != 0 && oldest > _clock.FrameCompleted) _waitForClockValue(oldest);
+            }
             Semaphore acquire = slot.TakeAcquireSemaphore(
                 slot.FreeAcquireSemaphores == 0 ? _clock.FrameCompleted : 0);
             uint imageIndex = 0;
@@ -669,23 +849,19 @@ internal sealed unsafe class Swapchain : IDisposable
 
                 case AcquireAction.PresentThenRebuild:
                     // Usable this frame; rebuilt before the next acquire.
-                    NeedsRecreation = true;
+                    _needsRecreation = true;
                     target = new PresentTarget(slot, imageIndex, acquire);
                     return true;
 
                 case AcquireAction.RebuildAndRetry:
                     slot.ReturnAcquireSemaphore(acquire);
-                    NeedsRecreation = true;
-                    // Not allowed to rebuild: the caller holds an image of this
-                    // slot already (see allowRebuild), so the rebuild waits for
-                    // the next frame's first acquire.
-                    if (!allowRebuild) return false;
+                    _needsRecreation = true;
                     if (!Build(out _)) return false;
                     continue;
 
                 case AcquireAction.SkipFrame:
                     slot.ReturnAcquireSemaphore(acquire);
-                    NeedsRecreation = true;
+                    _needsRecreation = true;
                     return false;
 
                 default:
@@ -694,7 +870,7 @@ internal sealed unsafe class Swapchain : IDisposable
                     // than turned into a quiet "no image this frame", which reads
                     // as a freeze.
                     VulkanResult.Check(result, "vkAcquireNextImageKHR");
-                    NeedsRecreation = true;
+                    _needsRecreation = true;
                     return false;
             }
         }
@@ -721,13 +897,25 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     public ulong Present(in PresentTarget target, ulong frameId = 0)
     {
+        // Allocated for every present, whether or not the extension carries it,
+        // so the frame to present mapping is the same on every driver.
+        ulong presentId = PresentIdCounter.Next();
+        return Present(target, frameId, presentId);
+    }
+
+    /// <summary>
+    /// Presents <paramref name="target" /> with a present id reserved earlier
+    /// (<paramref name="presentId" />, from <see cref="PresentIdCounter.Next" />). The
+    /// paced path reserves both ids of a pair on the render thread at handoff, in
+    /// render order, so the ids stay increasing in present order however late the
+    /// present thread presents them - VK_KHR_present_id requires that per swapchain.
+    /// </summary>
+    public ulong Present(in PresentTarget target, ulong frameId, ulong presentId)
+    {
         SwapchainKHR handle = target.Slot.Handle;
         Semaphore wait = target.PresentSemaphore;
         uint index = target.ImageIndex;
 
-        // Allocated for every present, whether or not the extension carries it,
-        // so the frame to present mapping is the same on every driver.
-        ulong presentId = PresentIdCounter.Next();
         PresentIds.Record(presentId, frameId);
 
         var presentIdInfo = new PresentIdKHR
@@ -749,17 +937,17 @@ internal sealed unsafe class Swapchain : IDisposable
         };
 
         // Presenting is a queue operation like any other, so it takes the same
-        // lock as submission.
+        // lock as submission - the lock of whichever queue the owner presents on.
         Result result;
         long waitStart = VulkanStats.WaitStart();
-        lock (_context.QueueLock)
+        lock (_presentQueueLock)
         {
-            result = _swapchainApi.QueuePresent(_context.GraphicsQueue, &presentInfo);
+            result = _swapchainApi.QueuePresent(_presentQueue, &presentInfo);
         }
         VulkanStats.NoteWait(WaitSite.Present, waitStart);
         if (result is Result.ErrorOutOfDateKhr or Result.SuboptimalKhr)
         {
-            if (ReferenceEquals(target.Slot, _current)) NeedsRecreation = true;
+            if (ReferenceEquals(target.Slot, _current)) _needsRecreation = true;
         }
         else
         {

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Present;
 using Optimum.Render.Vulkan.Shaders;
 using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
@@ -1118,6 +1119,15 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // Any open rendering scope has to close before the command buffer ends.
         _targets.EndRendering(_frames.Current.CommandBuffer);
 
+        // Paced presentation (frame generation, or OPTIMUM_DLSSG_DOUBLE_PRESENT with
+        // duplicate images): the frame is written into an output pair inside its own
+        // command buffer, and the pair is handed to the present thread after Submit A
+        // (VulkanDevice.PacedPresent.cs). Off, nothing of it exists - no thread, no pool,
+        // no second queue use - and the frame takes the single synchronous present below.
+        bool paced = PacedPresentEnabled && _swapchain != null && _presentPath != null;
+        if (!paced && _presentThread != null) ShutDownPacedPresent();
+        OutputPair? pacedPair = paced ? BeginPacedHandoff() : null;
+
         long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
         ulong renderValue = _frames.EndFrame();
         _frameActive = false;
@@ -1130,6 +1140,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // Headless: nothing to present; the frame is submitted all the same.
         if (_swapchain == null || _presentPath == null) return;
 
+        if (paced)
+        {
+            HandOffPacedPair(pacedPair, renderValue, presentEntry, frameSubmitted);
+            return;
+        }
+
         bool acquired = _swapchain.TryAcquire(out PresentTarget target);
         long acquireReturned = System.Diagnostics.Stopwatch.GetTimestamp();
         bool renderCompletedAtAcquire = _frames.Timeline.FrameCompleted >= renderValue;
@@ -1141,46 +1157,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             return;
         }
 
-        // Frame generation step 0: a second image for the generated present, taken
-        // before anything is recorded, so both blits ride the one command buffer.
-        //
-        // Two conditions, both of them about what this second acquire must not be
-        // allowed to do while the first acquire's image and semaphore are already
-        // held and its present submission is not yet noted:
-        //   - it may not rebuild the chain (allowRebuild: false), because Build
-        //     retires the slot the real target came from against the previous
-        //     frame's present value, which lets the retirement queue destroy the
-        //     semaphores this frame's present submission waits on;
-        //   - it may not be made at all unless the chain can hand out two images
-        //     at once, because past that limit vkAcquireNextImageKHR may block
-        //     until an image is presented and neither is presented until both
-        //     have been acquired.
-        // Either way the frame presents once, which is what it did before step 0.
-        BetweenPresentAcquiresForTests?.Invoke();
-        PresentTarget generatedTarget = default;
-        bool generated = GeneratedPresentEnabled
-            && _swapchain.SimultaneousAcquireLimit >= PresentPressure.GeneratedPlusRealPerFrame
-            && _swapchain.TryAcquire(out generatedTarget, allowRebuild: false);
-        if (!generated) generatedTarget = default;
-
-        // Which image a present carries is a property of that present: step 0's
-        // generated present is the same picture, later steps hand over another.
+        // Which image a present carries is a property of that present (step 1): this
+        // one is the composed frame; the paced path hands its pairs' images over instead.
         VulkanTexture? presentSource = DefaultColorTexture();
 
         CommandBuffer presentCommands = _frames.BeginPresentCommands();
         Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
         _presentPath.Record(presentCommands, target, presentSource);
-        if (generated)
-        {
-            Checkpoint(presentCommands, CheckpointMarker.PresentBlit(generatedTarget.ImageIndex, _frameCounter));
-            _presentPath.Record(presentCommands, generatedTarget, presentSource);
-        }
         ulong presentValue = _frames.SubmitPresent(
-            target.AcquireSemaphore, generated ? generatedTarget.AcquireSemaphore : default,
-            _presentPath.AcquireWaitStage, renderValue,
-            target.PresentSemaphore, generated ? generatedTarget.PresentSemaphore : default);
+            target.AcquireSemaphore, _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
         _swapchain.NotePresentSubmitted(target, presentValue);
-        if (generated) _swapchain.NotePresentSubmitted(generatedTarget, presentValue);
         long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
         // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself,
@@ -1192,7 +1178,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
-        PresentGeneratedFrame(generated, generatedTarget);
 
         long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_lastPresentReturn != 0 && _vsync &&
@@ -1204,73 +1189,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         _lastPresentReturn = presentReturn;
     }
 
-    /// <summary>
-    /// OPTIMUM_DLSSG_DOUBLE_PRESENT=1 turns the second present of every frame on
-    /// (frame generation, step 0). Off by default: a normal run presents once.
-    /// </summary>
-    internal const string GeneratedPresentVariable = "OPTIMUM_DLSSG_DOUBLE_PRESENT";
-
-    /// <summary>
-    /// Step 0 of the frame-generation design: every frame is presented twice, the
-    /// second time from the same composited image, tagged as a generated frame.
-    ///
-    /// It exists to answer one mechanical question before any vendor code does -
-    /// whether the acquire-semaphore free list and the Frame timeline bookkeeping
-    /// survive twice the present pressure - so the second present is deliberately
-    /// the same picture, submitted from the same command buffer as the real one
-    /// and presented from the same thread. The generated frame's own image, the
-    /// pacer and the present thread are later steps.
-    /// </summary>
-    internal bool GeneratedPresentEnabled { get; set; } =
-        Environment.GetEnvironmentVariable(GeneratedPresentVariable)?.Trim() == "1";
-
-    /// <summary>
-    /// The generated frame's <c>vkQueuePresentKHR</c>. Its image was acquired and
-    /// blitted with the real one, in the present submission that already
-    /// completed its recording, so all that is left here is the present itself.
-    ///
-    /// It is stamped through the out-of-band latency markers rather than
-    /// PresentStart/PresentEnd: those belong to the frame's one real present, and
-    /// a generated present is by definition not part of the frame's latency
-    /// chain. The frame id is the real frame's, which is what makes the present id
-    /// map carry both presents against one frame.
-    /// </summary>
-    private void PresentGeneratedFrame(bool generated, in PresentTarget generatedTarget)
-    {
-        if (!generated || _swapchain == null) return;
-
-        // vkQueueNotifyOutOfBandNV tells the driver this queue submission is not
-        // part of a frame; only the NV backend has it, and only while its
-        // swapchain is live.
-        (Latency as NvLowLatency2Backend)?.NotifyOutOfBandPresent(_context.GraphicsQueue);
-
-        Latency.Marker(_latencyFrameId, LatencyMarker.OutOfBandPresentStart);
-        ulong generatedPresentId = _swapchain.Present(generatedTarget, _latencyFrameId);
-        Latency.Marker(_latencyFrameId, LatencyMarker.OutOfBandPresentEnd);
-
-        LastGeneratedPresentIdForTests = generatedPresentId;
-        GeneratedPresentsForTests++;
-    }
-
-    /// <summary>The present id of the last generated present, 0 before the first. Tests only.</summary>
-    internal ulong LastGeneratedPresentIdForTests { get; private set; }
-
-    /// <summary>How many generated presents have been made. Tests only.</summary>
-    internal int GeneratedPresentsForTests { get; private set; }
-
     /// <summary>The present path as the blit path it is, for its recorded blits. Tests only.</summary>
     internal BlitPresentPath? BlitPresentPathForTests => _presentPath as BlitPresentPath;
 
-    /// <summary>The image every present is sourced from today. Tests only.</summary>
+    /// <summary>The image the synchronous present is sourced from. Tests only.</summary>
     internal ulong DefaultColorImageForTests => DefaultColorTexture()?.Image.Handle ?? 0;
-
-    /// <summary>
-    /// Called between the frame's two acquires. Tests only: the window between
-    /// them is the one place a rebuild would retire a slot whose image and
-    /// acquire semaphore this frame already holds, and it cannot be reached from
-    /// outside Present any other way.
-    /// </summary>
-    internal Action? BetweenPresentAcquiresForTests { get; set; }
 
     /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
     internal readonly record struct PresentTimings(
@@ -3554,6 +3477,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Before the idle wait: vkDeviceWaitIdle and everything destroyed below assume
+        // no other thread submits or presents, and the present thread does both.
+        if (_frames != null) ShutDownPacedPresent();
 
         if (_context != null)
         {

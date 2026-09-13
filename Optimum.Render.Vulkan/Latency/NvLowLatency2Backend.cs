@@ -399,6 +399,28 @@ internal sealed unsafe class NvLowLatency2Backend : ILatencyBackend
     }
 
     /// <summary>
+    /// Stamps an out-of-band present marker against that present's own id, without
+    /// touching the frame's marker state. <see cref="Marker" /> cannot be used from the
+    /// present thread: it re-settles <c>_markerFrameId</c> and <c>_markerPresentId</c>
+    /// whenever the frame id differs, and the render thread is always a frame ahead of
+    /// the present it is reporting, so every call would rewrite the render thread's
+    /// prediction under it. This reads only the settings and the swapchain handle.
+    /// </summary>
+    public void OutOfBandPresentMarker(ulong presentId, LatencyMarker marker)
+    {
+        if (_disposed || !Settings.Enabled || _swapchain.Handle == 0 || presentId == 0) return;
+
+        var info = new SetLatencyMarkerInfoNV
+        {
+            SType = StructureType.SetLatencyMarkerInfoNV,
+            PNext = null,
+            PresentID = presentId,
+            Marker = (LatencyMarkerNV)marker,
+        };
+        _functions.SetLatencyMarker(_context.Device, _swapchain, ref info);
+    }
+
+    /// <summary>
     /// Settles the present id the frame's markers and submit tags use. One frame
     /// presents once, and present ids are handed out in order by
     /// <see cref="PresentIdCounter" />, so the next one is this frame's;

@@ -208,7 +208,9 @@ public class TemporalRenderInventoryTests
 
         Assert.Contains("This inverted blit is the entire Y-flip story for the backend.", presentPath);
         Assert.Contains("// Source Y runs backwards: this is the flip.", presentPath);
-        Assert.Contains("blit.SrcOffsets.Element0 = new Offset3D(0, (int)source.Height, 0);", presentPath);
+        Assert.Contains("blit.SrcOffsets.Element0 = new Offset3D(0, (int)sourceHeight, 0);", presentPath);
+        // The paced present flips through the same helper rather than a copy of it.
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(presentPath, "this is the flip"));
         Assert.DoesNotContain("this is the flip", vulkanDevice);
         Assert.DoesNotContain("CmdBlitImage", vulkanDevice.Substring(vulkanDevice.IndexOf("    public void Present()", System.StringComparison.Ordinal)));
         Assert.Contains("_presentPath = new BlitPresentPath(", vulkanDevice);

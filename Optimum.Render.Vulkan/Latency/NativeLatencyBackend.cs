@@ -196,36 +196,12 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
         // 2. Cap, measured release to release.
         if (Settings.MinimumIntervalUs != 0 && _lastReleaseUs != 0)
         {
-            HoldUntil(_lastReleaseUs + (long)Settings.MinimumIntervalUs);
+            LatencyHold.Until(_lastReleaseUs + (long)Settings.MinimumIntervalUs);
         }
 
         long release = LatencyClock.NowUs();
         _lastReleaseUs = release;
         return release > start ? (ulong)(release - start) : 0;
-    }
-
-    /// <summary>
-    /// Holds until <paramref name="targetUs" />: coarse sleeping down to
-    /// <see cref="SpinTailUs" /> of the target, then the bounded spin tail. A
-    /// target further away than <see cref="MaxHoldUs" /> is treated as a stale
-    /// anchor and not waited for at all.
-    /// </summary>
-    private static void HoldUntil(long targetUs)
-    {
-        long now = LatencyClock.NowUs();
-        if (targetUs <= now) return;
-        if (targetUs - now > MaxHoldUs) return;
-
-        while (targetUs - now > SpinTailUs)
-        {
-            int ms = (int)((targetUs - now - SpinTailUs) / 1000);
-            if (ms <= 0) break;
-            Thread.Sleep(ms);
-            now = LatencyClock.NowUs();
-        }
-
-        // The tail: at most SpinTailUs of the hold, and only ever the tail.
-        while (LatencyClock.NowUs() < targetUs) Thread.SpinWait(64);
     }
 
     /// <summary>

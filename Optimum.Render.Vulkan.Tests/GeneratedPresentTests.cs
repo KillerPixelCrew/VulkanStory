@@ -1,159 +1,59 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Present;
+using Silk.NET.Vulkan;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// Frame generation, step 0: every frame is presented twice, from the same
-/// composited image, with no vendor code anywhere.
+/// Frame generation's presents, as the paced present ships them (ROADMAP, "The paced
+/// present: the design").
 ///
-/// The question this isolates is mechanical - does the acquire-semaphore free
-/// list and the Frame timeline bookkeeping survive twice the present pressure. So
-/// it runs many frames with a present between them and no readback inside the
-/// loop, which is the only shape that can see a lifetime or bookkeeping bug at
-/// all, and judges it on numbers: presents per frame, present ids, what the free
-/// list held, and the validation log under sync,best.
+/// Step 0 presented every frame twice from the render thread, both blits in one
+/// command buffer; that proved the acquire-semaphore free list and the Frame
+/// timeline survive twice the present pressure, and it is gone. What replaced it is
+/// judged here on numbers, never on a screenshot: with the switch off, the frame is
+/// one synchronous present and no thread exists; with it on, every rendered frame
+/// yields exactly one Generated and then one Real present from the present thread,
+/// carrying the ids the render thread reserved at handoff, in increasing order, with
+/// a present between frames and no readback in the loop - the only shape that can
+/// see a lifetime or ordering bug - and a validation log clean under sync,best.
 ///
-/// <para><b>Since the foundation merge this is also the integration proof of the
-/// two halves.</b> It was written when the free list was <c>imageCount + 1</c> and
-/// the ring was two deep; it now runs at the shipped depth (three) against the
-/// re-derived bound <c>max(imageCount, F x P) + 1</c>, with <c>P = 2</c> passed at
-/// swapchain creation unconditionally. Those are the two things that had to meet:
-/// the second present that step 0 introduced against the bound step 4 re-derived.
-/// If either side regresses - the device sizing for one present again, or the
-/// bound going back to the image count - this test takes the semaphore free list
-/// to exhaustion inside <c>Take</c> and fails here rather than in a game.</para>
+/// <para>It is still the integration proof of the free-list bound: the swapchain is
+/// created with <c>P = 2</c> unconditionally, and the paced run takes the free list
+/// through 240 presents at the shipped ring depth.</para>
 /// </summary>
 public class GeneratedPresentTests
 {
     private const int Width = 256;
     private const int Height = 192;
-    private const int Frames = 32;
+    private const int SynchronousFrames = 32;
+    private const int PacedFrames = 120;
 
     private readonly ITestOutputHelper _output;
 
     public GeneratedPresentTests(ITestOutputHelper output) => _output = output;
 
-    private sealed class Run
+    private static void RenderFrame(VulkanDevice seam, int programId, int frame, int frames)
     {
-        public readonly List<ulong> RealPresentIds = new();
-        public readonly List<ulong> GeneratedPresentIds = new();
-        public readonly List<int> FreeAcquireSemaphores = new();
-        public readonly List<int> PendingAcquireSemaphores = new();
-        public int GeneratedPresents;
-        public int AcquireSemaphoreCapacity;
-        public uint ImageCount;
-        public int FramesInFlight;
-        public PresentPressure Pressure;
-        public int Presents;
-        public int IdenticalBlits;
-        public int DistinctDestinations;
+        seam.BeginFrame();
+        seam.BindDefaultFramebuffer();
+        seam.ClearColor(0, 0.1f, frame / (float)frames, 0.3f, 1f);
+        seam.UseProgram(programId);
+        seam.SetViewport(0, 0, Width, Height);
+        seam.SetDepthTest(false);
+        seam.SetCullFace(false);
+        seam.DrawFullscreenTriangle();
+        seam.Present();
     }
 
     [SkippableFact]
-    public unsafe void TwoPresentsPerFrameCarryTheSameImageAndSurviveTheFreeList()
-    {
-        Skip.IfNot(SwapchainTests.TryCreateWindow(_output, Width, Height, out Window* window),
-            "No usable window system.");
-
-        try
-        {
-            Run single = Present((IntPtr)window, generated: false);
-            Run doubled = Present((IntPtr)window, generated: true);
-
-            _output.WriteLine($"frames in flight {doubled.FramesInFlight}, presents per frame " +
-                $"{doubled.Pressure.PresentsPerFrame} (sized for), swapchain images {doubled.ImageCount}, " +
-                $"acquire semaphores {doubled.AcquireSemaphoreCapacity}");
-            _output.WriteLine($"presents: single {single.Presents} in {Frames} frames, doubled {doubled.Presents} ({doubled.GeneratedPresents} generated)");
-            _output.WriteLine($"free acquire semaphores at present: single min {Min(single.FreeAcquireSemaphores)} max {Max(single.FreeAcquireSemaphores)}, " +
-                $"doubled min {Min(doubled.FreeAcquireSemaphores)} max {Max(doubled.FreeAcquireSemaphores)}");
-            _output.WriteLine($"parked (waiting for their present submission) : single max {Max(single.PendingAcquireSemaphores)}, " +
-                $"doubled max {Max(doubled.PendingAcquireSemaphores)}");
-
-            // The switch is what it says: off, one present per frame.
-            Assert.Equal(0, single.GeneratedPresents);
-            Assert.Equal(Frames, single.Presents);
-            Assert.Empty(single.GeneratedPresentIds);
-
-            // On: two per frame, and the second is a present of its own - its own
-            // id, its own acquired image, from the same picture.
-            Assert.Equal(Frames, doubled.GeneratedPresents);
-            Assert.Equal(Frames * 2, doubled.Presents);
-            Assert.Equal(Frames, doubled.IdenticalBlits);
-            Assert.Equal(Frames, doubled.DistinctDestinations);
-
-            // Present ids increase over both presents of a frame and across frames.
-            ulong previous = 0;
-            for (int frame = 0; frame < Frames; frame++)
-            {
-                ulong real = doubled.RealPresentIds[frame];
-                ulong generatedId = doubled.GeneratedPresentIds[frame];
-                Assert.True(real > previous, $"frame {frame}: present id {real} did not increase past {previous}");
-                Assert.True(generatedId > real,
-                    $"frame {frame}: the generated present id {generatedId} did not follow the real one {real}");
-                previous = generatedId;
-            }
-
-            // Nothing leaked out of the free list: everything is either free or
-            // parked against a submission, never lost.
-            foreach (Run run in new[] { single, doubled })
-            {
-                for (int i = 0; i < run.FreeAcquireSemaphores.Count; i++)
-                {
-                    Assert.True(run.FreeAcquireSemaphores[i] + run.PendingAcquireSemaphores[i] <= run.AcquireSemaphoreCapacity,
-                        $"the free list held {run.FreeAcquireSemaphores[i]} free and {run.PendingAcquireSemaphores[i]} parked " +
-                        $"semaphores of {run.AcquireSemaphoreCapacity}");
-                }
-            }
-
-            // The bound the swapchain was actually built with, re-derived rather
-            // than recompiled: max(imageCount, F x P) + 1 with P = 2, not
-            // imageCount + 1. Asserted against the live PresentPressure the device
-            // handed Swapchain.TryCreate, so a device that quietly went back to one
-            // present per frame fails here and not only in the numbers.
-            PresentPressure pressure = doubled.Pressure;
-            Assert.Equal(PresentPressure.GeneratedPlusRealPerFrame, pressure.PresentsPerFrame);
-            Assert.Equal(doubled.FramesInFlight, pressure.FramesInFlight);
-            Assert.Equal(
-                AcquireSemaphoreFreeList.CapacityFor(doubled.ImageCount, pressure),
-                doubled.AcquireSemaphoreCapacity);
-            Assert.Equal(
-                Math.Max((int)doubled.ImageCount, doubled.FramesInFlight * 2) + 1,
-                doubled.AcquireSemaphoreCapacity);
-        }
-        finally
-        {
-            GLFW.DestroyWindow(window);
-            GLFW.Terminate();
-        }
-    }
-
-    /// <summary>
-    /// The lifetime hazard the design names first, at the one place step 0 opened
-    /// it: the window between the frame's two acquires.
-    ///
-    /// The frame's first acquire already holds an image of the current swapchain
-    /// slot and one of its acquire semaphores, and its present submission has not
-    /// been made yet - so the slot's LastPresentValue is still the previous
-    /// frame's. If the second acquire is allowed to rebuild there, Build retires
-    /// that slot against that stale value and the next Collect destroys its
-    /// semaphores while this frame's present submission is still waiting on them.
-    /// It is a use-after-free that no single-frame readback can see and that only
-    /// appears when a resize or a SUBOPTIMAL acquire lands inside that window.
-    ///
-    /// Many frames, poison on, a present between them and no readback in the
-    /// loop; a rebuild is requested between the two acquires of every frame,
-    /// which is the window itself. The proof is that no swapchain was created
-    /// during a Present - Creations may only move at the NEXT frame's first
-    /// acquire, where it always moved - and that the run is validation-clean
-    /// under sync,best.
-    /// </summary>
-    [SkippableFact]
-    public unsafe void ARebuildBetweenTheTwoAcquiresNeverRetiresTheSlotTheFrameIsPresenting()
+    public unsafe void WithPacingOffEveryFrameIsOneSynchronousPresentAndNoThreadStarts()
     {
         Skip.IfNot(SwapchainTests.TryCreateWindow(_output, Width, Height, out Window* window),
             "No usable window system.");
@@ -161,68 +61,59 @@ public class GeneratedPresentTests
         try
         {
             VulkanDevice device = GpuTest.NewDevice();
-            device.ConfigureContextOptions += options => options.Poison = true;
             if (!device.Initialize((IntPtr)window, Width, Height, out string failureReason))
             {
                 device.Dispose();
                 Skip.If(true, "Vulkan presentation unavailable: " + failureReason);
             }
 
-            int rebuildsRequested = 0;
-            int creationsDuringPresent = 0;
-            int generatedPresents = 0;
             using (device)
             {
                 VulkanDevice seam = device;
-                device.GeneratedPresentEnabled = true;
+                device.PacedPresentEnabled = false;
                 int programId = SwapchainTests.LinkFullscreenProgram(seam);
-
                 Swapchain swapchain = device.SwapchainForTests!;
-                int creationsAtAcquire = -1;
-                device.BetweenPresentAcquiresForTests = () =>
-                {
-                    creationsAtAcquire = swapchain.Creations;
-                    swapchain.RequestRebuild(Width, Height, vsync: true);
-                    rebuildsRequested++;
-                };
 
-                for (int frame = 0; frame < Frames; frame++)
+                int presents = 0;
+                ulong previousId = 0;
+                for (int frame = 0; frame < SynchronousFrames; frame++)
                 {
-                    seam.BeginFrame();
-                    seam.BindDefaultFramebuffer();
-                    seam.ClearColor(0, 0.1f, frame / (float)Frames, 0.3f, 1f);
-                    seam.UseProgram(programId);
-                    seam.SetViewport(0, 0, Width, Height);
-                    seam.SetDepthTest(false);
-                    seam.SetCullFace(false);
-                    seam.DrawFullscreenTriangle();
+                    RenderFrame(seam, programId, frame, SynchronousFrames);
 
-                    int generatedBefore = device.GeneratedPresentsForTests;
-                    creationsAtAcquire = -1;
-                    seam.Present();
-                    // Only a frame whose first acquire succeeded entered the window.
-                    if (creationsAtAcquire >= 0 && swapchain.Creations != creationsAtAcquire) creationsDuringPresent++;
-                    if (device.GeneratedPresentsForTests != generatedBefore) generatedPresents++;
+                    // Off is off: nothing of the paced path exists after any frame.
+                    Assert.Null(device.PresentThreadForTests);
+                    Assert.Null(device.OutputPairPoolForTests);
+
+                    if (!device.LastPresentTimingsForTests.Presented) continue;
+                    presents++;
+
+                    // The render thread made the present submission itself (Submit B has a
+                    // Frame value) and presented once: the frame's id maps to this frame, and
+                    // no other present of this swapchain belongs to it.
+                    Assert.NotEqual(0UL, device.LastPresentTimingsForTests.PresentValue);
+                    ulong id = device.LastPresentIdForTests;
+                    Assert.True(id > previousId, $"frame {frame}: present id {id} did not increase past {previousId}");
+                    Assert.True(swapchain.PresentIds.TryGetFrameId(id, out ulong frameId));
+                    Assert.Equal(device.LatencyFrameId, frameId);
+                    Assert.False(swapchain.PresentIds.TryGetFrameId(id - 1, out ulong earlier) && earlier == frameId,
+                        $"frame {frame} presented twice");
+                    previousId = id;
                 }
 
-                _output.WriteLine($"{Frames} frames, poison on, a rebuild requested between the two acquires of " +
-                    $"every frame: rebuilds requested {rebuildsRequested}, swapchains created during a Present " +
-                    $"{creationsDuringPresent}, swapchain creations in total {swapchain.Creations}, " +
-                    $"generated presents {generatedPresents}, retired slots still pending {swapchain.RetiredPending}");
+                _output.WriteLine($"pacing off: {presents} presents in {SynchronousFrames} frames, mode {swapchain.PresentMode}");
+                Assert.Equal(SynchronousFrames, presents);
+                Assert.False(swapchain.FrameGenerationPresentModes);
 
-                // The window was actually entered, so a zero below is a real
-                // result rather than a test that never ran.
-                Assert.True(rebuildsRequested > 0, "no frame reached the window between the two acquires");
-
-                // The fix, stated as the thing that must not happen: no swapchain
-                // is created between the frame's two acquires. Before it, every
-                // one of these frames rebuilt there and retired the slot it was
-                // about to present from.
-                Assert.Equal(0, creationsDuringPresent);
-
-                // A refused second acquire costs that frame its generated present
-                // and nothing else - the frame still presented once.
-                Assert.Equal(0, generatedPresents);
+                // The bound the swapchain was built with, re-derived rather than
+                // recompiled: max(imageCount, F x P) + 1 with P = 2, whether or not the
+                // switch is on, because the semaphores are created once per swapchain.
+                SwapchainSlot slot = swapchain.CurrentSlotForTests!;
+                PresentPressure pressure = swapchain.Pressure;
+                Assert.Equal(PresentPressure.GeneratedPlusRealPerFrame, pressure.PresentsPerFrame);
+                Assert.Equal(device.FramesInFlightForTests, pressure.FramesInFlight);
+                Assert.Equal(AcquireSemaphoreFreeList.CapacityFor(slot.ImageCount, pressure), slot.AcquireSemaphoreCount);
+                Assert.Equal(Math.Max((int)slot.ImageCount, device.FramesInFlightForTests * 2) + 1,
+                    slot.AcquireSemaphoreCount);
 
                 GpuTest.AssertClean(seam);
             }
@@ -234,106 +125,115 @@ public class GeneratedPresentTests
         }
     }
 
-    /// <summary>
-    /// <paramref name="generated" /> frames, presented, with no readback in the
-    /// loop: a readback would drain the queue every frame and hide exactly the
-    /// bookkeeping this is about.
-    /// </summary>
-    private Run Present(IntPtr window, bool generated)
+    [SkippableFact]
+    public unsafe void PacedFramesPresentGeneratedThenRealWithTheIdsReservedAtHandoff()
     {
-        VulkanDevice device = GpuTest.NewDevice();
-        if (!device.Initialize(window, Width, Height, out string failureReason))
-        {
-            device.Dispose();
-            Skip.If(true, "Vulkan presentation unavailable: " + failureReason);
-        }
+        Skip.IfNot(SwapchainTests.TryCreateWindow(_output, Width, Height, out Window* window),
+            "No usable window system.");
 
-        var run = new Run();
-        using (device)
+        try
         {
-            VulkanDevice seam = device;
-            device.GeneratedPresentEnabled = generated;
-            int programId = SwapchainTests.LinkFullscreenProgram(seam);
-
-            for (int frame = 0; frame < Frames; frame++)
+            VulkanDevice device = GpuTest.NewDevice();
+            if (!device.Initialize((IntPtr)window, Width, Height, out string failureReason))
             {
-                seam.BeginFrame();
-                seam.BindDefaultFramebuffer();
-                seam.ClearColor(0, frame / (float)Frames, 0.2f, 0.3f, 1f);
-                seam.UseProgram(programId);
-                seam.SetViewport(0, 0, Width, Height);
-                seam.SetDepthTest(false);
-                seam.SetCullFace(false);
-                seam.DrawFullscreenTriangle();
-
-                int generatedBefore = device.GeneratedPresentsForTests;
-                seam.Present();
-
-                Swapchain? swapchain = device.SwapchainForTests;
-                SwapchainSlot? slot = swapchain?.CurrentSlotForTests;
-                run.FramesInFlight = device.FramesInFlightForTests;
-                if (swapchain != null) run.Pressure = swapchain.Pressure;
-                if (slot != null)
-                {
-                    run.ImageCount = slot.ImageCount;
-                    run.AcquireSemaphoreCapacity = slot.AcquireSemaphoreCount;
-                    run.FreeAcquireSemaphores.Add(slot.FreeAcquireSemaphores);
-                    run.PendingAcquireSemaphores.Add(slot.PendingAcquireSemaphores);
-                }
-
-                if (!device.LastPresentTimingsForTests.Presented) continue;
-                run.Presents++;
-                run.RealPresentIds.Add(device.LastPresentIdForTests);
-
-                if (device.GeneratedPresentsForTests == generatedBefore) continue;
-                run.GeneratedPresents++;
-                run.Presents++;
-                ulong generatedId = device.LastGeneratedPresentIdForTests;
-                run.GeneratedPresentIds.Add(generatedId);
-
-                // Both presents of the frame belong to one frame id, and the map
-                // that the driver reports are matched through holds both.
-                Assert.True(swapchain!.PresentIds.TryGetFrameId(device.LastPresentIdForTests, out ulong realFrameId));
-                Assert.True(swapchain.PresentIds.TryGetFrameId(generatedId, out ulong generatedFrameId));
-                Assert.Equal(realFrameId, generatedFrameId);
-
-                // "The same image" is what the two recorded blits say: one source
-                // image, one source extent, two different acquired destinations.
-                BlitPresentPath path = device.BlitPresentPathForTests!;
-                PresentBlitRecord real = path.PreviousRecordedBlit;
-                PresentBlitRecord copy = path.LastRecordedBlit;
-
-                // Step 1: the source is per call now, and every caller still
-                // passes the default colour image.
-                Assert.Equal(device.DefaultColorImageForTests, real.SourceImage);
-                Assert.Equal(device.DefaultColorImageForTests, copy.SourceImage);
-
-                if (real.SourceImage != 0 && real.SourceImage == copy.SourceImage &&
-                    real.SourceWidth == copy.SourceWidth && real.SourceHeight == copy.SourceHeight &&
-                    real.DestinationExtent.Width == copy.DestinationExtent.Width &&
-                    real.DestinationExtent.Height == copy.DestinationExtent.Height)
-                {
-                    run.IdenticalBlits++;
-                }
-                if (real.DestinationImage != copy.DestinationImage) run.DistinctDestinations++;
+                device.Dispose();
+                Skip.If(true, "Vulkan presentation unavailable: " + failureReason);
             }
 
-            GpuTest.AssertClean(seam);
+            var records = new List<PacedPresentRecord>();
+            var handoffs = new List<VulkanDevice.PacedHandoff>();
+            using (device)
+            {
+                VulkanDevice seam = device;
+                int programId = SwapchainTests.LinkFullscreenProgram(seam);
+                device.PacedPresentEnabled = true;
+                device.ConfigurePresentThreadForTests = thread => thread.PresentedForTests = record =>
+                {
+                    lock (records) records.Add(record);
+                };
+
+                for (int frame = 0; frame < PacedFrames; frame++)
+                {
+                    RenderFrame(seam, programId, frame, PacedFrames);
+                    Assert.True(device.LastPresentTimingsForTests.Presented, $"frame {frame} was not handed off");
+                    handoffs.Add(device.LastPacedHandoffForTests);
+                }
+
+                PresentThread thread = device.PresentThreadForTests!;
+                OutputPairPool pool = device.OutputPairPoolForTests!;
+                Assert.True(pool.WaitUntilPresented(TimeSpan.FromSeconds(30)),
+                    "the present thread did not present every handed-off pair within 30 s");
+
+                var shutdown = Stopwatch.StartNew();
+                device.ShutDownPacedPresent();
+                shutdown.Stop();
+
+                Swapchain swapchain = device.SwapchainForTests!;
+                FramePacingSnapshot generatedIntervals = thread.PresentIntervals(PacedPresentKind.Generated);
+                FramePacingSnapshot realIntervals = thread.PresentIntervals(PacedPresentKind.Real);
+                _output.WriteLine($"{PacedFrames} paced frames: {thread.GeneratedPresents} generated, {thread.RealPresents} real, " +
+                    $"{thread.SkippedPresents} skipped, back-pressure waits {pool.BackPressureWaits}, mode {swapchain.PresentMode}, " +
+                    $"shutdown {shutdown.Elapsed.TotalMilliseconds:F1} ms");
+                _output.WriteLine($"intervals before a generated present p50 {generatedIntervals.P50:F2} ms p99 {generatedIntervals.P99:F2}; " +
+                    $"before a real present p50 {realIntervals.P50:F2} ms p99 {realIntervals.P99:F2} (stand-in pacer: real follows at once)");
+
+                Assert.True(shutdown.Elapsed < TimeSpan.FromSeconds(5), "the shutdown did not join within its bound");
+                Assert.Null(device.PresentThreadForTests);
+                Assert.False(thread.IsRunning);
+                Assert.Null(thread.Failure);
+                Assert.Equal(PacedFrames, thread.GeneratedPresents);
+                Assert.Equal(PacedFrames, thread.RealPresents);
+                Assert.Equal(0, thread.SkippedPresents);
+                // Vsync is on by default: frame generation presents FIFO, never MAILBOX.
+                Assert.Equal(PresentModeKHR.FifoKhr, swapchain.PresentMode);
+
+                List<PacedPresentRecord> presented;
+                lock (records) presented = new List<PacedPresentRecord>(records);
+                Assert.Equal(PacedFrames * 2, presented.Count);
+
+                ulong previousId = 0;
+                for (int frame = 0; frame < PacedFrames; frame++)
+                {
+                    PacedPresentRecord generated = presented[frame * 2];
+                    PacedPresentRecord real = presented[frame * 2 + 1];
+                    VulkanDevice.PacedHandoff handoff = handoffs[frame];
+
+                    Assert.Equal(PacedPresentKind.Generated, generated.Kind);
+                    Assert.Equal(PacedPresentKind.Real, real.Kind);
+                    // The ids the render thread reserved at handoff, and no others.
+                    Assert.Equal(handoff.GeneratedPresentId, generated.PresentId);
+                    Assert.Equal(handoff.RealPresentId, real.PresentId);
+                    // Both halves are this frame's: its latency id, its pair, its Frame value.
+                    Assert.Equal(handoff.LatencyFrameId, generated.LatencyFrameId);
+                    Assert.Equal(handoff.LatencyFrameId, real.LatencyFrameId);
+                    Assert.Equal(handoff.PairIndex, generated.PairIndex);
+                    Assert.Equal(handoff.PairIndex, real.PairIndex);
+                    Assert.Equal(handoff.FrameValue, generated.FrameValue);
+                    // Strictly increasing in present order, across both halves and frames.
+                    Assert.True(generated.PresentId > previousId,
+                        $"frame {frame}: generated id {generated.PresentId} did not increase past {previousId}");
+                    Assert.True(real.PresentId > generated.PresentId,
+                        $"frame {frame}: real id {real.PresentId} did not follow generated id {generated.PresentId}");
+                    Assert.True(real.PresentValue > generated.PresentValue);
+                    previousId = real.PresentId;
+
+                    Assert.True(swapchain.PresentIds.TryGetFrameId(real.PresentId, out ulong realFrame) || frame < PacedFrames - 32);
+                    if (frame >= PacedFrames - 16) Assert.Equal(handoff.LatencyFrameId, realFrame);
+                }
+
+                // The swapchain is the render thread's again: a synchronous frame presents.
+                device.PacedPresentEnabled = false;
+                RenderFrame(seam, programId, 0, 1);
+                Assert.True(device.LastPresentTimingsForTests.Presented);
+                Assert.NotEqual(0UL, device.LastPresentTimingsForTests.PresentValue);
+
+                GpuTest.AssertClean(seam);
+            }
         }
-        return run;
-    }
-
-    private static int Min(List<int> values)
-    {
-        int min = int.MaxValue;
-        foreach (int value in values) min = Math.Min(min, value);
-        return values.Count == 0 ? 0 : min;
-    }
-
-    private static int Max(List<int> values)
-    {
-        int max = int.MinValue;
-        foreach (int value in values) max = Math.Max(max, value);
-        return values.Count == 0 ? 0 : max;
+        finally
+        {
+            GLFW.DestroyWindow(window);
+            GLFW.Terminate();
+        }
     }
 }

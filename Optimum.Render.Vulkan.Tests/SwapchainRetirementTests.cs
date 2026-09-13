@@ -281,6 +281,91 @@ public class SwapchainRetirementTests
         Assert.Equal(1, list.PendingCount);
     }
 
+    // ----------------------------------------------- frame generation, hand-over
+
+    /// <summary>
+    /// The paced present's present-mode rule: MAILBOX would replace the queued generated
+    /// frame with the real one presented right after it, and FIFO_RELAXED would let a
+    /// late generated frame tear into its real one - so vsync on is FIFO, vsync off is
+    /// IMMEDIATE, and a surface without IMMEDIATE falls back to FIFO, never to MAILBOX.
+    /// </summary>
+    [Fact]
+    public void FrameGenerationNeverPresentsMailboxOrRelaxedFifo()
+    {
+        PresentModeKHR[] all = { PresentModeKHR.FifoKhr, PresentModeKHR.FifoRelaxedKhr, PresentModeKHR.MailboxKhr, PresentModeKHR.ImmediateKhr };
+        PresentModeKHR[] noImmediate = { PresentModeKHR.FifoKhr, PresentModeKHR.FifoRelaxedKhr, PresentModeKHR.MailboxKhr };
+        PresentModeKHR[] fifoOnly = { PresentModeKHR.FifoKhr };
+
+        Assert.Equal(PresentModeKHR.FifoKhr, SwapchainPolicy.ChoosePresentMode(true, false, all, frameGeneration: true));
+        Assert.Equal(PresentModeKHR.FifoKhr, SwapchainPolicy.ChoosePresentMode(true, true, all, frameGeneration: true));
+        Assert.Equal(PresentModeKHR.ImmediateKhr, SwapchainPolicy.ChoosePresentMode(false, false, all, frameGeneration: true));
+        Assert.Equal(PresentModeKHR.FifoKhr, SwapchainPolicy.ChoosePresentMode(false, false, noImmediate, frameGeneration: true));
+        Assert.Equal(PresentModeKHR.FifoKhr, SwapchainPolicy.ChoosePresentMode(false, true, fifoOnly, frameGeneration: true));
+
+        // Without frame generation nothing changed.
+        Assert.Equal(PresentModeKHR.MailboxKhr, SwapchainPolicy.ChoosePresentMode(false, false, all, frameGeneration: false));
+        Assert.Equal(PresentModeKHR.FifoRelaxedKhr, SwapchainPolicy.ChoosePresentMode(true, true, all, frameGeneration: false));
+    }
+
+    /// <summary>
+    /// A hand-over between the render thread's Frame timeline and the present thread's
+    /// own timeline: a retired slot keyed on a value of the old clock is re-keyed onto the
+    /// new clock's first submission, not compared against an unrelated counter - which
+    /// would destroy it at once (old value below the new counter) or never (above it).
+    /// </summary>
+    [Fact]
+    public void AHandOverReKeysRetiredSlotsOntoTheNewClocksFirstValue()
+    {
+        var frameClock = new FakeClock { FrameRecorded = 40, FrameCompleted = 40 };
+        var retirement = new SwapchainRetirement(frameClock);
+        var presented = new Slot("presented");
+        var never = new Slot("never");
+        retirement.Retire(presented, SwapchainPolicy.RetireAfter(40));
+        retirement.Retire(never, 0);
+
+        var presentClock = new FakeClock();
+        retirement.Rebase(presentClock, presentClock.FrameRecorded + 1);
+
+        Assert.Equal(1, retirement.Collect());
+        Assert.Equal(1, never.DisposeCount);
+        Assert.Equal(0, presented.DisposeCount);
+
+        presentClock.FrameCompleted = 1;
+        Assert.Equal(1, retirement.Collect());
+        Assert.Equal(1, presented.DisposeCount);
+
+        // And back: the Frame clock resumes from its own values.
+        var again = new Slot("again");
+        retirement.Retire(again, SwapchainPolicy.RetireAfter(3));
+        retirement.Rebase(frameClock, frameClock.FrameRecorded + 1);
+        Assert.Equal(0, retirement.Collect());
+        frameClock.FrameCompleted = 41;
+        Assert.Equal(1, retirement.Collect());
+        Assert.Equal(1, again.DisposeCount);
+    }
+
+    [Fact]
+    public void AfterAHandOverEveryParkedAcquireSemaphoreIsFreeAgain()
+    {
+        var list = new AcquireSemaphoreFreeList(new ulong[] { 1, 2, 3 });
+        ulong first = list.Take(0);
+        ulong second = list.Take(0);
+        list.Take(0);
+        Assert.Equal(0UL, list.OldestPendingValue);
+        list.ReturnAfter(first, frameValue: 12);
+        list.ReturnAfter(second, frameValue: 10);
+
+        // The present thread waits for this one when nothing is free.
+        Assert.Equal(10UL, list.OldestPendingValue);
+        Assert.Throws<InvalidOperationException>(() => list.Take(0));
+
+        list.ReleaseAllPending();
+        Assert.Equal(0UL, list.OldestPendingValue);
+        Assert.Equal(0, list.PendingCount);
+        Assert.Equal(2, list.FreeCount);
+        Assert.Equal(new HashSet<ulong> { first, second }, new HashSet<ulong> { list.Take(0), list.Take(0) });
+    }
+
     // ---------------------------------------------------- FIFO_RELAXED promotion
 
     [Fact]
