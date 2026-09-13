@@ -574,6 +574,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumUpscalerPassthroughFilterChanged",
         "onOptimumUpscalerJitterChanged",
         "optimumUpdateUpscalerRows",
+        // DLSS-FG, the paced present: the frame generation row's handler, its
+        // unavailability hook (the renderer's reported reason first) and its label
+        // with the restart note.
+        "onOptimumFrameGenerationChanged",
+        "optimumFrameGenerationUnavailable",
+        "optimumFrameGenerationLabelText",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",

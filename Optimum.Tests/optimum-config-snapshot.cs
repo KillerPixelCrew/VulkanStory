@@ -33,11 +33,20 @@ internal readonly struct OptimumConfigSnapshot
     private readonly float _planLodBias;
     private readonly int[] _atlases;
     private readonly float _appliedBias;
+    // Frame generation: the session's latched value, the next session's choice, and the
+    // renderer's stand-down (null while frame generation was not stood down).
+    private readonly bool _frameGeneration;
+    private readonly bool _frameGenerationNextSession;
+    private readonly string? _frameGenerationUnavailableReason;
 
     private OptimumConfigSnapshot(
         string upscaler, string quality, bool taa, float taaMipBias, float renderScale, float lodBiasOffset,
-        float planRenderScale, float planLodBias, int[] atlases, float appliedBias)
+        float planRenderScale, float planLodBias, int[] atlases, float appliedBias,
+        bool frameGeneration, bool frameGenerationNextSession, string? frameGenerationUnavailableReason)
     {
+        _frameGeneration = frameGeneration;
+        _frameGenerationNextSession = frameGenerationNextSession;
+        _frameGenerationUnavailableReason = frameGenerationUnavailableReason;
         _upscaler = upscaler;
         _quality = quality;
         _taa = taa;
@@ -60,7 +69,10 @@ internal readonly struct OptimumConfigSnapshot
         OptimumConfig.UpscalerRenderScale,
         OptimumConfig.UpscalerLodBias,
         OptimumConfig.LodBiasedAtlases,
-        OptimumConfig.AppliedTerrainLodBias);
+        OptimumConfig.AppliedTerrainLodBias,
+        OptimumConfig.FrameGeneration,
+        OptimumConfig.FrameGenerationNextSession,
+        OptimumConfig.FrameGenerationUnavailableReason);
 
     public void Restore()
     {
@@ -70,6 +82,16 @@ internal readonly struct OptimumConfigSnapshot
         OptimumConfig.TaaMipBias = _taaMipBias;
         OptimumConfig.RenderScale = _renderScale;
         OptimumConfig.UpscalerLodBiasOffset = _lodBiasOffset;
+
+        // The stand-down is its reason: cleared, then re-issued with the same sentence when
+        // the captured state had one, so "never stood down" comes back as itself.
+        OptimumConfig.FrameGeneration = _frameGeneration;
+        OptimumConfig.FrameGenerationNextSession = _frameGenerationNextSession;
+        OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+        if (_frameGenerationUnavailableReason != null)
+        {
+            OptimumConfig.DisableFrameGenerationAtRuntime(_frameGenerationUnavailableReason);
+        }
 
         // "A plan is published" is the render scale, never the bias: a DLAA plan
         // carries a bias of 0 and is still a plan.
@@ -120,8 +142,17 @@ public class OptimumConfigSnapshotTests
             OptimumConfig.SetUpscalerPlan(0.6f, -1.25f);
             OptimumConfig.RegisterLodBiasedAtlases(atlases);
             OptimumConfig.NoteTerrainLodBiasApplied(-1.25f, reachedAtlases: true);
+            OptimumConfig.FrameGeneration = true;
+            OptimumConfig.FrameGenerationNextSession = false;
+            OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+            OptimumConfig.DisableFrameGenerationAtRuntime("captured reason");
 
             OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
+
+            OptimumConfig.FrameGeneration = false;
+            OptimumConfig.FrameGenerationNextSession = true;
+            OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+            OptimumConfig.DisableFrameGenerationAtRuntime("a test's own reason");
 
             // What a test does to it, ending the way the old cleanups ended.
             OptimumConfig.Upscaler = "off";
@@ -146,6 +177,17 @@ public class OptimumConfigSnapshotTests
             Assert.Equal(-1.25f, OptimumConfig.UpscalerLodBias, 5);
             Assert.Same(atlases, OptimumConfig.LodBiasedAtlases);
             Assert.Equal(-1.25f, OptimumConfig.AppliedTerrainLodBias, 5);
+            Assert.True(OptimumConfig.FrameGeneration);
+            Assert.False(OptimumConfig.FrameGenerationNextSession);
+            Assert.Equal("captured reason", OptimumConfig.FrameGenerationUnavailableReason);
+
+            // "Never stood down" is a state of its own and comes back as itself.
+            OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+            OptimumConfigSnapshot upright = OptimumConfigSnapshot.Capture();
+            OptimumConfig.DisableFrameGenerationAtRuntime("stood down after the capture");
+            upright.Restore();
+            Assert.False(OptimumConfig.FrameGenerationRuntimeDisabled);
+            Assert.Null(OptimumConfig.FrameGenerationUnavailableReason);
 
             // "Optimum has never touched the parameter" is a state of its own and
             // must not come back as a concrete bias.

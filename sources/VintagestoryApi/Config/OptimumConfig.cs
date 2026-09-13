@@ -598,6 +598,97 @@ public static class OptimumConfig
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// DLSS frame generation (DLSS-G): the setting this session runs with. False by default.
+    ///
+    /// <para>Two values, not one, because the setting needs a restart.</para> The paced
+    /// present that frame generation ships with (docs/ROADMAP.md, "The paced present: the
+    /// design") is decided at device creation: the second queue from the graphics family,
+    /// the present thread that owns the swapchain, the output pairs, the NGX feature. A gate
+    /// that flipped under a running session would ask the next framebuffer rebuild for a UI
+    /// target and a HUD-less snapshot that no present thread consumes - or, worse, would let
+    /// a later stage believe frame generation is on when nothing paces it. The user's
+    /// requirement is that nothing exposes frame generation unpaced ("DLSSFG without pacing
+    /// (Reflex) is useless and unplayable", 2026-09-13), so this value is fixed for the
+    /// session by <see cref="Load" /> and only <see cref="FrameGenerationNextSession" /> moves
+    /// when the settings row does.
+    ///
+    /// <para>Threading: written by <see cref="Load" /> on the main thread before any renderer
+    /// exists, and only read after that - immutable once the renderer starts. Tests write it
+    /// directly.</para>
+    /// </summary>
+    public static bool FrameGeneration;
+
+    /// <summary>
+    /// What the settings row wrote and <see cref="Save" /> persists as <c>FrameGeneration</c>:
+    /// the value the next session starts with. Equal to <see cref="FrameGeneration" /> until
+    /// the player changes the row, and the difference is exactly what the row's "restart
+    /// required" note reports. Main thread only (settings dialog and Load/Save).
+    /// </summary>
+    public static bool FrameGenerationNextSession;
+
+    // Null until the first stand-down, then that stand-down's reason; the stand-down IS this
+    // field being non-null. Interlocked: the stand-down can come from the render thread (NGX
+    // refusing the feature, a missing second queue at device creation) or from the present
+    // thread once it exists, while the settings dialog and both gates read it on the main
+    // thread. One field and one CompareExchange, not a flag beside a reason: with two, one
+    // thread could win the reason and another the flag, and the line logged by the winner
+    // would not be the sentence the settings row shows.
+    private static string? frameGenerationUnavailableReason;
+
+    /// <summary>
+    /// Set by the renderer when frame generation cannot run paced this session - the OpenGL
+    /// renderer (it has no present thread and never will), a graphics family with one queue,
+    /// a latency backend other than NvLowLatency2, NGX refusing the feature. It stays down for
+    /// the rest of the session and the frame runs exactly as it does with the setting off;
+    /// never a hard failure. The persisted setting is untouched. The frame generation
+    /// counterpart of <see cref="UpscalerRuntimeDisabled" />.
+    /// </summary>
+    public static bool FrameGenerationRuntimeDisabled =>
+        Volatile.Read(ref frameGenerationUnavailableReason) != null;
+
+    /// <summary>
+    /// The one sentence the renderer gave for standing frame generation down, or null while
+    /// nothing has. This is the hook the settings row reads to show frame generation as
+    /// unavailable (the <c>OptimumUpscalerUnavailable</c> convention): a renderer that knows
+    /// it cannot run frame generation paced calls <see cref="DisableFrameGenerationAtRuntime" />
+    /// with its reason whether or not the setting is on, and the row says so.
+    /// </summary>
+    public static string? FrameGenerationUnavailableReason =>
+        Volatile.Read(ref frameGenerationUnavailableReason);
+
+    /// <summary>
+    /// Stands frame generation down for the session and records why. Returns true the first
+    /// time only, from whichever thread got there first, so the renderer logs one line.
+    /// </summary>
+    public static bool DisableFrameGenerationAtRuntime(string reason)
+    {
+        // A blank reason would read as "not stood down", so it is replaced, never stored.
+        string recorded = string.IsNullOrWhiteSpace(reason) ? "the renderer stood frame generation down" : reason;
+        return Interlocked.CompareExchange(ref frameGenerationUnavailableReason, recorded, null) == null;
+    }
+
+    /// <summary>
+    /// Clears the stand-down and its reason. Only the tests call it, for the reason on
+    /// <see cref="ResetUpscalerRuntimeDisabledForTests" />: NGX allows one lifetime per
+    /// process, so a running client never retries.
+    /// </summary>
+    public static void ResetFrameGenerationRuntimeDisabledForTests()
+    {
+        Volatile.Write(ref frameGenerationUnavailableReason, null);
+    }
+
+    /// <summary>
+    /// Whether frame generation is in effect: the session's setting, with DLSS Super
+    /// Resolution the upscaler in effect (DLSS-G is fed by the same NGX session and its
+    /// inputs are the DLSS frame's), and not stood down by the renderer. Both
+    /// framebuffer-setup gates OR this in - the HUD-less snapshot and the UI target are the
+    /// vendor's <c>pHudless</c> and <c>pUI</c> - and with the setting off both answer exactly
+    /// what they answered before it existed.
+    /// </summary>
+    public static bool EffectiveFrameGeneration =>
+        FrameGeneration && EffectiveUpscalerIsDlss && !FrameGenerationRuntimeDisabled;
+
+    /// <summary>
     /// Whether the passthrough comparison upscaler is the one in effect. It is in the
     /// slot DLSS is in and takes the identical path; only the evaluate differs.
     /// </summary>
@@ -1224,6 +1315,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
         (nameof(OptimumConfigData.UpscalerPassthroughFilter), UpscalerPassthroughFilter),
         (nameof(OptimumConfigData.UpscalerJitter), UpscalerJitter.ToString()),
+        (nameof(OptimumConfigData.FrameGeneration), FrameGeneration.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1365,6 +1457,11 @@ public static class OptimumConfig
                 string.Equals(requestedPassthroughFilter, "nearest", StringComparison.OrdinalIgnoreCase) ? "nearest" :
                 "linear";
             UpscalerJitter = data.UpscalerJitter;
+            // A plain bool, so it cannot fail the parse; a config that never mentions it comes
+            // up off. Both halves take the file's value: the session runs with it and the row
+            // starts from it (see FrameGeneration for why they are two fields).
+            FrameGeneration = data.FrameGeneration;
+            FrameGenerationNextSession = data.FrameGeneration;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1445,6 +1542,9 @@ public static class OptimumConfig
             UpscalerLodBiasOffset = UpscalerLodBiasOffset,
             UpscalerPassthroughFilter = UpscalerPassthroughFilter,
             UpscalerJitter = UpscalerJitter,
+            // The next session's value, never the running one: a Save from any other row
+            // must not undo a frame generation change the player is waiting to restart for.
+            FrameGeneration = FrameGenerationNextSession,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1533,6 +1633,7 @@ internal sealed class OptimumConfigData
     public float UpscalerLodBiasOffset { get; set; } = 1.0f;
     public string UpscalerPassthroughFilter { get; set; } = "linear";
     public bool UpscalerJitter { get; set; } = true;
+    public bool FrameGeneration { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

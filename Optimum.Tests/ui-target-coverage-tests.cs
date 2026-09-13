@@ -126,7 +126,12 @@ public class UiTargetCoverageTests
         string platform = Platform();
 
         string gate = MethodBody(platform, "public bool OptimumUiTargetRequested");
-        Assert.Contains("Vintagestory.API.Config.OptimumUiTarget.Enabled", gate);
+        // The test override OR frame generation in effect: with the setting off the gate is
+        // exactly the environment switch it was.
+        Assert.Contains(
+            "return Vintagestory.API.Config.OptimumUiTarget.Enabled || Vintagestory.API.Config.OptimumConfig.EffectiveFrameGeneration;",
+            gate);
+        Assert.DoesNotContain("OptimumConfig.FrameGeneration;", gate);
         // Its own flag, deliberately not the upscaler's: an upscaler wants the HUD-less
         // scene, frame generation wants the UI separated as well.
         Assert.DoesNotContain("UpscalerReplacesTaa", gate);

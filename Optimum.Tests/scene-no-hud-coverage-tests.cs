@@ -87,7 +87,15 @@ public class SceneNoHudCoverageTests
     {
         string platform = Platform();
         string gate = MethodBody(platform, "public bool OptimumSceneNoHudRequested");
-        Assert.Contains("Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa", gate);
+        // An upscaler, or frame generation (whose pHudless this is). With the frame
+        // generation setting off EffectiveFrameGeneration is false, so the gate answers
+        // exactly the upscaler's question it answered before the setting existed.
+        Assert.Contains(
+            "return Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa || Vintagestory.API.Config.OptimumConfig.EffectiveFrameGeneration;",
+            gate);
+        // The effective value, never the raw setting: a stood-down or non-DLSS session
+        // must not allocate frame generation's inputs.
+        Assert.DoesNotContain("OptimumConfig.FrameGeneration;", gate);
 
         // The GL allocation and the device one are both behind that one question.
         Assert.Contains("if (OptimumSceneNoHudRequested)", platform);

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..17deee8 100644
+index 4d08f84..5d17015 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,28 @@ public class GuiCompositeSettings : GuiComposite
@@ -147,7 +147,7 @@ index 4d08f84..17deee8 100644
  			DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
  			if (shaderUniforms != null)
  			{
-@@ -1740,10 +1788,551 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1788,635 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -325,6 +325,15 @@ index 4d08f84..17deee8 100644
 +		{
 +			upscalerTooltip = upscalerTooltip + "\n\n" + Lang.Get("optimum-upscaler-unavailable") + " " + upscalerUnavailable;
 +		}
++		// Frame generation says what this machine can do the same way, through one hook
++		// (optimumFrameGenerationUnavailable) that asks the renderer's own report first.
++		string frameGenerationUnavailable = optimumFrameGenerationUnavailable();
++		string frameGenerationOnLabel = (frameGenerationUnavailable == null) ? Lang.Get("optimum-framegeneration-on") : Lang.Get("optimum-framegeneration-on-unavailable");
++		string frameGenerationTooltip = Lang.Get("optimum-framegeneration-tooltip");
++		if (frameGenerationUnavailable != null)
++		{
++			frameGenerationTooltip = frameGenerationTooltip + "\n\n" + Lang.Get("optimum-upscaler-unavailable") + " " + frameGenerationUnavailable;
++		}
 +		composer = ComposerHeader("gamesettings-optimumupscalingoptions", "optimumupscaling")
 +			.AddStaticText(Lang.Get("optimum-upscaler"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
 +			.AddHoverText(upscalerTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
@@ -354,12 +363,18 @@ index 4d08f84..17deee8 100644
 +			.AddStaticText(Lang.Get("optimum-upscalerjitter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-upscalerjitter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 5, 400, 25))
 +			.AddDropDown(new string[] { "on", "off" }, new string[] { Lang.Get("optimum-upscalerjitter-on"), Lang.Get("optimum-upscalerjitter-off") }, 0, onOptimumUpscalerJitterChanged, ElementBounds.Fixed(450, y0 + rowH * 5 + 2, 200, 25), "optUpscalerJitter")
++			// Frame generation. A dropdown rather than a switch so the "on" entry can say
++			// it is unavailable, the way the DLSS entry does; the label is dynamic because
++			// the setting needs a restart and the row has to say so once it was changed.
++			.AddDynamicText(optimumFrameGenerationLabelText(), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 440, 30), "optFrameGenerationLabel")
++			.AddHoverText(frameGenerationTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 400, 25))
++			.AddDropDown(new string[] { "off", "on" }, new string[] { Lang.Get("optimum-framegeneration-off"), frameGenerationOnLabel }, 0, onOptimumFrameGenerationChanged, ElementBounds.Fixed(450, y0 + rowH * 6 + 2, 200, 25), "optFrameGeneration")
 +			// The readout. Dynamic, not static: it is re-read every frame from the
 +			// platform while the dialog is open (Refresh), so a preset change shows the
 +			// plan the next frame really used instead of the one before it.
-+			.AddStaticText(Lang.Get("optimum-upscaleplan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 30))
-+			.AddHoverText(Lang.Get("optimum-upscaleplan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 650, 25))
-+			.AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 60), "optUpscalePlan")
++			.AddStaticText(Lang.Get("optimum-upscaleplan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 30))
++			.AddHoverText(Lang.Get("optimum-upscaleplan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 7, 650, 25))
++			.AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 8, 650, 60), "optUpscalePlan")
 +			.EndChildElements()
 +			.Compose();
 +		handler.LoadComposer(composer);
@@ -372,6 +387,7 @@ index 4d08f84..17deee8 100644
 +		composer.GetDropDown("optLatency").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.LatencyMode);
 +		composer.GetDropDown("optUpscalerPassthroughFilter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter);
 +		composer.GetDropDown("optUpscalerJitter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
++		composer.GetDropDown("optFrameGeneration").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession ? "on" : "off");
 +		// The sharpness row's value and its "-> -1.59 mip" text are both set by
 +		// optimumUpdateUpscalerRows, which is also what a slider move calls, so the
 +		// row never shows a bias the samplers are not carrying.
@@ -581,7 +597,75 @@ index 4d08f84..17deee8 100644
 +			jitter.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
 +			jitter.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
 +		}
++		// Frame generation shows what the next session starts with - that is what the row
++		// writes - and the label carries the restart note whenever that differs from what
++		// this session runs. Always enabled: turning it off must stay possible on a machine
++		// that cannot run it, and turning it on there is refused by the handler.
++		GuiElementDropDown frameGeneration = composer.GetDropDown("optFrameGeneration");
++		if (frameGeneration != null)
++		{
++			frameGeneration.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession ? "on" : "off");
++		}
++		GuiElementDynamicText frameGenerationLabel = composer.GetDynamicText("optFrameGenerationLabel");
++		if (frameGenerationLabel != null)
++		{
++			frameGenerationLabel.SetNewText(optimumFrameGenerationLabelText());
++		}
 +		optimumUpdateUpscalePlanReadout();
++	}
++
++	/// <summary>
++	/// Optimum (DLSS-FG, the paced present): why frame generation cannot run here, or null
++	/// while it can. The hook the renderer fills: OptimumConfig.FrameGenerationUnavailableReason
++	/// is the sentence the renderer gave when it stood frame generation down - the OpenGL
++	/// stand-down, and on Vulkan a graphics family with one queue, a latency backend other than
++	/// NvLowLatency2, or NGX refusing the feature. Below it, the two things the page can tell
++	/// on its own: DLSS itself cannot come up here (the platform's upscaler answer, which on
++	/// OpenGL is "this renderer has no upscaler"), or DLSS is not the upscaler in effect.
++	/// Frame generation is never offered where it would run unpaced.
++	/// </summary>
++	private string optimumFrameGenerationUnavailable()
++	{
++		if (ScreenManager.Platform == null) return Lang.Get("optimum-upscaler-unavailable-renderer");
++		string reported = Vintagestory.API.Config.OptimumConfig.FrameGenerationUnavailableReason;
++		if (reported != null) return reported;
++		string dlss = ScreenManager.Platform.OptimumUpscalerUnavailableFor("dlss");
++		if (dlss != null) return Lang.Get("optimum-framegeneration-unavailable-dlss") + " " + dlss;
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss) return Lang.Get("optimum-framegeneration-unavailable-needs-dlss");
++		return null;
++	}
++
++	/// <summary>
++	/// Optimum: the frame generation row's label, with the restart note while the persisted
++	/// choice differs from what this session runs (the setting is latched at startup - see
++	/// OptimumConfig.FrameGeneration).
++	/// </summary>
++	private string optimumFrameGenerationLabelText()
++	{
++		string label = Lang.Get("optimum-framegeneration");
++		if (Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession != Vintagestory.API.Config.OptimumConfig.FrameGeneration)
++		{
++			label = label + " " + Lang.Get("optimum-framegeneration-restart");
++		}
++		return label;
++	}
++
++	// Frame generation needs a restart, so this handler only persists the next session's
++	// choice: no rebuild, no shader reload, no temporal reset - the running frame is exactly
++	// the frame it was, and the gates keep answering from the session's latched value. Turning
++	// it on where it cannot run paced is refused, and the row put back, exactly as the upscaler
++	// row refuses DLSS; turning it off is always allowed.
++	private void onOptimumFrameGenerationChanged(string code, bool selected)
++	{
++		bool on = string.Equals(code, "on", StringComparison.OrdinalIgnoreCase);
++		if (on && optimumFrameGenerationUnavailable() != null)
++		{
++			optimumUpdateUpscalerRows();
++			return;
++		}
++		Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession = on;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		optimumUpdateUpscalerRows();
 +	}
 +
 +	/// <summary>
@@ -699,7 +783,7 @@ index 4d08f84..17deee8 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2407,87 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2491,87 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

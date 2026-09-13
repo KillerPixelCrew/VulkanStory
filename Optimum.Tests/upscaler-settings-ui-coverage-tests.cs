@@ -200,7 +200,7 @@ public class UpscalerSettingsUiCoverageTests
 
         Assert.Contains("public virtual string OptimumUpscalerPlan()", platform);
         Assert.Contains(
-            "AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 60), \"optUpscalePlan\")",
+            "AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 8, 650, 60), \"optUpscalePlan\")",
             gui);
 
         string text = Between(gui, "private string optimumUpscalePlanText()", "\n\t}");
@@ -512,6 +512,7 @@ public class UpscalerSettingsUiCoverageTests
             // and the optimum-upscaleplan* readout keys in one prefix.
             if (key.StartsWith("optimum-upscal", StringComparison.Ordinal) ||
                 key.StartsWith("optimum-latency", StringComparison.Ordinal) ||
+                key.StartsWith("optimum-framegeneration", StringComparison.Ordinal) ||
                 key.StartsWith("optimum-taa-upscaler", StringComparison.Ordinal))
             {
                 asked.Add(key);
@@ -615,6 +616,384 @@ public class UpscalerSettingsUiCoverageTests
             OptimumConfig.UpscalerQuality = originalQuality;
             try { Directory.Delete(dataPath, recursive: true); } catch (IOException) { }
         }
+    }
+
+    // ---- (f) frame generation ----------------------------------------------
+    //
+    // DLSS-G ships paced, with Reflex, or not at all (docs/ROADMAP.md, "The paced present:
+    // the design"; user, 2026-09-13: "DLSSFG without pacing (Reflex) is useless and
+    // unplayable"). The row, the setting it writes and the gates it feeds are one subject.
+
+    /// <summary>
+    /// The row sits in the upscaling tab as a dropdown whose "on" entry can say it is
+    /// unavailable, and its tooltip states every requirement and what the player gets.
+    /// </summary>
+    [Fact]
+    public void TheTabHasAFrameGenerationRowThatStatesItsRequirements()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+        string page = Between(gui, "private void OnOptimumUpscalingOptions(bool on)", "\n\t}\n");
+
+        Assert.Contains(
+            "AddDynamicText(optimumFrameGenerationLabelText(), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 440, 30), \"optFrameGenerationLabel\")",
+            page);
+        Assert.Contains(
+            "AddDropDown(new string[] { \"off\", \"on\" }, new string[] { Lang.Get(\"optimum-framegeneration-off\"), frameGenerationOnLabel }, 0, onOptimumFrameGenerationChanged, ElementBounds.Fixed(450, y0 + rowH * 6 + 2, 200, 25), \"optFrameGeneration\")",
+            page);
+        Assert.Contains("string frameGenerationTooltip = Lang.Get(\"optimum-framegeneration-tooltip\");", page);
+        Assert.Contains(".AddHoverText(frameGenerationTooltip,", page);
+        // The row opens on what the next session starts with, which is what it writes.
+        Assert.Contains(
+            "composer.GetDropDown(\"optFrameGeneration\").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession ? \"on\" : \"off\");",
+            page);
+
+        string tooltip = LangValue("optimum-framegeneration-tooltip");
+        Assert.Contains("DLSS", tooltip);
+        Assert.Contains("NVIDIA GPU with Reflex", tooltip);
+        Assert.Contains("second graphics queue", tooltip);
+        Assert.Contains("two frames per rendered frame", tooltip);
+        Assert.Contains("pacer", tooltip);
+        // The established restart wording (the greedy-mesh row's "Needs a game restart to
+        // fully apply."), and the refusal to run unpaced said in so many words.
+        Assert.Contains("Needs a game restart to apply.", tooltip);
+        Assert.Contains("rather than running unpaced", tooltip);
+
+        foreach (string key in new[]
+        {
+            "optimum-framegeneration", "optimum-framegeneration-tooltip", "optimum-framegeneration-off",
+            "optimum-framegeneration-on", "optimum-framegeneration-on-unavailable",
+            "optimum-framegeneration-restart", "optimum-framegeneration-unavailable-dlss",
+            "optimum-framegeneration-unavailable-needs-dlss",
+        })
+        {
+            Assert.Contains("\"" + key + "\":", Read("sources/lang/en.json"));
+        }
+    }
+
+    /// <summary>
+    /// Unavailable is shown, the upscaler row's way, and asked in a fixed order: the
+    /// renderer's own report (the hook the wiring fills through
+    /// <c>OptimumConfig.DisableFrameGenerationAtRuntime</c>) before anything the page can
+    /// infer, then DLSS's own availability, then whether DLSS is the upscaler in effect.
+    /// Turning it on where it cannot run is refused before anything is persisted.
+    /// </summary>
+    [Fact]
+    public void AnUnavailableFrameGenerationIsShownAndRefused()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+        string hook = Between(gui, "private string optimumFrameGenerationUnavailable()", "\n\t}\n");
+
+        int reported = hook.IndexOf("Vintagestory.API.Config.OptimumConfig.FrameGenerationUnavailableReason", StringComparison.Ordinal);
+        int dlss = hook.IndexOf("ScreenManager.Platform.OptimumUpscalerUnavailableFor(\"dlss\")", StringComparison.Ordinal);
+        int effective = hook.IndexOf("Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss", StringComparison.Ordinal);
+        Assert.True(reported >= 0 && dlss > reported && effective > dlss,
+            "the renderer's report, then DLSS availability, then the upscaler in effect");
+        Assert.EndsWith("return null;", hook.TrimEnd());
+
+        string page = Between(gui, "private void OnOptimumUpscalingOptions(bool on)", "\n\t}\n");
+        Assert.Contains("string frameGenerationUnavailable = optimumFrameGenerationUnavailable();", page);
+        Assert.Contains("Lang.Get(\"optimum-framegeneration-on-unavailable\")", page);
+        Assert.Contains("Lang.Get(\"optimum-upscaler-unavailable\") + \" \" + frameGenerationUnavailable", page);
+
+        string handler = Between(gui, "private void onOptimumFrameGenerationChanged(", "\n\t}\n");
+        int refusal = handler.IndexOf("if (on && optimumFrameGenerationUnavailable() != null)", StringComparison.Ordinal);
+        int returned = handler.IndexOf("return;", refusal, StringComparison.Ordinal);
+        int persisted = handler.IndexOf("FrameGenerationNextSession = on;", StringComparison.Ordinal);
+        Assert.True(refusal >= 0, "turning frame generation on where it cannot run is not refused");
+        Assert.InRange(returned, refusal, persisted);
+        Assert.InRange(handler.IndexOf("optimumUpdateUpscalerRows();", refusal, StringComparison.Ordinal), refusal, returned);
+    }
+
+    /// <summary>
+    /// Restart required, as behaviour: the handler writes only the next session's value and
+    /// persists it - no re-plan, no rebuild, no shader reload, no temporal reset, and never
+    /// the session's value, which is what both gates read. The label carries the note while
+    /// the two differ, and the row refresh keeps it current.
+    /// </summary>
+    [Fact]
+    public void TheFrameGenerationHandlerOnlyPersistsTheNextSession()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+        string handler = Between(gui, "private void onOptimumFrameGenerationChanged(", "\n\t}\n");
+
+        Assert.Contains("Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession = on;", handler);
+        Assert.Contains("Vintagestory.API.Config.OptimumConfig.Save();", handler);
+        Assert.DoesNotContain("OptimumConfig.FrameGeneration =", handler);
+        Assert.DoesNotContain("ApplyOptimumUpscalerSettings", handler);
+        Assert.DoesNotContain("RebuildFrameBuffers", handler);
+        Assert.DoesNotContain("ReloadShaders", handler);
+        Assert.DoesNotContain("RequestReset", handler);
+
+        string label = Between(gui, "private string optimumFrameGenerationLabelText()", "\n\t}\n");
+        Assert.Contains(
+            "if (Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession != Vintagestory.API.Config.OptimumConfig.FrameGeneration)",
+            label);
+        Assert.Contains("Lang.Get(\"optimum-framegeneration-restart\")", label);
+
+        string rows = Between(gui, "private void optimumUpdateUpscalerRows()", "\n\t}\n");
+        Assert.Contains("frameGenerationLabel.SetNewText(optimumFrameGenerationLabelText());", rows);
+        Assert.Contains(
+            "frameGeneration.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.FrameGenerationNextSession ? \"on\" : \"off\");",
+            rows);
+    }
+
+    /// <summary>
+    /// The setting is declared off, persisted from the next session's value, loaded into
+    /// both halves, reported, and its effective value is the conjunction the gates need.
+    /// </summary>
+    [Fact]
+    public void TheFrameGenerationSettingIsDeclaredPersistedAndGated()
+    {
+        foreach (string config in new[]
+        {
+            Read("VintagestoryApi/Config/OptimumConfig.cs"),
+            Read("sources/VintagestoryApi/Config/OptimumConfig.cs"),
+        })
+        {
+            // No initializer on the statics is the CLR default, false; the data object
+            // says false out loud so a config that never mentions it comes up off.
+            Assert.Contains("public static bool FrameGeneration;", config);
+            Assert.Contains("public static bool FrameGenerationNextSession;", config);
+            Assert.Contains("public bool FrameGeneration { get; set; } = false;", config);
+            Assert.Contains("FrameGeneration = data.FrameGeneration;", config);
+            Assert.Contains("FrameGenerationNextSession = data.FrameGeneration;", config);
+            Assert.Contains("FrameGeneration = FrameGenerationNextSession,", config);
+            Assert.Contains("(nameof(OptimumConfigData.FrameGeneration), FrameGeneration.ToString()),", config);
+            Assert.Contains("public static bool DisableFrameGenerationAtRuntime(string reason)", config);
+            Assert.Contains(
+                "FrameGeneration && EffectiveUpscalerIsDlss && !FrameGenerationRuntimeDisabled;", config);
+        }
+    }
+
+    /// <summary>
+    /// The truth table the two gates rely on, driven on the config: on only with the
+    /// session setting on, DLSS the upscaler in effect, and no stand-down. The row's value
+    /// (the next session's) never moves it.
+    /// </summary>
+    [Fact]
+    public void EffectiveFrameGenerationNeedsTheSettingDlssAndNoStandDown()
+    {
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
+        bool upscalerWasDisabled = OptimumConfig.UpscalerRuntimeDisabled;
+        try
+        {
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+
+            OptimumConfig.FrameGeneration = true;
+            OptimumConfig.Upscaler = "dlss";
+            Assert.True(OptimumConfig.EffectiveFrameGeneration);
+
+            foreach (string other in new[] { "off", "passthrough" })
+            {
+                OptimumConfig.Upscaler = other;
+                Assert.False(OptimumConfig.EffectiveFrameGeneration);
+            }
+            OptimumConfig.Upscaler = "dlss";
+
+            OptimumConfig.FrameGeneration = false;
+            OptimumConfig.FrameGenerationNextSession = true;
+            Assert.False(OptimumConfig.EffectiveFrameGeneration);
+            OptimumConfig.FrameGeneration = true;
+            OptimumConfig.FrameGenerationNextSession = false;
+            Assert.True(OptimumConfig.EffectiveFrameGeneration);
+
+            // An upscaler stand-down takes frame generation with it: DLSS is its input.
+            OptimumConfig.DisableUpscalerAtRuntime();
+            Assert.False(OptimumConfig.EffectiveFrameGeneration);
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+
+            Assert.Null(OptimumConfig.FrameGenerationUnavailableReason);
+            Assert.True(OptimumConfig.DisableFrameGenerationAtRuntime("no second graphics queue"));
+            Assert.False(OptimumConfig.DisableFrameGenerationAtRuntime("a later reason"));
+            Assert.False(OptimumConfig.EffectiveFrameGeneration);
+            Assert.True(OptimumConfig.FrameGenerationRuntimeDisabled);
+            Assert.Equal("no second graphics queue", OptimumConfig.FrameGenerationUnavailableReason);
+            // The persisted choice is untouched by the stand-down.
+            Assert.True(OptimumConfig.FrameGeneration);
+
+            // A blank reason still stands down: it cannot be stored as "not stood down".
+            OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+            Assert.True(OptimumConfig.DisableFrameGenerationAtRuntime(""));
+            Assert.True(OptimumConfig.FrameGenerationRuntimeDisabled);
+            Assert.False(OptimumConfig.EffectiveFrameGeneration);
+        }
+        finally
+        {
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            if (upscalerWasDisabled) OptimumConfig.DisableUpscalerAtRuntime();
+            snapshot.Restore();
+        }
+    }
+
+    /// <summary>
+    /// The stand-down is a cross-thread path (render thread, present thread, settings
+    /// dialog), so it is raced: many threads released together by a barrier, many rounds.
+    /// Exactly one wins each round, the reason shown is the winner's, and a reader never
+    /// sees "stood down" without a reason. Every wait is bounded so a hang fails the test.
+    /// </summary>
+    [Fact]
+    public void TheFrameGenerationStandDownIsWonByExactlyOneThreadAndKeepsItsReason()
+    {
+        const int Threads = 8;
+        const int Rounds = 300;
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
+        try
+        {
+            for (int round = 0; round < Rounds; round++)
+            {
+                OptimumConfig.ResetFrameGenerationRuntimeDisabledForTests();
+                using var barrier = new System.Threading.Barrier(Threads + 1);
+                int winners = 0;
+                string? winnerReason = null;
+                int torn = 0;
+                var workers = new System.Threading.Tasks.Task[Threads + 1];
+                for (int t = 0; t < Threads; t++)
+                {
+                    string reason = "reason " + t;
+                    workers[t] = System.Threading.Tasks.Task.Run(() =>
+                    {
+                        if (!barrier.SignalAndWait(TimeSpan.FromSeconds(10))) return;
+                        if (OptimumConfig.DisableFrameGenerationAtRuntime(reason))
+                        {
+                            System.Threading.Interlocked.Increment(ref winners);
+                            System.Threading.Volatile.Write(ref winnerReason, reason);
+                        }
+                    });
+                }
+                workers[Threads] = System.Threading.Tasks.Task.Run(() =>
+                {
+                    if (!barrier.SignalAndWait(TimeSpan.FromSeconds(10))) return;
+                    for (int i = 0; i < 2000; i++)
+                    {
+                        bool down = OptimumConfig.FrameGenerationRuntimeDisabled;
+                        string? why = OptimumConfig.FrameGenerationUnavailableReason;
+                        // Read in that order, a stand-down seen means its reason is already there.
+                        if (down && why == null) System.Threading.Interlocked.Increment(ref torn);
+                    }
+                });
+
+                Assert.True(System.Threading.Tasks.Task.WaitAll(workers, TimeSpan.FromSeconds(30)),
+                    "the stand-down race did not finish; something blocked");
+                Assert.Equal(1, winners);
+                Assert.Equal(0, torn);
+                Assert.Equal(winnerReason, OptimumConfig.FrameGenerationUnavailableReason);
+            }
+        }
+        finally
+        {
+            snapshot.Restore();
+        }
+    }
+
+    /// <summary>
+    /// The round trip through a real optimum.json: off by default, an explicit value
+    /// survives load and save, and a Save from any row persists the next session's value,
+    /// never the running one.
+    /// </summary>
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    [InlineData(null, false)]
+    public void FrameGenerationRoundTripsThroughOptimumJson(string? json, bool expected)
+    {
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
+        string dataPath = Path.Combine(Path.GetTempPath(), "optimum-framegeneration-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dataPath, ".optimum"));
+            File.WriteAllText(Path.Combine(dataPath, ".optimum", "shader-compatibility.json"),
+                "{ \"ScanFailed\": false, \"DisabledFeatures\": [] }");
+            OptimumConfig.SetDataPath(dataPath);
+            string configPath = Path.Combine(dataPath, "ModConfig", "optimum.json");
+            File.WriteAllText(configPath, json == null ? "{}" : "{ \"FrameGeneration\": " + json + " }");
+
+            OptimumConfig.FrameGeneration = !expected;
+            OptimumConfig.FrameGenerationNextSession = !expected;
+            OptimumConfig.Load();
+            Assert.Equal(expected, OptimumConfig.FrameGeneration);
+            Assert.Equal(expected, OptimumConfig.FrameGenerationNextSession);
+            Assert.Contains("\"FrameGeneration\": " + (expected ? "true" : "false"), File.ReadAllText(configPath));
+
+            // The row changes the next session; the session keeps what it started with.
+            OptimumConfig.FrameGenerationNextSession = !expected;
+            OptimumConfig.Save();
+            Assert.Equal(expected, OptimumConfig.FrameGeneration);
+            Assert.Contains("\"FrameGeneration\": " + (!expected ? "true" : "false"), File.ReadAllText(configPath));
+        }
+        finally
+        {
+            snapshot.Restore();
+            try { Directory.Delete(dataPath, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// OpenGL stands frame generation down at startup, in its own framebuffer setup, right
+    /// beside the upscaler's stand-down and before anything reads the two gates - with one
+    /// line, and touching nothing but the config and the platform's logger. The 2026-09-13
+    /// crash was a stand-down that reached ShaderRegistry, whose type initializer publishes
+    /// uncompiled programs into ShaderPrograms.* before vanilla has touched the type.
+    /// </summary>
+    [Fact]
+    public void OpenGlStandsFrameGenerationDownWithoutTouchingAVanillaStatic()
+    {
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string setup = Between(platform, "public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()", "\n\t}\n");
+
+        const string StandDown = "if (Vintagestory.API.Config.OptimumConfig.FrameGeneration && Vintagestory.API.Config.OptimumConfig.DisableFrameGenerationAtRuntime(";
+        int upscaler = setup.IndexOf("DisableOptimumUpscaler(\"this renderer cannot plan an upscale", StringComparison.Ordinal);
+        int frameGeneration = setup.IndexOf(StandDown, StringComparison.Ordinal);
+        int taa = setup.IndexOf("bool taaRequested =", StringComparison.Ordinal);
+        int sceneGate = setup.IndexOf("OptimumSceneNoHudRequested", StringComparison.Ordinal);
+        int uiGate = setup.IndexOf("OptimumUiTargetRequested", StringComparison.Ordinal);
+        Assert.True(upscaler >= 0 && frameGeneration > upscaler, "the stand-down belongs beside the upscaler's");
+        Assert.True(taa > frameGeneration, "the stand-down must come before the framebuffer build reads the config");
+        Assert.True(sceneGate > frameGeneration && uiGate > frameGeneration,
+            "both gates must be read after the stand-down, or the GL build allocates frame generation's inputs");
+
+        string block = Between(setup.Substring(frameGeneration), StandDown, "\n\t\t}\n");
+        Assert.Contains("logger.Notification(", block);
+        Assert.Equal(1, Occurrences(block, "logger."));
+        foreach (string forbidden in new[]
+        {
+            "ShaderRegistry", "ShaderPrograms", "ScreenManager", "ClientSettings", "RuntimeEnv",
+            "DisableOptimumUpscaler", "ApplyOptimumLodBias", "Lang.",
+        })
+        {
+            Assert.DoesNotContain(forbidden, block);
+        }
+
+        // The GL path alone: Vulkan overrides the whole setup and never calls this body.
+        string vulkan = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
+        Assert.Contains("public override List<FrameBufferRef> SetupDefaultFrameBuffers()", vulkan);
+        Assert.DoesNotContain("base.SetupDefaultFrameBuffers", vulkan);
+    }
+
+    /// <summary>
+    /// Every new settings-page member is a Cecil target; the gates and the setup were
+    /// already transplanted and stay so.
+    /// </summary>
+    [Fact]
+    public void EveryFrameGenerationMemberIsListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        foreach (string member in new[]
+        {
+            "onOptimumFrameGenerationChanged", "optimumFrameGenerationUnavailable",
+            "optimumFrameGenerationLabelText", "OptimumSceneNoHudRequested", "OptimumUiTargetRequested",
+        })
+        {
+            Assert.Contains("\"" + member + "\"", patcher);
+        }
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"SetupDefaultFrameBuffers\", 0)", patcher);
+    }
+
+    private static string LangValue(string key)
+    {
+        string lang = Read("sources/lang/en.json");
+        string value = Between(lang, "\"" + key + "\": \"", "\",");
+        return value.Substring(("\"" + key + "\": \"").Length);
     }
 
     // ---- helpers -----------------------------------------------------------
