@@ -359,6 +359,30 @@ slot); and the frame-id to present-id mapping with two presents.
   at both frame-ring depths). It cannot come from a headless run - an unfocused window falls under the
   client's 30 FPS background cap, so pacing numbers from one are meaningless. It comes before step 5.
 
+### Status: step 3 landed (2026-09-13, `feat/dlss-g` at c97551e)
+
+The HUD renders into its own RGBA8 target (slot 24, with depth for the GUI's own depth sort) and is composed back
+with one premultiplied fullscreen pass inside `ClientMain.RenderToDefaultFramebuffer`, after the Ortho stage and
+before `Done` - the position that keeps the with-HUD screenshot, the AVI writer, the parity dump and the headless
+capture reading the final frame. While that target is bound, `EnumBlendMode.Standard` resolves to separate alpha
+factors (alpha ONE, ONE_MINUS_SRC_ALPHA); everywhere else it is byte-for-byte vanilla. Gated by
+`OPTIMUM_UI_TARGET=1` until frame generation ORs itself in. Verified in game on both backends, numbers in
+`docs/vulkan-acceptance.md`: opaque UI bit-identical to the HUD drawn directly, translucent UI with zero systematic
+offset.
+
+What getting there cost, because each one generalises:
+- **The first in-game frame crashed**: `optimumUiTargetClearColor = new float[4]` was null in the patched DLL. The
+  Cecil transplant copies no constructor IL, so an injected field's initializer never runs. It was the eighth
+  instance of that bug in this repo, past seven hand-written per-instance guards; the rule is now a general test
+  (`NoInjectedFieldAnywhereCarriesAnInitializer`), which found five more, all fixed (11a10a8) - including a
+  collect-stride throttle that had never once run.
+- **OpenGL with an upscaler configured had not reached a world since a8f09ae**, found only because the UI target had
+  to be tried on OpenGL. Details in the acceptance doc. The lesson is procedural: a "both backends" check has to
+  include OpenGL with the user's real `optimum.json`, and the headless harness makes that cheap.
+- The review's three fixes (b56c3e4..1d78b17): the blend scope healed at the frame's first clear so a throwing GUI
+  renderer cannot leave it open into the next frame's world pass; the factors restored on every give-up return of
+  the compose; and the compose declared as its own frame-graph pass so it stops costing a mid-pass split.
+
 ### The three things most likely to go wrong
 
 1. **Resource lifetime past Present.** The generated frame and the retained real frame must survive until
@@ -413,3 +437,10 @@ the entry points readable for someone arriving new.
   `TransferDst`). The poison/upload case that bites today is fixed at its own site, not in the batcher, so
   any future path recording two transfer writes into one image in one batch has the same gap. Whoever owns
   the batcher should decide whether same-usage write-after-write ought to barrier by default.
+- The injected-field-initializer test reads the patcher manifests, so it cannot see fields the patcher adds on its
+  own when it transplants a method that uses them (`InjectMissingFieldsForMethod` in `ILPatcher.cs`); those get no
+  constructor either. Harmless today (`optimumAccumulatedDelta` starts at 0 either way), but an initializer on such a
+  field would pass the test.
+- A vanilla static class has a type initializer that may not be inert: `ShaderRegistry`'s publishes uncompiled
+  programs into `ShaderPrograms.*`. Optimum code that runs before vanilla's first use of such a type changes
+  initialisation order; the OpenGL loading-screen crash of 2026-09-13 was exactly that.

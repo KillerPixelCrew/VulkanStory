@@ -357,6 +357,48 @@ does not come, and reports which happened. Re-run of the same capture: `shutdown
 matching `Critical error occurred`, 0 `[Client Error]`/`[Client Fatal]`, no crash log written, NGX
 `Shutdown1: Success`.
 
+### The UI target on real frames, and OpenGL with an upscaler configured (2026-09-13, `feat/dlss-g` at c97551e)
+
+**A crash that had nothing to do with the UI target, found by trying to run it on OpenGL.** With
+`Upscaler: dlss` in `optimum.json`, OpenGL never reached a world: 3 of 3 runs died on the loading screen with
+`KeyNotFoundException: 'lightPosition'` in `ShaderProgramBase.Use`, with `OPTIMUM_UI_TARGET` on *and* off.
+`Upscaler: none` reached the world. Cause, isolated by A/B rather than inferred - the same build with one call
+removed reached the world: `DisableOptimumUpscaler` re-applied the terrain LOD bias through `ShaderRegistry`
+(added in a8f09ae), and the GL framebuffer setup stands the upscaler down at startup, long before vanilla first
+touches `ShaderRegistry` in `DoGameInitStage2`. `ShaderRegistry`'s static constructor runs
+`registerDefaultShaderProgramsPre`, which publishes an uncompiled program into every `ShaderPrograms.*` field, so
+the loading screen's next `Use()` hit a `ShaderPrograms.Gui` with no uniforms. Fixed by re-applying only from the
+running game (the per-frame `TerrainLodBiasPending` poll covers everything before it). Every run since Milestone 1
+that "verified both backends" had verified Vulkan only; nothing ran OpenGL with the upscaler setting on.
+
+After the fix, headless, `serene cave world`, frame 40:
+
+| run | renderer line | shader programs | crashes | shutdown |
+|---|---|---|---|---|
+| OpenGL, `Upscaler: dlss` | OpenGL | 125 | 0 | closed itself |
+| OpenGL, `OPTIMUM_UI_TARGET=1` | OpenGL | 125 | 0 | closed itself |
+| Vulkan, `OPTIMUM_UI_TARGET=1` | Vulkan | 125 | 0 | closed itself |
+
+The one `[Client Error]` in the OpenGL runs is the deliberate stand-down notice ("this renderer cannot plan an
+upscale for the frame").
+
+**The composed HUD against the HUD drawn directly, OpenGL** (two launches, same settings; per region, because two
+launches never share the scene - wind, foliage and TAA state differ, so a full-frame diff measures the scene):
+
+| region (upright 1280x850) | pixels | differing | mean abs d | mean signed d, composed - direct (R/G/B) | worst |
+|---|---|---|---|---|---|
+| opaque hotbar slot interior | 1681 | 0.00 % | 0.00 | +0.00 / +0.00 / +0.00 | 0 |
+| opaque hotbar frame | 280 | 0.00 % | 0.00 | +0.00 / +0.00 / +0.00 | 0 |
+| translucent chat panel | 179561 | 16.75 % | 0.15 | +0.00 / +0.00 / +0.00 | 11 |
+| control: sky, no HUD | 123921 | 9.51 % | 0.05 | +0.03 / +0.02 / +0.01 | 3 |
+| control: foliage, no HUD | 84281 | 51.03 % | 1.64 | -0.02 / +0.00 / +0.06 | 39 |
+
+Opaque UI is bit-identical, which is the losslessness claim. The translucent panel carries **no systematic
+offset** - the alpha-squared error the scoped blend state exists to prevent would show there as tens of levels in
+one direction behind every translucent element; what remains is the foliage noise behind the panel, attenuated by
+it. On Vulkan the same claim is carried by `UiTargetComposeTests` (0 of 2048 wrong composed pixels at 1/255) plus
+the in-game frame judged by eye on 2026-09-12; an in-game Vulkan region table is still to take.
+
 ## 3. Methods
 
 ### Parity dump and SSIM
