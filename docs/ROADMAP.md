@@ -284,53 +284,97 @@ recommended way to retain it) "at the correct time to achieve equal time interva
 requires you to present asynchronously from the main render thread." And the reason the guide gives for Reflex: the
 real frame is held back by the generated one, and Reflex is what keeps that added latency in check.
 
-Shape this implies, to be confirmed by the map before any code: the render thread keeps the Reflex sleep, input,
-simulation, rendering, the SR evaluate, the UI compose and the FG evaluate, then hands an (interpolated, real) pair and
-the timeline value that completes them to a present thread. The present thread owns the swapchain, presents on its own
-queue from the graphics family - marked out-of-band with `vkQueueNotifyOutOfBandNV` so Reflex's in-band accounting
-stays the render thread's - presents the generated frame immediately and the real one after a measured half interval,
-and stamps the out-of-band present markers. Spacing is measured present to present. Where the graphics family has
-only one queue, frame generation stands down with a log line rather than presenting unpaced.
+The design that follows from the sources is the next section.
 
-### The paced present: the design (2026-09-13, from the present-thread map)
+### The paced present: the design, sourced (2026-09-13, second version)
 
-Settled by the session owner from a read-only map of queues, swapchain ownership, command recording, retirement,
-Reflex and shutdown. It replaces steps 5 and 6 with one deliverable.
+The first version of this section was written from one chapter of NVIDIA's guide plus reasoning, and a workflow
+was launched on it. It was wrong in several places and the workflow was stopped. This version cites a source for
+every decision; anything marked *reasoning* has no source and is an open question until measured.
 
-**Two owners, no shared swapchain state.**
-- *Render thread*: Reflex sleep, input, simulation, render, DLSS SR, the UI compose, and the DLSS-G evaluate into
-  an (interpolated, real) output pair taken from a pool of `FramesInFlight` pairs (`OutputReal` retains the real
-  frame, as the guide recommends). It stamps `PresentStart`/`PresentEnd` around the handoff and reserves the real
-  frame's present id at the handoff, in render order - which keeps Reflex's present-id prediction true once
-  presentation is asynchronous.
-- *Present thread*: owns the swapchain outright - acquire, present, rebuild, slot retirement - on its own queue
-  from the graphics family, marked `vkQueueNotifyOutOfBandNV(PRESENT)`, with its own command pool, and stamps the
-  out-of-band present markers. Every acquire-record-submit-present cycle is sequential on that one thread, so the
-  step-0 hazard of a rebuild between two acquires cannot recur. The render thread asks for a resize or a vsync change
-  through a locked request record, never by writing swapchain fields.
+**Sources**
 
-**Lifetime without a second retire model.** The present thread's submissions signal a present timeline of their
-own. A pair's present submission waits on the Frame-timeline value that completes its evaluate; a pair is reused
-only after the present thread has submitted its read, and the next evaluate into it waits on that present-timeline
-value inside its submit - a GPU dependency, not a CPU wait. When no pair is free the render thread blocks for one,
-which is the back-pressure; the present thread never waits on the render thread's CPU progress, so the two cannot
-wait on each other. Rebuilding the pool (a resize) is a handshake: quiesce the present thread, drop stale pairs, wait
-its timeline, rebuild, resume. Shutdown stops and drains the present thread before `NgxLifetime.ShutDown` and device
-teardown; the headless self-exit takes the same path.
+| Tag | Source |
+|---|---|
+| NV-FG | DLSS-FG Programming Guide v310.7.0 (`~/.local/share/optimum-ngx/doc`), timing overview lines 118-153, section 7 lines 998-1076 |
+| SL-G | Streamline `docs/ProgrammingGuideDLSS_G.md` (`~/Projekte/ReScaleFrame/references/Streamline`): section 8 (Reflex), section 12 (resolution changes), 13 and 13.1 (frame times, pacing measurement), 22 (VSync) |
+| AMD-SC | FidelityFX `Kits/FidelityFX/docs/techniques/frame-interpolation-swap-chain.md`, "Frame pacing and presentation" and "VSync and Variable Refresh Rate" |
+| AMD-SRC | FidelityFX `framegeneration/fsr3/dx12/FrameInterpolationSwapchainDX12.cpp` lines 715-900 (pacing and presenter threads); defaults in `framegeneration/include/ffx_framegeneration_api_types.h` lines 64-72 |
+| XE | XeSS `doc/xess_fg_developer_guide_english.md`, Programming Guide and "Connect with XeLL" |
+| RSF | ReScaleFrame `docs/research/architecture.md` lines 99-101 |
+| VK | `vulkaninfo` on this machine, RTX 4070 Laptop, driver 615.71.09 |
+| BB | Blur Busters forum threads on Reflex with G-SYNC; secondary, not NVIDIA documentation |
 
-**The pacer.** A deterministic class with an injected clock. The generated frame is presented as soon as its pair
-arrives; the real frame at +1/2 of the smoothed rendered-frame interval, or immediately when the next pair is already
-due. Present-to-present intervals get their own stats ring, which is what `pacing-gate.sh` judges. Present modes:
-never MAILBOX with frame generation (it replaces the queued generated frame with the real one); FIFO with vsync on,
-with Reflex's rendered-frame cap at twice the refresh interval so two presents fit each refresh pair; IMMEDIATE with
-vsync off, where the pacer owns the spacing.
+**Decisions**
 
-**Refusals, not degradation.** A graphics family with one queue, a latency backend other than `NvLowLatency2`, or
-NGX refusing the feature: frame generation stands down with one log line. `OPTIMUM_DLSSG_DOUBLE_PRESENT` stays as
-the test switch and now drives the present thread with duplicate images, so the pacer can be measured on any GPU.
+1. **Threads.** A pacing thread and a presenter thread beside the render thread. The pacing thread waits on the CPU
+   for the evaluate's GPU completion, then computes the present delta; the presenter thread runs at the highest
+   priority, composes and presents both frames. [AMD-SC: "A high-priority pacing thread ... waits for GPU work to
+   finish to avoid long GPU-side waits after the CPU-side presentation call"; AMD-SRC lines 803-806; XE: "a
+   high-priority background thread that submits presents to an internally-managed high-priority direct queue"; NV-FG
+   section 7: "present asynchronously from the main render thread"]
+2. **One frame in flight.** The render thread's handoff waits until the previous frame's evaluate has completed on
+   the GPU, so rendered frames never queue behind presentation. [AMD-SC: "To minimize input latency, the present call
+   ... will wait for the previous frames interpolation and ui composition to be finished"; AMD-SRC line 856,
+   `SetEvent(interpolationEvent)` after the fence wait] This replaces the earlier pool of `FramesInFlight` queued pairs.
+3. **The delta.** A 10-sample moving average of evaluate-completion-to-completion intervals, reset after a gap over
+   100 ms or on a reset event; `delta = max(0, average/2 - variance*0.1 - 0.1 ms)`; the same delta for both frames.
+   [AMD-SRC lines 812, 865-889; defaults: safety margin 0.1 ms, variance factor 0.1]
+4. **Both presents are spaced from the previous present.** Each frame waits for its own GPU composition, then until
+   `previousPresent + delta` (busy spin; hybrid sleep available but off by default), then presents; the generated
+   frame first, then the real one. [AMD-SRC lines 763-781; AMD-SC: "waits until the calculated present time delta has
+   passed since the last presentation, then presents the generated frame. It repeats this for the real frame"; NV-FG
+   section 7 for the order; defaults `allowHybridSpin` false]
+5. **Drops.** The newest scheduled frame replaces an unpresented one; a generated frame may be dropped when
+   presentation falls behind, a real frame never. [SL-G section 13: "DLSS-G will always present real frame ... but the
+   interpolated frame can be dropped if presents go out of sync"; AMD-SRC lines 736-744, latest entry wins]
+6. **Present modes on this driver.** FIFO for vsync on, IMMEDIATE for vsync off - the equivalent of SyncInterval 1 and
+   0. [SL-G section 22; VK: the NVIDIA X11 surface offers FIFO, IMMEDIATE and FIFO_LATEST_READY, no MAILBOX]
+   FIFO_LATEST_READY is not used with frame generation - *reasoning*: it discards older ready images, which would drop
+   generated frames the way MAILBOX would.
+7. **Render cap.** Rendered frames just under half the output rate; with vsync on this limit is implicit at half the
+   refresh. [AMD-SC: "The application should ensure that the rendered frame rate is slightly below half the desired
+   output frame rate. When VSync is enabled, the render performance will be implicitly limited to half the monitors
+   maximum refresh rate"] The Reflex cap follows it. How far below: Reflex's own limit with G-SYNC and vsync sits about
+   7 % under refresh (224 fps at 240 Hz) [BB, secondary]; the margin is to be measured, not assumed.
+8. **Reflex.** Required. [NV-FG lines 143-147; SL-G section 8: "It is required"; XE: XeLL mandatory for XeFG] The
+   render thread keeps the sleep, input and render markers and stamps PresentStart/PresentEnd around the handoff with
+   the frame id carried in the handoff [SL-G section 8: the present markers "must provide correct frame index"; RSF:
+   "Carry IDs with the real handoff instead of sampling the latest global counter at Present"]. The presenter presents
+   on its own high-priority queue from the graphics family [XE; AMD-SC recommends normal priority for the application's
+   queues so interpolation and presentation are scheduled first], marked out-of-band with `vkQueueNotifyOutOfBandNV`.
+9. **Measuring pacing.** The verdict is display-side timing, never present-call timing. [SL-G section 13.1:
+   "MsBetweenPresents is not suitable for measuring frame pacing quality"] What this machine offers, verified rather
+   than assumed: the client presents to an **X11 surface through XWayland** - OpenTK initialises GLFW 3.4 with the X11
+   platform unless `OPENTK_4_USE_WAYLAND` is set (`OpenTK.Windowing.Desktop.dll`: `HonorOpenTK4UseWayland`,
+   `InitHintPlatform`), nothing in our scripts, the launcher or the session sets it, and a live client loads the xcb
+   present/dri3 stack. On the NVIDIA X11 surface `VK_EXT_present_timing` supports **no target present time** (absolute
+   or relative) and reports only the QUEUE_OPERATIONS_END stage, while `presentId2Supported` and
+   `presentWait2Supported` are true [VK]. So the display-side measurement is `VK_KHR_present_wait2` against
+   `VK_KHR_present_id2`, and because no target-time presentation exists here the pacer spins on the CPU as AMD's does.
+   Under Wayland (opt-in through `OPENTK_4_USE_WAYLAND`) the surface would add IMAGE_FIRST_PIXEL_OUT, still without
+   target times.
+10. **Swapchain-changing operations turn frame generation off first.** Resize, fullscreen switches and vsync changes
+    quiesce the presenter, rebuild, then resume. [SL-G section 12: "when host is modifying resolution, full-screen vs
+    windowed mode ... DLSS-G must be turned off"] Toggling frame generation itself is restart-required initially. [RSF]
+11. **Frames that cannot be interpolated are not.** A reset (camera cut, teleport, first frame after a rebuild)
+    presents the real frame alone. [RSF: "Ambiguous frames should skip interpolation"; NV-FG `reset` parameter]
+12. **Input rate.** Best results at 60 fps rendered and above; below 30 fps frame generation should stand down.
+    [AMD-SC: "designed to give optimal results with an input framerate of 60 FPS or higher ... at least 30 FPS"; XE:
+    "60 FPS recommended"] Thresholds and hysteresis are an open question.
+13. **Environment limits.** VRR and tearing only exist in fullscreen; windowed, the compositor presents. [AMD-SC] On
+    X11 that means judging pacing in unredirected fullscreen.
+14. **Submission granularity.** A frame made of several command submissions lets presents be scheduled on time.
+    [AMD-SC: "it is recommended to ensure the frame consists of multiple command list submissions"] Our render frame is
+    one Submit A; splitting it at stage boundaries under frame generation is to be measured first.
 
-**What a capture means.** `ReadDefaultFramebuffer`, the screenshot and the headless harness keep capturing the real
-composed frame; generated frames are not captured.
+**Open questions for the user**: FIFO_LATEST_READY (decision 6), the render-cap margin (7), the input-rate stand-down
+thresholds (12), whether the presenter should also serve the vsync-off IMMEDIATE path or frame generation should
+require vsync, and whether the pacing thread and presenter thread merge into one on Linux.
+
+**Salvage from the stopped workflow** (worktrees kept, nothing merged): the present-queue stream and the setting and
+gates stream committed and are likely reusable; the NGX DLSS-G feature stream left uncommitted work that is likely
+reusable; the present-thread and pacer streams implemented the first design and need rework.
 
 ### Status: steps 0, 1, 2 and 4 landed (2026-09-12, `feat/dlss-g` at 54a685e)
 
