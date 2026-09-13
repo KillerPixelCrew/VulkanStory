@@ -82,6 +82,38 @@ internal sealed class VulkanContextOptions
     /// in for a compositor that holds images back (PresentDecouplingTests).
     /// </summary>
     public TimeSpan AcquireDelayForTests;
+
+    /// <summary>
+    /// Asks for a second queue from the graphics family, for the paced present's
+    /// present thread (ROADMAP "The paced present: the design"). The wiring sets it
+    /// only when frame generation is requested: with it off, device creation is
+    /// exactly what it was before the present thread existed (one queue).
+    /// </summary>
+    public bool RequestPresentQueue;
+
+    /// <summary>
+    /// Tests only: pretends the graphics family reports this many queues; 0 reads
+    /// the real <c>QueueFamilyProperties.queueCount</c>. The RTX 4070 the suite
+    /// runs on reports 16, so the one-queue refusal is otherwise unreachable.
+    /// </summary>
+    public uint GraphicsFamilyQueueCountForTests;
+}
+
+/// <summary>
+/// Whether the context has a present queue of its own, and if not, why. Frame
+/// generation stands down on anything but <see cref="Available" /> (ROADMAP:
+/// "Refusals, not degradation"): presenting from a second thread on the graphics
+/// queue would put the present thread behind the render thread's queue lock,
+/// which is the stall the present thread exists to remove.
+/// </summary>
+internal enum PresentQueueStatus
+{
+    /// <summary>Nobody asked (frame generation off); one queue, as before.</summary>
+    NotRequested,
+    /// <summary>A second queue from the graphics family is up.</summary>
+    Available,
+    /// <summary>Asked for, but the graphics family has a single queue.</summary>
+    SingleQueueFamily,
 }
 
 /// <summary>What the chosen device can do, once it is up.</summary>
@@ -149,6 +181,20 @@ internal sealed class VulkanCapabilities
     /// another seam, so the token is carried here).
     /// </summary>
     public string LatencySummary = "latency backend off";
+
+    // ------------------------------------------------------------ present queue
+
+    /// <summary>
+    /// <c>QueueFamilyProperties.queueCount</c> of the graphics family (or the
+    /// test override). Recorded whether or not a present queue was asked for.
+    /// </summary>
+    public uint GraphicsFamilyQueueCount;
+
+    /// <summary>Whether <see cref="VulkanContext.PresentQueue" /> exists, and why not.</summary>
+    public PresentQueueStatus PresentQueue = PresentQueueStatus.NotRequested;
+
+    /// <summary>One token for the "device up" line and for frame generation's refusal line.</summary>
+    public string PresentQueueSummary => VulkanContext.PresentQueueToken(PresentQueue, GraphicsFamilyQueueCount);
 }
 
 /// <summary>
@@ -188,6 +234,40 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// enforced.
     /// </summary>
     public object QueueLock { get; } = new();
+
+    /// <summary>
+    /// The present thread's queue: index 1 of the graphics family, or default
+    /// when <see cref="VulkanCapabilities.PresentQueue" /> is not
+    /// <see cref="PresentQueueStatus.Available" />.
+    ///
+    /// Threading: immutable after device creation, so both threads read the
+    /// handle without a lock; submitting or presenting on it takes
+    /// <see cref="PresentQueueLock" />.
+    ///
+    /// Same family as <see cref="GraphicsQueue" />, because presentation support
+    /// is a family property: the swapchain's present check (Swapchain.TryCreate)
+    /// already covers it, and images handed over need no queue-family ownership
+    /// transfer.
+    /// </summary>
+    public Queue PresentQueue { get; private set; }
+
+    /// <summary>
+    /// Guards every submission and present on <see cref="PresentQueue" />.
+    ///
+    /// External synchronisation is required per queue, not per device, so this
+    /// is a lock of its own: sharing <see cref="QueueLock" /> would serialise the
+    /// present thread behind the render thread's frame submits and the upload
+    /// submits again, which is exactly what a separate queue is for. No caller
+    /// should hold both at once; the two queues never need a joint critical section.
+    /// </summary>
+    public object PresentQueueLock { get; } = new();
+
+    /// <summary>
+    /// The queueCount of the one DeviceQueueCreateInfo this context created: 1,
+    /// or 2 with a present queue. Immutable after creation; PresentQueueTests pin
+    /// that a device nobody asked a present queue of still requests one queue.
+    /// </summary>
+    public uint RequestedQueueCount { get; private set; }
 
     /// <summary>
     /// Backs every buffer and image out of a few large blocks. See
@@ -726,7 +806,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             return false;
         }
 
-        if (!TryFindGraphicsQueue(device, out _))
+        if (!TryFindGraphicsQueue(device, out _, out _))
         {
             reason = $"{name} has no graphics queue family";
             return false;
@@ -767,9 +847,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         return true;
     }
 
-    private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family)
+    private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family, out uint queueCount)
     {
         family = 0;
+        queueCount = 0;
         uint count = 0;
         Api.GetPhysicalDeviceQueueFamilyProperties(device, ref count, null);
         if (count == 0) return false;
@@ -785,6 +866,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             if (families[i].QueueFlags.HasFlag(QueueFlags.GraphicsBit))
             {
                 family = i;
+                queueCount = families[i].QueueCount;
                 return true;
             }
         }
@@ -797,20 +879,34 @@ internal sealed unsafe class VulkanContext : IDisposable
     {
         failureReason = null;
 
-        if (!TryFindGraphicsQueue(PhysicalDevice, out uint family))
+        if (!TryFindGraphicsQueue(PhysicalDevice, out uint family, out uint familyQueueCount))
         {
             failureReason = "graphics queue family disappeared between selection and creation";
             return false;
         }
         GraphicsQueueFamily = family;
+        if (options.GraphicsFamilyQueueCountForTests > 0)
+        {
+            familyQueueCount = options.GraphicsFamilyQueueCountForTests;
+        }
 
-        float priority = 1.0f;
+        // A present queue rides the same create info: the spec forbids two
+        // DeviceQueueCreateInfos naming one family (VUID-VkDeviceCreateInfo-queueFamilyIndex-02802).
+        // Equal priorities: the present thread's work is a blit and a present,
+        // and a lower priority would let the driver delay the very present the
+        // pacer timed. Not requested, this is the one-queue, priority-1.0 create
+        // info the context has always used.
+        PresentQueueStatus presentQueue = DecidePresentQueue(options.RequestPresentQueue, familyQueueCount);
+        uint queueCount = presentQueue == PresentQueueStatus.Available ? 2u : 1u;
+        float* priorities = stackalloc float[2];
+        priorities[0] = 1.0f;
+        priorities[1] = 1.0f;
         var queueCreateInfo = new DeviceQueueCreateInfo
         {
             SType = StructureType.DeviceQueueCreateInfo,
             QueueFamilyIndex = family,
-            QueueCount = 1,
-            PQueuePriorities = &priority,
+            QueueCount = queueCount,
+            PQueuePriorities = priorities,
         };
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
@@ -988,6 +1084,11 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
+        RequestedQueueCount = queueCount;
+        if (presentQueue == PresentQueueStatus.Available)
+        {
+            PresentQueue = Api.GetDeviceQueue(Device, family, 1);
+        }
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
         Capabilities.ColorWriteTier = colorWriteTier;
@@ -1002,6 +1103,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             DynamicState3Api = state3;
         }
+        Capabilities.GraphicsFamilyQueueCount = familyQueueCount;
+        Capabilities.PresentQueue = presentQueue;
         MemoryBudgetAvailable = wantMemoryBudget;
         EnabledDeviceExtensions = deviceExtensions.ToArray();
         RecordLatencyCapabilities();
@@ -1217,6 +1320,27 @@ internal sealed unsafe class VulkanContext : IDisposable
             MaxColorAttachments = properties.Limits.MaxColorAttachments,
         };
     }
+
+    /// <summary>
+    /// A present queue exists only when asked for and the graphics family has a
+    /// second queue to give. Not asked for stays on one queue even where sixteen
+    /// are offered, so a session without frame generation creates the same device
+    /// it always did.
+    /// </summary>
+    internal static PresentQueueStatus DecidePresentQueue(bool requested, uint graphicsFamilyQueueCount)
+    {
+        if (!requested) return PresentQueueStatus.NotRequested;
+        return graphicsFamilyQueueCount >= 2 ? PresentQueueStatus.Available : PresentQueueStatus.SingleQueueFamily;
+    }
+
+    /// <summary>The capability as the one log token frame generation's refusal line carries.</summary>
+    internal static string PresentQueueToken(PresentQueueStatus status, uint graphicsFamilyQueueCount) => status switch
+    {
+        PresentQueueStatus.Available => "present queue on",
+        PresentQueueStatus.SingleQueueFamily =>
+            "present queue refused: the graphics family has " + graphicsFamilyQueueCount + " queue",
+        _ => "present queue not requested",
+    };
 
     public static string VersionString(uint version) =>
         $"{version >> 22}.{(version >> 12) & 0x3FF}.{version & 0xFFF}";
