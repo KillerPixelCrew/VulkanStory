@@ -270,6 +270,28 @@ unknown from the next.
 6. **The present thread and its spacing pacer, last.** It has the least existing scaffolding and is the
    hardest thing here to verify.
 
+### Requirement: frame generation ships paced, with Reflex, or not at all (user, 2026-09-13)
+
+"DLSSFG without pacing (Reflex) is useless and unplayable." Steps 5 and 6 are therefore one deliverable: no build
+exposes frame generation to a player before the present thread and its pacer exist and Reflex is told about the
+generated presents correctly. A synchronous step 5 - both presents issued from the render thread inside
+`VulkanDevice.Present()` - was planned and started, and was stopped for this reason before anything landed.
+
+What NVIDIA's guide actually requires (DLSS-FG Programming Guide v310.7.0, section 7): "The DLSS-FG feature itself
+does not handle timing or presentation; this is the responsibility of your application." Present the generated frame
+as soon as the evaluate completes; present the retained real frame (`NVSDK_NGX_Parameter_OutputReal`, the
+recommended way to retain it) "at the correct time to achieve equal time intervals between frames. This typically
+requires you to present asynchronously from the main render thread." And the reason the guide gives for Reflex: the
+real frame is held back by the generated one, and Reflex is what keeps that added latency in check.
+
+Shape this implies, to be confirmed by the map before any code: the render thread keeps the Reflex sleep, input,
+simulation, rendering, the SR evaluate, the UI compose and the FG evaluate, then hands an (interpolated, real) pair and
+the timeline value that completes them to a present thread. The present thread owns the swapchain, presents on its own
+queue from the graphics family - marked out-of-band with `vkQueueNotifyOutOfBandNV` so Reflex's in-band accounting
+stays the render thread's - presents the generated frame immediately and the real one after a measured half interval,
+and stamps the out-of-band present markers. Spacing is measured present to present. Where the graphics family has
+only one queue, frame generation stands down with a log line rather than presenting unpaced.
+
 ### Status: steps 0, 1, 2 and 4 landed (2026-09-12, `feat/dlss-g` at 54a685e)
 
 Three parallel streams, one integration, one adversarial review. Build 0 errors; `Optimum.Tests` 1341
