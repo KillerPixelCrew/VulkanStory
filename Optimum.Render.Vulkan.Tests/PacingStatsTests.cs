@@ -23,6 +23,111 @@ public class PacingStatsTests
 
     public PacingStatsTests(ITestOutputHelper output) => _output = output;
 
+    // ------------------------------------------------------------ present ring
+
+    [Fact]
+    public void PresentRingFilesEachIntervalByTheKindsItSpans()
+    {
+        var ring = new PresentIntervalRing();
+        long t = 1_000_000;
+        for (int i = 0; i < 10; i++)
+        {
+            ring.Add(Present.PacedPresentKind.Generated, t);
+            t += 8_000;
+            ring.Add(Present.PacedPresentKind.Real, t);
+            t += 9_000;
+        }
+        // A dropped real half: generated follows generated.
+        ring.Add(Present.PacedPresentKind.Generated, t);
+        ring.Add(Present.PacedPresentKind.Generated, t + 17_000);
+        // A clock that went backwards is not an interval.
+        ring.Add(Present.PacedPresentKind.Real, t);
+
+        PresentIntervalSnapshot s = ring.Snapshot();
+        Assert.Equal(10, s.GeneratedToReal.Samples);
+        Assert.Equal(10, s.RealToGenerated.Samples);
+        Assert.Equal(8.0, s.GeneratedToReal.Mean, 9);
+        Assert.Equal(9.0, s.RealToGenerated.Mean, 9);
+        Assert.Equal(8.0 / 9.0, s.Ratio, 9);
+        Assert.Equal(1, s.Unpaired);
+        Assert.Equal(21, s.All.Samples);
+        Assert.Equal(0.0, new PresentIntervalRing().Snapshot().Ratio);
+    }
+
+    [Fact]
+    public void PresentLineCarriesTheTokensThePacingGateReads()
+    {
+        var ring = new PresentIntervalRing();
+        ring.Add(Present.PacedPresentKind.Generated, 1_000_000);
+        ring.Add(Present.PacedPresentKind.Real, 1_008_333);
+        ring.Add(Present.PacedPresentKind.Generated, 1_016_667);
+
+        string line = VulkanStats.FormatPresentLine(ring.Snapshot());
+        _output.WriteLine(line);
+        Assert.StartsWith("stats.present samples=2 ", line);
+        foreach (string token in new[]
+                 {
+                     "gen_to_real_mean_ms=8.333", "gen_to_real_p50_ms=", "gen_to_real_p95_ms=", "gen_to_real_p99_ms=",
+                     "gen_to_real_stddev_ms=", "real_to_gen_mean_ms=8.334", "real_to_gen_p50_ms=", "real_to_gen_p95_ms=",
+                     "real_to_gen_p99_ms=", "real_to_gen_stddev_ms=", "ratio=1.000", "present_stddev_ms=", "unpaired=0",
+                 })
+        {
+            Assert.Contains(token, line);
+        }
+        // Every token is key=number, which is all pacing-gate.sh's TOKEN_RE accepts.
+        Assert.Matches(new Regex(@"^stats\.present( [a-z0-9_]+=[\d.]+)+$"), line);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task PresentRingRacedByAPresenterAndTheStatsSampleStaysConsistent()
+    {
+        // Add runs on the present thread, Snapshot on the render thread's stats sample. Every
+        // snapshot must be one moment: the per-kind counts and the unpaired count add up to
+        // the total. Bounded so a deadlock fails the test instead of hanging the suite.
+        const int presents = 100_000;
+        var ring = new PresentIntervalRing(presents);
+        using var stop = new System.Threading.CancellationTokenSource();
+        long inconsistent = 0;
+        long snapshots = 0;
+
+        System.Threading.Tasks.Task presenter = System.Threading.Tasks.Task.Run(() =>
+        {
+            long t = 1_000_000;
+            for (int i = 0; i < presents; i++)
+            {
+                t += 4_000 + (i % 7) * 100;
+                // Every 50th present repeats its kind, so the unpaired count moves too.
+                bool generated = (i % 2 == 0) != (i % 50 == 49);
+                ring.Add(generated ? Present.PacedPresentKind.Generated : Present.PacedPresentKind.Real, t);
+            }
+        });
+        System.Threading.Tasks.Task sampler = System.Threading.Tasks.Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                PresentIntervalSnapshot s = ring.Snapshot();
+                if (s.GeneratedToReal.Samples + s.RealToGenerated.Samples + s.Unpaired != s.All.Samples ||
+                    (s.All.Samples > 0 && (s.All.Mean < 4.0 || s.All.Mean > 4.6)))
+                {
+                    System.Threading.Interlocked.Increment(ref inconsistent);
+                }
+                System.Threading.Interlocked.Increment(ref snapshots);
+            }
+        });
+
+        bool finished = await System.Threading.Tasks.Task.WhenAny(presenter,
+            System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(30))) == presenter;
+        stop.Cancel();
+        Assert.True(finished, "the presenter did not finish within 30 s (deadlock?)");
+        Assert.True(await System.Threading.Tasks.Task.WhenAny(sampler,
+                System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(10))) == sampler,
+            "the sampler did not stop within 10 s");
+        await presenter;
+        Assert.Equal(0, System.Threading.Interlocked.Read(ref inconsistent));
+        Assert.True(System.Threading.Interlocked.Read(ref snapshots) > 0);
+        Assert.Equal(presents - 1, ring.Snapshot().All.Samples);
+    }
+
     // ------------------------------------------------------------ interval ring
 
     [Fact]

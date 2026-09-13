@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Threading;
+using Optimum.Render.Vulkan.Present;
 using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -137,6 +138,13 @@ internal static class VulkanStats
 
     /// <summary>CPU frame intervals of the last 512 frames, any device.</summary>
     public static readonly FrameIntervalRing FrameIntervals = new(FrameIntervalRing.DefaultCapacity);
+
+    /// <summary>
+    /// Present-to-present intervals of the paced present, any device; the present thread
+    /// feeds it through the pacer, the <c>stats.present</c> line reads it. Empty (and the
+    /// line absent) on every run without the paced present.
+    /// </summary>
+    public static readonly PresentIntervalRing PresentIntervals = new();
 
     /// <summary>A mesh write that could not land; see MeshManager.Write.</summary>
     public static void NoteDroppedMeshWrite() => Interlocked.Increment(ref _droppedMeshWrites);
@@ -419,6 +427,9 @@ internal static class VulkanStats
         VulkanAllocator? memory = MemorySource;
         MemorySnapshot memorySnapshot = memory == null ? default : memory.Snapshot();
 
+        PresentIntervalSnapshot present = PresentIntervals.Snapshot();
+        string presentLine = present.All.Samples > 0 ? "\n" + FormatPresentLine(present) : "";
+
         return FormatIntervalLine(elapsed, frames, allocations, VulkanMemory.LiveAllocations,
                    uploads, uploadMs, created, deleted, dropped, overflows) + "\n" +
                FormatPacingLine(FrameIntervals.Snapshot(), FramesInFlight) + "\n" +
@@ -433,7 +444,8 @@ internal static class VulkanStats
                    Leases: Interlocked.Exchange(ref _transientLeases, 0),
                    AliasedLeases: Interlocked.Exchange(ref _aliasedLeases, 0),
                    ReadSelfCopies: Interlocked.Exchange(ref _readSelfCopies, 0),
-                   ReadSelfPool: Interlocked.Read(ref _readSelfPool)));
+                   ReadSelfPool: Interlocked.Read(ref _readSelfPool))) +
+               presentLine;
     }
 
     private static double Mib(ulong bytes) => bytes / (1024.0 * 1024.0);
@@ -622,6 +634,27 @@ internal static class VulkanStats
             "frames_in_flight={6}",
             pacing.Samples, pacing.P50, pacing.P95, pacing.P99, pacing.StdDev, pacing.Stutters, framesInFlight);
 
+    /// <summary>
+    /// <c>stats.present</c>: per-kind present-to-present intervals (mean, p50/p95/p99,
+    /// stddev), their ratio (1.0 = even spacing) and the spread over all presents, which
+    /// <c>scripts/dev/pacing-gate.sh</c> reports. Written only once a present has been
+    /// timed, so a run without the paced present keeps its sample byte for byte.
+    /// </summary>
+    public static string FormatPresentLine(PresentIntervalSnapshot present) =>
+        string.Format(CultureInfo.InvariantCulture,
+            "stats.present samples={0} gen_to_real_n={1} gen_to_real_mean_ms={2:F3} gen_to_real_p50_ms={3:F3} " +
+            "gen_to_real_p95_ms={4:F3} gen_to_real_p99_ms={5:F3} gen_to_real_stddev_ms={6:F3} " +
+            "real_to_gen_n={7} real_to_gen_mean_ms={8:F3} real_to_gen_p50_ms={9:F3} real_to_gen_p95_ms={10:F3} " +
+            "real_to_gen_p99_ms={11:F3} real_to_gen_stddev_ms={12:F3} ratio={13:F3} " +
+            "present_p50_ms={14:F3} present_p95_ms={15:F3} present_p99_ms={16:F3} present_stddev_ms={17:F3} unpaired={18}",
+            present.All.Samples,
+            present.GeneratedToReal.Samples, present.GeneratedToReal.Mean, present.GeneratedToReal.P50,
+            present.GeneratedToReal.P95, present.GeneratedToReal.P99, present.GeneratedToReal.StdDev,
+            present.RealToGenerated.Samples, present.RealToGenerated.Mean, present.RealToGenerated.P50,
+            present.RealToGenerated.P95, present.RealToGenerated.P99, present.RealToGenerated.StdDev,
+            present.Ratio,
+            present.All.P50, present.All.P95, present.All.P99, present.All.StdDev, present.Unpaired);
+
     public static string FormatWaitsLine(long[] counts, double[] milliseconds)
     {
         var line = new StringBuilder("stats.waits");
@@ -683,9 +716,92 @@ internal readonly record struct TransientSample(
     long ReadSelfCopies,
     long ReadSelfPool);
 
-/// <summary>Percentiles and spread of the frame-interval ring at one moment.</summary>
+/// <summary>
+/// Percentiles and spread of the frame-interval ring at one moment. <c>Mean</c> came
+/// with the paced present: its generated->real / real->generated ratio is a ratio of means.
+/// </summary>
 internal readonly record struct FramePacingSnapshot(
-    int Samples, double P50, double P95, double P99, double StdDev, int Stutters);
+    int Samples, double P50, double P95, double P99, double StdDev, int Stutters, double Mean = 0);
+
+/// <summary>
+/// The <c>stats.present</c> values: present-to-present intervals split by the kind of
+/// the present that ends them, and all of them together.
+/// </summary>
+internal readonly record struct PresentIntervalSnapshot(
+    FramePacingSnapshot GeneratedToReal, FramePacingSnapshot RealToGenerated, FramePacingSnapshot All, long Unpaired)
+{
+    /// <summary>
+    /// Mean generated->real over mean real->generated: 1.0 is even spacing, the pacer's
+    /// goal; 0 until both kinds have an interval.
+    /// </summary>
+    public double Ratio => GeneratedToReal.Samples > 0 && RealToGenerated.Samples > 0 && RealToGenerated.Mean > 0
+        ? GeneratedToReal.Mean / RealToGenerated.Mean
+        : 0;
+}
+
+/// <summary>
+/// Present-to-present intervals of the paced present (hazard 3 of the step-0 review:
+/// nothing measured present spacing - <see cref="FrameIntervalRing" /> is CPU frame
+/// starts and the missed-vsync detector brackets one <c>Present()</c> call, which holds
+/// both presents of a pair). One timestamp per vkQueuePresentKHR return, from whichever
+/// thread presented. An interval is filed by the pair of kinds it spans: generated then
+/// real is the pacer's hold, real then generated is the rest of the rendered interval.
+/// Two presents of the same kind in a row (a pair whose real half was dropped) count
+/// only toward <c>All</c> and <c>Unpaired</c>.
+///
+/// Threading: <see cref="Add" /> runs on the present thread, <see cref="Snapshot" /> on
+/// the render thread's stats sample. The last-present fields are guarded by
+/// <see cref="_gate" />, which a snapshot also holds so the three rings are read as one
+/// consistent moment; the inner rings take their own locks, always inside this one.
+/// </summary>
+internal sealed class PresentIntervalRing
+{
+    private readonly object _gate = new();
+    private readonly FrameIntervalRing _generatedToReal;
+    private readonly FrameIntervalRing _realToGenerated;
+    private readonly FrameIntervalRing _all;
+
+    // Guarded by _gate.
+    private long _lastUs;
+    private PacedPresentKind _lastKind;
+    private long _unpaired;
+
+    /// <param name="capacity">Intervals kept per ring; each kind gets its own, so the default covers 512 rendered frames.</param>
+    public PresentIntervalRing(int capacity = FrameIntervalRing.DefaultCapacity)
+    {
+        _generatedToReal = new FrameIntervalRing(capacity);
+        _realToGenerated = new FrameIntervalRing(capacity);
+        _all = new FrameIntervalRing(capacity * 2);
+    }
+
+    /// <summary>One present returned at <paramref name="presentReturnUs" /> (LatencyClock microseconds).</summary>
+    public void Add(PacedPresentKind kind, long presentReturnUs)
+    {
+        lock (_gate)
+        {
+            long last = _lastUs;
+            PacedPresentKind lastKind = _lastKind;
+            _lastUs = presentReturnUs;
+            _lastKind = kind;
+            if (last == 0 || presentReturnUs < last) return;
+
+            double ms = (presentReturnUs - last) / 1000.0;
+            _all.Add(ms);
+            if (lastKind == PacedPresentKind.Generated && kind == PacedPresentKind.Real) _generatedToReal.Add(ms);
+            else if (lastKind == PacedPresentKind.Real && kind == PacedPresentKind.Generated) _realToGenerated.Add(ms);
+            else _unpaired++;
+        }
+    }
+
+    public PresentIntervalSnapshot Snapshot()
+    {
+        lock (_gate)
+        {
+            return new PresentIntervalSnapshot(_generatedToReal.Snapshot(), _realToGenerated.Snapshot(),
+                _all.Snapshot(), _unpaired);
+        }
+    }
+}
 
 /// <summary>
 /// The last N CPU frame intervals, for p50/p95/p99, standard deviation and the
@@ -758,7 +874,7 @@ internal sealed class FrameIntervalRing
             for (int i = n - 1; i >= 0 && _scratch[i] > 2.0 * p50; i--) stutters++;
 
             return new FramePacingSnapshot(n, p50, NearestRank(_scratch, n, 0.95),
-                NearestRank(_scratch, n, 0.99), Math.Sqrt(squares / n), stutters);
+                NearestRank(_scratch, n, 0.99), Math.Sqrt(squares / n), stutters, mean);
         }
     }
 

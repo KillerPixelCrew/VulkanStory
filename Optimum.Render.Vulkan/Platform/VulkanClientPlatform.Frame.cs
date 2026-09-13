@@ -135,6 +135,9 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void OnWindowSizeChanged(int width, int height)
     {
+        // Paced present: a resize is also what a move to another monitor or a fullscreen
+        // switch produces, so the refresh rate is re-read here.
+        ReadDisplayRefreshRate();
         device.Resize(width, height);
     }
 

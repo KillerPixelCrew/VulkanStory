@@ -11,6 +11,13 @@
 #   dropped_mesh_writes  with --stats: mesh writes dropped == 0 in every sample
 #   uniform_overflows    with --stats: uniform overflows == 0 in every sample
 #
+# Reported, never failing (INFO rows, only when the stats log has stats.present lines,
+# i.e. the paced present of frame generation ran):
+#
+#   present_ratio        median of stats.present ratio= (mean generated->real over mean
+#                        real->generated present interval; 1.000 is even spacing)
+#   present_stddev       median of stats.present present_stddev_ms= (all present-to-present intervals)
+#
 # Usage:
 #   scripts/dev/pacing-gate.sh --renderer vulkan|opengl --fps <fps.log>
 #                              [--stats <vulkan-stats.log>] [--baseline <fps.log>]
@@ -35,7 +42,7 @@ import argparse, os, re, statistics, sys
 
 FPS_LINE_RE = re.compile(r"\[Optimum\] fps window=(?P<window>[\d.]+) frames=(?P<frames>\d+) mean=(?P<mean>[\d.]+) min=(?P<min>[\d.]+) max=(?P<max>[\d.]+) p99=(?P<p99>[\d.]+)(?: stddev=(?P<stddev>[\d.]+))?")
 STATS_LINE_RE = re.compile(r"^stats (?P<elapsed>[\d.]+)s: (?P<frames>\d+) frames \((?P<frame_ms>[\d.]+) ms/frame\), .*, mesh writes dropped (?P<dropped>\d+), uniform overflows (?P<overflows>\d+)$")
-STATS_TOKEN_LINE_RE = re.compile(r"^stats\.(?P<kind>pacing|waits|counters) (?P<tokens>.*)$")
+STATS_TOKEN_LINE_RE = re.compile(r"^stats\.(?P<kind>pacing|waits|counters|present) (?P<tokens>.*)$")
 TOKEN_RE = re.compile(r"([a-z0-9_]+)=([\d.]+)")
 
 STDDEV_BASELINE_FACTOR = 1.25
@@ -85,6 +92,22 @@ def parse_stats(lines, skip_seconds):
             for key, value in TOKEN_RE.findall(tokens.group("tokens")):
                 current["tokens"][tokens.group("kind") + "." + key] = float(value)
     return [s for s in samples if not s["skipped"]]
+
+
+def present_rows(samples):
+    """INFO rows for the paced present's stats.present line; none when no sample has one."""
+    present = [s for s in samples if "present.ratio" in s["tokens"]]
+    if not present:
+        return []
+    def median(key):
+        return statistics.median(s["tokens"].get("present." + key, 0.0) for s in present)
+    return [
+        ("present_ratio", "%.3f (gen->real %.3f ms / real->gen %.3f ms)"
+         % (median("ratio"), median("gen_to_real_mean_ms"), median("real_to_gen_mean_ms")),
+         "report only; 1.000 = even spacing", "INFO"),
+        ("present_stddev", "%.3f ms over %d samples" % (median("present_stddev_ms"), len(present)),
+         "report only", "INFO"),
+    ]
 
 
 def evaluate(renderer, fps_lines, stats_lines, baseline_lines, skip_seconds):
@@ -150,6 +173,7 @@ def evaluate(renderer, fps_lines, stats_lines, baseline_lines, skip_seconds):
                      "PASS" if dropped == 0 else "FAIL"))
         rows.append(("uniform_overflows", "%d over %d samples" % (overflows, len(samples)), "== 0",
                      "PASS" if overflows == 0 else "FAIL"))
+        rows.extend(present_rows(samples))
 
     summary = ["windows %d, median mean %.3f ms, median p99 %.3f ms, median stddev %s"
                % (len(windows), median_mean, median_p99,
@@ -201,6 +225,14 @@ SELF_TEST_STATS = [
     "stats.counters blocking_uploads=0 uploads=0 scopes=2662 barriers=242 rebar_fallbacks=0 dynamic_state=169400 uniform_ring_used=401600 uniform_ring_capacity=16777216",
 ]
 
+# The same run with the paced present on: a stats.present line closes each sample.
+SELF_TEST_STATS_PRESENT = (
+    SELF_TEST_STATS[:4]
+    + ["stats.present samples=240 gen_to_real_n=120 gen_to_real_mean_ms=8.390 gen_to_real_p50_ms=8.333 gen_to_real_p95_ms=8.600 gen_to_real_p99_ms=8.900 gen_to_real_stddev_ms=0.210 real_to_gen_n=120 real_to_gen_mean_ms=8.290 real_to_gen_p50_ms=8.334 real_to_gen_p95_ms=8.700 real_to_gen_p99_ms=9.100 real_to_gen_stddev_ms=0.260 ratio=1.012 present_p50_ms=8.333 present_p95_ms=8.650 present_p99_ms=9.000 present_stddev_ms=0.240 unpaired=0"]
+    + SELF_TEST_STATS[4:]
+    + ["stats.present samples=242 gen_to_real_n=121 gen_to_real_mean_ms=8.380 gen_to_real_p50_ms=8.333 gen_to_real_p95_ms=8.600 gen_to_real_p99_ms=8.900 gen_to_real_stddev_ms=0.200 real_to_gen_n=121 real_to_gen_mean_ms=8.300 real_to_gen_p50_ms=8.334 real_to_gen_p95_ms=8.700 real_to_gen_p99_ms=9.100 real_to_gen_stddev_ms=0.250 ratio=1.010 present_p50_ms=8.333 present_p95_ms=8.650 present_p99_ms=9.000 present_stddev_ms=0.230 unpaired=0"]
+)
+
 
 def replace_in(lines, index, old, new):
     changed = list(lines)
@@ -247,10 +279,32 @@ def self_test():
         if not ok:
             failures += 1
             print_table(renderer, rows, messages)
+
+    # The stats.present line is reported, never judged; without it no row appears.
+    checks = 0
+    code, rows, messages = evaluate("vulkan", SELF_TEST_FPS, SELF_TEST_STATS_PRESENT, None, 0)
+    by_rule = {row[0]: row for row in rows}
+    ok = (code == 0 and by_rule.get("present_ratio", (None, ""))[1].startswith("1.011 (gen->real 8.385 ms / real->gen 8.295 ms)")
+          and by_rule.get("present_stddev", (None, ""))[1] == "0.235 ms over 2 samples"
+          and by_rule["present_ratio"][3] == "INFO")
+    print("%s  present line reported as INFO rows" % ("ok  " if ok else "FAIL"))
+    checks += 1
+    if not ok:
+        failures += 1
+        print_table("vulkan", rows, messages)
+    code, rows, messages = evaluate("vulkan", SELF_TEST_FPS, SELF_TEST_STATS, None, 0)
+    ok = not any(row[0].startswith("present_") for row in rows)
+    print("%s  no present rows without the present line" % ("ok  " if ok else "FAIL"))
+    checks += 1
+    if not ok:
+        failures += 1
+        print_table("vulkan", rows, messages)
+    total = len(cases) + checks
+
     if failures:
-        print("self-test: %d of %d cases failed" % (failures, len(cases)))
+        print("self-test: %d of %d cases failed" % (failures, total))
         return 1
-    print("self-test: %d cases passed" % len(cases))
+    print("self-test: %d cases passed" % total)
     return 0
 
 

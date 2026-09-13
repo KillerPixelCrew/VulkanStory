@@ -170,6 +170,60 @@ public class PacingLogFormatCoverageTests
     }
 
     [Fact]
+    public void PacingGateReportsThePresentLineVulkanStatsWrites()
+    {
+        // The paced present's stats.present line: VulkanStats writes it, the gate reports
+        // its ratio and spread as INFO rows, and a log without it gates exactly as before.
+        string stats = Read("Optimum.Render.Vulkan/Core/VulkanStats.cs");
+        foreach (string token in new[]
+                 { "stats.present samples=", "gen_to_real_mean_ms=", "real_to_gen_mean_ms=", "ratio=", "present_stddev_ms=" })
+        {
+            Assert.Contains(token, stats);
+        }
+
+        string gate = Read("scripts/dev/pacing-gate.sh");
+        Assert.Contains("(?P<kind>pacing|waits|counters|present)", gate);
+        foreach (string key in new[] { "\"ratio\"", "\"gen_to_real_mean_ms\"", "\"real_to_gen_mean_ms\"", "\"present_stddev_ms\"" })
+        {
+            Assert.Contains(key, gate);
+        }
+
+        string format = FpsFormatString();
+        string dir = Directory.CreateTempSubdirectory("optimum-pacing-").FullName;
+        try
+        {
+            string fps = Path.Combine(dir, "fps.log");
+            string line = string.Format(CultureInfo.InvariantCulture, format,
+                1.004, 120, 8.367, 7.912f, 11.204f, 10.811f, 0.612);
+            File.WriteAllText(fps, line + "\n" + line + "\n");
+
+            string sample =
+                "stats 1.0s: 120 frames (8.4 ms/frame), 0 allocations (812 live), 0 blocking uploads costing 0 ms (0% of the interval), textures +0/-0, mesh writes dropped 0, uniform overflows 0\n" +
+                "stats.counters blocking_uploads=0 uploads=0 scopes=1 barriers=1 rebar_fallbacks=0 dynamic_state=1 uniform_ring_used=1 uniform_ring_capacity=2\n";
+            string present =
+                "stats.present samples=240 gen_to_real_n=120 gen_to_real_mean_ms=8.400 gen_to_real_p50_ms=8.333 gen_to_real_p95_ms=8.600 gen_to_real_p99_ms=8.900 gen_to_real_stddev_ms=0.210 real_to_gen_n=120 real_to_gen_mean_ms=8.000 real_to_gen_p50_ms=8.000 real_to_gen_p95_ms=8.700 real_to_gen_p99_ms=9.100 real_to_gen_stddev_ms=0.260 ratio=1.050 present_p50_ms=8.333 present_p95_ms=8.650 present_p99_ms=9.000 present_stddev_ms=0.321 unpaired=0\n";
+
+            string withPresent = Path.Combine(dir, "with-present.log");
+            File.WriteAllText(withPresent, sample + present + sample + present);
+            (int code, string output) = RunGate("--renderer", "vulkan", "--fps", fps, "--stats", withPresent);
+            Assert.True(code == 0, output);
+            Assert.Matches(new Regex(@"present_ratio\s+1\.050 \(gen->real 8\.400 ms / real->gen 8\.000 ms\).*INFO"), output);
+            Assert.Matches(new Regex(@"present_stddev\s+0\.321 ms over 2 samples.*INFO"), output);
+
+            string without = Path.Combine(dir, "without-present.log");
+            File.WriteAllText(without, sample + sample);
+            (code, output) = RunGate("--renderer", "vulkan", "--fps", fps, "--stats", without);
+            Assert.True(code == 0, output);
+            Assert.DoesNotContain("present_ratio", output);
+            Assert.DoesNotContain("present_stddev", output);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public void PacingGateNeverPatternKills()
     {
         string script = Read("scripts/dev/pacing-gate.sh");

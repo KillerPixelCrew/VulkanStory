@@ -325,6 +325,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            // Paced present: the refresh rate of the window's monitor, for the pacer's
+            // seed interval and the paced frame cap under FIFO.
+            ReadDisplayRefreshRate();
             // DLSS plan, Phase 2: NGX comes up on the device that now exists. A
             // refusal leaves the client on the Vulkan device with no upscaler, one
             // line in the log and the setting stood down - never a failed install.
