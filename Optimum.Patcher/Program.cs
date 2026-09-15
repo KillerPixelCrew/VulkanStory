@@ -111,6 +111,14 @@ var membersToInject = new Dictionary<string, List<string>>
         "bfsQueue",
         "bfsVisited",
     },
+    // Issue #74: reusable ItemRenderInfo scratch + fill/reset helpers so the GUI
+    // item render path avoids a per-slot allocation without touching the public API.
+    ["Vintagestory.Client.NoObf.InventoryItemRenderer"] = new()
+    {
+        "optimumGuiRenderInfoScratch",
+        "FillItemStackRenderInfo",
+        "ResetItemRenderInfo",
+    },
     ["Vintagestory.Client.NoObf.ClientPlatformWindows"] = new()
     {
         "_optimumSettingsInitialized",
@@ -235,6 +243,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "edgeOptimumChiselModeldataByRenderPassByLodLevel",
         "MergeTesselatedChunkParts",
         "populateTesselatedChunkPart",
+        "OptimumCloneChunkMesh",
     },
     // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
@@ -475,6 +484,13 @@ var targets = new List<MethodTarget>
     // Issue #75 Tier 1: GPU indirect draw submission (glMultiDrawElementsIndirect)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5,
         new[] { "Vintagestory.API.Client.MeshRef", "System.Int32[]", "System.Int32[]", "System.Int32", "System.Boolean" }),
+    // Issue #74: item-render profiler summary hook at the final render stage, and
+    // the reused-scratch per-slot item render path.
+    new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerRenderStage", 2,
+        new[] { "Vintagestory.API.Client.EnumRenderStage", "System.Single" }),
+    // Issue #74 item-render profiler: measure per-slot GetItemStackRenderInfo cost.
+    new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemstackToGui", 10,
+        new[] { "Vintagestory.API.Common.ItemSlot", "System.Double", "System.Double", "System.Double", "System.Single", "System.Int32", "System.Single", "System.Boolean", "System.Boolean", "System.Boolean" }),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop

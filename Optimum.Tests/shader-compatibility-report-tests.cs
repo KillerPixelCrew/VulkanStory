@@ -21,6 +21,14 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
     {
         OptimumConfig.ResetShaderCompatibilityForTests();
         OptimumConfig.SetDataPath(null);
+        try
+        {
+            string clean = Path.Combine(Path.GetTempPath(), "optimum-shader-compat-reset-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(clean);
+            OptimumConfig.SetDataPath(clean);
+            Directory.Delete(clean, true);
+        }
+        catch { }
         // Reset state with clean directory to prevent polluting other test runs
         if (Directory.Exists(_tempDataDir))
         {
