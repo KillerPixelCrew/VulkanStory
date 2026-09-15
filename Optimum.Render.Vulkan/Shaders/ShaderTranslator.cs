@@ -24,6 +24,16 @@ internal sealed class TranslatedProgram
     public Dictionary<EnumShaderType, string> RewrittenSource { get; } = new();
     public List<string> Errors { get; } = new();
     public bool Success => Errors.Count == 0;
+
+    /// <summary>
+    /// The specialization constants a native program's pipelines are created with
+    /// (docs/vulkan-native-shaders.md section 5); null for a rewritten program, whose
+    /// defines were resolved by the preprocessor.
+    /// </summary>
+    public NativeSpecialization? Specialization;
+
+    /// <summary>Whether the program was linked from the manifest's SPIR-V rather than through the rewriter.</summary>
+    public bool IsNative;
 }
 
 /// <summary>

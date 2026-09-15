@@ -1,3 +1,4 @@
+using Optimum.Render.Vulkan.Shaders;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -812,6 +813,31 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         Vk api = _context.Api;
         byte* entryPoint = (byte*)SilkMarshal.StringToPtr("main");
 
+        // A native program's settings are specialization constants (docs/vulkan-native-shaders.md
+        // section 5); every stage gets the same map, and an id a module does not declare is ignored.
+        NativeSpecialization? specialization = request.Program.Specialization;
+        SpecializationInfo* specializationInfo = null;
+        if (specialization != null && specialization.Entries.Length > 0)
+        {
+            nuint entryBytes = (nuint)(sizeof(SpecializationMapEntry) * specialization.Entries.Length);
+            var map = (SpecializationMapEntry*)System.Runtime.InteropServices.NativeMemory.Alloc(entryBytes);
+            for (int i = 0; i < specialization.Entries.Length; i++)
+            {
+                NativeSpecialization.Entry entry = specialization.Entries[i];
+                map[i] = new SpecializationMapEntry { ConstantID = entry.Id, Offset = entry.Offset, Size = entry.Size };
+            }
+            var data = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)Math.Max(specialization.Data.Length, 1));
+            specialization.Data.AsSpan().CopyTo(new Span<byte>(data, specialization.Data.Length));
+            specializationInfo = (SpecializationInfo*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)sizeof(SpecializationInfo));
+            *specializationInfo = new SpecializationInfo
+            {
+                MapEntryCount = (uint)specialization.Entries.Length,
+                PMapEntries = map,
+                DataSize = (nuint)specialization.Data.Length,
+                PData = data,
+            };
+        }
+
         var stages = new List<PipelineShaderStageCreateInfo>();
         foreach (KeyValuePair<EnumShaderType, ShaderModule> module in request.Program.Modules)
         {
@@ -826,6 +852,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                 },
                 Module = module.Value,
                 PName = entryPoint,
+                PSpecializationInfo = specializationInfo,
             });
         }
 
@@ -991,6 +1018,12 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         finally
         {
             SilkMarshal.Free((nint)entryPoint);
+            if (specializationInfo != null)
+            {
+                System.Runtime.InteropServices.NativeMemory.Free(specializationInfo->PMapEntries);
+                System.Runtime.InteropServices.NativeMemory.Free(specializationInfo->PData);
+                System.Runtime.InteropServices.NativeMemory.Free(specializationInfo);
+            }
         }
     }
 
