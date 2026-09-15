@@ -415,6 +415,52 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
 - **Environment overrides:**
   - `OPTIMUM_VK_NATIVE_SHADERS=0` forces the rewriter for A/B runs.
   - `OPTIMUM_VK_SHADER_SOURCE=<dir>` compiles the source tree at runtime for the development loop.
+- **Delivered (2026-09-16, the runtime seam):** `Shaders/NativeShaderLibrary.cs`,
+  `Shaders/ProgramInterfaceLayout.Native.cs`, the `LinkProgram` branch, `NativeShaderRuntimeTests`.
+  - **Loading, once at `Initialize`** (`NativeShaderLibrary.Resolve`, in this order): off when
+    `OPTIMUM_VK_NATIVE_SHADERS=0` or the device's `NativeShadersEnabled` is false; the device's
+    `NativeShaderDirectory` (tests); `OPTIMUM_VK_SHADER_SOURCE`, compiled through `NativeShaderBuilder.Build`
+    (programs that built are used, the build errors are named in the load line); else `shaders-vk/` beside
+    `Optimum.Render.Vulkan.dll`. A missing or malformed manifest, another schema version, or a `toolchain` other
+    than the device compiler's `ShaderCompiler.Identity` (it names the Silk shaderc package, so it is the same
+    on every platform) turns native shaders off with one line: `[Optimum] shaders: native off: <reason>`. A
+    loaded one logs `[Optimum] shaders: native <n> programs from <origin>`.
+  - **SPIR-V is verified lazily:** read and SHA-256-checked the first time a variant links; a mismatch or an
+    unreadable file fails that variant for the life of the device.
+  - **Variant key** (`NativeShaderLibrary.VariantKeyFor`): the defines of both stages' prefixes, vertex then
+    fragment. `GBUFFER` is `SSAOLEVEL > 0`; `ALLOWDEPTHOFFSET`, `GLOWSUB`, `VEC3SCALE` are 1 when defined (the
+    GLSL 330 sources test them with `defined()`); every other axis is its define's value, 0 when absent, and a
+    value other than 0 or 1 fails the program. Pinned against `ShaderCorpus.Variants()` and as the inverse of
+    the parity harness's `VariantFor` for every combination of every axis and every manifest key.
+  - **Outcomes:** no program of that name, or a geometry stage, is a **miss** (rewritten). A program the manifest
+    has but cannot serve (no variant for the key, a stage missing, a failed hash, an unreadable spec value, a
+    layout error, `vkCreateShaderModule` refusing the module) is **failed**: it links through the rewriter, logs
+    `[Optimum] shaders: native '<name>' failed, linked through the rewriter: <reason>` and counts as failed, not
+    rewritten. `N + M + K` is every program linked.
+  - **Counts:** ShaderRegistry links a whole load or reload in one synchronous call, so the first `BeginFrame`
+    after links reports the programs linked since the last report, logs the counts line and publishes the same
+    numbers as `stats.shaders native= rewritten= failed=`.
+  - **Placement table** (`ProgramInterfaceLayout.FromNative`), so the draw path reads one layout type:
+    - frame members from `frameMembers` (the owner rule was applied by the builder), located at
+      `FrameLocationBase + offset`;
+    - record members at their reflected offsets, `BlockSize` the record's size;
+    - push members that are not sampler slots (DRAW uniforms, section 4) in a fourth, disjoint range,
+      `PushLocationBase` (`1 << 27`) + offset, below the frame range and above any record offset. Their values
+      persist in a per-program push shadow that `BindDescriptors` copies into the device's push bytes before the
+      slots are resolved over them;
+    - samplers in the unit order the client assigns: `collectUniformNames`' pattern run over the GLSL 330 text the
+      program still carries. A name that is a `SetConvention.FrameTextures` entry reads set 0; a manifest slot
+      takes its `pushOffset`; a slot the oracle cannot see (a type outside its list) follows in push order;
+    - `storageBindings` a shipped module uses: FaceData to the storage block, bindings 1 and 2 to the client's
+      `Animation`/`AnimationPrev` UBOs; the named-block range is the rewriter's and fails a native program;
+    - `vertexInputs` for GL's constant attribute defaults, `writtenOutputs` for the colour write masks.
+  - **Specialization constants** (`NativeShaderLibrary.TryBuildSpecialization`): every constant the variant lists,
+    valued from the define `SpecializationConvention` maps it to in the same prefix (the setting ShaderRegistry
+    stamps), 0 when absent, 4 bytes each (`int`, `float`, `bool` as VkBool32). `GraphicsPipelineCache.CreatePipeline`
+    hands the one map to every stage. The in-memory `PipelineKey` already names the program id, whose constants
+    are fixed at link (a settings change still reloads every program), and `ShaderProgramResources.SourceHash`
+    hashes the specialization data with the SPIR-V, so the persistent pipeline-key log's content id changes with
+    the settings too.
 - **Mod shaders:** they stay on the rewriter, retargeted to the same shared layout (handoff item 4, first half,
   delivered 2026-09-15). `ShaderProgramResources` owns no set or pipeline layout; every pipeline is built
   against `SharedPipelineLayout`. The rewriter (`ProgramInterfaceLayout.Build`, `ShaderRewriter`) emits:
@@ -451,6 +497,18 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
   divides by zero in `ColorGrade`). On a hit the runtime seeds the push shadow and the record from the GLSL 330
   declarations' initializers, which it holds at the seam, the way `ProgramInterfaceLayout.WriteInitializer`
   seeds the rewriter's block. The manifest does not carry them (found by the family 1 pilot, 2026-09-15).
+  - **Delivered (2026-09-16):** `GlslUniformOracle` reads `uniform <type> <name> = <literal>;` from the include-expanded
+    GLSL 330 stage texts the program still carries (comments stripped, vertex stage first, the first declaration of a
+    name wins) and `ProgramInterfaceLayout.WriteInitializer` writes it into the record shadow at the member's
+    reflected offset, and into the push shadow for a push member. Only scalar literals are honoured, as for the
+    rewriter. The preprocessor is not run: an initializer inside an inactive `#if` would still be seeded, which no
+    shipped shader has.
+  - **Pinned** by `NativeShaderRuntimeTests.NativeAndRewrittenFamilyOneProgramsRenderTheSamePixels`: blit, final and
+    luma link natively and through the rewriter on one device and render fixed inputs under five FXAA/BLOOM/
+    SSAOLEVEL/GODRAYS combinations; blit and luma match exactly, final within 1/255 per channel, with
+    `minlight`/`maxlight`/`minsat`/`maxsat`/`extraGamma` never set and the native record checked for the seeded
+    values. `ACorruptedSpirvFileFallsBackToTheRewriterAndCountsAsFailed` and
+    `TurningNativeShadersOffLinksEveryProgramThroughTheRewriter` pin the fallbacks; all three run validation clean.
 
 ## 9. Adding a family
 
