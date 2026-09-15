@@ -232,6 +232,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "edgeOptimumChiselModeldataByRenderPassByLodLevel",
         "MergeTesselatedChunkParts",
         "populateTesselatedChunkPart",
+        "OptimumCloneChunkMesh",
     },
     // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()

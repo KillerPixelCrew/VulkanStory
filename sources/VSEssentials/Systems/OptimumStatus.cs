@@ -28,6 +28,15 @@ public class OptimumStatusModSystem : ModSystem
             OptimumDiagnostics.CullWalkLogEnabled = true;
         }
 
+        // Issue #73 mesh-construction profiler hook: OPTIMUM_MESH_PROFILE=1 makes
+        // ChunkTesselator.NowProcessChunk record per-chunk tess/finalize timing
+        // and thread-allocated bytes, logging a summary every MeshProfileLogEvery
+        // chunks so a scripted run captures the bottleneck without chat input.
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_MESH_PROFILE") == "1")
+        {
+            OptimumDiagnostics.MeshProfileEnabled = true;
+        }
+
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
