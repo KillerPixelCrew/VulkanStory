@@ -150,6 +150,33 @@ before window release was already correct.
     They were hidden before because no layer was installed.
 - Optimum.Tests: 5 host-environment failures (pacing gate x2, numpy self-tests x2, `_ref/` not materialised).
 
+### Test state (Linux notebook, 2026-09-15, at 99b836d)
+
+RTX 4070 Laptop, driver 615.71.09, X11 (XWayland), Vulkan SDK layers 1.4.357.0 - the same layer version as the
+Windows run above.
+
+- **Implicit layers switched off for every run**, confirmed with `VK_LOADER_DEBUG=layer`: MangoHud is enabled
+  globally on this machine and `VK_LAYER_LS_frame_generation` has no enable variable, so both would otherwise hook
+  the test host and draw or present on the swapchain. Only `VK_LAYER_MESA_device_select` stays (it orders
+  devices). Environment:
+  `MANGOHUD=0 DISABLE_MANGOHUD=1 DISABLE_LSFG=1 DISABLE_VK_LAYER_VALVE_steam_overlay_1=1 DISABLE_VK_LAYER_VALVE_steam_fossilize_1=1 DISABLE_GAMESCOPE_WSI=1 DISABLE_VULKAN_RENDERDOC_CAPTURE_1_45=1 DISABLE_LAYER_MESA_ANTI_LAG=1`.
+- **Validation is live in the suite**, not assumed: the loader inserts `VK_LAYER_KHRONOS_validation` into the test
+  process, `ValidationFeaturesTests` asserts the layer settings were applied, and
+  `SyncValidationControlTests.AnUnsynchronisedWriteAfterWriteIsReportedUnderASyncId` provokes a hazard and passes
+  only because sync validation reports it.
+- GPU suite: **661 passed, 0 failed, 0 skipped, no `SYNC-` messages.** The five present-after-write tests listed
+  above pass here, and they also pass with MangoHud and the frame-generation layer switched back on.
+- Optimum.Tests: 1177 passed, 34 skipped, 0 failed. The one failure before `99b836d` was
+  `SsaoTemporalDitherCoverageTests.WithoutATemporalConsumerTheOverrideIsTheVanillaShader` reading the deployed,
+  override-carrying copy of `ssao.fsh`; it now reads the client archive.
+
+**Item 1 status:** the present-after-write hazard does not reproduce on this machine with the identical layer
+version, so it is specific to the Windows run: its driver, its present path, or an implicit layer installed there
+(overlays such as the NVIDIA, Steam or RTSS ones hook the same way). Recheck on the Windows machine with every
+implicit layer disabled before changing the present path; the present semaphores already follow the Vulkan Guide's
+per-image pattern (`SwapchainSlot.PresentSemaphoreFor(imageIndex)`, signalled by the submission that moves the image
+to `PRESENT_SRC`).
+
 ### Next, in order
 
 1. **Fix the present-after-write hazard.** The present has to wait on a semaphore signalled by the submit
