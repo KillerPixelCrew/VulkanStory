@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..6bf26af 100644
+index f9128b4..d81387f 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -280,11 +280,15 @@ namespace Vintagestory.API.Client
@@ -18,7 +18,7 @@ index f9128b4..6bf26af 100644
              // Assign a location to it
              ModelDataPoolLocation poolLocation = new ModelDataPoolLocation()
              {
-@@ -462,10 +466,14 @@ namespace Vintagestory.API.Client
+@@ -462,11 +466,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -28,11 +28,12 @@ index f9128b4..6bf26af 100644
 +            long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
              render.RenderMesh(modelRef, indicesStartsByte, indicesSizes, indicesGroupsCount);
 +            long elapsedTicks = System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
-+            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkDrawSubmission(indicesGroupsCount, false, elapsedTicks);
++            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkDrawSubmission(indicesGroupsCount, Vintagestory.API.Config.OptimumConfig.EffectiveIndirectDraw, elapsedTicks);
          }
      }
  
  
+     /// <summary>
 @@ -513,10 +521,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
@@ -46,7 +47,7 @@ index f9128b4..6bf26af 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +542,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +545,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);

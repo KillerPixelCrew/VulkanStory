@@ -502,6 +502,14 @@ public static class OptimumConfig
         SetGreedyMeshShaderAbi(false, false);
     }
 
+    public static void ResetShaderCompatibilityForTests()
+    {
+        _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityScanFailed = false;
+        _shaderCompatibilityFingerprint = null;
+        ResetShaderCompatibilityAfterReload();
+    }
+
     private static void LoadShaderCompatibilityReport()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
@@ -701,6 +709,13 @@ public static class OptimumConfig
     /// </summary>
     public static void SetDataPath(string dataPath)
     {
+        if (dataPath == null)
+        {
+            _dataPath = null;
+            _configPath = null;
+            ResetShaderCompatibilityForTests();
+            return;
+        }
         string dir = Path.Combine(dataPath, "ModConfig");
         Directory.CreateDirectory(dir);
         _configPath = Path.Combine(dir, "optimum.json");

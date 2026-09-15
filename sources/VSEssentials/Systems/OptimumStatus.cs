@@ -28,6 +28,18 @@ public class OptimumStatusModSystem : ModSystem
             OptimumDiagnostics.CullWalkLogEnabled = true;
         }
 
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CHUNK_RENDER_LOG") == "1")
+        {
+            api.Event.RegisterGameTickListener(_ =>
+            {
+                api.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkRenderSummary());
+            }, 5000);
+            api.Event.LeaveWorld += () =>
+            {
+                api.Logger.Notification("[Optimum] Final " + OptimumDiagnostics.GetChunkRenderSummary());
+            };
+        }
+
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);

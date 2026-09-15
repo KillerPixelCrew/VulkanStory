@@ -19,6 +19,8 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
 
     public void Dispose()
     {
+        OptimumConfig.ResetShaderCompatibilityForTests();
+        OptimumConfig.SetDataPath(null);
         // Reset state with clean directory to prevent polluting other test runs
         if (Directory.Exists(_tempDataDir))
         {
