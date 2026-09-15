@@ -253,6 +253,13 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         // The same pipeline under another key, or a prewarm of it, is already on its way.
         if (_pendingJobs.TryGetValue(id, out CompileJob? pending))
         {
+            // A prewarm no worker has reached yet never had a warm attempt: on a warm start
+            // the driver cache serves it here, and waiting for the queue would skip the draw.
+            if (TryTakeWarmFromQueuedPrewarm(pending, request, out pipeline))
+            {
+                Store(key, pipeline, entry);
+                return true;
+            }
             pending.DemandKeys.Add(key);
             _pendingByKey[key] = pending;
             Promote(pending);
@@ -301,6 +308,51 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         VulkanStats.NotePipelinesPending(_pendingJobs.Count);
         NoteSkipped();
         return false;
+    }
+
+    /// <summary>
+    /// The FAIL_ON_PIPELINE_COMPILE_REQUIRED attempt for a lookup whose pipeline is only
+    /// queued as a prewarm. On success the prewarm is dropped: removed from its queue, or,
+    /// when a worker took it meanwhile, cancelled so its result is destroyed at publication.
+    /// A prewarm already promoted by an earlier lookup had its attempt then and gets none.
+    /// </summary>
+    private bool TryTakeWarmFromQueuedPrewarm(CompileJob job, PipelineRequest request, out Pipeline pipeline)
+    {
+        pipeline = default;
+        lock (_queueLock)
+        {
+            if (!job.Prewarm || !job.Queued) return false;
+        }
+
+        Result result;
+        lock (_driverCacheLock)
+        {
+            result = CreatePipeline(request, _driverCache, PipelineCreateFlags.CreateFailOnPipelineCompileRequiredBit,
+                out pipeline);
+        }
+        if (result == Result.PipelineCompileRequired) return false;
+        if (result != Result.Success)
+        {
+            throw new InvalidOperationException("vkCreateGraphicsPipelines failed: " + result);
+        }
+
+        Interlocked.Increment(ref _warm);
+        VulkanStats.NotePipelineWarm();
+        lock (_queueLock)
+        {
+            if (job.Queued)
+            {
+                job.Queued = false;
+                if (!_prewarmQueue.Remove(job)) _demandQueue.Remove(job);
+            }
+            else
+            {
+                job.Cancelled = true;
+            }
+            Forget(job);
+        }
+        VulkanStats.NotePipelinesPending(_pendingJobs.Count);
+        return true;
     }
 
     private void NoteSkipped()
@@ -386,6 +438,23 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     private Thread[]? _workers;
     private bool _stopping;
     private bool _workersStopped;
+    private bool _holdForTests;
+
+    /// <summary>
+    /// Tests only: while true the workers take no new job, so a test can observe a lookup
+    /// against a job that is still queued. Setting it false wakes them.
+    /// </summary>
+    internal bool HoldBackgroundCompilesForTests
+    {
+        set
+        {
+            lock (_queueLock)
+            {
+                _holdForTests = value;
+                Monitor.PulseAll(_queueLock);
+            }
+        }
+    }
 
     /// <summary>Render thread: every queued or running job by pipeline identity, and by the keys waiting on it.</summary>
     private readonly Dictionary<(int ProgramId, UInt128 ContentId), CompileJob> _pendingJobs = new();
@@ -458,7 +527,10 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
             CompileJob job;
             lock (_queueLock)
             {
-                while (!_stopping && _demandQueue.Count == 0 && _prewarmQueue.Count == 0) Monitor.Wait(_queueLock);
+                while (!_stopping && (_holdForTests || (_demandQueue.Count == 0 && _prewarmQueue.Count == 0)))
+                {
+                    Monitor.Wait(_queueLock);
+                }
                 if (_stopping) return;
                 LinkedList<CompileJob> queue = _demandQueue.Count > 0 ? _demandQueue : _prewarmQueue;
                 job = queue.First!.Value;
@@ -553,8 +625,9 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         int published = 0;
         while (_completed.TryDequeue(out CompileJob? job))
         {
-            _pendingJobs.Remove(job.Id);
-            foreach (PipelineKey key in job.DemandKeys) _pendingByKey.Remove(key);
+            // A job dropped early (Forget) may have been replaced under its id or keys by a
+            // newer one; only this job's own entries go.
+            Forget(job);
 
             if (job.Status != Result.Success || job.Pipeline.Handle == 0)
             {
@@ -618,6 +691,14 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     /// </summary>
     public void CancelProgram(ShaderProgramResources program)
     {
+        // Every job of the program the render thread still tracks, including one the worker
+        // finished that waits in the completed queue for the next frame start: publishing
+        // that one would park a pipeline of a deleted program where no lookup can claim it.
+        foreach (CompileJob job in _pendingJobs.Values)
+        {
+            if (ReferenceEquals(job.Request.Program, program)) job.Cancelled = true;
+        }
+
         lock (_queueLock)
         {
             foreach (LinkedList<CompileJob> queue in new[] { _demandQueue, _prewarmQueue })
@@ -665,8 +746,17 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     private void Forget(CompileJob job)
     {
-        _pendingJobs.Remove(job.Id);
-        foreach (PipelineKey key in job.DemandKeys) _pendingByKey.Remove(key);
+        if (_pendingJobs.TryGetValue(job.Id, out CompileJob? current) && ReferenceEquals(current, job))
+        {
+            _pendingJobs.Remove(job.Id);
+        }
+        foreach (PipelineKey key in job.DemandKeys)
+        {
+            if (_pendingByKey.TryGetValue(key, out CompileJob? waiting) && ReferenceEquals(waiting, job))
+            {
+                _pendingByKey.Remove(key);
+            }
+        }
     }
 
     /// <summary>Waits until no compile is queued or running. Tests only; false on timeout.</summary>
