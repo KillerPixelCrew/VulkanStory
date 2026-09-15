@@ -103,6 +103,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "ProbeThickLineSupport", Array.Empty<string>()),
         new(true, "OnWindowSizeChanged", new[] { "Int32", "Int32" }),
         new(true, "ReadTextureForParity", new[] { "Int32" }),
+        // Optimum AO: the platform's own ambient occlusion and its debug outputs.
+        new(true, "RenderOptimumAmbientOcclusion", new[] { "Single[]" }),
+        new(true, "OptimumAmbientOcclusionDebugTexture", new[] { "Int32" }),
         // Phase 1A step 5: the leaf operations the render systems outside the platform issued.
         new(true, "SetDepthRange", new[] { "Single", "Single" }),
         new(true, "ClearDefaultDepth", new[] { "Single" }),
@@ -321,6 +324,14 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
+        try
+        {
+            ReleaseAmbientOcclusion();
+        }
+        catch (Exception)
+        {
+            // Released with the device below either way.
+        }
         try
         {
             device?.Dispose();

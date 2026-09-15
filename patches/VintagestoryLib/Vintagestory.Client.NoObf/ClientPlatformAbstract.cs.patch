@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..7420dff 100644
+index d6eb844..0d7c6f9 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,433 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,453 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -111,6 +111,26 @@ index d6eb844..7420dff 100644
 +	public virtual int RenderOptimumTaaSharpen(int resolvedScene)
 +	{
 +		return resolvedScene;
++	}
++
++	/// <summary>
++	/// Optimum AO (docs/research/ambient-occlusion.md): records the platform's own ambient
++	/// occlusion for this frame and returns the visibility texture the scene composes; 0 means
++	/// vanilla SSAO runs. The neutral body, and so the OpenGL path, always returns 0.
++	/// </summary>
++	public virtual int RenderOptimumAmbientOcclusion(float[] projectMatrix)
++	{
++		return 0;
++	}
++
++	/// <summary>
++	/// Optimum AO: this frame's debug outputs for the parity dump and the headless harness -
++	/// 0 the pre-denoise working term, 1 the packed edges, 2 working-depth level 0, 3 the
++	/// denoised output; 0 when the platform ran no AO of its own.
++	/// </summary>
++	public virtual int OptimumAmbientOcclusionDebugTexture(int index)
++	{
++		return 0;
 +	}
 +
 +	public virtual bool OptimumFsrBlitActive()

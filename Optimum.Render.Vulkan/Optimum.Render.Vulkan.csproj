@@ -90,4 +90,13 @@
     <InternalsVisibleTo Include="Optimum.Render.Vulkan.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The ambient occlusion compute shaders (docs/research/ambient-occlusion.md section C)
+         travel inside the renderer assembly, so deploy and the packagers carry them with
+         the DLL; AmbientOcclusion/GtaoShaderSources.cs reads them by these names. -->
+    <EmbeddedResource Include="..\sources\shaders-vk\gtao\*.comp;..\sources\shaders-vk\gtao\*.glsl">
+      <LogicalName>shaders-vk/gtao/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

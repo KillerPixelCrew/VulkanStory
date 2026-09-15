@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..b2f4276 100644
+index 4a24e75..c22cb64 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -238,7 +238,7 @@ index 4a24e75..b2f4276 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +497,48 @@ public class ShaderRegistry
+@@ -333,10 +497,56 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -278,6 +278,14 @@ index 4a24e75..b2f4276 100644
 +		OptimumEntityMotion.Enabled = taaMotion;
 +		int taaMotionLocation = ((ClientSettings.SSAOQuality > 0) ? 4 : 2);
 +		string taaDefines = "#define TAAMOTION " + (taaMotion ? 1 : 0) + "\r\n#define TAAMOTIONLOCATION " + taaMotionLocation + "\r\n";
++		// Optimum AO (docs/research/ambient-occlusion.md): the class channel writes (the hand view,
++		// the no-cull plants) and scene-ssao's GTAO compose branch compile in only while the Vulkan
++		// platform runs GTAO, so OpenGL and every other configuration preprocess exactly as before.
++		// SSAOQuality > 0 is the G-buffer's own condition, the one SSAOLEVEL is stamped from. The
++		// flag tells the platform what the live shaders were built for.
++		bool optimumAo = OptimumConfig.EffectiveGtao && ClientSettings.SSAOQuality > 0;
++		OptimumConfig.AmbientOcclusionShadersUseGtao = optimumAo;
++		taaDefines = taaDefines + "#define OPTIMUMAO " + (optimumAo ? 1 : 0) + "\r\n";
 +		Shader taaFrag = program.FragmentShader;
 +		taaFrag.PrefixCode = taaFrag.PrefixCode + taaDefines;
 +		Shader taaVert = program.VertexShader;

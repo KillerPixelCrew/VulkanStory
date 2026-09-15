@@ -107,7 +107,20 @@ public partial class VulkanClientPlatform
             // The AO multiply before the TAA resolve shares the colour-0 mask, but
             // samples only the blurred AO and preserves every other Primary attachment.
             var reads = new List<int>();
-            AddColour(reads, SsaoBlurVerticalIndex, 0);
+            if (ambientOcclusionOutput != 0)
+            {
+                // GTAO: the visibility texture, and the attenuation inputs the OPTIMUMAO compose reads.
+                reads.Add(ambientOcclusionOutput);
+            }
+            else
+            {
+                AddColour(reads, SsaoBlurVerticalIndex, 0);
+            }
+            if (Vintagestory.API.Config.OptimumConfig.AmbientOcclusionShadersUseGtao)
+            {
+                AddColour(reads, PrimaryIndex, 3);
+                AddColour(reads, TransparentIndex, 1);
+            }
             device.DeclarePass(new PassDeclaration
             {
                 Name = "SceneSsao/0",

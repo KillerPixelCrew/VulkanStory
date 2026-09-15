@@ -63,6 +63,23 @@ public static class OptimumParityDump
     public static readonly long Frame = ResolveFrame();
 
     /// <summary>
+    /// True when <c>OPTIMUM_AO_OUTPUTS</c> opts in to the ambient occlusion debug outputs
+    /// (docs/research/ambient-occlusion.md C.13, section D): the pre-denoise working term, the
+    /// packed edges, working-depth level 0 and the denoised output are written by this dump
+    /// (slots 40-43) and beside every frame the headless harness captures. Compute-only
+    /// textures, so no framebuffer slot holds them and the dump asks the platform for them.
+    /// </summary>
+    public static readonly bool AmbientOcclusionOutputs = ResolveAmbientOcclusionOutputs();
+
+    private static bool ResolveAmbientOcclusionOutputs()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_AO_OUTPUTS");
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        value = value.Trim();
+        return value != "0" && !value.Equals("false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The one file-name format both backends use:
     /// <c>&lt;slotIndex&gt;-&lt;slotName&gt;-&lt;color&lt;i&gt;|depth&gt;-&lt;format&gt;.&lt;ext&gt;</c>.
     /// </summary>
