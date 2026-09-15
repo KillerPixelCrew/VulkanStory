@@ -88,6 +88,8 @@ docs/*
 !docs/research/
 # ...and the native shader interface contract every program family is written against.
 !docs/vulkan-native-shaders.md
+# ...and the modder documentation for Vulkan-native mod support (passes, motion writers, shaders).
+!docs/vulkan-mod-support.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1
