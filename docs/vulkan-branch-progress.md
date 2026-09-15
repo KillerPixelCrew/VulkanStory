@@ -3,7 +3,7 @@
 Everything needed to continue the Vulkan branch on another machine. Last updated 2026-09-15 at 11195c5.
 
 - Plan of record: `docs/vulkan-native-plan.md` (decisions 1-9, phases, risks).
-- Research the designs follow: `docs/research/` (caching, descriptor model, XeGTAO, validation).
+- Research the designs follow: `docs/research/` (caching, descriptor model, bindless, XeGTAO, validation).
 - Acceptance procedures: `docs/vulkan-acceptance.md`, `docs/taa-acceptance.md`, `docs/temporal-frame-contract.md`.
 - Older planning documents still in the tree: `VULKAN-BACKEND-PLAN.md`, `TAA-PLAN.md` (history; the plan of
   record supersedes them where they disagree).
@@ -156,12 +156,13 @@ before window release was already correct.
    that transitions the swapchain image to PRESENT_SRC, with one render-finished semaphore per swapchain
    image indexed by the acquired image (`docs/research/vulkan-validation.md` §4; Vulkan Guide "Swapchain
    Semaphore Reuse"). Exit: the five tests pass with the layer; the rest of the suite is unchanged.
-2. **Bindless implementation research** (was running, did not finish): write `docs/research/vulkan-bindless.md`.
-   Questions: separate `texture2D[]` + `sampler[]` vs combined arrays; shadow, array, cube and integer
-   samplers; layout and pool flags (partially bound, update-after-bind, variable count); required features
-   and limits per vendor incl. Intel iGPU; slot lifetime with frames in flight (ids recycle with deferred
-   deletion, transient aliasing rebinds ids per frame); when `nonuniformEXT` is required; driver quirks
-   2024-2026; a concrete recommendation.
+2. **Bindless implementation research: done** (`docs/research/vulkan-bindless.md`). Design outcome: combined-image-sampler
+   arrays in set 1, one binding per GLSL sampled type (2D, 2DArray, Cube, 3D, usampler2D, isampler2D, the shadow
+   variants), `PARTIALLY_BOUND | UPDATE_AFTER_BIND`, slot 0 a placeholder per type; per-draw indices in push
+   constants (no `nonuniformEXT`); slot writes batched once per frame; frees deferred until the timeline says
+   the frames that could sample them finished; set 0 stays a normal set (dynamic UBOs cannot be
+   update-after-bind); limit checks on the update-after-bind sampled-image/sampler counts, dynamic UBOs and
+   push-constant size; transient aliasing must resolve to the physical texture's slot.
 3. **Phase 3 groundwork on decision 9:** one global pipeline layout (set 0 frame UBO + frame textures, set 1
    bindless textures + shared samplers, set 2 storage, push constants <= 128 B); descriptor-indexing feature
    and limit check at startup (without it the session stays on OpenGL); `bindings.glsl` +
