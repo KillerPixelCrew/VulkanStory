@@ -1556,7 +1556,9 @@ public class VulkanDeviceIntegrationTests
     /// GPU reads freed memory. The cache must drop a deleted texture's sets and
     /// serve a successor its own, and the deferred free must land only after
     /// every frame that could have bound the old set has finished - which the
-    /// validation layer checks for us.
+    /// validation layer checks for us. Under the shared pipeline layout the sets that
+    /// name a texture are set 0's, holding the frame textures, so the program samples
+    /// `sky`; a bindless slot's retirement is BindlessTextureTableTests' subject.
     /// </summary>
     [SkippableFact]
     public unsafe void ADeletedTextureTakesItsDescriptorSetsWithIt()
@@ -1579,10 +1581,10 @@ public class VulkanDeviceIntegrationTests
                 }
                 """, """
                 #version 330 core
-                uniform sampler2D source;
+                uniform sampler2D sky;
                 in vec2 uv;
                 out vec4 outColor;
-                void main(void) { outColor = texture(source, uv); }
+                void main(void) { outColor = texture(sky, uv); }
                 """);
 
             int target = seam.CreateTexture2D(size, size,
@@ -1600,14 +1602,14 @@ public class VulkanDeviceIntegrationTests
             seam.BeginFrame();
             seam.BindFramebuffer(framebuffer);
             seam.UseProgram(program);
-            seam.SetSamplerUnit(program, "source", 0);
+            seam.SetSamplerUnit(program, "sky", 0);
             seam.BindTexture(0, first);
             seam.SetViewport(0, 0, size, size);
             seam.DrawFullscreenTriangle();
             seam.Present();
 
             int cachedWhileAlive = device!.CachedDescriptorSets;
-            Assert.True(cachedWhileAlive >= 1, "the draw should have cached a sampler set");
+            Assert.True(cachedWhileAlive >= 1, "the draw should have cached a frame set naming the texture");
 
             seam.DeleteTexture(first);
 
@@ -1625,7 +1627,7 @@ public class VulkanDeviceIntegrationTests
             seam.BeginFrame();
             seam.BindFramebuffer(framebuffer);
             seam.UseProgram(program);
-            seam.SetSamplerUnit(program, "source", 0);
+            seam.SetSamplerUnit(program, "sky", 0);
             seam.BindTexture(0, second);
             seam.SetViewport(0, 0, size, size);
             seam.DrawFullscreenTriangle();

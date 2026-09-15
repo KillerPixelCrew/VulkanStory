@@ -276,7 +276,54 @@ internal static class VulkanStats
     }
 
     /// <summary>A bindless lookup that resolved to a placeholder slot: no texture, a texture of the wrong kind, or a full array.</summary>
-    public static void NoteBindlessPlaceholderResolution() => Interlocked.Increment(ref _bindlessPlaceholderResolutions);
+    public static void NoteBindlessPlaceholderResolution()
+    {
+        Interlocked.Increment(ref _bindlessPlaceholderResolutions);
+        Interlocked.Increment(ref _intervalBindlessPlaceholders);
+    }
+
+    // Cumulative (tests read them) and per sample interval (the counters line).
+    private static long _pushConstantWrites;
+    private static long _storageSetBinds;
+    private static long _bindlessSlotResolutions;
+    private static long _samplerPlaceholders;
+    private static long _intervalPushConstantWrites;
+    private static long _intervalStorageSetBinds;
+    private static long _intervalBindlessSlots;
+    private static long _intervalBindlessPlaceholders;
+
+    /// <summary>A draw whose slot indices differed from what its recording last received: one vkCmdPushConstants.</summary>
+    public static void NotePushConstantWrite()
+    {
+        Interlocked.Increment(ref _pushConstantWrites);
+        Interlocked.Increment(ref _intervalPushConstantWrites);
+    }
+
+    /// <summary>A draw that bound set 2 because its set or its record's dynamic offset changed.</summary>
+    public static void NoteStorageSetBind()
+    {
+        Interlocked.Increment(ref _storageSetBinds);
+        Interlocked.Increment(ref _intervalStorageSetBinds);
+    }
+
+    /// <summary>A draw's sampler resolved through the bindless table (placeholder slots included).</summary>
+    public static void NoteBindlessSlotResolution()
+    {
+        Interlocked.Increment(ref _bindlessSlotResolutions);
+        Interlocked.Increment(ref _intervalBindlessSlots);
+    }
+
+    /// <summary>A draw's frame texture (set 0) resolved to its placeholder: nothing suitable bound.</summary>
+    public static void NoteSamplerPlaceholder()
+    {
+        Interlocked.Increment(ref _samplerPlaceholders);
+        Interlocked.Increment(ref _intervalBindlessPlaceholders);
+    }
+
+    public static long PushConstantWrites => Interlocked.Read(ref _pushConstantWrites);
+    public static long StorageSetBinds => Interlocked.Read(ref _storageSetBinds);
+    public static long BindlessSlotResolutions => Interlocked.Read(ref _bindlessSlotResolutions);
+    public static long SamplerPlaceholders => Interlocked.Read(ref _samplerPlaceholders);
 
     public static long BindlessWrites => Interlocked.Read(ref _bindlessWrites);
     public static long BindlessFlushes => Interlocked.Read(ref _bindlessFlushes);
@@ -393,7 +440,11 @@ internal static class VulkanStats
             InPassClears: Interlocked.Exchange(ref _inPassClears, 0),
             PromotedClears: Interlocked.Exchange(ref _promotedClears, 0),
             StandaloneClears: Interlocked.Exchange(ref _standaloneClears, 0),
-            PassSplits: Interlocked.Exchange(ref _passSplits, 0));
+            PassSplits: Interlocked.Exchange(ref _passSplits, 0),
+            PushConstantWrites: Interlocked.Exchange(ref _intervalPushConstantWrites, 0),
+            StorageSetBinds: Interlocked.Exchange(ref _intervalStorageSetBinds, 0),
+            BindlessSlots: Interlocked.Exchange(ref _intervalBindlessSlots, 0),
+            BindlessPlaceholders: Interlocked.Exchange(ref _intervalBindlessPlaceholders, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -477,12 +528,14 @@ internal static class VulkanStats
             "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7} " +
             "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11} " +
             "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
-            "standalone_clears={17} pass_splits={18}",
+            "standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} " +
+            "bindless_slots={21} bindless_placeholders={22}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
             counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
-            counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits);
+            counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits,
+            counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders);
 
     private static long _lastSample;
 
@@ -573,7 +626,11 @@ internal readonly record struct CounterSample(
     long InPassClears = 0,
     long PromotedClears = 0,
     long StandaloneClears = 0,
-    long PassSplits = 0);
+    long PassSplits = 0,
+    long PushConstantWrites = 0,
+    long StorageSetBinds = 0,
+    long BindlessSlots = 0,
+    long BindlessPlaceholders = 0);
 
 /// <summary>The values on the <c>stats.transients</c> line.</summary>
 internal readonly record struct TransientSample(

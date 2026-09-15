@@ -72,7 +72,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         _uniformRing = uniformRing;
         _regionStart = regionStart;
         _regionSize = regionSize;
-        _alignment = Math.Max(1, context.Capabilities.MinUniformBufferOffsetAlignment);
+        _alignment = FrameRing.OffsetAlignment(context.Capabilities);
         Index = index;
 
         var poolInfo = new CommandPoolCreateInfo
@@ -385,14 +385,16 @@ internal sealed class FrameRing : IDisposable
         _allocator = context.Allocator;
         // Per-frame dynamic data: the ReBAR class, falling through to host memory
         // (counted and logged) when the cap or the device says no.
+        // Storage usage too: a rewritten program's named blocks read their per-draw
+        // snapshot from here as std140 storage buffers (shared layout, set 2).
         _uniformRing = new VulkanBuffer(context, uniformRingSize,
-            BufferUsageFlags.UniformBufferBit,
+            BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit,
             MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
             MemoryPoolClass.ReBar);
 
         // Each region must start on a uniform-offset boundary, otherwise every
         // dynamic offset handed out from slot 1 onwards inherits the misalignment.
-        ulong alignment = Math.Max(1UL, context.Capabilities.MinUniformBufferOffsetAlignment);
+        ulong alignment = OffsetAlignment(context.Capabilities);
         ulong regionSize = uniformRingSize / (ulong)framesInFlight / alignment * alignment;
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
@@ -402,6 +404,13 @@ internal sealed class FrameRing : IDisposable
     }
 
     public int FramesInFlight => _slots.Length;
+
+    /// <summary>
+    /// Every ring offset is a legal uniform and storage buffer offset: both limits are
+    /// powers of two, so the larger is a multiple of the smaller.
+    /// </summary>
+    internal static ulong OffsetAlignment(VulkanCapabilities capabilities) =>
+        Math.Max(1UL, Math.Max(capabilities.MinUniformBufferOffsetAlignment, capabilities.MinStorageBufferOffsetAlignment));
 
     /// <summary>The Frame and Transfer timelines every submission signals.</summary>
     public FrameTimeline Timeline => _timeline;

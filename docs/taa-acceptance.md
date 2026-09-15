@@ -272,7 +272,7 @@ unchanged from earlier builds; the other six carry stable `key=value` tokens:
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
-stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
+stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n> push_constants=<n> storage_set_binds=<n> bindless_slots=<n> bindless_placeholders=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> leases=<n> aliased_leases=<n> readself_copies=<n> readself_pool=<n>
 stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draws_skipped=<n> pending=<n> cache_bytes=<bytes> saves=<n>
@@ -306,7 +306,12 @@ stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draw
   frame), `in_pass_clears` (clears recorded as vkCmdClearAttachments inside an open pass),
   `promoted_clears` (clears issued with no pass open that became LOAD_OP_CLEAR) and
   `standalone_clears` (promoted clears whose image was used before a pass attached it, recorded
-  as a clear-image command). The colour write tier is on the device-up validation log line;
+  as a clear-image command). Shared pipeline layout (plan decision 9): `push_constants`
+  (vkCmdPushConstants calls: draws whose slot indices differed from what the recording last
+  received), `storage_set_binds` (set 2 binds: the draw's set or its record's dynamic offset
+  changed), `bindless_slots` (sampler resolutions through the bindless table) and
+  `bindless_placeholders` (resolutions, bindless or set 0 frame texture, that read a placeholder
+  because nothing suitable was bound). The colour write tier is on the device-up validation log line;
   `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline` forces one.
 - `stats.transients` (Phase 2 step 4, `TransientAllocator` and `FeedbackCopyPool`): `transient_mib`
   (at the last frame boundary: the post-chain colour textures of framebuffer slots 2, 3, 4, 7, 8, 9,

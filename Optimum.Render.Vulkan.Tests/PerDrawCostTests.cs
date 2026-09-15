@@ -42,10 +42,10 @@ public class PerDrawCostTests
 
     private const string SampleFragment = """
         #version 330 core
-        uniform sampler2D source;
+        uniform sampler2D sky;
         in vec2 uv;
         out vec4 outColor;
-        void main(void) { outColor = texture(source, uv); }
+        void main(void) { outColor = texture(sky, uv); }
         """;
 
     private const string MeshVertex = """
@@ -295,7 +295,7 @@ public class PerDrawCostTests
                 seam.BindFramebuffer(target);
                 seam.ClearColor(0, 0f, 0f, 0f, 1f);
                 seam.UseProgram(program);
-                seam.SetSamplerUnit(program, "source", 0);
+                seam.SetSamplerUnit(program, "sky", 0);
                 seam.BindTexture(0, texture);
                 BaseState(seam);
                 seam.DrawFullscreenTriangle();
@@ -363,7 +363,7 @@ public class PerDrawCostTests
                 seam.BeginFrame();
                 seam.BindFramebuffer(target);
                 seam.UseProgram(program);
-                seam.SetSamplerUnit(program, "source", 0);
+                seam.SetSamplerUnit(program, "sky", 0);
                 seam.BindTexture(0, texture);
                 BaseState(seam);
                 seam.DrawFullscreenTriangle();

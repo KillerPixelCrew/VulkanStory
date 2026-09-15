@@ -70,7 +70,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
 
         try
         {
-            _layout = CreateLayout(capacities);
+            _layout = CreateSetLayout(context, capacities);
             _pool = CreatePool(capacities);
             Set = AllocateSet();
             CreatePlaceholders();
@@ -242,7 +242,8 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
 
     // ---------------------------------------------------------------- creation
 
-    private DescriptorSetLayout CreateLayout(uint[] capacities)
+    /// <summary>Set 1's layout for the given per-kind capacities. The table's own, and a standalone shared layout's.</summary>
+    internal static DescriptorSetLayout CreateSetLayout(VulkanContext context, uint[] capacities)
     {
         var bindings = new DescriptorSetLayoutBinding[BindlessKinds.Count];
         var flags = new DescriptorBindingFlags[BindlessKinds.Count];
@@ -276,7 +277,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
                 PBindings = bindingsPtr,
             };
             DescriptorSetLayout layout;
-            VulkanResult.Check(_context.Api.CreateDescriptorSetLayout(_context.Device, &info, null, &layout),
+            VulkanResult.Check(context.Api.CreateDescriptorSetLayout(context.Device, &info, null, &layout),
                 "vkCreateDescriptorSetLayout for the bindless texture set");
             return layout;
         }
