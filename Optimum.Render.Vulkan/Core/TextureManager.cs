@@ -85,6 +85,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
 
     /// <summary>Whether the view is a cube rather than a six-layer array.</summary>
     public bool Cube { get; init; }
+
+    /// <summary>Whether the image is 3D (<see cref="TextureManager.CreateVolume" />); GL-created textures never are.</summary>
+    public bool Volume { get; init; }
     public ImageAspectFlags Aspect { get; init; }
 
     /// <summary>Mutable, as glTexParameter is.</summary>
@@ -430,6 +433,84 @@ internal sealed unsafe class TextureManager : IDisposable
     }
 
     /// <summary>
+    /// Creates a single-level 3D colour texture, for the bindless table's
+    /// <c>sampler3D</c> placeholder: the game creates no 3D textures, but the
+    /// array's slot 0 still needs a 3D view. Uploads address it as layer 0 of a
+    /// one-texel-deep image.
+    /// </summary>
+    public int CreateVolume(uint width, uint height, uint depth, Format format)
+    {
+        width = Math.Max(1, width);
+        height = Math.Max(1, height);
+        depth = Math.Max(1, depth);
+
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type3D,
+            Format = format,
+            Extent = new Extent3D(width, height, depth),
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined,
+        };
+
+        Vk api = _context.Api;
+        if (api.CreateImage(_context.Device, &imageInfo, null, out Image image) != Result.Success)
+        {
+            throw new InvalidOperationException("vkCreateImage failed for a 3D texture");
+        }
+
+        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
+        MemoryAllocation allocation = _context.Allocator.Allocate(
+            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
+            $"a {width}x{height}x{depth} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
+        if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
+        {
+            api.DestroyImage(_context.Device, image, null);
+            _context.Allocator.Free(allocation);
+            throw new InvalidOperationException("vkBindImageMemory failed for a 3D texture");
+        }
+
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = image,
+            ViewType = ImageViewType.Type3D,
+            Format = format,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
+        };
+        if (api.CreateImageView(_context.Device, &viewInfo, null, out ImageView view) != Result.Success)
+        {
+            api.DestroyImage(_context.Device, image, null);
+            _context.Allocator.Free(allocation);
+            throw new InvalidOperationException("vkCreateImageView failed for a 3D texture");
+        }
+
+        var texture = new VulkanTexture(_context)
+        {
+            Image = image,
+            Allocation = allocation,
+            View = view,
+            Format = format,
+            Width = width,
+            Height = height,
+            MipLevels = 1,
+            Layers = 1,
+            Volume = true,
+            Aspect = ImageAspectFlags.ColorBit,
+        };
+
+        if (_context.PoisonFreshResources) Poison(texture);
+
+        return Register(texture);
+    }
+
+    /// <summary>
     /// Poison mode: fills every level and layer of a new image with
     /// <see cref="VulkanPoison" />'s value for its format, so a read of content
     /// nobody wrote is loud instead of whatever the allocator's memory held.
@@ -457,6 +538,15 @@ internal sealed unsafe class TextureManager : IDisposable
                 _context.Api.CmdClearColorImage(commandBuffer, texture.Image,
                     ImageLayout.TransferDstOptimal, &color, 1, &range);
             }
+
+            // Out of TRANSFER_DST, into the layout an upload leaves a texture in.
+            // The tracker models the clear and a following copy as the same
+            // Transfer write, so without this the first upload recorded right
+            // after the clear gets no barrier; synchronization2 tells CLEAR from
+            // COPY, and the layer reports WRITE_AFTER_WRITE (write_barriers = 0,
+            // seq_no 2, 2026-09-15, the first texture of a poisoned device). The
+            // poison stays: the layout change keeps the contents.
+            TransitionTexture(commandBuffer, texture, ResourceUsage.SampleFragment);
         }
         finally
         {
@@ -644,6 +734,13 @@ internal sealed unsafe class TextureManager : IDisposable
         };
     }
 
+    /// <summary>
+    /// Called from <see cref="Delete" /> with the physical texture that id named, on
+    /// whichever thread deleted it, under the upload lock. The bindless table
+    /// retires the texture's slots here.
+    /// </summary>
+    public Action<VulkanTexture>? Deleted { get; set; }
+
     public void Delete(int textureId, FrameRing? ring = null)
     {
         // Under the upload lock; see Upload. Retiring inside it keys the entry on
@@ -658,6 +755,10 @@ internal sealed unsafe class TextureManager : IDisposable
 
             _textures[textureId] = null;
             _freeIds.Push(textureId);
+
+            // Before the texture is retired, under the same timeline values: its
+            // bindless slots then outlive every frame that could sample them.
+            Deleted?.Invoke(texture);
 
             // Handing it to the ring means it outlives any frame still referencing it.
             if (ring != null) ring.DeferDeletion(texture);
