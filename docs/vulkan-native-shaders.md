@@ -438,3 +438,25 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
    its differential GPU test in its stage.
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
+
+### Family 7 decisions (optimum-programs, 2026-09-15)
+
+`taa-resolve`, `taa-sharpen`, `taa-debug`, `taa-skymotion`, `chunkliquidmotion`, `scene-ssao`, `fsr-easu`, `fsr-rcas`.
+- **Bodies:** only the step-4 differences. `taa-resolve` keeps its body and both DO NOT REVERT notes line for line
+  (3x3 nearest-depth disocclusion, motion and the writer-depth tolerance from the nearest-depth tap, the pixel's
+  own reactive, luminance anti-flicker `mix(1.2, 0.3, w*w) * blendAlpha`); its locals `glow` and `sky` shadow the
+  set 0 samplers of those names in function scope, which is legal and left as written.
+- **Uniforms behind an axis** (`taa-skymotion`, `chunkliquidmotion` declare theirs inside `#if TAAMOTION > 0`): the
+  oracle reads unpreprocessed text, so they are names of every variant and sit unconditionally in the record.
+- **Motion location:** `#if TAAMOTION == 1` then `#if GBUFFER == 1` location 4 else 2, so both writers carry the
+  axes `GBUFFER,TAAMOTION`; the two `TAAMOTION=0` variants are identical.
+- **TAA-off dummy output** stays (one `vec4` at location 0, never bound at runtime) and is written as
+  `optimumWriteReactiveOnly(0.0)`, bit-identical to the GLSL 330 `vec4(0.0)`, so no `outMotion` assignment exists
+  outside the include's return values. The TAA-on write is `optimumWriteMotion(..., writerDepth = gl_FragCoord.z)`,
+  whose behind-camera return equals the GLSL 330 early return in both writers.
+- **Placement:** the six fullscreen programs push only their slots. `chunkliquidmotion` is a chunk draw: push holds
+  `origin` and `modelViewMatrix` (76 B, no sampler); `projectionMatrix`, the previous-frame matrices,
+  `cameraPosDelta`, vertexwarp's twelve `prev*` uniforms and the fragment's TAA uniforms are record members.
+- **Depth remap:** `taa-skymotion.vert` keeps `z = w = 1`, so the remap yields window depth 1 as in GL.
+  `chunkliquidmotion.vert` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
+  convention, which the motion arithmetic expects.
