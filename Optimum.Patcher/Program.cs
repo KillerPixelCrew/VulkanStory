@@ -86,6 +86,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // Optimum AO: the platform's own ambient occlusion (0 = vanilla SSAO) and its debug outputs.
+        "RenderOptimumAmbientOcclusion",
+        "OptimumAmbientOcclusionDebugTexture",
         // Headless render harness: the channel order ReadDefaultFramebuffer leaves
         // in the caller's buffer. B G R A on both backends: the OpenGL path reads
         // GL_BGRA and VulkanClientPlatform converts its R8G8B8A8 texels to match.
@@ -361,6 +364,16 @@ var membersToInject = new Dictionary<string, List<string>>
         // the flag Final reads so the AO is never applied twice.
         "optimumSsaoInScene",
         "ApplyOptimumSceneSsao",
+        // Optimum AO: this frame's GTAO visibility texture (0 = vanilla SSAO), composed through
+        // ApplyOptimumSceneSsao, and the slots of its opt-in debug outputs in the parity dump and
+        // the headless harness.
+        "optimumAmbientOcclusionTexture",
+        "OptimumAoWorkingSlot",
+        "OptimumAoEdgesSlot",
+        "OptimumAoDepthSlot",
+        "OptimumAoOutputSlot",
+        "OptimumAoOutputCount",
+        "OptimumHeadlessWriteAmbientOcclusion",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.

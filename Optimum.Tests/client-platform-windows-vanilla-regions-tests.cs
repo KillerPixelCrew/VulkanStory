@@ -59,6 +59,10 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumTaaDisabled", "optimumTaaResolvedThisFrame", "optimumTaaShaderReloadPending",
         "optimumTaaTargetsReady", "taaResolvedColorTexture", "taaResolvedGlowTexture",
         "optimumSsaoInScene", "ApplyOptimumSceneSsao",
+        // Optimum AO: the platform's visibility texture composed through ApplyOptimumSceneSsao,
+        // and the slots and headless writer of its opt-in debug outputs.
+        "optimumAmbientOcclusionTexture", "OptimumAoWorkingSlot", "OptimumAoEdgesSlot", "OptimumAoDepthSlot",
+        "OptimumAoOutputSlot", "OptimumAoOutputCount", "OptimumHeadlessWriteAmbientOcclusion",
         // Headless render harness: the per-frame hook, its own in-world frame counter,
         // the chat-command script dispatch, the presented-frame readback and the clean
         // close from the render thread.

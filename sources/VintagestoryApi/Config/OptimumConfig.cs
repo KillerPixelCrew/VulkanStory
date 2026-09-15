@@ -545,6 +545,51 @@ public static class OptimumConfig
     public static bool TaaJitterDev = false;
 
     /// <summary>
+    /// Which ambient occlusion runs: "auto", "vanilla" or "gtao"
+    /// (docs/research/ambient-occlusion.md, section E).
+    ///
+    /// "auto" (the default) is the GTAO visibility-bitmask pass on the Vulkan backend
+    /// whenever TAA is active, and vanilla SSAO otherwise. "gtao" asks for it on Vulkan
+    /// without TAA too (a measurement configuration: two denoise passes, a still noise
+    /// index). "vanilla" keeps vanilla SSAO. The OpenGL backend ignores the setting and
+    /// always runs vanilla SSAO. Vanilla's own SSAO quality setting still switches AO off
+    /// entirely at 0 on both backends: the G-buffer both passes read exists only above 0.
+    ///
+    /// A string, like <see cref="Renderer" />: an unrecognised value degrades to "auto"
+    /// rather than failing the whole file.
+    /// </summary>
+    public static string AmbientOcclusion = "auto";
+
+    /// <summary>
+    /// The GTAO quality preset: "low" (1x2), "medium" (2x2), "high" (3x3) or "ultra" (9x3,
+    /// two denoise passes). Medium is the render-resolution handheld candidate; the handheld
+    /// default is decided by the section D measurements.
+    /// </summary>
+    public static string AmbientOcclusionPreset = "medium";
+
+    /// <summary>
+    /// Whether GTAO is selected for a backend: never on OpenGL; on Vulkan with "gtao", or
+    /// with "auto" while TAA is active.
+    /// </summary>
+    public static bool GtaoSelected(bool vulkanBackend, bool taaActive)
+    {
+        if (!vulkanBackend) return false;
+        if (string.Equals(AmbientOcclusion, "gtao", StringComparison.OrdinalIgnoreCase)) return true;
+        return taaActive && string.Equals(AmbientOcclusion, "auto", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>GTAO for the backend actually running and the TAA state actually in effect.</summary>
+    public static bool EffectiveGtao => GtaoSelected(OptimumRender.IsVulkan, EffectiveTaa);
+
+    /// <summary>
+    /// Stamped by ShaderRegistry when it builds the shader prefixes: true when the shaders were
+    /// compiled with <c>#define OPTIMUMAO 1</c> (the class channel writes and the GTAO compose
+    /// branch). The platform runs GTAO only while this holds, so the pass and the shaders
+    /// that feed and compose it can never disagree between two shader reloads.
+    /// </summary>
+    public static bool AmbientOcclusionShadersUseGtao { get; set; }
+
+    /// <summary>
     /// Which renderer the client runs: "opengl", "vulkan", or "auto".
     ///
     /// OpenGL is the default and stays so until the Vulkan backend reaches
@@ -896,6 +941,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
         (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
+        (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
+        (nameof(OptimumConfigData.AmbientOcclusionPreset), AmbientOcclusionPreset),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1012,6 +1059,11 @@ public static class OptimumConfig
             TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
             TaaDebugView = Math.Max(0, data.TaaDebugView);
             TaaJitterDev = data.TaaJitterDev;
+            // Unrecognised values degrade to the defaults rather than failing the file.
+            string requestedAo = data.AmbientOcclusion?.Trim().ToLowerInvariant() ?? "";
+            AmbientOcclusion = requestedAo is "vanilla" or "gtao" ? requestedAo : "auto";
+            string requestedAoPreset = data.AmbientOcclusionPreset?.Trim().ToLowerInvariant() ?? "";
+            AmbientOcclusionPreset = requestedAoPreset is "low" or "high" or "ultra" ? requestedAoPreset : "medium";
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1092,6 +1144,8 @@ public static class OptimumConfig
             TaaMipBias = TaaMipBias,
             TaaDebugView = TaaDebugView,
             TaaJitterDev = TaaJitterDev,
+            AmbientOcclusion = AmbientOcclusion,
+            AmbientOcclusionPreset = AmbientOcclusionPreset,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1180,6 +1234,8 @@ internal sealed class OptimumConfigData
     public float TaaMipBias { get; set; } = -0.5f;
     public int TaaDebugView { get; set; } = 0;
     public bool TaaJitterDev { get; set; } = false;
+    public string AmbientOcclusion { get; set; } = "auto";
+    public string AmbientOcclusionPreset { get; set; } = "medium";
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

@@ -55,7 +55,12 @@ public class ParityDumpCoverageTests
             int slot = int.TryParse(match.Groups[1].Value, out int literal) ? literal : constants[match.Groups[1].Value];
             named.Add(slot, match.Groups[2].Value);
         }
-        Assert.Equal(glSlots, new SortedSet<int>(named.Keys));
+        // Optimum AO: the compute-only outputs are named but held by no framebuffer
+        // (ambient-occlusion-coverage-tests pins them).
+        var aoSlots = new HashSet<int>(new[] { "OptimumAoWorkingSlot", "OptimumAoEdgesSlot", "OptimumAoDepthSlot", "OptimumAoOutputSlot" }.Select(c => constants[c]));
+        Assert.Equal(4, aoSlots.Count(named.ContainsKey));
+        Assert.DoesNotContain(glSlots, aoSlots.Contains);
+        Assert.Equal(glSlots, new SortedSet<int>(named.Keys.Where(slot => !aoSlots.Contains(slot))));
 
         // Vanilla slots are named exactly as EnumFrameBuffer names them.
         Dictionary<string, int> enumValues = EnumValues();

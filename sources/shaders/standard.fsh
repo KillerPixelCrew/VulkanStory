@@ -167,6 +167,11 @@ void main() {
 	// A bit hacky: We use ALLOWDEPTHOFFSET for the first person rendering. SSAO seems to break on it, so we disable it
 	#if SSAOLEVEL > 0
 		outGPosition.w=1;
+	#if OPTIMUMAO > 0
+		// Optimum AO class channel (C.5, C.9): the hand view has its own projection; the AO pass
+		// leaves these pixels at visibility 1 and treats them as solid when sampled.
+		outGNormal.w = -1.0;
+	#endif
 	#endif
 #endif
 #endif

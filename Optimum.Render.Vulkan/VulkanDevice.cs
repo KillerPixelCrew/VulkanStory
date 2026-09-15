@@ -946,6 +946,9 @@ public sealed unsafe class VulkanDevice : IDisposable
     internal int CreateStorageTexture(int width, int height, Format format, int mipLevels = 1) =>
         _textures.CreateStorage((uint)Math.Max(1, width), (uint)Math.Max(1, height), format, (uint)Math.Max(1, mipLevels));
 
+    /// <summary>A live texture's description (size, levels, chosen format, usage) for compute pass owners; null when it does not exist.</summary>
+    internal VulkanTexture? TextureOf(int textureId) => _textures.Get(textureId);
+
     private Graph.ComputeImageInfo? ComputeImageInfoOf(int textureId) =>
         _textures.Get(textureId) is { } texture
             ? new Graph.ComputeImageInfo(texture.Width, texture.Height, texture.MipLevels, texture.Cube ? 6u : texture.Layers)
