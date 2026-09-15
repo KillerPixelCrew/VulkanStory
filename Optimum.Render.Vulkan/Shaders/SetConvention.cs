@@ -80,6 +80,14 @@ internal static class SetConvention
     /// shaders' <c>faceDataBuf</c>); the animation pair is the plan's move of bone
     /// matrices off the 64 KiB UBO limit.
     /// </summary>
+    /// <summary>
+    /// Set 2's program record: every non-frame uniform that is not in the push block
+    /// (docs/vulkan-native-shaders.md section 4), a dynamic uniform buffer whose offset
+    /// moves when the record changed. Kept out of <see cref="StorageBuffers" /> because it
+    /// is a uniform buffer, not a storage buffer.
+    /// </summary>
+    public const int ProgramRecordBinding = 3;
+
     public static readonly Binding[] StorageBuffers =
     {
         new("OPTIMUM_BINDING_FACE_DATA", 0, "buffer", "faceDataBuf", 1),

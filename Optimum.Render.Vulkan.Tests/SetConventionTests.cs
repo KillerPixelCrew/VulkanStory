@@ -33,6 +33,7 @@ public class SetConventionTests
             ["OPTIMUM_SET_STORAGE"] = SetConvention.StorageSet,
             ["OPTIMUM_PUSH_CONSTANT_BYTES"] = (int)SetConvention.PushConstantBytes,
             ["OPTIMUM_BINDING_FRAME_GLOBALS"] = SetConvention.FrameGlobalsBinding,
+            ["OPTIMUM_BINDING_PROGRAM_RECORD"] = SetConvention.ProgramRecordBinding,
         };
         foreach (SetConvention.Binding binding in SetConvention.FrameTextures) expected[binding.Define] = binding.Value;
         foreach (SetConvention.Binding binding in SetConvention.StorageBuffers) expected[binding.Define] = binding.Value;
@@ -87,7 +88,7 @@ public class SetConventionTests
     {
         AssertUnique(SetConvention.FrameGlobalsBinding, SetConvention.FrameTextures);
         AssertUnique(null, SetConvention.TextureArrays);
-        AssertUnique(null, SetConvention.StorageBuffers);
+        AssertUnique(SetConvention.ProgramRecordBinding, SetConvention.StorageBuffers);
     }
 
     /// <summary>

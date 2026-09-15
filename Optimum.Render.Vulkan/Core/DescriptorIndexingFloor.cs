@@ -45,6 +45,12 @@ internal static class DescriptorIndexingFloor
     /// </summary>
     public const uint RequiredSampledImages = BindlessSampledImages + FrameTextures;
 
+    /// <summary>
+    /// Set 0's frame block and set 2's program record are both dynamic uniform buffers in
+    /// the layout that also holds the update-after-bind set.
+    /// </summary>
+    public const uint RequiredDynamicUniformBuffers = 2;
+
     /// <summary>The spec minimum, and the budget decision 9 gives per-draw indices and scalars.</summary>
     public const uint RequiredPushConstantBytes = 128;
 
@@ -69,9 +75,10 @@ internal static class DescriptorIndexingFloor
             support.MaxDescriptorSetUpdateAfterBindSampledImages, RequiredSampledImages);
         AtLeast(missing, "maxDescriptorSetUpdateAfterBindSamplers",
             support.MaxDescriptorSetUpdateAfterBindSamplers, RequiredSampledImages);
-        // Set 0's frame UBO is dynamic and shares the layout with the update-after-bind set.
+        // Set 0's frame UBO and set 2's program record are dynamic and share the layout
+        // with the update-after-bind set.
         AtLeast(missing, "maxDescriptorSetUpdateAfterBindUniformBuffersDynamic",
-            support.MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic, 1);
+            support.MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic, RequiredDynamicUniformBuffers);
         AtLeast(missing, "maxPushConstantsSize", support.MaxPushConstantsSize, RequiredPushConstantBytes);
         return missing;
     }

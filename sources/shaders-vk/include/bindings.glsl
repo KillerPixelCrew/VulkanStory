@@ -76,5 +76,8 @@ layout(set = OPTIMUM_SET_TEXTURES, binding = OPTIMUM_BINDING_TEXTURES_CUBE_SHADO
 #define OPTIMUM_BINDING_FACE_DATA 0
 #define OPTIMUM_BINDING_ANIMATION 1
 #define OPTIMUM_BINDING_ANIMATION_PREV 2
+// The program record (docs/vulkan-native-shaders.md section 4): a dynamic uniform
+// buffer with every non-frame uniform that is not in the push block.
+#define OPTIMUM_BINDING_PROGRAM_RECORD 3
 
 #endif
