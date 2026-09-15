@@ -58,6 +58,7 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumMotionWriteActive", "optimumParityDumpDone", "optimumParityWorldFrames",
         "optimumTaaDisabled", "optimumTaaResolvedThisFrame", "optimumTaaShaderReloadPending",
         "optimumTaaTargetsReady", "taaResolvedColorTexture", "taaResolvedGlowTexture",
+        "optimumSsaoInScene", "ApplyOptimumSceneSsao",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),
