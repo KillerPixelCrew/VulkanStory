@@ -24,6 +24,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumTesselationSafetyGate.cs" Link="Config\OptimumTesselationSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorldgenSafetyGate.cs" Link="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkVisibilityBfs.cs" Link="Config\OptimumChunkVisibilityBfs.cs" />
     <Compile Include="optimum-api-bridge.cs" />
   </ItemGroup>
   <ItemGroup>

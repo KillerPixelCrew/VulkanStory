@@ -400,5 +400,9 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Worldgen work stealing: SUSPENDED (serial policy pending R1)");
         if (OptimumConfig.ChunkReadPoolEnabled)
             api.Logger.Debug("[Optimum] Chunk read pool: ON (server-side)");
+        if (OptimumConfig.EffectiveIndirectDraw)
+            api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
+        else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
+            api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
     }
 }
