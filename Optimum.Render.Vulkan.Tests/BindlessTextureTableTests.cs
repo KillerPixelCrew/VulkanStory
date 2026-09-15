@@ -266,6 +266,7 @@ public class BindlessTextureTableTests
     private static readonly byte[] Green = { 0, 255, 0, 255 };
     private static readonly byte[] Blue = { 0, 0, 255, 255 };
     private static readonly byte[] Magenta = { 255, 0, 255, 255 };
+    private static readonly byte[] OpaqueBlack = { 0, 0, 0, 255 };
 
     private const string VertexSource = """
         #version 450
@@ -601,7 +602,7 @@ public class BindlessTextureTableTests
             }
             Assert.True(placeholderFrames >= 3, "the retired slot was freed after " + (6 - placeholderFrames) + " frames");
 
-            Assert.Equal(Magenta, harness.Pixel(retiredTarget));
+            Assert.Equal(OpaqueBlack, harness.Pixel(retiredTarget));
             Assert.Equal(Green, harness.Pixel(liveTarget));
 
             int blue = harness.Texture(Blue);
@@ -653,12 +654,16 @@ public class BindlessTextureTableTests
 
     /// <summary>
     /// A texture asked for as a kind it cannot sit behind, or no texture at all,
-    /// resolves to slot 0 and allocates nothing; slot 0 samples the placeholder.
+    /// resolves to slot 0 and allocates nothing; slot 0 samples the placeholder:
+    /// opaque black, as OpenGL reads an unbound texture, and magenta only under
+    /// poison mode, where an undefined read is meant to be loud.
     /// </summary>
-    [SkippableFact]
-    public void AWrongKindRequestResolvesToThePlaceholderSlot()
+    [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AWrongKindRequestResolvesToThePlaceholderSlot(bool poison)
     {
-        Skip.IfNot(TryCreateHarness(false, out Harness? harness, out ShaderCompiler? compiler), "No usable Vulkan device or shaderc.");
+        Skip.IfNot(TryCreateHarness(poison, out Harness? harness, out ShaderCompiler? compiler), "No usable Vulkan device or shaderc.");
         using (compiler)
         using (harness)
         {
@@ -684,7 +689,7 @@ public class BindlessTextureTableTests
             harness.Draw(target, 0);
             device.Present();
 
-            Assert.Equal(Magenta, harness.Pixel(target));
+            Assert.Equal(poison ? Magenta : OpaqueBlack, harness.Pixel(target));
             GpuTest.AssertClean(device);
         }
     }

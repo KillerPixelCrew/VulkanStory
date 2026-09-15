@@ -15,8 +15,10 @@ namespace Optimum.Render.Vulkan.Core;
 /// layout (<see cref="BindlessSlotKey" />); <see cref="BindlessSlotBook" /> decides
 /// which. Slot 0 of every array is that kind's placeholder, and every other slot
 /// holds the placeholder until it is allocated and again once it is freed, so a
-/// stale or out-of-date index samples magenta (or a far-plane depth, or an
-/// integer texel) instead of undefined memory.
+/// stale or out-of-date index samples a defined value instead of undefined memory:
+/// opaque black for colour kinds, as OpenGL reads an unbound texture (magenta under
+/// poison mode, where an undefined read is meant to be loud), a far-plane depth for
+/// shadow kinds, a fixed texel for integer kinds.
 ///
 /// Writes are queued and applied by <see cref="Flush" /> in one
 /// vkUpdateDescriptorSets: at frame start (<see cref="BeginFrame" />, which first
@@ -28,7 +30,13 @@ namespace Optimum.Render.Vulkan.Core;
 /// </summary>
 internal sealed unsafe class BindlessTextureTable : IDisposable
 {
-    /// <summary>Placeholder colour for float and depth-less colour arrays: loud, as poison mode is.</summary>
+    /// <summary>
+    /// Placeholder colour for colour arrays: opaque black, what OpenGL samples from an unbound
+    /// texture and what the per-program placeholders read before the shared layout.
+    /// </summary>
+    private static readonly byte[] OpaqueBlack = { 0, 0, 0, 255 };
+
+    /// <summary>The colour placeholder under poison mode, where an undefined read is meant to be loud.</summary>
     private static readonly byte[] Magenta = { 255, 0, 255, 255 };
 
     private readonly record struct PendingWrite(TextureKind Kind, uint Slot, ImageView View, Sampler Sampler, ImageLayout Layout);
@@ -324,7 +332,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     /// </summary>
     private void CreatePlaceholders()
     {
-        fixed (byte* magenta = Magenta)
+        fixed (byte* magenta = _context.PoisonFreshResources ? Magenta : OpaqueBlack)
         {
             _placeholders[(int)TextureKind.Texture2D] = Colour(_textures.Create(1, 1, Format.R8G8B8A8Unorm), 1, magenta);
             // A single-layer texture gets a 2D view; an array view needs two layers.
