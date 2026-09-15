@@ -59,6 +59,11 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Notification("[Optimum] item-render profiler ENABLED (OPTIMUM_ITEM_PROFILE=1)");
         }
 
+        // Issue #85: detect performance ecosystem mods (Komet, OptiTime, Tungsten, Synergy)
+        OptimumCompatibilityGuard.RunDetection(api);
+        api.Event.PlayerJoin += _ => OptimumCompatibilityGuard.NotifyPlayerOnJoin(api);
+        api.Event.LeaveWorld += OptimumCompatibilityGuard.ResetSession;
+
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
@@ -368,6 +373,7 @@ public class OptimumStatusModSystem : ModSystem
             sb.AppendLine($"  {name}: {value}");
         }
         sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}->{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}->{TyronThreadPool.SetMaxThreadsIoAfter}");
+        sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
         sb.AppendLine(OptimumDiagnostics.GetCountersSummary());
         sb.AppendLine(OptimumDiagnostics.GetTessellationSummary());
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
@@ -435,5 +441,14 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
         else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
             api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
+
+        if (OptimumConfig.KometDetected)
+            api.Logger.Warning(OptimumCompatibilityGuard.KometAdvisoryWarning);
+        if (OptimumConfig.OptiTimeDetected)
+            api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);
+        if (OptimumConfig.TungstenDetected)
+            api.Logger.Notification("[Optimum] Tungsten mod detected: server-side optimizations active.");
+        if (OptimumConfig.SynergyDetected)
+            api.Logger.Notification("[Optimum] Synergy mod detected: client-server synchronization active.");
     }
 }
