@@ -195,4 +195,102 @@ internal static class FrameGlobals
 
     private static int Align(int value, int alignment) =>
         alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
+
+    // ------------------------------------------------------------ native include
+
+    /// <summary>The generated native include (docs/vulkan-native-shaders.md sections 1 and 3).</summary>
+    public const string IncludePath = "sources/shaders-vk/include/frame.glsl";
+
+    /// <summary>The block's instance name in native shaders.</summary>
+    public const string InstanceName = "optimumFrame";
+
+    /// <summary>
+    /// The macro a native source defines to say the program includes <paramref name="owner" />
+    /// (a game include file name such as <c>fogandlight.vsh</c>) in some stage.
+    /// </summary>
+    public static string OwnerMacro(string owner) =>
+        "OPTIMUM_FRAME_OWNER_" + owner.Replace('.', '_').ToUpperInvariant();
+
+    /// <summary>Every owner, in the order its first member appears in the block.</summary>
+    public static IReadOnlyList<string> Owners
+    {
+        get
+        {
+            var owners = new List<string>();
+            foreach (Entry entry in Entries)
+            {
+                if (!owners.Contains(entry.Owner)) owners.Add(entry.Owner);
+            }
+            return owners;
+        }
+    }
+
+    /// <summary>
+    /// The text of <see cref="IncludePath" />: the block at its fixed offsets under an instance
+    /// name, then one group of <c>#define name optimumFrame.name</c> lines per owner.
+    ///
+    /// A group is outside the include guard and activates when its owner macro is defined and
+    /// the group has not been emitted yet, so including the file again after defining another
+    /// owner macro adds that owner's names. That keeps <see cref="TryPlace" />'s rule in native
+    /// sources: a name reads the frame block only in a program that includes its owner, and a
+    /// program that does not keeps a record member of the same name.
+    /// </summary>
+    public static string GenerateInclude()
+    {
+        var text = new System.Text.StringBuilder();
+        text.Append("""
+            // Generated from Optimum.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
+            // Do not edit: FrameGlobalsTests regenerates this file and fails on any difference.
+            //
+            // The FrameGlobals block (docs/vulkan-native-shaders.md section 3): set 0, binding 0, scalar
+            // layout, bound with a dynamic offset. Members sit at the offsets the renderer writes.
+            //
+            // No member is a global name here. A member is the shared frame value only in a program that
+            // includes the member's owner file, so every owner has its own group of defines below. An
+            // owner include (fogandlight.frag.glsl, vertexwarp.glsl, ...) defines its owner macro and
+            // includes this file, which activates its group. A program whose other stage includes an
+            // owner defines that owner's macro itself before its includes (for example
+            // OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH in a fragment stage that reads flatFogDensity), and a
+            // program that includes no owner of a name declares the name in its own record instead.
+
+            #ifndef OPTIMUM_FRAME_GLSL
+            #define OPTIMUM_FRAME_GLSL
+
+            #extension GL_EXT_scalar_block_layout : require
+
+            #include "bindings.glsl"
+
+
+            """);
+        text.Append("layout(set = OPTIMUM_SET_FRAME, binding = OPTIMUM_BINDING_FRAME_GLOBALS, scalar) uniform ")
+            .Append(BlockTypeName).Append('\n').Append("{\n");
+        foreach (UniformMember member in MemberList)
+        {
+            text.Append("    layout(offset = ").Append(member.Offset).Append(") ")
+                .Append(member.Type.Name).Append(' ').Append(member.Name);
+            if (member.ArrayLength > 0) text.Append('[').Append(member.ArrayLength).Append(']');
+            text.Append(";\n");
+        }
+        text.Append("} ").Append(InstanceName).Append(";\n\n")
+            .Append("// Block size: ").Append(BlockSize).Append(" bytes.\n\n")
+            .Append("#endif\n");
+
+        foreach (string owner in Owners)
+        {
+            string names = "OPTIMUM_FRAME_NAMES_" + owner.Replace('.', '_').ToUpperInvariant();
+            text.Append('\n')
+                .Append("// ").Append(owner).Append('\n')
+                .Append("#if defined(").Append(OwnerMacro(owner)).Append(") && !defined(").Append(names).Append(")\n")
+                .Append("#define ").Append(names).Append('\n');
+            foreach (Entry entry in Entries)
+            {
+                if (entry.Owner != owner) continue;
+                text.Append("#define ").Append(entry.Name).Append(' ')
+                    .Append(InstanceName).Append('.').Append(entry.Name).Append('\n');
+            }
+            text.Append("#endif\n");
+        }
+
+        return text.ToString();
+    }
 }
