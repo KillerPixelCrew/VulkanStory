@@ -64,6 +64,21 @@ public class TaaEntityMotionWriterTests
         x,  y,  z,  1f,
     };
 
+    /// <summary>
+    /// A previous camera the surface was behind: the previous view puts the quad at
+    /// view z = +1 and the previous projection's w row is -z, so the previous clip w
+    /// is -1 and the writer takes its behind-the-camera branch.
+    /// </summary>
+    private static readonly float[] BehindView = Translation(0f, 0f, 1f);
+
+    private static readonly float[] BehindProjection =
+    {
+        1, 0, 0,  0,
+        0, 1, 0,  0,
+        0, 0, 1, -1,
+        0, 0, 0,  0,
+    };
+
     // ------------------------------------------------------------------ tests
 
     /// <summary>
@@ -245,19 +260,61 @@ public class TaaEntityMotionWriterTests
         }
     }
 
+    /// <summary>
+    /// A previous position behind the previous camera is not a motion vector, but
+    /// the contract (docs/temporal-frame-contract.md section 3.2) still wants the
+    /// reactive value: a writer that bails out of its vector delivers b and zeroes
+    /// only rg and a. The entity helper used to return vec4(0.0) there and drop the
+    /// taaReactive value with the vector.
+    /// </summary>
+    [SkippableFact]
+    public void APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        using (device)
+        {
+            const float reactive = 0.6f;
+            Decoded centre = RenderEntityMotion(device!,
+                previousBone: Identity,
+                previousModelMatrix: Identity,
+                historyValid: 1,
+                cameraDeltaX: 0f,
+                cameraDeltaY: 0f,
+                previousGlobalWarp: 0f,
+                previousView: BehindView,
+                previousProjection: BehindProjection,
+                reactive: reactive);
+
+            _output.WriteLine($"behind: mv = ({centre.MotionX}, {centre.MotionY}), " +
+                              $"reactive = {centre.Reactive}, writerDepth = {centre.WriterDepth}");
+
+            // No vector, and the zero alpha that routes the pixel to the camera
+            // fallback rather than pretending the writer owns it.
+            Assert.InRange(centre.MotionX, -0.3f, 0.3f);
+            Assert.InRange(centre.MotionY, -0.3f, 0.3f);
+            Assert.InRange(centre.WriterDepth, 0f, 0.01f);
+            // ... but the reactive value is still delivered.
+            Assert.InRange(centre.Reactive, reactive - 0.01f, reactive + 0.01f);
+        }
+    }
+
     // ---------------------------------------------------------------- harness
 
     private readonly struct Decoded
     {
-        public Decoded(float motionX, float motionY, float writerDepth)
+        public Decoded(float motionX, float motionY, float reactive, float writerDepth)
         {
             MotionX = motionX;
             MotionY = motionY;
+            Reactive = reactive;
             WriterDepth = writerDepth;
         }
 
         public float MotionX { get; }
         public float MotionY { get; }
+        public float Reactive { get; }
         public float WriterDepth { get; }
     }
 
@@ -274,7 +331,10 @@ public class TaaEntityMotionWriterTests
         int historyValid,
         float cameraDeltaX,
         float cameraDeltaY,
-        float previousGlobalWarp)
+        float previousGlobalWarp,
+        float[]? previousView = null,
+        float[]? previousProjection = null,
+        float? reactive = null)
     {
         VulkanDevice seam = device;
 
@@ -355,11 +415,11 @@ public class TaaEntityMotionWriterTests
         SetSceneUniforms(seam, program);
         SetWarpUniforms(seam, program, previousGlobalWarp);
 
-        SetMatrix(seam, program, "prevProjectionMatrix", Identity);
-        SetMatrix(seam, program, "prevViewMatrix", Identity);
+        SetMatrix(seam, program, "prevProjectionMatrix", previousProjection ?? Identity);
+        SetMatrix(seam, program, "prevViewMatrix", previousView ?? Identity);
         SetMatrix(seam, program, "prevModelMatrix", previousModelMatrix);
         SetInt(seam, program, "taaHistoryValid", historyValid);
-        SetFloat(seam, program, "taaReactive", historyValid != 0 ? 0f : 1f);
+        SetFloat(seam, program, "taaReactive", reactive ?? (historyValid != 0 ? 0f : 1f));
         SetFloat3(seam, program, "cameraPosDelta", cameraDeltaX, cameraDeltaY, 0f);
         SetFloat2(seam, program, "taaRenderSize", Size, Size);
         SetFloat2(seam, program, "taaJitterPx", 0f, 0f);
@@ -382,7 +442,8 @@ public class TaaEntityMotionWriterTests
         return new Decoded(
             (decoded[offset] / 255f * 2f - 1f) * DecodeScale,
             (decoded[offset + 1] / 255f * 2f - 1f) * DecodeScale,
-            decoded[offset + 2] / 255f);
+            decoded[offset + 2] / 255f,
+            decoded[offset + 3] / 255f);
     }
 
     private static unsafe void WriteBone(VulkanDevice seam, int ubo, float[] matrix)
@@ -415,8 +476,8 @@ void main(void)
 	outColor = vec4(
 		clamp(m.r / decodeScale * 0.5 + 0.5, 0.0, 1.0),
 		clamp(m.g / decodeScale * 0.5 + 0.5, 0.0, 1.0),
-		clamp(m.a, 0.0, 1.0),
-		1.0);
+		clamp(m.b, 0.0, 1.0),
+		clamp(m.a, 0.0, 1.0));
 }
 ";
         int decode = LinkFromCorpus(seam, new List<ShaderStageSource>
