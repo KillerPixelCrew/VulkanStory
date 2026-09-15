@@ -438,3 +438,43 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
    its differential GPU test in its stage.
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
+
+## 10. Family decisions
+
+### Family post (`ssao`, `godrays`, `findbright`, `blur`, `bilateralblur`, `colorgrade`, `transparentcompose`, `debugdepthbuffer`, `woittest`), 2026-09-15
+
+All are one draw per `Use()`: the push block holds only sampler slots (none for `woittest`), everything else is record.
+Beyond the step 4 list, the ports differ from GLSL 330 in these places only. None of them changes a pixel, so
+the family adds no differential GPU test.
+
+- **`transparentcompose`: the `Array` quirk.** `collectUniformNames` reads `uniform sampler2DArray OITaccumulation` as
+  a `sampler2D` named `Array` at unit 4.
+  - **Decision:** the native slot is `OPTIMUM_SAMPLER_SLOT(sampler2DArray, OITaccumulation)`, fifth in the push block,
+    the unit the oracle gives `Array`. The native name set is the oracle's with `Array`/`sampler2D` read as
+    `OITaccumulation`/`sampler2DArray`.
+  - **Why the quirk is not reproduced:** no client call uses the name `Array`.
+    `ShaderProgramTransparentcompose.OITaccumulation2D` binds `"OITaccumulation"` at unit 4.
+    `SystemRenderOITLayers` points `"OITaccumulation"` at unit 7 through `SetProgramSamplerUnit`, and the device
+    resolves that by name.
+  - **No shader-side form exists:** a slot named `Array` must be declared `sampler2D` to match the oracle, and the
+    compiler rejects a `sampler2D` slot that indexes `optimumTextures2DArray` (section 6).
+  - **Needed:** the parity harness has to apply this mapping for any `uniform sampler2DArray <name>`.
+  - **Status: not shipped yet.** The port compiles, passes `spirv-val` and reflects in all four variants
+    (`GBUFFER`, `TAAMOTION`). Its only parity failure is exactly this name and unit-4 entry.
+  - **Motion:** it writes `optimumWriteReactiveOnly(clamp(anet, 0.0, 1.0))` at location 4 with the G-buffer, else 2.
+    The merge's additive (ONE, ONE) blend is unchanged.
+- **`blur`, `bilateralblur`: fragment inputs.**
+  - The unused fragment input `in vec2 frameSize` is dropped. No vertex stage writes it, nothing reads it, and it
+    would redeclare the record member `frameSize`.
+  - `texCoords[21]` and `texCoords[11]` start at location 0 and span past `OPTIMUM_LOCATION_PROGRAM_END`. Neither
+    program includes a file that `varyings.glsl` places at 16 and above, and 21 locations fit the 29 that Intel's
+    Mesa driver reports.
+  - `blur.fsh` reads `texCoords[16]`, which `blur.vsh` never writes. That read is undefined on both APIs, and the
+    port keeps it as the rewriter does.
+- **`ssao`:**
+  - The loop local `sample` becomes `samplePos`: `sample` is a reserved word in GLSL 450.
+  - `SSAOLEVEL == 2` becomes a specialization-constant ternary for `kernelSize` and a branch for the lower clamp.
+  - `TAAMOTION` stays an axis for the temporal dither step.
+  - `temporalFrameIndex` is declared in the record unconditionally: the oracle sees it in every variant.
+- **`colorgrade`:** the initializers of `minlight`, `maxlight`, `minsat` and `maxsat` come from the runtime seed
+  (section 8), as for `final`.
