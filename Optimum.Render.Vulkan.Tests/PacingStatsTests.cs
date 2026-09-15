@@ -152,7 +152,7 @@ public class PacingStatsTests
     }
 
     [Fact]
-    public void SampleIsTheOriginalLineFollowedByFourTokenLines()
+    public void SampleIsTheOriginalLineFollowedByTheTokenLines()
     {
         // The first call may only arm the interval clock.
         VulkanStats.SampleIfDue(TimeSpan.Zero);
@@ -160,7 +160,9 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(6, lines.Length);
+        Assert.Equal(7, lines.Length);
+        // Caching follow-ups: pipelines compiled blocking/async/prewarmed, skipped draws, cache bytes, saves.
+        Assert.StartsWith("stats.pipelines compiled_sync=", lines[6]);
         // Phase 2 step 4: transient and aliased MiB, the Transient pool's heap peak, ReadSelf copies.
         Assert.StartsWith("stats.transients transient_mib=", lines[5]);
         // Phase 1B step 5: pool classes, ReBAR use and misses, used/budget per heap.
@@ -185,6 +187,7 @@ public class PacingStatsTests
                      VulkanStats.FormatCountersLine(default),
                      VulkanAllocator.FormatMemoryLine(default),
                      VulkanStats.FormatTransientsLine(default),
+                     VulkanStats.FormatPipelinesLine(default),
                  })
         {
             foreach (Match token in Regex.Matches(line, @"([a-z0-9_]+)="))

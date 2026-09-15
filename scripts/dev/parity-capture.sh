@@ -128,6 +128,10 @@ echo "config: Renderer=$RENDERER_ARG (was $SAVED_RENDERER)"
 #    rewrite the config a second time.
 export OPTIMUM_PARITY_DUMP="$OUT_DIR"
 export OPTIMUM_PARITY_FRAME="$FRAME"
+# Captures compare exact frames: every draw must land in the frame that issues it, so
+# pipelines compile blocking unless the caller asks otherwise (background compiles skip
+# the draw until the worker is done).
+export OPTIMUM_VULKAN_SYNC_PIPELINES="${OPTIMUM_VULKAN_SYNC_PIPELINES:-1}"
 # LAUNCHED is set first: if the launch itself fails half-way, cleanup still closes
 # whatever started (kill-client.sh is a no-op when nothing runs).
 LAUNCHED=1

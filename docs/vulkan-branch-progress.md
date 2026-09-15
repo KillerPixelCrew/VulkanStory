@@ -68,7 +68,8 @@ compared before and after for every branch.
 - **Diagnostics environment variables** (Vulkan):
   - `OPTIMUM_VULKAN_VALIDATION=1|<log path>`, `OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best,mobile,gpu,gpu-only`
   - `OPTIMUM_VULKAN_STATS=<file>`, `OPTIMUM_RENDER_TRACE`
-  - `OPTIMUM_VULKAN_SHADER_CACHE=<path>|0`
+  - `OPTIMUM_VULKAN_SHADER_CACHE=<path>|0`, `OPTIMUM_VULKAN_SYNC_PIPELINES=1` (blocking pipeline creation; the
+    capture scripts default to it)
   - `OPTIMUM_VULKAN_FRAMEGRAPH=0`, `OPTIMUM_VULKAN_ALIAS=1`, `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline`
   - `OPTIMUM_VULKAN_NO_MEMORY_BUDGET=1`, `OPTIMUM_VULKAN_NO_REBAR=1`, `OPTIMUM_VULKAN_POISON`, `OPTIMUM_VULKAN_CHECKPOINTS`
 
@@ -247,6 +248,13 @@ Windows run above.
 7. **Caching follow-ups** (`docs/research/vulkan-caching.md`): `FAIL_ON_PIPELINE_COMPILE_REQUIRED` with
    background compiles, growth-triggered saves, pipeline-key log for pre-warming, optional
    `VK_KHR_pipeline_binary`; real-client warm-start check with the headless harness (needs game data).
+   - Landed on `wip/pipeline-cache-follow-ups` (design items 2, 4, 5): render-thread creation with
+     FAIL_ON, skipped draws while a bounded worker compiles against its own cache and merges under a
+     lock, publication at frame start; growth-triggered saves from a worker (8 MiB, sampled every 10 s)
+     next to the shutdown save; the versioned, LRU-capped `pipeline/<gpu>.keys` log with prewarm when a
+     matching program links; `stats.pipelines`. GPU tests default to blocking creation (`GpuTest`).
+   - Still open: `VK_KHR_pipeline_binary` (deferred, research item 6) and the real-client warm-start
+     check with the headless harness.
 8. **XeGTAO** (`docs/research/xegtao-integration.md`): compute pass kind in the frame graph, GLSL compute
    port (prefilter split into dispatches, main pass, one denoise pass with TAA), NoiseIndex = frame % 64,
    composition before the resolve, settings; OpenGL keeps vanilla SSAO; tests and a headless comparison.

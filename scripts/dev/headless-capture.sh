@@ -235,6 +235,10 @@ if [[ "$FIXED_DT" != "0" ]]; then export OPTIMUM_HEADLESS_FIXED_DT="$FIXED_DT"; 
 # mid-frame, and every run ends in a crash report that nobody can tell from a real
 # one. kill-client.sh stays as the fallback in cleanup().
 export OPTIMUM_HEADLESS_EXIT_WHEN_DONE=1
+# Captures compare exact frames: every draw must land in the frame that issues it, so
+# pipelines compile blocking unless the caller asks otherwise (background compiles skip
+# the draw until the worker is done).
+export OPTIMUM_VULKAN_SYNC_PIPELINES="${OPTIMUM_VULKAN_SYNC_PIPELINES:-1}"
 if (( PARITY_DUMP == 1 )); then
   export OPTIMUM_PARITY_DUMP="$OUT_DIR"
   export OPTIMUM_PARITY_FRAME="$PARITY_FRAME"
