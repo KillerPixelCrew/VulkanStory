@@ -127,6 +127,13 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
         SamplerState effective = BindlessKinds.EffectiveState(state, kind);
         lock (_lock)
         {
+            // Read under the lock Release takes: a delete that set the flag after this
+            // read blocks in Release until the slot below exists, and then retires it.
+            if (texture.Released)
+            {
+                NotePlaceholder();
+                return 0;
+            }
             uint slot = _book.Acquire(new BindlessSlotKey(texture.Id, kind, effective, layout), out bool created);
             if (slot == 0)
             {

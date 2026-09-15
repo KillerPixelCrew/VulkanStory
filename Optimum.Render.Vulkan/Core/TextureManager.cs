@@ -68,6 +68,18 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// <summary>Never reused, unlike <see cref="View" />; see <see cref="ResourceIds" />.</summary>
     public ulong Id { get; } = ResourceIds.Next();
 
+    private volatile bool _released;
+
+    /// <summary>
+    /// Set by <see cref="TextureManager.Delete" /> under the upload lock, before the
+    /// texture's bindless slots are released; a released texture gets no new slot.
+    /// </summary>
+    public bool Released
+    {
+        get => _released;
+        internal set => _released = value;
+    }
+
     public Format Format { get; init; }
 
     /// <summary>
@@ -755,6 +767,11 @@ internal sealed unsafe class TextureManager : IDisposable
 
             _textures[textureId] = null;
             _freeIds.Push(textureId);
+
+            // Marked before the hook: a lookup that took the texture before this
+            // delete and reaches the bindless table after Release must not allocate
+            // a slot nothing would ever retire.
+            texture.Released = true;
 
             // Before the texture is retired, under the same timeline values: its
             // bindless slots then outlive every frame that could sample them.
