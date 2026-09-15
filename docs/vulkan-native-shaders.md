@@ -438,3 +438,27 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
    its differential GPU test in its stage.
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
+
+### Family: gui-overlays (2026-09-15)
+
+Programs: `gui`, `guigear`, `guitopsoil`, `helditem`, `lines`, `texture2texture`, `autocamera`, `blockhighlights`,
+`wireframe`. `MinimalGui` (inline C# strings, never registered) and `optimum-map` (mod-registered inline strings)
+stay on the rewriter. Decisions:
+- **Animation as storage (`gui`):** the `Animation` UBO is `layout(std140, set = OPTIMUM_SET_STORAGE, binding =
+  OPTIMUM_BINDING_ANIMATION) readonly buffer Animation { mat4 values[]; } ElementTransforms;`. `MAXANIMATEDELEMENTS`
+  is a client setting (`maxAnimatedElements`) the offline build cannot know, so the array is a runtime array
+  rather than a fixed size; the vertex stage indexes it with `jointId` as before.
+- **Placement:** `gui` and `guitopsoil` follow the section 4 GUI row (slots, `rgbaIn`, `extraGlow`, `applyColor`,
+  `noTexture`, and for `gui` `overlayOpacity`, in push; the matrices in the record). `guigear`, `helditem`,
+  `texture2texture` and `blockhighlights` put only their slots in push. `lines`, `autocamera` and `wireframe`
+  have no samplers and no push block: every uniform is a record member.
+- **`helditem`'s `SSAOLEVEL > 0`** gates varyings and G-buffer outputs, so it is the `GBUFFER` axis; `BLOOM` and
+  `NORMALVIEW` are constant branches.
+- **`blockhighlights` and USEOIT:** `oit.glsl` declares its outputs and `OIT()` under `#if USEOIT > 0`, which
+  makes USEOIT an axis of the program. The client always registers it with `Oit = true`, and its GLSL 330 stage
+  with USEOIT 0 does not compile (`OIT` undefined). The native body guards the call with `#if USEOIT == 1`, so the
+  unreachable USEOIT=0 variant compiles and writes nothing, matching that variant's (empty) GLSL 330 outputs.
+  The fragment stage defines `OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH` (cross-stage owner) and carries
+  `windWaveCounter` in the record (its owner `vertexwarp.vsh` is not included).
+- **Unproduced fragment inputs** the GLSL 330 stages declare but nothing writes or reads (`guitopsoil`'s `color`
+  and `glowLevel`, `helditem`'s `n`) keep their declarations; the optimised modules drop them.
