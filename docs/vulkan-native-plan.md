@@ -86,6 +86,12 @@ reconciled below. Every file:line fact quoted was re-checked in the tree.
    "mods rendering through the game API land inside declared passes and work": Optimum publishes how to add
    Vulkan-native support to a mod - declaring passes, writing motion, shipping native shaders, drawing
    through the native renderers (Phase 5).
+9. **One pipeline layout, bindless textures from the start (user, 2026-09-15).** Supersedes the set
+   convention's per-pass and per-material sets and moves bindless out of Phase 4. Per-program layouts
+   invalidate bound sets on every program switch, and building a sampler set per draw is the hot path the
+   Khronos descriptor-management sample and Zink's measurements point at; descriptor indexing is portable
+   (DXVK requires it on every vendor). Every program shares set 0 frame, set 1 bindless textures and shared
+   samplers, set 2 storage, and one push-constant range (`docs/research/vulkan-descriptor-model.md`).
 
 ## Constraints
 
@@ -343,16 +349,20 @@ by glslc `-I`. The GLSL 330 assets in `sources/shaders/` keep shipping and keep 
 uniform-name set and texture declaration order, which is the client's oracle. The native path
 supplies only placements and bindings; no `ShaderRegistry` change is needed.
 
-**Set convention** (frequency-ordered; mirrored in `Shaders/SetConvention.cs`, a test asserts
-`bindings.glsl` and the C# agree):
+**Set convention** (decision 9; one pipeline layout shared by every program; mirrored in
+`Shaders/SetConvention.cs`, a test asserts `bindings.glsl` and the C# agree; design sources in
+`docs/research/vulkan-descriptor-model.md`, implementation details in `docs/research/vulkan-bindless.md`):
 
 | Set | Update | Contents |
 |---|---|---|
-| 0 frame | once per frame | `FrameGlobals` UBO (every uniform `ShaderProgramBase.Use()` auto-binds plus the `OptimumTemporal` record) and the fixed frame textures `shadowMapFar/Near`, `sky`, `glow`, `liquidDepth` |
-| 1 pass | once per pass | `PassParams` UBO (dynamic offset) and pass inputs (scene, glow, depth, motion, history×3, gbuffer, bloom, godrays) |
-| 2 material | bound once | sampled textures and samplers as a plain array; bindless (partially bound, update-after-bind) is a Phase 4 option decided by the measured descriptor miss rate |
-| 3 draw | dynamic offset per draw | `DrawData` UBO (model/prev-model matrices, per-draw warp/tint overrides, flags), `FaceData` SSBO, `Animation`/`AnimationPrev` SSBOs |
-| push (≤128 B) | per draw | the few scalars written between draws of one program (material index, origin, z-offset, flags), chosen per program from a measured write-frequency profile |
+| 0 frame | once per frame | `FrameGlobals` UBO with a dynamic offset (every uniform `ShaderProgramBase.Use()` auto-binds plus the `OptimumTemporal` record) and the fixed frame textures `shadowMapFar/Near`, `sky`, `glow`, `liquidDepth` |
+| 1 textures | when a texture is created or retired | the bindless texture arrays (partially bound, update-after-bind) and the few shared samplers; every texture the game creates gets a slot, and shaders index it |
+| 2 storage | when a buffer is created or retired | `FaceData`, per-object and `Animation`/`AnimationPrev` SSBOs, indexed by draw |
+| push (≤128 B) | per draw | texture slot indices, per-draw scalars (origin, z-offset, tint, flags) and the offset of the draw's record; larger per-program values sit in a per-frame buffer addressed from here |
+
+No layout differs between programs, so a program switch never invalidates a bound set, and no draw builds
+a descriptor set. Startup checks the descriptor-indexing features and limits; a device without them stays
+on OpenGL.
 
 **Uniform placement.** `GetUniformLocation(program, name)` returns an index into the program's
 placement table `(home: Push | Frame | Pass | Draw | SamplerUnit, offset, size)`, `-1` when the
@@ -387,11 +397,12 @@ rewriter; one log line `[Optimum] shaders: N native, M rewritten, K failed`.
 `OPTIMUM_VK_SHADER_SOURCE=<dir>` compiles the tree at runtime through shaderc for the dev loop;
 a test asserts runtime and offline SPIR-V are byte-identical for a sample program.
 
-**Mod-shader adapter.** The rewriter targets the same four sets: loose uniforms → set 3 per-draw
-block, samplers → set 2 plain array, SSBOs → set 3, and any loose uniform whose name matches a
-`FrameGlobals` member → set 0 (so a mod shader including `fogandlight.fsh` keeps working
-unchanged). Confined to `ProgramInterfaceLayout.Build` plus a frame-global name map; a test
-compares the descriptor-set layouts of a native and an adapter program.
+**Mod-shader adapter.** The rewriter targets the same shared layout (decision 9): loose uniforms →
+the program's record in the per-frame uniform buffer, addressed from push constants; samplers →
+indices into the set 1 bindless arrays, carried in push constants; SSBOs → set 2; and any loose
+uniform whose name matches a `FrameGlobals` member → set 0 (so a mod shader including
+`fogandlight.fsh` keeps working unchanged). Confined to `ProgramInterfaceLayout.Build` plus a
+frame-global name map; a test asserts a native and an adapter program share one pipeline layout.
 
 **Temporal contract.** One writer: `include/motion.glsl` with
 `optimumWriteMotion(mv, reactive, writerDepth)` and `optimumWriteReactiveOnly(reactive)`
@@ -671,12 +682,22 @@ to end), and whether the runtime rewriter survives for mod shaders.
 Moved to roadmap step 4 (2026-09-15), after the general refactor, except the SPIR-V cache and manifest,
 which Phase 3 produces.
 
-Disk pipeline cache + used-key manifest + warm-up; push-constant placement from the measured
+Landed early, per `docs/research/vulkan-caching.md`: the disk SPIR-V cache (`ShaderBinaryCache`: key over
+format version, compiler options, the shaderc binary's hash, stage and rewritten source; header with a
+SHA-256 of the payload) and the persisted driver pipeline cache (`PipelineCacheFile`: one file per GPU,
+wrapper checked against vendor, device, driver version, pointer size and UUID, blob header checked too,
+empty cache on any mismatch or driver rejection, saved at shutdown). Both write atomically with retries
+and live in `GamePaths.Cache/optimum-vulkan`; `OPTIMUM_VULKAN_SHADER_CACHE=<path>` moves them and
+`OPTIMUM_VULKAN_SHADER_CACHE=0` turns them off. The device-up validation log line says whether the
+pipeline cache started cold, warm or rejected. Still open from the research: compile-required
+(`FAIL_ON_PIPELINE_COMPILE_REQUIRED`) with background builds, growth-triggered saves, and
+`VK_KHR_pipeline_binary` as an optional backend.
+
+Used-key manifest + warm-up; push-constant placement from the measured
 profile (`OPTIMUM_VULKAN_UNIFORM_PROFILE`) frozen into the manifest for the 48 programs;
 animation SSBO ring; `Use()` include-block early-out (measured first); per-pass GPU timestamps
 (`timestampValidBits` gated); transient aliasing default on after clean validation on all
-targets; bindless set 2 only if `DescriptorCache.Misses` per frame in a loaded world justifies
-it; `DirectToSwapchain` and transfer backend B measured, kept only where they win.
+targets; bindless textures are Phase 3 now (decision 9); `DirectToSwapchain` and transfer backend B measured, kept only where they win.
 
 Exit: on the fixed scene Vulkan mean FPS ≥ OpenGL and p99 ≤ OpenGL on this machine, numbers in
 `docs/vulkan-acceptance.md` §6 (Arc 140V row filled when the handheld is available); pipeline
