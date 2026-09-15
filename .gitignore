@@ -82,6 +82,8 @@ docs/*
 # ...and the Vulkan-native plan: the design, the decisions behind it and the roadmap, for anyone
 # picking the work up.
 !docs/vulkan-native-plan.md
+# ...and the handover note saying where the branch work stands.
+!docs/vulkan-branch-progress.md
 # ...and the research notes the plan and its designs cite.
 !docs/research/
 build-linux.sh
