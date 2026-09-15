@@ -137,6 +137,15 @@ records the decision here):
   family 6);
 - a sampler name seen twice is reassigned the current unit count.
 
+**Oracle decisions (2026-09-15, after the family ports):**
+- `uniform sampler2DArray <name>` (`transparentcompose`'s `OITaccumulation`): `collectUniformNames` has no
+  sampler2DArray, so the client registers the name `Array` with a sampler2D type at that texture unit. The
+  harness compares the declared name and type (`Oracle.ArraySamplerAliases` records the alias), and the runtime
+  answers `GetUniformLocation("Array")` and the unit bookkeeping with the declared sampler's slot.
+- A set-0 frame texture a program declares itself without including the port that owns it (`cloudvolumetric`'s
+  `liquidDepth`) is the `bindings.glsl` declaration every native stage already has, and counts as present when its
+  name and type match `SetConvention.FrameTextures`, exactly as the rewriter places it.
+
 ## 3. Descriptor use
 
 - **Set 0 (frame):** `frame.glsl` declares the FrameGlobals UBO at `OPTIMUM_BINDING_FRAME_GLOBALS` (scalar
