@@ -438,3 +438,35 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
    its differential GPU test in its stage.
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
+
+### Family 3: chunks (2026-09-15)
+
+`chunkopaque`, `chunktopsoil`, `chunktransparent`, `chunkliquid`, `chunkliquiddepth`, `chunkshadowmap` (its
+`USESSBO=0` variant is `Chunkshadowmap_NoSSBOs`). Decisions this family took:
+- **Axes.** `chunkopaque`: `GBUFFER`, `GREEDYMESH`, `TAAMOTION`, `USESSBO` (16 variants); `chunktopsoil`: `GBUFFER`,
+  `TAAMOTION`, `USESSBO`; `chunktransparent`: `USEOIT`, `USESSBO`; `chunkliquid`: `USEOIT`; `chunkshadowmap`:
+  `USESSBO`; `chunkliquiddepth`: none. A GLSL 330 `#if SSAOLEVEL > 0` that gates a varying or an output becomes
+  `#if GBUFFER == 1` (in both stages, including the fragment `in vec4 gnormal` the GLSL 330 stage declared
+  unconditionally), and `layout(location = TAAMOTIONLOCATION)` becomes location 4 under `GBUFFER == 1`, else 2.
+- **`USEOIT` on the chunk OIT programs.** `oit.glsl` gates its outputs and `OIT()` on `USEOIT`, so both programs
+  branch on it although the client only links them with `Oit = true`. The `USEOIT=0` variant wraps the `OIT()`
+  call in `#if USEOIT > 0` and has no outputs, exactly what the GLSL 330 stage preprocesses to.
+- **Varying locations.** With every axis on `chunkopaque` has 17 varyings of its own; `lod0Fade` and `nb`
+  share location 8 as components 0 and 1 rather than leave locations 0-15. `chunkliquid.fsh` declares
+  `flat in int renderFoam`, which no stage writes or reads; it keeps location 14 and the optimiser drops it.
+- **Cross-stage owners.** Vertex stages that read `lightPosition`/`shadowIntensity` (`chunkopaque`) define
+  `OPTIMUM_FRAME_OWNER_FOGANDLIGHT_FSH`; every shaded fragment stage defines `OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH`
+  and `OPTIMUM_FRAME_OWNER_VERTEXWARP_VSH` (`fogandlight.frag.glsl`, `fogspheres.glsl`, and `chunkliquid.fsh`'s own
+  `waterWaveCounter`/`windSpeed`). Names a program declares itself but whose owner it includes
+  (`chunkopaque.vsh`'s `cameraUnderwater`, `shadowIntensity`, `lightPosition`) are frame members, not record
+  members. `chunkliquiddepth` includes no owner of `viewDistance`, so there it is a record member.
+- **Placement.** Push: sampler slots, `origin`, `modelViewMatrix` (`mvpMatrix` for the shadow map), and
+  `forcedTransparency` for `chunktransparent`: 76-84 B. Everything else, `projectionMatrix` and the twelve
+  `vertexwarp.glsl` `prev*` members included, is record.
+- **Braces across a spec-constant `#if`.** `chunkliquid.fsh` opens `if (skyExposed > 0) {` under
+  `#if SHADOWQUALITY == 0` and closes it under a second one; the port is
+  `if (OPTIMUM_SHADOWQUALITY != 0 || skyExposed > 0) {`, the same control flow.
+- **Motion.** `chunkopaque` and `chunktopsoil` write `optimumWriteMotion(taaPrevClip, taaRenderSize, taaJitterPx,
+  0.0, gl_FragCoord.z)`; the previous-position reconstruction in the vertex stages is unchanged.
+- **Initializers** the runtime seeds (section 8): `chunktopsoil`'s `alphaTest = 0.01`, `chunkliquid`'s
+  `dropletIntensity = 0`.
