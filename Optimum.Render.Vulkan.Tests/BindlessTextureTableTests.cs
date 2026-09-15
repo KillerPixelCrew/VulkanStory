@@ -688,4 +688,75 @@ public class BindlessTextureTableTests
             GpuTest.AssertClean(device);
         }
     }
+
+    /// <summary>
+    /// The shared layout declares every binding of the convention: set 2 carries the
+    /// program record (a dynamic uniform buffer at <see cref="SetConvention.ProgramRecordBinding" />)
+    /// beside the storage buffers, and the layout's dynamic uniform buffers are the
+    /// ones the device floor requires. A native shader reading the record would
+    /// otherwise not build a pipeline on the shared layout.
+    /// </summary>
+    [Fact]
+    public void TheSharedLayoutDeclaresTheProgramRecordInSetTwo()
+    {
+        DescriptorSetLayoutBinding[] storage = SharedPipelineLayout.StorageBindings();
+        int records = 0;
+        foreach (DescriptorSetLayoutBinding binding in storage)
+        {
+            if (binding.Binding != (uint)SetConvention.ProgramRecordBinding) continue;
+            records++;
+            Assert.Equal(DescriptorType.UniformBufferDynamic, binding.DescriptorType);
+            Assert.Equal(1u, binding.DescriptorCount);
+            Assert.Equal(SharedPipelineLayout.Stages, binding.StageFlags);
+        }
+        Assert.Equal(1, records);
+        foreach (SetConvention.Binding buffer in SetConvention.StorageBuffers)
+        {
+            Assert.Contains(storage, b => b.Binding == (uint)buffer.Value && b.DescriptorType == DescriptorType.StorageBuffer);
+        }
+
+        uint dynamicUniforms = 0;
+        foreach (DescriptorSetLayoutBinding binding in SharedPipelineLayout.FrameBindings())
+        {
+            if (binding.DescriptorType == DescriptorType.UniformBufferDynamic) dynamicUniforms += binding.DescriptorCount;
+        }
+        foreach (DescriptorSetLayoutBinding binding in storage)
+        {
+            if (binding.DescriptorType == DescriptorType.UniformBufferDynamic) dynamicUniforms += binding.DescriptorCount;
+        }
+        Assert.Equal(DescriptorIndexingFloor.RequiredDynamicUniformBuffers, dynamicUniforms);
+    }
+
+    /// <summary>
+    /// A lookup that took the texture before another thread deleted it and reaches
+    /// the table after the deletion released its slots must not allocate: nothing
+    /// would ever retire that slot, and its descriptor would name a view the frame
+    /// ring destroys. It resolves to the placeholder instead.
+    /// </summary>
+    [SkippableFact]
+    public void AResolveOfATextureAlreadyReleasedAllocatesNothing()
+    {
+        Skip.IfNot(TryCreateHarness(false, out Harness? harness, out ShaderCompiler? compiler), "No usable Vulkan device or shaderc.");
+        using (compiler)
+        using (harness)
+        {
+            VulkanDevice device = harness!.Device;
+            BindlessTextureTable table = harness.Table;
+            int red = harness.Texture(Red);
+            VulkanTexture held = device.TexturesForTests.Get(red)!;
+
+            device.DeleteTexture(red);
+            Assert.Equal(0, table.PendingRetirements);
+
+            long before = table.PlaceholderResolutions;
+            Assert.Equal(0u, table.Resolve(held, TextureKind.Texture2D, SamplerState.Default));
+            Assert.Equal(before + 1, table.PlaceholderResolutions);
+            Assert.Equal(0, table.LiveSlots(TextureKind.Texture2D));
+            Assert.Equal(0, table.PendingWrites);
+
+            device.BeginFrame();
+            device.Present();
+            GpuTest.AssertClean(device);
+        }
+    }
 }

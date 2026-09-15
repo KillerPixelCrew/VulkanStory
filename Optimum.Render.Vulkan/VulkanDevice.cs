@@ -905,6 +905,9 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>The context (and its allocator). Tests only.</summary>
     internal VulkanContext ContextForTests => _context;
 
+    /// <summary>The texture manager. Tests only.</summary>
+    internal TextureManager TexturesForTests => _textures;
+
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
 
