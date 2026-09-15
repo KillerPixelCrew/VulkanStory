@@ -134,8 +134,11 @@ public class PacingStatsTests
             "stats.counters blocking_uploads=1 uploads=2 scopes=3 barriers=4 rebar_fallbacks=5 " +
             "dynamic_state=6 uniform_ring_used=7 uniform_ring_capacity=8 barrier_commands=9 barriers_per_frame=2.0 " +
             "mask_restarts=10 feedback_splits=11 passes=12 plan_hits=13 plan_misses=14 in_pass_clears=15 " +
-            "promoted_clears=16 standalone_clears=17 pass_splits=18 compute_passes=19 dispatches=20",
-            VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)));
+            "promoted_clears=16 standalone_clears=17 pass_splits=18 push_constants=19 storage_set_binds=20 " +
+            "bindless_slots=21 bindless_placeholders=22 compute_passes=23 dispatches=24 " +
+            "native_passes=25 native_draws=26",
+            VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+                19, 20, 21, 22, 23, 24, 25, 26)));
 
         Assert.Equal(
             "stats.transients transient_mib=1.5 aliased_mib=0.5 heap_peak_mib=64.0 leases=3 aliased_leases=1 " +
@@ -370,8 +373,10 @@ public class PacingStatsTests
         Assert.Contains("_frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);", readBack);
         Assert.DoesNotContain("WaitSite.UploadSubmit", device);
 
-        // The per-draw dynamic-state count matches the commands actually recorded.
-        string dynamicState = Body(device, "private void ApplyDynamicState(");
+        // The per-draw dynamic-state count matches the commands actually recorded. The
+        // emission is shared: the emulated draw resolves the values from the state tracker,
+        // a native draw from its pipeline's fixed state, and both record them here.
+        string dynamicState = Body(device, "private void EmitDynamicState(");
         Assert.Equal(VulkanStats.DynamicStateCommandsPerDraw, Count(dynamicState, "api.CmdSet"));
         // Phase 1B step 6: dirty-masked, so the count is what was emitted, not a constant.
         Assert.Contains("DynamicStateDirty dirty = _dynamicState.Update(serial, values);", dynamicState);
