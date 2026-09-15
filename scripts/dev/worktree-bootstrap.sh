@@ -92,7 +92,8 @@ done < <(find "$wt/patches" -type f -name '*.patch' -not -path '*/runtime/*' -pr
 while IFS= read -r -d '' src; do
   rel="${src#$wt/sources/}"
   top="$(cut -d/ -f1 <<<"$rel")"
-  case "$top" in lang|shaders|shaderincludes) continue ;; esac
+  # Deploy-time and native shader trees are read from sources/ directly; a root copy is stale clutter.
+  case "$top" in lang|shaders|shaderincludes|shaders-vk) continue ;; esac
   if is_vanilla_project "$top"; then target="$wt/build/$rel"; else target="$wt/$rel"; fi
   mkdir -p "$(dirname "$target")"
   cp -f "$src" "$target"

@@ -1624,11 +1624,12 @@ if [[ -d "$sources_dir" ]]; then
     rel="${src#$sources_dir/}"
     # For vanilla (decompiled) projects, the working tree is under build/.
     top_proj="$(echo "$rel" | cut -d/ -f1)"
-    # lang/ and shaders/ are deploy-time asset overlays, not project source.
-    # deploy and the package scripts read them from sources/ directly; copying
-    # them here dumped stray lang/ and shaders/ dirs at the repo root.
+    # lang/, shaders/, shaderincludes/ and shaders-vk/ are asset or native shader
+    # trees, not project source: deploy, the package scripts and the shader
+    # compiler read them from sources/ directly; copying them here dumped stray
+    # directories at the repo root that could be edited in place of the real ones.
     case "$top_proj" in
-      lang|shaders) continue ;;
+      lang|shaders|shaderincludes|shaders-vk) continue ;;
     esac
     if echo "$vanilla_patch_projects" | grep -qw "$top_proj"; then
       target="$repo_root/build/$rel"
