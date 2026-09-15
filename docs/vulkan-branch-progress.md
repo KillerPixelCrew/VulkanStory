@@ -222,6 +222,17 @@ Windows run above.
    and limit check at startup (without it the session stays on OpenGL); `bindings.glsl` +
    `Shaders/SetConvention.cs` with an agreement test; uniform placement table (push | frame | per-frame
    record | storage | texture slot).
+   **Status (2026-09-15):** steps 1 and 2 of the decision-9 sequence are in. Capability negotiation:
+   `Core/DescriptorIndexingFloor.cs` judges runtimeDescriptorArray, partially bound, sampled-image update-after-bind,
+   dynamic sampled-image indexing and the update-after-bind sampled-image/sampler, dynamic-UBO and push-constant limits
+   against the set-1 table; `IsUsable` rejects a device below it (OpenGL fallback with the named reason), `CreateDevice`
+   enables the features, `VulkanCapabilities.DescriptorIndexing` carries them and the device-up line logs them. Set
+   convention: `sources/shaders-vk/include/bindings.glsl` (source of truth) and `Shaders/SetConvention.cs`, pinned by
+   `SetConventionTests` (defines, declarations, uniqueness, floor agreement, the include compiles). Tests:
+   `BindlessCapabilityTests` (floor logic, researched vendor limits, a decision-9 layout created and allocated with no
+   validation message on the selected device). GPU suite 673/673, no `SYNC-`; both local devices (RTX 4070, UHD ADL-S)
+   meet the floor. Open for the layout step: best practices' AMD check `KeepLayoutSmall` warns on that layout's
+   128-byte push-constant range; size the real push block from the uniform placement map, not the maximum.
 4. **Rewriter retargeted** to the shared layout (samplers -> bindless indices, loose uniforms -> per-frame
    record addressed from push constants), then native GLSL 450 per program family (includes; post programs;
    GUI/lines; chunks; entities; particles/decals/sky/clouds; SSAO/godrays/bloom/colorgrade/OIT; Optimum

@@ -73,6 +73,8 @@ internal sealed class VulkanCapabilities
     public ulong MinUniformBufferOffsetAlignment;
     public ulong MaxUniformBufferRange;
     public uint MaxColorAttachments = 8;
+    /// <summary>The bindless features and limits of plan decision 9; every selected device meets <see cref="DescriptorIndexingFloor" />.</summary>
+    public DescriptorIndexingSupport DescriptorIndexing;
 
     /// <summary>VK_EXT_color_write_enable enabled (only when the selected tier uses it).</summary>
     public bool ColorWriteEnable;
@@ -745,6 +747,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (!features.Features.IndependentBlend) missing.Add("independentBlend");
         // Chunk rendering issues one indirect multidraw per pool.
         if (!features.Features.MultiDrawIndirect) missing.Add("multiDrawIndirect");
+        // Decision 9: one pipeline layout with bindless textures. A device without
+        // it stays on OpenGL rather than running a second, per-program layout path.
+        missing.AddRange(DescriptorIndexingFloor.Missing(ReadDescriptorIndexingSupport(device)));
 
         if (missing.Count > 0)
         {
@@ -754,6 +759,38 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         reason = null;
         return true;
+    }
+
+    /// <summary>The features and limits <see cref="DescriptorIndexingFloor" /> judges, as the device reports them.</summary>
+    private DescriptorIndexingSupport ReadDescriptorIndexingSupport(PhysicalDevice device)
+    {
+        var vulkan12Features = new PhysicalDeviceVulkan12Features { SType = StructureType.PhysicalDeviceVulkan12Features };
+        var features = new PhysicalDeviceFeatures2
+        {
+            SType = StructureType.PhysicalDeviceFeatures2,
+            PNext = &vulkan12Features,
+        };
+        Api.GetPhysicalDeviceFeatures2(device, &features);
+
+        var vulkan12Properties = new PhysicalDeviceVulkan12Properties { SType = StructureType.PhysicalDeviceVulkan12Properties };
+        var properties = new PhysicalDeviceProperties2
+        {
+            SType = StructureType.PhysicalDeviceProperties2,
+            PNext = &vulkan12Properties,
+        };
+        Api.GetPhysicalDeviceProperties2(device, &properties);
+
+        return new DescriptorIndexingSupport(
+            RuntimeDescriptorArray: vulkan12Features.RuntimeDescriptorArray,
+            DescriptorBindingPartiallyBound: vulkan12Features.DescriptorBindingPartiallyBound,
+            DescriptorBindingSampledImageUpdateAfterBind: vulkan12Features.DescriptorBindingSampledImageUpdateAfterBind,
+            ShaderSampledImageArrayDynamicIndexing: features.Features.ShaderSampledImageArrayDynamicIndexing,
+            MaxPerStageDescriptorUpdateAfterBindSampledImages: vulkan12Properties.MaxPerStageDescriptorUpdateAfterBindSampledImages,
+            MaxPerStageDescriptorUpdateAfterBindSamplers: vulkan12Properties.MaxPerStageDescriptorUpdateAfterBindSamplers,
+            MaxDescriptorSetUpdateAfterBindSampledImages: vulkan12Properties.MaxDescriptorSetUpdateAfterBindSampledImages,
+            MaxDescriptorSetUpdateAfterBindSamplers: vulkan12Properties.MaxDescriptorSetUpdateAfterBindSamplers,
+            MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic: vulkan12Properties.MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic,
+            MaxPushConstantsSize: properties.Properties.Limits.MaxPushConstantsSize);
     }
 
     private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family)
@@ -840,6 +877,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             IndependentBlend = true,
             MultiDrawIndirect = true,
+            // Decision 9: per-draw bindless indices come from push constants.
+            ShaderSampledImageArrayDynamicIndexing = true,
             // Optional. Wireframe debug and thick lines degrade rather than fail.
             FillModeNonSolid = available.FillModeNonSolid,
             WideLines = available.WideLines,
@@ -914,6 +953,11 @@ internal sealed unsafe class VulkanContext : IDisposable
             PNext = &vulkan13,
             ScalarBlockLayout = true,
             TimelineSemaphore = true,
+            // Decision 9's bindless set: partially bound combined-image-sampler arrays
+            // written while bound. IsUsable already proved the device has them.
+            RuntimeDescriptorArray = true,
+            DescriptorBindingPartiallyBound = true,
+            DescriptorBindingSampledImageUpdateAfterBind = true,
         };
         var features2 = new PhysicalDeviceFeatures2
         {
@@ -1150,6 +1194,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             MinUniformBufferOffsetAlignment = properties.Limits.MinUniformBufferOffsetAlignment,
             MaxUniformBufferRange = properties.Limits.MaxUniformBufferRange,
             MaxColorAttachments = properties.Limits.MaxColorAttachments,
+            DescriptorIndexing = ReadDescriptorIndexingSupport(PhysicalDevice),
         };
     }
 
