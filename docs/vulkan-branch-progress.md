@@ -54,10 +54,18 @@ materialised).
   lifetime with frames in flight (texture ids already recycle through a free list with deferred
   deletion, and transient aliasing rebinds ids per frame, so slots must follow `Rebind`/`RestoreBindings`);
   when `nonuniformEXT` is needed; driver quirks 2024-2026.
-- **Full GPU suite with the validation layer active** was running (Vulkan SDK 1.4.357.0 had just been
-  installed with `winget install KhronosGroup.VulkanSDK`; previously every validation test skipped). At
-  interruption 110 tests had run with only the known `PacingStatsTests` failure. Rerun it and triage any
-  validation messages that now surface. The notebook needs the SDK (or distro validation layers) too.
+- **Full GPU suite with the validation layer active** (Vulkan SDK 1.4.357.0, installed with
+  `winget install KhronosGroup.VulkanSDK`; previously every validation test skipped) finished: 661 tests,
+  6 failures. One is the known host failure `PacingStatsTests`. The other five are new and all the same
+  sync-validation hazard, which the missing layer had hidden: `SYNC-HAZARD-PRESENT-AFTER-WRITE` ("no
+  sufficient synchronization is present to ensure that a swapchain present operation does not conflict
+  with a prior layout transition") in `PresentDecouplingTests.RecordingTimeDoesNotGrowWithTheInjectedAcquireDelay`,
+  `SwapchainRecreationTests.AHiddenWindowResizeLoopRecreatesWithoutWaitingAndStaysClean` and
+  `SwapchainTests.TogglingVsyncRebuildsTheChainCleanly` / `ADeviceComesUpAgainstARealWindowAndPresentsFrames`
+  / `ResizingRebuildsTheChainAndKeepsPresenting`. First fix on the list: the present path's semaphore wait
+  must cover the command buffer that transitions the swapchain image to PRESENT_SRC, with one render-finished
+  semaphore per swapchain image indexed by the acquired image (`docs/research/vulkan-validation.md` §4,
+  Swapchain Semaphore Reuse). The notebook needs the SDK (or distro validation layers) too.
 
 ## Next steps
 
