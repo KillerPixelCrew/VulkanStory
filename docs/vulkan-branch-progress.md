@@ -247,7 +247,7 @@ Windows run above.
 7. **Caching follow-ups** (`docs/research/vulkan-caching.md`): `FAIL_ON_PIPELINE_COMPILE_REQUIRED` with
    background compiles, growth-triggered saves, pipeline-key log for pre-warming, optional
    `VK_KHR_pipeline_binary`; real-client warm-start check with the headless harness (needs game data).
-8. **GTAO with visibility bitmasks** (XeGTAO-derived; XeGTAO itself is archived since 2024-04-22, see `docs/research/xegtao-integration.md` section 0; default AO on Vulkan while TAA is active): compute pass kind in the frame graph, GLSL compute
+8. **GTAO with visibility bitmasks** (XeGTAO-derived; XeGTAO itself is archived since 2024-04-22, see `docs/research/xegtao-integration.md` section 0; the combined design is `docs/research/ambient-occlusion.md` section C; physically correct, default AO on Vulkan while TAA is active): compute pass kind in the frame graph, GLSL compute
    port (prefilter split into dispatches, main pass, one denoise pass with TAA), NoiseIndex = frame % 64,
    composition before the resolve, settings; OpenGL keeps vanilla SSAO; tests and a headless comparison.
 9. **General refactor:** split `VulkanDevice.cs`, restructure the project layout, remove GL-emulation leftovers.

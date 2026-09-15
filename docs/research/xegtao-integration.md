@@ -11,6 +11,9 @@ With TAA: NoiseIndex = frame % 64 and a single denoise pass. On GL 3.3, keep van
 
 ## 0. Status and algorithm choice (2026-09-15)
 
+**Superseded as the design by `docs/research/ambient-occlusion.md`**, which researches every source below in depth
+and combines them (section C); this section stays as the candidate record.
+
 - **XeGTAO is archived.** The repository was archived on 2024-04-22; its last commits are "Archiving Notice" and a
   README update. It stays MIT and usable, but receives no fixes. https://github.com/GameTechDev/XeGTAO
 - **The algorithm is not superseded as a base, but it has a maintained successor:** GTAO with visibility bitmasks
