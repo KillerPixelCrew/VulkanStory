@@ -123,6 +123,14 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// changes something. Replaces up to 56 per-program copies of the same values.
     /// </summary>
     private DescriptorSetLayout _frameSetLayout;
+
+    /// <summary>
+    /// Decision 9's set 1 and the one shared pipeline layout. Created at bring-up and
+    /// kept current (slots retire with their textures, writes flush before every
+    /// submission); no draw uses them until shaders target the shared layout.
+    /// </summary>
+    private BindlessTextureTable? _bindless;
+    private SharedPipelineLayout? _sharedLayout;
     private readonly byte[] _frameGlobals = FrameGlobals.CreateShadow();
     private uint _frameGlobalsVersion = 1;
     private uint _frameGlobalsSnapshotFrame;
@@ -444,6 +452,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         _descriptors = new DescriptorCache(_context);
         // One layout for the shared frame block, named by every program's pipeline layout.
         _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
+        // Decision 9: the bindless table retires a texture's slots on the timeline
+        // values of its deletion, and the shared layout names the table's set layout.
+        _bindless = new BindlessTextureTable(_context, _textures, _frames.Timeline);
+        _textures.Deleted = texture => _bindless.Release(texture.Id);
+        _sharedLayout = new SharedPipelineLayout(_context, _bindless.Layout);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
         for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
         _indirectRing = new IndirectRing(_frames.FramesInFlight);
@@ -777,6 +790,9 @@ public sealed unsafe class VulkanDevice : IDisposable
         _transients.BeginFrame();
 
         FrameSlot slot = _frames.BeginFrame();
+        // After the ring's wait and collection, before anything is recorded: freed
+        // bindless slots get their placeholder back and queued writes land.
+        _bindless?.BeginFrame();
         _readSelfCopies.Collect();
         _frameActive = true;
         _frameCounter++;
@@ -827,6 +843,56 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>The frame ring's upload manager. Tests only.</summary>
     internal UploadManager UploadsForTests => _uploads;
 
+    /// <summary>Decision 9's set 1. Tests only.</summary>
+    internal BindlessTextureTable BindlessForTests => _bindless!;
+
+    /// <summary>Decision 9's shared pipeline layout. Tests only.</summary>
+    internal SharedPipelineLayout SharedLayoutForTests => _sharedLayout!;
+
+    /// <summary>
+    /// Records one fullscreen triangle into the bound target with a pipeline built on
+    /// the shared layout: the bindless set bound at set 1, <paramref name="pushConstants" />
+    /// pushed for vertex and fragment. Every placeholder and every texture in
+    /// <paramref name="sampledTextureIds" /> is made shader-readable first, as a draw
+    /// does for what it samples. Tests only, until shaders target the shared layout.
+    /// </summary>
+    internal void DrawBindlessForTests(Pipeline pipeline, int width, int height, byte[] pushConstants,
+        params int[] sampledTextureIds)
+    {
+        if (!_frameActive || _targets.Bound == null || _bindless == null || _sharedLayout == null) return;
+        CommandBuffer commandBuffer = Commands;
+        Vk api = _context.Api;
+
+        var sampled = new List<int>(sampledTextureIds);
+        for (int kind = 0; kind < BindlessKinds.Count; kind++) sampled.Add(_bindless.PlaceholderTextureId((TextureKind)kind));
+        foreach (int id in sampled)
+        {
+            VulkanTexture? texture = _textures.Get(id);
+            if (texture == null || texture.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
+            _targets.EndRendering(commandBuffer);
+            _textures.Require(_barriers, commandBuffer, texture, Graph.ResourceUsage.SampleFragment);
+        }
+        _barriers.Flush(commandBuffer);
+        _targets.EnsureRendering(commandBuffer);
+
+        api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, pipeline);
+        var viewport = new Viewport(0, 0, width, height, 0, 1);
+        api.CmdSetViewport(commandBuffer, 0, 1, &viewport);
+        var scissor = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)width, (uint)height));
+        api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
+        DescriptorSet set = _bindless.Set;
+        api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, _sharedLayout.Layout,
+            (uint)Shaders.SetConvention.TextureSet, 1, &set, 0, null);
+        fixed (byte* push = pushConstants)
+        {
+            api.CmdPushConstants(commandBuffer, _sharedLayout.Layout, SharedPipelineLayout.Stages, 0,
+                (uint)pushConstants.Length, push);
+        }
+        api.CmdDraw(commandBuffer, 3, 1, 0, 0);
+        // The raw bind and states above are not what the cache believes the buffer holds.
+        _dynamicState.Invalidate();
+    }
+
     /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
     internal bool DeviceLocalStaticMeshesForTests
     {
@@ -838,6 +904,9 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>The context (and its allocator). Tests only.</summary>
     internal VulkanContext ContextForTests => _context;
+
+    /// <summary>The texture manager. Tests only.</summary>
+    internal TextureManager TexturesForTests => _textures;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -936,6 +1005,8 @@ public sealed unsafe class VulkanDevice : IDisposable
         _targets.EndRendering(_frames.Current.CommandBuffer);
 
         long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
+        // A slot first resolved while recording is written before its draws are submitted.
+        _bindless?.Flush();
         ulong renderValue = _frames.EndFrame();
         _frameActive = false;
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -3093,6 +3164,7 @@ public sealed unsafe class VulkanDevice : IDisposable
     private ulong SubmitPartial()
     {
         _targets.EndRendering(Commands);
+        _bindless?.Flush();
         ulong submitted = _frames.SubmitPartial();
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
         return submitted;
@@ -3328,6 +3400,10 @@ public sealed unsafe class VulkanDevice : IDisposable
             _context.Api.DestroyDescriptorSetLayout(_context.Device, _frameSetLayout, null);
             _frameSetLayout = default;
         }
+        // The shared pipeline layout before the table's set layout it names; the
+        // table's placeholders are textures and go with the texture manager.
+        _sharedLayout?.Dispose();
+        _bindless?.Dispose();
 
         _uniformBuffers.Clear();
 

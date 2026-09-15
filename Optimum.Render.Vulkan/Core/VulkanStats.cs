@@ -290,6 +290,27 @@ internal static class VulkanStats
 
     public static long RebarFallbacks => Interlocked.Read(ref _rebarFallbacks);
 
+    private static long _bindlessWrites;
+    private static long _bindlessFlushes;
+    private static long _bindlessPlaceholderResolutions;
+
+    /// <summary>
+    /// One vkUpdateDescriptorSets on the bindless set carrying <paramref name="writes" />
+    /// slot writes (new slots and placeholders written back into freed ones).
+    /// </summary>
+    public static void NoteBindlessFlush(int writes)
+    {
+        Interlocked.Increment(ref _bindlessFlushes);
+        Interlocked.Add(ref _bindlessWrites, writes);
+    }
+
+    /// <summary>A bindless lookup that resolved to a placeholder slot: no texture, a texture of the wrong kind, or a full array.</summary>
+    public static void NoteBindlessPlaceholderResolution() => Interlocked.Increment(ref _bindlessPlaceholderResolutions);
+
+    public static long BindlessWrites => Interlocked.Read(ref _bindlessWrites);
+    public static long BindlessFlushes => Interlocked.Read(ref _bindlessFlushes);
+    public static long BindlessPlaceholderResolutions => Interlocked.Read(ref _bindlessPlaceholderResolutions);
+
     /// <summary>A multi-draw that did not fit its frame slot's indirect buffer and took an overflow buffer.</summary>
     public static void NoteIndirectOverflow() => Interlocked.Increment(ref _indirectOverflows);
 
