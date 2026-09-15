@@ -49,10 +49,16 @@ internal static class ShaderTranslator
         EnumShaderType.GeometryShader,
     };
 
+    /// <param name="includes">
+    /// The include files the program was assembled from, as ShaderRegistry records
+    /// them. They decide which uniforms read the shared frame block
+    /// (<see cref="FrameGlobals" />); without them every uniform stays the program's own.
+    /// </param>
     public static TranslatedProgram Translate(
         IReadOnlyList<ShaderStageSource> stages,
         ShaderCompiler compiler,
-        IReadOnlyDictionary<string, int>? declaredAttributes = null)
+        IReadOnlyDictionary<string, int>? declaredAttributes = null,
+        IReadOnlySet<string>? includes = null)
     {
         var program = new TranslatedProgram();
 
@@ -92,7 +98,7 @@ internal static class ShaderTranslator
             return program;
         }
 
-        program.Layout = ProgramInterfaceLayout.Build(parsed, declaredAttributes);
+        program.Layout = ProgramInterfaceLayout.Build(parsed, declaredAttributes, includes);
         foreach (string error in program.Layout.Errors)
         {
             program.Errors.Add(error);

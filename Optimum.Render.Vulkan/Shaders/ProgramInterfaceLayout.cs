@@ -65,10 +65,32 @@ internal sealed class ProgramInterfaceLayout
 {
     public const string BlockTypeName = "OptimumUniforms";
     public const string BlockInstanceName = "_optimum";
-    public const int DefaultBlockSet = 0;
-    public const int DefaultBlockBinding = 0;
+
+    // Sets are ordered by how often their contents change: the frame block every
+    // program shares (FrameGlobals), then the program's textures, its storage
+    // buffers, and last its own uniform blocks, which change between draws.
+    public const int FrameSet = FrameGlobals.Set;
     public const int SamplerSet = 1;
     public const int StorageSet = 2;
+    public const int DefaultBlockSet = 3;
+    public const int DefaultBlockBinding = 0;
+    public const int SetCount = 4;
+
+    /// <summary>
+    /// The shared frame members each stage declared (see <see cref="FrameGlobals" />).
+    /// Emitted per stage for the same reason <see cref="MembersByStage" /> is.
+    /// </summary>
+    public Dictionary<EnumShaderType, HashSet<string>> FrameMembersByStage { get; } = new();
+
+    /// <summary>
+    /// The array length each shared frame member was declared with in this program:
+    /// a shader may read a prefix of the shared array (<c>pointLights[DYNLIGHTS]</c>).
+    /// 0 for a member that is not an array.
+    /// </summary>
+    public Dictionary<string, int> FrameMemberDeclaredLengths { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Whether the program reads anything from the shared frame block.</summary>
+    public bool UsesFrameBlock => FrameMemberDeclaredLengths.Count > 0;
 
     /// <summary>Members in declaration order, vertex stage first.</summary>
     public List<UniformMember> Members { get; } = new();
@@ -152,7 +174,7 @@ internal sealed class ProgramInterfaceLayout
         return buffer;
     }
 
-    private static void WriteInitializer(byte[] buffer, UniformMember member)
+    internal static void WriteInitializer(byte[] buffer, UniformMember member)
     {
         // Only scalar literal defaults are honoured. Every initialiser in the
         // shipped shaders is one; a constructor expression would need an
@@ -190,9 +212,14 @@ internal sealed class ProgramInterfaceLayout
     /// Locations from <c>IShaderProgram</c>'s BindAttribLocation map, for mods
     /// that name attributes through the API instead of a layout qualifier.
     /// </param>
+    /// <param name="includes">
+    /// The program's include files; a uniform whose owning include is among them
+    /// reads the shared frame block (<see cref="FrameGlobals.TryPlace" />).
+    /// </param>
     public static ProgramInterfaceLayout Build(
         IReadOnlyList<(EnumShaderType Stage, ParsedShader Parsed)> stages,
-        IReadOnlyDictionary<string, int>? declaredAttributes = null)
+        IReadOnlyDictionary<string, int>? declaredAttributes = null,
+        IReadOnlySet<string>? includes = null)
     {
         var layout = new ProgramInterfaceLayout();
         int offset = 0;
@@ -206,7 +233,7 @@ internal sealed class ProgramInterfaceLayout
                 switch (declaration.Kind)
                 {
                     case GlslDeclarationKind.DefaultUniform:
-                        AddDefaultUniform(layout, declaration, stage, ref offset);
+                        AddDefaultUniform(layout, declaration, stage, includes, ref offset);
                         break;
                     case GlslDeclarationKind.OpaqueUniform:
                         AddSampler(layout, declaration);
@@ -230,13 +257,36 @@ internal sealed class ProgramInterfaceLayout
     // ------------------------------------------------------------------ uniforms
 
     private static void AddDefaultUniform(
-        ProgramInterfaceLayout layout, GlslDeclaration declaration, EnumShaderType stage, ref int offset)
+        ProgramInterfaceLayout layout, GlslDeclaration declaration, EnumShaderType stage,
+        IReadOnlySet<string>? includes, ref int offset)
     {
         if (!GlslType.TryParse(declaration.TypeName, out GlslType type))
         {
             // A struct-typed uniform, or a type this backend does not model. The
             // rewriter leaves the declaration alone, so the shader still compiles;
             // it simply is not settable through the generated block.
+            return;
+        }
+
+        // A value Use() writes into every program that includes its owner: it reads
+        // the shared frame block instead of taking room in this program's own.
+        if (declaration.UnresolvedArraySize == null &&
+            FrameGlobals.TryPlace(declaration.Name, type, declaration.ArrayLength, includes, out _))
+        {
+            if (!layout.FrameMembersByStage.TryGetValue(stage, out HashSet<string>? frameMembers))
+            {
+                frameMembers = new HashSet<string>(StringComparer.Ordinal);
+                layout.FrameMembersByStage[stage] = frameMembers;
+            }
+            frameMembers.Add(declaration.Name);
+
+            // Every stage is compiled with the same defines, so the lengths agree;
+            // the longest is kept should they not, since each is a prefix.
+            if (!layout.FrameMemberDeclaredLengths.TryGetValue(declaration.Name, out int known) ||
+                declaration.ArrayLength > known)
+            {
+                layout.FrameMemberDeclaredLengths[declaration.Name] = declaration.ArrayLength;
+            }
             return;
         }
 

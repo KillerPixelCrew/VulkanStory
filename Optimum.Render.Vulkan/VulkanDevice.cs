@@ -98,6 +98,19 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     private bool _lastUniformAllocationOk = true;
 
+    /// <summary>
+    /// The shared frame block (set 0, <see cref="FrameGlobals" />): the one set
+    /// layout every program's pipeline layout names for it, the CPU shadow every
+    /// frame-global write lands in, and the ring snapshot draws bind until a write
+    /// changes something. Replaces up to 56 per-program copies of the same values.
+    /// </summary>
+    private DescriptorSetLayout _frameSetLayout;
+    private readonly byte[] _frameGlobals = FrameGlobals.CreateShadow();
+    private uint _frameGlobalsVersion = 1;
+    private uint _frameGlobalsSnapshotFrame;
+    private uint _frameGlobalsSnapshotVersion;
+    private uint _frameGlobalsSnapshotOffset;
+
     /// <summary>Sixteen bytes of float defaults followed by sixteen of int.</summary>
     private const ulong DefaultAttributeBufferSize = 32;
 
@@ -395,6 +408,8 @@ public sealed unsafe class VulkanDevice : IDisposable
         _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
             _context.Capabilities.DynamicColorBlend);
         _descriptors = new DescriptorCache(_context);
+        // One layout for the shared frame block, named by every program's pipeline layout.
+        _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
         for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
         _indirectRing = new IndirectRing(_frames.FramesInFlight);
@@ -1056,7 +1071,11 @@ public sealed unsafe class VulkanDevice : IDisposable
             return 0;
         }
 
-        TranslatedProgram translated = ShaderTranslator.Translate(stages, _shaderCompiler);
+        // The include files the registry assembled the program from decide which
+        // of its uniforms read the shared frame block. A program built any other
+        // way - a mod's, a test's - keeps every uniform to itself.
+        TranslatedProgram translated = ShaderTranslator.Translate(stages, _shaderCompiler, null,
+            (program as Vintagestory.Client.NoObf.ShaderProgramBase)?.includes);
         if (!translated.Success)
         {
             foreach (string error in translated.Errors)
@@ -1078,7 +1097,7 @@ public sealed unsafe class VulkanDevice : IDisposable
                     " type=" + member.Type + " count=" + member.ArrayLength);
             }
         }
-        _programs[programId] = new ShaderProgramResources(_context, programId, translated);
+        _programs[programId] = new ShaderProgramResources(_context, programId, translated, _frameSetLayout);
         _programNames[programId] = program.PassName ?? "";
         return programId;
     }
@@ -1119,11 +1138,38 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     private void Write(int programId, int location, ReadOnlySpan<byte> data)
     {
+        // A member of the shared frame block: one shadow for every program.
+        if (ShaderProgramResources.IsFrameLocation(location))
+        {
+            WriteFrameGlobal(location - ShaderProgramResources.FrameLocationBase, data);
+            return;
+        }
+
         if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
         {
             program.SetUniform(location, data);
         }
     }
+
+    /// <summary>
+    /// Writes into the shared frame block. Use() rewrites the same values on every
+    /// program switch, so the common case is bytes that already match: a comparison
+    /// and nothing else. A real change bumps the version and the next draw takes a
+    /// new snapshot.
+    /// </summary>
+    private void WriteFrameGlobal(int offset, ReadOnlySpan<byte> data)
+    {
+        if (offset < 0 || offset + data.Length > _frameGlobals.Length) return;
+
+        Span<byte> destination = _frameGlobals.AsSpan(offset, data.Length);
+        if (data.SequenceEqual(destination)) return;
+
+        data.CopyTo(destination);
+        _frameGlobalsVersion++;
+    }
+
+    /// <summary>A copy of the shared frame block's current bytes. For tests.</summary>
+    internal byte[] FrameGlobalsForTests => (byte[])_frameGlobals.Clone();
 
     public void SetUniform(int programId, int location, float value) =>
         Write(programId, location, new ReadOnlySpan<byte>(&value, sizeof(float)));
@@ -2326,11 +2372,53 @@ public sealed unsafe class VulkanDevice : IDisposable
         MirrorValidationMessage(message);
     }
 
+    /// <summary>
+    /// Binds the shared frame block (set 0). Its bytes go into the ring once per
+    /// change of its contents: every draw that follows in the frame reads the same
+    /// snapshot, through the one descriptor set every program shares, and only the
+    /// dynamic offset moves when a value does.
+    /// </summary>
+    private void BindFrameGlobals(CommandBuffer commandBuffer, ShaderProgramResources program)
+    {
+        uint offset = 0;
+        if (_frameGlobalsSnapshotFrame == _frameCounter && _frameGlobalsSnapshotVersion == _frameGlobalsVersion)
+        {
+            offset = _frameGlobalsSnapshotOffset;
+        }
+        else if (_frames.Current.TryAllocateUniforms(_frameGlobals.Length, out RingAllocation allocation))
+        {
+            fixed (byte* source = _frameGlobals)
+            {
+                System.Buffer.MemoryCopy(source, (void*)allocation.Pointer, _frameGlobals.Length, _frameGlobals.Length);
+            }
+            offset = allocation.Offset;
+            _frameGlobalsSnapshotFrame = _frameCounter;
+            _frameGlobalsSnapshotVersion = _frameGlobalsVersion;
+            _frameGlobalsSnapshotOffset = offset;
+        }
+        else
+        {
+            ReportUniformExhaustion(program, "the shared frame block");
+        }
+
+        var contents = new DescriptorSetContents(
+            0, ProgramInterfaceLayout.FrameSet, Array.Empty<SamplerBindingValue>(),
+            new[] { new BufferBindingValue(FrameGlobals.Binding, _frames.UniformBuffer, 0, (ulong)_frameGlobals.Length) });
+        DescriptorSet frameSet = GetDescriptorSet(contents, _frameSetLayout);
+        _context.Api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
+            ProgramInterfaceLayout.FrameSet, 1, &frameSet, 1, &offset);
+    }
+
     private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         Vk api = _context.Api;
 
-        // Set 0: the generated uniform block plus one entry for every block the
+        if (program.Interface.UsesFrameBlock)
+        {
+            BindFrameGlobals(commandBuffer, program);
+        }
+
+        // Set 3: the generated uniform block plus one entry for every block the
         // shader declared for itself. Every one of them is a dynamic descriptor
         // pointing at this frame's uniform ring, so the set itself never changes
         // - the per-draw offset travels alongside it instead.
@@ -2352,7 +2440,13 @@ public sealed unsafe class VulkanDevice : IDisposable
             if (hasGeneratedBlock)
             {
                 uint generatedOffset = 0;
-                if (_frames.Current.TryAllocateUniforms(
+                if (program.HasSnapshotFor(_frameCounter))
+                {
+                    // Nothing written since this program's last draw this frame
+                    // took its snapshot: bind the same bytes again.
+                    generatedOffset = program.SnapshotOffset;
+                }
+                else if (_frames.Current.TryAllocateUniforms(
                         program.UniformShadow.Length, out RingAllocation allocation))
                 {
                     fixed (byte* source = program.UniformShadow)
@@ -2361,7 +2455,7 @@ public sealed unsafe class VulkanDevice : IDisposable
                             program.UniformShadow.Length, program.UniformShadow.Length);
                     }
                     generatedOffset = allocation.Offset;
-                    program.MarkUniformsClean();
+                    program.NoteSnapshot(_frameCounter, allocation.Offset);
                 }
                 else
                 {
@@ -3172,6 +3266,12 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
+        // After every pipeline layout that named it.
+        if (_context != null && _frameSetLayout.Handle != 0)
+        {
+            _context.Api.DestroyDescriptorSetLayout(_context.Device, _frameSetLayout, null);
+            _frameSetLayout = default;
+        }
 
         _uniformBuffers.Clear();
 

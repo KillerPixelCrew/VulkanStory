@@ -310,7 +310,7 @@ public class ShaderTranslationUnitTests
         ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, source));
         string code = RewriteVertex(source, layout);
 
-        Assert.Contains("layout(scalar, set = 0, binding = 0) uniform OptimumUniforms", code);
+        Assert.Contains("layout(scalar, set = 3, binding = 0) uniform OptimumUniforms", code);
         Assert.Contains("layout(offset = 0) float zNear;", code);
         Assert.Contains("layout(offset = 4) vec3 tint;", code);
         // The originals are gone, so the names resolve to the block members.

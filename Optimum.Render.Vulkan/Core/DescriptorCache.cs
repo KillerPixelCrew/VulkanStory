@@ -463,8 +463,10 @@ internal sealed unsafe class DescriptorCache : IDisposable
 /// </summary>
 internal static class ProgramInterfaceLayoutBindings
 {
-    public const int DefaultBlockSet = 0;
-    public const int DefaultBlockBinding = 0;
+    public const int FrameSet = 0;
+    public const int FrameBinding = 0;
     public const int SamplerSet = 1;
     public const int StorageSet = 2;
+    public const int DefaultBlockSet = 3;
+    public const int DefaultBlockBinding = 0;
 }
