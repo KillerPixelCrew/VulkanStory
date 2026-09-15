@@ -95,6 +95,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public uint MipLevels { get; init; }
     public uint Layers { get; init; }
 
+    /// <summary>The image usage it was created with; 0 for images created outside <see cref="TextureManager.Create" />'s paths.</summary>
+    public ImageUsageFlags Usage { get; init; }
+
     /// <summary>Whether the view is a cube rather than a six-layer array.</summary>
     public bool Cube { get; init; }
 
@@ -172,6 +175,35 @@ internal sealed unsafe class VulkanTexture : IDisposable
         return view;
     }
 
+    /// <summary>
+    /// 2D views of a mip range, created on demand. A storage image descriptor names
+    /// exactly one level, and a sampled read of level n must not name the levels the
+    /// same pass writes: validation checks the layout of every level a view covers.
+    /// </summary>
+    private readonly Dictionary<(uint BaseMip, uint MipCount), ImageView> _mipViews = new();
+
+    public ImageView ViewOfMips(uint baseMip, uint mipCount)
+    {
+        if (baseMip == 0 && mipCount >= MipLevels && Layers <= 1 && !Cube && !Volume) return View;
+        lock (_mipViews)
+        {
+            if (_mipViews.TryGetValue((baseMip, mipCount), out ImageView existing)) return existing;
+
+            var createInfo = new ImageViewCreateInfo
+            {
+                SType = StructureType.ImageViewCreateInfo,
+                Image = Image,
+                ViewType = ImageViewType.Type2D,
+                Format = Format,
+                SubresourceRange = new ImageSubresourceRange(Aspect, baseMip, mipCount, 0, 1),
+            };
+            VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
+                "vkCreateImageView for mips " + baseMip + "+" + mipCount);
+            _mipViews[(baseMip, mipCount)] = view;
+            return view;
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -183,6 +215,11 @@ internal sealed unsafe class VulkanTexture : IDisposable
             if (layerView.Handle != 0) api.DestroyImageView(_context.Device, layerView, null);
         }
         _layerViews.Clear();
+        foreach (ImageView mipView in _mipViews.Values)
+        {
+            if (mipView.Handle != 0) api.DestroyImageView(_context.Device, mipView, null);
+        }
+        _mipViews.Clear();
         if (View.Handle != 0) api.DestroyImageView(_context.Device, View, null);
         if (Image.Handle != 0) api.DestroyImage(_context.Device, Image, null);
         if (Allocation.IsValid) _context.Allocator.Free(Allocation);
@@ -374,6 +411,44 @@ internal sealed unsafe class TextureManager : IDisposable
                 ? ImageUsageFlags.DepthStencilAttachmentBit
                 : ImageUsageFlags.ColorAttachmentBit);
 
+        return CreateImage(width, height, format, mipLevels, layers, cube, usage, aspect, poolClass);
+    }
+
+    /// <summary>
+    /// Creates a texture a compute pass writes as a storage image (and later passes
+    /// sample): <paramref name="requested" /> when the device can store to and sample
+    /// it, otherwise the first wider format of the same kind that it can
+    /// (<see cref="StorageFormats.Choose" />, ending in RGBA8). Transfer usage is
+    /// always included, as for every texture; a colour attachment usage only where
+    /// the chosen format supports it. <paramref name="mipLevels" /> is explicit: a
+    /// prefiltered chain keeps as many levels as its consumer reads, not a full chain.
+    /// </summary>
+    public int CreateStorage(uint width, uint height, Format requested, uint mipLevels = 1,
+        MemoryPoolClass poolClass = MemoryPoolClass.DeviceImages)
+    {
+        width = Math.Max(1, width);
+        height = Math.Max(1, height);
+        mipLevels = Math.Clamp(mipLevels, 1, MipLevelsFor(width, height));
+
+        Format format = StorageFormats.Choose(requested, _context.OptimalFormatFeatures);
+        if (format != requested)
+        {
+            RenderTrace.Write("storage texture: " + requested + " is not storage-capable here; using " + format);
+        }
+
+        ImageUsageFlags usage = ImageUsageFlags.StorageBit | ImageUsageFlags.SampledBit |
+                                ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit;
+        if (StorageFormats.SupportsColorAttachment(_context.OptimalFormatFeatures(format)))
+        {
+            usage |= ImageUsageFlags.ColorAttachmentBit;
+        }
+
+        return CreateImage(width, height, format, mipLevels, 1, false, usage, ImageAspectFlags.ColorBit, poolClass);
+    }
+
+    private int CreateImage(uint width, uint height, Format format, uint mipLevels, uint layers, bool cube,
+        ImageUsageFlags usage, ImageAspectFlags aspect, MemoryPoolClass poolClass)
+    {
         var imageInfo = new ImageCreateInfo
         {
             SType = StructureType.ImageCreateInfo,
@@ -437,6 +512,7 @@ internal sealed unsafe class TextureManager : IDisposable
             Layers = viewLayers,
             Cube = cube,
             Aspect = aspect,
+            Usage = usage,
         };
 
         if (_context.PoisonFreshResources) Poison(texture);
@@ -889,6 +965,18 @@ internal sealed unsafe class TextureManager : IDisposable
     {
         _uploads.NoteUse(commandBuffer, texture);
         batcher.Require(texture, 0, texture.MipLevels, 0, texture.Layers, usage);
+    }
+
+    /// <summary>
+    /// <see cref="Require(BarrierBatcher, CommandBuffer, VulkanTexture, ResourceUsage)" /> for
+    /// a range of mip levels (every layer): a compute pass reading level n and writing
+    /// level n + 1 of one image moves each level into its own layout.
+    /// </summary>
+    public void Require(BarrierBatcher batcher, CommandBuffer commandBuffer, VulkanTexture texture,
+        uint baseMip, uint mipCount, ResourceUsage usage)
+    {
+        _uploads.NoteUse(commandBuffer, texture);
+        batcher.Require(texture, baseMip, mipCount, 0, texture.Layers, usage);
     }
 
     /// <summary>A transition named by layout (tests, a readback restoring what it found); see <see cref="UsageState.ForLayout" />.</summary>

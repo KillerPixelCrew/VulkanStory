@@ -1157,6 +1157,17 @@ internal sealed unsafe class VulkanContext : IDisposable
         return text.ToString();
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Format, FormatFeatureFlags> _formatFeatures = new();
+
+    /// <summary>The optimal-tiling features of <paramref name="format" /> on the selected device, cached.</summary>
+    public FormatFeatureFlags OptimalFormatFeatures(Format format) =>
+        _formatFeatures.GetOrAdd(format, f =>
+        {
+            FormatProperties properties;
+            Api.GetPhysicalDeviceFormatProperties(PhysicalDevice, f, &properties);
+            return properties.OptimalTilingFeatures;
+        });
+
     private VulkanCapabilities ReadCapabilities()
     {
         PhysicalDeviceProperties properties = Api.GetPhysicalDeviceProperties(PhysicalDevice);

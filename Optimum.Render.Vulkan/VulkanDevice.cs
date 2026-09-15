@@ -39,6 +39,12 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     private readonly Graph.FrameGraph _graph = new();
     private GraphicsPipelineCache _pipelines = null!;
+
+    /// <summary>Compute programs and their pipelines (the frame graph's compute pass kind).</summary>
+    private ComputePipelineCache _compute = null!;
+
+    /// <summary>Per-slot descriptor sets of compute passes, reset when the slot begins a frame.</summary>
+    private ComputeDescriptorArena[] _computeArenas = Array.Empty<ComputeDescriptorArena>();
     private DescriptorCache _descriptors = null!;
 
     /// <summary>How many descriptor sets the cache currently holds. For tests.</summary>
@@ -450,6 +456,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
             _context.Capabilities.DynamicColorBlend, pipelineSeed);
         _descriptors = new DescriptorCache(_context);
+        _compute = new ComputePipelineCache(_context, () => _pipelines.DriverCache);
         // One layout for the shared frame block, named by every program's pipeline layout.
         _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
         // Decision 9: the bindless table retires a texture's slots on the timeline
@@ -459,6 +466,8 @@ public sealed unsafe class VulkanDevice : IDisposable
         _sharedLayout = new SharedPipelineLayout(_context, _bindless.Layout);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
         for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
+        _computeArenas = new ComputeDescriptorArena[_frames.FramesInFlight];
+        for (int i = 0; i < _computeArenas.Length; i++) _computeArenas[i] = new ComputeDescriptorArena(_context);
         _indirectRing = new IndirectRing(_frames.FramesInFlight);
         _indirectBuffers = new VulkanBuffer?[_frames.FramesInFlight];
         _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
@@ -802,6 +811,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         // its indirect cursor and descriptor arena reset wholesale.
         BeginIndirectFrame(slot.Index);
         _descriptorArenas[slot.Index].Reset();
+        _computeArenas[slot.Index].Reset();
         _resourceAge.NoteFrame(ResourceIds.Highest);
         _dynamicState.Invalidate();
 
@@ -891,6 +901,194 @@ public sealed unsafe class VulkanDevice : IDisposable
         api.CmdDraw(commandBuffer, 3, 1, 0, 0);
         // The raw bind and states above are not what the cache believes the buffer holds.
         _dynamicState.Invalidate();
+    }
+
+    // ------------------------------------------------------------------ compute
+
+    /// <summary>The compute programs. Tests only.</summary>
+    internal ComputePipelineCache ComputeForTests => _compute;
+
+    /// <summary>A compute program from compiled SPIR-V; see <see cref="ComputeProgramDescription" />.</summary>
+    internal int CreateComputeProgram(ComputeProgramDescription description) => _compute.Create(description);
+
+    /// <summary>
+    /// Compiles a native compute shader and creates its program; 0, with the compiler's
+    /// message in <see cref="GetError" />, when it does not compile.
+    /// </summary>
+    internal int CreateComputeProgram(string code, string name, ComputeSlot[] slots, uint pushConstantBytes = 0,
+        uint localSizeX = 8, uint localSizeY = 8)
+    {
+        ShaderCompileResult compiled = _shaderCompiler.CompileCompute(code, name);
+        if (!compiled.Success)
+        {
+            AddDiagnostic(VulkanContext.ErrorPrefix + "compute shader '" + name + "' failed to compile: " + compiled.Error);
+            return 0;
+        }
+        return _compute.Create(new ComputeProgramDescription
+        {
+            Name = name,
+            Spirv = compiled.Spirv,
+            Slots = slots,
+            PushConstantBytes = pushConstantBytes,
+            LocalSizeX = localSizeX,
+            LocalSizeY = localSizeY,
+        });
+    }
+
+    /// <summary>Deletes a compute program once no submitted frame can still bind it.</summary>
+    internal void DeleteComputeProgram(int programId)
+    {
+        ComputeProgram? program = _compute.Remove(programId);
+        if (program != null) _frames.DeferDeletion(program);
+    }
+
+    /// <summary>
+    /// A texture compute passes store to: <paramref name="format" /> where the device can
+    /// store to and sample it, else a wider format of the same kind (RGBA8 last);
+    /// <paramref name="mipLevels" /> levels. The chosen format is the texture's
+    /// <see cref="VulkanTexture.Format" />.
+    /// </summary>
+    internal int CreateStorageTexture(int width, int height, Format format, int mipLevels = 1) =>
+        _textures.CreateStorage((uint)Math.Max(1, width), (uint)Math.Max(1, height), format, (uint)Math.Max(1, mipLevels));
+
+    private Graph.ComputeImageInfo? ComputeImageInfoOf(int textureId) =>
+        _textures.Get(textureId) is { } texture
+            ? new Graph.ComputeImageInfo(texture.Width, texture.Height, texture.MipLevels, texture.Cube ? 6u : texture.Layers)
+            : null;
+
+    private static readonly SamplerState ComputeNearest = new(Filter.Nearest, Filter.Nearest, SamplerMipmapMode.Nearest,
+        SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, 0f, false, 1f, BorderColor.FloatOpaqueBlack,
+        Mipmapped: true);
+
+    private static readonly SamplerState ComputeLinear = ComputeNearest with
+    {
+        MagFilter = Filter.Linear,
+        MinFilter = Filter.Linear,
+    };
+
+    /// <summary>
+    /// Records a compute pass into the frame (<see cref="Graph.ComputePassDeclaration" />):
+    /// closes any open rendering scope, lands clears pending on its images, queues one
+    /// barrier per binding level range from its access and flushes them as one command,
+    /// binds the pipeline for the pass's specialization values and one descriptor set,
+    /// and records every dispatch. False, with the reason in <see cref="GetError" />,
+    /// when no frame is open or the declaration does not fit its program.
+    /// </summary>
+    internal bool RecordComputePass(Graph.ComputePassDeclaration pass)
+    {
+        if (!_frameActive) return false;
+
+        ComputeProgram? program = _compute.Get(pass.ProgramId);
+        string? error = program == null
+            ? "no compute program " + pass.ProgramId
+            : Graph.ComputePassPlanner.Validate(pass, ComputeImageInfoOf);
+        if (error == null && program != null)
+        {
+            foreach (Graph.ComputeBinding binding in pass.Bindings)
+            {
+                if (!program.TryGetSlot(binding.Binding, out ComputeSlot slot))
+                {
+                    error = "binding " + binding.Binding + " is not in program '" + program.Name + "'";
+                    break;
+                }
+                bool storage = Graph.ComputePassPlanner.IsStorage(binding.Access);
+                if (storage != (slot.Kind == ComputeSlotKind.Storage))
+                {
+                    error = "binding " + binding.Binding + " is declared " + slot.Kind + " by program '" + program.Name +
+                            "' but bound " + binding.Access;
+                    break;
+                }
+                if (storage && (_textures.Get(binding.TextureId)!.Usage & ImageUsageFlags.StorageBit) == 0)
+                {
+                    error = "binding " + binding.Binding + " stores to texture " + binding.TextureId +
+                            ", which was not created as a storage texture";
+                    break;
+                }
+            }
+            foreach (ComputeSlot slot in program.Slots)
+            {
+                if (error != null) break;
+                if (Array.FindIndex(pass.Bindings, b => b.Binding == slot.Binding) < 0)
+                    error = "program '" + program.Name + "' binding " + slot.Binding + " is not bound";
+            }
+            foreach (Graph.ComputeDispatch dispatch in pass.Dispatches)
+            {
+                if (error != null) break;
+                if (dispatch.PushConstants is { Length: > 0 } push && push.Length > program.PushConstantBytes)
+                    error = "a dispatch pushes " + push.Length + " bytes; program '" + program.Name + "' declares " +
+                            program.PushConstantBytes;
+            }
+        }
+        if (error != null)
+        {
+            AddDiagnostic(VulkanContext.ErrorPrefix + "compute pass '" + pass.Name + "': " + error);
+            return false;
+        }
+
+        CommandBuffer commandBuffer = Commands;
+        Vk api = _context.Api;
+
+        // No rendering scope encloses a dispatch, and a clear promoted into one of the
+        // pass's images lands before the pass reads or writes it.
+        _targets.EndRendering(commandBuffer);
+        foreach (Graph.ComputeBinding binding in pass.Bindings)
+        {
+            _targets.FlushPendingClears(commandBuffer, _textures.Get(binding.TextureId)!);
+        }
+
+        _graph.OpenComputePass(Graph.ComputePassPlanner.Signature(_graph.NameId("compute:" + pass.Name), pass,
+            ComputeImageInfoOf));
+
+        foreach (Graph.ComputeBinding binding in pass.Bindings)
+        {
+            _textures.Require(_barriers, commandBuffer, _textures.Get(binding.TextureId)!, binding.BaseMip,
+                binding.MipCount, Graph.ComputePassPlanner.UsageOf(binding.Access));
+        }
+        _barriers.Flush(commandBuffer);
+
+        Span<ComputeImageWrite> writes = pass.Bindings.Length <= 16
+            ? stackalloc ComputeImageWrite[pass.Bindings.Length]
+            : new ComputeImageWrite[pass.Bindings.Length];
+        for (int i = 0; i < pass.Bindings.Length; i++)
+        {
+            Graph.ComputeBinding binding = pass.Bindings[i];
+            VulkanTexture texture = _textures.Get(binding.TextureId)!;
+            bool storage = Graph.ComputePassPlanner.IsStorage(binding.Access);
+            writes[i] = new ComputeImageWrite(binding.Binding,
+                storage ? DescriptorType.StorageImage : DescriptorType.CombinedImageSampler,
+                texture.ViewOfMips(binding.BaseMip, binding.MipCount),
+                storage ? default : _textures.Samplers.Get(binding.Linear ? ComputeLinear : ComputeNearest),
+                storage ? ImageLayout.General : ImageLayout.ShaderReadOnlyOptimal);
+        }
+        DescriptorSet set = _computeArenas[_frames.Current.Index].Get(program!.SetLayout, writes);
+        Pipeline pipeline = _compute.PipelineFor(program, pass.Specialization);
+
+        api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Compute, pipeline);
+        api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Compute, program.Layout, ComputeProgram.PassSet, 1,
+            &set, 0, null);
+
+        foreach (Graph.ComputeDispatch dispatch in pass.Dispatches)
+        {
+            if (dispatch.PushConstants is { Length: > 0 } push)
+            {
+                fixed (byte* data = push)
+                {
+                    api.CmdPushConstants(commandBuffer, program.Layout, ShaderStageFlags.ComputeBit, 0, (uint)push.Length,
+                        data);
+                }
+            }
+            (uint x, uint y, uint z) = Graph.ComputePassPlanner.Groups(dispatch, pass, ComputeImageInfoOf,
+                program.LocalSizeX, program.LocalSizeY);
+            if (x == 0 || y == 0 || z == 0) continue;
+            api.CmdDispatch(commandBuffer, x, y, z);
+            _graph.NoteDispatch();
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("dispatch '" + pass.Name + "' program " + program.Id + " '" + program.Name + "' groups=" +
+                    x + "x" + y + "x" + z);
+            }
+        }
+        return true;
     }
 
     /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
@@ -3212,6 +3410,23 @@ public sealed unsafe class VulkanDevice : IDisposable
     internal byte[] ReadBackLevel0ForTests(int textureId) =>
         ReadBackLevel0(_textures.Get(textureId) ?? throw new ArgumentException("no texture " + textureId));
 
+    /// <summary>One mip level of a texture through the in-frame readback. Tests only; a frame must be open.</summary>
+    internal byte[] ReadBackLevelForTests(int textureId, uint mipLevel)
+    {
+        VulkanTexture texture = _textures.Get(textureId) ?? throw new ArgumentException("no texture " + textureId);
+        if (!_frameActive) throw new InvalidOperationException("a mip readback needs an open frame");
+        uint width = Math.Max(1, texture.Width >> (int)mipLevel);
+        uint height = Math.Max(1, texture.Height >> (int)mipLevel);
+        ulong bytes = (ulong)width * height * (ulong)BytesPerPixel(texture.Format);
+        var data = new byte[bytes];
+        _targets.FlushPendingClears(Commands, texture);
+        _targets.EndRendering(Commands);
+        ReadbackTicket ticket = _readbacks.CopyToHost(texture, 0, 0, width, height, texture.Aspect, bytes, mipLevel);
+        SubmitPartial();
+        fixed (byte* destination = data) _readbacks.WaitAndCopy(ticket, (IntPtr)destination);
+        return data;
+    }
+
     private byte[] ReadBackLevel0(VulkanTexture texture)
     {
         int width = (int)texture.Width;
@@ -3394,6 +3609,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
+        _compute?.Dispose();
         // After every pipeline layout that named it.
         if (_context != null && _frameSetLayout.Handle != 0)
         {
@@ -3414,6 +3630,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         foreach (VulkanBuffer overflow in _indirectOverflow) overflow.Dispose();
         _indirectOverflow.Clear();
         foreach (DescriptorArena arena in _descriptorArenas) arena.Dispose();
+        foreach (ComputeDescriptorArena arena in _computeArenas) arena.Dispose();
         _defaultAttributes?.Dispose();
         _placeholderUniforms?.Dispose();
         _swapchain?.Dispose();

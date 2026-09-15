@@ -100,6 +100,9 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         }
     }
 
+    /// <summary>The driver's pipeline cache; compute pipelines compile through it too, so one file warms both.</summary>
+    public Silk.NET.Vulkan.PipelineCache DriverCache => _driverCache;
+
     /// <summary>The driver created its cache from the initial data rather than empty.</summary>
     public bool SeedAccepted { get; }
 

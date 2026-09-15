@@ -27,6 +27,14 @@ public enum ResourceUsage
     SampleVertex,
     /// <summary>Read as a storage image.</summary>
     StorageRead,
+    /// <summary>Sampled by a compute shader.</summary>
+    SampleCompute,
+    /// <summary>Read as a storage image by a compute shader, never written.</summary>
+    StorageReadCompute,
+    /// <summary>Written as a storage image by a compute shader without reading it first.</summary>
+    StorageWrite,
+    /// <summary>Read and written as a storage image by a compute shader.</summary>
+    StorageReadWrite,
     /// <summary>Source of a copy or blit.</summary>
     TransferSrc,
     /// <summary>Destination of a copy, blit or clear.</summary>
@@ -79,6 +87,14 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.StorageRead => new(ImageLayout.General,
             PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit,
             AccessFlags2.ShaderStorageReadBit),
+        ResourceUsage.SampleCompute => new(ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderSampledReadBit),
+        ResourceUsage.StorageReadCompute => new(ImageLayout.General,
+            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit),
+        ResourceUsage.StorageWrite => new(ImageLayout.General,
+            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
+        ResourceUsage.StorageReadWrite => new(ImageLayout.General,
+            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit),
         ResourceUsage.TransferSrc => new(ImageLayout.TransferSrcOptimal,
             PipelineStageFlags2.TransferBit, AccessFlags2.TransferReadBit),
         ResourceUsage.TransferDst => new(ImageLayout.TransferDstOptimal,
@@ -103,6 +119,9 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled =>
                 (DepthTests, AccessFlags2.DepthStencilAttachmentWriteBit),
             ResourceUsage.TransferDst => (PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
+            // A dispatch's storage write: the next barrier must make it available.
+            ResourceUsage.StorageWrite or ResourceUsage.StorageReadWrite =>
+                (PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
             _ => (PipelineStageFlags2.None, AccessFlags2.None),
         };
 
