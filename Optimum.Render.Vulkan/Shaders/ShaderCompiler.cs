@@ -28,7 +28,7 @@ internal sealed class ShaderCompileResult
 /// resolved. Running a real preprocessor first means the rewriter only ever sees
 /// straight-line declarations and never has to reason about conditionals.
 /// </summary>
-internal sealed unsafe class ShaderCompiler : IDisposable
+internal sealed unsafe partial class ShaderCompiler : IDisposable
 {
     private readonly Shaderc _api;
     private readonly Compiler* _compiler;

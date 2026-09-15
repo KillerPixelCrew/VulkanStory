@@ -195,6 +195,69 @@ public class FrameGlobalsTests
         }
     }
 
+    /// <summary>
+    /// <c>sources/shaders-vk/include/frame.glsl</c> is generated from the table. Set
+    /// OPTIMUM_REGENERATE_NATIVE_INCLUDES=1 to rewrite it after changing the table; without it
+    /// any difference fails, so a table change cannot ship with a stale native block.
+    /// </summary>
+    [Fact]
+    public void TheCommittedNativeIncludeIsWhatTheTableGenerates()
+    {
+        string path = Path.Combine(ShaderCorpus.RepositoryRoot, FrameGlobals.IncludePath);
+        string generated = FrameGlobals.GenerateInclude();
+        if (Environment.GetEnvironmentVariable("OPTIMUM_REGENERATE_NATIVE_INCLUDES") == "1")
+        {
+            File.WriteAllText(path, generated);
+        }
+
+        Assert.True(File.Exists(path), path + " is missing; run with OPTIMUM_REGENERATE_NATIVE_INCLUDES=1");
+        Assert.Equal(generated, File.ReadAllText(path).Replace("\r\n", "\n"));
+    }
+
+    /// <summary>
+    /// The compiled block puts every member at the offset the renderer writes: the SPIR-V
+    /// <c>Offset</c> decorations of the block at set 0, binding 0 are the table's offsets, member
+    /// by member, and the arrays stride by their element size (scalar layout, no std140 padding).
+    /// </summary>
+    [SkippableFact]
+    public void TheCompiledNativeBlockHasTheTablesOffsets()
+    {
+        Skip.IfNot(NativeShaderTree.TryCreateCompiler(out ShaderCompiler? compiler, out string reason), reason);
+        const string probe = """
+            #version 450
+            #include "frame.glsl"
+            layout(location = 0) out vec4 outColor;
+            void main()
+            {
+                outColor = vec4(optimumFrame.zNear, optimumFrame.pointLights[99].x, 0.0, 1.0);
+            }
+            """;
+
+        using (compiler)
+        {
+            ShaderCompileResult result = NativeShaderTree.Compile(compiler!, probe, EnumShaderType.FragmentShader, "frame-offsets-probe");
+            Assert.True(result.Success, result.Error);
+
+            SpirvReader spirv = SpirvReader.Parse(result.Spirv);
+            uint? block = spirv.BlockAt((uint)FrameGlobals.Set, (uint)FrameGlobals.Binding);
+            Assert.True(block.HasValue, "no block at set 0, binding 0");
+            Assert.Equal(FrameGlobals.Members.Count, spirv.MemberCount(block!.Value));
+
+            for (int i = 0; i < FrameGlobals.Members.Count; i++)
+            {
+                UniformMember member = FrameGlobals.Members[i];
+                Assert.True(member.Offset == spirv.MemberOffset(block.Value, i),
+                    $"{member.Name}: table offset {member.Offset}, SPIR-V offset {spirv.MemberOffset(block.Value, i)}");
+                string? name = spirv.MemberName(block.Value, i);
+                if (name != null) Assert.Equal(member.Name, name);
+                if (member.ArrayLength > 0)
+                {
+                    Assert.Equal((uint?)member.Type.Size, spirv.ArrayStride(block.Value, i));
+                }
+            }
+        }
+    }
+
     private static float ReadFloat(byte[] shadow, string name)
     {
         Assert.True(FrameGlobals.TryGetMember(name, out UniformMember member));
