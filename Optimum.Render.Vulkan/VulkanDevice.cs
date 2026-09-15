@@ -396,7 +396,11 @@ public sealed unsafe class VulkanDevice : IDisposable
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off") +
             "; color write tier " + DeviceCaps.Token(_context.Capabilities.ColorWriteTier) +
-            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : ""));
+            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : "") +
+            "; bindless sampled images per stage " +
+            _context.Capabilities.DescriptorIndexing.MaxPerStageDescriptorUpdateAfterBindSampledImages +
+            " (needs " + DescriptorIndexingFloor.RequiredSampledImages + ")" +
+            "; push constants " + _context.Capabilities.DescriptorIndexing.MaxPushConstantsSize + " B");
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
