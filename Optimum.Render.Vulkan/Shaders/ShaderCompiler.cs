@@ -82,8 +82,82 @@ internal sealed unsafe class ShaderCompiler : IDisposable
         }
     }
 
+    /// <summary>
+    /// Where compiled modules are kept between launches; null compiles every time.
+    /// The filename only names errors (no debug info is emitted), so it is not part of the key.
+    /// </summary>
+    public ShaderBinaryCache? BinaryCache { get; set; }
+
+    /// <summary>
+    /// The options <see cref="CreateOptions" /> sets, spelled out for the cache key.
+    /// Change both together.
+    /// </summary>
+    internal const string OptionsIdentity = "glsl;vulkan1.3;spirv1.5;performance;no-debug-info;no-include-resolver";
+
+    private static string? _nativeIdentity;
+
+    /// <summary>
+    /// Everything besides the source that decides the SPIR-V: the options and the
+    /// shaderc build. The C API exposes no compiler version, so the build is the
+    /// loaded library's own hash (docs/research/vulkan-caching.md §5).
+    /// </summary>
+    public string Identity => OptionsIdentity + ";" + (_nativeIdentity ??= NativeLibraryIdentity());
+
+    internal static string NativeLibraryIdentity()
+    {
+        string name = OperatingSystem.IsWindows() ? "shaderc_shared.dll"
+            : OperatingSystem.IsMacOS() ? "libshaderc_shared.dylib"
+            : "libshaderc_shared.so";
+        string runtime = RuntimeInformation.RuntimeIdentifier;
+
+        foreach (string? directory in new[]
+                 {
+                     AppContext.BaseDirectory,
+                     System.IO.Path.GetDirectoryName(typeof(ShaderCompiler).Assembly.Location),
+                 })
+        {
+            if (string.IsNullOrEmpty(directory)) continue;
+            foreach (string candidate in new[]
+                     {
+                         System.IO.Path.Combine(directory, name),
+                         System.IO.Path.Combine(directory, "runtimes", runtime, "native", name),
+                     })
+            {
+                try
+                {
+                    if (!System.IO.File.Exists(candidate)) continue;
+                    using System.IO.FileStream stream = System.IO.File.OpenRead(candidate);
+                    return "shaderc-sha256:" +
+                        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
+                }
+                catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+
+        // Not found where the packagers put it: fall back to the binding's version,
+        // which pins the native package it ships with.
+        return "silk-shaderc-" + typeof(Shaderc).Assembly.GetName().Version;
+    }
+
     /// <summary>Compiles already-rewritten Vulkan GLSL to SPIR-V.</summary>
     public ShaderCompileResult Compile(string code, string filename, EnumShaderType stage)
+    {
+        string? key = null;
+        if (BinaryCache != null)
+        {
+            key = ShaderBinaryCache.KeyFor(code, stage, Identity);
+            byte[]? cached = BinaryCache.TryGet(key);
+            if (cached != null) return new ShaderCompileResult { Success = true, Spirv = cached };
+        }
+
+        ShaderCompileResult compiled = CompileUncached(code, filename, stage);
+        if (key != null && compiled.Success) BinaryCache!.Put(key, compiled.Spirv);
+        return compiled;
+    }
+
+    private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage)
     {
         var result = new ShaderCompileResult();
 

@@ -246,4 +246,79 @@ public class PipelineCacheTests
         }
     }
 
+    /// <summary>
+    /// The launch-to-launch round trip on a real driver: the blob the driver hands out
+    /// carries its own header for this device, survives the file wrapper, and seeds a
+    /// new cache that then builds the same pipeline without complaint.
+    /// </summary>
+    [SkippableFact]
+    public void ASavedPipelineCacheSeedsTheNextCacheOnTheSameDevice()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, out VulkanContext? context, messages), "No usable Vulkan device.");
+
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-pipeline-cache-" + Guid.NewGuid().ToString("N"));
+        using (context)
+        {
+            try
+            {
+                using var compiler = new ShaderCompiler();
+                TranslatedProgram translated = TranslateVanilla("blit", compiler);
+                Assert.True(translated.Success, string.Join("; ", translated.Errors));
+                using var program = new ShaderProgramResources(context!, programId: 7, translated);
+
+                var tracker = new GlStateTracker();
+                tracker.SetProgram(7);
+                var targets = new RenderTargetFormats(new[] { Format.R8G8B8A8Unorm }, Format.Undefined);
+                int targetId = tracker.InternTargetFormats(targets);
+                GraphicsPipelineCache.PipelineRequest Request() => new()
+                {
+                    Program = program,
+                    VertexLayout = VertexLayoutDescription.Empty,
+                    Targets = targets,
+                    Blend = new[] { tracker.BlendFor(0) },
+                    PolygonMode = tracker.PolygonMode,
+                    Topology = tracker.Topology,
+                };
+
+                PipelineCacheIdentity identity = PipelineCacheIdentity.Of(context!.Capabilities);
+                string path = PipelineCacheFile.PathFor(root, identity);
+                byte[] blob;
+                using (var first = new GraphicsPipelineCache(context!))
+                {
+                    Assert.False(first.SeedAccepted);
+                    first.Get(tracker.BuildKey(0, targetId, 1), Request());
+                    blob = first.SerializeDriverCache();
+                }
+
+                Assert.True(PipelineCacheFile.HasMatchingVulkanHeader(blob, identity),
+                    "the driver's blob does not name the device its properties report");
+                Assert.True(PipelineCacheFile.Save(path, blob, identity));
+                byte[]? loaded = PipelineCacheFile.Load(path, identity);
+                Assert.Equal(blob, loaded);
+
+                using (var second = new GraphicsPipelineCache(context!, loaded))
+                {
+                    Assert.True(second.SeedAccepted);
+                    Assert.NotEqual(0ul, second.Get(tracker.BuildKey(0, targetId, 1), Request()).Handle);
+                }
+
+                _output.WriteLine($"pipeline cache blob {blob.Length} bytes at {path}");
+                ValidationAssert.NoErrors(messages);
+                ValidationAssert.NoSyncHazards(messages);
+            }
+            finally
+            {
+                try
+                {
+                    System.IO.Directory.Delete(root, recursive: true);
+                }
+                catch (System.IO.DirectoryNotFoundException)
+                {
+                }
+            }
+        }
+    }
+
 }
