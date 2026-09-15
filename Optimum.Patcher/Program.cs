@@ -339,6 +339,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumTaaSharpenIndex",
         "OptimumFsrBlitActive",
         "RenderOptimumTaaSharpen",
+        // TAA: the jittered AO multiplied into the scene before the resolve, and
+        // the flag Final reads so the AO is never applied twice.
+        "optimumSsaoInScene",
+        "ApplyOptimumSceneSsao",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -386,6 +390,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "TaaResolve",
         // TAA P5: the post-resolve sharpen pass program.
         "TaaSharpen",
+        // TAA: the AO multiply into the scene before the resolve.
+        "SceneSsao",
         // TAA P4: the liquid velocity pass program.
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.

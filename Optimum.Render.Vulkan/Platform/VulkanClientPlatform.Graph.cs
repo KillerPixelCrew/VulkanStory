@@ -102,6 +102,22 @@ public partial class VulkanClientPlatform
     private void DeclareFinalCompositionPass()
     {
         if (device == null || !device.FrameGraphEnabled) return;
+        if (passContext == "Post")
+        {
+            // The AO multiply before the TAA resolve shares the colour-0 mask, but
+            // samples only the blurred AO and preserves every other Primary attachment.
+            var reads = new List<int>();
+            AddColour(reads, SsaoBlurVerticalIndex, 0);
+            device.DeclarePass(new PassDeclaration
+            {
+                Name = "SceneSsao/0",
+                FramebufferId = PassDeclaration.BoundFramebuffer,
+                ColorSlots = 1u,
+                Reads = reads.ToArray(),
+                Flags = PassFlags.None,
+            });
+            return;
+        }
         device.DeclarePass(new PassDeclaration
         {
             Name = "FinalComposition/0",

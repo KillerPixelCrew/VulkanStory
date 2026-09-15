@@ -6,6 +6,7 @@ uniform sampler2D glowParts;
 uniform sampler2D bloomParts;
 uniform sampler2D godrayParts;
 uniform sampler2D ssaoScene;
+uniform int optimumSsaoInScene;
 
 uniform float gammaLevel;
 uniform float brightnessLevel;
@@ -102,12 +103,16 @@ void main(void)
 	#endif
 
 	#if SSAOLEVEL > 0
+	// Optimum TAA: skipped when the AO was already multiplied into the scene
+	// before the resolve, so it is never applied twice.
+	if (optimumSsaoInScene == 0) {
 		#if SSAOLEVEL > 1
 			float ssao = min(texture(ssaoScene, texCoord).r, texture(ssaoScene, texCoord - vec2(0, invFrameSize.y*1)).r);
 		#else
 			float ssao = texture(ssaoScene, texCoord).r;
 		#endif
 		color.rgb *= min(1, ssao + bloomSub);
+	}
 	#endif
 
 	#if GODRAYS > 0
