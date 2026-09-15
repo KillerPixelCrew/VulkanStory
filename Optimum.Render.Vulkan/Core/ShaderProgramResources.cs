@@ -73,6 +73,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         {
             Modules[stage.Key] = CreateModule(stage.Value);
         }
+        SourceHash = HashSpirv(translated.Spirv);
 
         // Sampler uniforms default to the unit matching their binding, which is
         // the order the game's own texture-location bookkeeping assigns.
@@ -90,6 +91,32 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
 
         CreateSetLayouts();
         CreatePipelineLayout();
+    }
+
+    /// <summary>
+    /// A hash of every stage's SPIR-V, in stage order. The SPIR-V was compiled from the
+    /// rewritten source with its defines resolved, so two programs with this hash build the
+    /// same pipelines for the same state - what the pipeline-key log matches on across launches.
+    /// </summary>
+    public UInt128 SourceHash { get; }
+
+    private static UInt128 HashSpirv(Dictionary<EnumShaderType, byte[]> spirv)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
+            System.Security.Cryptography.HashAlgorithmName.SHA256);
+        var stages = new List<EnumShaderType>(spirv.Keys);
+        stages.Sort();
+        Span<byte> header = stackalloc byte[8];
+        foreach (EnumShaderType stage in stages)
+        {
+            BitConverter.TryWriteBytes(header, (int)stage);
+            BitConverter.TryWriteBytes(header[4..], spirv[stage].Length);
+            hash.AppendData(header);
+            hash.AppendData(spirv[stage]);
+        }
+        Span<byte> digest = stackalloc byte[32];
+        hash.GetHashAndReset(digest);
+        return new UInt128(BitConverter.ToUInt64(digest[..8]), BitConverter.ToUInt64(digest.Slice(8, 8)));
     }
 
     private ShaderModule CreateModule(byte[] spirv)

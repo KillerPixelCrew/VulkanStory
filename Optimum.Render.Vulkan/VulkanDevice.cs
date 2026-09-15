@@ -54,8 +54,22 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     public string? ShaderCacheDirectory { get; set; }
 
-    private string? _pipelineCachePath;
-    private PipelineCacheIdentity _pipelineCacheIdentity;
+    /// <summary>The pipeline cache and key-log files and their saves; null when there is no cache root.</summary>
+    private PipelineCachePersistence? _pipelinePersistence;
+
+    /// <summary>
+    /// Forces blocking pipeline creation (every draw lands in the frame that issues it) when
+    /// true, allows background compiles with skipped draws when false; null reads
+    /// OPTIMUM_VULKAN_SYNC_PIPELINES. Set before <see cref="Initialize" />. GPU tests that read
+    /// pixels back after one frame get true from GpuTest.
+    /// </summary>
+    public bool? SynchronousPipelines { get; set; }
+
+    internal static bool ResolveSynchronousPipelines(bool? configured, string? environment) =>
+        configured ?? environment?.Trim() is "1" or "on" or "true";
+
+    /// <summary>The pipeline cache. Tests only.</summary>
+    internal GraphicsPipelineCache PipelinesForTests => _pipelines;
 
     internal static string? ResolveShaderCacheRoot(string? configured, string? environment)
     {
@@ -435,12 +449,18 @@ public sealed unsafe class VulkanDevice : IDisposable
         byte[]? pipelineSeed = null;
         if (cacheRoot != null)
         {
-            _pipelineCacheIdentity = PipelineCacheIdentity.Of(_context.Capabilities);
-            _pipelineCachePath = PipelineCacheFile.PathFor(cacheRoot, _pipelineCacheIdentity);
-            pipelineSeed = PipelineCacheFile.Load(_pipelineCachePath, _pipelineCacheIdentity);
+            _pipelinePersistence = PipelineCachePersistence.Open(cacheRoot,
+                PipelineCacheIdentity.Of(_context.Capabilities), out pipelineSeed);
+            _pipelinePersistence.Log = MirrorValidationMessage;
         }
         _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
             _context.Capabilities.DynamicColorBlend, pipelineSeed);
+        // Background compiles (docs/research/vulkan-caching.md, design item 4): a draw whose
+        // pipeline is not in the driver cache is skipped while a worker compiles it.
+        bool synchronousPipelines = ResolveSynchronousPipelines(SynchronousPipelines,
+            Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SYNC_PIPELINES"));
+        _pipelines.AsyncCompiles = !synchronousPipelines;
+        _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
         // One layout for the shared frame block, named by every program's pipeline layout.
         _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
@@ -462,7 +482,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         MirrorValidationMessage(cacheRoot == null
             ? "--- shader cache off"
             : "--- shader cache " + cacheRoot + "; pipeline cache " +
-              (pipelineSeed == null ? "cold" : _pipelines.SeedAccepted ? "warm (" + pipelineSeed.Length + " bytes)" : "rejected by the driver"));
+              (pipelineSeed == null ? "cold" : _pipelines.SeedAccepted ? "warm (" + pipelineSeed.Length + " bytes)" : "rejected by the driver") +
+              "; pipeline key log " + (_pipelinePersistence?.KeyLog.Count ?? 0) + " entries");
+        MirrorValidationMessage("--- pipelines " + (_pipelines.AsyncCompiles
+            ? "compile in the background"
+            : synchronousPipelines ? "compile blocking (OPTIMUM_VULKAN_SYNC_PIPELINES)" : "compile blocking (no pipelineCreationCacheControl)"));
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
         CreatePlaceholderUniformBuffer();
@@ -766,6 +790,11 @@ public sealed unsafe class VulkanDevice : IDisposable
                 (frameStart - _lastFrameStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
         }
         _lastFrameStart = frameStart;
+
+        // The safe point for pipelines the background worker finished, and for the
+        // opportunistic pipeline cache save (a timestamp check; the save runs on a worker).
+        _pipelines.PublishCompleted();
+        _pipelinePersistence?.Tick(_pipelines, frameStart);
 
         // The frame that ended: its ReadSelf copies wait on the Frame value it
         // recorded (taken before the ring reserves the next), and its transient
@@ -1138,8 +1167,15 @@ public sealed unsafe class VulkanDevice : IDisposable
                     " type=" + member.Type + " count=" + member.ArrayLength);
             }
         }
-        _programs[programId] = new ShaderProgramResources(_context, programId, translated, _frameSetLayout);
+        var resources = new ShaderProgramResources(_context, programId, translated, _frameSetLayout);
+        _programs[programId] = resources;
         _programNames[programId] = program.PassName ?? "";
+        // Pipelines an earlier launch used with this exact program start compiling now.
+        int prewarming = _pipelines.PrewarmFor(resources);
+        if (prewarming > 0 && RenderTrace.Enabled)
+        {
+            RenderTrace.Write("program " + programId + " prewarming " + prewarming + " pipelines");
+        }
         return programId;
     }
 
@@ -1167,6 +1203,8 @@ public sealed unsafe class VulkanDevice : IDisposable
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
         _programNames.Remove(programId);
+        // No background compile may still be reading its modules or layout.
+        _pipelines.CancelProgram(program);
         _frames.DeferDeletion(program);
     }
 
@@ -2169,17 +2207,27 @@ public sealed unsafe class VulkanDevice : IDisposable
                 ", merged " + vertexLayout.Attributes.Length);
         }
 
-        Pipeline pipeline = _pipelines.Get(
-            _state.BuildKey(layoutId, formatsId, attachmentCount, drawBuffers),
-            new GraphicsPipelineCache.PipelineRequest
+        if (!_pipelines.TryGet(
+                _state.BuildKey(layoutId, formatsId, attachmentCount, drawBuffers),
+                new GraphicsPipelineCache.PipelineRequest
+                {
+                    Program = program,
+                    VertexLayout = vertexLayout,
+                    Targets = formats,
+                    Blend = blend,
+                    PolygonMode = _state.PolygonMode,
+                    Topology = _state.Topology,
+                },
+                out Pipeline pipeline))
+        {
+            // Compiling on the background worker: this draw is skipped (counted as
+            // draws_skipped on stats.pipelines) and the pipeline is published at a frame start.
+            if (RenderTrace.Enabled)
             {
-                Program = program,
-                VertexLayout = vertexLayout,
-                Targets = formats,
-                Blend = blend,
-                PolygonMode = _state.PolygonMode,
-                Topology = _state.Topology,
-            });
+                RenderTrace.Write("draw skipped: pipeline for program " + _state.CurrentProgram + " still compiling");
+            }
+            return false;
+        }
 
         Vk api = _context.Api;
         api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, pipeline);
@@ -3296,18 +3344,15 @@ public sealed unsafe class VulkanDevice : IDisposable
     // ------------------------------------------------------------------- teardown
 
     /// <summary>
-    /// Writes the driver's pipeline cache for the next launch. On shutdown only, after
-    /// the device is idle; a failed write costs the next launch its warm start, nothing more.
+    /// Writes the driver's pipeline cache and the pipeline-key log for the next launch, after
+    /// the device is idle; opportunistic saves during the session come from
+    /// <see cref="PipelineCachePersistence.Tick" />. A failed write costs the next launch its
+    /// warm start, nothing more.
     /// </summary>
     private void SavePipelineCache()
     {
-        if (_pipelineCachePath == null || _pipelines == null) return;
-        byte[] blob = _pipelines.SerializeDriverCache();
-        if (blob.Length == 0) return;
-        if (!PipelineCacheFile.Save(_pipelineCachePath, blob, _pipelineCacheIdentity))
-        {
-            MirrorValidationMessage("--- pipeline cache not saved to " + _pipelineCachePath);
-        }
+        if (_pipelinePersistence == null || _pipelines == null) return;
+        _pipelinePersistence.SaveAtShutdown(_pipelines);
     }
 
     public void Dispose()
@@ -3319,6 +3364,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
         }
+
+        // Background compiles read program modules and layouts, and a background save
+        // reads the driver cache: both end before anything they use is destroyed.
+        _pipelines?.StopBackgroundCompiles();
+        _pipelinePersistence?.WaitForPendingSave();
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
