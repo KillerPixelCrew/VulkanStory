@@ -17,7 +17,16 @@ Inputs:
   (`chunkopaque`, `taa-resolve`, ...). Never `.vsh`/`.fsh` (`SetConventionTests` enforces it), so no packager
   glob over `sources/shaders/` can pick them up.
 - **Per-program interface:** `sources/shaders-vk/<program>.interface.glsl` declares the program's push block
-  and record (section 4). Both stages include it, so the two declarations cannot drift.
+  and record (section 4). Both stages include it, so the two declarations cannot drift. It is included right
+  after `specialization.glsl` (it uses `OPTIMUM_SAMPLER_SLOT` and the set/binding defines) and needs no guard.
+- **What the rewriter did that a native stage now does itself** (settled by the family 1 pilot, 2026-09-15):
+  - the last vertex stage ends `main` with `gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;`, the GL to
+    Vulkan clip-depth remap `ShaderRewriter` wraps around every GLSL 330 `main`. No Y flip and no `gl_FragCoord`
+    change: the rewriter makes none, so `gl_FragCoord` reads stay as written;
+  - `gl_VertexID` is spelled `gl_VertexIndex`;
+  - every varying gets an explicit location (0-15), both stages declaring the same one;
+  - an uninitialised-by-design local that a spec-constant branch assigns is declared before it with a value no
+    path reads (section 5).
 - **Shared includes:** `sources/shaders-vk/include/*.glsl`, one per game include, same base name
   (`fogandlight.frag.glsl`, `fogandlight.vert.glsl`, `vertexwarp.glsl`, `shadowcoords.glsl`, `colormap.vert.glsl`,
   `colormap.frag.glsl`, `dither.glsl`, `skycolor.glsl`, `underwatereffects.glsl`, `noise2d.glsl`, `noise3d.glsl`,
@@ -87,6 +96,46 @@ consults that set. So for every program and every variant:
 A static parity test per program per variant (names, sampler order, inputs, outputs, types) runs through
 `ShaderCorpus` on the GLSL 330 side and the manifest on the native side. It needs no GPU and is part of every
 family stage.
+
+**The harness (delivered 2026-09-15 with the family 1 pilot):** `Optimum.Render.Vulkan.Tests/NativeShaderParityTests.cs`,
+data-driven over every `<program>.vert`/`.frag` pair in `sources/shaders-vk`. A family stage adds shaders and
+never touches the test. Per program it:
+- builds the manifest for the tree through `NativeShaderBuilder.Build` (the library entry point the tool runs), and
+  fails on any build error of the program;
+- compares against the GLSL 330 files of the same base name (`<program>.vsh`/`.fsh`, `sources/shaders` override
+  else vanilla asset). A native program is named after the GLSL 330 files it replaces, never after a registration
+  alias (`Chunkshadowmap_NoSSBOs` is `chunkshadowmap` with `USESSBO=0`);
+- **names and types:** reproduces `collectUniformNames` (pattern, options, stage order) over each stage's
+  include-expanded, unpreprocessed `Code`, and requires it to equal the native set. The native set is
+  `frameMembers` + the port headers' `optimum-frame-texture` names of the includes the program pulls in + non-slot
+  push members + record members + sampler slots (with their `OPTIMUM_SAMPLER_SLOT` type);
+- **samplers:** the native slot order equals the oracle's `textureLocations` order with the set 0 frame textures
+  removed, and no two GLSL 330 samplers share a unit;
+- **port headers:** every `optimum-program-uniform` of every included port is a frame member (its owner is included)
+  or a push/record member with the header's type and array length;
+- **push block** at most 128 B;
+- **inputs and outputs, per variant and per base:** the variant's axes are mapped back to prefix defines
+  (`TAAMOTION`, `GBUFFER` as `SSAOLEVEL` 0 or at least 1, `TAAMOTIONLOCATION` = 4 with the G-buffer else 2, `USEOIT`,
+  `USESSBO`, `GREEDYMESH`; `ALLOWDEPTHOFFSET`/`GLOWSUB`/`VEC3SCALE` as `#define X 1` in the program's own prefix)
+  on top of each of three `ShaderCorpus` bases (`everything-off`, `everything-on`, `taa-with-ssao`). The GLSL 330
+  stage is preprocessed and parsed; vertex inputs compare as (location, type), fragment outputs as (location,
+  name). Unlocated GLSL 330 declarations take the lowest free span in declaration order, as
+  `ProgramInterfaceLayout` assigns them. Because the non-axis defines differ between the bases, a define that
+  changes a GLSL 330 declaration but is not an axis of the native program fails here;
+- **compile:** all 2^axes variants exist, every shipped module passes `spirv-val --target-env vulkan1.3
+  --scalar-block-layout` when `spirv-val` is on PATH (the device floor requires and enables `scalarBlockLayout`;
+  without the flag every scalar record is rejected as straddling), and the push block and record reflect exactly
+  as the preprocessed source declares them: same members in order, scalar-layout offsets, size.
+
+Failures name program, variant key and base, and list the entries only on one side.
+
+**Oracle quirks the harness reproduces rather than hides** (a family that meets one decides it in its stage and
+records the decision here):
+- the pattern sees commented-out and `#if 0` uniforms, so they are names;
+- a type outside its list (`sampler2DArray`, `uint`, `bool`, `usampler2D`, ...) is invisible to it. Worse,
+  `sampler2DArray OITaccumulation` matches as type `sampler2D` with the name `Array` (`transparentcompose.fsh`,
+  family 6);
+- a sampler name seen twice is reassigned the current unit count.
 
 ## 3. Descriptor use
 
@@ -353,3 +402,39 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
   - `OPTIMUM_VK_NATIVE_SHADERS=0` forces the rewriter for A/B runs.
   - `OPTIMUM_VK_SHADER_SOURCE=<dir>` compiles the source tree at runtime for the development loop.
 - **Mod shaders:** they stay on the rewriter, retargeted to the same shared layout (handoff item 4, first half).
+- **Initializers:** a block member cannot carry a GLSL 330 initializer (`uniform float maxlight = 1;`), and
+  some are never set by the client (`final`'s `minlight`, `maxlight`, `minsat`, `maxsat`; a zero `maxlight`
+  divides by zero in `ColorGrade`). On a hit the runtime seeds the push shadow and the record from the GLSL 330
+  declarations' initializers, which it holds at the seam, the way `ProgramInterfaceLayout.WriteInitializer`
+  seeds the rewriter's block. The manifest does not carry them (found by the family 1 pilot, 2026-09-15).
+
+## 9. Adding a family
+
+Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage touches only
+`sources/shaders-vk/` and this document; the parity harness (section 2) picks the programs up by itself.
+
+1. **Read the effective GLSL 330 sources:** `sources/shaders/<program>.vsh/.fsh` when present, else the vanilla
+   asset, plus the includes they pull in. List every uniform in declaration order per stage, the sampler order,
+   the vertex inputs and fragment outputs, and every `#if` with the define it tests.
+2. **Classify the defines** (section 5): a define that gates a declaration (input, output, uniform, buffer,
+   varying) is an axis and stays `#if AXIS == 1` / `#if GBUFFER` by value. Every other one becomes
+   `if (OPTIMUM_X ...)` with the same comparison, the gated declarations unconditional.
+3. **Write `<program>.interface.glsl`** (section 4): `OPTIMUM_SAMPLER_SLOT(<GLSL 330 type>, <name>)` for every
+   non-frame sampler in GLSL 330 declaration order (vertex stage first, then fragment), then DRAW uniforms that fit;
+   the record holds the rest, vertex-stage uniforms first, each in declaration order. Leave out frame members whose
+   owner the program includes, and list each included port's `optimum-program-uniform` names that are not.
+4. **Write `<program>.vert` and `.frag`:** `#version 450`, the two extensions, then `bindings.glsl`,
+   `frame.glsl`, `specialization.glsl` and the interface, with any `OPTIMUM_FRAME_OWNER_*` a cross-stage name
+   needs defined first (section 3). Keep the bodies token for token except: `texture(name, ...)` becomes
+   `texture(optimumTextures<Array>[name], ...)`, a sampler passed to a function becomes the indexed array
+   element, `gl_VertexID` becomes `gl_VertexIndex`, `#if` on a constant becomes a branch, the vertex stage ends
+   with the depth remap (section 1), varyings get locations, and `#include x.fsh` becomes `#include "x.glsl"`.
+5. **Run** `dotnet test Optimum.Render.Vulkan.Tests --filter "FullyQualifiedName~NativeShaderParityTests"`. It
+   fails with the program, variant key and GLSL 330 base, and the entries on only one side. A harness failure is
+   fixed in the shader, never by changing the harness for one program; an oracle quirk (section 2) is decided and
+   written down here first.
+6. **Numeric behaviour** is argued from the diff to the GLSL 330 body (the list in step 4 is the whole allowed
+   difference). A family whose port needs more than that (a transformed expression, a changed precision) states
+   its differential GPU test in its stage.
+7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
+   `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
