@@ -166,6 +166,31 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
     public ShaderCompileResult CompileForReflection(string code, string filename, EnumShaderType stage) =>
         CompileUncached(code, filename, stage, optimize: false);
 
+    /// <summary>
+    /// Stage tag for compute modules in the binary cache key: GL_COMPUTE_SHADER, which no
+    /// client stage uses, so a compute module never shares a key with a vertex or fragment one.
+    /// </summary>
+    internal const EnumShaderType ComputeStageTag = (EnumShaderType)37305;
+
+    /// <summary>
+    /// Compiles a native Vulkan GLSL compute shader (<c>sources/shaders-vk/**.comp</c>)
+    /// to SPIR-V. No prefix, no rewriter: native shaders are written for the backend.
+    /// </summary>
+    public ShaderCompileResult CompileCompute(string code, string filename)
+    {
+        string? key = null;
+        if (BinaryCache != null)
+        {
+            key = ShaderBinaryCache.KeyFor(code, ComputeStageTag, Identity);
+            byte[]? cached = BinaryCache.TryGet(key);
+            if (cached != null) return new ShaderCompileResult { Success = true, Spirv = cached };
+        }
+
+        ShaderCompileResult compiled = CompileUncached(code, filename, ComputeStageTag);
+        if (key != null && compiled.Success) BinaryCache!.Put(key, compiled.Spirv);
+        return compiled;
+    }
+
     private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage, bool optimize = true)
     {
         var result = new ShaderCompileResult();
@@ -341,6 +366,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
         EnumShaderType.VertexShader => ShaderKind.VertexShader,
         EnumShaderType.FragmentShader => ShaderKind.FragmentShader,
         EnumShaderType.GeometryShader => ShaderKind.GeometryShader,
+        ComputeStageTag => ShaderKind.ComputeShader,
         _ => ShaderKind.VertexShader,
     };
 

@@ -135,9 +135,9 @@ public class PacingStatsTests
             "dynamic_state=6 uniform_ring_used=7 uniform_ring_capacity=8 barrier_commands=9 barriers_per_frame=2.0 " +
             "mask_restarts=10 feedback_splits=11 passes=12 plan_hits=13 plan_misses=14 in_pass_clears=15 " +
             "promoted_clears=16 standalone_clears=17 pass_splits=18 push_constants=19 storage_set_binds=20 " +
-            "bindless_slots=21 bindless_placeholders=22",
+            "bindless_slots=21 bindless_placeholders=22 compute_passes=23 dispatches=24",
             VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-                19, 20, 21, 22)));
+                19, 20, 21, 22, 23, 24)));
 
         Assert.Equal(
             "stats.transients transient_mib=1.5 aliased_mib=0.5 heap_peak_mib=64.0 leases=3 aliased_leases=1 " +

@@ -193,6 +193,8 @@ internal static class ShaderCorpus
         public int TaaMotion;
         /// <summary>Primary colour attachment the motion texture occupies: 4 with the SSAO G-buffer, 2 without.</summary>
         public int TaaMotionLocation = 2;
+        /// <summary>ShaderRegistry's OPTIMUMAO: 1 while the Vulkan platform runs GTAO.</summary>
+        public int OptimumAo;
 
         /// <summary>
         /// Defines a caller put on the program itself before the engine's block,
@@ -257,6 +259,14 @@ internal static class ShaderCorpus
         // the bodies of every vertexwarp function the motion writers replay for
         // the previous frame - so with TAA on it is a shipped combination that
         // no other row produced (the "everything-off" row carries TAAMOTION 0).
+        // The Vulkan AO row: TAA with the SSAO G-buffer and OPTIMUMAO 1, the combination that
+        // compiles in the class-channel writes (chunkopaque's no-cull flag, the hand-view class
+        // in standard and entityanimated) and scene-ssao's GTAO compose branch.
+        yield return new ShaderVariant
+        {
+            Name = "taa-with-gtao",
+            SsaoLevel = 2, DynLights = 4, TaaMotion = 1, TaaMotionLocation = 4, OptimumAo = 1,
+        };
         yield return new ShaderVariant
         {
             Name = "taa-no-waving",
@@ -289,6 +299,7 @@ internal static class ShaderCorpus
             lines.Add($"#define GREEDYMESH_GRAD 0");
             lines.Add($"#define TAAMOTION {variant.TaaMotion}");
             lines.Add($"#define TAAMOTIONLOCATION {variant.TaaMotionLocation}");
+            lines.Add($"#define OPTIMUMAO {variant.OptimumAo}");
         }
         else
         {
@@ -306,6 +317,7 @@ internal static class ShaderCorpus
             lines.Add($"#define GREEDYMESH {variant.GreedyMesh}");
             lines.Add($"#define TAAMOTION {variant.TaaMotion}");
             lines.Add($"#define TAAMOTIONLOCATION {variant.TaaMotionLocation}");
+            lines.Add($"#define OPTIMUMAO {variant.OptimumAo}");
         }
 
         string prefix = string.Join("\r\n", lines) + "\r\n";

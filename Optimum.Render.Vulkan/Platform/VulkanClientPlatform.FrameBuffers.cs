@@ -491,6 +491,8 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void DisposeFrameBuffers(List<FrameBufferRef> buffers)
     {
+        // The AO targets are sized to Primary and go with it.
+        ReleaseAmbientOcclusionTargets();
         HashSet<int> deletedTextures = new HashSet<int>();
         for (int k = 0; k < buffers.Count; k++)
         {

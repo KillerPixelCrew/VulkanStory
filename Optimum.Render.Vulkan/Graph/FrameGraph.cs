@@ -109,6 +109,8 @@ internal sealed class FrameGraph
     public long PromotedClears { get; private set; }
     public long StandaloneClears { get; private set; }
     public long PlannedDontCareLoads { get; private set; }
+    public long ComputePasses { get; private set; }
+    public long Dispatches { get; private set; }
 
     /// <summary>Passes opened in the frame being recorded.</summary>
     public int PassesThisFrame => _frame.Count;
@@ -154,6 +156,41 @@ internal sealed class FrameGraph
                 " plan=" + (PrefixMatchesPlan ? "match" : "conservative"));
         }
         return index;
+    }
+
+    /// <summary>
+    /// A compute pass was recorded: counted, and, while the graph is on, its signature
+    /// (storage writes as attachment uses, reads as reads) joins the frame so the plan
+    /// sees the dispatch's writes and reads between the raster passes around it. It opens
+    /// no scope, so it is not one of <see cref="Passes" />.
+    /// </summary>
+    public int OpenComputePass(PassSignature signature)
+    {
+        ComputePasses++;
+        VulkanStats.NoteComputePass();
+        if (!Enabled) return -1;
+
+        int index = _frame.Count;
+        for (int k = 0; k < _plans.Length; k++)
+        {
+            FramePlan? plan = _plans[k];
+            _prefixMatches[k] = _prefixMatches[k] && plan != null && !plan.IsConservative &&
+                                plan.MatchesPass(index, signature);
+        }
+        _frame.Add(signature);
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("compute pass " + index + " name=" + signature.NameId + " writes=" +
+                signature.Attachments.Length + " reads=" + signature.Reads.Length + " " + signature.Width + "x" +
+                signature.Height + " plan=" + (PrefixMatchesPlan ? "match" : "conservative"));
+        }
+        return index;
+    }
+
+    public void NoteDispatch()
+    {
+        Dispatches++;
+        VulkanStats.NoteDispatch();
     }
 
     /// <summary>

@@ -237,6 +237,15 @@ internal static class VulkanStats
     /// <summary>A second rendering scope inside one declared pass.</summary>
     public static void NotePassSplit() => Interlocked.Increment(ref _passSplits);
 
+    private static long _computePasses;
+    private static long _dispatches;
+
+    /// <summary>A compute pass recorded (its barriers, pipeline and set), outside any rendering scope.</summary>
+    public static void NoteComputePass() => Interlocked.Increment(ref _computePasses);
+
+    /// <summary>One vkCmdDispatch.</summary>
+    public static void NoteDispatch() => Interlocked.Increment(ref _dispatches);
+
     private static long _transientBytes;
     private static long _aliasedBytesPeak;
     private static long _transientLeases;
@@ -475,7 +484,9 @@ internal static class VulkanStats
             PushConstantWrites: Interlocked.Exchange(ref _intervalPushConstantWrites, 0),
             StorageSetBinds: Interlocked.Exchange(ref _intervalStorageSetBinds, 0),
             BindlessSlots: Interlocked.Exchange(ref _intervalBindlessSlots, 0),
-            BindlessPlaceholders: Interlocked.Exchange(ref _intervalBindlessPlaceholders, 0));
+            BindlessPlaceholders: Interlocked.Exchange(ref _intervalBindlessPlaceholders, 0),
+            ComputePasses: Interlocked.Exchange(ref _computePasses, 0),
+            Dispatches: Interlocked.Exchange(ref _dispatches, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -581,13 +592,14 @@ internal static class VulkanStats
             "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11} " +
             "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
             "standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} " +
-            "bindless_slots={21} bindless_placeholders={22}",
+            "bindless_slots={21} bindless_placeholders={22} compute_passes={23} dispatches={24}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
             counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
             counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits,
-            counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders);
+            counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders,
+            counters.ComputePasses, counters.Dispatches);
 
     private static long _lastSample;
 
@@ -684,7 +696,9 @@ internal readonly record struct CounterSample(
     long PushConstantWrites = 0,
     long StorageSetBinds = 0,
     long BindlessSlots = 0,
-    long BindlessPlaceholders = 0);
+    long BindlessPlaceholders = 0,
+    long ComputePasses = 0,
+    long Dispatches = 0);
 
 /// <summary>The values on the <c>stats.transients</c> line.</summary>
 internal readonly record struct TransientSample(
