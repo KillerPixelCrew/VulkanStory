@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[Collection("OptimumConfig")]
 public class OptimumSimdCullingTests
 {
     [Fact]
