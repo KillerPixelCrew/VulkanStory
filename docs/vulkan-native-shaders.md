@@ -78,7 +78,7 @@ family stage.
 ```glsl
 // <program>.interface.glsl
 layout(push_constant, scalar) uniform OptimumDraw {
-    uint terrainTex;          // sampler slot, same name as the GLSL 330 sampler
+    OPTIMUM_SAMPLER_SLOT(sampler2DArray, terrainTex);  // uint slot, the GLSL 330 sampler's name and type
     vec3 origin;              // DRAW-frequency uniforms that fit
     mat4 modelViewMatrix;
 } draw;
@@ -90,7 +90,12 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
 ```
 
 - **Push block:**
-  - Every non-frame sampler's slot index first (4 B each).
+  - Every non-frame sampler's slot index first (4 B each), declared with
+    `OPTIMUM_SAMPLER_SLOT(<GLSL 330 sampler type>, <name>)` from `bindings.glsl`, which expands to `uint <name>`.
+    SPIR-V keeps no trace of which array a `uint` indexes, so the offline compiler reads the type from the macro
+    and checks it against the set 1 array the shipped module actually indexes (section 6). A plain `uint` push
+    member that indexes a texture array is a build error. (Added 2026-09-15 with the compiler: the first draft
+    wrote a bare `uint` with a comment, which reflection cannot read.)
   - Then the uniforms the frequency map classifies as DRAW (they change between draws without a `Use()`), in
     declaration order, while the block stays within 128 B.
 - **Record:** every remaining non-frame uniform (PROGRAM-frequency ones, and DRAW ones that did not fit).
@@ -135,33 +140,96 @@ The prefix is `ShaderRegistry.registerDefaultShaderCodePrefixes`, `ShaderRegistr
   - Declarations a spec-constant branch uses are declared unconditionally, so the name set of section 2 is
     unaffected (the oracle already sees names inside inactive `#if`s).
   - A settings change becomes a pipeline-key change, not a recompile.
-- **Variant key** in the manifest: the sorted `NAME=value` list of the axis symbols the program branches on.
+- **Variant key** in the manifest: the sorted `NAME=value` list of the axis symbols the program branches on,
+  joined by commas (`GBUFFER=1,TAAMOTION=0`; empty when the program has none).
+- **Testing an axis:** only by value (`#if TAAMOTION == 1`, `#if GBUFFER`). Every variant defines every axis it
+  branches on as 0 or 1, so `#ifdef`, `#ifndef` and `defined()` on an axis are build errors. A program branches on
+  an axis when any `#if`/`#elif` in either stage, includes expanded, names it.
 
 ## 6. Offline compile, manifest, reflection
 
-- **Tool:** `tools/shader-compiler` (C#, references the renderer for `ShaderCompiler`, `SetConvention` and
-  reflection), with three modes:
-  - `--build`: compiles every program and variant into `shaders-vk/*.spv` plus `shaders.manifest.json`.
-  - `--verify`: recompiles and compares hashes; this is the `make check-shaders-vk` gate.
-  - `--single`: one program.
-- **Build wiring:** an MSBuild target runs it with a content-hash cache. Deploy puts the output beside the
-  renderer DLL, never under `assets/`.
+- **Tool:** `tools/shader-compiler/Optimum.Shaders.Compiler.csproj`, a thin front end. The work is
+  `Shaders/NativeShaderBuilder.cs` in the renderer, so the runtime `OPTIMUM_VK_SHADER_SOURCE` loop (section 8)
+  compiles the same way; the command line is `NativeShaderTool.Run`, which the tests drive. Output always lands in
+  `<output dir>/shaders-vk/`. Exit codes: 0 success, 1 build or verify failure (a failed build writes nothing),
+  2 usage.
+  - `--build <source dir> <output dir>`: compiles every `<program>.vert`/`.frag` pair (a lone stage is an error)
+    for every combination of the program's axes. It writes `<program>[.<AXIS><value>...].<vert|frag>.spv`, axes
+    sorted (`chunkopaque.GBUFFER1.TAAMOTION0.frag.spv`), plus `shaders.manifest.json`. Only files whose bytes
+    changed are rewritten, and SPIR-V no program produces any more is deleted. A tree with only `include/`
+    yields a valid manifest with no programs.
+  - `--verify <source dir> <output dir>`: recompiles in memory and fails on any difference: manifest bytes,
+    SPIR-V bytes (reported with both SHA-256s), a missing or an unexpected `.spv`. `make check-shaders-vk` runs
+    it against `bin/<Configuration>/net10.0`.
+  - `--single <program> <source dir> <output dir>`: rebuilds one program into an existing manifest written by
+    the same toolchain.
+- **Includes:** `#include "x"` resolves beside the including file first, then in `include/`. Expansion is
+  textual and recursive; include guards are the files' own. The includes of both stages together are the
+  program's include set for the frame-member rule (section 3).
+- **Build wiring:** the MSBuild target sits on the tool project (after `Build`), not on
+  `Optimum.Render.Vulkan.csproj`, because the tool references the renderer and a renderer target that ran it would
+  be a build cycle. It is incremental:
+  - inputs: `sources/shaders-vk/**`, a source list written only when it changes (so deleting a file reruns the
+    target), the tool and the renderer DLL;
+  - output: a stamp in `obj/`, deleted first when the manifest is missing. The manifest itself cannot be an
+    output: write-if-changed leaves an unchanged manifest with an old timestamp, which would rerun the target on
+    every build;
+  - `-p:OptimumSkipNativeShaders=true` skips it.
+
+  The content-hash cache is the tool's write-if-changed. Output goes to `bin/<Configuration>/net10.0/shaders-vk/`,
+  the directory `make deploy` and the packagers read.
+- **Deploy and packaging:** `make deploy` replaces `<client dir>/shaders-vk/` beside `Optimum.Render.Vulkan.dll`
+  (vanilla dir and install dir) and compares every file with `cmp`. `scripts/package-linux.sh`,
+  `scripts/package-macos.sh` and `scripts/package.ps1` stage it the same way and fail when the manifest is missing.
+  The GLSL "void main" corruption scan never reads it. Never under `assets/`. The plan's
+  `<game>/Optimum/shaders-vk/` is superseded: the renderer DLL sits in the client root, so beside it is
+  `<game>/shaders-vk/`.
 - **Reflection** is a small SPIR-V reader in the renderer (`Shaders/SpirvReflection.cs`), not a new package.
   - It reads `OpEntryPoint` interfaces, `OpName`/`OpMemberName`, and `OpDecorate`/`OpMemberDecorate` (`Location`,
     `DescriptorSet`, `Binding`, `Offset`, `SpecId`) plus the type graph for sizes.
   - Set and binding numbers are fixed by `bindings.glsl`, so reflection only confirms them. No SPIR-V
     reflection dependency exists in the tree (integration map, section 5), and this avoids adding one to
     packaging.
-- **Manifest per program and variant:**
-  - the variant key;
-  - stage files with SHA-256;
-  - push members (name, type, offset, size) and record members;
-  - frame members;
-  - samplers (name, GLSL type, array kind, push offset, GLSL 330 order);
-  - storage bindings, vertex inputs, fragment outputs and `writtenOutputs`;
-  - specialization constants (id, name, type, default).
+  - **Two modules per stage.** An optimised module has no `OpName`s and has dropped every declaration nothing
+    uses (unused inputs, specialization constants and descriptors; unused outputs survive). Every stage is
+    therefore compiled twice: the shipped `-O` module, and an unoptimised twin
+    (`ShaderCompiler.CompileForReflection`, never shipped) that keeps names and every declaration.
+    - From the twin: names, block layouts, stage interfaces and specialization constants.
+    - From the shipped module: `writtenOutputs`, which descriptors are used, and which push member indexes which
+      array.
+  - glslang sizes a bindless array that is declared `[]` but never indexed as a one-element array rather than a
+    runtime array; the convention check accepts either.
+- **Checks the tool enforces** (build errors, not warnings):
+  - the push block is at most 128 B;
+  - the push block and the record agree between the stages;
+  - every descriptor sits at a binding `bindings.glsl` defines, with its type: set 0 textures, set 1 arrays by
+    sampler type, set 2 storage buffers and the record as a uniform block; there is no set above 2;
+  - sampler slots use `OPTIMUM_SAMPLER_SLOT`, are `uint`, come before every other push member, and index the
+    set 1 array of their declared type;
+  - no plain `uint` push member indexes a texture array;
+  - specialization constants agree between the stages.
+- **Manifest per program and variant** (schema version 1; written with `Utf8JsonWriter`, `\n` line endings,
+  byte-deterministic because `--verify` compares bytes). The program lists its `name` and sorted `axes`; each
+  variant has:
+  - `key`: the variant key (section 5);
+  - `stages`: stage, source file, SPIR-V file, SHA-256;
+  - `push` and `record`: type name, size and members (name, type, offset, size, `arrayLength`: 0 not an array,
+    -1 runtime), or `null`;
+  - `frameMembers`: the FrameGlobals members, in block order, whose owner include the program includes.
+    `fogandlight.vsh` stands for `fogandlight.vert.glsl` or `fogandlight.glsl`; `.fsh` likewise with `.frag`;
+  - `samplers`: name, GLSL type, `bindlessArray`, `arrayBinding`, `pushOffset`, `order`. The order is push-block
+    order, which is the GLSL 330 declaration order by authoring (section 4);
+  - `frameTextures`: the set 0 textures the shipped modules sample (name, GLSL type, binding). These are taken
+    from use, not declaration, because `bindings.glsl` declares all five in every program; the family parity
+    tests apply the owner rule to them;
+  - `storageBindings`: set 2 buffers other than the record (name, set, binding, descriptor type, array length,
+    runtime array, `used` by a shipped module);
+  - `vertexInputs` and `fragmentOutputs`: location, name, type and array length, as declared;
+  - `writtenOutputs`: bit n set when the shipped fragment module stores to location n;
+  - `specializationConstants`: id, name, type and default (a bool is a JSON bool).
 
-  Schema version and toolchain identity sit at the top.
+  Schema version and toolchain identity (`ShaderCompiler.Identity`) sit at the top. A reader refuses any other
+  schema version.
 
 ## 7. Motion: `include/motion.glsl`
 

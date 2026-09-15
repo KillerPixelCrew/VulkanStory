@@ -157,11 +157,21 @@ internal sealed unsafe class ShaderCompiler : IDisposable
         return compiled;
     }
 
-    private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage)
+    /// <summary>
+    /// Compiles with optimisation off and never through the cache. The optimiser strips every
+    /// <c>OpName</c> and drops declarations nothing uses, so the offline shader compiler reflects
+    /// names and declared interfaces from this twin of the shipped module
+    /// (docs/vulkan-native-shaders.md section 6). Never shipped.
+    /// </summary>
+    public ShaderCompileResult CompileForReflection(string code, string filename, EnumShaderType stage) =>
+        CompileUncached(code, filename, stage, optimize: false);
+
+    private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage, bool optimize = true)
     {
         var result = new ShaderCompileResult();
 
         CompileOptions* options = CreateOptions();
+        if (!optimize) _api.CompileOptionsSetOptimizationLevel(options, OptimizationLevel.Zero);
         try
         {
             CompilationResult* compiled = CompileWith(code, filename, stage, options, preprocessOnly: false);

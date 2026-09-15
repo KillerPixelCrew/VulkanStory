@@ -88,6 +88,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Optimum.Render.Vulkan.Tests" />
+    <!-- tools/shader-compiler: a thin front end over Shaders/NativeShaderBuilder. -->
+    <InternalsVisibleTo Include="Optimum.Shaders.Compiler" />
   </ItemGroup>
 
 </Project>
