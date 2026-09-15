@@ -115,6 +115,182 @@ compared before and after for every branch.
 
 ## 5. Status and to-do
 
+### Plan status, audited 2026-09-16
+
+Every item of `/home/n1ght/.claude/plans/i-never-wanted-this-sequential-kernighan.md` checked against this tree by
+five read-only agents, each required to cite a file, test or commit for anything marked done; a claim in the plan or
+in this handoff was not accepted as evidence. The same marking, with per-item evidence, is at the top of the plan file.
+
+**44 done, 15 partial, 28 left, 1 blocked, 2 superseded. The plan is not complete.**
+
+Legend: `[x]` done, `[~]` partially done (what is left follows it), `[ ]` not started, `[!]` blocked externally,
+`[-]` superseded by a later decision.
+
+**Step 0: branching; Phase 0: foundations; Phase 1A: platform substitution; Phase 1B: synchronisation foundation; constrai**
+
+- [x] Step 0: Branching: fix/taa-sky-direction and feat/vulkan-native from origin/main
+- [x] Phase 0: Foundations: patcher capabilities, diagnostics, validation default, parity dump, acceptance doc skeleton
+- [x] Phase 0 exit criteria: Phase 0 exit: builds/suites green, both dump paths run, GL-vs-GL noise floor, VK-vs-GL table, pacing baselines recorded
+- [x] Phase 1A step 1: VulkanClientPlatform forwarding subclass; SetupOptimumFrameBuffers moved; ClientProgram.Start wiring; csproj donor reference
+- [x] Phase 1A step 2: TAA members to the abstract class; 7 casts become virtual calls; 14 Optimum.Tests files re-pointed
+- [x] Phase 1A step 3: Program/uniform/UBO virtuals; ShaderProgramBase.cs and UBO.cs revert to vanilla plus virtual calls; per-draw CPU measured
+- [x] Phase 1A step 4: Remaining leaf sites moved; IOptimumGraphicsDevice/OptimumRender.Device/OptimumRenderBootstrap.Install deleted; ClientPlatformWindows branch-free
+- [x] Phase 1A Tests: Phase 1A test list: GL.-grep source test, no-lambda test, fallback re-assigns ScreenManager.Platform, no device/cast remnants, PlatformSubstitutionTests, identical-pixel GPU tests
+- [x] Phase 1A Exit: Phase 1A exit: identical screenshots per backend; forced-install-failure fallback exercised with the exact log line
+- [x] Phase 1B step 1: FrameTimeline + RetireQueue; FrameRing on timelines; blocking waits = 1/frame
+- [x] Phase 1B step 2: UploadManager + per-slot upload command buffer (backend A); ReadbackManager + SubmitPartial + QueryRing; SubmitAndWait/FlushFrame deleted
+- [x] Phase 1B step 3: Readback in a frame: ReadbackManager.CopyToHost + SubmitPartial; only screenshot path waits
+- [x] Phase 1B step 4: Swapchain/SwapchainRetirement/IPresentPath split submission; resize/alt-tab/minimise clean under sync,best; acquire wait stage never ALL_COMMANDS
+- [x] Phase 1B step 5: VulkanAllocator pool classes + budget; static meshes off ReBAR; allocator policy tests; heap report
+- [x] Phase 1B step 6: Per-slot indirect ring; descriptor arena; dirty-masked dynamic state; free GetError; CPU frame time drop measured, draw counters unchanged
+- [~] Phase 1B Tests: GPU test list: AsyncTransferTests, PresentDecouplingTests, SwapchainRecreationVisualTests, ConcurrentDeviceAccessTests, ReadbackMidFrameTests, QueryRingTests, AllocatorPolicyTests; unit: IndirectRingWrapTests, TimelineLifetimeTests, PresentWaitStageTests, SwapchainRetirementTests
+- [x] Phase 1B/1A Exit (combined, Phase 1 exit): Phase 1 exit: both renderers start; forced-install-failure fallback; sync,best 0 errors; blocking uploads 0; build/test counts recorded
+- [x] Constraint: Cecil transplant rules: No cached lambdas / LINQ predicates / non-capturing lambdas / hidden-helper lowering in transplanted bodies
+- [x] Constraint: Patcher capabilities (typesToUnseal/methodsToVirtualize/verifier): typesToUnseal clears TypeAttributes.Sealed; methodsToVirtualize sets Virtual|NewSlot|HideBySig; call-vs-callvirt verifier fails the patch on a stray call
+- [x] Constraint: Hardware floor: Vulkan 1.3 + dynamicRendering, synchronization2, timelineSemaphore, scalarBlockLayout, independentBlend, multiDrawIndirect; optional tiers with fallback + env override
+
+**Phase 2: frame graph -> Milestone 1; Phase 3: native shaders**
+
+- [x] Phase 2 Step 1: ResourceStateTracker + BarrierBatcher drive the immediate path
+- [x] Phase 2 Step 2: FrameGraph streaming recorder + PassRecorder, coexisting with the non-graph path
+- [x] Phase 2 Step 3: Write-mask motion tiers, clear promotion, FramePlan load/store solving; TAA through the graph
+- [~] Phase 2 Step 4: Transient aliasing implemented, default off, but not wired into the live per-frame graph path
+  - left: Wire FrameGraph/PassRecorder to call BindTransientForFrame per declared transient lifetime so aliasing can actually take effect outside tests.
+- [x] Phase 2 invariants pinned by tests: Invariants pinned by tests
+- [ ] Milestone 1 bullet: pacing-gate.sh passes: M1 bullet 1 - pacing-gate.sh passes against the OpenGL baseline
+- [x] Milestone 1 bullet: blocking uploads/waits: M1 bullet 2 - blocking uploads 0, blocking waits 1/frame
+- [x] Milestone 1 bullet: acquire ordering: M1 bullet 3 - acquire after render submit, wait stage TRANSFER/COLOR_ATTACHMENT_OUTPUT
+- [x] Milestone 1 bullet: scopes and passes: M1 bullet 4 - ScopesOpened==PassCount; no transition inside a scope
+- [x] Milestone 1 bullet: validation scripted session: M1 bullet 5 - sync,best validation, zero [error] over the scripted session
+- [ ] Milestone 1 bullet: SSIM parity TAA off: M1 bullet 6 - per-attachment SSIM vs OpenGL, TAA off
+- [x] Milestone 1 bullet: TAA still-frame stability: M1 bullet 7 - TAA on: luma-diff median within 0.3 of OpenGL, distant-leaf rejection <=1.5%
+- [ ] Milestone 1 bullet: TAA acceptance rows re-pass: M1 bullet 8 - TAA acceptance rows A11,A13,A14,A15,A17,A18 re-pass
+- [x] Milestone 1 bullet: in-game judgement: M1 bullet 9 - user judges it in game on both backends
+- [-] Phase 3 set convention: Set convention: superseded by decision 9, implemented as a single shared layout
+- [x] Phase 3 placement table: Uniform placement table
+- [x] Phase 3 manifest: shaders.manifest.json schema and consistency
+- [x] Phase 3 compiler tool: Offline shader compiler tool (--build/--verify/--single)
+- [x] Phase 3 adapter layout: Mod-shader adapter retargeted to the shared layout in one change
+- [x] Phase 3 seven worktree stages of native GLSL: Native GLSL ported in family stages
+- [x] Phase 3 scanner v2: Launcher scanner v2 (ShaderAssetOverride, PlatformInternals, schema 2)
+- [ ] Phase 3 temporal contract addendum-or-v2 decision: Temporal contract addendum-or-v2 decision for native shaders
+  - left: Add a dated entry to docs/temporal-frame-contract.md (or a version bump) stating whether the native-shader motion-writer port is a v1 addendum or a v2 change.
+- [ ] Phase 3 ReloadShaders no longer recompiling on a settings change: ReloadShaders no longer recompiling on a settings change
+- [~] Phase 3 Tests list: Phase 3 Tests list (parity, motion-writer shape, manifest, adapter-layout, differential, launcher fixtures, no legacy extensions)
+  - left: The plan specifically asks that 'the eight Taa*Motion*Tests gain native-vs-rewriter differential cases (motion attachment equal within 1 ULP of RGBA16F)'. Searched TaaMotionWriterTests.cs, TaaEntityMotionWriterTests.cs, TaaInstancedMotionWriterTests.cs, TaaStandardMotionWriterTests.cs, TaaLiquidMotionTests.cs, TaaSkyMotionTests.cs and found no native-vs-rewriter comparison in any of them - all sti
+- [ ] Phase 3 Exit criteria: Phase 3 exit criteria (48 native/0 failed logged, SSIM>=0.99, validation clean, in-game settings sweep, vulkan-acceptance.md matrix, contract decision)
+  - left: Run and record the actual Phase 3 exit in docs/vulkan-acceptance.md: the native/rewritten/failed count from a real (non-headless-forced) launch, per-attachment SSIM, validation log, the full settings sweep on both backends, and the temporal-contract addendum-or-v2 decision.
+
+**Phase 3b (docs/vulkan-native-render-systems.md decisions 1-7, stage 1 nine-pass scope, parallel world-system stages, rem**
+
+- [x] Phase 3b decision 1: Runtime rewriter stays permanently as mod-shader adapter
+- [~] Phase 3b decision 2: Seams are existing virtuals, overridden without calling base
+  - left: 6 of 7 post/TAA virtuals still call base; no world-system transplanted seams exist (ChunkRenderer, entities, particles, GUI unchanged).
+- [~] Phase 3b decision 3: A native system reads client state, never GL state
+  - left: Rule only exercised by the blit; unverified for any world-render system since none has been ported.
+- [x] Phase 3b decision 4: Device API for native systems (NativePasses)
+- [~] Phase 3b decision 5: order and parallelism: Stage 1 (device API + post/TAA chain) then parallel world systems then removal
+  - left: Stage 1 itself incomplete (8 of 9 chain passes still on base); stage 2 (chunks, entities, particles/decals/sky/clouds, GUI/text) not started; stage 3 removal not started.
+- [~] Phase 3b decision 6: Behavioural identity is the acceptance rule (old-route vs native-route GPU tests)
+  - left: Differential tests needed for the remaining 8 passes once each goes native; none exist because none is native.
+- [x] Phase 3b decision 7: FSR input identity preserved (BlitPrimaryToDefault keeps reading Primary colour 0)
+- [~] Phase 3b stage 1 scope: 9 chain passes: Which of the nine post/TAA chain passes are native today
+  - left: 8 of 9 passes (everything except the final blit) still run the OpenGL body via base.<Method>() and therefore still go through GlStateTracker, texture units and uniform-by-location.
+- [ ] Phase 3b: world render systems still on the emulation layer: Every world render system still on the GL-emulation layer
+  - left: All world render systems (chunks, entities, particles, decals, sky/clouds, GUI/text) - stage 2 of decision 5 - are entirely unstarted.
+- [ ] Phase 3b: GlStateTracker / texture-unit tables / uniform-by-location reachability: GlStateTracker, texture-unit tables and uniform-by-location still reachable from the Vulkan path
+  - left: Not reachable only from the native blit's own pipeline creation; reachable and load-bearing for every other pass and every world system.
+- [x] Phase 4: disk pipeline cache: Disk pipeline cache with FAIL_ON_PIPELINE_COMPILE_REQUIRED, background compile worker
+- [x] Phase 4: used-key manifest: Used-pipeline-key manifest for pre-warming
+- [x] Phase 4: warm-up: Background warm-up from the manifest
+- [ ] Phase 4: push-constant placement from a measured profile: Push-constant placement frozen from OPTIMUM_VULKAN_UNIFORM_PROFILE measurement
+  - left: Entire item: the env-driven measurement tool, the manifest field, and the placement logic reading it are all absent.
+- [x] Phase 4: animation SSBO ring: Bone/animation data on a storage-buffer ring with dynamic offsets
+- [ ] Phase 4: Use() include-block early-out: Skipping ShaderProgramBase.Use()'s frame-global include-block writes when unchanged
+  - left: Entire item unimplemented; Use() still writes all ~50 frame-global uniforms unconditionally every call.
+- [ ] Phase 4: per-pass GPU timestamps: Per-pass GPU time table from timestamp queries
+  - left: No timestamp-query infrastructure exists; no per-pass ms table has been produced.
+- [ ] Phase 4: transient aliasing default on: Transient aliasing switched on by default after clean validation on all targets
+  - left: Default flag flip to on, plus the required clean-validation-on-all-targets gate, have not happened.
+- [-] Phase 4: bindless decision: Bindless set (originally set 2, later set 1) adopted based on measured descriptor-miss rate
+- [ ] Phase 4: DirectToSwapchain: DirectToSwapchain present policy measured and kept only if it wins
+  - left: Entire item unimplemented and unmeasured.
+- [ ] Phase 4: transfer backend B: Dedicated-transfer-queue backend (B) measured against backend A
+  - left: No ITransferBackend abstraction, no backend B implementation, no measurement exists.
+- [ ] Phase 4: exit criteria: Phase 4 exit - Vulkan mean FPS >= OpenGL, p99 <= OpenGL, pipeline cache hit rate >= 95%, per-pass ms table within 10% of GPU frame time
+  - left: Every numeric exit criterion is unmeasured, or where a related number exists (Milestone 1 pacing) it fails the bar; the required 30-minute session and doubled perf-capture.sh runs have not been executed.
+
+**Phase 5: mod API and fork ports; Phase 6: upscaler and frame-generation seams; Latency seams section (L0 types, S1-S8, b**
+
+- [~] Phase 5: Mod API and fork ports
+  - left: No evidence the exit criterion 'VSEssentials/VSSurvivalMod/VSCreativeMod renderers checked against declared passes' was done: grep for OptimumPass/RegisterOptimumPass/MotionWriter across VSEssentials, VSSurvivalMod, VSCreativeMod (working trees) and their patches/ directories returns nothing; none of the 40+ existing fork renderer patches (CloudRendererVolumetric, MechNetworkRenderer, EntityShapeR
+- [ ] Vendor orchestrator decision: Optimum builds its own multi-vendor orchestrator (not Streamline)
+  - left: Merge/port from feat/dlss (or feat/dlss-g) into feat/vulkan-taa, which per the branch-split decision (StratumServer PR #69) is deliberately deferred until after the native Vulkan backend and TAA land upstream.
+- [ ] Vendor orchestrator decision: Slot coupling: vendor latency backend only when upscaler vendor matches GPU
+  - left: Same as the orchestrator item: exists on feat/dlss only, not yet ported/merged to feat/vulkan-taa.
+- [ ] Vendor orchestrator decision: NVIDIA goes direct: Reflex via VK_NV_low_latency2, DLSS/DLSS-G via NGX P/Invoke (no Streamline)
+  - left: Not merged into feat/vulkan-taa; lives on feat/dlss/feat/latency per the documented branch split.
+- [ ] Vendor orchestrator decision: Intel on Windows: D3D12 bridge present path with XeFG and XeLL
+  - left: Entirely unbuilt: needs the D3D12 bridge present path, shared-image/fence interop, and XeLL binding; also gated on 'Windows interop support on the Arc driver is unverified: spike before building on it' per the plan's own text, i.e. even the prerequisite spike has not happened.
+- [ ] Latency seams: L0 types, S1-S8 seams, backends None/Native/NvLowLatency2/AmdAntiLag
+  - left: Zero of this exists on feat/vulkan-taa. It is real work but on a sibling branch not yet merged back; XeLL as a fifth backend is absent even there (see the Intel D3D12 bridge item).
+- [ ] Latency seams: Acceptance numbers (section L)
+  - left: Not present on feat/vulkan-taa; would need porting docs/vulkan-acceptance.md's Latency section (and the underlying code) from feat/latency.
+- [ ] NGX on native Linux: Spike result: NGX comes up through a native shim
+  - left: None of this is on feat/vulkan-taa; it would need to be merged/ported from feat/dlss once that branch returns as its own PR per the documented sequencing.
+- [ ] DLSS SR evaluation: DLSS Super Resolution evaluates on the device
+  - left: Entirely absent from feat/vulkan-taa; the sequencing note in the committed docs/vulkan-native-plan.md on this branch says this returns as its own PR after the native backend, from feat/dlss-g.
+- [ ] Phase 6: Upscaler and frame-generation seams
+  - left: All of it: SceneNoHud/Composited graph handles, IPresentPath-based PresentThread backend selection, FramesInFlight raised to 3, temporal contract bumped to v2 with the vendor surface, and a recorded FSR/XeSS quality-perf table - none present on feat/vulkan-taa; real progress toward some of these (SceneNoHud, two-present dlss-g plumbing) exists on feat/dlss-g only.
+
+**Roadmap items (HDR output, ray tracing, headless render harness, GTAO/XeGTAO 3 sub-steps), plan's Documentation-to-updat**
+
+- [ ] Roadmap: HDR output: HDR output
+  - left: Everything: float/10-bit scene colour format, tone mapper, VK_EXT_swapchain_colorspace/HDR10 or scRGB swapchain, DLSS IsHDR=1 switch, temporal-contract colour-space row (T2/T3, currently only reserved as a heading in docs/temporal-frame-contract.md section 8, with no content).
+- [ ] Roadmap: ray tracing: Ray tracing
+  - left: Everything: BLAS-per-chunk-mesh / TLAS-over-loaded-chunks with per-frame refit, VK_KHR_acceleration_structure/ray_query device tier, RTAO as the first ray budget, then shadows/reflections, then a denoiser (DLSS Ray Reconstruction or a hand-written one). Sequenced last by design, not blocked by anything external yet.
+- [~] Roadmap: headless render harness: Headless render harness that does not take the machine
+  - left: The doc's own admission (docs/vulkan-acceptance.md, headless section, 'What it does not cover'): 'No camera path is checked in yet - one has to be authored per scene with .cam p and .cam save.' The roadmap's acceptance bar - 'the shimmer class of bug (jitter, disocclusion, AO noise) shows up as a number from that sequence' via a checked-in deterministic camera path - has not been demonstrated; the
+- [x] GTAO order-of-work step 1: GTAO step 1: composite AO into the scene at render resolution, before the resolve
+- [x] GTAO order-of-work step 2: GTAO step 2: make the dither temporally varying
+- [~] GTAO order-of-work step 3: GTAO step 3: port XeGTAO and judge it against the fixed SSAO
+  - left: All of section D's measurement plan: converged numerical reference, thin-foliage/halo numbers, temporal-stability numbers vs vanilla SSAO+TAA, per-pass GPU cost on Arc-class and RTX hardware, and the resulting handheld-preset decision. Until then GTAO has landed as a code path but has not been 'judged' by the plan's own definition.
+- [~] Documentation to update: Documentation-to-update list (VULKAN-BACKEND-PLAN.md v2, acceptance/allowlist docs, contract addendum, CLAUDE.md, skills)
+  - left: Rewrite VULKAN-BACKEND-PLAN.md in place to v2 (or formally mark it superseded/archived and delete stale sections instead of leaving contradictory content live); record the Phase-3 temporal-contract addendum-or-v2 decision somewhere durable; add the shaders-vk source-of-truth row, check-shaders-vk build step and the missing env vars to CLAUDE.md; update the three named skills with the manifest/paci
+- [~] Risks (ranked) mitigations: Risks section: are the 10 ranked mitigations actually in place
+  - left: Fill in docs/vulkan-acceptance.md section 6's vendor matrix with the numbers that already exist elsewhere (risk 6); record the Phase-3 temporal-contract decision (risk 8, shared with the Documentation item above).
+- [!] Handoff item 1: Fix the present-after-write hazard
+  - left: Waiting on: the complete first-message text of one of the five failures, captured on the Windows GTX 1060 (or another Pascal/580-branch device) by running `dotnet test Optimum.Render.Vulkan.Tests --filter <the 5 test names> --logger "console;verbosity=detailed"` with the implicit Vulkan layers disabled, plus that machine's driver version and `vulkaninfo --summary` (present modes, image counts) rec
+- [~] Handoff item 7: Caching follow-ups
+  - left: Two items explicitly still open, confirmed absent from the code: VK_KHR_pipeline_binary (grep for 'PipelineBinary'/'pipeline_binary' across Optimum.Render.Vulkan: zero hits) and a real-client warm-start check driven through the headless harness (no 'warm-start' or 'WarmStart' hit anywhere outside the two progress-doc lines that call it open).
+- [ ] Handoff item 9: General refactor: split VulkanDevice.cs, restructure the project, remove GL-emulation leftovers
+  - left: Everything: splitting VulkanDevice.cs into smaller units, any project-layout restructuring, and removing GlStateTracker.cs plus its call sites. This is item 9 of 12 on the to-do list and item 5 (Phase 3b native render systems, a prerequisite for retiring GlStateTracker per the handoff's own text) is itself only one stage in (device API + native blit merged; chunks/entities/particles/GUI on native 
+- [~] Handoff item 11: Validation milestones 2-7
+  - left: A real per-area CI split including a scheduled GPU-AV run; AMD/RADV coverage; a lavapipe CI lane; a written, evidenced sign-off against the Khronos checklist; debug object naming and command-buffer labels; Aftermath and a GFXReconstruct reference capture.
+- [ ] Handoff item 12: Cleanup for review (last)
+  - left: The entire item: read VULKAN-BACKEND-PLAN.md fully and reconcile/retire it, review the named scripts and Core/RenderTargetManager.cs for tooling/workflow references, and (with the owner's OK per the branch's binding rule on history rewrites) squash or rewrite the ~23-27 worktree/merge-wave commit subjects before the upstream PR, plus the optional host-environment test fixes (numpy self-tests, Wind
+
+**Added 2026-09-16 at the owner's request: the DLSS / DLSS-FG foundations, brought forward**
+
+Foundations only - the vendor backends, NGX, two-presents-per-frame and the present-thread pacer stay out. Scoped
+against `feat/latency` and `feat/dlss-g`; note it is `feat/dlss-g`, not `feat/dlss`, that carries the HUD work.
+
+- [ ] Foundation A, frame marking: L0 latency types, the pre-input `LatencySleep` lib seam,
+  `IDeviceRequirementContributor` and the pNext chain builder in `CreateDevice`, one frame id per frame,
+  `VkPresentIdKHR` chaining, markers around simulation / render submit / present, the `stats.latency` line.
+  Conflicts: `VulkanClientPlatform.Frame.cs` exists here already (add, do not replace); `FrameSlot.Submit` gains a
+  parameter and its three call sites move together, `UploadManager.SubmitStandalone` stays untagged.
+- [ ] Foundation B, GUI separation: the `SceneNoHud` snapshot (slot 23) at the end of `RenderFinalComposition`, and
+  the UI target (slot 24) with a `ui-compose` pass composed back before the `Done` stage, so an upscaler or frame
+  generator evaluates a HUD-less image. Conflicts: the `feat/dlss-g` hooks sit in the lib GL body of
+  `BlitPrimaryToDefault`, which is overridden here and dispatches to `RenderNativeBlit()` - ported verbatim they are
+  dead code on Vulkan, so they must be re-implemented at that method's three exit points, with the lib patch kept for
+  the OpenGL path only. `ui-compose` registers through the native manifest / `LinkProgram` seam and needs
+  premultiplied-alpha blending. The UI compose GPU test must be new: the original only proved the GL-emulation path.
+- Staging: L0 contracts (serial), then lib hook + device/markers + SceneNoHud + UI target in parallel worktrees, then
+  integrate, then in-game on both backends. Review only the `RenderNativeBlit()` re-implementation.
+
+
 ### Done
 
 | Commit | What |
