@@ -444,24 +444,42 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
 
-### Family 7 decisions (optimum-programs, 2026-09-15)
+## 10. Family decisions
 
-`taa-resolve`, `taa-sharpen`, `taa-debug`, `taa-skymotion`, `chunkliquidmotion`, `scene-ssao`, `fsr-easu`, `fsr-rcas`.
-- **Bodies:** only the step-4 differences. `taa-resolve` keeps its body and both DO NOT REVERT notes line for line
-  (3x3 nearest-depth disocclusion, motion and the writer-depth tolerance from the nearest-depth tap, the pixel's
-  own reactive, luminance anti-flicker `mix(1.2, 0.3, w*w) * blendAlpha`); its locals `glow` and `sky` shadow the
-  set 0 samplers of those names in function scope, which is legal and left as written.
-- **Uniforms behind an axis** (`taa-skymotion`, `chunkliquidmotion` declare theirs inside `#if TAAMOTION > 0`): the
-  oracle reads unpreprocessed text, so they are names of every variant and sit unconditionally in the record.
-- **Motion location:** `#if TAAMOTION == 1` then `#if GBUFFER == 1` location 4 else 2, so both writers carry the
-  axes `GBUFFER,TAAMOTION`; the two `TAAMOTION=0` variants are identical.
-- **TAA-off dummy output** stays (one `vec4` at location 0, never bound at runtime) and is written as
-  `optimumWriteReactiveOnly(0.0)`, bit-identical to the GLSL 330 `vec4(0.0)`, so no `outMotion` assignment exists
-  outside the include's return values. The TAA-on write is `optimumWriteMotion(..., writerDepth = gl_FragCoord.z)`,
-  whose behind-camera return equals the GLSL 330 early return in both writers.
-- **Placement:** the six fullscreen programs push only their slots. `chunkliquidmotion` is a chunk draw: push holds
-  `origin` and `modelViewMatrix` (76 B, no sampler); `projectionMatrix`, the previous-frame matrices,
-  `cameraPosDelta`, vertexwarp's twelve `prev*` uniforms and the fragment's TAA uniforms are record members.
-- **Depth remap:** `taa-skymotion.vert` keeps `z = w = 1`, so the remap yields window depth 1 as in GL.
-  `chunkliquidmotion.vert` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
-  convention, which the motion arithmetic expects.
+### Family post (`ssao`, `godrays`, `findbright`, `blur`, `bilateralblur`, `colorgrade`, `transparentcompose`, `debugdepthbuffer`, `woittest`), 2026-09-15
+
+All are one draw per `Use()`: the push block holds only sampler slots (none for `woittest`), everything else is record.
+Beyond the step 4 list, the ports differ from GLSL 330 in these places only. None of them changes a pixel, so
+the family adds no differential GPU test.
+
+- **`transparentcompose`: the `Array` quirk.** `collectUniformNames` reads `uniform sampler2DArray OITaccumulation` as
+  a `sampler2D` named `Array` at unit 4.
+  - **Decision:** the native slot is `OPTIMUM_SAMPLER_SLOT(sampler2DArray, OITaccumulation)`, fifth in the push block,
+    the unit the oracle gives `Array`. The native name set is the oracle's with `Array`/`sampler2D` read as
+    `OITaccumulation`/`sampler2DArray`.
+  - **Why the quirk is not reproduced:** no client call uses the name `Array`.
+    `ShaderProgramTransparentcompose.OITaccumulation2D` binds `"OITaccumulation"` at unit 4.
+    `SystemRenderOITLayers` points `"OITaccumulation"` at unit 7 through `SetProgramSamplerUnit`, and the device
+    resolves that by name.
+  - **No shader-side form exists:** a slot named `Array` must be declared `sampler2D` to match the oracle, and the
+    compiler rejects a `sampler2D` slot that indexes `optimumTextures2DArray` (section 6).
+  - **Needed:** the parity harness has to apply this mapping for any `uniform sampler2DArray <name>`.
+  - **Status: not shipped yet.** The port compiles, passes `spirv-val` and reflects in all four variants
+    (`GBUFFER`, `TAAMOTION`). Its only parity failure is exactly this name and unit-4 entry.
+  - **Motion:** it writes `optimumWriteReactiveOnly(clamp(anet, 0.0, 1.0))` at location 4 with the G-buffer, else 2.
+    The merge's additive (ONE, ONE) blend is unchanged.
+- **`blur`, `bilateralblur`: fragment inputs.**
+  - The unused fragment input `in vec2 frameSize` is dropped. No vertex stage writes it, nothing reads it, and it
+    would redeclare the record member `frameSize`.
+  - `texCoords[21]` and `texCoords[11]` start at location 0 and span past `OPTIMUM_LOCATION_PROGRAM_END`. Neither
+    program includes a file that `varyings.glsl` places at 16 and above, and 21 locations fit the 29 that Intel's
+    Mesa driver reports.
+  - `blur.fsh` reads `texCoords[16]`, which `blur.vsh` never writes. That read is undefined on both APIs, and the
+    port keeps it as the rewriter does.
+- **`ssao`:**
+  - The loop local `sample` becomes `samplePos`: `sample` is a reserved word in GLSL 450.
+  - `SSAOLEVEL == 2` becomes a specialization-constant ternary for `kernelSize` and a branch for the lower clamp.
+  - `TAAMOTION` stays an axis for the temporal dither step.
+  - `temporalFrameIndex` is declared in the record unconditionally: the oracle sees it in every variant.
+- **`colorgrade`:** the initializers of `minlight`, `maxlight`, `minsat` and `maxsat` come from the runtime seed
+  (section 8), as for `final`.
