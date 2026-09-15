@@ -131,6 +131,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
+        "_optimumSingleIndirectBufferId",
+        "_optimumSingleIndirectBufferCapacity",
+        "_optimumSharedIndirectCommands",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -478,6 +481,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderPostprocessingEffects", 1),
+    // Issue #75 Tier 1: GPU indirect draw submission (glMultiDrawElementsIndirect)
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5,
+        new[] { "Vintagestory.API.Client.MeshRef", "System.Int32[]", "System.Int32[]", "System.Int32", "System.Boolean" }),
     // Issue #74: item-render profiler summary hook at the final render stage, and
     // the reused-scratch per-slot item render path.
     new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerRenderStage", 2,

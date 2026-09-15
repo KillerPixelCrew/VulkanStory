@@ -19,12 +19,8 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
 
     public void Dispose()
     {
-        // Reset the process-global shader-compatibility state this test mutated
-        // via SetDataPath (loading a scanFailed/disabled report). Without this,
-        // _shaderCompatibilityScanFailed leaks into later test classes (e.g.
-        // GodRaysSampleCapTests reads IsShaderFeatureDisabled) depending on
-        // execution order. Point the data path at a fresh dir with no report,
-        // which reloads an empty (all-enabled) report.
+        OptimumConfig.ResetShaderCompatibilityForTests();
+        OptimumConfig.SetDataPath(null);
         try
         {
             string clean = Path.Combine(Path.GetTempPath(), "optimum-shader-compat-reset-" + Guid.NewGuid().ToString("N"));

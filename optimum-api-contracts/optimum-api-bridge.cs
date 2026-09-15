@@ -88,6 +88,9 @@ public static class OptimumApiBridge
         }
     }
 
+    internal static bool IsChiselTracked(ModelDataPoolLocation location) =>
+        location != null && ChiselLodLocations.TryGetValue(location, out _);
+
     public static bool InFrustumAndRange(
         FrustumCulling culler,
         Sphere sphere,
@@ -95,6 +98,11 @@ public static class OptimumApiBridge
         int lodLevel,
         ModelDataPoolLocation location)
     {
+        if (OptimumConfig.EffectiveSimdCulling)
+        {
+            return OptimumFrustumCullSimd.InFrustumAndRange(culler, sphere, nowVisible, lodLevel, location);
+        }
+
         // Mirrors the source-tree FrustumCulling.InFrustumAndRange chisel branch:
         // LOD 2 (real carved mesh) renders inside ChiselLodDistanceSq, LOD 3 (cube proxy)
         // renders outside it. Both LOD levels of a chisel chunk part are flagged, so this

@@ -28,6 +28,18 @@ public class OptimumStatusModSystem : ModSystem
             OptimumDiagnostics.CullWalkLogEnabled = true;
         }
 
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CHUNK_RENDER_LOG") == "1")
+        {
+            api.Event.RegisterGameTickListener(_ =>
+            {
+                api.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkRenderSummary());
+            }, 5000);
+            api.Event.LeaveWorld += () =>
+            {
+                api.Logger.Notification("[Optimum] Final " + OptimumDiagnostics.GetChunkRenderSummary());
+            };
+        }
+
         // Issue #73 mesh-construction profiler hook: OPTIMUM_MESH_PROFILE=1 makes
         // ChunkTesselator.NowProcessChunk record per-chunk tess/finalize timing
         // and thread-allocated bytes, logging a summary every MeshProfileLogEvery
@@ -419,5 +431,9 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Worldgen work stealing: SUSPENDED (serial policy pending R1)");
         if (OptimumConfig.ChunkReadPoolEnabled)
             api.Logger.Debug("[Optimum] Chunk read pool: ON (server-side)");
+        if (OptimumConfig.EffectiveIndirectDraw)
+            api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
+        else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
+            api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
     }
 }

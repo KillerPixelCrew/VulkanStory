@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -176,6 +177,33 @@ public static class OptimumConfig
 
     public static bool EntityLightBatchEnabled = true;
     public static bool EntityShaderStateCacheEnabled = true;
+
+    /// <summary>
+    /// Issue #75: Enables GPU indirect draw submission (glMultiDrawElementsIndirect)
+    /// for chunk mesh pools when supported by the hardware and driver (OpenGL 4.3+ / ARB_multi_draw_indirect).
+    /// Defaults to false during evaluation.
+    /// </summary>
+    public static bool IndirectDrawEnabled = false;
+
+    /// <summary>
+    /// Set at startup after OpenGL capability probe. False on macOS (OpenGL 4.1) and legacy drivers.
+    /// </summary>
+    public static bool IndirectDrawSupported = false;
+
+    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported;
+
+    /// <summary>
+    /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
+    /// for bounding volumes in chunk mesh pools and model locations.
+    /// </summary>
+    public static bool SimdCullingEnabled = true;
+
+    /// <summary>
+    /// True when the CPU supports 128-bit or 256-bit vector operations.
+    /// </summary>
+    public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
+
+    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported;
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
@@ -521,6 +549,14 @@ public static class OptimumConfig
         SetGreedyMeshShaderAbi(false, false);
     }
 
+    public static void ResetShaderCompatibilityForTests()
+    {
+        _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityScanFailed = false;
+        _shaderCompatibilityFingerprint = null;
+        ResetShaderCompatibilityAfterReload();
+    }
+
     private static void LoadShaderCompatibilityReport()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
@@ -714,6 +750,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChunkDeserializeParallel), ChunkDeserializeParallel.ToString()),
         (nameof(OptimumConfigData.ChunkDeserializeParallelMinY), ChunkDeserializeParallelMinY.ToString()),
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
+        (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
+        (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
     };
 
     /// <summary>
@@ -721,6 +759,13 @@ public static class OptimumConfig
     /// </summary>
     public static void SetDataPath(string dataPath)
     {
+        if (dataPath == null)
+        {
+            _dataPath = null;
+            _configPath = null;
+            ResetShaderCompatibilityForTests();
+            return;
+        }
         string dir = Path.Combine(dataPath, "ModConfig");
         Directory.CreateDirectory(dir);
         _configPath = Path.Combine(dir, "optimum.json");
@@ -808,6 +853,8 @@ public static class OptimumConfig
             LaunchTaskBudgetEnabled = data.LaunchTaskBudgetEnabled;
             LaunchTaskBudgetMs = Math.Clamp(data.LaunchTaskBudgetMs, 1, 500);
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
+            IndirectDrawEnabled = data.IndirectDraw;
+            SimdCullingEnabled = data.SimdCulling;
         }
         catch (Exception)
         {
@@ -879,6 +926,8 @@ public static class OptimumConfig
             LaunchTaskBudgetEnabled = LaunchTaskBudgetEnabled,
             LaunchTaskBudgetMs = LaunchTaskBudgetMs,
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
+            IndirectDraw = IndirectDrawEnabled,
+            SimdCulling = SimdCullingEnabled,
         };
 
         try
@@ -958,6 +1007,8 @@ internal sealed class OptimumConfigData
     public bool LaunchTaskBudgetEnabled { get; set; } = false;
     public int LaunchTaskBudgetMs { get; set; } = 100;
     public string WorldgenWorkerPolicy { get; set; } = "auto";
+    public bool IndirectDraw { get; set; } = false;
+    public bool SimdCulling { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -1736,6 +1787,70 @@ public static class OptimumDiagnostics
     private static long _chunkPoolsCulled;
     private static long _chunkVisibleGroups;
     private static long _chunkFrustumCullTicks;
+
+    // Issue #75: GPU indirect vs conventional draw submission timing & counters
+    private static long _chunkIndirectDrawCalls;
+    private static long _chunkConventionalDrawCalls;
+    private static long _chunkIndirectSubmissionTicks;
+    private static long _chunkConventionalSubmissionTicks;
+    private static long _chunkIndirectGroups;
+    private static long _chunkConventionalGroups;
+
+    public static long ChunkIndirectDrawCalls => Interlocked.Read(ref _chunkIndirectDrawCalls);
+    public static long ChunkConventionalDrawCalls => Interlocked.Read(ref _chunkConventionalDrawCalls);
+    public static long ChunkIndirectSubmissionTicks => Interlocked.Read(ref _chunkIndirectSubmissionTicks);
+    public static long ChunkConventionalSubmissionTicks => Interlocked.Read(ref _chunkConventionalSubmissionTicks);
+    public static long ChunkIndirectGroups => Interlocked.Read(ref _chunkIndirectGroups);
+    public static long ChunkConventionalGroups => Interlocked.Read(ref _chunkConventionalGroups);
+
+    public static void RecordChunkDrawSubmission(int groupCount, bool isIndirect, long elapsedTicks)
+    {
+        if (isIndirect)
+        {
+            Interlocked.Increment(ref _chunkIndirectDrawCalls);
+            Interlocked.Add(ref _chunkIndirectGroups, groupCount);
+            Interlocked.Add(ref _chunkIndirectSubmissionTicks, elapsedTicks);
+        }
+        else
+        {
+            Interlocked.Increment(ref _chunkConventionalDrawCalls);
+            Interlocked.Add(ref _chunkConventionalGroups, groupCount);
+            Interlocked.Add(ref _chunkConventionalSubmissionTicks, elapsedTicks);
+        }
+    }
+
+    public static void ResetChunkDrawSubmissionCounters()
+    {
+        Interlocked.Exchange(ref _chunkIndirectDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkConventionalDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkIndirectSubmissionTicks, 0);
+        Interlocked.Exchange(ref _chunkConventionalSubmissionTicks, 0);
+        Interlocked.Exchange(ref _chunkIndirectGroups, 0);
+        Interlocked.Exchange(ref _chunkConventionalGroups, 0);
+    }
+
+    // Issue #75 Tier 2: SIMD frustum culling counters
+    private static long _simdFrustumTests;
+    private static long _simdFrustumCulled;
+
+    public static long SimdFrustumTests => Interlocked.Read(ref _simdFrustumTests);
+    public static long SimdFrustumCulled => Interlocked.Read(ref _simdFrustumCulled);
+
+    public static void RecordSimdFrustumTest(bool culled)
+    {
+        Interlocked.Increment(ref _simdFrustumTests);
+        if (culled)
+        {
+            Interlocked.Increment(ref _simdFrustumCulled);
+        }
+    }
+
+    public static void ResetSimdFrustumCounters()
+    {
+        Interlocked.Exchange(ref _simdFrustumTests, 0);
+        Interlocked.Exchange(ref _simdFrustumCulled, 0);
+    }
+
     private const int ChunkRenderWindowSize = 120;
     private static readonly long[] _chunkWindowDrawCalls = new long[ChunkRenderWindowSize];
     private static readonly long[] _chunkWindowPoolsRendered = new long[ChunkRenderWindowSize];
@@ -1867,6 +1982,8 @@ public static class OptimumDiagnostics
         Array.Clear(_chunkWindowPoolsCulled);
         Array.Clear(_chunkWindowVisibleGroups);
         Array.Clear(_chunkWindowFrustumCullTicks);
+        ResetChunkDrawSubmissionCounters();
+        ResetSimdFrustumCounters();
     }
 
     public static void ResetChunkRenderFrame()
@@ -1966,7 +2083,22 @@ public static class OptimumDiagnostics
         double windowGroupsPerFrame = windowFrames == 0 ? 0 : (double)windowGroups / windowFrames;
         double windowCullMsPerFrame = windowFrames == 0 ? 0 : windowCullMs / windowFrames;
 
-        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
+        long indDraws = Interlocked.Read(ref _chunkIndirectDrawCalls);
+        long convDraws = Interlocked.Read(ref _chunkConventionalDrawCalls);
+        long indTicks = Interlocked.Read(ref _chunkIndirectSubmissionTicks);
+        long convTicks = Interlocked.Read(ref _chunkConventionalSubmissionTicks);
+        double indMs = indTicks * 1000.0 / Stopwatch.Frequency;
+        double convMs = convTicks * 1000.0 / Stopwatch.Frequency;
+        double totalSubMs = indMs + convMs;
+        double subMsPerFrame = frames == 0 ? 0 : totalSubMs / frames;
+        double indDrawsPerFrame = frames == 0 ? 0 : (double)indDraws / frames;
+
+        long simdTests = Interlocked.Read(ref _simdFrustumTests);
+        long simdCulled = Interlocked.Read(ref _simdFrustumCulled);
+        double simdTestsPerFrame = frames == 0 ? 0 : (double)simdTests / frames;
+        double simdCulledPerFrame = frames == 0 ? 0 : (double)simdCulled / frames;
+
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, simdTests/frame={simdTestsPerFrame:0.0}, simdCulled/frame={simdCulledPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
     }
 
     public static string GetCountersSummary()
@@ -2307,5 +2439,66 @@ public static class OptimumDiagnostics
         long columns = Interlocked.Read(ref _chunkDeserializeParallelColumns);
         long chunks = Interlocked.Read(ref _chunkDeserializeParallelChunks);
         return $"Optimum chunk deserialize parallel: columns={columns}, chunks={chunks}";
+    }
+}
+
+/// <summary>
+/// Issue #75: Memory layout for an OpenGL 4.3 DrawElementsIndirectCommand struct (20 bytes).
+/// Used by glMultiDrawElementsIndirect to dispatch chunk mesh batches.
+/// </summary>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+public struct DrawElementsIndirectCommand
+{
+    public uint Count;
+    public uint InstanceCount;
+    public uint FirstIndex;
+    public int BaseVertex;
+    public uint BaseInstance;
+
+    public const int SizeInBytes = 20;
+
+    public DrawElementsIndirectCommand(uint count, uint instanceCount, uint firstIndex, int baseVertex, uint baseInstance)
+    {
+        Count = count;
+        InstanceCount = instanceCount;
+        FirstIndex = firstIndex;
+        BaseVertex = baseVertex;
+        BaseInstance = baseInstance;
+    }
+}
+
+/// <summary>
+/// Issue #75: Helper routines for GPU indirect rendering capability detection,
+/// command translation, and safe fallback.
+/// </summary>
+public static class OptimumIndirectRendering
+{
+    public static int BuildCommands(
+        int[] indicesStartsByte,
+        int[] indicesSizes,
+        int groupCount,
+        DrawElementsIndirectCommand[] targetArray)
+    {
+        if (indicesStartsByte == null || indicesSizes == null || targetArray == null)
+        {
+            return 0;
+        }
+
+        int count = Math.Min(groupCount, Math.Min(indicesSizes.Length, targetArray.Length));
+        for (int i = 0; i < count; i++)
+        {
+            uint firstIndex = (uint)(indicesStartsByte[i * 2] / 4);
+            uint indexCount = (uint)Math.Max(0, indicesSizes[i]);
+            targetArray[i] = new DrawElementsIndirectCommand(indexCount, 1u, firstIndex, 0, 0u);
+        }
+
+        return count;
+    }
+
+    public static bool ValidateCommand(in DrawElementsIndirectCommand cmd, int maxIndicesCount)
+    {
+        if (cmd.InstanceCount == 0 || cmd.Count == 0) return false;
+        if (cmd.FirstIndex + cmd.Count > (uint)maxIndicesCount) return false;
+        return true;
     }
 }
