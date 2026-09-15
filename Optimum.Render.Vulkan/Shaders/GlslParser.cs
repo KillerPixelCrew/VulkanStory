@@ -58,6 +58,9 @@ internal sealed class GlslDeclaration
     /// <summary>Interpolation and auxiliary qualifiers preceding the type.</summary>
     public string Qualifiers = "";
 
+    /// <summary>Absolute start of the storage keyword (<c>uniform</c>, <c>buffer</c>, <c>in</c>, ...), or -1.</summary>
+    public int StorageKeywordStart = -1;
+
     public int End => Start + Length;
 }
 
@@ -345,6 +348,7 @@ internal static class GlslParser
                 word == "attribute" || word == "varying" || word == "shared")
             {
                 storage = word;
+                declaration.StorageKeywordStart = start + cursor - word.Length;
                 break;
             }
 

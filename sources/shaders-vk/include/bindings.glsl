@@ -8,7 +8,8 @@
 //   set 0  frame     once per frame        FrameGlobals UBO (dynamic offset) + frame textures
 //   set 1  textures  on create / retire    bindless combined-image-sampler arrays,
 //                                          PARTIALLY_BOUND | UPDATE_AFTER_BIND
-//   set 2  storage   on create / retire    FaceData and the animation buffers
+//   set 2  storage   per draw              FaceData, the animation buffers, the program record
+//                                          and named blocks
 //   push   per draw                        texture slot indices and per-draw scalars
 //
 // Indices into the set-1 arrays come from push constants and are uniform over a
@@ -86,5 +87,9 @@ layout(set = OPTIMUM_SET_TEXTURES, binding = OPTIMUM_BINDING_TEXTURES_CUBE_SHADO
 // The program record (docs/vulkan-native-shaders.md section 4): a dynamic uniform
 // buffer with every non-frame uniform that is not in the push block.
 #define OPTIMUM_BINDING_PROGRAM_RECORD 3
+// Any other named block a rewritten (mod or GLSL 330) program declares, as a
+// layout(std140) readonly storage buffer, in declaration order. More fails the link.
+#define OPTIMUM_BINDING_NAMED_BLOCK_FIRST 4
+#define OPTIMUM_BINDING_NAMED_BLOCK_LAST 7
 
 #endif

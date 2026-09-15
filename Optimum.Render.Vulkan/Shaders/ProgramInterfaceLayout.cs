@@ -1,14 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Client;
 
 namespace Optimum.Render.Vulkan.Shaders;
 
-/// <summary>One member of the generated default-uniform block.</summary>
 /// <summary>One vertex input a program declares, and where it lives.</summary>
 internal readonly record struct VertexInputSlot(string Name, int Location, GlslType Type);
 
+/// <summary>One member of the program record (the generated default-uniform block).</summary>
 internal sealed class UniformMember
 {
     public string Name = "";
@@ -25,20 +26,41 @@ internal sealed class UniformMember
     public int ElementCount => ArrayLength == 0 ? 1 : ArrayLength;
 }
 
+/// <summary>
+/// One sampler a program declares. Under the shared pipeline layout (plan decision 9)
+/// a sampler is either one of set 0's fixed frame textures, read under its own name,
+/// or a slot index into set 1's bindless array of its kind, carried in the push block
+/// under the sampler's name.
+/// </summary>
 internal sealed class SamplerBinding
 {
     public string Name = "";
     public string TypeName = "";
-    public int Binding;
+
+    /// <summary>
+    /// Declaration order across the program, vertex stage first: the texture unit the
+    /// client's own bookkeeping (<c>ShaderProgram.collectUniformNames</c>) assigns by default.
+    /// </summary>
+    public int Order;
+
+    /// <summary>The set 0 binding when this is a fixed frame texture (<see cref="SetConvention.FrameTextures" />), else -1.</summary>
+    public int FrameBinding = -1;
+
+    /// <summary>The set 1 array the slot indexes; meaningful only when <see cref="IsFrameTexture" /> is false.</summary>
+    public TextureKind Kind;
+
+    /// <summary>Byte offset of the slot index in the push block, or -1 for a frame texture.</summary>
+    public int PushOffset = -1;
+
+    public bool IsFrameTexture => FrameBinding >= 0;
 }
 
+/// <summary>A named uniform or storage block and its set 2 binding.</summary>
 internal sealed class BlockBinding
 {
     public string BlockName = "";
-    public int Set;
+    public int Set = SetConvention.StorageSet;
     public int Binding;
-    /// <summary>True when the shader declared the binding itself.</summary>
-    public bool Explicit;
 }
 
 /// <summary>
@@ -64,17 +86,10 @@ internal sealed class BlockBinding
 internal sealed class ProgramInterfaceLayout
 {
     public const string BlockTypeName = "OptimumUniforms";
-    public const string BlockInstanceName = "_optimum";
+    public const string PushBlockTypeName = "OptimumDraw";
 
-    // Sets are ordered by how often their contents change: the frame block every
-    // program shares (FrameGlobals), then the program's textures, its storage
-    // buffers, and last its own uniform blocks, which change between draws.
-    public const int FrameSet = FrameGlobals.Set;
-    public const int SamplerSet = 1;
-    public const int StorageSet = 2;
-    public const int DefaultBlockSet = 3;
-    public const int DefaultBlockBinding = 0;
-    public const int SetCount = 4;
+    /// <summary>Bytes of one sampler slot index in the push block.</summary>
+    public const int SlotBytes = 4;
 
     /// <summary>
     /// The shared frame members each stage declared (see <see cref="FrameGlobals" />).
@@ -108,8 +123,24 @@ internal sealed class ProgramInterfaceLayout
     /// </summary>
     public Dictionary<EnumShaderType, HashSet<string>> MembersByStage { get; } = new();
 
+    /// <summary>Every sampler, frame textures included, in declaration order.</summary>
     public List<SamplerBinding> Samplers { get; } = new();
     public Dictionary<string, SamplerBinding> SamplersByName { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Which samplers each stage declared: a stage gets push members and body rewrites
+    /// only for its own, for the reason <see cref="MembersByStage" /> exists.
+    /// </summary>
+    public Dictionary<EnumShaderType, HashSet<string>> SamplersByStage { get; } = new();
+
+    /// <summary>Bytes of the push block: one slot index per non-frame sampler; 0 when there are none.</summary>
+    public int PushConstantSize { get; private set; }
+
+    /// <summary>Whether any sampler reads a set 0 frame texture.</summary>
+    public bool UsesFrameTextures { get; private set; }
+
+    /// <summary>Whether a draw of the program needs set 2: a record, a named block or a storage block.</summary>
+    public bool UsesStorageSet => HasUniformBlock || UniformBlocks.Count > 0 || StorageBlocks.Count > 0;
 
     public List<BlockBinding> UniformBlocks { get; } = new();
     public List<BlockBinding> StorageBlocks { get; } = new();
@@ -146,7 +177,7 @@ internal sealed class ProgramInterfaceLayout
     /// </summary>
     public HashSet<int> WrittenFragmentOutputs { get; } = new();
 
-    /// <summary>Size of the generated block in bytes; 0 when it has no members.</summary>
+    /// <summary>Size of the program record in bytes; 0 when it has no members.</summary>
     public int BlockSize { get; private set; }
 
     public bool HasUniformBlock => BlockSize > 0;
@@ -223,8 +254,7 @@ internal sealed class ProgramInterfaceLayout
     {
         var layout = new ProgramInterfaceLayout();
         int offset = 0;
-        int nextUniformBlockBinding = DefaultBlockBinding + 1;
-        int nextStorageBinding = 0;
+        int nextNamedBinding = SetConvention.NamedBlockFirstBinding;
 
         foreach ((EnumShaderType stage, ParsedShader parsed) in stages)
         {
@@ -236,13 +266,13 @@ internal sealed class ProgramInterfaceLayout
                         AddDefaultUniform(layout, declaration, stage, includes, ref offset);
                         break;
                     case GlslDeclarationKind.OpaqueUniform:
-                        AddSampler(layout, declaration);
+                        AddSampler(layout, declaration, stage);
                         break;
                     case GlslDeclarationKind.UniformBlock:
-                        AddBlock(layout.UniformBlocks, declaration, DefaultBlockSet, ref nextUniformBlockBinding);
+                        AddBlock(layout, layout.UniformBlocks, declaration, ref nextNamedBinding);
                         break;
                     case GlslDeclarationKind.StorageBlock:
-                        AddBlock(layout.StorageBlocks, declaration, StorageSet, ref nextStorageBinding);
+                        AddBlock(layout, layout.StorageBlocks, declaration, ref nextNamedBinding);
                         break;
                 }
             }
@@ -335,49 +365,124 @@ internal sealed class ProgramInterfaceLayout
         layout.MembersByName[member.Name] = member;
     }
 
-    private static void AddSampler(ProgramInterfaceLayout layout, GlslDeclaration declaration)
+    /// <summary>
+    /// Classifies a sampler under the shared layout. A name and type that match one of
+    /// set 0's fixed frame textures read that binding; every other sampler takes the
+    /// next push-block slot, in declaration order, and indexes the set 1 array of its
+    /// GLSL type. A type set 1 has no array for, a sampler array, or more slots than
+    /// the push block holds is a link error.
+    /// </summary>
+    private static void AddSampler(ProgramInterfaceLayout layout, GlslDeclaration declaration, EnumShaderType stage)
     {
-        if (layout.SamplersByName.ContainsKey(declaration.Name)) return;
+        if (!layout.SamplersByStage.TryGetValue(stage, out HashSet<string>? stageSamplers))
+        {
+            stageSamplers = new HashSet<string>(StringComparer.Ordinal);
+            layout.SamplersByStage[stage] = stageSamplers;
+        }
+        stageSamplers.Add(declaration.Name);
+
+        if (layout.SamplersByName.TryGetValue(declaration.Name, out SamplerBinding? existing))
+        {
+            if (!string.Equals(existing.TypeName, declaration.TypeName, StringComparison.Ordinal))
+            {
+                layout.Errors.Add($"sampler '{declaration.Name}' is declared as '{existing.TypeName}' " +
+                                  $"and '{declaration.TypeName}' in different stages");
+            }
+            return;
+        }
 
         var binding = new SamplerBinding
         {
             Name = declaration.Name,
             TypeName = declaration.TypeName,
-            Binding = layout.Samplers.Count,
+            Order = layout.Samplers.Count,
         };
         layout.Samplers.Add(binding);
         layout.SamplersByName[binding.Name] = binding;
+
+        if (declaration.ArrayLength != 0 || declaration.UnresolvedArraySize != null)
+        {
+            layout.Errors.Add($"sampler '{declaration.Name}' is an array, which the shared layout's push slots cannot index");
+            return;
+        }
+
+        foreach (SetConvention.Binding frame in SetConvention.FrameTextures)
+        {
+            if (string.Equals(frame.Name, declaration.Name, StringComparison.Ordinal) &&
+                string.Equals(frame.GlslType, declaration.TypeName, StringComparison.Ordinal))
+            {
+                binding.FrameBinding = frame.Value;
+                layout.UsesFrameTextures = true;
+                return;
+            }
+        }
+
+        if (!BindlessKinds.TryFromGlslType(declaration.TypeName, out TextureKind kind))
+        {
+            layout.Errors.Add($"sampler '{declaration.Name}' has type '{declaration.TypeName}', " +
+                              "for which set 1 has no bindless array");
+            return;
+        }
+
+        binding.Kind = kind;
+        binding.PushOffset = layout.PushConstantSize;
+        layout.PushConstantSize += SlotBytes;
+        if (layout.PushConstantSize > SetConvention.PushConstantBytes)
+        {
+            layout.Errors.Add($"sampler '{declaration.Name}' needs push byte {layout.PushConstantSize}, " +
+                              $"past the {SetConvention.PushConstantBytes} the shared layout holds");
+        }
     }
 
+    /// <summary>
+    /// Gives a named block its set 2 binding. The game's <c>Animation</c> and
+    /// <c>AnimationPrev</c> blocks take the convention's animation bindings, the first
+    /// storage block takes FaceData's, and every other block takes the next binding of
+    /// the named-block range in declaration order. A binding the shader stated is not
+    /// kept: chunkopaque.vsh's <c>binding = 3</c> is the record's binding under the
+    /// shared layout, and the mesh path binds FaceData by the convention's number.
+    /// </summary>
     private static void AddBlock(
-        List<BlockBinding> blocks, GlslDeclaration declaration, int set, ref int nextBinding)
+        ProgramInterfaceLayout layout, List<BlockBinding> blocks, GlslDeclaration declaration, ref int nextNamedBinding)
     {
         foreach (BlockBinding existing in blocks)
         {
             if (existing.BlockName == declaration.Name) return;
         }
 
-        // A shader that names its own binding keeps it: chunkopaque.vsh declares
-        // "layout(binding = 3, std430) readonly buffer faceDataBuf", and the mesh
-        // path binds the vertex buffer to that exact index.
-        int declared = ReadQualifierInt(declaration.LayoutQualifiers, "binding");
-
-        // Set 0, binding 0 is where the generated OptimumUniforms block lives.
-        // A shader that names that binding itself would register two blocks at
-        // one descriptor binding, so it is treated as unnumbered and moves to
-        // the next free binding; the rewriter re-emits the qualifier from here.
-        if (set == DefaultBlockSet && declared == DefaultBlockBinding) declared = -1;
-
-        blocks.Add(new BlockBinding
+        int binding;
+        bool storage = declaration.Kind == GlslDeclarationKind.StorageBlock;
+        if (!storage && declaration.Name == "Animation" && !HasBinding(layout, SetConvention.AnimationBinding))
         {
-            BlockName = declaration.Name,
-            Set = set,
-            Binding = declared >= 0 ? declared : nextBinding,
-            Explicit = declared >= 0,
-        });
+            binding = SetConvention.AnimationBinding;
+        }
+        else if (!storage && declaration.Name == "AnimationPrev" && !HasBinding(layout, SetConvention.AnimationPrevBinding))
+        {
+            binding = SetConvention.AnimationPrevBinding;
+        }
+        else if (storage && !HasBinding(layout, SetConvention.FaceDataBinding))
+        {
+            binding = SetConvention.FaceDataBinding;
+        }
+        else if (nextNamedBinding <= SetConvention.NamedBlockLastBinding)
+        {
+            binding = nextNamedBinding++;
+        }
+        else
+        {
+            layout.Errors.Add($"block '{declaration.Name}' does not fit set 2: the shared layout holds " +
+                              $"{SetConvention.NamedBlockLastBinding - SetConvention.NamedBlockFirstBinding + 1} named blocks");
+            return;
+        }
 
-        if (declared < 0) nextBinding++;
-        else if (declared >= nextBinding) nextBinding = declared + 1;
+        blocks.Add(new BlockBinding { BlockName = declaration.Name, Binding = binding });
+    }
+
+    private static bool HasBinding(ProgramInterfaceLayout layout, int binding)
+    {
+        foreach (BlockBinding block in layout.UniformBlocks) if (block.Binding == binding) return true;
+        foreach (BlockBinding block in layout.StorageBlocks) if (block.Binding == binding) return true;
+        return false;
     }
 
     // ----------------------------------------------------------------- locations
@@ -631,23 +736,6 @@ internal sealed class ProgramInterfaceLayout
             }
             candidate++;
         }
-    }
-
-    private static int ReadQualifierInt(string? qualifiers, string key)
-    {
-        if (qualifiers == null) return -1;
-        foreach (string part in qualifiers.Split(','))
-        {
-            int equals = part.IndexOf('=');
-            if (equals < 0) continue;
-            if (part.AsSpan(0, equals).Trim().SequenceEqual(key) &&
-                int.TryParse(part.AsSpan(equals + 1).Trim(), NumberStyles.Integer,
-                    CultureInfo.InvariantCulture, out int value))
-            {
-                return value;
-            }
-        }
-        return -1;
     }
 
     private static int Align(int value, int alignment) =>

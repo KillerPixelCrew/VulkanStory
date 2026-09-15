@@ -219,23 +219,6 @@ public class FrameRingTests
 
     // -------------------------------------------------------- descriptor cache
 
-    /// <summary>
-    /// The set and binding numbers are decided by the shader rewriter and
-    /// duplicated as constants in the descriptor layer so it does not depend on
-    /// the translation types. If the two ever drift, samplers get written into
-    /// the wrong set and nothing renders.
-    /// </summary>
-    [Fact]
-    public void DescriptorBindingConstantsAgreeWithTheShaderRewriter()
-    {
-        Assert.Equal(ProgramInterfaceLayout.FrameSet, ProgramInterfaceLayoutBindings.FrameSet);
-        Assert.Equal(FrameGlobals.Binding, ProgramInterfaceLayoutBindings.FrameBinding);
-        Assert.Equal(ProgramInterfaceLayout.DefaultBlockSet, ProgramInterfaceLayoutBindings.DefaultBlockSet);
-        Assert.Equal(ProgramInterfaceLayout.DefaultBlockBinding, ProgramInterfaceLayoutBindings.DefaultBlockBinding);
-        Assert.Equal(ProgramInterfaceLayout.SamplerSet, ProgramInterfaceLayoutBindings.SamplerSet);
-        Assert.Equal(ProgramInterfaceLayout.StorageSet, ProgramInterfaceLayoutBindings.StorageSet);
-    }
-
     [Fact]
     public void DescriptorContentsCompareByValue()
     {
@@ -278,10 +261,10 @@ public class FrameRingTests
                 ImageUsageFlags.SampledBit, ImageAspectFlags.ColorBit);
 
             Sampler sampler = CreateSampler(context!);
-            DescriptorSetLayout layout = program.SetLayouts[ProgramInterfaceLayout.SamplerSet];
+            DescriptorSetLayout layout = program.StandaloneLayout!.FrameSetLayout;
 
-            DescriptorSetContents Contents() => new(1, ProgramInterfaceLayout.SamplerSet,
-                new[] { new SamplerBindingValue(0, image.View, sampler) },
+            DescriptorSetContents Contents() => new(1, SetConvention.FrameSet,
+                new[] { new SamplerBindingValue((uint)SetConvention.FrameTextures[0].Value, image.View, sampler) },
                 Array.Empty<BufferBindingValue>());
 
             DescriptorSet first = cache.Get(Contents(), layout);
@@ -319,7 +302,7 @@ public class FrameRingTests
                 ImageUsageFlags.SampledBit, ImageAspectFlags.ColorBit);
 
             Sampler sampler = CreateSampler(context!);
-            DescriptorSetLayout layout = program.SetLayouts[ProgramInterfaceLayout.SamplerSet];
+            DescriptorSetLayout layout = program.StandaloneLayout!.FrameSetLayout;
 
             // Distinct views over one image: cheap, and enough to make each set's
             // contents unique without one device allocation per entry.
@@ -340,8 +323,8 @@ public class FrameRingTests
                     context!.Api.CreateImageView(context.Device, &viewInfo, null, out ImageView view);
                     views.Add(view);
 
-                    cache.Get(new DescriptorSetContents(1, ProgramInterfaceLayout.SamplerSet,
-                        new[] { new SamplerBindingValue(0, view, sampler) },
+                    cache.Get(new DescriptorSetContents(1, SetConvention.FrameSet,
+                        new[] { new SamplerBindingValue((uint)SetConvention.FrameTextures[0].Value, view, sampler) },
                         Array.Empty<BufferBindingValue>()), layout);
                 }
 

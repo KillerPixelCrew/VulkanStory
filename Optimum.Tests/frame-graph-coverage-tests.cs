@@ -95,7 +95,7 @@ public class FrameGraphCoverageTests
     {
         string stats = Read("Optimum.Render.Vulkan/Core/VulkanStats.cs");
         Assert.Contains("\"passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} \"", stats);
-        Assert.Contains("\"standalone_clears={17} pass_splits={18}\"", stats);
+        Assert.Contains("\"standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} \"", stats);
 
         string doc = Read("docs/taa-acceptance.md");
         Assert.Contains("OPTIMUM_VULKAN_FRAMEGRAPH=0", doc);

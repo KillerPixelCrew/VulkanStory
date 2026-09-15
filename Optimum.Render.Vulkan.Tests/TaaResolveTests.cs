@@ -71,7 +71,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentR = 0.7f, currentG = 0.3f, currentB = 0.2f;
@@ -129,7 +129,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentValue = 0.6f;
@@ -209,7 +209,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
@@ -280,7 +280,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentValue = 0.5f;
@@ -357,7 +357,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
@@ -435,7 +435,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float edgeCentre = 16f;
@@ -477,7 +477,7 @@ public class TaaResolveTests
     private static unsafe float ResolveEdgeCentroid(
         VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
-        DescriptorCache descriptors, (float x, float y) jitterPx, Func<float, float> sceneAt)
+        SharedLayoutTestBinding descriptors, (float x, float y) jitterPx, Func<float, float> sceneAt)
     {
         var inputs = CreateInputSet(textures);
         UploadRgba16F(textures, inputs.SceneTex,
@@ -532,7 +532,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const int brightColumn = 16;
@@ -602,7 +602,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentR = 0.65f, currentG = 0.4f, currentB = 0.25f;
@@ -987,7 +987,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state, fragmentTransform);
 
             var inputs = CreateInputSet(textures);
@@ -1124,7 +1124,7 @@ public class TaaResolveTests
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
-            using var descriptors = new DescriptorCache(context!);
+            using var descriptors = new SharedLayoutTestBinding(context!, textures);
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
@@ -1281,7 +1281,7 @@ public class TaaResolveTests
     private static unsafe void ResolveOnce(
         VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
-        DescriptorCache descriptors, TaaInputSet inputs, TaaUniforms uniforms, TaaAttachmentSet output)
+        SharedLayoutTestBinding descriptors, TaaInputSet inputs, TaaUniforms uniforms, TaaAttachmentSet output)
     {
         SetUniformFloats(program, "renderSize", uniforms.RenderSize);
         SetUniformFloats(program, "jitterPx", uniforms.JitterPx);
@@ -1322,16 +1322,15 @@ public class TaaResolveTests
             AddressV = SamplerAddressMode.ClampToEdge,
         };
 
-        var samplerBindings = new SamplerBindingValue[program.Interface.Samplers.Count];
-        var sampledTextures = new VulkanTexture[samplerBindings.Length];
-        for (int i = 0; i < samplerBindings.Length; i++)
+        var samplers = new Dictionary<string, SharedLayoutTestBinding.SampledTexture>(StringComparer.Ordinal);
+        var sampledTextures = new VulkanTexture[program.Interface.Samplers.Count];
+        for (int i = 0; i < sampledTextures.Length; i++)
         {
             SamplerBinding declared = program.Interface.Samplers[i];
             VulkanTexture texture = textures.Get(textureByName[declared.Name])
                 ?? throw new InvalidOperationException("no texture bound for sampler '" + declared.Name + "'");
             sampledTextures[i] = texture;
-            Sampler samplerHandle = textures.Samplers.Get(samplerState);
-            samplerBindings[i] = new SamplerBindingValue((uint)declared.Binding, texture.View, samplerHandle, texture.Id);
+            samplers[declared.Name] = new SharedLayoutTestBinding.SampledTexture(textureByName[declared.Name], samplerState);
         }
 
         VulkanFramebuffer bound = targets.Get(output.Framebuffer)!;
@@ -1365,6 +1364,7 @@ public class TaaResolveTests
             {
                 textures.TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
             }
+            descriptors.Transition(commandBuffer, Array.Empty<SharedLayoutTestBinding.SampledTexture>());
 
             targets.Bind(commandBuffer, output.Framebuffer);
             targets.EnsureRendering(commandBuffer);
@@ -1389,33 +1389,7 @@ public class TaaResolveTests
             api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, 0);
             api.CmdSetLineWidth(commandBuffer, 1.0f);
 
-            if (program.Interface.HasUniformBlock)
-            {
-                var uniformContents = new DescriptorSetContents(
-                    program.ProgramId, ProgramInterfaceLayout.DefaultBlockSet,
-                    Array.Empty<SamplerBindingValue>(),
-                    new[]
-                    {
-                        new BufferBindingValue(ProgramInterfaceLayout.DefaultBlockBinding,
-                            uniformBuffer.Handle, 0, (ulong)program.UniformShadow.Length, uniformBuffer.Id),
-                    });
-                DescriptorSet uniformSet = descriptors.Get(
-                    uniformContents, program.SetLayouts[ProgramInterfaceLayout.DefaultBlockSet]);
-                uint dynamicOffset = 0;
-                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                    ProgramInterfaceLayout.DefaultBlockSet, 1, &uniformSet, 1, &dynamicOffset);
-            }
-
-            if (samplerBindings.Length > 0)
-            {
-                var samplerContents = new DescriptorSetContents(
-                    program.ProgramId, ProgramInterfaceLayout.SamplerSet,
-                    samplerBindings, Array.Empty<BufferBindingValue>());
-                DescriptorSet samplerSet = descriptors.Get(
-                    samplerContents, program.SetLayouts[ProgramInterfaceLayout.SamplerSet]);
-                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                    ProgramInterfaceLayout.SamplerSet, 1, &samplerSet, 0, null);
-            }
+            descriptors.Bind(commandBuffer, program, samplers, record: uniformBuffer);
 
             api.CmdDraw(commandBuffer, 3, 1, 0, 0);
             targets.EndRendering(commandBuffer);

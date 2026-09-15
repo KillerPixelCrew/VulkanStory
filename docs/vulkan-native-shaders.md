@@ -175,6 +175,11 @@ records the decision here):
   - `OPTIMUM_BINDING_ANIMATION` and `OPTIMUM_BINDING_ANIMATION_PREV` hold the bone matrices, read as storage
     buffers.
   - `OPTIMUM_BINDING_PROGRAM_RECORD` (binding 3) is the program record: a dynamic uniform buffer.
+  - `OPTIMUM_BINDING_NAMED_BLOCK_FIRST`..`_LAST` (4..7) hold a rewritten program's other named blocks, as
+    std140 storage buffers in declaration order (section 8). Native programs do not use the range.
+  - Set 2 is written whole: a binding a draw has nothing for holds a zero-filled placeholder buffer. It is
+    built per draw (a set naming a uniform-ring offset comes from the frame slot's arena) and bound only
+    when the set or the record's dynamic offset changed.
 - **Push constants:** one block per program, at most `OPTIMUM_PUSH_CONSTANT_BYTES` (128).
 
 ## 4. Placement: push block and program record
@@ -401,7 +406,37 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
 - **Environment overrides:**
   - `OPTIMUM_VK_NATIVE_SHADERS=0` forces the rewriter for A/B runs.
   - `OPTIMUM_VK_SHADER_SOURCE=<dir>` compiles the source tree at runtime for the development loop.
-- **Mod shaders:** they stay on the rewriter, retargeted to the same shared layout (handoff item 4, first half).
+- **Mod shaders:** they stay on the rewriter, retargeted to the same shared layout (handoff item 4, first half,
+  delivered 2026-09-15). `ShaderProgramResources` owns no set or pipeline layout; every pipeline is built
+  against `SharedPipelineLayout`. The rewriter (`ProgramInterfaceLayout.Build`, `ShaderRewriter`) emits:
+  - **Samplers.** A name and type equal to a `SetConvention.FrameTextures` entry reads set 0 at that binding.
+    Every other sampler becomes `layout(offset = 4n) uint <name>` in an anonymous
+    `layout(push_constant, scalar) uniform OptimumDraw` block, in GLSL 330 declaration order (the order
+    `collectUniformNames` assigns units in), and the stage declares the set 1 arrays it indexes. Every
+    reference to the sampler in the body becomes `optimumTextures<Kind>[<name>]`: a sampler can only be a
+    function argument, so sampling calls (`texture`, `texelFetch`, `textureLod`, `textureGather`,
+    `textureGrad`, `textureSize`) and samplers handed to the shader's own functions (`getColorMapped`,
+    FXAA's texture chain, `sampleCatmullRom`) are one rule. A parameter, local or struct member of the same
+    name shadows the global in its scope and is left alone. (A `sampler2D` local initialised from the array
+    would have spared the body rewrite, but GLSL allows samplers only as uniforms and function parameters.)
+    A sampler array, a type set 1 has no array for, or more than 32 slots fails the link.
+  - **Loose uniforms.** Frame members as before (`FrameGlobals.TryPlace`); every other one is the program
+    record at set 2 binding 3 (scalar layout, explicit offsets). `LocationOf` keeps its three ranges.
+  - **Named uniform blocks** become `layout(std140, set = 2, binding = N) readonly buffer`: `Animation` and
+    `AnimationPrev` at bindings 1 and 2, any other at 4..7 in declaration order, more fails the link. std140
+    is forced because a storage buffer defaults to std430, and std140 is what the client's UBO uploads
+    already stride to. The draw snapshots the client UBO into the uniform ring (which gains STORAGE usage and
+    aligns to both offset limits) and names the snapshot's offset in set 2.
+  - **Storage blocks** move to `OPTIMUM_BINDING_FACE_DATA` whatever binding the shader stated: chunkopaque's
+    `binding = 3` is the record's under the shared layout. A second storage block takes the named-block range.
+  - **The draw** resolves each sampler: unit, bound texture (a feedback draw's ReadSelf copy in place of the
+    attachment; a transient rebind through `TextureManager.Get` to the physical texture), the unit's sampler
+    object over the texture's state, then the bindless slot of the declared kind keyed on
+    `DEPTH_READ_ONLY_OPTIMAL` when it samples the bound depth attachment with writes off, or the kind's
+    placeholder (slot 0) when the texture cannot sit behind the kind. Set 1 is bound once per recording, set 0
+    only when its set or offset changed (never by a program switch alone), push constants only when the bytes
+    changed. `stats.counters` reports `push_constants`, `storage_set_binds`, `bindless_slots` and
+    `bindless_placeholders`.
 - **Initializers:** a block member cannot carry a GLSL 330 initializer (`uniform float maxlight = 1;`), and
   some are never set by the client (`final`'s `minlight`, `maxlight`, `minsat`, `maxsat`; a zero `maxlight`
   divides by zero in `ColorGrade`). On a hit the runtime seeds the push shadow and the record from the GLSL 330

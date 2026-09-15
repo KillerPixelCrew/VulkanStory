@@ -101,7 +101,7 @@ public class FrameGlobalsTests
         Assert.Contains("layout(scalar, set = 0, binding = 0) uniform OptimumFrameGlobals", code);
         Assert.Contains($"layout(offset = {lights.Offset}) vec3 pointLights[4];", code);
         Assert.Contains($"layout(offset = {distance.Offset}) float viewDistance;", code);
-        Assert.Contains("layout(scalar, set = 3, binding = 0) uniform OptimumUniforms", code);
+        Assert.Contains("layout(scalar, set = 2, binding = 3) uniform OptimumUniforms", code);
         Assert.DoesNotContain("uniform vec3 pointLights[4];", code);
     }
 

@@ -72,7 +72,7 @@ internal static class BindlessKinds
     /// <summary>
     /// Whether a texture of <paramref name="shape" /> can legally sit behind
     /// <paramref name="kind" />. The dimensionality rules are the ones
-    /// <c>TextureSuitsSampler</c> applies to per-program sets (a GL texture target
+    /// the draw path applies to every sampler (a GL texture target
     /// cannot change): 2D kinds need one layer, array kinds more than one, cube
     /// kinds a cube, 3D a volume. Shadow kinds need a depth format, integer kinds
     /// the matching signedness, and float kinds a non-integer format (depth reads
