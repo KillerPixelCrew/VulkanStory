@@ -1,6 +1,6 @@
 # feat/vulkan-taa: handoff
 
-Everything needed to continue the Vulkan branch on another machine. Last updated 2026-09-15 at c6af6f9.
+Everything needed to continue the Vulkan branch on another machine. Last updated 2026-09-16 at 14f0779.
 
 - Plan of record: `docs/vulkan-native-plan.md` (decisions 1-9, phases, risks).
 - Research the designs follow: `docs/research/` (caching, descriptor model, bindless, XeGTAO, validation).
@@ -202,6 +202,26 @@ Windows run above.
   (`dotnet test Optimum.Render.Vulkan.Tests --filter <names> --logger "console;verbosity=detailed"`) with the
   Windows implicit layers disabled, and record the driver version and `vulkaninfo --summary` (present modes,
   image counts) next to it.
+
+### Test state (Linux notebook, 2026-09-16, at 14f0779): the native shaders in the real client
+
+Headless captures of `serene cave world` (`scripts/dev/headless-capture.sh`, 5 frames from in-world frame 300,
+window never mapped), implicit layers off, `sync,best` validation to a file. The dev client was deployed with
+`make deploy INSTALL_DIR=/nonexistent-...` so the user's own install was not touched.
+
+- **Vulkan, native shaders forced** (`OPTIMUM_VK_NATIVE_SHADERS=force`): `[Optimum] shaders: 63 native, 4 rewritten,
+  0 failed` (the 4 have no manifest entry: the inline `MinimalGui`, the mod-registered `optimum-map` and two
+  registration variants; nothing fell back with a reason). **0 validation errors, 0 `SYNC-` messages.** GTAO ran
+  (up to 177 compute passes per stats sample).
+- **Vulkan, default**: the dev client has no launcher scan, so the conservative rule put every program on the
+  rewriter (`0 native, 50 rewritten`) - as designed. Same run: 0 validation errors, 0 `SYNC-`, GTAO active.
+- **OpenGL**: ran unchanged, twice.
+- **Pixels (`scripts/dev/ssim.py`)**: two OpenGL launches of the same save differ by **SSIM 0.9757** (mean abs 1.73)
+  - the same-session noise floor, since a launch differs in world time, weather and entities. Native vs rewriter on
+  Vulkan is **0.9770** (1.58), *inside* that floor: the 49 native programs introduce no measurable pixel difference.
+  Vulkan vs OpenGL is 0.969 and native vs OpenGL 0.964, both around the floor and not a per-pass comparison.
+- Not yet measured: a deterministic comparison with the scene stilled (`--commands`, `--fixed-dt`), the AO
+  measurement plan of `docs/research/ambient-occlusion.md` section D, and pacing numbers.
 
 ### Next, in order
 
