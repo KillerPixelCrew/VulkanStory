@@ -444,7 +444,8 @@ internal static class VulkanStats
                    Leases: Interlocked.Exchange(ref _transientLeases, 0),
                    AliasedLeases: Interlocked.Exchange(ref _aliasedLeases, 0),
                    ReadSelfCopies: Interlocked.Exchange(ref _readSelfCopies, 0),
-                   ReadSelfPool: Interlocked.Read(ref _readSelfPool)));
+                   ReadSelfPool: Interlocked.Read(ref _readSelfPool))) + "\n" +
+               FormatPipelinesLine(TakePipelineSample());
     }
 
     private static double Mib(ulong bytes) => bytes / (1024.0 * 1024.0);
@@ -515,7 +516,75 @@ internal static class VulkanStats
             counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits);
 
     private static long _lastSample;
+
+    private static long _pipelinesSync;
+    private static long _pipelinesAsync;
+    private static long _pipelinesPrewarmed;
+    private static long _pipelinesWarm;
+    private static long _pipelineDrawsSkipped;
+    private static long _pipelinesPending;
+    private static long _pipelineCacheBytes;
+    private static long _pipelineCacheSaves;
+
+    /// <summary>A pipeline compiled on the calling (render) thread, blocking the draw.</summary>
+    public static void NotePipelineCompiledSync() => Interlocked.Increment(ref _pipelinesSync);
+
+    /// <summary>A pipeline a draw asked for, compiled by the background worker.</summary>
+    public static void NotePipelineCompiledAsync() => Interlocked.Increment(ref _pipelinesAsync);
+
+    /// <summary>A pipeline built from the pipeline-key log before any draw asked for it.</summary>
+    public static void NotePipelinePrewarmed() => Interlocked.Increment(ref _pipelinesPrewarmed);
+
+    /// <summary>A FAIL_ON_PIPELINE_COMPILE_REQUIRED creation the driver cache satisfied without compiling.</summary>
+    public static void NotePipelineWarm() => Interlocked.Increment(ref _pipelinesWarm);
+
+    /// <summary>A draw skipped because its pipeline was still compiling in the background.</summary>
+    public static void NotePipelineDrawSkipped() => Interlocked.Increment(ref _pipelineDrawsSkipped);
+
+    public static void NotePipelinesPending(int pending) => Interlocked.Exchange(ref _pipelinesPending, pending);
+
+    /// <summary>Serialised driver cache size at the last sample or save.</summary>
+    public static void NotePipelineCacheBytes(long bytes) => Interlocked.Exchange(ref _pipelineCacheBytes, bytes);
+
+    /// <summary>A driver pipeline cache file written (opportunistic or shutdown).</summary>
+    public static void NotePipelineCacheSave() => Interlocked.Increment(ref _pipelineCacheSaves);
+
+    public static long PipelineDrawsSkipped => Interlocked.Read(ref _pipelineDrawsSkipped);
+
+    private static PipelineSample TakePipelineSample() => new(
+        CompiledSync: Interlocked.Exchange(ref _pipelinesSync, 0),
+        CompiledAsync: Interlocked.Exchange(ref _pipelinesAsync, 0),
+        Prewarmed: Interlocked.Exchange(ref _pipelinesPrewarmed, 0),
+        Warm: Interlocked.Exchange(ref _pipelinesWarm, 0),
+        DrawsSkipped: Interlocked.Exchange(ref _pipelineDrawsSkipped, 0),
+        Pending: Interlocked.Read(ref _pipelinesPending),
+        CacheBytes: Interlocked.Read(ref _pipelineCacheBytes),
+        Saves: Interlocked.Exchange(ref _pipelineCacheSaves, 0));
+
+    /// <summary>
+    /// <c>stats.pipelines</c>: pipelines compiled blocking, by the background worker, and
+    /// prewarmed from the key log over the interval; creations the driver cache satisfied
+    /// without a compile; draws skipped waiting for a pipeline; compiles still pending; the
+    /// serialised driver cache size at the last sample; cache files written over the interval.
+    /// </summary>
+    public static string FormatPipelinesLine(PipelineSample sample) =>
+        string.Format(CultureInfo.InvariantCulture,
+            "stats.pipelines compiled_sync={0} compiled_async={1} prewarmed={2} warm={3} draws_skipped={4} " +
+            "pending={5} cache_bytes={6} saves={7}",
+            sample.CompiledSync, sample.CompiledAsync, sample.Prewarmed, sample.Warm, sample.DrawsSkipped,
+            sample.Pending, sample.CacheBytes, sample.Saves);
 }
+
+/// <summary>The values on the <c>stats.pipelines</c> line.</summary>
+internal readonly record struct PipelineSample(
+    long CompiledSync,
+    long CompiledAsync,
+    long Prewarmed,
+    long Warm,
+    long DrawsSkipped,
+    long Pending,
+    long CacheBytes,
+    long Saves);
 
 /// <summary>The per-interval counters on the <c>stats.counters</c> line.</summary>
 internal readonly record struct CounterSample(

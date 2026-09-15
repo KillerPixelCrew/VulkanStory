@@ -84,6 +84,11 @@ internal sealed class VulkanCapabilities
     public bool DynamicColorBlend;
     /// <summary>The tier draws use; see <see cref="Core.ColorWriteTier" />.</summary>
     public ColorWriteTier ColorWriteTier = ColorWriteTier.PipelineKey;
+    /// <summary>
+    /// pipelineCreationCacheControl (core in 1.3, optional to support) enabled: pipelines can be
+    /// created with FAIL_ON_PIPELINE_COMPILE_REQUIRED, which the background compile path needs.
+    /// </summary>
+    public bool PipelineCreationCacheControl;
 }
 
 /// <summary>
@@ -940,12 +945,24 @@ internal sealed unsafe class VulkanContext : IDisposable
             _ => wantDeviceFault ? &faultFeatures : null,
         };
 
+        // Optional: FAIL_ON_PIPELINE_COMPILE_REQUIRED for the background compile path
+        // (docs/research/vulkan-caching.md §2). Without it every pipeline compiles blocking.
+        var vulkan13Query = new PhysicalDeviceVulkan13Features { SType = StructureType.PhysicalDeviceVulkan13Features };
+        var vulkan13QueryRoot = new PhysicalDeviceFeatures2
+        {
+            SType = StructureType.PhysicalDeviceFeatures2,
+            PNext = &vulkan13Query,
+        };
+        Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &vulkan13QueryRoot);
+        bool pipelineCacheControl = vulkan13Query.PipelineCreationCacheControl;
+
         var vulkan13 = new PhysicalDeviceVulkan13Features
         {
             SType = StructureType.PhysicalDeviceVulkan13Features,
             PNext = optionalFeatures,
             DynamicRendering = true,
             Synchronization2 = true,
+            PipelineCreationCacheControl = pipelineCacheControl,
         };
         var vulkan12 = new PhysicalDeviceVulkan12Features
         {
@@ -1012,6 +1029,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
         Capabilities.ColorWriteTier = colorWriteTier;
+        Capabilities.PipelineCreationCacheControl = pipelineCacheControl;
         Capabilities.ColorWriteEnable = colorWriteTier == ColorWriteTier.DynamicEnable;
         Capabilities.DynamicColorWriteMask = colorWriteTier == ColorWriteTier.DynamicMask;
         Capabilities.DynamicColorBlend = colorWriteTier == ColorWriteTier.DynamicMask && canBlend;
