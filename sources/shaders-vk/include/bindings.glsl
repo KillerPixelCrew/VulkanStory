@@ -26,6 +26,13 @@
 
 #define OPTIMUM_PUSH_CONSTANT_BYTES 128
 
+// A sampler's slot index in the push block, under the GLSL 330 sampler's own name:
+//   OPTIMUM_SAMPLER_SLOT(sampler2DArray, terrainTex);
+// declares `uint terrainTex`. SPIR-V keeps no trace of which array a uint indexes, so the
+// offline compiler reads the type from this declaration and checks it against the set 1
+// array the shipped module actually indexes (docs/vulkan-native-shaders.md section 4).
+#define OPTIMUM_SAMPLER_SLOT(glslType, name) uint name
+
 // Set 0. The FrameGlobals block itself is generated from Shaders/FrameGlobals.cs.
 #define OPTIMUM_BINDING_FRAME_GLOBALS 0
 #define OPTIMUM_BINDING_SHADOW_MAP_FAR 1

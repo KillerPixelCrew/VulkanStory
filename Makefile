@@ -39,7 +39,7 @@ ifneq ($(CLIENT_ARCHIVE),)
 endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
-.PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat check-shaders check-shaders-vk bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
@@ -57,6 +57,12 @@ check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 
 check-shaders: ## Verify optimized shader overlays are not truncated
 	bash scripts/validate-shader-assets.sh sources/shaders
+
+SHADER_COMPILER = tools/shader-compiler/bin/$(CONFIGURATION)/net10.0/Optimum.Shaders.Compiler.dll
+
+check-shaders-vk: ## Recompile sources/shaders-vk and fail on any SPIR-V or manifest difference from the build output
+	dotnet build tools/shader-compiler/Optimum.Shaders.Compiler.csproj -c $(CONFIGURATION) --nologo -v quiet -p:OptimumSkipNativeShaders=true
+	dotnet $(SHADER_COMPILER) --verify sources/shaders-vk $(MOD_OUT)
 
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
@@ -110,6 +116,15 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@# directory and LD_LIBRARY_PATH, not Lib/, and a copy it cannot find makes the
 	@# renderer fall back to OpenGL silently.
 	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/; fi
+	@# Native SPIR-V and its manifest (docs/vulkan-native-shaders.md section 6), beside the
+	@# renderer and never under assets/: the asset manager must not read SPIR-V and a mod must
+	@# not shadow engine shaders by asset priority. The build always writes the manifest, even
+	@# for an empty source tree, so a missing one means tools/shader-compiler never ran. The
+	@# directory is replaced whole, so a removed program does not linger, and checked file by
+	@# file like the overlays below.
+	@[ -f "$(MOD_OUT)/shaders-vk/shaders.manifest.json" ] || { echo "Error: $(MOD_OUT)/shaders-vk/shaders.manifest.json missing; build tools/shader-compiler (dotnet build VintageStory.slnx)"; exit 1; }
+	@rm -rf "$(VANILLA_DIR)/shaders-vk" && mkdir -p "$(VANILLA_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(VANILLA_DIR)/shaders-vk/"
+	@for f in $(MOD_OUT)/shaders-vk/*; do d="$(VANILLA_DIR)/shaders-vk/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done
 	@# Every file, not *.fsh plus *.vsh: the packagers copy the whole directory,
 	@# and a stage that ships only on one of the two paths is the bug the
 	@# completeness check below exists to catch.
@@ -140,6 +155,8 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
 		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/; fi; \
+		rm -rf "$(INSTALL_DIR)/shaders-vk" && mkdir -p "$(INSTALL_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(INSTALL_DIR)/shaders-vk/" || exit 1; \
+		for f in $(MOD_OUT)/shaders-vk/*; do d="$(INSTALL_DIR)/shaders-vk/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \
 		for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done; \
 		if [ -d "sources/shaderincludes" ]; then mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi; \
 		for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(INSTALL_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \
