@@ -228,6 +228,8 @@ public class FrameRingTests
     [Fact]
     public void DescriptorBindingConstantsAgreeWithTheShaderRewriter()
     {
+        Assert.Equal(ProgramInterfaceLayout.FrameSet, ProgramInterfaceLayoutBindings.FrameSet);
+        Assert.Equal(FrameGlobals.Binding, ProgramInterfaceLayoutBindings.FrameBinding);
         Assert.Equal(ProgramInterfaceLayout.DefaultBlockSet, ProgramInterfaceLayoutBindings.DefaultBlockSet);
         Assert.Equal(ProgramInterfaceLayout.DefaultBlockBinding, ProgramInterfaceLayoutBindings.DefaultBlockBinding);
         Assert.Equal(ProgramInterfaceLayout.SamplerSet, ProgramInterfaceLayoutBindings.SamplerSet);

@@ -67,9 +67,11 @@ internal static class ShaderRewriter
             switch (declaration.Kind)
             {
                 case GlslDeclarationKind.DefaultUniform:
-                    // Its storage now lives in the generated block. Members keep
-                    // their names there, so every use site still compiles.
-                    if (layout.MembersByName.ContainsKey(declaration.Name))
+                    // Its storage now lives in the generated block or the shared
+                    // frame block. Members keep their names in both, so every use
+                    // site still compiles.
+                    if (layout.MembersByName.ContainsKey(declaration.Name) ||
+                        layout.FrameMemberDeclaredLengths.ContainsKey(declaration.Name))
                     {
                         edits.Add(new Edit(declaration.Start, declaration.Length, ""));
                     }
@@ -116,14 +118,16 @@ internal static class ShaderRewriter
         ParsedShader parsed, ProgramInterfaceLayout layout, EnumShaderType stage, bool emitDepthRemap,
         List<Edit> edits)
     {
+        string frameBlock = BuildFrameBlock(layout, stage);
         string block = BuildUniformBlock(layout, stage);
 
         var header = new StringBuilder();
         header.Append("#version 450\n");
-        if (block.Length > 0)
+        if (frameBlock.Length > 0 || block.Length > 0)
         {
             header.Append("#extension GL_EXT_scalar_block_layout : require\n");
         }
+        header.Append(frameBlock);
         header.Append(block);
 
         // The geometry stage's EmitVertex() replacement lives in the header so
@@ -148,6 +152,41 @@ internal static class ShaderRewriter
         {
             edits.Add(new Edit(start, length, ""));
         }
+    }
+
+    /// <summary>
+    /// Emits the shared frame block (<see cref="FrameGlobals" />) with the members
+    /// this stage reads, at the offsets every program agrees on, each with the array
+    /// length this program declared. Anonymous like the program's own block, so
+    /// every reference in the body resolves unchanged.
+    /// </summary>
+    private static string BuildFrameBlock(ProgramInterfaceLayout layout, EnumShaderType stage)
+    {
+        if (!layout.FrameMembersByStage.TryGetValue(stage, out HashSet<string>? stageMembers)) return "";
+        if (stageMembers.Count == 0) return "";
+
+        var builder = new StringBuilder();
+        builder.Append(CultureInfo.InvariantCulture, $"\nlayout(scalar, set = {FrameGlobals.Set}");
+        builder.Append(CultureInfo.InvariantCulture, $", binding = {FrameGlobals.Binding}) uniform ");
+        builder.Append(FrameGlobals.BlockTypeName);
+        builder.Append("\n{\n");
+
+        foreach (UniformMember member in FrameGlobals.Members)
+        {
+            if (!stageMembers.Contains(member.Name)) continue;
+
+            builder.Append(CultureInfo.InvariantCulture, $"    layout(offset = {member.Offset}) ");
+            builder.Append(member.Type.Name).Append(' ').Append(member.Name);
+            int length = layout.FrameMemberDeclaredLengths[member.Name];
+            if (length > 0)
+            {
+                builder.Append('[').Append(length.ToString(CultureInfo.InvariantCulture)).Append(']');
+            }
+            builder.Append(";\n");
+        }
+
+        builder.Append("};\n");
+        return builder.ToString();
     }
 
     /// <summary>
