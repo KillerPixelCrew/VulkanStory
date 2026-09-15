@@ -1188,9 +1188,15 @@ is inside `ClientPlatformWindows` and becomes transplant targets with the branch
   `OpenTK.Graphics.ES30` and P/Invokes into `opengl32`/`libGL`. Results land in
   the existing `shader-compatibility.json` as a `glBoundMods` list;
   `OptimumConfig` exposes `IsShaderFeatureDisabled("Vulkan")` in the same style.
-  A second, advisory token scan flags Harmony mods that name
-  `ClientPlatformWindows`, `ShaderProgramBase` or `VAO`, because they may patch
-  internals the branch bypasses; those produce a warning, not a fallback.
+  A second token scan flags Harmony mods that name `ClientPlatformWindows` or
+  `ShaderProgramBase` (the `PlatformInternals` indicator); since scan v2
+  (2026-09-15) that is a fallback to OpenGL, not a warning (section 9).
+- Scan v2 (`CurrentSchemaVersion` 2) also reports `shaderAssetOverrides` and
+  `rewriterPrograms`, the list the Vulkan runtime consumes to choose the rewriter
+  over the native SPIR-V per program. `ShaderCompatibilityScanner.LoadReport`
+  refuses any other schema version, so a v1 report is invalidated, never read as
+  if it carried the v2 verdicts; the launcher rescans and overwrites it on every
+  start.
 
 ### Config and settings
 
@@ -1229,11 +1235,20 @@ decompile means a new device operation.
 | `Renderer = opengl` | vanilla GL path; no Vulkan code loads |
 | Mod references `OpenTK.Graphics.OpenGL*` or P/Invokes GL | session forced to `opengl`; log + one-time notice naming the mod |
 | Mod uses only `IRenderAPI`/`IShaderAPI` and GLSL 330 | works on Vulkan; shader failures degrade per mod as today |
-| Harmony mod patching platform internals | warning; runs on Vulkan; user can pin `opengl` |
+| Harmony mod naming `ClientPlatformWindows` or `ShaderProgramBase` (`PlatformInternals`) | session forced to `opengl`: a Harmony patch on a platform graphics member is not honoured on Vulkan, because `VulkanClientPlatform` overrides those members and links programs itself, so the patched GL body never runs |
+| Mod ships `assets/<domain>/shaders/<program>.vsh\|.fsh` for a vanilla or Optimum program | runs on Vulkan; that program only is built through the rewriter from the mod's GLSL instead of the native SPIR-V (`rewriterPrograms` lists it) |
+| Mod ships any `assets/<domain>/shaderincludes/*` file | runs on Vulkan; every program takes the rewriter (`rewriterPrograms` = `["all"]`), because every program compiles against the merged include dictionary |
+| Mod ships a shader under a new program name | runs on Vulkan through the rewriter; not an override, nothing else changes |
 | Vulkan < 1.3, missing required feature, no presentable queue | `opengl` with reason |
 | Previous Vulkan session left a crash marker | one `opengl` session, marker cleared |
 | macOS | `opengl` |
 | Wayland/X11 | both via GLFW surfaces; Wayland tested explicitly (the code base already special-cases `IsWaylandSession`) |
+
+Scan decisions are in `<data>/.optimum/shader-compatibility.json` (schema 2):
+`disabledFeatures` carries `Vulkan` for both OpenGL routes, with `featureReasons`
+and `openGlRequiredBy` naming the mods; a failed scan never vetoes Vulkan but
+sets `rewriterPrograms` to `["all"]`, since it cannot tell which programs a mod
+replaced.
 
 The GL SSBO gate for Arc (`ClientSystemStartup.cs:1076`) and the 4.3-fallback
 loop in `AttemptToOpenWindow` are GL-driver workarounds and are bypassed on

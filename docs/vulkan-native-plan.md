@@ -417,7 +417,10 @@ records explicitly whether the contract gets a dated v1 addendum (provenance onl
 an overridden `shaderincludes/*` forces all programs); new `PlatformInternals` indicator
 (Harmony + `ClientPlatformWindows`/`ShaderProgramBase` strings) → `openGlRequired`; `RawOpenGL`
 unchanged; `CurrentSchemaVersion` 2. `VULKAN-BACKEND-PLAN.md` §9 states that a Harmony patch on
-a platform graphics member is not honoured on Vulkan.
+a platform graphics member is not honoured on Vulkan. *Delivered 2026-09-15 (wip/launcher-scanner-v2):*
+the report carries `shaderAssetOverrides` (asset, programs, owners) and `rewriterPrograms` (sorted base names,
+or `["all"]` for an include override or a failed scan) for the runtime to consume; `openGlRequired` is the
+`Vulkan` entry in `disabledFeatures`, with `openGlRequiredBy`; `LoadReport` refuses v1 files.
 
 ### D. Mod policy (decision 2 made concrete)
 
