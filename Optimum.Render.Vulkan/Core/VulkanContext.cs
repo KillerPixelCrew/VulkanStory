@@ -71,6 +71,7 @@ internal sealed class VulkanCapabilities
     public float MaxSamplerLodBias;
     public int MaxBoundDescriptorSets;
     public ulong MinUniformBufferOffsetAlignment;
+    public ulong MinStorageBufferOffsetAlignment;
     public ulong MaxUniformBufferRange;
     public uint MaxColorAttachments = 8;
     /// <summary>The bindless features and limits of plan decision 9; every selected device meets <see cref="DescriptorIndexingFloor" />.</summary>
@@ -1210,6 +1211,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             MaxSamplerLodBias = properties.Limits.MaxSamplerLodBias,
             MaxBoundDescriptorSets = (int)properties.Limits.MaxBoundDescriptorSets,
             MinUniformBufferOffsetAlignment = properties.Limits.MinUniformBufferOffsetAlignment,
+            MinStorageBufferOffsetAlignment = properties.Limits.MinStorageBufferOffsetAlignment,
             MaxUniformBufferRange = properties.Limits.MaxUniformBufferRange,
             MaxColorAttachments = properties.Limits.MaxColorAttachments,
             DescriptorIndexing = ReadDescriptorIndexingSupport(PhysicalDevice),

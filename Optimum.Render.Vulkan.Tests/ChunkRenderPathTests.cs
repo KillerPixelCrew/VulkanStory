@@ -362,18 +362,10 @@ public class ChunkRenderPathTests
                 });
             Assert.NotEqual((ulong)0, pipeline.Handle);
 
-            using var descriptors = new DescriptorCache(context!);
+            using var binding = new SharedLayoutTestBinding(context!, textures);
             VulkanBuffer faceBuffer = meshes.BufferOf(mesh, MeshManager.BufferXyz)!;
             BlockBinding storageBlock = Assert.Single(program.Interface.StorageBlocks);
-            DescriptorSet storageSet = descriptors.Get(
-                new DescriptorSetContents(1, ProgramInterfaceLayout.StorageSet,
-                    Array.Empty<SamplerBindingValue>(),
-                    new[]
-                    {
-                        new BufferBindingValue(
-                            (uint)storageBlock.Binding, faceBuffer.Handle, 0, faceBuffer.Size, faceBuffer.Id),
-                    }),
-                program.SetLayouts[ProgramInterfaceLayout.StorageSet]);
+            Assert.Equal(SetConvention.FaceDataBinding, storageBlock.Binding);
 
             commands.SubmitAndWait(commandBuffer =>
             {
@@ -383,9 +375,8 @@ public class ChunkRenderPathTests
 
                 Vk api = context!.Api;
                 api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, pipeline);
-                DescriptorSet boundStorageSet = storageSet;
-                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                    ProgramInterfaceLayout.StorageSet, 1, &boundStorageSet, 0, null);
+                binding.Bind(commandBuffer, program, new Dictionary<string, SharedLayoutTestBinding.SampledTexture>(),
+                    storage: faceBuffer);
 
                 var viewport = new Viewport(0, 0, size, size, 0, 1);
                 api.CmdSetViewport(commandBuffer, 0, 1, &viewport);

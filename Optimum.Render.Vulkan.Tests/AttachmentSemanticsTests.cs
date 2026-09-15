@@ -438,10 +438,10 @@ public class AttachmentSemanticsTests
     }
 
     /// <summary>
-    /// Like <see cref="RenderFullscreen" />, but binds one combined-image-sampler
-    /// descriptor referring to <paramref name="sampledDepthTextureId" /> at set 1,
-    /// binding 0 - the shape a resolve pass reading its own depth attachment
-    /// needs. The framebuffer's depth attachment is put in
+    /// Like <see cref="RenderFullscreen" />, but samples
+    /// <paramref name="sampledDepthTextureId" /> through a bindless slot keyed on the
+    /// read-only depth layout - the shape a resolve pass reading its own depth
+    /// attachment needs. The framebuffer's depth attachment is put in
     /// DEPTH_READ_ONLY_OPTIMAL for the scope rather than the write layout, and
     /// depth test/write stay off throughout.
     /// </summary>
@@ -470,32 +470,24 @@ public class AttachmentSemanticsTests
                 Topology = state.Topology,
             });
 
-        using var descriptors = new DescriptorCache(context);
+        using var binding = new SharedLayoutTestBinding(context, textures);
+        VulkanTexture depthTexture = textures.Get(sampledDepthTextureId)!;
+        var samplers = new Dictionary<string, SharedLayoutTestBinding.SampledTexture>
+        {
+            [program.Interface.Samplers[0].Name] = new(sampledDepthTextureId, depthTexture.State, ImageLayout.DepthReadOnlyOptimal),
+        };
 
         commands.SubmitAndWait(commandBuffer =>
         {
             Vk api = context.Api;
 
+            binding.Transition(commandBuffer, samplers.Values);
             targets.Bind(commandBuffer, framebuffer);
             targets.SetDepthReadOnly(true);
             targets.EnsureRendering(commandBuffer);
 
-            VulkanTexture depthTexture = textures.Get(sampledDepthTextureId)!;
-            var samplerBinding = new SamplerBindingValue(
-                (uint)program.Interface.Samplers[0].Binding,
-                depthTexture.View,
-                textures.Samplers.Get(depthTexture.State),
-                depthTexture.Id,
-                ImageLayout.DepthReadOnlyOptimal);
-
-            DescriptorSet samplerSet = descriptors.Get(
-                new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.SamplerSet,
-                    new[] { samplerBinding }, Array.Empty<BufferBindingValue>()),
-                program.SetLayouts[ProgramInterfaceLayout.SamplerSet]);
-
             api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, pipeline);
-            api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                ProgramInterfaceLayout.SamplerSet, 1, &samplerSet, 0, null);
+            binding.Bind(commandBuffer, program, samplers);
 
             var viewport = new Viewport(0, 0, size, size, 0, 1);
             api.CmdSetViewport(commandBuffer, 0, 1, &viewport);

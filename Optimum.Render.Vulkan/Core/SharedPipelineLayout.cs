@@ -10,7 +10,7 @@ namespace Optimum.Render.Vulkan.Core;
 ///
 /// | set 0 | FrameGlobals dynamic UBO and the fixed frame textures; a normal set (dynamic buffers cannot be update-after-bind) |
 /// | set 1 | the bindless texture table's layout (<see cref="BindlessTextureTable" />), not owned here |
-/// | set 2 | the storage buffers, a normal set |
+/// | set 2 | FaceData, the animation blocks, the program record (dynamic) and the named-block range, a normal set built per draw |
 /// | push  | <see cref="SetConvention.PushConstantBytes" /> for vertex and fragment |
 ///
 /// Created once at device bring-up; destroyed at teardown after the device-idle
@@ -21,6 +21,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     public const ShaderStageFlags Stages = ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit;
 
     private readonly VulkanContext _context;
+    private readonly bool _ownsTextureSetLayout;
     private bool _disposed;
 
     public DescriptorSetLayout FrameSetLayout { get; }
@@ -28,9 +29,36 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     public DescriptorSetLayout StorageSetLayout { get; }
     public PipelineLayout Layout { get; }
 
+    /// <summary>
+    /// A layout of the same shape with a set 1 layout of its own, which it owns: for
+    /// programs built outside a device (tests). Pipelines built against it are
+    /// compatible with any set 1 layout built from the same capacities.
+    /// </summary>
+    public static SharedPipelineLayout CreateStandalone(VulkanContext context)
+    {
+        uint[] capacities = BindlessKinds.ClampCapacities(context.Capabilities.DescriptorIndexing,
+            DescriptorIndexingFloor.FrameTextures);
+        DescriptorSetLayout textures = BindlessTextureTable.CreateSetLayout(context, capacities);
+        try
+        {
+            return new SharedPipelineLayout(context, textures, ownsTextureSetLayout: true);
+        }
+        catch
+        {
+            context.Api.DestroyDescriptorSetLayout(context.Device, textures, null);
+            throw;
+        }
+    }
+
     public SharedPipelineLayout(VulkanContext context, DescriptorSetLayout textureSetLayout)
+        : this(context, textureSetLayout, ownsTextureSetLayout: false)
+    {
+    }
+
+    private SharedPipelineLayout(VulkanContext context, DescriptorSetLayout textureSetLayout, bool ownsTextureSetLayout)
     {
         _context = context;
+        _ownsTextureSetLayout = ownsTextureSetLayout;
         TextureSetLayout = textureSetLayout;
         Vk api = context.Api;
 
@@ -102,33 +130,50 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     }
 
     /// <summary>
-    /// Set 2: the storage buffers and the program record, a dynamic uniform buffer
-    /// (docs/vulkan-native-shaders.md section 3). Set 2 is a normal set, so the
-    /// dynamic buffer is legal beside the update-after-bind set 1; the device floor
-    /// counts it (<see cref="DescriptorIndexingFloor.RequiredDynamicUniformBuffers" />).
+    /// Set 2: the storage buffers, the program record (a dynamic uniform buffer,
+    /// docs/vulkan-native-shaders.md section 3) and the named-block range, where a
+    /// rewritten program's other named blocks sit as std140 storage buffers. Set 2 is
+    /// a normal set, so the dynamic buffer is legal beside the update-after-bind set 1;
+    /// the device floor counts it (<see cref="DescriptorIndexingFloor.RequiredDynamicUniformBuffers" />).
     /// </summary>
     internal static DescriptorSetLayoutBinding[] StorageBindings()
     {
-        var bindings = new DescriptorSetLayoutBinding[SetConvention.StorageBuffers.Length + 1];
-        for (int i = 0; i < SetConvention.StorageBuffers.Length; i++)
+        int named = SetConvention.NamedBlockLastBinding - SetConvention.NamedBlockFirstBinding + 1;
+        var bindings = new DescriptorSetLayoutBinding[SetConvention.StorageBuffers.Length + 1 + named];
+        int index = 0;
+        foreach (SetConvention.Binding buffer in SetConvention.StorageBuffers)
         {
-            bindings[i] = new DescriptorSetLayoutBinding
+            bindings[index++] = new DescriptorSetLayoutBinding
             {
-                Binding = (uint)SetConvention.StorageBuffers[i].Value,
+                Binding = (uint)buffer.Value,
                 DescriptorType = DescriptorType.StorageBuffer,
-                DescriptorCount = SetConvention.StorageBuffers[i].Capacity,
+                DescriptorCount = buffer.Capacity,
                 StageFlags = Stages,
             };
         }
-        bindings[^1] = new DescriptorSetLayoutBinding
+        bindings[index++] = new DescriptorSetLayoutBinding
         {
             Binding = (uint)SetConvention.ProgramRecordBinding,
             DescriptorType = DescriptorType.UniformBufferDynamic,
             DescriptorCount = 1,
             StageFlags = Stages,
         };
+        for (int binding = SetConvention.NamedBlockFirstBinding; binding <= SetConvention.NamedBlockLastBinding; binding++)
+        {
+            bindings[index++] = new DescriptorSetLayoutBinding
+            {
+                Binding = (uint)binding,
+                DescriptorType = DescriptorType.StorageBuffer,
+                DescriptorCount = 1,
+                StageFlags = Stages,
+            };
+        }
         return bindings;
     }
+
+    /// <summary>The descriptor type set 2 declares at <paramref name="binding" />.</summary>
+    public static DescriptorType StorageSetDescriptorType(uint binding) =>
+        binding == SetConvention.ProgramRecordBinding ? DescriptorType.UniformBufferDynamic : DescriptorType.StorageBuffer;
 
     private DescriptorSetLayout CreateSetLayout(DescriptorSetLayoutBinding[] bindings, string what)
     {
@@ -155,5 +200,6 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
         api.DestroyPipelineLayout(_context.Device, Layout, null);
         api.DestroyDescriptorSetLayout(_context.Device, StorageSetLayout, null);
         api.DestroyDescriptorSetLayout(_context.Device, FrameSetLayout, null);
+        if (_ownsTextureSetLayout) api.DestroyDescriptorSetLayout(_context.Device, TextureSetLayout, null);
     }
 }

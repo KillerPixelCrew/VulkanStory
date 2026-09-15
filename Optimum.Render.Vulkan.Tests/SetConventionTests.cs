@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Shaders;
+using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Xunit;
 
@@ -34,6 +35,8 @@ public class SetConventionTests
             ["OPTIMUM_PUSH_CONSTANT_BYTES"] = (int)SetConvention.PushConstantBytes,
             ["OPTIMUM_BINDING_FRAME_GLOBALS"] = SetConvention.FrameGlobalsBinding,
             ["OPTIMUM_BINDING_PROGRAM_RECORD"] = SetConvention.ProgramRecordBinding,
+            ["OPTIMUM_BINDING_NAMED_BLOCK_FIRST"] = SetConvention.NamedBlockFirstBinding,
+            ["OPTIMUM_BINDING_NAMED_BLOCK_LAST"] = SetConvention.NamedBlockLastBinding,
         };
         foreach (SetConvention.Binding binding in SetConvention.FrameTextures) expected[binding.Define] = binding.Value;
         foreach (SetConvention.Binding binding in SetConvention.StorageBuffers) expected[binding.Define] = binding.Value;
@@ -89,7 +92,100 @@ public class SetConventionTests
         AssertUnique(SetConvention.FrameGlobalsBinding, SetConvention.FrameTextures);
         AssertUnique(null, SetConvention.TextureArrays);
         AssertUnique(SetConvention.ProgramRecordBinding, SetConvention.StorageBuffers);
+        foreach (SetConvention.Binding buffer in SetConvention.StorageBuffers)
+        {
+            Assert.False(buffer.Value is >= SetConvention.NamedBlockFirstBinding and <= SetConvention.NamedBlockLastBinding,
+                buffer.Define + " sits in the named-block range");
+        }
+        Assert.False(SetConvention.ProgramRecordBinding is >= SetConvention.NamedBlockFirstBinding and <= SetConvention.NamedBlockLastBinding);
+        Assert.Equal(SetConvention.NamedBlockLastBinding + 1, SetConvention.StorageSetBindingCount);
+        Assert.Equal(SetConvention.StorageSetBindingCount, SharedPipelineLayout.StorageBindings().Length);
     }
+
+    /// <summary>
+    /// The rewriter is the other place the convention's numbers are written down: a
+    /// mod-shader program's compiled SPIR-V must name exactly the sets and bindings the
+    /// shared layout declares for what it reads - frame block and frame texture in set 0,
+    /// the sampler's array in set 1, FaceData, Animation, the record and a named block in
+    /// set 2 - and its push block must fit the layout's range.
+    /// </summary>
+    [SkippableFact]
+    public void TheRewritersSetsAndBindingsAreTheConventions()
+    {
+        const string vertex = """
+            #version 330 core
+            layout(binding = 3, std430) readonly buffer faceDataBuf { vec4 faces[]; };
+            layout(std140) uniform Animation { mat4 values[2]; };
+            layout(std140) uniform Extra { vec4 extra; };
+            uniform float viewDistance;
+            void main() { gl_Position = faces[0] * values[1] * extra * viewDistance; }
+            """;
+        const string fragment = """
+            #version 330 core
+            uniform sampler2DShadow shadowMapFar;
+            uniform sampler2DArray terrainTex;
+            uniform float alphaTest;
+            out vec4 outColor;
+            void main() { outColor = texture(terrainTex, vec3(alphaTest)) * texture(shadowMapFar, vec3(0.5)); }
+            """;
+
+        ShaderCompiler compiler;
+        try
+        {
+            compiler = new ShaderCompiler();
+        }
+        catch (Exception error) when (error is DllNotFoundException or InvalidOperationException)
+        {
+            Skip.If(true, "shaderc unavailable: " + error.Message);
+            return;
+        }
+
+        using (compiler)
+        {
+            TranslatedProgram translated = ShaderTranslator.Translate(new[]
+            {
+                new ShaderStageSource { Stage = EnumShaderType.VertexShader, Code = vertex, Filename = "convention.vsh" },
+                new ShaderStageSource { Stage = EnumShaderType.FragmentShader, Code = fragment, Filename = "convention.fsh" },
+            }, compiler, includes: new HashSet<string>(StringComparer.Ordinal) { "fogandlight.vsh" });
+            Assert.True(translated.Success, string.Join("; ", translated.Errors));
+
+            var declared = new HashSet<(int Set, int Binding, SpirvDescriptorKind Kind)>();
+            foreach (DescriptorSetLayoutBinding binding in SharedPipelineLayout.FrameBindings())
+                declared.Add((SetConvention.FrameSet, (int)binding.Binding, KindOf(binding.DescriptorType)));
+            foreach (SetConvention.Binding array in SetConvention.TextureArrays)
+                declared.Add((SetConvention.TextureSet, array.Value, SpirvDescriptorKind.CombinedImageSampler));
+            foreach (DescriptorSetLayoutBinding binding in SharedPipelineLayout.StorageBindings())
+                declared.Add((SetConvention.StorageSet, (int)binding.Binding, KindOf(binding.DescriptorType)));
+
+            var used = new HashSet<(int, int, SpirvDescriptorKind)>();
+            foreach (byte[] spirv in translated.Spirv.Values)
+            {
+                SpirvModuleReflection reflection = SpirvReflection.Reflect(spirv);
+                foreach (SpirvDescriptorBinding binding in reflection.Bindings)
+                {
+                    var key = (binding.Set, binding.Binding, binding.Kind);
+                    Assert.True(declared.Contains(key), $"{binding.Name} at set {binding.Set} binding {binding.Binding} ({binding.Kind}) is not in the shared layout");
+                    used.Add(key);
+                }
+            }
+
+            Assert.Contains((SetConvention.FrameSet, SetConvention.FrameGlobalsBinding, SpirvDescriptorKind.UniformBuffer), used);
+            Assert.Contains((SetConvention.FrameSet, SetConvention.FrameTextures[0].Value, SpirvDescriptorKind.CombinedImageSampler), used);
+            Assert.Contains((SetConvention.TextureSet, SetConvention.TextureArrays[1].Value, SpirvDescriptorKind.CombinedImageSampler), used);
+            Assert.Contains((SetConvention.StorageSet, SetConvention.FaceDataBinding, SpirvDescriptorKind.StorageBuffer), used);
+            Assert.Contains((SetConvention.StorageSet, SetConvention.AnimationBinding, SpirvDescriptorKind.StorageBuffer), used);
+            Assert.Contains((SetConvention.StorageSet, SetConvention.ProgramRecordBinding, SpirvDescriptorKind.UniformBuffer), used);
+            Assert.Contains((SetConvention.StorageSet, SetConvention.NamedBlockFirstBinding, SpirvDescriptorKind.StorageBuffer), used);
+            Assert.True(translated.Layout.PushConstantSize <= SetConvention.PushConstantBytes);
+        }
+    }
+
+    private static SpirvDescriptorKind KindOf(DescriptorType type) => type switch
+    {
+        DescriptorType.UniformBuffer or DescriptorType.UniformBufferDynamic => SpirvDescriptorKind.UniformBuffer,
+        DescriptorType.StorageBuffer or DescriptorType.StorageBufferDynamic => SpirvDescriptorKind.StorageBuffer,
+        _ => SpirvDescriptorKind.CombinedImageSampler,
+    };
 
     /// <summary>
     /// The include is real GLSL: a fragment shader that includes it and samples a

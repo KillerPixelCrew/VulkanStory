@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Optimum.Render.Vulkan.Shaders;
 using Silk.NET.Vulkan;
 
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -332,24 +333,19 @@ internal sealed unsafe class DescriptorCache : IDisposable
         return slot;
     }
 
-    /// <summary>A pool sized for the rewriter's three set kinds; shared with <see cref="DescriptorArena" />.</summary>
+    /// <summary>A pool sized for the shared layout's set 0 and set 2; shared with <see cref="DescriptorArena" />.</summary>
     internal static DescriptorPool CreatePool(VulkanContext context, uint maxSets, DescriptorPoolCreateFlags flags)
     {
-        // A pool can only satisfy the descriptor types it was sized for. Set 0
-        // holds the generated block plus every block the shader declares for
-        // itself - entityanimated's ElementTransforms is one - and all of them
-        // are dynamic uniform buffers, so that budget covers several per set.
-        // Without a size for a type the allocation fails, the set is never
-        // written, and the first draw that uses it takes the device down.
+        // A pool can only satisfy the descriptor types it was sized for. Without
+        // a size for a type the allocation fails, the set is never written, and
+        // the first draw that uses it takes the device down. Set 0 holds one
+        // dynamic uniform buffer and the frame textures; set 2 one dynamic
+        // uniform buffer (the record) and every other binding a storage buffer.
         var sizes = stackalloc DescriptorPoolSize[3]
         {
-            // Set 0 holds the generated block plus every named block, all dynamic.
-            // Eight per set is Vulkan's guaranteed minimum for
-            // maxDescriptorSetUniformBuffersDynamic, so a set that fits the
-            // device limit always fits the pool.
-            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, SetsPerPool * 8),
+            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, SetsPerPool * 2),
             new DescriptorPoolSize(DescriptorType.CombinedImageSampler, SetsPerPool * 8),
-            new DescriptorPoolSize(DescriptorType.StorageBuffer, SetsPerPool * 2),
+            new DescriptorPoolSize(DescriptorType.StorageBuffer, SetsPerPool * (uint)SetConvention.StorageSetBindingCount),
         };
 
         var createInfo = new DescriptorPoolCreateInfo
@@ -416,18 +412,16 @@ internal sealed unsafe class DescriptorCache : IDisposable
                     Range = buffer.Range,
                 };
 
-                // Every buffer in set 0 is a uniform block - the generated one at
-                // binding 0 and the shader's own after it - and every one of them
-                // is dynamic, so the per-draw ring offset travels separately and
-                // the set itself never has to change.
+                // Set 0's one buffer is the frame block, a dynamic uniform buffer; set 2
+                // declares its record dynamic and every other binding a storage buffer.
                 writes[index++] = new WriteDescriptorSet
                 {
                     SType = StructureType.WriteDescriptorSet,
                     DstSet = set,
                     DstBinding = buffer.Binding,
                     DescriptorCount = 1,
-                    DescriptorType = contents.SetIndex == ProgramInterfaceLayoutBindings.StorageSet
-                        ? DescriptorType.StorageBuffer
+                    DescriptorType = contents.SetIndex == SetConvention.StorageSet
+                        ? SharedPipelineLayout.StorageSetDescriptorType(buffer.Binding)
                         : DescriptorType.UniformBufferDynamic,
                     PBufferInfo = bufferPtr + i,
                 };
@@ -453,20 +447,4 @@ internal sealed unsafe class DescriptorCache : IDisposable
         }
         _pools.Clear();
     }
-}
-
-/// <summary>
-/// The set and binding numbers the shader rewriter assigns.
-///
-/// Duplicated here as plain constants so the descriptor layer does not depend on
-/// the shader translation types; the pair is checked against each other by test.
-/// </summary>
-internal static class ProgramInterfaceLayoutBindings
-{
-    public const int FrameSet = 0;
-    public const int FrameBinding = 0;
-    public const int SamplerSet = 1;
-    public const int StorageSet = 2;
-    public const int DefaultBlockSet = 3;
-    public const int DefaultBlockBinding = 0;
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Shaders;
 using Vintagestory.API.Client;
 using Xunit;
@@ -153,12 +154,13 @@ public class ShaderTranslationUnitTests
 
     /// <summary>
     /// chunkopaque.vsh declares <c>layout(binding = 3, std430) readonly buffer
-    /// faceDataBuf</c> and the mesh path binds the vertex buffer to that exact
-    /// index, so the declared binding has to survive. It also has to be
-    /// recognised at all: failing to step over "readonly" left it unclassified.
+    /// faceDataBuf</c>. Binding 3 is the program record's under the shared layout, so
+    /// the block moves to FaceData's binding, where the mesh path binds the vertex
+    /// buffer. It also has to be recognised at all: failing to step over "readonly"
+    /// left it unclassified.
     /// </summary>
     [Fact]
-    public void DeclaredStorageBufferBindingsSurviveMemoryQualifiers()
+    public void DeclaredStorageBuffersMoveToTheFaceDataBindingThroughMemoryQualifiers()
     {
         ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, """
             #version 330 core
@@ -169,13 +171,12 @@ public class ShaderTranslationUnitTests
 
         BlockBinding block = Assert.Single(layout.StorageBlocks);
         Assert.Equal("faceDataBuf", block.BlockName);
-        Assert.Equal(3, block.Binding);
-        Assert.True(block.Explicit);
-        Assert.Equal(ProgramInterfaceLayout.StorageSet, block.Set);
+        Assert.Equal(SetConvention.FaceDataBinding, block.Binding);
+        Assert.Equal(SetConvention.StorageSet, block.Set);
     }
 
     [Fact]
-    public void SamplersBecomeDescriptorsRatherThanBlockMembers()
+    public void SamplersBecomeSlotsOrFrameTexturesRatherThanBlockMembers()
     {
         ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, """
             #version 330 core
@@ -186,8 +187,11 @@ public class ShaderTranslationUnitTests
             """));
 
         Assert.Equal(2, layout.Samplers.Count);
-        Assert.Equal(0, layout.SamplersByName["terrainTex"].Binding);
-        Assert.Equal(1, layout.SamplersByName["shadowMapFar"].Binding);
+        Assert.Equal(0, layout.SamplersByName["terrainTex"].Order);
+        Assert.Equal(1, layout.SamplersByName["shadowMapFar"].Order);
+        Assert.Equal(0, layout.SamplersByName["terrainTex"].PushOffset);
+        Assert.Equal(SetConvention.FrameTextures[0].Value, layout.SamplersByName["shadowMapFar"].FrameBinding);
+        Assert.Equal(4, layout.PushConstantSize);
         Assert.DoesNotContain("terrainTex", layout.MembersByName.Keys);
         Assert.Equal(4, layout.BlockSize);
     }
@@ -256,23 +260,27 @@ public class ShaderTranslationUnitTests
     }
 
     /// <summary>
-    /// Set 0, binding 0 belongs to the generated OptimumUniforms block. A shader
-    /// that claims it for its own block would double-register that descriptor.
+    /// A shader's own binding numbers mean nothing under the shared layout: binding 0
+    /// is FaceData's and binding 3 the record's. Named blocks take the named-block
+    /// range in declaration order; the game's Animation pair takes its own bindings.
     /// </summary>
     [Fact]
-    public void AUserBlockAtBindingZeroMovesOffTheOptimumUniformsBinding()
+    public void NamedBlocksTakeTheConventionsSetTwoBindingsWhateverTheShaderStated()
     {
         ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, """
             #version 330 core
             layout(std140, binding = 0) uniform Lights { vec4 pos; };
-            layout(std140, binding = 2) uniform Fog { vec4 colour; };
+            layout(std140) uniform AnimationPrev { mat4 prev[2]; };
+            layout(std140, binding = 3) uniform Fog { vec4 colour; };
+            layout(std140) uniform Animation { mat4 values[2]; };
             void main() {}
             """));
 
-        Assert.Equal(2, layout.UniformBlocks.Count);
-        Assert.NotEqual(ProgramInterfaceLayout.DefaultBlockBinding, layout.UniformBlocks[0].Binding);
-        Assert.NotEqual(layout.UniformBlocks[1].Binding, layout.UniformBlocks[0].Binding);
-        Assert.Equal(2, layout.UniformBlocks[1].Binding);
+        Assert.Empty(layout.Errors);
+        Assert.Equal(
+            new[] { ("Lights", 4), ("AnimationPrev", SetConvention.AnimationPrevBinding), ("Fog", 5), ("Animation", SetConvention.AnimationBinding) },
+            layout.UniformBlocks.Select(b => (b.BlockName, b.Binding)));
+        Assert.All(layout.UniformBlocks, b => Assert.Equal(SetConvention.StorageSet, b.Set));
     }
 
     [Fact]
@@ -310,7 +318,7 @@ public class ShaderTranslationUnitTests
         ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, source));
         string code = RewriteVertex(source, layout);
 
-        Assert.Contains("layout(scalar, set = 3, binding = 0) uniform OptimumUniforms", code);
+        Assert.Contains("layout(scalar, set = 2, binding = 3) uniform OptimumUniforms", code);
         Assert.Contains("layout(offset = 0) float zNear;", code);
         Assert.Contains("layout(offset = 4) vec3 tint;", code);
         // The originals are gone, so the names resolve to the block members.
@@ -573,5 +581,255 @@ public class ShaderTranslationUnitTests
     public void PreprocessingLeavesAcceptableVersionsAlone(string source)
     {
         Assert.Equal(source, ShaderCompiler.RaiseVersionForPreprocessing(source));
+    }
+
+    // ------------------------------------------------------- shared layout: samplers
+
+    private static string RewriteFragment(string source, ProgramInterfaceLayout layout) =>
+        ShaderRewriter.Rewrite(Parse(source), layout, EnumShaderType.FragmentShader, emitDepthRemap: false).Code;
+
+    /// <summary>
+    /// Every non-frame sampler becomes a uint slot in the push block under its own
+    /// name, four bytes each in GLSL 330 declaration order, and the stage declares
+    /// the set 1 array of each kind it indexes. The sampler declaration itself is gone.
+    /// </summary>
+    [Fact]
+    public void SamplersBecomePushSlotsInDeclarationOrderBesideTheirBindlessArrays()
+    {
+        const string source = """
+            #version 330 core
+            uniform sampler2DArray terrainTex;
+            uniform float alphaTest;
+            uniform sampler2D glowTex;
+            out vec4 outColor;
+            void main() { outColor = texture(terrainTex, vec3(0.5)) + texture(glowTex, vec2(0.5)) * alphaTest; }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.Empty(layout.Errors);
+        Assert.Equal(8, layout.PushConstantSize);
+        Assert.Equal((TextureKind.Texture2DArray, 0), (layout.SamplersByName["terrainTex"].Kind, layout.SamplersByName["terrainTex"].PushOffset));
+        Assert.Equal((TextureKind.Texture2D, 4), (layout.SamplersByName["glowTex"].Kind, layout.SamplersByName["glowTex"].PushOffset));
+
+        Assert.Contains("layout(push_constant, scalar) uniform OptimumDraw", code);
+        Assert.Contains("layout(offset = 0) uint terrainTex;", code);
+        Assert.Contains("layout(offset = 4) uint glowTex;", code);
+        Assert.Contains("#extension GL_EXT_nonuniform_qualifier : require", code);
+        Assert.Contains("layout(set = 1, binding = 0) uniform sampler2D optimumTextures2D[];", code);
+        Assert.Contains("layout(set = 1, binding = 1) uniform sampler2DArray optimumTextures2DArray[];", code);
+        Assert.DoesNotContain("uniform sampler2DArray terrainTex", code);
+        Assert.Contains("texture(optimumTextures2DArray[terrainTex], vec3(0.5)) + texture(optimumTextures2D[glowTex], vec2(0.5))", code);
+    }
+
+    /// <summary>
+    /// The sampling call forms the corpus uses (texture 140x, texelFetch 19x,
+    /// textureGather 2x, textureLod and textureGrad once each) plus textureSize all
+    /// take the sampler as an argument; each is rewritten to the indexed array element.
+    /// </summary>
+    [Theory]
+    [InlineData("texture(tex, uv)")]
+    [InlineData("texelFetch(tex, ivec2(0), 0)")]
+    [InlineData("textureLod(tex, uv, 0.0)")]
+    [InlineData("textureGather(tex, uv, 1)")]
+    [InlineData("textureGrad(tex, uv, vec2(0.0), vec2(0.0))")]
+    [InlineData("vec4(textureSize(tex, 0), 0.0, 1.0)")]
+    [InlineData("textureProj(tex, vec3(uv, 1.0))")]
+    public void EverySamplingCallFormReadsTheIndexedArrayElement(string call)
+    {
+        string source = "#version 330 core\nuniform sampler2D tex;\nin vec2 uv;\nout vec4 outColor;\nvoid main() { outColor = " +
+                        call + "; }\n";
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.Contains("outColor = " + call.Replace("(tex,", "(optimumTextures2D[tex],", StringComparison.Ordinal) + ";", code);
+        using var compiler = new ShaderCompiler();
+        ShaderCompileResult compiled = compiler.Compile(code, "call.frag", EnumShaderType.FragmentShader);
+        Assert.True(compiled.Success, compiled.Error + "\n" + code);
+    }
+
+    /// <summary>
+    /// A sampler handed to a function - colormap's getColorMapped, FXAA's texture chain,
+    /// the TAA resolve's Catmull-Rom - is rewritten at the call, while the function's own
+    /// sampler parameter, and every use of it, keep their names even when the parameter
+    /// shadows a global sampler of the same name.
+    /// </summary>
+    [Fact]
+    public void SamplersPassedToFunctionsAreRewrittenAtTheCallAndParametersKeepTheirNames()
+    {
+        const string source = """
+            #version 330 core
+            uniform sampler2D terrainTex;
+            uniform sampler2D tex;
+            in vec2 uv;
+            out vec4 outColor;
+            vec4 getColorMapped(sampler2D sourceTex, vec4 color) { return texture(sourceTex, uv) * color; }
+            vec4 sampleTwice(sampler2D tex, vec2 at) { return texture(tex, at) + textureLod(tex, at, 0.0); }
+            float shadowing(float terrainTex) { return terrainTex * 2.0; }
+            void main()
+            {
+                float tex2 = 1.0;
+                outColor = getColorMapped(terrainTex, sampleTwice(tex, uv)) * shadowing(tex2);
+                {
+                    float terrainTex = 0.5;
+                    outColor *= terrainTex;
+                }
+                outColor += texture(terrainTex, uv);
+            }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.Contains("vec4 getColorMapped(sampler2D sourceTex, vec4 color) { return texture(sourceTex, uv) * color; }", code);
+        Assert.Contains("vec4 sampleTwice(sampler2D tex, vec2 at) { return texture(tex, at) + textureLod(tex, at, 0.0); }", code);
+        Assert.Contains("float shadowing(float terrainTex) { return terrainTex * 2.0; }", code);
+        Assert.Contains("getColorMapped(optimumTextures2D[terrainTex], sampleTwice(optimumTextures2D[tex], uv))", code);
+        Assert.Contains("float terrainTex = 0.5;\n        outColor *= terrainTex;", code.Replace("\r", ""));
+        Assert.Contains("outColor += texture(optimumTextures2D[terrainTex], uv);", code);
+
+        using var compiler = new ShaderCompiler();
+        ShaderCompileResult compiled = compiler.Compile(code, "functions.frag", EnumShaderType.FragmentShader);
+        Assert.True(compiled.Success, compiled.Error + "\n" + code);
+    }
+
+    /// <summary>Comments, fields and preprocessor lines that mention a sampler's name are left alone.</summary>
+    [Fact]
+    public void CommentsFieldsAndDirectivesNamingASamplerAreNotRewritten()
+    {
+        const string source = """
+            #version 330 core
+            #line 7
+            uniform sampler2D bloom;
+            struct Light { float bloom; };
+            out vec4 outColor;
+            // texture(bloom, ...) in a comment
+            void main() { Light l; l.bloom = 1.0; /* bloom */ outColor = texture(bloom, vec2(l.bloom)); }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.Contains("#line 7", code);
+        Assert.Contains("struct Light { float bloom; };", code);
+        Assert.Contains("// texture(bloom, ...) in a comment", code);
+        Assert.Contains("l.bloom = 1.0; /* bloom */ outColor = texture(optimumTextures2D[bloom], vec2(l.bloom));", code);
+    }
+
+    /// <summary>
+    /// A sampler named and typed like one of set 0's frame textures reads that binding
+    /// under its own name; the same name with another type is an ordinary slot.
+    /// </summary>
+    [Fact]
+    public void FrameTextureNamesResolveToSetZeroOnlyWithTheConventionsType()
+    {
+        const string source = """
+            #version 330 core
+            uniform sampler2DShadow shadowMapFar;
+            uniform sampler2D sky;
+            uniform sampler2DArray glow;
+            out vec4 outColor;
+            void main() { outColor = texture(sky, vec2(0.5)) * texture(shadowMapFar, vec3(0.5)) + texture(glow, vec3(0.5)); }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.True(layout.UsesFrameTextures);
+        Assert.Contains("layout(set = 0, binding = 1) uniform sampler2DShadow shadowMapFar;", code);
+        Assert.Contains("layout(set = 0, binding = 3) uniform sampler2D sky;", code);
+        Assert.Equal(-1, layout.SamplersByName["glow"].FrameBinding);
+        Assert.Equal(0, layout.SamplersByName["glow"].PushOffset);
+        Assert.Contains("texture(sky, vec2(0.5)) * texture(shadowMapFar, vec3(0.5)) + texture(optimumTextures2DArray[glow], vec3(0.5))", code);
+    }
+
+    [Fact]
+    public void SamplerArraysUnknownKindsAndAFullPushBlockFailTheLink()
+    {
+        Assert.Contains(LayoutOf((EnumShaderType.FragmentShader, "#version 330 core\nuniform sampler2D many[4];\nvoid main() {}\n")).Errors,
+            e => e.Contains("array", StringComparison.Ordinal));
+        Assert.Contains(LayoutOf((EnumShaderType.FragmentShader, "#version 330 core\nuniform sampler1D line;\nvoid main() {}\n")).Errors,
+            e => e.Contains("no bindless array", StringComparison.Ordinal));
+
+        var declarations = string.Concat(Enumerable.Range(0, 33).Select(i => $"uniform sampler2D s{i};\n"));
+        Assert.Contains(LayoutOf((EnumShaderType.FragmentShader, "#version 330 core\n" + declarations + "void main() {}\n")).Errors,
+            e => e.Contains("push byte 132", StringComparison.Ordinal));
+    }
+
+    // ---------------------------------------------------- shared layout: set 2 blocks
+
+    /// <summary>
+    /// A named uniform block becomes a std140 readonly storage buffer in set 2, whatever
+    /// memory layout the shader wrote, with its instance name and members untouched, so
+    /// the client's std140 upload is read as it was written.
+    /// </summary>
+    [Fact]
+    public void NamedUniformBlocksBecomeStd140ReadonlyStorageBuffersInSetTwo()
+    {
+        const string source = """
+            #version 330 core
+            layout (std140) uniform Animation
+            {
+                mat4 values[4];
+            } ElementTransforms;
+            uniform Tint { vec4 tint; };
+            void main() { gl_Position = ElementTransforms.values[1] * tint; }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, source));
+        string code = RewriteVertex(source, layout);
+
+        Assert.Empty(layout.Errors);
+        Assert.Contains("layout(std140, set = 2, binding = 1) readonly buffer Animation", code);
+        Assert.Contains("} ElementTransforms;", code);
+        Assert.Contains("layout(std140, set = 2, binding = 4) readonly buffer Tint { vec4 tint; };", code);
+
+        using var compiler = new ShaderCompiler();
+        ShaderCompileResult compiled = compiler.Compile(code, "blocks.vert", EnumShaderType.VertexShader);
+        Assert.True(compiled.Success, compiled.Error + "\n" + code);
+        var reflection = SpirvReflection.Reflect(compiled.Spirv);
+        Assert.Contains(reflection.Bindings, b => b.Set == 2 && b.Binding == 1 && b.Kind == SpirvDescriptorKind.StorageBuffer);
+    }
+
+    [Fact]
+    public void MoreNamedBlocksThanTheRangeHoldsFailTheLink()
+    {
+        var blocks = string.Concat(Enumerable.Range(0, 5).Select(i => $"layout(std140) uniform B{i} {{ vec4 v{i}; }};\n"));
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, "#version 330 core\n" + blocks + "void main() {}\n"));
+        Assert.Contains(layout.Errors, e => e.Contains("'B4' does not fit set 2", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Loose uniforms are the program record at set 2's record binding, scalar layout,
+    /// with the offsets LocationOf hands out; the push block and the record never share
+    /// a name, and both compile side by side.
+    /// </summary>
+    [Fact]
+    public void LooseUniformsAreTheProgramRecordBesideThePushBlock()
+    {
+        const string source = """
+            #version 330 core
+            uniform sampler2D tex;
+            uniform float alphaTest;
+            uniform vec3 rgbaFog;
+            out vec4 outColor;
+            void main() { outColor = texture(tex, vec2(alphaTest)) + vec4(rgbaFog, 1.0); }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.FragmentShader, source));
+        string code = RewriteFragment(source, layout);
+
+        Assert.Contains("layout(scalar, set = 2, binding = 3) uniform OptimumUniforms", code);
+        Assert.Contains("layout(offset = 0) float alphaTest;", code);
+        Assert.Contains("layout(offset = 4) vec3 rgbaFog;", code);
+        Assert.True(layout.UsesStorageSet);
+
+        using var compiler = new ShaderCompiler();
+        ShaderCompileResult compiled = compiler.Compile(code, "record.frag", EnumShaderType.FragmentShader);
+        Assert.True(compiled.Success, compiled.Error + "\n" + code);
+        var reflection = SpirvReflection.Reflect(compiled.Spirv);
+        Assert.Contains(reflection.Bindings, b => b.Set == 2 && b.Binding == 3);
     }
 }

@@ -18,9 +18,9 @@ namespace Optimum.Render.Vulkan.Tests;
 /// check the cache behaves.
 ///
 /// This is where a mistake in the descriptor-set design surfaces. The rewriter
-/// decides that samplers live in set 1 and storage buffers in set 2; nothing
-/// validates that decision until a driver is asked to build a pipeline layout
-/// from it alongside the SPIR-V that assumes it.
+/// decides where samplers, the record and storage buffers live in the shared
+/// pipeline layout; nothing validates that decision until a driver is asked to
+/// build a pipeline from the SPIR-V that assumes it against that layout.
 /// </summary>
 public class PipelineCacheTests
 {
@@ -69,7 +69,8 @@ public class PipelineCacheTests
             _output.WriteLine($"storage blocks: {translated.Layout.StorageBlocks.Count}");
 
             Assert.NotEqual(0ul, program.PipelineLayout.Handle);
-            foreach (DescriptorSetLayout layout in program.SetLayouts)
+            SharedPipelineLayout shared = program.StandaloneLayout!;
+            foreach (DescriptorSetLayout layout in new[] { shared.FrameSetLayout, shared.TextureSetLayout, shared.StorageSetLayout })
             {
                 Assert.NotEqual(0ul, layout.Handle);
             }
@@ -86,9 +87,9 @@ public class PipelineCacheTests
     }
 
     /// <summary>
-    /// The chunk program is the one with a storage buffer at a binding the shader
-    /// declared. Building a layout for it checks that set 2 and binding 3 line up
-    /// between the rewriter and the descriptor layout.
+    /// The chunk program is the one with a storage buffer, declared at binding 3 in
+    /// the shader - the record's binding under the shared layout. The rewriter moves it
+    /// to FaceData's binding in set 2, where the draw path binds the mesh buffer.
     /// </summary>
     [SkippableFact]
     public void TheChunkProgramsStorageBufferLandsWhereTheShaderExpectsIt()
@@ -104,8 +105,8 @@ public class PipelineCacheTests
             Assert.True(translated.Success, string.Join("; ", translated.Errors));
 
             BlockBinding storage = Assert.Single(translated.Layout.StorageBlocks);
-            Assert.Equal(ProgramInterfaceLayout.StorageSet, storage.Set);
-            Assert.Equal(3, storage.Binding);
+            Assert.Equal(SetConvention.StorageSet, storage.Set);
+            Assert.Equal(SetConvention.FaceDataBinding, storage.Binding);
 
             using var program = new ShaderProgramResources(context!, programId: 2, translated);
             Assert.NotEqual(0ul, program.PipelineLayout.Handle);

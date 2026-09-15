@@ -9,7 +9,7 @@ namespace Optimum.Render.Vulkan.Shaders;
 /// | Set | Update | Contents |
 /// | 0 frame | once per frame | FrameGlobals UBO (dynamic offset) and the fixed frame textures |
 /// | 1 textures | when a texture is created or retired | bindless combined-image-sampler arrays, one per GLSL sampled type, PARTIALLY_BOUND and UPDATE_AFTER_BIND |
-/// | 2 storage | when a buffer is created or retired | FaceData and the animation buffers |
+/// | 2 storage | per draw | FaceData, the animation buffers, the program record and named blocks |
 /// | push | per draw | texture slot indices and per-draw scalars, at most <see cref="PushConstantBytes" /> |
 ///
 /// Array sizes are docs/research/vulkan-bindless.md's starting sizes; the device
@@ -76,11 +76,6 @@ internal static class SetConvention
     };
 
     /// <summary>
-    /// Set 2's storage buffers. Only FaceData exists in the game today (the chunk
-    /// shaders' <c>faceDataBuf</c>); the animation pair is the plan's move of bone
-    /// matrices off the 64 KiB UBO limit.
-    /// </summary>
-    /// <summary>
     /// Set 2's program record: every non-frame uniform that is not in the push block
     /// (docs/vulkan-native-shaders.md section 4), a dynamic uniform buffer whose offset
     /// moves when the record changed. Kept out of <see cref="StorageBuffers" /> because it
@@ -88,10 +83,31 @@ internal static class SetConvention
     /// </summary>
     public const int ProgramRecordBinding = 3;
 
+    /// <summary>
+    /// Set 2's storage buffers. FaceData is the chunk shaders' <c>faceDataBuf</c>; the
+    /// animation pair holds the game's <c>Animation</c> and <c>AnimationPrev</c> blocks,
+    /// read as std140 storage buffers (named after the blocks the rewriter maps there).
+    /// </summary>
     public static readonly Binding[] StorageBuffers =
     {
         new("OPTIMUM_BINDING_FACE_DATA", 0, "buffer", "faceDataBuf", 1),
-        new("OPTIMUM_BINDING_ANIMATION", 1, "buffer", "animationBuf", 1),
-        new("OPTIMUM_BINDING_ANIMATION_PREV", 2, "buffer", "animationPrevBuf", 1),
+        new("OPTIMUM_BINDING_ANIMATION", 1, "buffer", "Animation", 1),
+        new("OPTIMUM_BINDING_ANIMATION_PREV", 2, "buffer", "AnimationPrev", 1),
     };
+
+    public const int FaceDataBinding = 0;
+    public const int AnimationBinding = 1;
+    public const int AnimationPrevBinding = 2;
+
+    /// <summary>
+    /// Set 2 bindings for every other named block a rewritten program declares, in
+    /// declaration order: a GLSL 330 <c>uniform Block { ... }</c> becomes a
+    /// <c>layout(std140) readonly buffer</c> here, so the client's std140 bytes are read
+    /// unchanged. A program with more named blocks than this range fails to link.
+    /// </summary>
+    public const int NamedBlockFirstBinding = 4;
+    public const int NamedBlockLastBinding = 7;
+
+    /// <summary>Every set 2 binding: storage buffers, the record, and the named-block range.</summary>
+    public const int StorageSetBindingCount = NamedBlockLastBinding + 1;
 }

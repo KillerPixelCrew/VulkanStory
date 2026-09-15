@@ -29,11 +29,19 @@ internal sealed class RewrittenShader
 /// since they name GL extensions that either do not exist or are already core in
 /// Vulkan GLSL.
 ///
-/// Loose uniforms move into one generated block. GL's default uniform block has
-/// no Vulkan equivalent, and this game declares 488 of them.
+/// Loose uniforms move into the program record, set 2's dynamic uniform buffer
+/// (GL's default uniform block has no Vulkan equivalent, and this game declares
+/// 488 of them), or into the shared frame block at set 0.
 ///
-/// Samplers, uniform blocks and storage buffers gain descriptor set and binding
-/// numbers, keeping any the shader already stated.
+/// Every program targets the one shared pipeline layout (plan decision 9,
+/// <see cref="SetConvention" />). A sampler named and typed like one of set 0's
+/// frame textures reads that binding. Every other sampler becomes a slot index in
+/// the push block under its own name, and every reference to it in the body - a
+/// sampling call or an argument to a function - reads
+/// <c>optimumTextures&lt;Kind&gt;[name]</c> from set 1. Named uniform blocks become
+/// <c>layout(std140) readonly buffer</c> blocks in set 2, so the client's std140
+/// bytes are read unchanged; storage blocks move to set 2 at the convention's
+/// bindings.
 ///
 /// Vertex inputs, varyings and fragment outputs gain the explicit locations
 /// SPIR-V requires and GLSL 330 left implicit.
@@ -80,20 +88,28 @@ internal static class ShaderRewriter
                 case GlslDeclarationKind.OpaqueUniform:
                     if (layout.SamplersByName.TryGetValue(declaration.Name, out SamplerBinding? sampler))
                     {
-                        edits.Add(LayoutEdit(declaration, new (string, string)[]
+                        if (sampler.IsFrameTexture)
                         {
-                            ("set", ProgramInterfaceLayout.SamplerSet.ToString(CultureInfo.InvariantCulture)),
-                            ("binding", sampler.Binding.ToString(CultureInfo.InvariantCulture)),
-                        }));
+                            edits.Add(LayoutEdit(declaration, new (string, string?)[]
+                            {
+                                ("set", Number(SetConvention.FrameSet)),
+                                ("binding", Number(sampler.FrameBinding)),
+                            }));
+                        }
+                        else
+                        {
+                            // The name is now the slot index in the push block.
+                            edits.Add(new Edit(declaration.Start, declaration.Length, ""));
+                        }
                     }
                     break;
 
                 case GlslDeclarationKind.UniformBlock:
-                    AddBlockEdit(layout.UniformBlocks, declaration, edits);
+                    AddBlockEdit(layout.UniformBlocks, declaration, edits, asStorage: true);
                     break;
 
                 case GlslDeclarationKind.StorageBlock:
-                    AddBlockEdit(layout.StorageBlocks, declaration, edits);
+                    AddBlockEdit(layout.StorageBlocks, declaration, edits, asStorage: false);
                     break;
 
                 case GlslDeclarationKind.Input:
@@ -102,6 +118,8 @@ internal static class ShaderRewriter
                     break;
             }
         }
+
+        AddSamplerReferenceEdits(parsed, layout, stage, edits);
 
         if (emitDepthRemap)
         {
@@ -120,15 +138,23 @@ internal static class ShaderRewriter
     {
         string frameBlock = BuildFrameBlock(layout, stage);
         string block = BuildUniformBlock(layout, stage);
+        string push = BuildPushBlock(layout, stage);
+        string arrays = BuildTextureArrays(layout, stage);
 
         var header = new StringBuilder();
         header.Append("#version 450\n");
-        if (frameBlock.Length > 0 || block.Length > 0)
+        if (frameBlock.Length > 0 || block.Length > 0 || push.Length > 0)
         {
             header.Append("#extension GL_EXT_scalar_block_layout : require\n");
         }
+        if (arrays.Length > 0)
+        {
+            header.Append("#extension GL_EXT_nonuniform_qualifier : require\n");
+        }
         header.Append(frameBlock);
         header.Append(block);
+        header.Append(push);
+        header.Append(arrays);
 
         // The geometry stage's EmitVertex() replacement lives in the header so
         // it precedes every function that may call it.
@@ -190,8 +216,8 @@ internal static class ShaderRewriter
     }
 
     /// <summary>
-    /// Emits the block that replaces GL's default uniform block, carrying only
-    /// the members this stage declared.
+    /// Emits the program record - the block that replaces GL's default uniform
+    /// block, at set 2's record binding - carrying only the members this stage declared.
     ///
     /// Members keep their original names and the block is anonymous, so every
     /// reference in the shader body resolves unchanged. Each member states its
@@ -206,8 +232,8 @@ internal static class ShaderRewriter
         if (stageMembers.Count == 0) return "";
 
         var builder = new StringBuilder();
-        builder.Append(CultureInfo.InvariantCulture, $"\nlayout(scalar, set = {ProgramInterfaceLayout.DefaultBlockSet}");
-        builder.Append(CultureInfo.InvariantCulture, $", binding = {ProgramInterfaceLayout.DefaultBlockBinding}) uniform ");
+        builder.Append(CultureInfo.InvariantCulture, $"\nlayout(scalar, set = {SetConvention.StorageSet}");
+        builder.Append(CultureInfo.InvariantCulture, $", binding = {SetConvention.ProgramRecordBinding}) uniform ");
         builder.Append(ProgramInterfaceLayout.BlockTypeName);
         builder.Append("\n{\n");
 
@@ -228,24 +254,239 @@ internal static class ShaderRewriter
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Emits the push block with one slot index per bindless sampler this stage
+    /// declared, under the sampler's own name, at the offset the whole program agrees
+    /// on. Anonymous, so the rewritten references read the index by that name.
+    /// </summary>
+    private static string BuildPushBlock(ProgramInterfaceLayout layout, EnumShaderType stage)
+    {
+        if (!layout.SamplersByStage.TryGetValue(stage, out HashSet<string>? stageSamplers)) return "";
+
+        var builder = new StringBuilder();
+        foreach (SamplerBinding sampler in layout.Samplers)
+        {
+            if (sampler.IsFrameTexture || !stageSamplers.Contains(sampler.Name)) continue;
+            if (builder.Length == 0)
+            {
+                builder.Append("\nlayout(push_constant, scalar) uniform ").Append(ProgramInterfaceLayout.PushBlockTypeName);
+                builder.Append("\n{\n");
+            }
+            // OPTIMUM_SAMPLER_SLOT(<type>, <name>) in bindings.glsl expands to the same declaration.
+            builder.Append(CultureInfo.InvariantCulture, $"    layout(offset = {sampler.PushOffset}) uint {sampler.Name};");
+            builder.Append(CultureInfo.InvariantCulture, $" // {sampler.TypeName}\n");
+        }
+        if (builder.Length == 0) return "";
+        builder.Append("};\n");
+        return builder.ToString();
+    }
+
+    /// <summary>The set 1 arrays this stage's bindless samplers index, declared as bindings.glsl declares them.</summary>
+    private static string BuildTextureArrays(ProgramInterfaceLayout layout, EnumShaderType stage)
+    {
+        if (!layout.SamplersByStage.TryGetValue(stage, out HashSet<string>? stageSamplers)) return "";
+
+        var kinds = new SortedSet<int>();
+        foreach (SamplerBinding sampler in layout.Samplers)
+        {
+            if (!sampler.IsFrameTexture && stageSamplers.Contains(sampler.Name)) kinds.Add((int)sampler.Kind);
+        }
+        var builder = new StringBuilder();
+        foreach (int kind in kinds)
+        {
+            SetConvention.Binding array = SetConvention.TextureArrays[kind];
+            builder.Append(CultureInfo.InvariantCulture,
+                $"layout(set = {SetConvention.TextureSet}, binding = {array.Value}) uniform {array.GlslType} {array.Name}[];\n");
+        }
+        return builder.ToString();
+    }
+
     // -------------------------------------------------------------- declarations
 
-    private static void AddBlockEdit(List<BlockBinding> blocks, GlslDeclaration declaration, List<Edit> edits)
+    private static readonly string[] MemoryLayouts = { "std140", "std430", "shared", "packed" };
+
+    /// <summary>
+    /// Moves a named block to its set 2 binding. A uniform block becomes a
+    /// <c>layout(std140) readonly buffer</c>: std140 is what the client's UBO uploads
+    /// already stride to, and a storage buffer defaults to std430, so the memory
+    /// layout is stated explicitly whatever the shader wrote.
+    /// </summary>
+    private static void AddBlockEdit(List<BlockBinding> blocks, GlslDeclaration declaration, List<Edit> edits,
+        bool asStorage)
     {
         foreach (BlockBinding block in blocks)
         {
             if (block.BlockName != declaration.Name) continue;
 
-            // The memory layout qualifier the shader chose (std140 / std430) is
-            // preserved: those blocks are filled by UBO uploads whose striding
-            // already matches, and only the default block needs scalar rules.
-            edits.Add(LayoutEdit(declaration, new (string, string)[]
+            if (asStorage)
             {
-                ("set", block.Set.ToString(CultureInfo.InvariantCulture)),
-                ("binding", block.Binding.ToString(CultureInfo.InvariantCulture)),
+                edits.Add(LayoutEdit(declaration, new (string, string?)[]
+                {
+                    ("std140", null),
+                    ("set", Number(block.Set)),
+                    ("binding", Number(block.Binding)),
+                }, MemoryLayouts));
+                if (declaration.StorageKeywordStart >= 0)
+                {
+                    edits.Add(new Edit(declaration.StorageKeywordStart, "uniform".Length, "readonly buffer"));
+                }
+                return;
+            }
+
+            // A storage block keeps the memory layout it chose (std430 for faceDataBuf).
+            edits.Add(LayoutEdit(declaration, new (string, string?)[]
+            {
+                ("set", Number(block.Set)),
+                ("binding", Number(block.Binding)),
             }));
             return;
         }
+    }
+
+    /// <summary>
+    /// Rewrites every reference to a bindless sampler this stage declared into
+    /// <c>optimumTextures&lt;Kind&gt;[name]</c>, where <c>name</c> is now the slot index
+    /// in the push block. A sampler can only ever appear as a function argument - to
+    /// <c>texture</c>, <c>texelFetch</c>, <c>textureLod</c>, <c>textureGather</c>,
+    /// <c>textureSize</c> or to a function of the shader's own such as colormap's
+    /// <c>getColorMapped</c> - so every reference is rewritten and no call form is
+    /// singled out.
+    ///
+    /// Not rewritten: the global declarations (they have edits of their own), a field
+    /// after a dot, a declaration of the same name (a parameter <c>sampler2D tex</c>, a
+    /// local or struct member), and every use inside the scope such a declaration
+    /// shadows the global in. Comments and preprocessor lines are skipped.
+    /// </summary>
+    private static void AddSamplerReferenceEdits(
+        ParsedShader parsed, ProgramInterfaceLayout layout, EnumShaderType stage, List<Edit> edits)
+    {
+        if (!layout.SamplersByStage.TryGetValue(stage, out HashSet<string>? stageSamplers)) return;
+
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (SamplerBinding sampler in layout.Samplers)
+        {
+            if (sampler.IsFrameTexture || !stageSamplers.Contains(sampler.Name)) continue;
+            replacements[sampler.Name] = SetConvention.TextureArrays[(int)sampler.Kind].Name + "[" + sampler.Name + "]";
+        }
+        if (replacements.Count == 0) return;
+
+        var skipped = new List<(int Start, int End)>();
+        foreach (GlslDeclaration declaration in parsed.Declarations)
+        {
+            if (declaration.Kind is GlslDeclarationKind.Other) continue;
+            skipped.Add((declaration.Start, declaration.End));
+        }
+        skipped.Sort(static (a, b) => a.Start.CompareTo(b.Start));
+
+        string source = parsed.Source;
+        var scopes = new List<HashSet<string>> { new(StringComparer.Ordinal) };
+        HashSet<string>? parameters = null;
+        int parenDepth = 0;
+        string previous = ";";
+        bool previousIsWord = false;
+        int skip = 0;
+        int i = 0;
+        bool lineStart = true;
+
+        while (i < source.Length)
+        {
+            while (skip < skipped.Count && skipped[skip].End <= i) skip++;
+            if (skip < skipped.Count && skipped[skip].Start <= i)
+            {
+                i = skipped[skip].End;
+                previous = ";";
+                previousIsWord = false;
+                continue;
+            }
+
+            char c = source[i];
+            if (c == '\n') { lineStart = true; i++; continue; }
+            if (char.IsWhiteSpace(c)) { i++; continue; }
+
+            if (c == '#' && lineStart)
+            {
+                while (i < source.Length && source[i] != '\n')
+                {
+                    if (source[i] == '\\' && i + 1 < source.Length && source[i + 1] == '\n') i++;
+                    i++;
+                }
+                continue;
+            }
+            lineStart = false;
+
+            if (c == '/' && i + 1 < source.Length && source[i + 1] == '/')
+            {
+                while (i < source.Length && source[i] != '\n') i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < source.Length && source[i + 1] == '*')
+            {
+                int close = source.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = close < 0 ? source.Length : close + 2;
+                continue;
+            }
+
+            if (char.IsLetter(c) || c == '_')
+            {
+                int start = i;
+                while (i < source.Length && (char.IsLetterOrDigit(source[i]) || source[i] == '_')) i++;
+                string word = source.Substring(start, i - start);
+
+                if (replacements.TryGetValue(word, out string? replacement) && previous != ".")
+                {
+                    bool declaration = previousIsWord && previous is not ("return" or "case");
+                    if (declaration)
+                    {
+                        (scopes.Count == 1 && parenDepth > 0 ? parameters ??= new(StringComparer.Ordinal) : scopes[^1])
+                            .Add(word);
+                    }
+                    else if (!Shadowed(scopes, word))
+                    {
+                        edits.Add(new Edit(start, word.Length, replacement));
+                    }
+                }
+
+                previous = word;
+                previousIsWord = true;
+                continue;
+            }
+
+            switch (c)
+            {
+                case '(':
+                    if (scopes.Count == 1 && parenDepth == 0) parameters = null;
+                    parenDepth++;
+                    break;
+                case ')':
+                    if (parenDepth > 0) parenDepth--;
+                    break;
+                case '{':
+                    // A function body sees its parameters; any other brace opens a plain scope.
+                    scopes.Add(scopes.Count == 1 && parameters != null ? parameters : new(StringComparer.Ordinal));
+                    parameters = null;
+                    break;
+                case '}':
+                    if (scopes.Count > 1) scopes.RemoveAt(scopes.Count - 1);
+                    break;
+                case ';':
+                    if (scopes.Count == 1) parameters = null;
+                    break;
+            }
+            previous = c.ToString();
+            previousIsWord = false;
+            i++;
+        }
+    }
+
+    private static bool Shadowed(List<HashSet<string>> scopes, string name)
+    {
+        // The outermost set only ever holds names declared at global scope inside a
+        // struct or prototype parenthesis, which never shadow a use; start above it.
+        for (int i = scopes.Count - 1; i >= 1; i--)
+        {
+            if (scopes[i].Contains(name)) return true;
+        }
+        return false;
     }
 
     private static void AddLocationEdit(
@@ -265,21 +506,26 @@ internal static class ShaderRewriter
             if (!layout.VaryingLocations.TryGetValue(declaration.Name, out location)) return;
         }
 
-        edits.Add(LayoutEdit(declaration, new (string, string)[]
+        edits.Add(LayoutEdit(declaration, new (string, string?)[]
         {
-            ("location", location.ToString(CultureInfo.InvariantCulture)),
+            ("location", Number(location)),
         }));
     }
 
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
     /// <summary>
     /// Produces an edit that replaces the declaration's <c>layout(...)</c> clause
-    /// with one carrying the given keys, preserving any others it already had.
-    /// When there was no clause, the span is empty and this inserts one.
+    /// with one carrying the given keys (a null value adds a bare word such as
+    /// <c>std140</c>), preserving any others it already had except
+    /// <paramref name="removals" />. When there was no clause, the span is empty
+    /// and this inserts one.
     /// </summary>
-    private static Edit LayoutEdit(GlslDeclaration declaration, (string Key, string Value)[] additions)
+    private static Edit LayoutEdit(GlslDeclaration declaration, (string Key, string? Value)[] additions,
+        params string[] removals)
     {
         var parts = new List<string>();
-        var overridden = new HashSet<string>(StringComparer.Ordinal);
+        var overridden = new HashSet<string>(removals, StringComparer.Ordinal);
         foreach ((string key, _) in additions) overridden.Add(key);
 
         if (declaration.LayoutQualifiers != null)
@@ -297,12 +543,15 @@ internal static class ShaderRewriter
             }
         }
 
-        foreach ((string key, string value) in additions)
+        foreach ((string key, string? value) in additions)
         {
-            parts.Add($"{key} = {value}");
+            parts.Add(value == null ? key : $"{key} = {value}");
         }
 
-        return new Edit(declaration.LayoutStart, declaration.LayoutLength, $"layout({string.Join(", ", parts)}) ");
+        // A replaced clause keeps the whitespace that followed it; an inserted one brings its own.
+        string clause = $"layout({string.Join(", ", parts)})";
+        return new Edit(declaration.LayoutStart, declaration.LayoutLength,
+            declaration.LayoutLength == 0 ? clause + " " : clause);
     }
 
     // ---------------------------------------------------------------- depth remap

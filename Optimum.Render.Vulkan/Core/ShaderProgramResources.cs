@@ -8,9 +8,10 @@ using Vintagestory.API.Client;
 namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>
-/// Everything the GPU needs for one linked shader program: the modules, the
-/// descriptor set layouts derived from its interface, the pipeline layout, and
-/// the CPU-side shadow of its uniform block.
+/// Everything the GPU needs for one linked shader program: the modules and the
+/// CPU-side shadow of its program record. Every program's pipelines are built
+/// against the one shared pipeline layout (plan decision 9, <see cref="SharedPipelineLayout" />),
+/// so a program owns no set layouts and no pipeline layout of its own.
 ///
 /// The shadow buffer is what makes GL's uniform protocol work. The game sets
 /// uniforms one at a time by name, at any point before a draw, and expects the
@@ -25,7 +26,6 @@ namespace Optimum.Render.Vulkan.Core;
 internal sealed unsafe class ShaderProgramResources : IDisposable
 {
     private readonly VulkanContext _context;
-    private readonly bool _ownsFrameLayout;
     private bool _disposed;
 
     public int ProgramId { get; }
@@ -33,14 +33,16 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
 
     public Dictionary<EnumShaderType, ShaderModule> Modules { get; } = new();
 
-    /// <summary>
-    /// Set 0 the shared frame block, set 1 samplers, set 2 storage buffers, set 3
-    /// the program's own uniform blocks.
-    /// </summary>
-    public DescriptorSetLayout[] SetLayouts { get; } = new DescriptorSetLayout[ProgramInterfaceLayout.SetCount];
-    public PipelineLayout PipelineLayout { get; private set; }
+    /// <summary>The shared pipeline layout this program's pipelines are created against. Not owned.</summary>
+    public PipelineLayout PipelineLayout { get; }
 
-    /// <summary>CPU mirror of the generated uniform block.</summary>
+    /// <summary>
+    /// A shared layout of the program's own, for a program built outside a device (tests):
+    /// the same shape as the device's, set 1 included. Null for a device's programs.
+    /// </summary>
+    public SharedPipelineLayout? StandaloneLayout { get; }
+
+    /// <summary>CPU mirror of the program record.</summary>
     public byte[] UniformShadow { get; }
 
     /// <summary>Bumped by every write that changes the shadow.</summary>
@@ -57,12 +59,12 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// </summary>
     public Dictionary<string, int> SamplerUnits { get; } = new(StringComparer.Ordinal);
 
-    /// <param name="frameLayout">
-    /// The device's shared frame set layout. Programs built outside a device - in
-    /// tests - pass none and get a layout of their own with the same shape.
+    /// <param name="sharedLayout">
+    /// The device's shared pipeline layout. Programs built outside a device - in
+    /// tests - pass none and get a <see cref="StandaloneLayout" /> of the same shape.
     /// </param>
     public ShaderProgramResources(
-        VulkanContext context, int programId, TranslatedProgram translated, DescriptorSetLayout frameLayout = default)
+        VulkanContext context, int programId, TranslatedProgram translated, PipelineLayout sharedLayout = default)
     {
         _context = context;
         ProgramId = programId;
@@ -75,22 +77,19 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         }
         SourceHash = HashSpirv(translated.Spirv);
 
-        // Sampler uniforms default to the unit matching their binding, which is
-        // the order the game's own texture-location bookkeeping assigns.
+        // Sampler uniforms default to the unit matching their declaration order,
+        // which is the order the game's own texture-location bookkeeping assigns.
         foreach (SamplerBinding sampler in Interface.Samplers)
         {
-            SamplerUnits[sampler.Name] = sampler.Binding;
+            SamplerUnits[sampler.Name] = sampler.Order;
         }
 
-        if (frameLayout.Handle == 0)
+        if (sharedLayout.Handle == 0)
         {
-            frameLayout = CreateFrameSetLayout(context);
-            _ownsFrameLayout = true;
+            StandaloneLayout = SharedPipelineLayout.CreateStandalone(context);
+            sharedLayout = StandaloneLayout.Layout;
         }
-        SetLayouts[ProgramInterfaceLayout.FrameSet] = frameLayout;
-
-        CreateSetLayouts();
-        CreatePipelineLayout();
+        PipelineLayout = sharedLayout;
     }
 
     /// <summary>
@@ -139,135 +138,6 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         }
     }
 
-    /// <summary>
-    /// Stage visibility is set to all graphics stages rather than tracked per
-    /// binding: the sets are tiny, the cost of a wider visibility is nil, and a
-    /// uniform shared between stages - which GL makes routine - would otherwise
-    /// need its visibility recomputed on every link.
-    /// </summary>
-    private const ShaderStageFlags AllGraphics =
-        ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit | ShaderStageFlags.GeometryBit;
-
-    /// <summary>
-    /// The shared frame block's set layout: one dynamic uniform buffer. Identical
-    /// for every program, so one descriptor set in the frame's uniform ring serves
-    /// all of them and only the dynamic offset moves when the block changes.
-    /// </summary>
-    public static DescriptorSetLayout CreateFrameSetLayout(VulkanContext context)
-    {
-        return CreateSetLayout(context, new List<DescriptorSetLayoutBinding>
-        {
-            new()
-            {
-                Binding = FrameGlobals.Binding,
-                DescriptorType = DescriptorType.UniformBufferDynamic,
-                DescriptorCount = 1,
-                StageFlags = AllGraphics,
-            },
-        });
-    }
-
-    private void CreateSetLayouts()
-    {
-        var uniformBindings = new List<DescriptorSetLayoutBinding>();
-        if (Interface.HasUniformBlock)
-        {
-            uniformBindings.Add(new DescriptorSetLayoutBinding
-            {
-                Binding = ProgramInterfaceLayout.DefaultBlockBinding,
-                DescriptorType = DescriptorType.UniformBufferDynamic,
-                DescriptorCount = 1,
-                StageFlags = AllGraphics,
-            });
-        }
-        // A block the shader declares for itself is dynamic for the same reason
-        // the generated one is: the client re-uploads it between draws that are
-        // only recorded, so each draw needs its own slice of the frame's uniform
-        // ring, reached through an offset rather than through a set of its own.
-        foreach (BlockBinding block in Interface.UniformBlocks)
-        {
-            uniformBindings.Add(new DescriptorSetLayoutBinding
-            {
-                Binding = (uint)block.Binding,
-                DescriptorType = DescriptorType.UniformBufferDynamic,
-                DescriptorCount = 1,
-                StageFlags = AllGraphics,
-            });
-        }
-
-        var samplerBindings = new List<DescriptorSetLayoutBinding>();
-        foreach (SamplerBinding sampler in Interface.Samplers)
-        {
-            samplerBindings.Add(new DescriptorSetLayoutBinding
-            {
-                Binding = (uint)sampler.Binding,
-                DescriptorType = DescriptorType.CombinedImageSampler,
-                DescriptorCount = 1,
-                StageFlags = AllGraphics,
-            });
-        }
-
-        var storageBindings = new List<DescriptorSetLayoutBinding>();
-        foreach (BlockBinding block in Interface.StorageBlocks)
-        {
-            storageBindings.Add(new DescriptorSetLayoutBinding
-            {
-                Binding = (uint)block.Binding,
-                DescriptorType = DescriptorType.StorageBuffer,
-                DescriptorCount = 1,
-                StageFlags = AllGraphics,
-            });
-        }
-
-        SetLayouts[ProgramInterfaceLayout.DefaultBlockSet] = CreateSetLayout(_context, uniformBindings);
-        SetLayouts[ProgramInterfaceLayout.SamplerSet] = CreateSetLayout(_context, samplerBindings);
-        SetLayouts[ProgramInterfaceLayout.StorageSet] = CreateSetLayout(_context, storageBindings);
-    }
-
-    private static DescriptorSetLayout CreateSetLayout(VulkanContext context, List<DescriptorSetLayoutBinding> bindings)
-    {
-        // An empty set is still created rather than skipped, so set numbering
-        // stays fixed: samplers are always set 1 whether or not the program has
-        // uniforms, which keeps the rewriter's binding decisions valid.
-        DescriptorSetLayoutBinding[] array = bindings.ToArray();
-        fixed (DescriptorSetLayoutBinding* bindingsPtr = array)
-        {
-            var createInfo = new DescriptorSetLayoutCreateInfo
-            {
-                SType = StructureType.DescriptorSetLayoutCreateInfo,
-                BindingCount = (uint)array.Length,
-                PBindings = array.Length == 0 ? null : bindingsPtr,
-            };
-
-            if (context.Api.CreateDescriptorSetLayout(
-                    context.Device, &createInfo, null, out DescriptorSetLayout layout) != Result.Success)
-            {
-                throw new InvalidOperationException("vkCreateDescriptorSetLayout failed");
-            }
-            return layout;
-        }
-    }
-
-    private void CreatePipelineLayout()
-    {
-        fixed (DescriptorSetLayout* setLayouts = SetLayouts)
-        {
-            var createInfo = new PipelineLayoutCreateInfo
-            {
-                SType = StructureType.PipelineLayoutCreateInfo,
-                SetLayoutCount = (uint)SetLayouts.Length,
-                PSetLayouts = setLayouts,
-            };
-
-            if (_context.Api.CreatePipelineLayout(
-                    _context.Device, &createInfo, null, out PipelineLayout layout) != Result.Success)
-            {
-                throw new InvalidOperationException("vkCreatePipelineLayout failed");
-            }
-            PipelineLayout = layout;
-        }
-    }
-
     // ------------------------------------------------------------------ uniforms
 
     /// <summary>
@@ -295,8 +165,8 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// Resolves a uniform name to an opaque location, the way glGetUniformLocation
     /// does.
     ///
-    /// Samplers are not members of the generated block - they are descriptor
-    /// bindings - but the client looks every declared uniform up by name and
+    /// Samplers are not members of the program record - they are push slots or
+    /// frame textures - but the client looks every declared uniform up by name and
     /// treats a -1 as "the shader does not use this". Returning -1 for samplers
     /// would tell it that every texture uniform in the game is unused, so they
     /// get locations of their own from a disjoint range. Members of the shared
@@ -368,14 +238,8 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         _disposed = true;
 
         Vk api = _context.Api;
-        api.DestroyPipelineLayout(_context.Device, PipelineLayout, null);
-
-        for (int set = 0; set < SetLayouts.Length; set++)
-        {
-            // The shared frame layout belongs to the device.
-            if (set == ProgramInterfaceLayout.FrameSet && !_ownsFrameLayout) continue;
-            if (SetLayouts[set].Handle != 0) api.DestroyDescriptorSetLayout(_context.Device, SetLayouts[set], null);
-        }
+        // A device's shared layout belongs to the device.
+        StandaloneLayout?.Dispose();
         foreach (ShaderModule module in Modules.Values)
         {
             api.DestroyShaderModule(_context.Device, module, null);

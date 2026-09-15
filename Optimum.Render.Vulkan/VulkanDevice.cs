@@ -145,20 +145,18 @@ public sealed unsafe class VulkanDevice : IDisposable
     private bool _lastUniformAllocationOk = true;
 
     /// <summary>
-    /// The shared frame block (set 0, <see cref="FrameGlobals" />): the one set
-    /// layout every program's pipeline layout names for it, the CPU shadow every
-    /// frame-global write lands in, and the ring snapshot draws bind until a write
-    /// changes something. Replaces up to 56 per-program copies of the same values.
-    /// </summary>
-    private DescriptorSetLayout _frameSetLayout;
-
-    /// <summary>
-    /// Decision 9's set 1 and the one shared pipeline layout. Created at bring-up and
-    /// kept current (slots retire with their textures, writes flush before every
-    /// submission); no draw uses them until shaders target the shared layout.
+    /// Decision 9's set 1 and the one shared pipeline layout every program's pipelines
+    /// are built against. Created at bring-up and kept current (slots retire with their
+    /// textures, writes flush before every submission).
     /// </summary>
     private BindlessTextureTable? _bindless;
     private SharedPipelineLayout? _sharedLayout;
+
+    /// <summary>
+    /// The shared frame block (set 0, <see cref="FrameGlobals" />): the CPU shadow every
+    /// frame-global write lands in, and the ring snapshot draws bind until a write
+    /// changes something. Replaces up to 56 per-program copies of the same values.
+    /// </summary>
     private readonly byte[] _frameGlobals = FrameGlobals.CreateShadow();
     private uint _frameGlobalsVersion = 1;
     private uint _frameGlobalsSnapshotFrame;
@@ -171,13 +169,9 @@ public sealed unsafe class VulkanDevice : IDisposable
     private VulkanBuffer? _defaultAttributes;
 
     /// <summary>
-    /// A one-texel image that stands in for any sampler the client has not bound.
-    /// See the placeholder note in BindDescriptors.
+    /// The zero-filled buffer at every set 2 binding a draw has nothing for. An unbound
+    /// sampler reads the bindless table's placeholder of its kind instead.
     /// </summary>
-    private int _placeholderTexture;
-    private int _placeholderArrayTexture;
-    private int _placeholderCubeTexture;
-    private int _placeholderDepthTexture;
     private VulkanBuffer? _placeholderUniforms;
 
     /// <summary>Texture bound to each unit, and any sampler overriding the texture's own state.</summary>
@@ -486,12 +480,14 @@ public sealed unsafe class VulkanDevice : IDisposable
         _pipelines.AsyncCompiles = !synchronousPipelines;
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
-        // One layout for the shared frame block, named by every program's pipeline layout.
-        _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
         // Decision 9: the bindless table retires a texture's slots on the timeline
         // values of its deletion, and the shared layout names the table's set layout.
         _bindless = new BindlessTextureTable(_context, _textures, _frames.Timeline);
-        _textures.Deleted = texture => _bindless.Release(texture.Id);
+        _textures.Deleted = texture =>
+        {
+            _bindless.Release(texture.Id);
+            ForgetFrameTexture(texture.Id);
+        };
         _sharedLayout = new SharedPipelineLayout(_context, _bindless.Layout);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
         for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
@@ -517,7 +513,6 @@ public sealed unsafe class VulkanDevice : IDisposable
             ? "compile in the background"
             : synchronousPipelines ? "compile blocking (OPTIMUM_VULKAN_SYNC_PIPELINES, a frame capture or the device setting)" : "compile blocking (no pipelineCreationCacheControl)"));
         CreateDefaultAttributeBuffer();
-        CreatePlaceholderTexture();
         CreatePlaceholderUniformBuffer();
 
         if (!headless)
@@ -620,86 +615,9 @@ public sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// Builds the one-texel image that fills any sampler binding the client left
-    /// empty. Opaque black, which is what GL reads from an unbound texture.
-    /// </summary>
-    private void CreatePlaceholderTexture()
-    {
-        var texel = new byte[] { 0, 0, 0, 255 };
-        fixed (byte* pixels = texel)
-        {
-            _placeholderTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm);
-            _textures.Upload(_placeholderTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4);
-
-            // A descriptor's view type has to match the sampler's dimensionality
-            // - a 2D view in a sampler2DArray slot is invalid, not merely black -
-            // so an arrayed and a cube placeholder stand in for those samplers.
-            _placeholderArrayTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm, layers: 2);
-            for (uint layer = 0; layer < 2; layer++)
-            {
-                _textures.Upload(_placeholderArrayTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4, layer);
-            }
-
-            _placeholderCubeTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm, layers: 6, cube: true);
-            for (uint face = 0; face < 6; face++)
-            {
-                _textures.Upload(_placeholderCubeTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4, face);
-            }
-        }
-
-        // A shadow sampler compares against depth, so its placeholder is a depth
-        // texel at the far plane: every comparison passes and nothing is shadowed,
-        // which is what a missing shadow map looks like on GL. The state enables
-        // comparison so the sampler object matches the sampler declaration too.
-        float far = 1f;
-        _placeholderDepthTexture = _textures.Create(1, 1, Format.D32Sfloat);
-        _textures.Upload(_placeholderDepthTexture, 0, 0, 0, 1, 1, (IntPtr)(&far), 4);
-        VulkanTexture? depthPlaceholder = _textures.Get(_placeholderDepthTexture);
-        if (depthPlaceholder != null)
-        {
-            depthPlaceholder.State = depthPlaceholder.State with { CompareEnable = true };
-        }
-    }
-
-    /// <summary>
-    /// The placeholder that fits a sampler's declaration: a shadow sampler
-    /// compares against depth and needs a depth format, the others need the
-    /// matching view type. An arrayed shadow sampler gets the 2D depth
-    /// placeholder, which the trace will show should the game ever declare one.
-    /// </summary>
-    private int PlaceholderFor(string samplerType) =>
-        samplerType.Contains("Shadow", StringComparison.Ordinal) ? _placeholderDepthTexture
-        : samplerType.Contains("Cube", StringComparison.Ordinal) ? _placeholderCubeTexture
-        : samplerType.Contains("Array", StringComparison.Ordinal) ? _placeholderArrayTexture
-        : _placeholderTexture;
-
-    /// <summary>
-    /// Whether a texture can legally sit behind a sampler of the given type. A
-    /// shadow sampler on a colour texture is the case that matters: GL leaves the
-    /// comparison undefined, Vulkan rejects the descriptor, and the game reaches
-    /// it whenever a shadow map slot exists without a shadow map behind it.
-    /// </summary>
-    private static bool TextureSuitsSampler(VulkanTexture texture, string samplerType)
-    {
-        if (samplerType.Contains("Shadow", StringComparison.Ordinal)
-            && !TextureManager.IsDepthFormat(texture.Format))
-        {
-            return false;
-        }
-
-        // The view type has to match the sampler's dimensionality, which GL
-        // enforces through its texture targets: a 2D texture cannot be bound
-        // where a sampler2DArray reads, nor an array where a sampler2D does.
-        bool wantsCube = samplerType.Contains("Cube", StringComparison.Ordinal);
-        bool wantsArray = samplerType.Contains("Array", StringComparison.Ordinal);
-        if (wantsCube) return texture.Cube;
-        if (wantsArray) return texture.Layers > 1 && !texture.Cube;
-        return texture.Layers == 1 && !texture.Cube;
-    }
-
-    /// <summary>
     /// Builds the zero-filled buffer that fills any shader-declared uniform block
-    /// the client has not supplied a buffer for yet.
+    /// the client has not supplied a buffer for yet, and every other set 2 binding
+    /// a draw does not read (the shared layout's set is written whole).
     ///
     /// Same reasoning as the placeholder texture: leaving the binding undefined
     /// makes every draw with that program invalid, so a program whose UBO has not
@@ -714,7 +632,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         ulong size = Math.Min(65536UL, Math.Max(16384UL, _context!.Capabilities.MaxUniformBufferRange));
 
         _placeholderUniforms = new VulkanBuffer(_context, size,
-            BufferUsageFlags.UniformBufferBit,
+            BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
 
         if (_placeholderUniforms.Mapped != IntPtr.Zero)
@@ -936,6 +854,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         api.CmdDraw(commandBuffer, 3, 1, 0, 0);
         // The raw bind and states above are not what the cache believes the buffer holds.
         _dynamicState.Invalidate();
+        ForgetBoundDescriptors();
     }
 
     /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
@@ -1247,14 +1166,14 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             RenderTrace.DumpProgramSources(program.PassName, translated);
             RenderTrace.Write("program " + programId + " '" + program.PassName + "' uniformBlockBytes=" +
-                translated.Layout.BlockSize);
+                translated.Layout.BlockSize + " pushBytes=" + translated.Layout.PushConstantSize);
             foreach (UniformMember member in translated.Layout.Members)
             {
                 RenderTrace.Write("  uniform " + member.Name + " offset=" + member.Offset +
                     " type=" + member.Type + " count=" + member.ArrayLength);
             }
         }
-        var resources = new ShaderProgramResources(_context, programId, translated, _frameSetLayout);
+        var resources = new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
         _programs[programId] = resources;
         _programNames[programId] = program.PassName ?? "";
         // Pipelines an earlier launch used with this exact program start compiling now.
@@ -2359,7 +2278,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         foreach (SamplerBinding declared in program.Interface.Samplers)
         {
-            int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped) ? mapped : declared.Binding;
+            int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped) ? mapped : declared.Order;
             if ((uint)unit >= GlStateTracker.MaxTextureUnits) continue;
             if (_targets.IsBoundDepth(_boundTextures[unit])) return true;
         }
@@ -2377,26 +2296,33 @@ public sealed unsafe class VulkanDevice : IDisposable
         ReleaseReadSelfCopies();
         if (program.Interface.Samplers.Count == 0) return;
 
-        bool placeholderNeeded = false;
+        // Set 1's placeholders (and set 0's, which are the same textures) are written
+        // shader-read-only and never used any other way: put them there once.
+        if (!_bindlessPlaceholdersReadable && _bindless != null)
+        {
+            for (int kind = 0; kind < BindlessKinds.Count; kind++)
+            {
+                VulkanTexture? placeholder = _textures.Get(_bindless.PlaceholderTextureId((TextureKind)kind));
+                if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
+                _targets.EndRendering(commandBuffer);
+                _textures.Require(_barriers, commandBuffer, placeholder, Graph.ResourceUsage.SampleFragment);
+            }
+            _bindlessPlaceholdersReadable = true;
+        }
 
         for (int i = 0; i < program.Interface.Samplers.Count; i++)
         {
             SamplerBinding declared = program.Interface.Samplers[i];
             int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped)
                 ? mapped
-                : declared.Binding;
+                : declared.Order;
 
             VulkanTexture? texture = (uint)unit < GlStateTracker.MaxTextureUnits
                 ? _textures.Get(_boundTextures[unit])
                 : null;
 
-            if (texture == null)
-            {
-                // BindDescriptors will reach for the placeholder here, so that is
-                // what this draw actually samples.
-                placeholderNeeded = true;
-                continue;
-            }
+            // Nothing bound: the draw reads a placeholder, readable since above.
+            if (texture == null) continue;
 
             // A clear promoted into it has to land before the read (frame graph).
             _targets.FlushPendingClears(commandBuffer, texture);
@@ -2436,23 +2362,6 @@ public sealed unsafe class VulkanDevice : IDisposable
             _textures.Require(_barriers, commandBuffer, texture, Graph.ResourceUsage.SampleFragment);
         }
 
-        if (!placeholderNeeded)
-        {
-            _barriers.Flush(commandBuffer);
-            return;
-        }
-
-        foreach (int id in new[]
-                 {
-                     _placeholderTexture, _placeholderArrayTexture, _placeholderCubeTexture, _placeholderDepthTexture,
-                 })
-        {
-            VulkanTexture? placeholder = _textures.Get(id);
-            if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
-
-            _targets.EndRendering(commandBuffer);
-            _textures.Require(_barriers, commandBuffer, placeholder, Graph.ResourceUsage.SampleFragment);
-        }
         _barriers.Flush(commandBuffer);
     }
 
@@ -2548,339 +2457,371 @@ public sealed unsafe class VulkanDevice : IDisposable
         MirrorValidationMessage(message);
     }
 
+    // ----------------------------------------------- shared layout: what is bound
+
     /// <summary>
-    /// Binds the shared frame block (set 0). Its bytes go into the ring once per
-    /// change of its contents: every draw that follows in the frame reads the same
-    /// snapshot, through the one descriptor set every program shares, and only the
+    /// What the current recording holds at each set of the shared pipeline layout (plan
+    /// decision 9), and the push bytes it last received. Every program's pipelines are
+    /// built against the one layout, so binding another program's pipeline disturbs none
+    /// of it: set 1 is bound once per recording, set 0 and set 2 only when their set or
+    /// dynamic offset changes, and push constants only when the bytes do. A new recording
+    /// (another serial) or a raw bind outside this path (<see cref="ForgetBoundDescriptors" />)
+    /// starts over.
+    /// </summary>
+    private ulong _boundSerial;
+    private DescriptorSet _boundFrameSet;
+    private uint _boundFrameOffset;
+    private bool _boundTextureSet;
+    private DescriptorSet _boundStorageSet;
+    private uint _boundRecordOffset;
+    private int _pushedLength;
+    private readonly byte[] _pushShadow = new byte[SetConvention.PushConstantBytes];
+    private readonly byte[] _pushedBytes = new byte[SetConvention.PushConstantBytes];
+
+    /// <summary>
+    /// Set 0's frame textures as the last draw that samples each resolved them, in
+    /// <see cref="SetConvention.FrameTextures" /> order; an empty value is that binding's
+    /// placeholder. Only a program that samples a frame texture reads the binding, and it
+    /// resolves it again first, so a value left from another program is never read.
+    /// A texture's deletion clears its values (any thread, hence the lock).
+    /// </summary>
+    private readonly SamplerBindingValue[] _frameTextureValues = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+    private readonly object _frameTextureLock = new();
+
+    /// <summary>Whether set 1's placeholders have been put in the layout their descriptors name.</summary>
+    private bool _bindlessPlaceholdersReadable;
+
+    /// <summary>Binds of set 0 and set 1 this device recorded. Tests only.</summary>
+    internal long FrameSetBindsForTests { get; private set; }
+    internal long TextureSetBindsForTests { get; private set; }
+
+    /// <summary>Forgets what the recording holds bound, after a bind this path did not make.</summary>
+    private void ForgetBoundDescriptors() => _boundSerial = 0;
+
+    private void SyncBoundDescriptors(CommandBuffer commandBuffer)
+    {
+        FrameSlot slot = _frames.Current;
+        ulong serial = slot.CommandBuffer.Handle == commandBuffer.Handle ? slot.RecordingSerial : 0;
+        if (serial != 0 && serial == _boundSerial) return;
+
+        _boundSerial = serial;
+        _boundFrameSet = default;
+        _boundFrameOffset = 0;
+        _boundTextureSet = false;
+        _boundStorageSet = default;
+        _boundRecordOffset = 0;
+        _pushedLength = 0;
+    }
+
+    private void ForgetFrameTexture(ulong textureId)
+    {
+        lock (_frameTextureLock)
+        {
+            for (int i = 0; i < _frameTextureValues.Length; i++)
+            {
+                if (_frameTextureValues[i].Resource == textureId) _frameTextureValues[i] = default;
+            }
+        }
+    }
+
+    private static int FrameTextureIndex(int binding)
+    {
+        for (int i = 0; i < SetConvention.FrameTextures.Length; i++)
+        {
+            if (SetConvention.FrameTextures[i].Value == binding) return i;
+        }
+        throw new ArgumentOutOfRangeException(nameof(binding), binding, "not a frame texture binding");
+    }
+
+    private static TextureKind KindOf(SamplerBinding sampler)
+    {
+        if (!sampler.IsFrameTexture) return sampler.Kind;
+        BindlessKinds.TryFromGlslType(sampler.TypeName, out TextureKind kind);
+        return kind;
+    }
+
+    /// <summary>Set 0's placeholder for a frame texture: the bindless table's placeholder of the declared kind.</summary>
+    private SamplerBindingValue FrameTexturePlaceholder(int index)
+    {
+        SetConvention.Binding frame = SetConvention.FrameTextures[index];
+        BindlessKinds.TryFromGlslType(frame.GlslType, out TextureKind kind);
+        VulkanTexture placeholder = _textures.Get(_bindless!.PlaceholderTextureId(kind))!;
+        return new SamplerBindingValue((uint)frame.Value, placeholder.View,
+            _textures.Samplers.Get(BindlessKinds.EffectiveState(SamplerState.Default, kind)), placeholder.Id);
+    }
+
+    /// <summary>
+    /// Takes a snapshot of the shared frame block when it changed and returns its ring
+    /// offset. Every draw that follows in the frame reads the same snapshot and only the
     /// dynamic offset moves when a value does.
     /// </summary>
-    private void BindFrameGlobals(CommandBuffer commandBuffer, ShaderProgramResources program)
+    private uint SnapshotFrameGlobals(ShaderProgramResources program)
     {
-        uint offset = 0;
         if (_frameGlobalsSnapshotFrame == _frameCounter && _frameGlobalsSnapshotVersion == _frameGlobalsVersion)
         {
-            offset = _frameGlobalsSnapshotOffset;
+            return _frameGlobalsSnapshotOffset;
         }
-        else if (_frames.Current.TryAllocateUniforms(_frameGlobals.Length, out RingAllocation allocation))
-        {
-            fixed (byte* source = _frameGlobals)
-            {
-                System.Buffer.MemoryCopy(source, (void*)allocation.Pointer, _frameGlobals.Length, _frameGlobals.Length);
-            }
-            offset = allocation.Offset;
-            _frameGlobalsSnapshotFrame = _frameCounter;
-            _frameGlobalsSnapshotVersion = _frameGlobalsVersion;
-            _frameGlobalsSnapshotOffset = offset;
-        }
-        else
+        if (!_frames.Current.TryAllocateUniforms(_frameGlobals.Length, out RingAllocation allocation))
         {
             ReportUniformExhaustion(program, "the shared frame block");
+            return 0;
         }
-
-        var contents = new DescriptorSetContents(
-            0, ProgramInterfaceLayout.FrameSet, Array.Empty<SamplerBindingValue>(),
-            new[] { new BufferBindingValue(FrameGlobals.Binding, _frames.UniformBuffer, 0, (ulong)_frameGlobals.Length) });
-        DescriptorSet frameSet = GetDescriptorSet(contents, _frameSetLayout);
-        _context.Api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-            ProgramInterfaceLayout.FrameSet, 1, &frameSet, 1, &offset);
+        fixed (byte* source = _frameGlobals)
+        {
+            System.Buffer.MemoryCopy(source, (void*)allocation.Pointer, _frameGlobals.Length, _frameGlobals.Length);
+        }
+        _frameGlobalsSnapshotFrame = _frameCounter;
+        _frameGlobalsSnapshotVersion = _frameGlobalsVersion;
+        _frameGlobalsSnapshotOffset = allocation.Offset;
+        return allocation.Offset;
     }
 
     private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         Vk api = _context.Api;
+        SharedPipelineLayout shared = _sharedLayout!;
+        SyncBoundDescriptors(commandBuffer);
 
-        if (program.Interface.UsesFrameBlock)
+        ResolveSamplers(program);
+
+        // Set 0: the frame block and the fixed frame textures.
+        if (program.Interface.UsesFrameBlock || program.Interface.UsesFrameTextures)
         {
-            BindFrameGlobals(commandBuffer, program);
+            uint offset = SnapshotFrameGlobals(program);
+            var samplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+            lock (_frameTextureLock)
+            {
+                for (int i = 0; i < samplers.Length; i++)
+                {
+                    samplers[i] = _frameTextureValues[i].View.Handle != 0 ? _frameTextureValues[i] : FrameTexturePlaceholder(i);
+                }
+            }
+            var contents = new DescriptorSetContents(0, SetConvention.FrameSet, samplers,
+                new[]
+                {
+                    new BufferBindingValue((uint)SetConvention.FrameGlobalsBinding, _frames.UniformBuffer, 0,
+                        (ulong)_frameGlobals.Length),
+                });
+            DescriptorSet frameSet = GetDescriptorSet(contents, shared.FrameSetLayout);
+            if (frameSet.Handle != _boundFrameSet.Handle || offset != _boundFrameOffset)
+            {
+                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,
+                    (uint)SetConvention.FrameSet, 1, &frameSet, 1, &offset);
+                _boundFrameSet = frameSet;
+                _boundFrameOffset = offset;
+                FrameSetBindsForTests++;
+            }
         }
 
-        // Set 3: the generated uniform block plus one entry for every block the
-        // shader declared for itself. Every one of them is a dynamic descriptor
-        // pointing at this frame's uniform ring, so the set itself never changes
-        // - the per-draw offset travels alongside it instead.
-        bool hasGeneratedBlock = program.Interface.HasUniformBlock;
-        int dynamicCount = (hasGeneratedBlock ? 1 : 0) + program.Interface.UniformBlocks.Count;
-
-        if (dynamicCount > 0)
+        // Set 1 once per recording, and the slot indices when they changed.
+        int pushSize = program.Interface.PushConstantSize;
+        if (pushSize > 0)
         {
-            var buffers = new List<BufferBindingValue>(dynamicCount);
-
-            // Dynamic offsets are consumed in increasing order of binding number,
-            // not in the order the bindings were written, so each one is carried
-            // with its binding and sorted below.
-            uint* offsetBindings = stackalloc uint[dynamicCount];
-            uint* offsetValues = stackalloc uint[dynamicCount];
-            int offsetCount = 0;
-            bool allocationOk = true;
-
-            if (hasGeneratedBlock)
+            if (!_boundTextureSet)
             {
-                uint generatedOffset = 0;
-                if (program.HasSnapshotFor(_frameCounter))
-                {
-                    // Nothing written since this program's last draw this frame
-                    // took its snapshot: bind the same bytes again.
-                    generatedOffset = program.SnapshotOffset;
-                }
-                else if (_frames.Current.TryAllocateUniforms(
-                        program.UniformShadow.Length, out RingAllocation allocation))
-                {
-                    fixed (byte* source = program.UniformShadow)
-                    {
-                        System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
-                            program.UniformShadow.Length, program.UniformShadow.Length);
-                    }
-                    generatedOffset = allocation.Offset;
-                    program.NoteSnapshot(_frameCounter, allocation.Offset);
-                }
-                else
-                {
-                    // The draw goes ahead reading offset zero of the ring, which
-                    // is some other draw's block: wrong, and for a shader that
-                    // loops on a uniform count, possibly fatal.
-                    allocationOk = false;
-                    ReportUniformExhaustion(program, "its generated uniform block");
-                }
-
-                buffers.Add(new BufferBindingValue(
-                    ProgramInterfaceLayout.DefaultBlockBinding,
-                    _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length));
-                offsetBindings[offsetCount] = ProgramInterfaceLayout.DefaultBlockBinding;
-                offsetValues[offsetCount++] = generatedOffset;
+                DescriptorSet textureSet = _bindless!.Set;
+                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,
+                    (uint)SetConvention.TextureSet, 1, &textureSet, 0, null);
+                _boundTextureSet = true;
+                TextureSetBindsForTests++;
             }
-
-            // A block the shader declares is fed by whichever UBO the client
-            // created under that name; one it has not created yet reads zeroes
-            // rather than leaving the descriptor undefined.
-            foreach (BlockBinding block in program.Interface.UniformBlocks)
+            if (pushSize > _pushedLength ||
+                !_pushShadow.AsSpan(0, pushSize).SequenceEqual(_pushedBytes.AsSpan(0, pushSize)))
             {
-                ClientUniformBuffer? ubo = null;
-                if (_boundUniformBuffers.TryGetValue(block.BlockName, out int handle))
+                fixed (byte* push = _pushShadow)
                 {
-                    _uniformBuffers.TryGetValue(handle, out ubo);
+                    api.CmdPushConstants(commandBuffer, shared.Layout, SharedPipelineLayout.Stages, 0, (uint)pushSize, push);
                 }
-
-                if (ubo == null)
-                {
-                    // Zeroes, at dynamic offset zero. The placeholder has existed
-                    // since the device came up; should it somehow not, the ring
-                    // stands in, because a set with a hole in it - or a dynamic
-                    // offset count that disagrees with the layout - is an invalid
-                    // draw rather than merely a wrong colour.
-                    buffers.Add(_placeholderUniforms != null
-                        ? new BufferBindingValue((uint)block.Binding, _placeholderUniforms.Handle,
-                            0, _placeholderUniforms.Size, _placeholderUniforms.Id)
-                        : new BufferBindingValue((uint)block.Binding, _frames.UniformBuffer,
-                            0, Math.Min(16384UL, _context.Capabilities.MaxUniformBufferRange)));
-                    offsetBindings[offsetCount] = (uint)block.Binding;
-                    offsetValues[offsetCount++] = 0;
-                    continue;
-                }
-
-                if (TrySnapshotClientBlock(ubo, program, out uint blockOffset))
-                {
-                    buffers.Add(new BufferBindingValue((uint)block.Binding,
-                        _frames.UniformBuffer, 0, (ulong)ubo.Shadow.Length));
-                    offsetBindings[offsetCount] = (uint)block.Binding;
-                    offsetValues[offsetCount++] = blockOffset;
-                }
-                else
-                {
-                    // No room left in the ring. Rather than aliasing the block's
-                    // persistent buffer - which would hand every remaining draw
-                    // in the frame the last upload, the exact bug the ring
-                    // exists to fix - this draw gets its own transient copy.
-                    // Slower, but still correct; the overflow is counted so a
-                    // scene that lives in this path shows up in the stats.
-                    allocationOk = false;
-                    VulkanStats.NoteUniformOverflow();
-                    var overflow = new VulkanBuffer(_context, (ulong)ubo.Shadow.Length,
-                        BufferUsageFlags.UniformBufferBit,
-                        MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-                    fixed (byte* shadow = ubo.Shadow)
-                    {
-                        System.Buffer.MemoryCopy(shadow, (void*)overflow.Mapped,
-                            ubo.Shadow.Length, ubo.Shadow.Length);
-                    }
-                    buffers.Add(new BufferBindingValue((uint)block.Binding,
-                        overflow.Handle, 0, overflow.Size, overflow.Id));
-                    offsetBindings[offsetCount] = (uint)block.Binding;
-                    offsetValues[offsetCount++] = 0;
-                    // Released and deferred in that order: the cached set naming
-                    // this buffer must not outlive it under a reused handle.
-                    // (This is the only VulkanBuffer a client UBO ever owns -
-                    // the block itself is host-side shadow plus a ring snapshot.)
-                    _descriptors.Release(overflow.Id);
-                    _frames.DeferDeletion(overflow);
-                }
+                _pushShadow.AsSpan(0, pushSize).CopyTo(_pushedBytes);
+                _pushedLength = Math.Max(_pushedLength, pushSize);
+                VulkanStats.NotePushConstantWrite();
             }
-
-            _lastUniformAllocationOk = allocationOk;
-
-            // Insertion sort by binding: at most a handful of entries, and the
-            // generated block is already the lowest of them.
-            for (int i = 1; i < offsetCount; i++)
-            {
-                uint binding = offsetBindings[i];
-                uint value = offsetValues[i];
-                int j = i - 1;
-                while (j >= 0 && offsetBindings[j] > binding)
-                {
-                    offsetBindings[j + 1] = offsetBindings[j];
-                    offsetValues[j + 1] = offsetValues[j];
-                    j--;
-                }
-                offsetBindings[j + 1] = binding;
-                offsetValues[j + 1] = value;
-            }
-
-            var uniformContents = new DescriptorSetContents(
-                program.ProgramId, ProgramInterfaceLayout.DefaultBlockSet,
-                Array.Empty<SamplerBindingValue>(), buffers.ToArray());
-
-            DescriptorSet uniformSet = GetDescriptorSet(
-                uniformContents, program.SetLayouts[ProgramInterfaceLayout.DefaultBlockSet]);
-
-            api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                ProgramInterfaceLayout.DefaultBlockSet, 1, &uniformSet,
-                (uint)offsetCount, offsetCount == 0 ? null : offsetValues);
         }
 
-        // Set 1: one combined image sampler per declared sampler, resolved through
-        // the unit each sampler uniform points at.
-        if (program.Interface.Samplers.Count > 0)
+        if (program.Interface.UsesStorageSet)
         {
-            var bindings = new SamplerBindingValue[program.Interface.Samplers.Count];
-            for (int i = 0; i < bindings.Length; i++)
+            BindStorageSet(commandBuffer, program, meshId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves every sampler the program declares through the unit its uniform points
+    /// at, to the texture bound there - a feedback draw's ReadSelf copy in place of the
+    /// attachment it copies, and through <see cref="TextureManager.Get" /> the physical
+    /// texture behind a transient rebind - with the unit's sampler object overriding the
+    /// texture's own state, as glBindSampler does. A frame texture's value goes to set 0;
+    /// every other sampler gets the bindless slot of its kind, keyed on the read-only
+    /// depth layout when it samples the bound depth attachment with writes off, and its
+    /// index lands in the push shadow. A texture that cannot sit behind the declared kind
+    /// reads that kind's placeholder, as an unbound unit does.
+    /// </summary>
+    private void ResolveSamplers(ShaderProgramResources program)
+    {
+        foreach (SamplerBinding declared in program.Interface.Samplers)
+        {
+            int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped) ? mapped : declared.Order;
+            TextureKind kind = KindOf(declared);
+            VulkanTexture? texture = null;
+            SamplerState sampling = SamplerState.Default;
+            ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal;
+
+            if ((uint)unit < GlStateTracker.MaxTextureUnits)
             {
-                SamplerBinding declared = program.Interface.Samplers[i];
-                int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped)
-                    ? mapped
-                    : declared.Binding;
-
-                ImageView view = default;
-                Sampler sampler = default;
-                ulong resource = 0;
-
-                if ((uint)unit < GlStateTracker.MaxTextureUnits)
+                int bound = _boundTextures[unit];
+                int textureId = _sampledTextureOverrides.TryGetValue(bound, out int copy) ? copy : bound;
+                texture = _textures.Get(textureId);
+                if (texture != null && !BindlessKinds.Suits(TextureShape.Of(texture), kind))
                 {
-                    int textureId = _sampledTextureOverrides.TryGetValue(_boundTextures[unit], out int copy)
-                        ? copy : _boundTextures[unit];
-                    VulkanTexture? texture = _textures.Get(textureId);
-                    if (texture != null && !TextureSuitsSampler(texture, declared.TypeName))
+                    if (RenderTrace.Enabled)
                     {
-                        // Left unbound on purpose, so the placeholder that suits
-                        // the sampler takes the slot below.
-                        if (RenderTrace.Enabled)
-                        {
-                            RenderTrace.Write("sampler '" + declared.Name + "' (" + declared.TypeName +
-                                ") on program " + program.ProgramId + " has texture " + _boundTextures[unit] +
-                                " of format " + texture.Format + " bound, which it cannot sample; using a placeholder");
-                        }
-                        texture = null;
+                        RenderTrace.Write("sampler '" + declared.Name + "' (" + declared.TypeName +
+                            ") on program " + program.ProgramId + " has texture " + bound +
+                            " of format " + texture.Format + " bound, which it cannot sample; using a placeholder");
                     }
-                    if (texture != null)
-                    {
-                        view = texture.View;
-                        resource = texture.Id;
-                        // A sampler bound to the unit overrides the texture's own
-                        // state, which is what glBindSampler means.
-                        // MAX_LEVEL belongs to the texture, even when a sampler
-                        // overrides its filters. Resolve at draw time so changes
-                        // to either object also affect an already-bound unit.
-                        SamplerState sampling = _standaloneSamplers.TryGetValue(_unitSamplerOverrides[unit], out SamplerState custom)
-                            ? custom with { MaxLevel = texture.State.MaxLevel }
-                            : texture.State;
-                        sampler = _textures.Samplers.Get(sampling);
-                    }
+                    texture = null;
                 }
-
-                // The bound depth attachment, sampled with writes off, is read in
-                // the layout the scope holds it in rather than shader-read-only.
-                ImageLayout layout = view.Handle != 0 && _targets.DepthReadOnly
-                                     && _targets.IsBoundDepth(_boundTextures[unit])
-                    ? ImageLayout.DepthReadOnlyOptimal
-                    : ImageLayout.ShaderReadOnlyOptimal;
-
-                bindings[i] = new SamplerBindingValue((uint)declared.Binding, view, sampler, resource, layout);
+                if (texture != null)
+                {
+                    // MAX_LEVEL belongs to the texture, even when a sampler overrides its filters.
+                    sampling = _standaloneSamplers.TryGetValue(_unitSamplerOverrides[unit], out SamplerState custom)
+                        ? custom with { MaxLevel = texture.State.MaxLevel }
+                        : texture.State;
+                    // The bound depth attachment, sampled with writes off, is read in the
+                    // layout the scope holds it in rather than shader-read-only.
+                    if (_targets.DepthReadOnly && _targets.IsBoundDepth(bound)) layout = ImageLayout.DepthReadOnlyOptimal;
+                }
             }
 
-            // A sampler the client left unbound gets the placeholder rather than
-            // an empty descriptor. Leaving the set unbound is not an option: the
-            // shader statically uses set 1, and drawing without it is undefined
-            // behaviour that costs the device rather than one texture. GL is
-            // permissive here - sampling an unbound texture reads black and the
-            // draw proceeds - so the placeholder is also the closer emulation.
-            for (int i = 0; i < bindings.Length; i++)
+            if (declared.IsFrameTexture)
             {
-                if (bindings[i].View.Handle != 0 && bindings[i].Sampler.Handle != 0) continue;
-
-                VulkanTexture? placeholder =
-                    _textures.Get(PlaceholderFor(program.Interface.Samplers[i].TypeName));
-                if (placeholder == null) continue;
-
-                bindings[i] = new SamplerBindingValue(
-                    bindings[i].Binding, placeholder.View, _textures.Samplers.Get(placeholder.State),
-                    placeholder.Id);
+                SamplerBindingValue value = texture == null
+                    ? default
+                    : new SamplerBindingValue((uint)declared.FrameBinding, texture.View,
+                        _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, kind)), texture.Id, layout);
+                if (texture == null) VulkanStats.NoteSamplerPlaceholder();
+                lock (_frameTextureLock) _frameTextureValues[FrameTextureIndex(declared.FrameBinding)] = value;
+                continue;
             }
 
-            bool complete = true;
-            foreach (SamplerBindingValue binding in bindings)
+            uint slot = _bindless!.Resolve(texture, kind, sampling, layout);
+            VulkanStats.NoteBindlessSlotResolution();
+            BitConverter.TryWriteBytes(_pushShadow.AsSpan(declared.PushOffset, ProgramInterfaceLayout.SlotBytes), slot);
+        }
+    }
+
+    /// <summary>
+    /// Set 2, built per draw against the shared layout: the program record at its
+    /// dynamic binding (a ring snapshot when the shadow changed), each named block from
+    /// the client's UBO snapshot as a std140 storage buffer at the snapshot's offset,
+    /// each storage block from the mesh's vertex buffer, and the zero-filled placeholder
+    /// buffer at every binding the program does not read. A set naming a ring offset is
+    /// new every frame, so it comes from the slot's arena.
+    /// </summary>
+    private void BindStorageSet(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
+    {
+        SharedPipelineLayout shared = _sharedLayout!;
+        VulkanBuffer placeholder = _placeholderUniforms!;
+        var buffers = new BufferBindingValue[SetConvention.StorageSetBindingCount];
+        for (int binding = 0; binding < buffers.Length; binding++)
+        {
+            buffers[binding] = new BufferBindingValue((uint)binding, placeholder.Handle, 0, placeholder.Size, placeholder.Id);
+        }
+
+        bool allocationOk = true;
+        bool namesRingOffset = false;
+        uint recordOffset = 0;
+        const int record = SetConvention.ProgramRecordBinding;
+
+        if (program.Interface.HasUniformBlock)
+        {
+            if (program.HasSnapshotFor(_frameCounter))
             {
-                if (binding.View.Handle == 0 || binding.Sampler.Handle == 0) { complete = false; break; }
+                // Nothing written since this program's last draw this frame took its snapshot.
+                recordOffset = program.SnapshotOffset;
+            }
+            else if (_frames.Current.TryAllocateUniforms(program.UniformShadow.Length, out RingAllocation allocation))
+            {
+                fixed (byte* source = program.UniformShadow)
+                {
+                    System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
+                        program.UniformShadow.Length, program.UniformShadow.Length);
+                }
+                recordOffset = allocation.Offset;
+                program.NoteSnapshot(_frameCounter, allocation.Offset);
+            }
+            else
+            {
+                // The draw reads offset zero of the ring, which is some other draw's record:
+                // wrong, and for a shader that loops on a uniform count, possibly fatal.
+                allocationOk = false;
+                ReportUniformExhaustion(program, "its program record");
+            }
+            buffers[record] = new BufferBindingValue(record, _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length);
+        }
+
+        // A block the shader declares is fed by whichever UBO the client created under
+        // that name; one it has not created yet reads the placeholder's zeroes.
+        foreach (BlockBinding block in program.Interface.UniformBlocks)
+        {
+            ClientUniformBuffer? ubo = null;
+            if (_boundUniformBuffers.TryGetValue(block.BlockName, out int handle)) _uniformBuffers.TryGetValue(handle, out ubo);
+            if (ubo == null) continue;
+
+            if (TrySnapshotClientBlock(ubo, program, out uint blockOffset))
+            {
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, _frames.UniformBuffer,
+                    blockOffset, (ulong)ubo.Shadow.Length);
+                namesRingOffset = true;
+                continue;
             }
 
-            if (complete)
+            // No room left in the ring. Rather than aliasing a buffer every remaining draw
+            // would share - the exact bug the ring exists to fix - this draw gets its own
+            // transient copy. Counted, so a scene that lives in this path shows in the stats.
+            allocationOk = false;
+            VulkanStats.NoteUniformOverflow();
+            var overflow = new VulkanBuffer(_context, (ulong)ubo.Shadow.Length,
+                BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit,
+                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            fixed (byte* shadow = ubo.Shadow)
             {
-                DescriptorSet samplerSet = GetDescriptorSet(
-                    new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.SamplerSet,
-                        bindings, Array.Empty<BufferBindingValue>()),
-                    program.SetLayouts[ProgramInterfaceLayout.SamplerSet]);
+                System.Buffer.MemoryCopy(shadow, (void*)overflow.Mapped, ubo.Shadow.Length, ubo.Shadow.Length);
+            }
+            buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, overflow.Handle, 0, overflow.Size, overflow.Id);
+            namesRingOffset = true;
+            // Released and deferred in that order: no cached set naming it may outlive it.
+            _descriptors.Release(overflow.Id);
+            _frames.DeferDeletion(overflow);
+        }
 
-                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                    ProgramInterfaceLayout.SamplerSet, 1, &samplerSet, 0, null);
+        // The SSBO chunk path reads its vertices from the mesh's xyz buffer by gl_VertexIndex.
+        foreach (BlockBinding block in program.Interface.StorageBlocks)
+        {
+            VulkanBuffer? buffer = meshId > 0 ? _meshes.BufferOf(meshId, MeshManager.BufferXyz) : null;
+            if (buffer != null)
+            {
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, buffer.Handle, 0, buffer.Size, buffer.Id);
             }
             else if (RenderTrace.Enabled)
             {
-                RenderTrace.Write("draw with an incomplete sampler set on program " + program.ProgramId);
+                RenderTrace.Write("storage block '" + block.BlockName + "' on program " + program.ProgramId +
+                    " has no mesh buffer (mesh " + meshId + "); it reads the placeholder");
             }
         }
 
-        // Set 2: the storage buffers a shader reads its own vertices from.
-        //
-        // The SSBO chunk path does not use vertex attributes at all - the chunk
-        // shaders declare `readonly buffer faceDataBuf` and index it by
-        // gl_VertexID, with the packed face records living in the mesh's xyz
-        // slot. Without this set bound the shader reads nothing and the terrain
-        // is simply absent, which is exactly how it presented.
-        if (program.Interface.StorageBlocks.Count > 0 && meshId > 0)
-        {
-            var storage = new List<BufferBindingValue>(program.Interface.StorageBlocks.Count);
-            foreach (BlockBinding block in program.Interface.StorageBlocks)
-            {
-                VulkanBuffer? buffer = _meshes.BufferOf(meshId, MeshManager.BufferXyz);
-                if (buffer == null) continue;
+        _lastUniformAllocationOk = allocationOk;
 
-                storage.Add(new BufferBindingValue(
-                    (uint)block.Binding, buffer.Handle, 0, buffer.Size, buffer.Id));
-            }
+        var contents = new DescriptorSetContents(0, SetConvention.StorageSet, Array.Empty<SamplerBindingValue>(), buffers);
+        DescriptorSet storageSet = namesRingOffset
+            ? _descriptorArenas[_frames.Current.Index].Get(contents, shared.StorageSetLayout)
+            : GetDescriptorSet(contents, shared.StorageSetLayout);
+        if (storageSet.Handle == _boundStorageSet.Handle && recordOffset == _boundRecordOffset) return;
 
-            if (storage.Count == program.Interface.StorageBlocks.Count)
-            {
-                DescriptorSet storageSet = GetDescriptorSet(
-                    new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.StorageSet,
-                        Array.Empty<SamplerBindingValue>(), storage.ToArray()),
-                    program.SetLayouts[ProgramInterfaceLayout.StorageSet]);
-
-                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                    ProgramInterfaceLayout.StorageSet, 1, &storageSet, 0, null);
-            }
-            else if (RenderTrace.Enabled)
-            {
-                RenderTrace.Write("draw with an incomplete storage set on program " + program.ProgramId +
-                    " mesh " + meshId);
-            }
-        }
+        _context.Api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,
+            (uint)SetConvention.StorageSet, 1, &storageSet, 1, &recordOffset);
+        _boundStorageSet = storageSet;
+        _boundRecordOffset = recordOffset;
+        VulkanStats.NoteStorageSetBind();
     }
 
     private void ApplyDynamicState(CommandBuffer commandBuffer, VulkanFramebuffer target, ShaderProgramResources program)
@@ -3460,12 +3401,6 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
-        // After every pipeline layout that named it.
-        if (_context != null && _frameSetLayout.Handle != 0)
-        {
-            _context.Api.DestroyDescriptorSetLayout(_context.Device, _frameSetLayout, null);
-            _frameSetLayout = default;
-        }
         // The shared pipeline layout before the table's set layout it names; the
         // table's placeholders are textures and go with the texture manager.
         _sharedLayout?.Dispose();

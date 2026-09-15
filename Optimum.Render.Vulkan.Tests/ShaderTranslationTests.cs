@@ -288,15 +288,14 @@ public class ShaderTranslationTests
 
             Assert.True(result.Success, $"{program}: {string.Join("; ", result.Errors)}");
 
-            // The storage buffer must keep the binding the shader declared: the
-            // mesh path binds the vertex buffer to that exact index.
+            // The storage buffer moves to FaceData's binding in set 2, whatever the
+            // shader declared: the mesh path binds the vertex buffer there.
             if (program is "chunkopaque" or "chunktransparent" or "chunktopsoil")
             {
                 BlockBinding? faceData = result.Layout.StorageBlocks
                     .FirstOrDefault(b => b.BlockName == "faceDataBuf");
                 Assert.NotNull(faceData);
-                Assert.Equal(3, faceData!.Binding);
-                Assert.True(faceData.Explicit, "declared binding should be preserved, not reassigned");
+                Assert.Equal(SetConvention.FaceDataBinding, faceData!.Binding);
             }
         }
     }
