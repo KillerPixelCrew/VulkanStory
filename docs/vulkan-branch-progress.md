@@ -137,6 +137,8 @@ before window release was already correct.
 
 ### Test state (Windows machine, 2026-09-15)
 
+GeForce GTX 1060 (Pascal) on Windows. Pascal stays on NVIDIA's 580 driver branch; 590 and later dropped it.
+
 - GPU suite with the Vulkan SDK 1.4.357.0 validation layer: 661 tests, 6 failures.
   - `PacingStatsTests.PacingGateReadsTheLinesThisBackendWrites`: host issue (WSL path translation), not a
     renderer defect.
@@ -170,19 +172,44 @@ Windows run above.
   `SsaoTemporalDitherCoverageTests.WithoutATemporalConsumerTheOverrideIsTheVanillaShader` reading the deployed,
   override-carrying copy of `ssao.fsh`; it now reads the client archive.
 
-**Item 1 status:** the present-after-write hazard does not reproduce on this machine with the identical layer
-version, so it is specific to the Windows run: its driver, its present path, or an implicit layer installed there
-(overlays such as the NVIDIA, Steam or RTSS ones hook the same way). Recheck on the Windows machine with every
-implicit layer disabled before changing the present path; the present semaphores already follow the Vulkan Guide's
-per-image pattern (`SwapchainSlot.PresentSemaphoreFor(imageIndex)`, signalled by the submission that moves the image
-to `PRESENT_SRC`).
+**Item 1 status: does not reproduce here; the failing hardware is Pascal on the 580 driver branch.**
+
+- Reproduction matrix on this notebook, the five tests only, implicit layers off, layers 1.4.357.0: RTX 4070 on
+  Wayland and on X11 (GLFW platform chosen by unsetting `DISPLAY` or `WAYLAND_DISPLAY`; setting them to an empty
+  string makes GLFW fail and every test skips), and the Intel UHD iGPU (Mesa ANV, selected with
+  `VK_LOADER_DRIVERS_SELECT=*intel*`; `MESA_VK_DEVICE_SELECT` alone still hands the tests the NVIDIA device) on
+  Wayland and on X11. **5/5 passed in all four, zero `SYNC-` messages.** The present path has not changed since
+  the Windows run (no commits under `Present/`, `FrameRing.cs` or `VulkanDevice.cs` after `11195c5`).
+- The two machines that failed share an architecture: the Windows GTX 1060 above, and the upstream reviewer's
+  MX150 on Linux (driver 580.173.02), whose resize-loop tests also failed (reported as "swapchain fence signaling
+  races" in the PR 69 review). Both are Pascal, and Pascal is frozen on the 580 branch, so the driver's
+  acquire/present behaviour (image index order, SUBOPTIMAL/OUT_OF_DATE results, image counts, present modes) is
+  the variable this notebook cannot vary.
+- What the layer needs to report it (`layers/sync/sync_submit.cpp`, `QueueBatchContext::ResolvePresentSemaphoreWait`
+  and `DoQueuePresentValidate`): a present on the same queue imports the batch that signalled its wait semaphore
+  through a barrier, and everything else from the queue's last batch without one. `SYNC-HAZARD-PRESENT-AFTER-WRITE`
+  therefore means the image's last layout transition reached the present by the unbarriered route: the wait
+  resolved against a different batch than the one that transitioned the image, or the layer found no signal for the
+  semaphore. Our signal stage is not the cause: `VkSubmitInfo` signal semaphores are converted to `ALL_COMMANDS`
+  (`layers/utils/convert_utils.cpp`), which covers layout transitions since KhronosGroup/Vulkan-ValidationLayers#7479.
+  Two layer facts to check against the full message: `PreCallRecordDestroySemaphore` erases pending timeline signals
+  but not pending binary ones, and an acquire records its semaphore's signal with `emplace`, which ignores an entry
+  already present for the same handle.
+- **Needed from the Windows machine before any code change:** the complete text of one failure. The assertion prints
+  the first full layer message per hazard id (`ValidationAssert.NoSyncHazards`, "first message"), which names the
+  prior access: command buffer, submit index, batch tag and command. Run the five tests alone
+  (`dotnet test Optimum.Render.Vulkan.Tests --filter <names> --logger "console;verbosity=detailed"`) with the
+  Windows implicit layers disabled, and record the driver version and `vulkaninfo --summary` (present modes,
+  image counts) next to it.
 
 ### Next, in order
 
 1. **Fix the present-after-write hazard.** The present has to wait on a semaphore signalled by the submit
    that transitions the swapchain image to PRESENT_SRC, with one render-finished semaphore per swapchain
    image indexed by the acquired image (`docs/research/vulkan-validation.md` §4; Vulkan Guide "Swapchain
-   Semaphore Reuse"). Exit: the five tests pass with the layer; the rest of the suite is unchanged.
+   Semaphore Reuse"). That pattern is already in place; the hazard is Pascal/580-specific and waits on the full
+   message from the GTX 1060 (see "Item 1 status"). Exit: the five tests pass with the layer on Pascal; the rest
+   of the suite is unchanged.
 2. **Bindless implementation research: done** (`docs/research/vulkan-bindless.md`). Design outcome: combined-image-sampler
    arrays in set 1, one binding per GLSL sampled type (2D, 2DArray, Cube, 3D, usampler2D, isampler2D, the shadow
    variants), `PARTIALLY_BOUND | UPDATE_AFTER_BIND`, slot 0 a placeholder per type; per-draw indices in push
