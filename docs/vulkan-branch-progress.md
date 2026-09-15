@@ -1,6 +1,6 @@
 # feat/vulkan-taa: handoff
 
-Everything needed to continue the Vulkan branch on another machine. Last updated 2026-09-15 at 11195c5.
+Everything needed to continue the Vulkan branch on another machine. Last updated 2026-09-15 at c6af6f9.
 
 - Plan of record: `docs/vulkan-native-plan.md` (decisions 1-9, phases, risks).
 - Research the designs follow: `docs/research/` (caching, descriptor model, bindless, XeGTAO, validation).
@@ -234,12 +234,28 @@ Windows run above.
    validation message on the selected device). GPU suite 673/673, no `SYNC-`; both local devices (RTX 4070, UHD ADL-S)
    meet the floor. Open for the layout step: best practices' AMD check `KeepLayoutSmall` warns on that layout's
    128-byte push-constant range; size the real push block from the uniform placement map, not the maximum.
+   **Status (2026-09-15, evening): done.** The bindless texture table (slot allocator keyed on the physical texture,
+   deferred free on the Frame timeline, per-kind placeholders: opaque black, magenta only under poison mode) and
+   `SharedPipelineLayout` are merged, and every program now links against the one layout: set 0 frame block and
+   frame textures, set 1 bindless arrays, set 2 FaceData, named uniform blocks as std140 storage buffers
+   (Animation 1, AnimationPrev 2, others 4-7) and the program record (dynamic UBO, binding 3), samplers as bindless
+   slots in push constants. Per-program layouts are gone. GPU suite 878/878 at the retarget merge.
 4. **Rewriter retargeted** to the shared layout (samplers -> bindless indices, loose uniforms -> per-frame
    record addressed from push constants), then native GLSL 450 per program family (includes; post programs;
    GUI/lines; chunks; entities; particles/decals/sky/clouds; SSAO/godrays/bloom/colorgrade/OIT; Optimum
    programs), offline compiler tool + `shaders.manifest.json` + MSBuild target + packaging, runtime manifest
    load with the "N native, M rewritten, K failed" log line, specialization constants for quality defines,
    parity tests against the GLSL 330 sources.
+   **Status (2026-09-15, evening):** the rewriter half is done (item 3). Native GLSL 450: contract
+   `docs/vulkan-native-shaders.md`; shared includes, `frame.glsl`/`specialization.glsl` generators and
+   `motion.glsl`; the offline compiler (`tools/shader-compiler`, SPIR-V reflection, `shaders.manifest.json`,
+   MSBuild target, deploy and packaging beside the renderer DLL); the static parity harness
+   (`NativeShaderParityTests`, GLSL 330 oracle vs manifest); all 49 registered programs ported (MinimalGui and the
+   mod-registered optimum-map stay on the rewriter). GPU suite 968/968 at the family merges. In progress: the
+   runtime seam (manifest load in `LinkProgram`, per-program rewriter fallback, placement-table locations,
+   initializer seeding, the `Array` alias for sampler2DArray, native-vs-rewriter pixel tests). Open after it: the
+   settings-change reload through specialization constants, launcher scanner v2 (in progress), in-game check on
+   both backends.
 5. **Phase 3b:** native render systems (post chain and TAA first, then chunks, entities,
    particles/decals/sky, GUI/text); remove `GlStateTracker`, GL id tables, texture units and
    uniform-by-location from the Vulkan path; decide the runtime rewriter's fate for mod shaders.
@@ -258,6 +274,8 @@ Windows run above.
 8. **XeGTAO** (`docs/research/xegtao-integration.md`): compute pass kind in the frame graph, GLSL compute
    port (prefilter split into dispatches, main pass, one denoise pass with TAA), NoiseIndex = frame % 64,
    composition before the resolve, settings; OpenGL keeps vanilla SSAO; tests and a headless comparison.
+   **Status (2026-09-15, evening):** the frame-graph compute pass kind is implemented on its stage branch; the AO
+   passes, class channel, composition and settings are in progress.
 9. **General refactor:** split `VulkanDevice.cs`, restructure the project layout, remove GL-emulation leftovers.
 10. **Optimisation** (plan Phase 4): per-pass GPU timestamps, push-constant placement from the measured
     profile, transient aliasing on by default, DirectToSwapchain / transfer backend measured. Exit: Vulkan
