@@ -158,6 +158,22 @@ and `platform=linux`):
 - **Pre-Skylake Intel**: the 240-entry binding table is a hardware limit there.
   https://gfxstrand.net/faith/blog/2022/08/descriptors-are-hard/
 
+**How the ANV limits derive**
+
+- **Pre-Gfx12.5 image limit (confirmed from source):** `struct anv_address_range_descriptor` is a `uint64_t
+  address` plus two `uint32_t` fields, 16 bytes. The indirect descriptor pool is 3 GiB (`anv_va.c`), and 3 GiB /
+  16 B = 201,326,592, exactly what gpuinfo shows for Skylake through Tiger/Alder Lake on Linux.
+  https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/intel/vulkan/anv_private.h ,
+  https://gitlab.freedesktop.org/mesa/mesa/-/blob/main/src/intel/vulkan/anv_va.c
+- **Pre-Gfx12.5 sampler limit [Inference]:** `struct anv_sampled_image_descriptor` starts with a `uint32_t image`
+  field holding a 20-bit SURFACE_STATE index; if the struct is 8 bytes, 3 GiB / 8 B = 402,653,184, matching the
+  reported sampler limit. The rest of the struct was not read.
+- **Gfx12.5+ (DG2, MTL, ARL, BMG, Lunar Lake 140V) [Inference]:** 33,554,432 images equals a 2 GiB bindless
+  surface-state pool divided by a 64-byte surface state; 67,108,864 samplers would mean a 32-byte sampler state.
+  The `ANV_SURFACE_STATE_SIZE` / `ANV_SAMPLER_STATE_SIZE` defines were not found.
+- None of this changes the recommendation: every Intel target reports tens of millions of update-after-bind
+  sampled-image descriptors, so array size is bounded by memory and write cost, not by the driver.
+
 **Other limits that matter**
 
 - `maxSamplerAllocationCount`: 4000 on NVIDIA and Intel Windows (including the 140V); 1,048,576 on AMD
