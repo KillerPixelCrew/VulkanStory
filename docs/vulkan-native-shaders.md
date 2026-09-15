@@ -637,7 +637,7 @@ stay on the rewriter. Decisions:
 ### 9.1 Family 5: particles, decals, sky, clouds (2026-09-15)
 
 Ported: `particlescube`, `particlesquad`, `particlesquad2d`, `decals`, `sky`, `nightsky`, `celestialobject`,
-`aurora`, `cloudmap`. Not ported: the unregistered `clouds` pair, and `cloudvolumetric` (below).
+`aurora`, `cloudmap`, `cloudvolumetric` (below). Not ported: the unregistered `clouds` pair.
 
 - **USEOIT on programs that include `oit.glsl`.** `oit.glsl` gates its outputs and functions on `USEOIT`, so every
   includer gets the axis and the builder compiles `USEOIT=0` too. `particlesquad`, `particlesquad2d` and `aurora`
@@ -666,11 +666,9 @@ Ported: `particlescube`, `particlesquad`, `particlesquad2d`, `decals`, `sky`, `n
 - **Placement.** Particles and the sky programs draw once per `Use()` or have no DRAW uniforms, so their push block
   holds only sampler slots (`particlescube` and `sky` have none, so they have no push block). `decals` pushes both
   slots plus `origin` and `modelViewMatrix` (84 B).
-- **cloudvolumetric is blocked on the harness/contract.** `cloudvolumetric.fsh` declares
-  `uniform sampler2D liquidDepth` itself, without including `underwatereffects.fsh`. `bindings.glsl` declares the
-  set 0 `liquidDepth` globally, so a push slot of that name cannot compile. Sampling the frame texture compiles,
-  but section 2's name set counts a frame texture only through an included port's `optimum-frame-texture`
-  header, and `NativeShaderParityTests` fails with `only GLSL 330 [liquidDepth]`. Pulling in
-  `underwatereffects.glsl` to get the header would add its frame members to the name set. Unblocking needs a
-  contract decision: either count the set 0 textures a program's own GLSL 330 source declares, or have
-  `bindings.glsl` stop declaring frame textures a program does not own.
+- **cloudvolumetric** (the Optimum override of the `.fsh`, the vanilla `.vsh`) was unblocked by the section 2
+  oracle decision. Its own `uniform sampler2D liquidDepth` is sampled as the `bindings.glsl` set 0 texture, with no
+  push slot. Push = `depthTex`, `cloudMap`, `cloudCol` (12 B); record = `iMvpMatrix`, `cloudMapWidth`,
+  `cloudOffset`, `frame`, `time`, `FrameWidth`, `PerceptionEffectIntensity`. USEOIT is its only axis (2
+  variants), handled as above: `traverse`'s per-bin reveal loop and `main`'s output initialisation and
+  accumulation are under `#if USEOIT == 1`.
