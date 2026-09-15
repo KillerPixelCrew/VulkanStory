@@ -164,6 +164,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     internal Func<VulkanDevice> DeviceFactory = () => new VulkanDevice
     {
         ShaderCacheDirectory = System.IO.Path.Combine(GamePaths.Cache, "optimum-vulkan"),
+        ShaderProgramOverriddenByMods = Vintagestory.API.Config.OptimumConfig.IsShaderProgramOverriddenByMods,
     };
 
     /// <summary>Test seam: where the crash marker goes; null means <see cref="GamePaths.DataPath" />.</summary>

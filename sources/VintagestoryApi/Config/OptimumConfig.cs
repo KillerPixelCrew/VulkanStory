@@ -528,6 +528,8 @@ public static class OptimumConfig
     // outside OptimumConfigData so a mod cannot make a runtime fallback
     // persistent by changing its shader files.
     private static readonly HashSet<string> _shaderCompatibilityDisabledFeatures = new(StringComparer.OrdinalIgnoreCase);
+    // "all" until a schema 2 report says otherwise: no report read yet is no report.
+    private static readonly HashSet<string> _shaderCompatibilityRewriterPrograms = new(StringComparer.OrdinalIgnoreCase) { AllShaderPrograms };
     private static bool _shaderCompatibilityScanFailed;
     private static bool _greedyMeshVertexShaderReady;
     private static bool _greedyMeshFragmentShaderReady;
@@ -632,6 +634,24 @@ public static class OptimumConfig
     public static bool IsFeatureExplicitlyDisabled(string feature) =>
         _shaderCompatibilityDisabledFeatures.Contains(feature);
 
+    /// <summary>
+    /// The entry of the scan's <c>rewriterPrograms</c> (report schema 2) that stands for every program:
+    /// a shaderincludes override, or a scan that could not finish.
+    /// </summary>
+    public const string AllShaderPrograms = "all";
+
+    /// <summary>
+    /// Whether the launcher's scan found a mod replacing <paramref name="passName" />'s GLSL, so the Vulkan
+    /// renderer must build it through the rewriter from that source instead of linking the native SPIR-V
+    /// (docs/vulkan-native-shaders.md section 8). True when <c>rewriterPrograms</c> names the program
+    /// (case-insensitive, the scanner lowercases base names) or holds <see cref="AllShaderPrograms" />.
+    /// A missing, unreadable, failed or pre-schema-2 report counts as <see cref="AllShaderPrograms" />,
+    /// the scanner's own conservative rule. Asking for <see cref="AllShaderPrograms" /> itself answers
+    /// whether every program is rewriter-only.
+    /// </summary>
+    public static bool IsShaderProgramOverriddenByMods(string passName) =>
+        IsShaderProgramOverriddenBy(_shaderCompatibilityRewriterPrograms, passName);
+
     public static void SetGreedyMeshShaderAbi(bool vertexShaderReady, bool fragmentShaderReady)
     {
         _greedyMeshVertexShaderReady = vertexShaderReady;
@@ -649,6 +669,7 @@ public static class OptimumConfig
         _shaderCompatibilityDisabledFeatures.Clear();
         _shaderCompatibilityScanFailed = true;
         _shaderCompatibilityFingerprint = null;
+        SetRewriterProgramsToAll();
         ResetShaderCompatibilityAfterReload();
 
         if (_dataPath == null) return;
@@ -673,6 +694,9 @@ public static class OptimumConfig
                 }
             }
 
+            _shaderCompatibilityRewriterPrograms.Clear();
+            foreach (string program in RewriterProgramsOf(report)) _shaderCompatibilityRewriterPrograms.Add(program);
+
             _shaderCompatibilityScanFailed = report.ScanFailed;
             _shaderCompatibilityFingerprint = report.Fingerprint;
         }
@@ -681,7 +705,67 @@ public static class OptimumConfig
             _shaderCompatibilityDisabledFeatures.Clear();
             _shaderCompatibilityScanFailed = true;
             _shaderCompatibilityFingerprint = null;
+            SetRewriterProgramsToAll();
         }
+    }
+
+    /// <summary>
+    /// The <c>rewriterPrograms</c> of a shader compatibility report's JSON, as <see cref="IsShaderProgramOverriddenByMods" />
+    /// reads them: the named programs, or the single <see cref="AllShaderPrograms" /> for a null, unreadable, pre-schema-2
+    /// or failed report and for one without the field. Pure; the loaded state is not touched.
+    /// </summary>
+    public static IReadOnlyCollection<string> ParseShaderRewriterPrograms(string? reportJson)
+    {
+        if (string.IsNullOrWhiteSpace(reportJson)) return new[] { AllShaderPrograms };
+        try
+        {
+            var report = JsonSerializer.Deserialize<ShaderCompatibilityState>(reportJson, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            return RewriterProgramsOf(report);
+        }
+        catch (Exception)
+        {
+            return new[] { AllShaderPrograms };
+        }
+    }
+
+    /// <summary>Whether <paramref name="rewriterPrograms" /> (see <see cref="ParseShaderRewriterPrograms" />) send <paramref name="passName" /> to the rewriter.</summary>
+    public static bool IsShaderProgramOverriddenBy(IEnumerable<string> rewriterPrograms, string passName)
+    {
+        foreach (string program in rewriterPrograms)
+        {
+            if (string.Equals(program, AllShaderPrograms, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(passName) && string.Equals(program, passName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Schema 2 carries the programs a mod's GLSL replaced. A v1 report, a report without the list, or a
+    // failed scan cannot say which programs are safe, so all of them stay rewriter-only.
+    private static List<string> RewriterProgramsOf(ShaderCompatibilityState? report)
+    {
+        var programs = new List<string>();
+        if (report == null || report.SchemaVersion < 2 || report.RewriterPrograms == null || report.ScanFailed)
+        {
+            programs.Add(AllShaderPrograms);
+            return programs;
+        }
+        foreach (string? program in report.RewriterPrograms)
+        {
+            if (!string.IsNullOrWhiteSpace(program)) programs.Add(program.Trim());
+        }
+        return programs;
+    }
+
+    private static void SetRewriterProgramsToAll()
+    {
+        _shaderCompatibilityRewriterPrograms.Clear();
+        _shaderCompatibilityRewriterPrograms.Add(AllShaderPrograms);
     }
 
     private static string? _configPath;
@@ -1038,6 +1122,8 @@ public static class OptimumConfig
 
     private sealed class ShaderCompatibilityState
     {
+        public int SchemaVersion { get; set; }
+        public List<string>? RewriterPrograms { get; set; }
         public bool ScanFailed { get; set; }
         public string? Fingerprint { get; set; }
         public List<string>? DisabledFeatures { get; set; }

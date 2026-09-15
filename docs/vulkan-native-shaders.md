@@ -139,9 +139,12 @@ records the decision here):
 
 **Oracle decisions (2026-09-15, after the family ports):**
 - `uniform sampler2DArray <name>` (`transparentcompose`'s `OITaccumulation`): `collectUniformNames` has no
-  sampler2DArray, so the client registers the name `Array` with a sampler2D type at that texture unit. The
-  harness compares the declared name and type (`Oracle.ArraySamplerAliases` records the alias), and the runtime
-  answers `GetUniformLocation("Array")` and the unit bookkeeping with the declared sampler's slot.
+  sampler2DArray, so its pattern reads the name `Array` with a sampler2D type at that texture unit. The harness
+  compares the declared name and type (`Oracle.ArraySamplerAliases` records the alias). The alias exists **only in
+  the static oracle**: the client binds the sampler by its real name
+  (`ShaderProgramTransparentcompose.OITaccumulation2D` calls `BindTexture2D("OITaccumulation", value, 4)`,
+  `SystemRenderOITLayers` calls `SetProgramSamplerUnit(..., "OITaccumulation", 7)`), so the runtime answers the
+  declared name and needs no `Array` alias (corrected 2026-09-16).
 - A set-0 frame texture a program declares itself without including the port that owns it (`cloudvolumetric`'s
   `liquidDepth`) is the `bindings.glsl` declaration every native stage already has, and counts as present when its
   name and type match `SetConvention.FrameTextures`, exactly as the rewriter places it.
@@ -414,6 +417,8 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
 - **Log line:** one line reports `[Optimum] shaders: N native, M rewritten, K failed`.
 - **Environment overrides:**
   - `OPTIMUM_VK_NATIVE_SHADERS=0` forces the rewriter for A/B runs.
+  - `OPTIMUM_VK_NATIVE_SHADERS=force` links natively even where the launcher's mod shader scan sends a program to
+    the rewriter (development runs without the launcher; see "Mod shader scan" below).
   - `OPTIMUM_VK_SHADER_SOURCE=<dir>` compiles the source tree at runtime for the development loop.
 - **Delivered (2026-09-16, the runtime seam):** `Shaders/NativeShaderLibrary.cs`,
   `Shaders/ProgramInterfaceLayout.Native.cs`, the `LinkProgram` branch, `NativeShaderRuntimeTests`.
@@ -421,10 +426,30 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
     `OPTIMUM_VK_NATIVE_SHADERS=0` or the device's `NativeShadersEnabled` is false; the device's
     `NativeShaderDirectory` (tests); `OPTIMUM_VK_SHADER_SOURCE`, compiled through `NativeShaderBuilder.Build`
     (programs that built are used, the build errors are named in the load line); else `shaders-vk/` beside
-    `Optimum.Render.Vulkan.dll`. A missing or malformed manifest, another schema version, or a `toolchain` other
-    than the device compiler's `ShaderCompiler.Identity` (it names the Silk shaderc package, so it is the same
-    on every platform) turns native shaders off with one line: `[Optimum] shaders: native off: <reason>`. A
-    loaded one logs `[Optimum] shaders: native <n> programs from <origin>`.
+    `Optimum.Render.Vulkan.dll`. A missing or malformed manifest, another schema version, or a `toolchain` whose
+    compile options differ from the device compiler's turns native shaders off with one line:
+    `[Optimum] shaders: native off: <reason>`. A loaded one logs `[Optimum] shaders: native <n> programs from <origin>`.
+  - **Toolchain check (2026-09-16):** `ShaderCompiler.Identity` is `OptionsIdentity` + `;` + the shaderc library
+    identity (the SHA-256 of `shaderc_shared` beside the renderer, else the Silk package name), so it differs between
+    Linux, Windows and macOS and between shaderc builds. `NativeShaderLibrary.Load` compares only the options part
+    (before the last `;`): every stage's SHA-256 already pins the SPIR-V bytes, so a manifest built on another
+    platform or by another shaderc build is accepted, and the differing library is appended to the status line
+    (`...; manifest built with shader library '<built>', this renderer has '<own>' (same options; ...)`). Different
+    options are refused as before. Pinned by `NativeShaderRuntimeTests.OnlyTheCompileOptionsOfTheToolchainMustMatch`
+    and `AManifestThatCannotBeTrustedIsRejectedWithOneReason`.
+  - **Mod shader scan (2026-09-16):** the launcher's report (schema 2) lists in `rewriterPrograms` the program base
+    names whose GLSL a mod asset replaces, or the single entry `all` (a shaderincludes override, or a scan that
+    failed). `OptimumConfig.IsShaderProgramOverriddenByMods(passName)` is true when the list names the program
+    (case-insensitive) or holds `all`; a missing, unreadable, failed or v1 report, or one without the field, counts
+    as `all`, the scanner's own conservative rule. The platform hands that query to the device
+    (`VulkanDevice.ShaderProgramOverriddenByMods`; null, as in tests, consults no scan). `LinkProgram` asks it
+    before the manifest lookup: an overridden program links through the rewriter from the mod's source, counts as
+    **rewritten** (not failed), and a program the manifest has logs once:
+    `[Optimum] shaders: native '<name>' linked through the rewriter: a mod replaces its GLSL (launcher shader scan)`.
+    When the scan answers `all`, the load line says `the mod shader scan makes every program rewriter-only`;
+    under `OPTIMUM_VK_NATIVE_SHADERS=force` it says `mod shader scan ignored` and the scan is not consulted. Pinned by
+    `Optimum.Tests/shader-compatibility-config-tests.cs` (names, `all`, missing field, v1, failed, missing and
+    malformed report) and `NativeShaderRuntimeTests.AProgramTheModScanNamesLinksThroughTheRewriterUnlessForced`.
   - **SPIR-V is verified lazily:** read and SHA-256-checked the first time a variant links; a mismatch or an
     unreadable file fails that variant for the life of the device.
   - **Variant key** (`NativeShaderLibrary.VariantKeyFor`): the defines of both stages' prefixes, vertex then

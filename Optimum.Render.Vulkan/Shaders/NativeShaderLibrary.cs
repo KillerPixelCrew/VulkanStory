@@ -92,8 +92,18 @@ internal sealed class GlslUniformOracle
 /// </summary>
 internal sealed class NativeShaderLibrary
 {
-    /// <summary><c>0</c> forces the rewriter for every program (A/B runs).</summary>
+    /// <summary>
+    /// <c>0</c> forces the rewriter for every program (A/B runs); <see cref="ForceValue" /> links natively even
+    /// where the launcher's mod shader scan says a mod replaced the program (development runs without the launcher).
+    /// </summary>
     public const string EnabledVariable = "OPTIMUM_VK_NATIVE_SHADERS";
+
+    /// <summary>The <see cref="EnabledVariable" /> value that ignores the mod shader scan.</summary>
+    public const string ForceValue = "force";
+
+    /// <summary>Whether <see cref="EnabledVariable" />'s value asks to ignore the mod shader scan.</summary>
+    public static bool IgnoresModScan(string? enabledVariable) =>
+        string.Equals(enabledVariable?.Trim(), ForceValue, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>A <c>sources/shaders-vk</c> tree to compile at device start instead of the shipped manifest.</summary>
     public const string SourceVariable = "OPTIMUM_VK_SHADER_SOURCE";
@@ -150,7 +160,12 @@ internal sealed class NativeShaderLibrary
 
     /// <summary>
     /// Reads <c>shaders.manifest.json</c> from <paramref name="directory" />. Null, with the one reason, when it is
-    /// missing, malformed, of another schema version, or built by another toolchain than <paramref name="toolchain" />.
+    /// missing, malformed, of another schema version, or built with other compile options than <paramref name="toolchain" />.
+    ///
+    /// A toolchain is <c>ShaderCompiler.Identity</c>: the options, then after the last <c>;</c> the shaderc library
+    /// (its SHA-256, or the Silk package). Only the options must match: a manifest built on another platform or with
+    /// another shaderc build is still accepted, because every stage's SHA-256 pins the SPIR-V bytes themselves. The
+    /// differing library is then the non-empty <paramref name="reason" /> of a loaded library, for the status line.
     /// </summary>
     public static NativeShaderLibrary? Load(string directory, string toolchain, out string reason)
     {
@@ -173,14 +188,29 @@ internal sealed class NativeShaderLibrary
             return null;
         }
 
+        reason = "";
         if (manifest.Toolchain != toolchain)
         {
-            reason = "manifest " + path + " was built by toolchain '" + manifest.Toolchain + "', this renderer compiles with '" + toolchain + "'";
-            return null;
+            (string builtOptions, string builtLibrary) = SplitToolchain(manifest.Toolchain);
+            (string ownOptions, string ownLibrary) = SplitToolchain(toolchain);
+            if (builtOptions != ownOptions)
+            {
+                reason = "manifest " + path + " was built by toolchain '" + manifest.Toolchain + "', this renderer compiles with '" + toolchain + "'";
+                return null;
+            }
+            reason = "manifest built with shader library '" + builtLibrary + "', this renderer has '" + ownLibrary +
+                     "' (same options; the SPIR-V is pinned by its per-stage sha256)";
         }
 
-        reason = "";
         return new NativeShaderLibrary(manifest, path, directory, null);
+    }
+
+    /// <summary>A toolchain identity split at its last <c>;</c>: the compile options and the shaderc library.</summary>
+    internal static (string Options, string Library) SplitToolchain(string? toolchain)
+    {
+        toolchain ??= "";
+        int split = toolchain.LastIndexOf(';');
+        return split < 0 ? (toolchain, "") : (toolchain[..split], toolchain[(split + 1)..]);
     }
 
     /// <summary>

@@ -161,6 +161,13 @@ public sealed class NativeShaderRuntimeTests
         Assert.Equal((NativeShaderLibrary.Mode.Directory, Path.Combine("/bin", "shaders-vk")),
             Pick(NativeShaderLibrary.Resolve(true, null, null, null, "/bin")));
 
+        Assert.Equal(NativeShaderLibrary.Mode.Directory, NativeShaderLibrary.Resolve(null, "/dir", "force", null, "/bin").Mode);
+        Assert.True(NativeShaderLibrary.IgnoresModScan("force"));
+        Assert.True(NativeShaderLibrary.IgnoresModScan(" FORCE "));
+        Assert.False(NativeShaderLibrary.IgnoresModScan("0"));
+        Assert.False(NativeShaderLibrary.IgnoresModScan("1"));
+        Assert.False(NativeShaderLibrary.IgnoresModScan(null));
+
         static (NativeShaderLibrary.Mode, string?) Pick((NativeShaderLibrary.Mode Mode, string? Path, string Reason) r) => (r.Mode, r.Path);
     }
 
@@ -190,6 +197,40 @@ public sealed class NativeShaderRuntimeTests
 
             Assert.NotNull(NativeShaderLibrary.Load(directory, "tool", out string accepted));
             Assert.Equal("", accepted);
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    /// <summary>
+    /// A manifest built with the same compile options by another shaderc build (another platform, another package)
+    /// is accepted: the per-stage SHA-256 pins the SPIR-V. The differing library is the note for the status line.
+    /// Different options are still refused.
+    /// </summary>
+    [Fact]
+    public void OnlyTheCompileOptionsOfTheToolchainMustMatch()
+    {
+        string directory = TemporaryDirectory();
+        try
+        {
+            string options = ShaderCompiler.OptionsIdentity;
+            var manifest = new NativeShaderManifest { Toolchain = options + ";shaderc-sha256:linux" };
+            File.WriteAllText(Path.Combine(directory, NativeShaderManifest.FileName), manifest.ToJson());
+
+            Assert.NotNull(NativeShaderLibrary.Load(directory, options + ";shaderc-sha256:linux", out string same));
+            Assert.Equal("", same);
+
+            Assert.NotNull(NativeShaderLibrary.Load(directory, options + ";silk-shaderc-2.23.0.0", out string otherLibrary));
+            Assert.Contains("shaderc-sha256:linux", otherLibrary);
+            Assert.Contains("silk-shaderc-2.23.0.0", otherLibrary);
+
+            Assert.Null(NativeShaderLibrary.Load(directory, options.Replace("performance", "size") + ";shaderc-sha256:linux", out string otherOptions));
+            Assert.Contains("toolchain", otherOptions);
+
+            Assert.Equal(("a;b", "c"), NativeShaderLibrary.SplitToolchain("a;b;c"));
+            Assert.Equal(("tool", ""), NativeShaderLibrary.SplitToolchain("tool"));
         }
         finally
         {
@@ -393,6 +434,69 @@ public sealed class NativeShaderRuntimeTests
         }
     }
 
+    /// <summary>
+    /// The launcher's mod shader scan at the seam: a program it names links through the rewriter and counts as
+    /// rewritten while another links natively; a scan of "all" sends every program to the rewriter and says so in
+    /// the status line; <c>OPTIMUM_VK_NATIVE_SHADERS=force</c> (the device setting it maps to) ignores the scan.
+    /// </summary>
+    [SkippableFact]
+    public void AProgramTheModScanNamesLinksThroughTheRewriterUnlessForced()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped vanilla assets.");
+        NativeShaderBuildResult build = RequireFamilyOneBuild();
+        string root = TemporaryDirectory();
+        try
+        {
+            NativeShaderBuilder.Write(build, root);
+            string directory = Path.Combine(root, NativeShaderManifest.DirectoryName);
+            ShaderCorpus.ShaderVariant variant = Combinations[1].ToVariant();
+            Func<string, bool> blitOnly = name => string.Equals(name, "blit", StringComparison.OrdinalIgnoreCase);
+
+            Skip.IfNot(TryCreateDevice(_output, directory, null, out VulkanDevice? device, blitOnly, false), "No usable Vulkan device.");
+            using (device)
+            {
+                VulkanDevice seam = device!;
+                Assert.DoesNotContain("rewriter-only", seam.NativeShaderStatus);
+                int blit = LinkGlsl330(seam, "blit", "blit", variant);
+                int luma = LinkGlsl330(seam, "luma", "luma", variant);
+                int blitAgain = LinkGlsl330(seam, "blit", "blit", variant);
+                Assert.False(seam.IsNativeProgram(blit));
+                Assert.False(seam.IsNativeProgram(blitAgain));
+                Assert.True(seam.IsNativeProgram(luma), seam.GetError());
+                Assert.Equal((1, 2, 0), seam.ShaderLinkCounts);
+                Assert.Contains(Render(seam, blit, "blit", InputTextures(seam)), b => b != 0);
+                AssertClean(seam);
+            }
+
+            Skip.IfNot(TryCreateDevice(_output, directory, null, out device, _ => true, false), "No usable Vulkan device.");
+            using (device)
+            {
+                VulkanDevice seam = device!;
+                Assert.Contains("rewriter-only", seam.NativeShaderStatus);
+                foreach (string name in FamilyOne)
+                {
+                    Assert.False(seam.IsNativeProgram(LinkGlsl330(seam, name, name, variant)));
+                }
+                Assert.Equal((0, FamilyOne.Length, 0), seam.ShaderLinkCounts);
+                AssertClean(seam);
+            }
+
+            Skip.IfNot(TryCreateDevice(_output, directory, null, out device, _ => true, true), "No usable Vulkan device.");
+            using (device)
+            {
+                VulkanDevice seam = device!;
+                Assert.Contains("scan ignored", seam.NativeShaderStatus);
+                Assert.True(seam.IsNativeProgram(LinkGlsl330(seam, "blit", "blit", variant)), seam.GetError());
+                Assert.Equal((1, 0, 0), seam.ShaderLinkCounts);
+                AssertClean(seam);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static readonly Lazy<(NativeShaderBuildResult? Result, string Reason)> FamilyOneBuild = new(() => BuildTree(FamilyOne));
@@ -446,11 +550,14 @@ public sealed class NativeShaderRuntimeTests
         File.WriteAllBytes(path, bytes);
     }
 
-    private static bool TryCreateDevice(ITestOutputHelper output, string manifestDirectory, bool? enabled, out VulkanDevice? device)
+    private static bool TryCreateDevice(ITestOutputHelper output, string manifestDirectory, bool? enabled, out VulkanDevice? device,
+        Func<string, bool>? modScan = null, bool? ignoreModScan = null)
     {
         VulkanDevice created = NewDevice();
         created.NativeShaderDirectory = manifestDirectory;
         created.NativeShadersEnabled = enabled;
+        created.ShaderProgramOverriddenByMods = modScan;
+        created.IgnoreModShaderScan = ignoreModScan;
         if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
         {
             device = created;
