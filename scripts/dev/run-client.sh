@@ -27,6 +27,17 @@ PY
   fi
 fi
 cd "$CLIENT" || exit 1
-setsid prime-run dotnet Vintagestory.dll --dataPath "$DATA_PATH" -o "$WORLD" > "$LOG" 2>&1 < /dev/null &
+# PRIME render offload onto the discrete NVIDIA GPU. prime-run is Arch's wrapper and
+# is missing on Debian, Ubuntu, Mint, Fedora and openSUSE; the variables it sets are
+# the standard ones, so set them directly when the NVIDIA driver is loaded. Without
+# that driver they would point GLX at a vendor library that is not installed, so a
+# machine without it launches plainly.
+LAUNCH=(dotnet)
+if command -v prime-run >/dev/null 2>&1; then
+  LAUNCH=(prime-run dotnet)
+elif [[ -e /proc/driver/nvidia/version ]]; then
+  export __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only
+fi
+setsid "${LAUNCH[@]}" Vintagestory.dll --dataPath "$DATA_PATH" -o "$WORLD" > "$LOG" 2>&1 < /dev/null &
 disown
 echo "launched; log: $LOG"

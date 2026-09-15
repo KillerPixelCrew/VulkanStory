@@ -284,10 +284,12 @@ try {
     Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
 
-    # shaderc is a native library; the game loads natives out of Lib\.
+    # shaderc is a native library loaded by Silk.NET.Shaderc, which probes the
+    # application directory, not Lib\ - a copy it cannot find makes the renderer
+    # fall back to OpenGL silently.
     $shadercNative = Join-Path $apiOut (Join-Path 'runtimes' (Join-Path 'win-x64' (Join-Path 'native' 'shaderc_shared.dll')))
     if (Test-Path $shadercNative) {
-        Copy-Item -Force $shadercNative (Join-Path $stageDir 'Lib')
+        Copy-Item -Force $shadercNative $stageDir
     } else {
         Write-Warning "No native shaderc at $shadercNative; the Vulkan renderer will not load"
     }
