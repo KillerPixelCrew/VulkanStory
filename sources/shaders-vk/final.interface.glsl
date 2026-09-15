@@ -22,6 +22,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
     vec3 playerViewVector;
 
     int optimumSsaoInScene;
+    int optimumAoDebug;
 
     float gammaLevel;
     float brightnessLevel;

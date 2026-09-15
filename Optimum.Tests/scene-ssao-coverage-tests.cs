@@ -30,7 +30,10 @@ public class SceneSsaoCoverageTests
         Assert.Equal(1, Count(post, "ssao.Use();"));
         Assert.Contains("if (OptimumTaaRequested && TaaTargetsReady)", post);
 
-        Assert.Contains("final.Uniform(\"optimumSsaoInScene\", optimumSsaoInScene ? 1 : 0);", platform);
+        // The flag means "AO is not Final's to apply": set when the AO was already multiplied
+        // into the scene before the resolve, and also when AO is switched off entirely, where
+        // nothing rendered into the SSAO target and multiplying by it would darken the frame.
+        Assert.Contains("final.Uniform(\"optimumSsaoInScene\", (optimumSsaoInScene || !RenderSSAO) ? 1 : 0);", platform);
         Assert.Contains("optimumSsaoInScene = true;", platform);
         Assert.Contains("if (optimumSsaoInScene == 0)", Read("sources/shaders/final.fsh"));
         Assert.Contains("uniform int optimumSsaoInScene;", Read("sources/shaders/final.fsh"));

@@ -330,6 +330,77 @@ public class AmbientOcclusionCoverageTests
         Assert.Contains("\"onOptimumAmbientOcclusionChanged\"", Read("Optimum.Patcher/Program.cs"));
     }
 
+    // ------------------------------------------------------------------ the debug view
+
+    [Fact]
+    public void SwitchingAoOffAlsoStopsFinalFromMultiplyingByTheStaleSsaoTarget()
+    {
+        // The regression this pins: the scene shaders are still compiled with SSAOLEVEL > 0, so
+        // final.fsh multiplies by ssaoScene unless optimumSsaoInScene says otherwise. With AO off
+        // nothing renders into that target, so an unguarded multiply darkens the whole image.
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.Contains(
+            "final.Uniform(\"optimumSsaoInScene\", (optimumSsaoInScene || !RenderSSAO) ? 1 : 0);",
+            platform);
+    }
+
+    [Fact]
+    public void TheDebugViewShowsWhicheverAoRanAndOnlyWhileAoIsOn()
+    {
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.Contains("bool optimumAoDebugView = OptimumConfig.AmbientOcclusionDebugView && RenderSSAO;", platform);
+        // GTAO's own visibility texture when it produced one, the vanilla blurred target otherwise.
+        Assert.Contains("optimumAoDebugView && optimumAmbientOcclusionTexture != 0", platform);
+        Assert.Contains("final.Uniform(\"optimumAoDebug\", optimumAoDebugView ? 1 : 0);", platform);
+
+        string config = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("public static bool AmbientOcclusionDebugView = false;", config);
+        Assert.Contains("public bool AmbientOcclusionDebugView { get; set; } = false;", config);
+        Assert.Contains("AmbientOcclusionDebugView = data.AmbientOcclusionDebugView;", config);
+        Assert.Contains("AmbientOcclusionDebugView = AmbientOcclusionDebugView,", config);
+    }
+
+    [Fact]
+    public void TheDebugBranchIsTheSameInBothShaderTwins()
+    {
+        // The native program and the GLSL 330 override must agree on the uniform set (the parity
+        // harness) and on what the branch does, or the two backends show different pictures.
+        string gl = Read("sources/shaders/final.fsh");
+        Assert.Contains("uniform int optimumAoDebug;", gl);
+        Assert.Contains("float aoDebugTerm = texture(ssaoScene, texCoord).r;", gl);
+        Assert.Contains("outColor = vec4(vec3(aoDebugTerm), 1.0);", gl);
+
+        string vk = Read("sources/shaders-vk/final.frag");
+        Assert.Contains("float aoDebugTerm = texture(optimumTextures2D[ssaoScene], texCoord).r;", vk);
+        Assert.Contains("outColor = vec4(vec3(aoDebugTerm), 1.0);", vk);
+        Assert.Contains("int optimumAoDebug;", Read("sources/shaders-vk/final.interface.glsl"));
+
+        // Before colour grading and vignetting in both: the view is the AO term, nothing else.
+        Assert.True(gl.IndexOf("optimumAoDebug != 0", StringComparison.Ordinal)
+            < gl.IndexOf("vec4 gradedColor = ColorGrade(color);", StringComparison.Ordinal));
+        Assert.True(vk.IndexOf("optimumAoDebug != 0", StringComparison.Ordinal)
+            < vk.IndexOf("vec4 gradedColor = ColorGrade(color);", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheDebugViewIsAnOptimumTabSwitchWithItsLangEntriesAndPatcherListing()
+    {
+        string gui = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
+        Assert.Contains("Lang.Get(\"optimum-aodebug\")", gui);
+        Assert.Contains("AddSwitch(onOptimumAmbientOcclusionDebugChanged", gui);
+        Assert.Contains("composer.GetSwitch(\"optAoDebug\").SetValue(Vintagestory.API.Config.OptimumConfig.AmbientOcclusionDebugView);", gui);
+
+        string handler = Between(gui, "private void onOptimumAmbientOcclusionDebugChanged(bool on)", "\n\t}");
+        Assert.Contains("OptimumConfig.AmbientOcclusionDebugView = on;", handler);
+        Assert.DoesNotContain("ReloadShaders", handler);
+        Assert.DoesNotContain("RebuildFrameBuffers", handler);
+
+        string lang = Read("sources/lang/en.json");
+        Assert.Contains("\"optimum-aodebug\":", lang);
+        Assert.Contains("\"optimum-aodebug-tooltip\":", lang);
+        Assert.Contains("\"onOptimumAmbientOcclusionDebugChanged\"", Read("Optimum.Patcher/Program.cs"));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static string Between(string text, string start, string end)

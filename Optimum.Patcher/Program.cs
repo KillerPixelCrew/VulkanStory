@@ -479,6 +479,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumTaaSharpnessChanged",
         "onOptimumTaaMipBiasChanged",
         "onOptimumAmbientOcclusionChanged",
+        "onOptimumAmbientOcclusionDebugChanged",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",

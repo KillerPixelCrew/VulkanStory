@@ -59,5 +59,7 @@
 	"optimum-taamipbias-tooltip": "Mip-map bias, in hundredths of a mip level, applied while TAA is on: jitter gives the resolve sub-pixel samples, so textures can be selected sharper than an unjittered frame would allow. -50 is the default; 0 keeps vanilla mip selection; more negative is sharper but can reintroduce texture shimmer. Applies immediately.",
 	"optimum-ao": "Ambient Occlusion",
 	"optimum-ao-tooltip": "Master switch for ambient occlusion - the contact shading in corners, under overhangs and where blocks meet. Off skips both the vanilla SSAO pass and Optimum's GTAO and changes nothing else, so flipping it while standing still shows exactly what AO contributes. Applies on the next frame: no shader reload, no restart. Which AO runs while it is on is the ambient occlusion mode in optimum.json (auto, vanilla or gtao); the vanilla SSAO quality setting at 0 still switches it off on both paths.",
+	"optimum-aodebug": "AO Debug View (B/W)",
+	"optimum-aodebug-tooltip": "Show the ambient occlusion term by itself, as a black and white image: white is fully lit, dark is fully occluded, and nothing else - no textures, no lighting, no colour grading. Shows whichever AO is running, Optimum's GTAO or the vanilla SSAO, which makes it the way to compare the two and to see where the occlusion actually lands. Does nothing while ambient occlusion is switched off. Applies immediately.",
 	"optimum-godrayscap-tooltip": "Limits the god-rays post-process to 100 texture samples. Off keeps the vanilla 180-sample path."
 }
