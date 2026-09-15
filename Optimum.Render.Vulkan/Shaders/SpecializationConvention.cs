@@ -42,5 +42,8 @@ internal static class SpecializationConvention
         // value still selects fogandlight.vsh's no-point-light path, which also skips the night
         // vision, MINBRIGHT and contrast terms. Keeping that path needs the value.
         new(11, "OPTIMUM_DYNLIGHTS", "int", "0", "DYNLIGHTS"),
+        // Optimum AO (docs/research/ambient-occlusion.md C.5, C.11): gates the class-channel writes and
+        // scene-ssao's GTAO compose branch, never an output or a varying.
+        new(12, "OPTIMUM_OPTIMUMAO", "int", "0", "OPTIMUMAO"),
     };
 }

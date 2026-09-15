@@ -268,10 +268,21 @@ The prefix is `ShaderRegistry.registerDefaultShaderCodePrefixes`, `ShaderRegistr
     path (`applyLightWithoutPointLight`), which also skips the night-vision, `MINBRIGHT` and 1.05-contrast
     terms, so a loop bound alone would change pixels with dynamic lights set to 0.
   - `MAXANIMATEDELEMENTS` is fixed.
+  - `OPTIMUMAO` (Optimum AO, stamped 0 or 1 since the GTAO merge) gates only uniform and sampler declarations
+    and code (the class-channel writes into `gNormal.w` in `chunkopaque`, `entityanimated`, `standard`, and
+    `scene-ssao`'s GTAO compose branch), never an output or varying, so it is the constant `OPTIMUM_OPTIMUMAO`
+    (added 2026-09-16). `scene-ssao`'s `#if OPTIMUMAO > 0 if (optimumAoMode == 1) {...} else #endif {...}` becomes
+    `if (OPTIMUM_OPTIMUMAO > 0 && optimumAoMode == 1) {...} else {...}`, the same control flow.
+  - `OPTIMUMAO_MULTIBOUNCE` is never stamped by `ShaderRegistry` (the albedo hook of
+    `docs/research/ambient-occlusion.md` C.11, off in the first version), so it is neither a constant nor an
+    axis: `scene-ssao.frag` declares a plain `const int OPTIMUM_AO_MULTIBOUNCE = 0` and branches on it, which
+    compiles the multibounce code out. `optimumMultiBounce` and the `aoAlbedo` sampler slot are declared
+    unconditionally, as the oracle sees them; the optimiser drops both. When the albedo hook ships it becomes a
+    real constant with a stamped define.
   - **Ids** (`specialization.glsl`, mirrored in `Shaders/SpecializationConvention.cs`): 0 `OPTIMUM_FXAA`,
     1 `OPTIMUM_SSAOLEVEL`, 2 `OPTIMUM_NORMALVIEW`, 3 `OPTIMUM_BLOOM`, 4 `OPTIMUM_GODRAYS`, 5 `OPTIMUM_FOAMEFFECT`,
     6 `OPTIMUM_SHINYEFFECT`, 7 `OPTIMUM_SHADOWQUALITY`, 8 `OPTIMUM_WAVINGSTUFF`, 9 `OPTIMUM_MINBRIGHT` (float),
-    10 `OPTIMUM_GREEDYMESH_GRAD`, 11 `OPTIMUM_DYNLIGHTS`. Every other constant is `int`.
+    10 `OPTIMUM_GREEDYMESH_GRAD`, 11 `OPTIMUM_DYNLIGHTS`, 12 `OPTIMUM_OPTIMUMAO`. Every other constant is `int`.
     - Defaults are 0, the value an undefined macro has in `#if` and the fallback `fogandlight.vsh` defines;
       the runtime specializes every constant.
     - `SpecializationConventionTests` checks the include against the C# table, the ids and types in the

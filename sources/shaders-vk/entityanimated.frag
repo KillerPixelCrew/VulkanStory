@@ -161,6 +161,10 @@ void main() {
 	// A bit hacky: We use ALLOWDEPTHOFFSET for the first person rendering. SSAO seems to break on it, so we disable it
 	#if USEOIT == 0 && GBUFFER == 1
 		outGPosition.w=1;
+	if (OPTIMUM_OPTIMUMAO > 0) {
+		// Optimum AO class channel (C.5, C.9): the first-person hand writes the hand class.
+		outGNormal.w = -1.0;
+	}
 	#endif
 
 #endif

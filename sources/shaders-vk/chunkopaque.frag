@@ -144,6 +144,11 @@ void main()
 #if GBUFFER == 1
 		outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 		outGNormal = gnormal;
+		if (OPTIMUM_OPTIMUMAO > 0) {
+		// Optimum AO class channel (docs/research/ambient-occlusion.md C.5): plants, grass and
+		// cross-quad blocks draw in the no-cull opaque pass (haxyFade), and are thin like leaves.
+		if (haxyFade > 0) outGNormal.w = 1.0;
+		}
 #endif
 
 		if (OPTIMUM_NORMALVIEW > 0) {
@@ -207,6 +212,10 @@ void main()
 #if GBUFFER == 1
 	outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 	outGNormal = gnormal;
+	if (OPTIMUM_OPTIMUMAO > 0) {
+	// Optimum AO class channel (C.5): the no-cull opaque pass (plants, grass, cross-quads) is thin.
+	if (haxyFade > 0) outGNormal.w = 1.0;
+	}
 #endif
 
 	if (OPTIMUM_NORMALVIEW > 0) {
