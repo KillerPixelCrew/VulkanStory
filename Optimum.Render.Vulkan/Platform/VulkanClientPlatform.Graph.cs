@@ -344,8 +344,19 @@ public partial class VulkanClientPlatform
         SetPassContext("Frame", PassFlags.AllowSplit);
     }
 
+    /// <summary>
+    /// Phase 3b: the blit runs natively (VulkanClientPlatform.NativeBlit.cs) - its own
+    /// pipelines, one declared pass per written target, no GL-shaped call in between. The
+    /// GL body stays reachable through <see cref="NativeBlitEnabled" /> for the old-route
+    /// side of the parity tests.
+    /// </summary>
     public override void BlitPrimaryToDefault()
     {
+        if (NativeBlitEnabled && device != null)
+        {
+            RenderNativeBlit();
+            return;
+        }
         SetPassContext("Blit", PassFlags.None);
         base.BlitPrimaryToDefault();
         SetPassContext("Frame", PassFlags.AllowSplit);

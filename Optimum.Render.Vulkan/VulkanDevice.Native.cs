@@ -1,0 +1,711 @@
+using System;
+using System.Collections.Generic;
+using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Graph;
+using Optimum.Render.Vulkan.Shaders;
+using Silk.NET.Vulkan;
+
+namespace Optimum.Render.Vulkan;
+
+/// <summary>Which block of a program's interface a native uniform lives in.</summary>
+internal enum NativeUniformBlock : byte
+{
+    None = 0,
+    /// <summary>The program record at set 2, snapshotted into the uniform ring per draw.</summary>
+    Record = 1,
+    /// <summary>A DRAW uniform in the program's push block.</summary>
+    Push = 2,
+    /// <summary>A member of the shared frame block at set 0.</summary>
+    Frame = 3,
+}
+
+/// <summary>
+/// A uniform's placement in one native pipeline's program, resolved once when the pipeline
+/// is created. A native renderer holds the value and writes through it, so no draw looks a
+/// uniform up by name.
+/// </summary>
+internal readonly record struct NativeUniform(NativeUniformBlock Block, int Offset, int Size)
+{
+    public bool IsPresent => Block != NativeUniformBlock.None;
+}
+
+/// <summary>
+/// A sampler's placement: the push-block offset its bindless slot index is written to (or
+/// the set 0 binding, for a fixed frame texture) and the array kind it indexes. Resolved
+/// once with the pipeline.
+/// </summary>
+internal readonly record struct NativeSamplerSlot(int Index, int PushOffset, int FrameBinding, TextureKind Kind)
+{
+    public static NativeSamplerSlot None => new(-1, -1, -1, TextureKind.Texture2D);
+
+    public bool IsPresent => Index >= 0;
+}
+
+/// <summary>One sampled texture of a native draw: the slot, the texture handle and the sampler state to read it with (null: the texture's own).</summary>
+internal readonly record struct NativeTexture(NativeSamplerSlot Sampler, int TextureId, SamplerState? Sampling = null);
+
+/// <summary>
+/// The fixed state a native pipeline is built for (docs/vulkan-native-render-systems.md,
+/// decision 4). It is <see cref="PipelineKey" />'s shape stated outright instead of read
+/// back out of <see cref="GlStateTracker" />: per-attachment blend and colour write mask,
+/// depth test/write/compare, cull, topology and the target's formats.
+/// </summary>
+internal sealed class NativePipelineDescription
+{
+    /// <summary>The linked program: a manifest program when native shaders are on, its rewritten twin otherwise.</summary>
+    public int ProgramId;
+
+    /// <summary>The pass name the program was linked under, checked against the device's; null skips the check.</summary>
+    public string? PassName;
+
+    /// <summary>The variant the program must have been linked for, checked against the device's; null skips the check.</summary>
+    public string? VariantKey;
+
+    /// <summary>Per colour attachment; <see cref="AttachmentBlend.WriteMask" /> is the colour write mask. Attachments past the array are not written.</summary>
+    public AttachmentBlend[] Blend = Array.Empty<AttachmentBlend>();
+
+    public bool DepthTest;
+    public bool DepthWrite;
+    public CompareOp DepthCompare = CompareOp.Less;
+    public CullModeFlags Cull = CullModeFlags.None;
+    public PrimitiveTopology Topology = PrimitiveTopology.TriangleList;
+
+    /// <summary>The attachment formats of the target the pipeline renders into.</summary>
+    public RenderTargetFormats Targets = null!;
+}
+
+/// <summary>
+/// A pipeline a native render system owns: the program, its fixed state, the pipeline-cache
+/// key built from them, and the placement tables the draws write through.
+/// </summary>
+internal sealed class NativePipeline
+{
+    private readonly Dictionary<string, NativeUniform> _uniforms = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, NativeSamplerSlot> _samplers = new(StringComparer.Ordinal);
+
+    internal NativePipeline(ShaderProgramResources program, NativePipelineDescription description,
+        PipelineKey key, GraphicsPipelineCache.PipelineRequest request, int dynamicBlendId)
+    {
+        Program = program;
+        Description = description;
+        Key = key;
+        Request = request;
+        DynamicBlendId = dynamicBlendId;
+
+        ProgramInterfaceLayout layout = program.Interface;
+        foreach (UniformMember member in layout.Members)
+        {
+            _uniforms[member.Name] = new NativeUniform(NativeUniformBlock.Record, member.Offset, member.Size);
+        }
+        foreach (KeyValuePair<string, UniformMember> push in layout.PushMembersByName)
+        {
+            _uniforms[push.Key] = new NativeUniform(NativeUniformBlock.Push, push.Value.Offset, push.Value.Size);
+        }
+        foreach (string name in layout.FrameMemberDeclaredLengths.Keys)
+        {
+            if (FrameGlobals.TryGetMember(name, out UniformMember frame))
+            {
+                _uniforms[name] = new NativeUniform(NativeUniformBlock.Frame, frame.Offset, frame.Size);
+            }
+        }
+        for (int i = 0; i < layout.Samplers.Count; i++)
+        {
+            SamplerBinding sampler = layout.Samplers[i];
+            TextureKind kind = sampler.Kind;
+            if (sampler.IsFrameTexture) BindlessKinds.TryFromGlslType(sampler.TypeName, out kind);
+            _samplers[sampler.Name] = new NativeSamplerSlot(i, sampler.PushOffset, sampler.FrameBinding, kind);
+        }
+    }
+
+    internal ShaderProgramResources Program { get; }
+
+    public int ProgramId => Program.ProgramId;
+
+    public NativePipelineDescription Description { get; }
+
+    internal PipelineKey Key { get; }
+
+    internal GraphicsPipelineCache.PipelineRequest Request { get; }
+
+    /// <summary>The interned blend set the dynamic-state cache compares on, with the mask tier's dynamic blend.</summary>
+    internal int DynamicBlendId { get; }
+
+    /// <summary>The placement of a uniform, resolved once here rather than per draw.</summary>
+    public NativeUniform Uniform(string name) =>
+        _uniforms.TryGetValue(name, out NativeUniform member) ? member : default;
+
+    /// <summary>The placement of a sampler, resolved once here rather than per draw.</summary>
+    public NativeSamplerSlot Sampler(string name) =>
+        _samplers.TryGetValue(name, out NativeSamplerSlot sampler) ? sampler : NativeSamplerSlot.None;
+}
+
+/// <summary>
+/// A native pass: an explicit target, the colour slots it writes, the textures it samples
+/// and the viewport its draws use. No draw-buffer mask and no bound-target guessing.
+/// </summary>
+internal sealed class NativePassDescription
+{
+    public string Name = "";
+
+    /// <summary>A render target id, or <see cref="PassDeclaration.DefaultFramebuffer" /> for the default target.</summary>
+    public int FramebufferId = PassDeclaration.DefaultFramebuffer;
+
+    /// <summary>Bit i: colour slot i is an attachment of the pass.</summary>
+    public uint ColorSlots = 1u;
+
+    /// <summary>The textures the pass samples, made shader-readable at pass entry.</summary>
+    public int[] Reads = Array.Empty<int>();
+
+    public uint TransientSlots;
+    public PassFlags Flags = PassFlags.None;
+
+    public int ViewportX;
+    public int ViewportY;
+
+    /// <summary>Negative: the full target.</summary>
+    public int ViewportWidth = -1;
+    public int ViewportHeight = -1;
+}
+
+/// <summary>
+/// The device API native render systems draw through (docs/vulkan-native-render-systems.md,
+/// section 2 decision 4 and section 3).
+///
+/// A native system asks for a pipeline by program and fixed state, declares a pass with its
+/// target, its colour slots and the textures it reads, writes its uniforms by placement and
+/// records draws. None of it consults <see cref="GlStateTracker" />, the texture-unit tables
+/// or a draw-buffer mask; the emulation layer stays for mod renderers and for the vanilla
+/// systems that have not moved yet.
+/// </summary>
+public sealed unsafe partial class VulkanDevice
+{
+    private readonly Interner<BlendSignature> _nativeBlends = new();
+    private readonly Interner<RenderTargetFormats> _nativeFormats = new();
+    private readonly Dictionary<NativePipelineCacheKey, NativePipeline> _nativePipelines = new();
+
+    /// <summary>The manifest variant each native program was linked for, keyed by program id.</summary>
+    private readonly Dictionary<int, string> _programVariants = new();
+
+    private NativePassDescription? _nativePass;
+    private VulkanFramebuffer? _nativeTarget;
+    private long _emulationCalls;
+    private long _emulationCallsInNativePasses;
+    private long _nativePasses;
+    private long _nativeDraws;
+
+    private readonly record struct NativePipelineCacheKey(
+        int ProgramId, int FormatsId, int BlendId, bool DepthTest, bool DepthWrite,
+        CompareOp DepthCompare, CullModeFlags Cull, PrimitiveTopology Topology);
+
+    /// <summary>Calls into the GL-emulation layer (state, units, uniforms by location, draws). Tests only.</summary>
+    internal long EmulationCallsForTests => _emulationCalls;
+
+    /// <summary>Calls into the GL-emulation layer while a native pass was open: must stay 0. Tests only.</summary>
+    internal long EmulationCallsInNativePassesForTests => _emulationCallsInNativePasses;
+
+    /// <summary>Native passes declared and native draws recorded. Tests only.</summary>
+    internal long NativePassesForTests => _nativePasses;
+    internal long NativeDrawsForTests => _nativeDraws;
+
+    /// <summary>Distinct native pipelines this device holds. Tests only.</summary>
+    internal int NativePipelinesForTests => _nativePipelines.Count;
+
+    /// <summary>Counts one entry into the GL-emulation layer, and whether it happened inside a native pass.</summary>
+    private void NoteEmulation()
+    {
+        _emulationCalls++;
+        if (_nativePass != null) _emulationCallsInNativePasses++;
+    }
+
+    /// <summary>Set 1's placeholders are written shader-read-only and never used any other way: put them there once.</summary>
+    private void EnsureBindlessPlaceholdersReadable(CommandBuffer commandBuffer)
+    {
+        if (_bindlessPlaceholdersReadable || _bindless == null) return;
+
+        for (int kind = 0; kind < BindlessKinds.Count; kind++)
+        {
+            VulkanTexture? placeholder = _textures.Get(_bindless.PlaceholderTextureId((TextureKind)kind));
+            if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
+            _targets.EndRendering(commandBuffer);
+            _textures.Require(_barriers, commandBuffer, placeholder, ResourceUsage.SampleFragment);
+        }
+        _bindlessPlaceholdersReadable = true;
+    }
+
+    // ------------------------------------------------------------------ pipelines
+
+    /// <summary>
+    /// The attachment formats of a target's colour slots, so a native system can state the
+    /// formats its pipeline is built for. Null for a target that does not exist.
+    /// </summary>
+    internal RenderTargetFormats? NativeTargetFormats(int framebufferId, uint colorSlots)
+    {
+        VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(framebufferId));
+        if (target == null) return null;
+
+        uint exclusion = 0;
+        for (int i = 0; i < GlStateTracker.MaxColorAttachments; i++)
+        {
+            if (((colorSlots >> i) & 1) == 0) exclusion |= 1u << i;
+        }
+        return _targets.ScopeFormats(target, exclusion);
+    }
+
+    /// <summary>The manifest variant a program was linked for; "" for a program the rewriter linked.</summary>
+    internal string NativeVariantOf(int programId) =>
+        _programVariants.TryGetValue(programId, out string? key) ? key : "";
+
+    private int ResolveNativeFramebuffer(int framebufferId) =>
+        framebufferId == PassDeclaration.DefaultFramebuffer ? _defaultFramebuffer : framebufferId;
+
+    /// <summary>
+    /// The pipeline for a program and a piece of fixed state, created through the pipeline
+    /// cache on first request and returned from this device's table afterwards. Null with a
+    /// reason when the program is not linked, was linked as something else, or the request
+    /// names no target formats.
+    /// </summary>
+    internal NativePipeline? RequestNativePipeline(NativePipelineDescription description, out string error)
+    {
+        error = "";
+        if (!_programs.TryGetValue(description.ProgramId, out ShaderProgramResources? program))
+        {
+            error = "program " + description.ProgramId + " is not linked";
+            return null;
+        }
+        if (description.PassName != null &&
+            (!_programNames.TryGetValue(description.ProgramId, out string? name) ||
+             !string.Equals(name, description.PassName, StringComparison.Ordinal)))
+        {
+            error = "program " + description.ProgramId + " is not '" + description.PassName + "'";
+            return null;
+        }
+        if (description.VariantKey != null &&
+            !string.Equals(NativeVariantOf(description.ProgramId), description.VariantKey, StringComparison.Ordinal))
+        {
+            error = "program '" + description.PassName + "' was linked for variant '" +
+                NativeVariantOf(description.ProgramId) + "', not '" + description.VariantKey + "'";
+            return null;
+        }
+        if (description.Targets == null)
+        {
+            error = "the request names no target formats";
+            return null;
+        }
+
+        ColorWriteTier tier = _context.Capabilities.ColorWriteTier;
+        bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
+        int count = description.Targets.ColorFormats.Length;
+
+        // The blend set as the pipeline bakes it under the colour write tier, the way
+        // GlStateTracker.PipelineBlendFor does for an emulated draw - without the tracker.
+        var baked = new AttachmentBlend[Math.Max(count, 1)];
+        for (int i = 0; i < baked.Length; i++)
+        {
+            AttachmentBlend blend = AttachmentBlend.Default;
+            if (i < description.Blend.Length) blend = description.Blend[i];
+            else blend.WriteMask = 0;
+
+            switch (tier)
+            {
+            case ColorWriteTier.DynamicMask:
+                if (dynamicBlend) blend = AttachmentBlend.Default;
+                blend.WriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit
+                    | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+                break;
+            }
+            baked[i] = blend;
+        }
+
+        int rawBlendId = _nativeBlends.Intern(new BlendSignature(NativeBlendSpan(description, count)));
+        int bakedBlendId = _nativeBlends.Intern(new BlendSignature(baked.AsSpan(0, Math.Max(count, 0))));
+        int formatsId = _nativeFormats.Intern(description.Targets);
+
+        var cacheKey = new NativePipelineCacheKey(description.ProgramId, formatsId, bakedBlendId,
+            description.DepthTest, description.DepthWrite, description.DepthCompare,
+            description.Cull, description.Topology);
+        if (_nativePipelines.TryGetValue(cacheKey, out NativePipeline? cached) &&
+            ReferenceEquals(cached.Program, program))
+        {
+            return cached;
+        }
+
+        // A native draw generates its vertices, so the layout is the reserved empty one plus
+        // the constant attribute defaults GL promises for anything the program declares.
+        VertexLayoutDescription vertexLayout = _meshes.LayoutOf(MeshManager.EmptyLayoutId)
+            .WithDefaultsFor(program.Interface.VertexInputs);
+
+        // The blend id is negative so a native key can never collide with an emulated one,
+        // whose ids come from the tracker's interners.
+        var key = new PipelineKey(
+            ProgramId: description.ProgramId,
+            VertexLayoutId: MeshManager.EmptyLayoutId,
+            TargetFormatsId: formatsId,
+            BlendId: -(bakedBlendId + 1),
+            PolygonMode: PolygonMode.Fill,
+            TopologyClass: GlEnums.TopologyClassOf(description.Topology));
+
+        var request = new GraphicsPipelineCache.PipelineRequest
+        {
+            Program = program,
+            VertexLayout = vertexLayout,
+            Targets = description.Targets,
+            Blend = baked,
+            PolygonMode = PolygonMode.Fill,
+            Topology = description.Topology,
+        };
+
+        var pipeline = new NativePipeline(program, description, key, request, -(rawBlendId + 1));
+        _nativePipelines[cacheKey] = pipeline;
+
+        // Created here rather than at the first draw where it can be; an async cache queues
+        // the compile and the first draws are skipped until it is published, as they are on
+        // the emulated path.
+        _pipelines.TryGet(key, request, out _);
+        return pipeline;
+    }
+
+    private static ReadOnlySpan<AttachmentBlend> NativeBlendSpan(NativePipelineDescription description, int count)
+    {
+        if (description.Blend.Length >= count) return description.Blend.AsSpan(0, Math.Max(count, 0));
+        var padded = new AttachmentBlend[Math.Max(count, 0)];
+        for (int i = 0; i < padded.Length; i++)
+        {
+            padded[i] = i < description.Blend.Length ? description.Blend[i] : AttachmentBlend.Default;
+        }
+        return padded;
+    }
+
+    /// <summary>Whether a pipeline's program is still the linked one of that id (a shader reload replaces it).</summary>
+    internal bool IsNativePipelineLive(NativePipeline pipeline) =>
+        _programs.TryGetValue(pipeline.ProgramId, out ShaderProgramResources? program) &&
+        ReferenceEquals(program, pipeline.Program);
+
+    private void ForgetNativePipelines(int programId)
+    {
+        if (_nativePipelines.Count == 0) return;
+
+        var stale = new List<NativePipelineCacheKey>();
+        foreach (KeyValuePair<NativePipelineCacheKey, NativePipeline> entry in _nativePipelines)
+        {
+            if (entry.Key.ProgramId == programId) stale.Add(entry.Key);
+        }
+        foreach (NativePipelineCacheKey key in stale) _nativePipelines.Remove(key);
+    }
+
+    // ---------------------------------------------------------------------- passes
+
+    /// <summary>
+    /// Opens a native pass on an explicit target: its colour slots, the textures it samples
+    /// and the viewport its draws use. The draw-buffer mask is not consulted.
+    /// </summary>
+    internal bool BeginNativePass(NativePassDescription pass)
+    {
+        EndNativePass();
+        if (!_frameActive) return false;
+
+        int id = ResolveNativeFramebuffer(pass.FramebufferId);
+        VulkanFramebuffer? target = id > 0 ? _targets.Get(id) : null;
+        if (target == null)
+        {
+            if (RenderTrace.Enabled) RenderTrace.Write("native pass '" + pass.Name + "' skipped: no such target " + id);
+            return false;
+        }
+
+        CommandBuffer commandBuffer = Commands;
+        _targets.DeclarePass(commandBuffer, new PassDeclaration
+        {
+            Name = pass.Name,
+            FramebufferId = id,
+            ColorSlots = pass.ColorSlots,
+            Reads = pass.Reads,
+            TransientSlots = pass.TransientSlots,
+            Flags = pass.Flags,
+        }, id);
+        if (!ReferenceEquals(_targets.Bound, target)) _targets.Bind(commandBuffer, id);
+
+        _nativePass = pass;
+        _nativeTarget = target;
+        _nativePasses++;
+        VulkanStats.NoteNativePass();
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("native pass '" + pass.Name + "' target=" + id + " slots=" + pass.ColorSlots +
+                " reads=" + string.Join(",", pass.Reads));
+        }
+        return true;
+    }
+
+    /// <summary>Closes the native pass and its scope.</summary>
+    internal void EndNativePass()
+    {
+        if (_nativePass == null) return;
+
+        _nativePass = null;
+        _nativeTarget = null;
+        if (!_frameActive) return;
+
+        CommandBuffer commandBuffer = Commands;
+        _targets.EndPass(commandBuffer);
+        _targets.EndRendering(commandBuffer);
+    }
+
+    // --------------------------------------------------------------------- uniforms
+
+    /// <summary>Writes a uniform of a native pipeline's program at its resolved placement.</summary>
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, ReadOnlySpan<byte> data)
+    {
+        switch (uniform.Block)
+        {
+        case NativeUniformBlock.Record:
+            pipeline.Program.SetUniform(uniform.Offset, data);
+            break;
+        case NativeUniformBlock.Push:
+            pipeline.Program.SetPushUniform(ShaderProgramResources.PushLocationBase + uniform.Offset, data);
+            break;
+        case NativeUniformBlock.Frame:
+            WriteFrameGlobal(uniform.Offset, data);
+            break;
+        }
+    }
+
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float value) =>
+        WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(&value, sizeof(float)));
+
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, int value) =>
+        WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(&value, sizeof(int)));
+
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y)
+    {
+        float* values = stackalloc float[2] { x, y };
+        WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 2 * sizeof(float)));
+    }
+
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y, float z)
+    {
+        float* values = stackalloc float[3] { x, y, z };
+        WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 3 * sizeof(float)));
+    }
+
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y, float z, float w)
+    {
+        float* values = stackalloc float[4] { x, y, z, w };
+        WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 4 * sizeof(float)));
+    }
+
+    // ------------------------------------------------------------------------ draws
+
+    /// <summary>
+    /// Records the fullscreen triangle of a native pass: the pass's reads are made
+    /// shader-readable, the sampled textures resolve to bindless slots straight from their
+    /// handles and sampler state, and the pipeline's fixed state is what the draw runs with.
+    /// </summary>
+    internal bool DrawNativeFullscreen(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)
+    {
+        if (!_frameActive || _nativePass == null || _nativeTarget == null)
+        {
+            if (RenderTrace.Enabled) RenderTrace.Write("native draw skipped: no open native pass");
+            return false;
+        }
+
+        NativePassDescription pass = _nativePass;
+        VulkanFramebuffer target = _nativeTarget;
+        if (!ReferenceEquals(_targets.Bound, target))
+        {
+            AddDiagnostic("native pass '" + pass.Name + "' lost its target before its draw");
+            return false;
+        }
+
+        ShaderProgramResources program = pipeline.Program;
+        if (!IsNativePipelineLive(pipeline))
+        {
+            AddDiagnostic("native pass '" + pass.Name + "' draws with program " + pipeline.ProgramId +
+                ", which has been relinked or deleted");
+            return false;
+        }
+
+        CommandBuffer commandBuffer = Commands;
+        ReleaseReadSelfCopies();
+        EnsureBindlessPlaceholdersReadable(commandBuffer);
+
+        // The pass's reads, put into the layout a shader read needs. A pass never samples
+        // its own attachment: that would be feedback, which a native system resolves by
+        // declaring two passes instead.
+        for (int i = 0; i < textures.Length; i++)
+        {
+            VulkanTexture? texture = _textures.Get(textures[i].TextureId);
+            if (texture == null) continue;
+            if (_targets.IsAttachmentOfBound(textures[i].TextureId) || _targets.IsBoundDepth(textures[i].TextureId))
+            {
+                AddDiagnostic("native pass '" + pass.Name + "' samples texture " + textures[i].TextureId +
+                    ", an attachment of its own target");
+                return false;
+            }
+            _targets.FlushPendingClears(commandBuffer, texture);
+            if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal)
+            {
+                _uploads.NoteUse(commandBuffer, texture);
+                continue;
+            }
+            _targets.EndRendering(commandBuffer);
+            _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.SampleFragment);
+        }
+        _barriers.Flush(commandBuffer);
+
+        _targets.SetDepthReadOnly(false);
+        _targets.EnsureRendering(commandBuffer);
+
+        RenderTargetFormats scope = _targets.ScopeFormats(target);
+        if (!scope.Equals(pipeline.Description.Targets))
+        {
+            AddDiagnostic("native pass '" + pass.Name + "' has target formats its pipeline was not built for");
+            return false;
+        }
+
+        if (!_pipelines.TryGet(pipeline.Key, pipeline.Request, out Pipeline handle))
+        {
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("native draw skipped: pipeline for program " + pipeline.ProgramId + " still compiling");
+            }
+            return false;
+        }
+
+        Vk api = _context.Api;
+        api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, handle);
+
+        VertexLayoutDescription vertexLayout = pipeline.Request.VertexLayout;
+        if (vertexLayout.Bindings.Length > 0 &&
+            vertexLayout.Bindings[^1].Binding == VertexLayoutDescription.DefaultAttributeBinding &&
+            _defaultAttributes != null)
+        {
+            Silk.NET.Vulkan.Buffer defaults = _defaultAttributes.Handle;
+            ulong offset = 0;
+            api.CmdBindVertexBuffers(commandBuffer,
+                VertexLayoutDescription.DefaultAttributeBinding, 1, &defaults, &offset);
+        }
+
+        // The program's push block, then this draw's slots over it.
+        int pushSize = program.Interface.PushConstantSize;
+        if (program.PushShadow != null) program.PushShadow.CopyTo(_pushShadow, 0);
+        else if (pushSize > 0) _pushShadow.AsSpan(0, pushSize).Clear();
+
+        for (int i = 0; i < textures.Length; i++)
+        {
+            NativeTexture sampled = textures[i];
+            NativeSamplerSlot sampler = sampled.Sampler;
+            if (!sampler.IsPresent) continue;
+
+            VulkanTexture? texture = _textures.Get(sampled.TextureId);
+            if (texture != null && !BindlessKinds.Suits(TextureShape.Of(texture), sampler.Kind))
+            {
+                if (RenderTrace.Enabled)
+                {
+                    RenderTrace.Write("native sampler " + sampler.Index + " on program " + program.ProgramId +
+                        " has texture " + sampled.TextureId + " of format " + texture.Format +
+                        " bound, which it cannot sample; using a placeholder");
+                }
+                texture = null;
+            }
+
+            SamplerState sampling = SamplerState.Default;
+            if (texture != null)
+            {
+                // MAX_LEVEL belongs to the texture, even when the caller overrides the filters.
+                sampling = sampled.Sampling is { } state
+                    ? state with { MaxLevel = texture.State.MaxLevel }
+                    : texture.State;
+            }
+
+            if (sampler.FrameBinding >= 0)
+            {
+                SamplerBindingValue value = texture == null
+                    ? default
+                    : new SamplerBindingValue((uint)sampler.FrameBinding, texture.View,
+                        _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, sampler.Kind)), texture.Id);
+                if (texture == null) VulkanStats.NoteSamplerPlaceholder();
+                lock (_frameTextureLock) _frameTextureValues[FrameTextureIndex(sampler.FrameBinding)] = value;
+                continue;
+            }
+
+            uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling);
+            VulkanStats.NoteBindlessSlotResolution();
+            BitConverter.TryWriteBytes(_pushShadow.AsSpan(sampler.PushOffset, ProgramInterfaceLayout.SlotBytes), slot);
+        }
+
+        BindProgramSets(commandBuffer, program, 0);
+        EmitNativeDynamicState(commandBuffer, target, pass, pipeline);
+
+        Checkpoint(commandBuffer,
+            CheckpointMarker.Draw(CheckpointKind.Fullscreen, program.ProgramId, target.Id, 0));
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("native fullscreen program=" + program.ProgramId + " pass='" + pass.Name +
+                "' target=" + target.Id);
+        }
+        api.CmdDraw(commandBuffer, 3, 1, 0, 0);
+        _nativeDraws++;
+        VulkanStats.NoteNativeDraw();
+        return true;
+    }
+
+    /// <summary>The dynamic state of a native draw: the pipeline's fixed state and the pass's viewport, never the tracker's.</summary>
+    private void EmitNativeDynamicState(CommandBuffer commandBuffer, VulkanFramebuffer target,
+        NativePassDescription pass, NativePipeline pipeline)
+    {
+        ColorWriteTier tier = _context.Capabilities.ColorWriteTier;
+        bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
+        int colorStates = (int)Math.Min(_context.Capabilities.MaxColorAttachments, (uint)GlStateTracker.MaxColorAttachments);
+        NativePipelineDescription description = pipeline.Description;
+
+        uint colorWrite = 0;
+        for (int i = 0; i < colorStates && tier != ColorWriteTier.PipelineKey; i++)
+        {
+            ColorComponentFlags mask = i < description.Blend.Length ? description.Blend[i].WriteMask : 0;
+            // An output the program never writes keeps the attachment's contents, as it does on GL.
+            if (!pipeline.Program.Interface.WrittenFragmentOutputs.Contains(i)) mask = 0;
+            if (tier == ColorWriteTier.DynamicEnable)
+            {
+                if (mask != 0) colorWrite |= 1u << i;
+            }
+            else
+            {
+                colorWrite |= (uint)mask << (i * 4);
+            }
+        }
+
+        int width = pass.ViewportWidth >= 0 ? pass.ViewportWidth : (int)target.Width;
+        int height = pass.ViewportHeight >= 0 ? pass.ViewportHeight : (int)target.Height;
+        var values = new DynamicStateValues
+        {
+            Viewport = new Viewport(pass.ViewportX, pass.ViewportY, width, height, 0f, 1f),
+            Scissor = new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
+            CullMode = description.Cull,
+            FrontFace = GlStateTracker.FrontFace,
+            Topology = description.Topology,
+            DepthTest = description.DepthTest,
+            DepthWrite = description.DepthWrite,
+            DepthCompare = description.DepthCompare,
+            StencilTest = false,
+            StencilFail = StencilOp.Keep,
+            StencilPass = StencilOp.Keep,
+            StencilDepthFail = StencilOp.Keep,
+            StencilCompare = CompareOp.Always,
+            StencilCompareMask = 0xFF,
+            StencilWriteMask = 0xFF,
+            StencilReference = 0,
+            LineWidth = 1.0f,
+            ColorWrite = colorWrite,
+            BlendStateId = dynamicBlend ? pipeline.DynamicBlendId : 0,
+        };
+
+        FrameSlot slot = _frames.Current;
+        ulong serial = slot.CommandBuffer.Handle == commandBuffer.Handle ? slot.RecordingSerial : 0;
+
+        Span<AttachmentBlend> blendStates = stackalloc AttachmentBlend[dynamicBlend ? colorStates : 0];
+        for (int i = 0; i < blendStates.Length; i++)
+        {
+            blendStates[i] = i < description.Blend.Length ? description.Blend[i] : AttachmentBlend.Default;
+        }
+        EmitDynamicState(commandBuffer, values, serial, tier, dynamicBlend, colorStates, blendStates);
+    }
+}
