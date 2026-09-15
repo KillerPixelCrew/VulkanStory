@@ -444,35 +444,24 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
 
-### Family: entities (`entityanimated`, `shadowmapentityanimated`, `standard`, `instanced`; 2026-09-15)
+### Family 7 decisions (optimum-programs, 2026-09-15)
 
-Axes and variants: `entityanimated` ALLOWDEPTHOFFSET, GBUFFER, TAAMOTION, USEOIT (16; `Entityanimated_Oit` is
-USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `instanced` GBUFFER, TAAMOTION (4);
-`shadowmapentityanimated` none (1). No oracle quirk (section 2) was met. Decisions:
-
-- **`#if defined(X)` on a per-registration define** (`ALLOWDEPTHOFFSET`, `GLOWSUB`) becomes `#if X == 1`; the
-  nested `#if ALLOWDEPTHOFFSET > 0` folds into it, since every variant defines the axis as 0 or 1.
-- **Animation buffers:** `Animation`/`AnimationPrev` are `readonly buffer`s at `OPTIMUM_BINDING_ANIMATION`/
-  `_PREV`, std140, keeping the instance names `ElementTransforms`/`PrevElementTransforms` and the member
-  `values`, declared as a runtime array `mat4 values[]`: MAXANIMATEDELEMENTS is not a native define, and the
-  index (`jointId`) is unchanged.
-- **`AnimationPrev` exists only for TAAMOTION=1, USEOIT=0.** The GLSL 330 vertex stage declares it for every
-  TAAMOTION program, but the client creates the UBO only for the opaque program
-  (`ShaderProgramEntityanimated`, `!Oit && EffectiveTaa`), and the OIT fragment stage never reads `taaPrevClip`.
-  The OIT variant therefore writes `taaPrevClip = vec4(0.0)` and has no binding 2, so the runtime need not bind a
-  buffer the client never made. No pixel changes: nothing reads that varying under USEOIT=1.
-- **Placement:** push and record are identical in every variant of a program (the oracle's names do not depend
-  on defines).
-  - `entityanimated`: push = `entityTex`, `addRenderFlags`, `extraGlow`, `taaHistoryValid`, `taaReactive`,
-    `entityId`, `glitchFlicker` (28 B). Record = everything else (568 B).
-  - `standard`: push = `tex`, `tex2dOverlay`, the nine integer flags and `taaReactive` (48 B). Record 628 B.
-  - `instanced`: push = `tex` (every per-object value is an instance attribute). Record 328 B, including
-    `windWaveCounter`: its vertex stage includes no `vertexwarp.glsl`, so it has no owner in this program.
-  - `shadowmapentityanimated`: push = `entityTex`, `modelViewMatrix` (per entity in the shadow pass),
-    `addRenderFlags` (72 B). Record = `projectionMatrix`.
-- **Open for the runtime stage (not worked around here):** `EntityShapeRenderer` sets `windWaveIntensity` and
-  `waterWaveCounter` per entity (uniform-frequency map, section 3.2). In `entityanimated` both are frame members
-  (the program includes `vertexwarp.glsl`), so a native program reads the frame value unless the runtime treats
-  a per-draw write to an owned frame name specially. The GLSL 330 path honours the override.
-- **`instanced.fsh`'s `in float normalShadeIntensity`** is written by no vertex stage and read by nothing. It
-  keeps a location of its own (11), and the optimised module drops it.
+`taa-resolve`, `taa-sharpen`, `taa-debug`, `taa-skymotion`, `chunkliquidmotion`, `scene-ssao`, `fsr-easu`, `fsr-rcas`.
+- **Bodies:** only the step-4 differences. `taa-resolve` keeps its body and both DO NOT REVERT notes line for line
+  (3x3 nearest-depth disocclusion, motion and the writer-depth tolerance from the nearest-depth tap, the pixel's
+  own reactive, luminance anti-flicker `mix(1.2, 0.3, w*w) * blendAlpha`); its locals `glow` and `sky` shadow the
+  set 0 samplers of those names in function scope, which is legal and left as written.
+- **Uniforms behind an axis** (`taa-skymotion`, `chunkliquidmotion` declare theirs inside `#if TAAMOTION > 0`): the
+  oracle reads unpreprocessed text, so they are names of every variant and sit unconditionally in the record.
+- **Motion location:** `#if TAAMOTION == 1` then `#if GBUFFER == 1` location 4 else 2, so both writers carry the
+  axes `GBUFFER,TAAMOTION`; the two `TAAMOTION=0` variants are identical.
+- **TAA-off dummy output** stays (one `vec4` at location 0, never bound at runtime) and is written as
+  `optimumWriteReactiveOnly(0.0)`, bit-identical to the GLSL 330 `vec4(0.0)`, so no `outMotion` assignment exists
+  outside the include's return values. The TAA-on write is `optimumWriteMotion(..., writerDepth = gl_FragCoord.z)`,
+  whose behind-camera return equals the GLSL 330 early return in both writers.
+- **Placement:** the six fullscreen programs push only their slots. `chunkliquidmotion` is a chunk draw: push holds
+  `origin` and `modelViewMatrix` (76 B, no sampler); `projectionMatrix`, the previous-frame matrices,
+  `cameraPosDelta`, vertexwarp's twelve `prev*` uniforms and the fragment's TAA uniforms are record members.
+- **Depth remap:** `taa-skymotion.vert` keeps `z = w = 1`, so the remap yields window depth 1 as in GL.
+  `chunkliquidmotion.vert` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
+  convention, which the motion arithmetic expects.
