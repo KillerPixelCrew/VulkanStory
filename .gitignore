@@ -86,6 +86,8 @@ docs/*
 !docs/vulkan-branch-progress.md
 # ...and the research notes the plan and its designs cite.
 !docs/research/
+# ...and the native shader interface contract every program family is written against.
+!docs/vulkan-native-shaders.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1

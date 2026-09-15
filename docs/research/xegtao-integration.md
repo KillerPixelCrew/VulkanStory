@@ -9,6 +9,99 @@ Research notes for integrating XeGTAO (MIT, GameTechDev) into the Vulkan rendere
 
 With TAA: NoiseIndex = frame % 64 and a single denoise pass. On GL 3.3, keep vanilla SSAO.
 
+## 0. Status and algorithm choice (2026-09-15)
+
+- **XeGTAO is archived.** The repository was archived on 2024-04-22; its last commits are "Archiving Notice" and a
+  README update. It stays MIT and usable, but receives no fixes. https://github.com/GameTechDev/XeGTAO
+- **The algorithm is not superseded as a base, but it has a maintained successor:** GTAO with visibility bitmasks
+  (Therrien, Levesque, Gilet 2023). Each slice's two horizon angles become a bitfield of N sectors, and every depth
+  sample is treated as a slab of constant thickness, so light passes behind thin surfaces instead of the whole
+  horizon being occluded. https://arxiv.org/abs/2301.11376
+- **Shipped and maintained:** Bevy replaced GTAO with it in 0.15 (new `constant_object_thickness` field).
+  https://bevy.org/learn/migration-guides/0-14-to-0-15/
+  - Source: `crates/bevy_pbr/src/ssao/{preprocess_depth,ssao,spatial_denoise}.wesl`, MIT OR Apache-2.0. Its header
+    names XeGTAO v1.30, Therrien's code post and SSRT3 as bases.
+    https://github.com/bevyengine/bevy/tree/main/crates/bevy_pbr/src/ssao
+  - Open follow-ups: bevyengine/bevy#19713 (2025) lists acos-free slice evaluation and thickness heuristics as the
+    known improvements over a single fixed thickness. https://github.com/bevyengine/bevy/issues/19713
+  - The Skyrim and Fallout 4 community shaders' Screen Space GI uses the same sector bitmask in `gi.cs.hlsl`. GPL-3.0,
+    so reference only (local copies under `~/Projekte/ReScaleFrame/references`).
+- **Licences of the other references:** Therrien's code post states no licence
+  (https://cdrinmatane.github.io/posts/ssaovb-code/), so the sector update is implemented from the paper. The
+  ground-truth VBAO variant on Shadertoy (linked from bevy#19713) states none either: reference only.
+- **Why it matters for this game [Inference]:** the scene is dominated by thin, alpha-tested geometry (leaves, grass,
+  fences, plants). Horizon-based GTAO treats every such surface as infinitely thick and darkens everything behind
+  it. The thickness term is aimed at exactly this case.
+- **[Uncertain]** A commercial Unreal plugin reports about 3 ms for UE5's GTAO against 0.6 ms for its visibility-bitmask
+  version at 1080p (Epic forum listing); vendor-reported, not reproduced here.
+
+**Other candidates checked (2026-09-15)**
+
+- **MXAO (iMMERSE, Pascal Gilcher).**
+  - The modes (`MXAO_AO_TYPE`) are GTAO, solid angle, visibility bitmask, and visibility bitmask with solid angle.
+    https://guides.martysmods.com/shaders/immerse/mxao/
+  - The author says it adds a better horizon falloff than baseline GTAO and a cosine term that the plain bitmask
+    lacks. https://github.com/martymcmodding/iMMERSE
+  - **Code unusable:** the repository licence and the shader header read "Copyright (c) Pascal Gilcher. All rights
+    reserved ... Unauthorized copying of this file, via any medium is strictly prohibited ... Proprietary and
+    confidential". https://github.com/martymcmodding/iMMERSE/blob/main/Shaders/MartysMods_MXAO.fx
+  - What carries over are published ideas only. Cosine-weighted visibility bitmasks are documented by the
+    ground-truth VBAO follow-up referenced in bevyengine/bevy#19713 (reference only, licence unstated).
+  - MXAO also shows the useful product shape: the slice integration is a switch, not a fork.
+- **Alchemy AO (McGuire, Osman, Bukowski, Hennessy, HPG 2011) and Scalable Ambient Obscurance (McGuire 2012).**
+  https://casual-effects.com/research/McGuire2011AlchemyAO/VV11AlchemyAO.pdf ,
+  https://research.nvidia.com/sites/default/files/pubs/2012-06_Scalable-Ambient-Obscurance/McGuire12SAO.pdf
+  - Point-sample obscurance with an aesthetic falloff and intensity/contrast parameters, not a radiometric AO
+    estimate.
+  - SAO's lasting contribution is the depth mip chain for wide radii at constant cost. XeGTAO and Bevy already use
+    it (Bevy's `preprocess_depth.wesl` cites SAO section 2.2).
+  - **[Inference]** Horizon-based slice integration extracts more per depth sample than independent point samples,
+    so it gives less noise at the low sample counts a TAA-accumulated pass runs at. Alchemy/SAO would need more
+    samples or more blur for the same stability.
+- **openmw-ssao (zesterer, last push 2024-11-25).** https://github.com/zesterer/openmw-ssao
+  - **No licence file:** reference only.
+  - Point-sample SSAO (`shaders/ssao.omwfx`) with its own temporal reprojection:
+    - AO history in a private buffer;
+    - a world-position "marker" stored beside it to reject stale history;
+    - the per-pixel sample count reduced where history is trusted;
+    - change-based rejection against ghosts;
+    - a depth-weighted blur.
+  - **Not adopted.** On this renderer TAA is the accumulator and AO is composed before the resolve (section 4 of the
+    handoff knowledge). A second, AO-private history would stack a second ghosting source on top of TAA's.
+  - Its depth-relative occlusion falloff against halos is the standard range check the GTAO pipeline already has.
+- **Unity Ground Truth Ambient Occlusion (MaxwellGengYF, last push 2019-03-12).**
+  https://github.com/MaxwellGengYF/Unity-Ground-Truth-Ambient-Occlusion
+  - **No licence file:** reference only.
+  - A legacy-pipeline Unity port of Jimenez 2016 with its own temporal filter and GTSO specular occlusion.
+  - Superseded as a reference by XeGTAO v1.30 and Bevy.
+  - Specular occlusion needs a PBR specular term this game's shading does not have.
+
+- **"Low-sample GTAO + spatial denoise".** This is not an alternative but the structure every candidate above shares:
+  - few slices and steps per pixel;
+  - noise varied per frame;
+  - an edge-aware 3x3 spatial denoise;
+  - TAA accumulating over frames.
+
+  XeGTAO (one denoise pass with TAA) and Bevy (one 3x3 bilateral pass) both work this way. The choice between them
+  is only the per-slice integration.
+
+**Decision.** Implement GTAO with visibility bitmasks. Keep XeGTAO's surrounding pipeline, which Bevy keeps too:
+- the prefiltered depth mip chain;
+- Hilbert-LUT noise with an R2 sequence advanced per frame while TAA is active;
+- an edge-aware spatial denoise.
+
+The main pass is the low-sample slice loop with a switchable integration (a specialization constant or macro, as
+MXAO switches its AO type): visibility bitmask with cosine weighting (default) or horizon GTAO, so both can be
+measured on this game's foliage with the headless harness. The bitmask variant uses:
+- 32-bit mask per slice;
+- `SLICE_COUNT` and `SAMPLES_PER_SLICE_SIDE` as quality macros;
+- thickness in blocks.
+
+XeGTAO's analytic visibility integral and bent normals are not used. The MIT notices of XeGTAO and Bevy stay in the
+headers of the ported files. Owner decision: it is the default ambient occlusion on Vulkan whenever TAA is active;
+vanilla SSAO otherwise and on OpenGL. The integration plan below still applies, except for step 3's main pass and
+step 2's bent normals.
+
 Source files are cited by their GitHub URLs: [XeGTAO.h](https://github.com/GameTechDev/XeGTAO/blob/master/Source/Rendering/Shaders/XeGTAO.h), [XeGTAO.hlsli](https://github.com/GameTechDev/XeGTAO/blob/master/Source/Rendering/Shaders/XeGTAO.hlsli), [vaGTAO.hlsl](https://github.com/GameTechDev/XeGTAO/blob/master/Source/Rendering/Shaders/vaGTAO.hlsl) and [README](https://github.com/GameTechDev/XeGTAO/blob/master/README.md).
 
 ## 1. XeGTAO specifics
