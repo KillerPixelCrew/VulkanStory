@@ -388,8 +388,12 @@ public class TaaSettingsCoverageTests
         // The completeness check compares CONTENT, not mere existence: a vanilla
         // file of the same name that was never overwritten used to satisfy
         // [ -f "$$d" ] and pass.
-        Assert.Equal(2, Occurrences(makefile, "did not reach"));
-        Assert.Equal(2, Occurrences(makefile, "cmp -s \"$$f\" \"$$d\""));
+        // Two per destination (vanilla dir, install dir): the GLSL overlay check and the
+        // native SPIR-V check (shaders-vk, pinned in installer-release-coverage-tests.cs).
+        Assert.Equal(4, Occurrences(makefile, "did not reach"));
+        Assert.Equal(4, Occurrences(makefile, "cmp -s \"$$f\" \"$$d\""));
+        Assert.Equal(2, Occurrences(makefile, "for f in sources/shaders/* sources/shaderincludes/*; do [ -f \"$$f\" ] || continue; d=\"$("));
+        Assert.Equal(2, Occurrences(makefile, "for f in $(MOD_OUT)/shaders-vk/*; do d=\"$("));
         Assert.DoesNotContain("[ -f \"$$d\" ] ||", makefile);
     }
 

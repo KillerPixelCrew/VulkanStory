@@ -294,6 +294,32 @@ try {
         Write-Warning "No native shaderc at $shadercNative; the Vulkan renderer will not load"
     }
 
+    # Native SPIR-V programs and their manifest (docs/vulkan-native-shaders.md section 6),
+    # beside Optimum.Render.Vulkan.dll and never under assets\: the asset manager must not
+    # read SPIR-V and a mod must not shadow engine shaders by asset priority. The build
+    # always writes the manifest, even for an empty source tree, so a missing one means
+    # tools/shader-compiler never ran. SPIR-V is binary: the "void main" corruption scan
+    # below covers the GLSL overlay in assets/game/shaders only and must never be pointed
+    # at this directory.
+    $shadersVkSrc = Join-Path $apiOut 'shaders-vk'
+    $shadersVkDst = Join-Path $stageDir 'shaders-vk'
+    if (-not (Test-Path (Join-Path $shadersVkSrc 'shaders.manifest.json'))) {
+        throw "Native shader manifest missing at $shadersVkSrc; build tools/shader-compiler (dotnet build VintageStory.slnx -c Release)"
+    }
+    if (Test-Path $shadersVkDst) { Remove-Item -Recurse -Force $shadersVkDst }
+    New-Item -ItemType Directory -Force -Path $shadersVkDst | Out-Null
+    Get-ChildItem $shadersVkSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shadersVkDst }
+    $missingShadersVk = @()
+    foreach ($spirvFile in (Get-ChildItem $shadersVkSrc -File)) {
+        $stagedSpirv = Join-Path $shadersVkDst $spirvFile.Name
+        if (-not (Test-Path $stagedSpirv) -or (Get-FileHash $stagedSpirv).Hash -ne (Get-FileHash $spirvFile.FullName).Hash) {
+            $missingShadersVk += $spirvFile.FullName
+        }
+    }
+    if ($missingShadersVk.Count -gt 0) {
+        throw "Native shader file(s) never reached ${shadersVkDst}: $($missingShadersVk -join ', ')"
+    }
+
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
@@ -446,6 +472,7 @@ try {
         'Optimum.Patcher.dll',
         'uninstall.ps1',
         'Vintagestory.exe',
+        'shaders-vk/shaders.manifest.json',
         '.optimum/donors/VintagestoryLib.Donor.dll',
         '.optimum/donors/VintagestoryAPI.Contracts.dll',
         '.optimum/donors/VSEssentials.Donor.dll',

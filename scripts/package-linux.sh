@@ -306,6 +306,31 @@ else
     echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
 fi
 
+# Native SPIR-V programs and their manifest (docs/vulkan-native-shaders.md section 6),
+# beside Optimum.Render.Vulkan.dll and never under assets/: the asset manager must not
+# read SPIR-V and a mod must not shadow engine shaders by asset priority. The build
+# always writes the manifest, even for an empty source tree, so a missing one means
+# tools/shader-compiler never ran. SPIR-V is binary: the "void main" corruption scan
+# below covers the GLSL overlay in assets/game/shaders only and must never be pointed
+# at this directory.
+SHADERS_VK_SRC="$MOD_OUT/shaders-vk"
+SHADERS_VK_DST="$STAGE_DIR/shaders-vk"
+if [[ ! -f "$SHADERS_VK_SRC/shaders.manifest.json" ]]; then
+    echo "Error: $SHADERS_VK_SRC/shaders.manifest.json missing; build tools/shader-compiler (dotnet build VintageStory.slnx -c Release)" >&2
+    exit 1
+fi
+rm -rf "$SHADERS_VK_DST"
+mkdir -p "$SHADERS_VK_DST"
+find "$SHADERS_VK_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADERS_VK_DST/" \;
+MISSING_SHADERS_VK=""
+while IFS= read -r -d '' f; do
+    cmp -s "$f" "$SHADERS_VK_DST/$(basename "$f")" || MISSING_SHADERS_VK="$MISSING_SHADERS_VK $f"
+done < <(find "$SHADERS_VK_SRC" -maxdepth 1 -type f -print0)
+if [[ -n "$MISSING_SHADERS_VK" ]]; then
+    echo "Error: native shader file(s) never reached $SHADERS_VK_DST:$MISSING_SHADERS_VK" >&2
+    exit 1
+fi
+
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
 # It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.
