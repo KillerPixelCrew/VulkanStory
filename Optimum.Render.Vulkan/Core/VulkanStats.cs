@@ -351,6 +351,28 @@ internal static class VulkanStats
         Interlocked.Increment(ref _intervalBindlessSlots);
     }
 
+    private static long _nativePasses;
+    private static long _nativeDraws;
+    private static long _intervalNativePasses;
+    private static long _intervalNativeDraws;
+
+    /// <summary>A pass a native render system declared with explicit writes and reads (no draw-buffer mask).</summary>
+    public static void NoteNativePass()
+    {
+        Interlocked.Increment(ref _nativePasses);
+        Interlocked.Increment(ref _intervalNativePasses);
+    }
+
+    /// <summary>A draw a native render system recorded through its own pipeline, without the GL state tracker.</summary>
+    public static void NoteNativeDraw()
+    {
+        Interlocked.Increment(ref _nativeDraws);
+        Interlocked.Increment(ref _intervalNativeDraws);
+    }
+
+    public static long NativePasses => Interlocked.Read(ref _nativePasses);
+    public static long NativeDraws => Interlocked.Read(ref _nativeDraws);
+
     /// <summary>A draw's frame texture (set 0) resolved to its placeholder: nothing suitable bound.</summary>
     public static void NoteSamplerPlaceholder()
     {
@@ -486,7 +508,9 @@ internal static class VulkanStats
             BindlessSlots: Interlocked.Exchange(ref _intervalBindlessSlots, 0),
             BindlessPlaceholders: Interlocked.Exchange(ref _intervalBindlessPlaceholders, 0),
             ComputePasses: Interlocked.Exchange(ref _computePasses, 0),
-            Dispatches: Interlocked.Exchange(ref _dispatches, 0));
+            Dispatches: Interlocked.Exchange(ref _dispatches, 0),
+            NativePasses: Interlocked.Exchange(ref _intervalNativePasses, 0),
+            NativeDraws: Interlocked.Exchange(ref _intervalNativeDraws, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -592,14 +616,15 @@ internal static class VulkanStats
             "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11} " +
             "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
             "standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} " +
-            "bindless_slots={21} bindless_placeholders={22} compute_passes={23} dispatches={24}",
+            "bindless_slots={21} bindless_placeholders={22} compute_passes={23} dispatches={24}" +
+            " native_passes={25} native_draws={26}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
             counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
             counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits,
             counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders,
-            counters.ComputePasses, counters.Dispatches);
+            counters.ComputePasses, counters.Dispatches, counters.NativePasses, counters.NativeDraws);
 
     private static long _lastSample;
 
@@ -698,7 +723,9 @@ internal readonly record struct CounterSample(
     long BindlessSlots = 0,
     long BindlessPlaceholders = 0,
     long ComputePasses = 0,
-    long Dispatches = 0);
+    long Dispatches = 0,
+    long NativePasses = 0,
+    long NativeDraws = 0);
 
 /// <summary>The values on the <c>stats.transients</c> line.</summary>
 internal readonly record struct TransientSample(

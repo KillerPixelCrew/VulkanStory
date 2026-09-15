@@ -241,6 +241,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
+        // Phase 3b: the window's client size as a seam, so the native blit and the OpenGL body
+        // read the same value (docs/vulkan-native-render-systems.md, decision 3).
+        "OptimumWindowClientSize",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).

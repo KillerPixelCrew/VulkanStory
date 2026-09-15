@@ -303,20 +303,30 @@ public class AmbientOcclusionCoverageTests
     }
 
     [Fact]
-    public void TheMasterSwitchIsAnOptimumTabSwitchWiredToTheConfig()
+    public void TheAoChoiceIsOneDropDownWiredToTheConfig()
     {
         string gui = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
         Assert.Contains("Lang.Get(\"optimum-ao\")", gui);
         Assert.Contains("Lang.Get(\"optimum-ao-tooltip\")", gui);
-        Assert.Contains("AddSwitch(onOptimumAmbientOcclusionChanged", gui);
-        Assert.Contains("\"optAo\")", gui);
-        Assert.Contains("composer.GetSwitch(\"optAo\").SetValue(Vintagestory.API.Config.OptimumConfig.AmbientOcclusionEnabled);", gui);
+        // One control for the whole choice: off, the game's own pass, ours, or auto.
+        Assert.Contains("AddDropDown(new string[] { \"off\", \"auto\", \"vanilla\", \"gtao\" }", gui);
+        Assert.Contains("onOptimumAmbientOcclusionChanged", gui);
+        Assert.Contains("\"optAoMode\")", gui);
+        Assert.Contains("composer.GetDropDown(\"optAoMode\").SetSelectedIndex(", gui);
+        foreach (string key in new[] { "optimum-ao-off", "optimum-ao-auto", "optimum-ao-vanilla", "optimum-ao-gtao" })
+        {
+            Assert.Contains("Lang.Get(\"" + key + "\")", gui);
+        }
 
-        string handler = Between(gui, "private void onOptimumAmbientOcclusionChanged(bool on)", "\n\t}");
-        Assert.Contains("OptimumConfig.AmbientOcclusionEnabled = on;", handler);
+        string handler = Between(gui, "private void onOptimumAmbientOcclusionChanged(string code, bool selected)", "\n\t}");
+        Assert.Contains("OptimumConfig.AmbientOcclusionEnabled = false;", handler);
+        Assert.Contains("OptimumConfig.AmbientOcclusion = code;", handler);
         Assert.Contains("OptimumConfig.Save();", handler);
-        // The point of the switch is the live A/B: no reload, no rebuild, no temporal reset.
-        Assert.DoesNotContain("ReloadShaders", handler);
+        // Off gates the passes only, so it must not reload; changing WHICH AO runs changes the
+        // OPTIMUMAO the shaders carry, so exactly that case reloads them.
+        Assert.Contains("bool wasGtao = Vintagestory.API.Config.OptimumConfig.EffectiveGtao;", handler);
+        Assert.Contains("if (Vintagestory.API.Config.OptimumConfig.EffectiveGtao != wasGtao)", handler);
+        Assert.Contains("handler.ReloadShaders();", handler);
         Assert.DoesNotContain("RebuildFrameBuffers", handler);
         Assert.DoesNotContain("RequestReset", handler);
     }
@@ -325,8 +335,14 @@ public class AmbientOcclusionCoverageTests
     public void TheMasterSwitchHasItsLangEntriesAndItsPatcherListing()
     {
         string lang = Read("sources/lang/en.json");
-        Assert.Contains("\"optimum-ao\":", lang);
-        Assert.Contains("\"optimum-ao-tooltip\":", lang);
+        foreach (string key in new[]
+        {
+            "optimum-ao", "optimum-ao-tooltip",
+            "optimum-ao-off", "optimum-ao-auto", "optimum-ao-vanilla", "optimum-ao-gtao",
+        })
+        {
+            Assert.Contains("\"" + key + "\":", lang);
+        }
         Assert.Contains("\"onOptimumAmbientOcclusionChanged\"", Read("Optimum.Patcher/Program.cs"));
     }
 

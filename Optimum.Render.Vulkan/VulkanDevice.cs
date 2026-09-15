@@ -24,7 +24,7 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IDisposable
+public sealed unsafe partial class VulkanDevice : IDisposable
 {
     private VulkanContext _context = null!;
     private UploadManager _uploads = null!;
@@ -567,6 +567,12 @@ public sealed unsafe class VulkanDevice : IDisposable
         CreateDefaultAttributeBuffer();
         CreatePlaceholderUniformBuffer();
 
+        // The default target is an ordinary offscreen one, so it exists headless too: the
+        // frame's last passes (the blit) write into it, and a headless run - the capture
+        // harness, a test driving the post chain - reads it back. Only presenting it needs
+        // a surface.
+        CreateDefaultFramebuffer((uint)width, (uint)height);
+
         if (!headless)
         {
             if (!WindowSurface.TryCreate(_context, windowHandle, out SurfaceKHR surface, out string? surfaceError))
@@ -584,7 +590,6 @@ public sealed unsafe class VulkanDevice : IDisposable
 
             _swapchain = swapchain;
             _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
-            CreateDefaultFramebuffer((uint)width, (uint)height);
         }
 
         failureReason = null!;
@@ -780,6 +785,10 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void BeginFrame()
     {
+        // A native pass never spans a frame boundary.
+        _nativePass = null;
+        _nativeTarget = null;
+
         // CPU frame interval: start of one frame to the start of the next, so it
         // includes the Frame timeline pacing wait below and everything the client did.
         long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1307,21 +1316,41 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     // ------------------------------------------------------------------ raw state
 
-    public void SetViewport(int x, int y, int width, int height) => _state.SetViewport(x, y, width, height);
+    public void SetViewport(int x, int y, int width, int height)
+    {
+        NoteEmulation();
+        _state.SetViewport(x, y, width, height);
+    }
     public void SetScissor(int x, int y, int width, int height) => _state.SetScissor(x, y, width, height);
     public void SetScissorEnabled(bool enabled) => _state.SetScissorEnabled(enabled);
     public bool ScissorEnabled => _state.ScissorEnabled;
 
-    public void SetDepthTest(bool enabled) => _state.SetDepthTest(enabled);
+    public void SetDepthTest(bool enabled)
+    {
+        NoteEmulation();
+        _state.SetDepthTest(enabled);
+    }
     public void SetDepthMask(bool enabled) => _state.SetDepthWrite(enabled);
     public void SetDepthFunc(int func) => _state.SetDepthFunc(func);
 
-    public void SetCullFace(bool enabled) => _state.SetCullEnabled(enabled);
+    public void SetCullFace(bool enabled)
+    {
+        NoteEmulation();
+        _state.SetCullEnabled(enabled);
+    }
     public void SetCullFaceMode(bool back) => _state.SetCullBack(back);
 
-    public void SetBlend(bool enabled, EnumBlendMode mode) => _state.SetBlend(enabled, mode);
+    public void SetBlend(bool enabled, EnumBlendMode mode)
+    {
+        NoteEmulation();
+        _state.SetBlend(enabled, mode);
+    }
 
-    public void SetBlendEnabled(bool enabled) => _state.SetBlendEnabled(enabled);
+    public void SetBlendEnabled(bool enabled)
+    {
+        NoteEmulation();
+        _state.SetBlendEnabled(enabled);
+    }
 
     public void SetBlendFuncSeparate(int attachment, int srcColor, int dstColor, int srcAlpha, int dstAlpha) =>
         _state.SetAttachmentBlendFunc(attachment, srcColor, dstColor, srcAlpha, dstAlpha);
@@ -1470,6 +1499,9 @@ public sealed unsafe class VulkanDevice : IDisposable
         }
         resources ??= new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
         _programs[programId] = resources;
+        // The variant a native program was linked for (TryLink reports the key as its detail),
+        // so a native pipeline request can state the variant it expects.
+        if (resources.IsNative) _programVariants[programId] = nativeDetail;
         _programNames[programId] = program.PassName ?? "";
         // Pipelines an earlier launch used with this exact program start compiling now.
         int prewarming = _pipelines.PrewarmFor(resources);
@@ -1603,10 +1635,15 @@ public sealed unsafe class VulkanDevice : IDisposable
         _programNames.Remove(programId);
         // No background compile may still be reading its modules or layout.
         _pipelines.CancelProgram(program);
+        ForgetNativePipelines(programId);
         _frames.DeferDeletion(program);
     }
 
-    public void UseProgram(int programId) => _state.SetProgram(programId);
+    public void UseProgram(int programId)
+    {
+        NoteEmulation();
+        _state.SetProgram(programId);
+    }
 
     public int GetUniformLocation(int programId, string name) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
@@ -1615,6 +1652,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     private void Write(int programId, int location, ReadOnlySpan<byte> data)
     {
+        NoteEmulation();
         // A member of the shared frame block: one shadow for every program.
         if (ShaderProgramResources.IsFrameLocation(location))
         {
@@ -1753,6 +1791,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void SetSamplerUnit(int programId, string samplerName, int unit)
     {
+        NoteEmulation();
         if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
         {
             program.SamplerUnits[samplerName] = unit;
@@ -2090,6 +2129,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void BindTexture(int unit, int textureId)
     {
+        NoteEmulation();
         if ((uint)unit >= GlStateTracker.MaxTextureUnits) return;
         _boundTextures[unit] = textureId;
         if (RenderTrace.Enabled) RenderTrace.Write("bind unit=" + unit + " texture=" + textureId);
@@ -2141,6 +2181,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void BindSampler(int unit, int samplerId)
     {
+        NoteEmulation();
         if ((uint)unit >= GlStateTracker.MaxTextureUnits) return;
 
         _unitSamplerOverrides[unit] = _standaloneSamplers.ContainsKey(samplerId) ? samplerId : 0;
@@ -2170,8 +2211,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         _targets.Attach(framebufferId, index, textureId, (uint)layer);
     }
 
-    public void SetDrawBuffers(int framebufferId, int attachmentMask) =>
+    public void SetDrawBuffers(int framebufferId, int attachmentMask)
+    {
+        NoteEmulation();
         _targets.SetDrawBuffers(framebufferId, (uint)attachmentMask);
+    }
 
     public bool CheckFramebufferComplete(int framebufferId, out string status)
     {
@@ -2190,11 +2234,13 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void BindFramebuffer(int framebufferId)
     {
+        NoteEmulation();
         if (_frameActive) _targets.Bind(Commands, framebufferId);
     }
 
     public void BindDefaultFramebuffer()
     {
+        NoteEmulation();
         if (_frameActive) _targets.Bind(Commands, _defaultFramebuffer);
     }
 
@@ -2544,6 +2590,7 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     private bool PrepareDraw(int vertexLayoutId, int meshId, out CommandBuffer commandBuffer)
     {
+        NoteEmulation();
         commandBuffer = default;
         if (!_frameActive)
         {
@@ -2694,19 +2741,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         ReleaseReadSelfCopies();
         if (program.Interface.Samplers.Count == 0) return;
 
-        // Set 1's placeholders (and set 0's, which are the same textures) are written
-        // shader-read-only and never used any other way: put them there once.
-        if (!_bindlessPlaceholdersReadable && _bindless != null)
-        {
-            for (int kind = 0; kind < BindlessKinds.Count; kind++)
-            {
-                VulkanTexture? placeholder = _textures.Get(_bindless.PlaceholderTextureId((TextureKind)kind));
-                if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
-                _targets.EndRendering(commandBuffer);
-                _textures.Require(_barriers, commandBuffer, placeholder, Graph.ResourceUsage.SampleFragment);
-            }
-            _bindlessPlaceholdersReadable = true;
-        }
+        EnsureBindlessPlaceholdersReadable(commandBuffer);
 
         for (int i = 0; i < program.Interface.Samplers.Count; i++)
         {
@@ -2976,13 +3011,23 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
-        Vk api = _context.Api;
-        SharedPipelineLayout shared = _sharedLayout!;
-        SyncBoundDescriptors(commandBuffer);
 
         // A native push block's members persist per program; the slots are resolved over them.
         if (program.PushShadow != null) program.PushShadow.CopyTo(_pushShadow, 0);
         ResolveSamplers(program);
+        BindProgramSets(commandBuffer, program, meshId);
+    }
+
+    /// <summary>
+    /// Binds the three sets of the shared layout for a draw whose push shadow already holds
+    /// its sampler slots: the frame set, the texture set with the push block, and the storage
+    /// set. Shared by the GL-emulation path and the native one.
+    /// </summary>
+    private void BindProgramSets(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
+    {
+        Vk api = _context.Api;
+        SharedPipelineLayout shared = _sharedLayout!;
+        SyncBoundDescriptors(commandBuffer);
 
         // Set 0: the frame block and the fixed frame textures.
         if (program.Interface.UsesFrameBlock || program.Interface.UsesFrameTextures)
@@ -3282,6 +3327,21 @@ public sealed unsafe class VulkanDevice : IDisposable
         // slot's current one is never trusted.
         FrameSlot slot = _frames.Current;
         ulong serial = slot.CommandBuffer.Handle == commandBuffer.Handle ? slot.RecordingSerial : 0;
+        Span<AttachmentBlend> blendStates = stackalloc AttachmentBlend[dynamicBlend ? colorStates : 0];
+        for (int i = 0; i < blendStates.Length; i++) blendStates[i] = _state.BlendFor(i);
+        EmitDynamicState(commandBuffer, values, serial, tier, dynamicBlend, colorStates, blendStates);
+    }
+
+    /// <summary>
+    /// Records the dynamic state a draw needs and the recording does not already hold. The
+    /// values come from the GL state tracker on the emulation path and from a native
+    /// pipeline's fixed state on the native one.
+    /// </summary>
+    private void EmitDynamicState(CommandBuffer commandBuffer, DynamicStateValues values, ulong serial,
+        ColorWriteTier tier, bool dynamicBlend, int colorStates, ReadOnlySpan<AttachmentBlend> blendStates)
+    {
+        Vk api = _context.Api;
+        uint colorWrite = values.ColorWrite;
         DynamicStateDirty dirty = _dynamicState.Update(serial, values);
         if (tier == ColorWriteTier.PipelineKey) dirty &= ~DynamicStateDirty.ColorWrite;
         if (!dynamicBlend) dirty &= ~DynamicStateDirty.ColorBlend;
@@ -3312,7 +3372,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             ColorBlendEquationEXT* equations = stackalloc ColorBlendEquationEXT[colorStates];
             for (int i = 0; i < colorStates; i++)
             {
-                AttachmentBlend blend = _state.BlendFor(i);
+                AttachmentBlend blend = i < blendStates.Length ? blendStates[i] : AttachmentBlend.Default;
                 blendEnables[i] = blend.Enabled;
                 equations[i] = new ColorBlendEquationEXT
                 {

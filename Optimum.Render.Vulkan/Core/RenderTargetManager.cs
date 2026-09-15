@@ -746,6 +746,35 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         return framebuffer.FormatsId;
     }
 
+    /// <summary>
+    /// The attachment formats of the scope <paramref name="framebuffer" /> opens, without
+    /// interning them: what a native pipeline has to be built for, and what a native draw
+    /// checks its pipeline against. <paramref name="exclusion" /> is the slot mask a pass
+    /// would leave out (bit i: slot i is not an attachment of the pass), so the formats can
+    /// be asked for before the pass is declared.
+    /// </summary>
+    public RenderTargetFormats ScopeFormats(VulkanFramebuffer framebuffer, uint exclusion = 0)
+    {
+        int count = 0;
+        for (int i = 0; i < GlStateTracker.MaxColorAttachments; i++)
+        {
+            if (InScope(framebuffer, i) && ((exclusion >> i) & 1) == 0) count = i + 1;
+        }
+
+        var colorFormats = new Format[count];
+        for (int i = 0; i < count; i++)
+        {
+            bool inScope = InScope(framebuffer, i) && ((exclusion >> i) & 1) == 0;
+            VulkanTexture? texture = inScope ? _textures.Get(framebuffer.Color[i].TextureId) : null;
+            colorFormats[i] = texture?.Format ?? Format.Undefined;
+        }
+
+        Format depthFormat = framebuffer.DepthTextureId > 0
+            ? _textures.Get(framebuffer.DepthTextureId)?.Format ?? Format.Undefined
+            : Format.Undefined;
+        return new RenderTargetFormats(colorFormats, depthFormat);
+    }
+
     /// <summary>Colour attachments of the scope the framebuffer opens (highest participating slot + 1).</summary>
     public int EnabledAttachmentCount(VulkanFramebuffer framebuffer) =>
         HighestScopeAttachment(framebuffer) + 1;

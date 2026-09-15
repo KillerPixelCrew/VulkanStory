@@ -63,6 +63,60 @@ public class FsrPipelineCoverageTests
         Assert.Contains("DisableOptimumFsr(error)", platform);
     }
 
+    /// <summary>
+    /// Phase 3b: on Vulkan the blit runs natively - the same three branches, the same
+    /// conditions and uniform values, one declared pass per written target, and EASU still
+    /// reading Primary colour 0 (docs/vulkan-native-render-systems.md, decision 7). The
+    /// OpenGL body stays reachable for the parity tests' old route.
+    /// </summary>
+    [Fact]
+    public void TheVulkanBlitRunsNativelyWithOnePassPerWrittenTarget()
+    {
+        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
+        Assert.Contains("public override void BlitPrimaryToDefault()", graph);
+        Assert.Contains("if (NativeBlitEnabled && device != null)", graph);
+        Assert.Contains("RenderNativeBlit();", graph);
+
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
+        Assert.Contains("if (OptimumConfig.TaaDebugView != 0 && MotionAttachmentIndex >= 0)", native);
+        Assert.Contains("if (taaDebug != null && !taaDebug.LoadError)", native);
+        Assert.Contains("if (OptimumFsrBlitActive())", native);
+        Assert.Contains("DisableOptimumFsr(error);", native);
+        // EASU upsamples Primary colour 0, and the two FSR targets are two declared passes.
+        Assert.Contains("new NativeTexture(nativeFsrEasu.Samplers[0], scene2D),", native);
+        Assert.Contains("BeginNativeBlitPass(\"Blit/\" + OptimumFsrFramebufferIndex, fsrTarget.FboId,", native);
+        Assert.Contains("BeginNativeBlitPass(\"Blit/Default\", NativeDefaultTarget, client.Width, client.Height, new[] { fsrColor })", native);
+        Assert.Contains("1f / primary.Width, 1f / primary.Height", native);
+        Assert.Contains("1f / fsrTarget.Width, 1f / fsrTarget.Height", native);
+        Assert.Contains("ShaderProgramBlit blit = ShaderPrograms.Blit;", native);
+
+        // The device API the native blit draws through, and its stats.
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.Native.cs");
+        Assert.Contains("internal NativePipeline? RequestNativePipeline(", device);
+        Assert.Contains("internal bool BeginNativePass(NativePassDescription pass)", device);
+        Assert.Contains("internal bool DrawNativeFullscreen(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)", device);
+        Assert.Contains("VulkanStats.NoteNativePass();", device);
+        Assert.Contains("VulkanStats.NoteNativeDraw();", device);
+
+        string stats = Read("Optimum.Render.Vulkan/Core/VulkanStats.cs");
+        Assert.Contains("native_passes={25} native_draws={26}", stats);
+
+        // The FSR failure path needs the base's own disable, so the transplant widens it.
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.Contains("protected void DisableOptimumFsr(Exception error)", platform);
+
+        // Both routes size the blit by one seam rather than casting the window themselves.
+        Assert.Contains("public virtual Size2i OptimumWindowClientSize()", platform);
+        Assert.Contains("GlViewport(0, 0, optimumClientSize.Width, optimumClientSize.Height);", platform);
+        Assert.Contains("Size2i client = OptimumWindowClientSize();", native);
+        // The FSR sharpen pass takes its viewport from LoadFrameBuffer(Default), so that site
+        // reads the seam too.
+        Assert.Contains("Size2i optimumDefaultSize = OptimumWindowClientSize();", platform);
+        Assert.Contains("\"OptimumWindowClientSize\"", Read("Optimum.Patcher/Program.cs"));
+    }
+
     [Fact]
     public void TerrainBiasCoversTextureObjectsAndCustomSamplers()
     {
