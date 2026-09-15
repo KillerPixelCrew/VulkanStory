@@ -86,6 +86,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // Headless render harness: the channel order ReadDefaultFramebuffer leaves
+        // in the caller's buffer. B G R A on both backends: the OpenGL path reads
+        // GL_BGRA and VulkanClientPlatform converts its R8G8B8A8 texels to match.
+        "OptimumDefaultFramebufferIsBgra",
         // Phase 1A step 3: the program, uniform and UBO operations ShaderProgramBase and
         // UBO call. Neutral bodies; ClientPlatformWindows overrides them. SetUniform and
         // SetUniformMatrix inject every overload the donor declares.
@@ -352,6 +356,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Headless render harness: the per-frame hook window_RenderFrame calls next
+        // to the parity dump, its own in-world frame counter, the chat-command
+        // script dispatch, the presented-frame readback and the clean close from
+        // the render thread once the run's artefacts are written.
+        "optimumHeadlessWorldFrames",
+        "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone",
+        "optimumHeadlessFramesWritten",
+        "optimumHeadlessExitRequested",
+        "OptimumHeadlessTick",
+        "OptimumHeadlessExitIfDone",
+        "OptimumHeadlessRunCommands",
+        "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame",
         // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
         // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
         // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.
@@ -868,6 +886,11 @@ var targets = new List<MethodTarget>
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
+    // Optimum (headless render harness): a capture runs silent, so the mixer is
+    // created muted and every later attempt to restore the volume is answered with
+    // silence. Both bodies are vanilla's apart from that one condition.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "StartAudio", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_MasterSoundLevel", 1),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),

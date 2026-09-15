@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..49a9a11 100644
+index d6eb844..7420dff 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,416 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,433 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -20,6 +20,23 @@ index d6eb844..49a9a11 100644
 +
 +	public virtual void ShutdownGraphics()
 +	{
++	}
++
++	// Optimum (headless render harness): the channel order ReadDefaultFramebuffer
++	// leaves in the caller's buffer. The OpenGL path reads GL_BGRA, because that is
++	// what the screenshot path's SKBitmap wants. Every backend owes its callers the
++	// same order, so no platform overrides this: the Vulkan device's default colour
++	// target is R8G8B8A8_UNORM, and VulkanClientPlatform.ReadDefaultFramebuffer
++	// swaps red and blue on the way out rather than answering false here - answering
++	// false would fix the headless frames and leave the screenshot key and the AVI
++	// recorder swapped. The headless frame writer reads this so a backend that ever
++	// does hand back R G B A can say so.
++	public virtual bool OptimumDefaultFramebufferIsBgra
++	{
++		get
++		{
++			return true;
++		}
 +	}
 +
 +	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the

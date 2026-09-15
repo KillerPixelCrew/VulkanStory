@@ -59,6 +59,16 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumTaaDisabled", "optimumTaaResolvedThisFrame", "optimumTaaShaderReloadPending",
         "optimumTaaTargetsReady", "taaResolvedColorTexture", "taaResolvedGlowTexture",
         "optimumSsaoInScene", "ApplyOptimumSceneSsao",
+        // Headless render harness: the per-frame hook, its own in-world frame counter,
+        // the chat-command script dispatch, the presented-frame readback and the clean
+        // close from the render thread.
+        "OptimumHeadlessTick", "OptimumHeadlessRunCommands", "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
+        "OptimumHeadlessExitIfDone", "optimumHeadlessExitRequested",
+        // The headless harness runs silent: the mixer is created muted and every
+        // attempt to restore the volume is answered with silence.
+        "StartAudio", "MasterSoundLevel",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),

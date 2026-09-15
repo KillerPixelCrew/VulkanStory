@@ -326,6 +326,54 @@ pacing seen in Phase 0 and Phase 1 was the moving world, not the build. Evidence
   `scripts/dev/luma-diff.py --median a1 b1 a2 b2 ...` in explicit pair order, compare medians.
   Used for the TAA still-frame row only; it is not flicker evidence.
 
+### Headless render harness
+- `scripts/dev/headless-capture.sh --renderer vulkan|opengl --world <name> --out <dir> [--commands <file>]
+  [--frames <list>|--count <n>] [--fixed-dt <s>] [--parity-dump]` runs one capture end to end: renderer
+  written for the run and restored on exit, renderer line required, frames written, the client closed
+  from its own render thread.
+- What it covers. `OPTIMUM_HEADLESS=1` creates the window with `StartVisible=false` and
+  `StartFocused=false`: a real window with a real surface and a real swapchain, never mapped and never
+  focused, on both backends (there is no surfaceless GL path in this client, so this is the only offscreen
+  mode that is symmetric). The frame loop, the swapchain and every rendering path are unchanged - the
+  harness is one call in `window_RenderFrame`, beside the parity dump, after the post chain and the final
+  blit. Frames come from `ReadDefaultFramebuffer`, the same polymorphic call the in-game screenshot makes
+  and a device-side copy on Vulkan, so no OS window capture is involved and no compositor is needed; they
+  are written as `frame-NNNNNN.ppm` at a chosen frame list or cadence, which `scripts/dev/ssim.py` reads
+  and which pairs between two captures by name. `OPTIMUM_HEADLESS_COMMANDS` feeds a file of chat lines on
+  an in-world frame, routed the way the chat HUD routes what a human types, so `/time` and `/weather` fix
+  the scene and `.cam load` / `.cam play` drive vanilla's own keyframed camera (`SystemCinematicCamera`).
+  `OPTIMUM_HEADLESS_FIXED_DT` pins `ClientMain.DeltaTimeLimiter`, the field vanilla's own recorder sets,
+  so the simulated step is constant. `OPTIMUM_HEADLESS_EXIT_WHEN_DONE` closes the client from the render
+  thread once the capture and the parity dump are written - a never-mapped window cannot be sent a close
+  event, and SIGTERM closes it from a signal thread in the middle of a frame. A capture runs silent: the
+  mixer is created muted and the persisted sound settings are never written. A permanently unfocused
+  window falls under the existing 30 FPS background cap, so a run does not take the machine.
+- What it does not cover. A display server is still required - real, nested or Xvfb - because GLFW asks
+  for the screen size before any window exists and Vulkan needs a WSI surface; "headless" here means no
+  visible window, not no display. Reproducibility is frame-for-frame repeatable, not bit-exact: a fixed
+  step does not pin chunk streaming, particle or mob RNG, which is the same standard V0.1 sets for GL-vs-GL
+  noise. The per-attachment dump `scripts/dev/taa-rejection.py` reads is still `OPTIMUM_PARITY_DUMP`
+  (composed in by `--parity-dump`, not replaced). No camera path is checked in yet - one has to be
+  authored per scene with `.cam p` and `.cam save`.
+- The determinism guard a shimmer number needs. A shimmer number is a difference between consecutive
+  captured frames, so anything that moves for a reason other than the effect under test is measured as
+  shimmer. Two captures are comparable only when all of this is pinned and recorded beside the number:
+  the world (save file and seed), the camera path (the checked-in `.cam` file, played from a fixed
+  in-world frame), the step (`--fixed-dt`, same value), the frame list (same indices, not the same
+  count), the graphics settings that change what is drawn (`ssaa`, `fxaa`, `ssaoQuality`, `bloom`,
+  `godRays`, `mipMapLevel`, render resolution, TAA and its sharpness), the time and weather the command
+  script sets, and the backend and GPU/driver the run actually used (from the renderer line, not from what
+  was asked for). What is not pinned, and therefore may never be read as a signal: chunk streaming order
+  and the pop-in it causes, particle and mob RNG, wind phase, and anything before the first frame the
+  world has finished loading - so the capture starts well after the command script, and mobs and weather
+  are commanded off rather than hoped away.
+- A run that drifted is rejected, not reported. The check is mechanical: capture the same scene twice on
+  the same backend and settings and compare the two runs frame by frame (`scripts/dev/ssim.py`). That
+  self-pair is the noise floor, and the shimmer number is only meaningful above it. A run whose self-pair
+  falls below the floor, or whose recorded settings, camera file, frame list or renderer line differ from
+  the reference run's, is thrown away and re-run - it is not published with a caveat. Frames that fail to
+  pair by name (a short or ragged capture) are the same failure and get the same treatment.
+
 ## 4. Evidence rules
 
 From the plan's "Verification and evidence rules":
