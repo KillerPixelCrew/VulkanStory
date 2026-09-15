@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
-index 7befa7d..0a47741 100644
+index 7befa7d..b46f0f4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 @@ -1,8 +1,9 @@
@@ -12,7 +12,28 @@ index 7befa7d..0a47741 100644
  
  namespace Vintagestory.Client.NoObf;
  
-@@ -63,12 +64,21 @@ public class ChunkCuller
+@@ -30,10 +31,20 @@ public class ChunkCuller
+ 
+ 	private bool nowOff;
+ 
+ 	private const long ExtraDimensionsStart = 4503599627370496L;
+ 
++	// Optimum issue #72: BFS visibility walk (Minecraft/Sodium technique). Reuses
++	// two collections across passes so a steady camera does no per-pass allocation.
++	// These are Cecil-injected fields, so their C# initializers never run (the
++	// constructor is not transplanted); they are lazily created in runBfsVisibility
++	// with ??=. The opposite-face lookup is a static method for the same reason -
++	// an injected static array field would also skip its initializer.
++	private Queue<long> bfsQueue;
++
++	private Dictionary<long, int> bfsVisited;
++
+ 	public ChunkCuller(ClientMain game)
+ 	{
+ 		this.game = game;
+ 		ClientSettings.Inst.AddWatcher<int>("viewDistance", genShellVectors);
+ 		genShellVectors(ClientSettings.ViewDistance);
+@@ -63,12 +74,21 @@ public class ChunkCuller
  		cubicShellPositions = hashSet.ToArray();
  	}
  
@@ -35,7 +56,7 @@ index 7befa7d..0a47741 100644
  				return;
  			}
  			ClientChunk.bufIndex = 1;
-@@ -94,10 +104,11 @@ public class ChunkCuller
+@@ -94,10 +114,11 @@ public class ChunkCuller
  				}
  			}
  			nowOff = true;
@@ -47,3 +68,295 @@ index 7befa7d..0a47741 100644
  		if (centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32) && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
  		{
  			return;
+@@ -125,16 +146,50 @@ public class ChunkCuller
+ 						}
+ 					}
+ 				}
+ 			}
+ 		}
+-		for (int l = 0; l < cubicShellPositions.Length; l++)
++		if (OptimumConfig.BfsChunkVisibilityEnabled)
+ 		{
+-			Vec3i toPosRel = cubicShellPositions[l];
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.25);
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
++			// Optimum issue #72: breadth-first flood fill over the per-chunk
++			// face-connectivity graph instead of per-shell raycasts. Linear in
++			// loaded chunks and front-to-back, versus the raycast's up-to-3 rays
++			// per shell position (thousands of chunks at high view distance -
++			// the cost Mojang's own author rejected). The adapter reports every
++			// chunk as in-frustum so the marked-visible set matches the raycast's
++			// contract: ChunkCuller marks reachable chunks, and the mesh pools do
++			// the frustum cull later. Robust all-incoming-faces reachability plus
++			// the camera-neighbourhood seed above keep it from ever hiding a chunk
++			// the player can see.
++			OptimumDiagnostics.BfsChunkVisibility.Hit();
++			long bfsStart = System.Diagnostics.Stopwatch.GetTimestamp();
++			lock (game.WorldMap.chunksLock)
++			{
++				runBfsVisibility(ClientSettings.Occlusionculling);
++			}
++			int bfsVisible = OptimumDiagnostics.CullWalkLogEnabled ? countVisibleMarked() : 0;
++			if (OptimumDiagnostics.RecordChunkCullerWalk(bfs: true, System.Diagnostics.Stopwatch.GetTimestamp() - bfsStart, bfsVisible))
++			{
++				game.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkCullerWalkSummary());
++			}
++		}
++		else
++		{
++			OptimumDiagnostics.BfsChunkVisibility.Skip();
++			long rayStart = System.Diagnostics.Stopwatch.GetTimestamp();
++			for (int l = 0; l < cubicShellPositions.Length; l++)
++			{
++				Vec3i toPosRel = cubicShellPositions[l];
++				traverseRayAndMarkVisible(centerpos, toPosRel, 0.25);
++				traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
++				traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
++			}
++			int rayVisible = OptimumDiagnostics.CullWalkLogEnabled ? countVisibleMarked() : 0;
++			if (OptimumDiagnostics.RecordChunkCullerWalk(bfs: false, System.Diagnostics.Stopwatch.GetTimestamp() - rayStart, rayVisible))
++			{
++				game.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkCullerWalkSummary());
++			}
+ 		}
+ 		game.chunkRenderer.SwapVisibleBuffers();
+ 	}
+ 
+ 	private void traverseRayAndMarkVisible(Vec3i fromPos, Vec3i toPosRel, double yoffset = 0.5, double xoffset = 0.5)
+@@ -192,6 +247,235 @@ public class ChunkCuller
+ 				}
+ 			}
+ 		}
+ 		return null;
+ 	}
++
++	// Optimum issue #72: breadth-first visibility flood fill over the per-chunk
++	// face-connectivity graph, replacing the per-shell raycast. Runs under
++	// game.WorldMap.chunksLock (taken by the caller). Mirrors the unit-tested
++	// OptimumChunkVisibilityBfs reference in the API assembly: queue of packed
++	// chunk coords each carrying the incoming face, a never-go-back direction
++	// mask per visited chunk, robust all-incoming-faces reachability (MC-70850
++	// safe), and the camera chunk always seeded. Frustum culling is intentionally
++	// NOT applied here: like the vanilla raycast, this only marks reachable chunks
++	// visible and the mesh pools frustum-cull afterwards, so the marked set can
++	// never be smaller than what the player can see.
++	private void runBfsVisibility(bool useOcclusion)
++	{
++		Dictionary<long, ClientChunk> chunks = game.WorldMap.chunks;
++		// Cecil-injected fields skip their C# initializers (ctor is not transplanted),
++		// so create them lazily on first use. See cecil-injected-field-initializer-tests.
++		if (bfsQueue == null)
++		{
++			bfsQueue = new Queue<long>();
++		}
++		if (bfsVisited == null)
++		{
++			bfsVisited = new Dictionary<long, int>();
++		}
++		bfsQueue.Clear();
++		bfsVisited.Clear();
++
++		int cx = centerpos.X;
++		int cy = centerpos.Y;
++		int cz = centerpos.Z;
++
++		// Bound the flood to the loaded shell. The vanilla raycast is implicitly
++		// bounded by each ray's march length (fromPos.ManhattanDistanceTo(toPos) + 2);
++		// the BFS needs an explicit radius or it floods unboundedly through invalid
++		// (never-loaded) sky/space coordinates - which spun the culling thread and
++		// froze the client. One chunk past the shell radius covers everything the
++		// renderer can show.
++		int bfsRadius = ClientSettings.ViewDistance / 32 + 2;
++		int bfsRadiusY = game.WorldMap.ChunkMapSizeY + 2;
++
++		long rootPack = bfsPack(cx, cy, cz);
++		bfsVisited[rootPack] = 0;
++		bfsQueue.Enqueue(bfsEncodeNode(cx, cy, cz, -1));
++
++		while (bfsQueue.Count > 0)
++		{
++			long node = bfsQueue.Dequeue();
++			int nodeFromFace = (int)((node >> 60) & 0x7) - 1; // -1 == seed (no incoming face)
++			int ncx = bfsUnpackX(node);
++			int ncy = bfsUnpackY(node);
++			int ncz = bfsUnpackZ(node);
++			long curPack = bfsPack(ncx, ncy, ncz);
++			int curMask = bfsVisited.TryGetValue(curPack, out var mm) ? mm : 0;
++
++			for (int dir = 0; dir < 6; dir++)
++			{
++				// (1) never-go-back: skip a direction whose opposite the flood already used
++				if ((curMask & (1 << bfsOppositeOf(dir))) != 0)
++				{
++					continue;
++				}
++
++				// (2) reachability through the current chunk (robust MC-70850-safe form):
++				// enterable seed (nodeFromFace < 0) always passes; otherwise the current
++				// chunk must be visible-through SOME incoming face to this exit face.
++				// First-ring exemption mirrors the vanilla raycast's `num2 > 1` guard:
++				// the camera chunk and its immediate (Manhattan distance <= 1) neighbours
++				// always let the flood pass through, so a lone solid chunk right next to
++				// the camera does not blank everything behind it.
++				int camDist = Math.Abs(ncx - cx) + Math.Abs(ncy - cy) + Math.Abs(ncz - cz);
++				if (useOcclusion && nodeFromFace >= 0 && camDist > 1 && !bfsReachable(chunks, ncx, ncy, ncz, dir))
++				{
++					continue;
++				}
++
++				int nx = ncx + BlockFacing.ALLFACES[dir].Normali.X;
++				int ny = ncy + BlockFacing.ALLFACES[dir].Normali.Y;
++				int nz = ncz + BlockFacing.ALLFACES[dir].Normali.Z;
++
++				// View-distance bound: never expand past the loaded shell. Without
++				// this the flood runs off into never-loaded coordinates forever.
++				if (System.Math.Abs(nx - cx) > bfsRadius || System.Math.Abs(nz - cz) > bfsRadius
++					|| System.Math.Abs(ny - cy) > bfsRadiusY)
++				{
++					continue;
++				}
++
++				// Stop at invalid chunk positions. Mirrors the raycast's stop but
++				// ALWAYS continues on an invalid position (the raycast's own guard
++				// only kept going above the height limit to let sky rays exit the
++				// march; the BFS has the radius cap for that and must never expand
++				// into an invalid coordinate, or it floods unboundedly).
++				if (!game.WorldMap.IsValidChunkPosFast(nx, ny, nz))
++				{
++					continue;
++				}
++
++				long nPack = bfsPack(nx, ny, nz);
++				int newMask = curMask | (1 << dir);
++
++				if (bfsVisited.TryGetValue(nPack, out var existing))
++				{
++					int merged = existing | newMask;
++					if (merged != existing)
++					{
++						bfsVisited[nPack] = merged;
++					}
++					continue;
++				}
++
++				bfsVisited[nPack] = newMask;
++
++				if (chunks.TryGetValue(bfsChunkKey(nx, ny, nz), out var value) && value != null)
++				{
++					value.SetVisible(visible: true);
++				}
++
++				bfsQueue.Enqueue(bfsEncodeNode(nx, ny, nz, bfsOppositeOf(dir)));
++			}
++		}
++
++		// Seed chunk itself: always visible even when embedded in solid.
++		if (chunks.TryGetValue(bfsChunkKey(cx, cy, cz), out var root) && root != null)
++		{
++			root.SetVisible(visible: true);
++		}
++	}
++
++	// Robust reachability: reachable toward toFace if visible-through ANY incoming
++	// face. Checking every incoming face rather than only the recorded flow face is
++	// what prevents the MC-70850 see-through/missing-chunk bug. ClientChunk.IsTraversable
++	// returns true on stale traversability data, so this only ever over-includes.
++	private bool bfsReachable(Dictionary<long, ClientChunk> chunks, int cx, int cy, int cz, int toFace)
++	{
++		if (!chunks.TryGetValue(bfsChunkKey(cx, cy, cz), out var chunk) || chunk == null)
++		{
++			return true; // not loaded: cannot block sight
++		}
++		BlockFacing to = BlockFacing.ALLFACES[toFace];
++		for (int from = 0; from < 6; from++)
++		{
++			if (from == toFace)
++			{
++				continue;
++			}
++			if (chunk.IsTraversable(BlockFacing.ALLFACES[from], to))
++			{
++				return true;
++			}
++		}
++		return false;
++	}
++
++	// Measurement-only (issue #72 A/B): counts chunks currently marked visible in
++	// the buffer the walk just wrote (CullVisible[(bufIndex+1)%2]), before the
++	// SwapVisibleBuffers below. Used only when CullWalkLogEnabled to compare the
++	// raycast vs BFS visible sets in the same scene, so the O(chunks) scan never
++	// runs on a normal frame.
++	private int countVisibleMarked()
++	{
++		int buf = (ClientChunk.bufIndex + 1) % 2;
++		int n = 0;
++		lock (game.WorldMap.chunksLock)
++		{
++			foreach (KeyValuePair<long, ClientChunk> kv in game.WorldMap.chunks)
++			{
++				if (kv.Value.CullVisible[buf])
++				{
++					n++;
++				}
++			}
++		}
++		return n;
++	}
++
++	// BlockFacing.Index ordering: N=0,E=1,S=2,W=3,U=4,D=5. Opposite pairs
++	// N<->S, E<->W, U<->D. Static so no injected-field initializer is needed.
++	private static int bfsOppositeOf(int dir)
++	{
++		switch (dir)
++		{
++			case 0: return 2;
++			case 1: return 3;
++			case 2: return 0;
++			case 3: return 1;
++			case 4: return 5;
++			default: return 4;
++		}
++	}
++
++	private long bfsChunkKey(int cx, int cy, int cz)
++	{
++		return ((long)cy * (long)game.WorldMap.index3dMulZ + cz) * game.WorldMap.index3dMulX + cx;
++	}
++
++	// Reversible bit-pack of a cubic chunk coord for the visited map. 20 bits per
++	// axis (biased by 2^19 so negatives stay non-negative) fits any real world's
++	// chunk range (+/-524287 chunks = +/-16.7M blocks) inside the low 60 bits,
++	// leaving the top 4 bits free for the incoming face in bfsEncodeNode without
++	// overflowing the signed 64-bit long.
++	private static long bfsPack(int cx, int cy, int cz)
++	{
++		long x = cx + 524288L;
++		long y = cy + 524288L;
++		long z = cz + 524288L;
++		return (x & 0xFFFFF) | ((y & 0xFFFFF) << 20) | ((z & 0xFFFFF) << 40);
++	}
++
++	// Queue node = packed coord (low 60 bits) with the incoming face (+1, 0 = seed)
++	// in bits 60-62. No shift of bfsPack, so nothing overflows.
++	private static long bfsEncodeNode(int cx, int cy, int cz, int fromFace)
++	{
++		return bfsPack(cx, cy, cz) | ((long)((fromFace + 1) & 0x7) << 60);
++	}
++
++	private static int bfsUnpackX(long node)
++	{
++		return (int)((node & 0xFFFFF) - 524288L);
++	}
++
++	private static int bfsUnpackY(long node)
++	{
++		return (int)(((node >> 20) & 0xFFFFF) - 524288L);
++	}
++
++	private static int bfsUnpackZ(long node)
++	{
++		return (int)(((node >> 40) & 0xFFFFF) - 524288L);
++	}
+ }

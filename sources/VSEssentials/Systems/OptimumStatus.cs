@@ -19,6 +19,15 @@ public class OptimumStatusModSystem : ModSystem
         this.api = api;
         api.Event.LevelFinalize += LogGameLaunchTaskSummary;
 
+        // Issue #72 measurement hook: OPTIMUM_CULL_WALK_LOG=1 makes ChunkCuller
+        // log a raycast-vs-BFS walk-timing summary to the client log every
+        // CullWalkLogEvery recomputes, so a timed headless run captures the
+        // number without in-game chat input.
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CULL_WALK_LOG") == "1")
+        {
+            OptimumDiagnostics.CullWalkLogEnabled = true;
+        }
+
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
@@ -369,6 +378,8 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Greedy mesh: ON (maxWidth={0})", OptimumConfig.GreedyMeshMaxMergeWidth);
         if (OptimumConfig.OcclusionCullingScaleEnabled)
             api.Logger.Debug("[Optimum] Occlusion culling scale: ON");
+        if (OptimumConfig.BfsChunkVisibilityEnabled)
+            api.Logger.Debug("[Optimum] BFS chunk visibility: ON");
         if (OptimumConfig.DynamicLightCacheEnabled)
             api.Logger.Debug("[Optimum] Dynamic light cache: ON");
         if (OptimumConfig.EntityLightBatchEnabled)
