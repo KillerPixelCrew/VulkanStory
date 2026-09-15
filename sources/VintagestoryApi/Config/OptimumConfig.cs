@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -190,6 +191,19 @@ public static class OptimumConfig
     public static bool IndirectDrawSupported = false;
 
     public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported;
+
+    /// <summary>
+    /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
+    /// for bounding volumes in chunk mesh pools and model locations.
+    /// </summary>
+    public static bool SimdCullingEnabled = true;
+
+    /// <summary>
+    /// True when the CPU supports 128-bit or 256-bit vector operations.
+    /// </summary>
+    public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
+
+    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported;
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
@@ -702,6 +716,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChunkDeserializeParallelMinY), ChunkDeserializeParallelMinY.ToString()),
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
         (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
+        (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
     };
 
     /// <summary>
@@ -802,6 +817,7 @@ public static class OptimumConfig
             LaunchTaskBudgetMs = Math.Clamp(data.LaunchTaskBudgetMs, 1, 500);
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
             IndirectDrawEnabled = data.IndirectDraw;
+            SimdCullingEnabled = data.SimdCulling;
         }
         catch (Exception)
         {
@@ -872,6 +888,7 @@ public static class OptimumConfig
             LaunchTaskBudgetMs = LaunchTaskBudgetMs,
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
             IndirectDraw = IndirectDrawEnabled,
+            SimdCulling = SimdCullingEnabled,
         };
 
         try
@@ -950,6 +967,7 @@ internal sealed class OptimumConfigData
     public int LaunchTaskBudgetMs { get; set; } = 100;
     public string WorldgenWorkerPolicy { get; set; } = "auto";
     public bool IndirectDraw { get; set; } = false;
+    public bool SimdCulling { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -1633,6 +1651,28 @@ public static class OptimumDiagnostics
         Interlocked.Exchange(ref _chunkConventionalGroups, 0);
     }
 
+    // Issue #75 Tier 2: SIMD frustum culling counters
+    private static long _simdFrustumTests;
+    private static long _simdFrustumCulled;
+
+    public static long SimdFrustumTests => Interlocked.Read(ref _simdFrustumTests);
+    public static long SimdFrustumCulled => Interlocked.Read(ref _simdFrustumCulled);
+
+    public static void RecordSimdFrustumTest(bool culled)
+    {
+        Interlocked.Increment(ref _simdFrustumTests);
+        if (culled)
+        {
+            Interlocked.Increment(ref _simdFrustumCulled);
+        }
+    }
+
+    public static void ResetSimdFrustumCounters()
+    {
+        Interlocked.Exchange(ref _simdFrustumTests, 0);
+        Interlocked.Exchange(ref _simdFrustumCulled, 0);
+    }
+
     private const int ChunkRenderWindowSize = 120;
     private static readonly long[] _chunkWindowDrawCalls = new long[ChunkRenderWindowSize];
     private static readonly long[] _chunkWindowPoolsRendered = new long[ChunkRenderWindowSize];
@@ -1765,6 +1805,7 @@ public static class OptimumDiagnostics
         Array.Clear(_chunkWindowVisibleGroups);
         Array.Clear(_chunkWindowFrustumCullTicks);
         ResetChunkDrawSubmissionCounters();
+        ResetSimdFrustumCounters();
     }
 
     public static void ResetChunkRenderFrame()
@@ -1874,7 +1915,12 @@ public static class OptimumDiagnostics
         double subMsPerFrame = frames == 0 ? 0 : totalSubMs / frames;
         double indDrawsPerFrame = frames == 0 ? 0 : (double)indDraws / frames;
 
-        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
+        long simdTests = Interlocked.Read(ref _simdFrustumTests);
+        long simdCulled = Interlocked.Read(ref _simdFrustumCulled);
+        double simdTestsPerFrame = frames == 0 ? 0 : (double)simdTests / frames;
+        double simdCulledPerFrame = frames == 0 ? 0 : (double)simdCulled / frames;
+
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, simdTests/frame={simdTestsPerFrame:0.0}, simdCulled/frame={simdCulledPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
     }
 
     public static string GetCountersSummary()
