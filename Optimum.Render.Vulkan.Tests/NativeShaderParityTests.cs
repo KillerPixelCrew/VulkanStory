@@ -66,7 +66,17 @@ public sealed class NativeShaderParityTests
         public readonly SortedDictionary<string, SortedSet<string>> Names = new(StringComparer.Ordinal);
         /// <summary>textureLocations: a repeated sampler name is reassigned the current count, as the client does.</summary>
         public readonly Dictionary<string, int> TextureLocations = new(StringComparer.Ordinal);
+        /// <summary>
+        /// The pattern has no sampler2DArray, so <c>uniform sampler2DArray OITaccumulation</c> matches as type
+        /// sampler2D named <c>Array</c>. The client registers that name and unit; the program's real sampler is the
+        /// declared one. Key: the name the client sees; value: the declared sampler2DArray name. The runtime answers
+        /// the client's name with the declared sampler's slot.
+        /// </summary>
+        public readonly Dictionary<string, string> ArraySamplerAliases = new(StringComparer.Ordinal);
     }
+
+    private static readonly Regex DeclaredSampler2DArray = new(@"\G(\s|\r\n)uniform\s*sampler2DArray\s+(?<var>[\d\w]+)",
+        RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture);
 
     internal static Oracle CollectOracle(IEnumerable<ShaderStageSource> stages)
     {
@@ -82,6 +92,13 @@ public sealed class NativeShaderParityTests
             {
                 string value = item.Groups["var"].Value;
                 string type = item.Groups["type"].ToString();
+                Match array = DeclaredSampler2DArray.Match(stage.Code, item.Index);
+                if (value == "Array" && array.Success)
+                {
+                    oracle.ArraySamplerAliases["Array"] = array.Groups["var"].Value;
+                    value = array.Groups["var"].Value;
+                    type = "sampler2DArray";
+                }
                 if (!oracle.Names.TryGetValue(value, out SortedSet<string>? types))
                 {
                     oracle.Names[value] = types = new SortedSet<string>(StringComparer.Ordinal);
@@ -312,6 +329,20 @@ public sealed class NativeShaderParityTests
         }
         foreach (NativeMember member in variant.Record?.Members ?? new List<NativeMember>()) Add(member.Name, member.Type, "the record");
         foreach (NativeSampler sampler in variant.Samplers) Add(sampler.Name, sampler.GlslType, "a sampler slot");
+        // A set-0 frame texture the program declares itself (cloudvolumetric's liquidDepth, without including
+        // underwatereffects) is the bindings.glsl declaration every native stage already has, as the rewriter
+        // treats a sampler whose name and type match SetConvention.FrameTextures.
+        foreach ((string name, SortedSet<string> types) in oracle.Names)
+        {
+            if (native.ContainsKey(name)) continue;
+            foreach (string type in types)
+            {
+                if (SetConvention.FrameTextures.Any(binding => binding.Name == name && binding.GlslType == type))
+                {
+                    Add(name, type, "a set-0 frame texture the program declares itself");
+                }
+            }
+        }
 
         var onlyNative = native.Keys.Except(oracle.Names.Keys).ToList();
         var onlyGlsl330 = oracle.Names.Keys.Except(native.Keys).ToList();
