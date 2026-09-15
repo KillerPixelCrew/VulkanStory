@@ -77,6 +77,21 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     internal string? NativeShaderDirectory { get; set; }
 
+    /// <summary>
+    /// The launcher's mod shader scan (<c>OptimumConfig.IsShaderProgramOverriddenByMods</c>): true for a pass name
+    /// whose GLSL a mod replaced, and for <c>"all"</c> when every program is rewriter-only. Such a program links
+    /// through the rewriter from the mod's source instead of the native SPIR-V. Null consults no scan (tests, a
+    /// device outside the client); <c>OPTIMUM_VK_NATIVE_SHADERS=force</c> ignores it. Read at <see cref="Initialize" />.
+    /// </summary>
+    public Func<string, bool>? ShaderProgramOverriddenByMods { get; set; }
+
+    /// <summary>True ignores <see cref="ShaderProgramOverriddenByMods" /> as <c>OPTIMUM_VK_NATIVE_SHADERS=force</c> does; null follows the environment. For tests.</summary>
+    internal bool? IgnoreModShaderScan { get; set; }
+
+    /// <summary>The scan <see cref="LinkProgram" /> consults: null when there is none or it is ignored.</summary>
+    private Func<string, bool>? _modShaderScan;
+    private readonly HashSet<string> _modOverrideLogged = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>What <see cref="Initialize" /> made of the native shaders: the origin and program count, or why they are off.</summary>
     internal string NativeShaderStatus { get; private set; } = "not loaded";
 
@@ -1387,7 +1402,13 @@ public sealed unsafe class VulkanDevice : IDisposable
         TranslatedProgram? native = null;
         bool nativeFailed = false;
         string nativeDetail = "";
-        if (_nativeShaders != null)
+        if (_nativeShaders != null && _modShaderScan != null && _modShaderScan(passName))
+        {
+            // A mod replaced this program's GLSL (or the scan cannot rule it out): the native SPIR-V would draw
+            // vanilla over the mod, so the mod's source goes through the rewriter. Rewritten, not failed.
+            ReportModOverride(passName);
+        }
+        else if (_nativeShaders != null)
         {
             NativeShaderLibrary.Outcome outcome = _nativeShaders.TryLink(passName, stages, out native, out nativeDetail);
             nativeFailed = outcome == NativeShaderLibrary.Outcome.Failed;
@@ -1490,11 +1511,41 @@ public sealed unsafe class VulkanDevice : IDisposable
             _ => null,
         };
 
+        string enabledVariable = Environment.GetEnvironmentVariable(NativeShaderLibrary.EnabledVariable) ?? "";
+        bool ignoreScan = IgnoreModShaderScan ?? NativeShaderLibrary.IgnoresModScan(enabledVariable);
+        _modShaderScan = ignoreScan ? null : ShaderProgramOverriddenByMods;
+
         NativeShaderStatus = _nativeShaders == null
             ? "off: " + reason
             : _nativeShaders.Manifest.Programs.Count + " programs from " + _nativeShaders.Origin +
               (reason.Length > 0 ? "; " + reason : "");
+        if (_nativeShaders != null && ignoreScan && ShaderProgramOverriddenByMods != null)
+        {
+            NativeShaderStatus += "; mod shader scan ignored (" + NativeShaderLibrary.EnabledVariable + "=" + NativeShaderLibrary.ForceValue + ")";
+        }
+        else if (_nativeShaders != null && _modShaderScan != null && _modShaderScan(AllShaderProgramsEntry))
+        {
+            NativeShaderStatus += "; the mod shader scan makes every program rewriter-only (no report, a failed scan, or a shaderincludes override)";
+        }
         LogShaderLine("[Optimum] shaders: native " + NativeShaderStatus);
+    }
+
+    /// <summary>The scan's entry for every program (<c>OptimumConfig.AllShaderPrograms</c>, the scanner's <c>AllPrograms</c>).</summary>
+    internal const string AllShaderProgramsEntry = "all";
+
+    /// <summary>Logs, once per program the manifest has, that the mod shader scan sent it to the rewriter.</summary>
+    private void ReportModOverride(string passName)
+    {
+        if (_nativeShaders?.Manifest.FindProgram(passName) == null) return;
+        bool all = _modShaderScan!(AllShaderProgramsEntry);
+        lock (_modOverrideLogged)
+        {
+            if (!_modOverrideLogged.Add(passName)) return;
+        }
+        string line = "[Optimum] shaders: native '" + passName + "' linked through the rewriter: " +
+            (all ? "the mod shader scan makes every program rewriter-only" : "a mod replaces its GLSL (launcher shader scan)");
+        LogShaderLine(line);
+        if (RenderTrace.Enabled) RenderTrace.Write(line);
     }
 
     private void ReportNativeFailure(string passName, string detail)
