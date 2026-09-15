@@ -438,3 +438,36 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
    its differential GPU test in its stage.
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
+
+### Family: entities (`entityanimated`, `shadowmapentityanimated`, `standard`, `instanced`; 2026-09-15)
+
+Axes and variants: `entityanimated` ALLOWDEPTHOFFSET, GBUFFER, TAAMOTION, USEOIT (16; `Entityanimated_Oit` is
+USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `instanced` GBUFFER, TAAMOTION (4);
+`shadowmapentityanimated` none (1). No oracle quirk (section 2) was met. Decisions:
+
+- **`#if defined(X)` on a per-registration define** (`ALLOWDEPTHOFFSET`, `GLOWSUB`) becomes `#if X == 1`; the
+  nested `#if ALLOWDEPTHOFFSET > 0` folds into it, since every variant defines the axis as 0 or 1.
+- **Animation buffers:** `Animation`/`AnimationPrev` are `readonly buffer`s at `OPTIMUM_BINDING_ANIMATION`/
+  `_PREV`, std140, keeping the instance names `ElementTransforms`/`PrevElementTransforms` and the member
+  `values`, declared as a runtime array `mat4 values[]`: MAXANIMATEDELEMENTS is not a native define, and the
+  index (`jointId`) is unchanged.
+- **`AnimationPrev` exists only for TAAMOTION=1, USEOIT=0.** The GLSL 330 vertex stage declares it for every
+  TAAMOTION program, but the client creates the UBO only for the opaque program
+  (`ShaderProgramEntityanimated`, `!Oit && EffectiveTaa`), and the OIT fragment stage never reads `taaPrevClip`.
+  The OIT variant therefore writes `taaPrevClip = vec4(0.0)` and has no binding 2, so the runtime need not bind a
+  buffer the client never made. No pixel changes: nothing reads that varying under USEOIT=1.
+- **Placement:** push and record are identical in every variant of a program (the oracle's names do not depend
+  on defines).
+  - `entityanimated`: push = `entityTex`, `addRenderFlags`, `extraGlow`, `taaHistoryValid`, `taaReactive`,
+    `entityId`, `glitchFlicker` (28 B). Record = everything else (568 B).
+  - `standard`: push = `tex`, `tex2dOverlay`, the nine integer flags and `taaReactive` (48 B). Record 628 B.
+  - `instanced`: push = `tex` (every per-object value is an instance attribute). Record 328 B, including
+    `windWaveCounter`: its vertex stage includes no `vertexwarp.glsl`, so it has no owner in this program.
+  - `shadowmapentityanimated`: push = `entityTex`, `modelViewMatrix` (per entity in the shadow pass),
+    `addRenderFlags` (72 B). Record = `projectionMatrix`.
+- **Open for the runtime stage (not worked around here):** `EntityShapeRenderer` sets `windWaveIntensity` and
+  `waterWaveCounter` per entity (uniform-frequency map, section 3.2). In `entityanimated` both are frame members
+  (the program includes `vertexwarp.glsl`), so a native program reads the frame value unless the runtime treats
+  a per-draw write to an owned frame name specially. The GLSL 330 path honours the override.
+- **`instanced.fsh`'s `in float normalShadeIntensity`** is written by no vertex stage and read by nothing. It
+  keeps a location of its own (11), and the optimised module drops it.
