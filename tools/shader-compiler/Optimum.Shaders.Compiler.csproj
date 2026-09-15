@@ -40,8 +40,8 @@
     <!-- The shared output make deploy and the packagers read (MOD_OUT). -->
     <NativeShaderOutputRoot>$(OptimumRepositoryRoot)bin$([System.IO.Path]::DirectorySeparatorChar)$(Configuration)$([System.IO.Path]::DirectorySeparatorChar)net10.0</NativeShaderOutputRoot>
     <NativeShaderManifest>$(NativeShaderOutputRoot)$([System.IO.Path]::DirectorySeparatorChar)shaders-vk$([System.IO.Path]::DirectorySeparatorChar)shaders.manifest.json</NativeShaderManifest>
-    <NativeShaderInputList>$(ProjectDir)$(IntermediateOutputPath)shaders-vk.inputs</NativeShaderInputList>
-    <NativeShaderStamp>$(ProjectDir)$(IntermediateOutputPath)shaders-vk.stamp</NativeShaderStamp>
+    <NativeShaderInputList>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)shaders-vk.inputs</NativeShaderInputList>
+    <NativeShaderStamp>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)shaders-vk.stamp</NativeShaderStamp>
     <NativeShaderDotnet>$(DOTNET_HOST_PATH)</NativeShaderDotnet>
     <NativeShaderDotnet Condition="'$(NativeShaderDotnet)' == ''">dotnet</NativeShaderDotnet>
   </PropertyGroup>
