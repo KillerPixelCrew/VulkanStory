@@ -135,6 +135,7 @@ public sealed class NativeShaderRuntimeTests
                 ["OPTIMUM_SHINYEFFECT"] = corpus.ShinyEffect, ["OPTIMUM_SHADOWQUALITY"] = corpus.ShadowQuality,
                 ["OPTIMUM_WAVINGSTUFF"] = corpus.WavingStuff, ["OPTIMUM_MINBRIGHT"] = corpus.MinBright,
                 ["OPTIMUM_GREEDYMESH_GRAD"] = 0, ["OPTIMUM_DYNLIGHTS"] = corpus.DynLights,
+                ["OPTIMUM_OPTIMUMAO"] = corpus.OptimumAo,
             };
             foreach (NativeSpecialization.Entry entry in specialization.Entries)
             {
