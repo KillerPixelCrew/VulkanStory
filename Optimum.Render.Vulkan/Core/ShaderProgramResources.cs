@@ -45,6 +45,18 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// <summary>CPU mirror of the program record.</summary>
     public byte[] UniformShadow { get; }
 
+    /// <summary>
+    /// CPU mirror of a native program's push block when it holds members besides sampler slots; null
+    /// otherwise. A draw copies it into the device's push shadow before the slots are resolved over it.
+    /// </summary>
+    public byte[]? PushShadow { get; }
+
+    /// <summary>The specialization constants every pipeline of this program is created with; null for a rewritten program.</summary>
+    public NativeSpecialization? Specialization { get; }
+
+    /// <summary>Whether the program was linked from the native manifest.</summary>
+    public bool IsNative { get; }
+
     /// <summary>Bumped by every write that changes the shadow.</summary>
     public uint UniformVersion { get; private set; } = 1;
 
@@ -70,12 +82,15 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         ProgramId = programId;
         Interface = translated.Layout;
         UniformShadow = translated.Layout.CreateShadowBuffer();
+        PushShadow = translated.Layout.CreatePushShadow();
+        Specialization = translated.Specialization;
+        IsNative = translated.IsNative;
 
         foreach (KeyValuePair<EnumShaderType, byte[]> stage in translated.Spirv)
         {
             Modules[stage.Key] = CreateModule(stage.Value);
         }
-        SourceHash = HashSpirv(translated.Spirv);
+        SourceHash = HashSpirv(translated.Spirv, translated.Specialization);
 
         // Sampler uniforms default to the unit matching their declaration order,
         // which is the order the game's own texture-location bookkeeping assigns.
@@ -93,13 +108,15 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     }
 
     /// <summary>
-    /// A hash of every stage's SPIR-V, in stage order. The SPIR-V was compiled from the
-    /// rewritten source with its defines resolved, so two programs with this hash build the
-    /// same pipelines for the same state - what the pipeline-key log matches on across launches.
+    /// A hash of every stage's SPIR-V, in stage order, and of a native program's specialization
+    /// data. The rewriter's SPIR-V has its defines resolved; a native module's settings are its
+    /// specialization constants, so they are part of the program's identity. Two programs with
+    /// this hash build the same pipelines for the same state - what the pipeline-key log matches
+    /// on across launches.
     /// </summary>
     public UInt128 SourceHash { get; }
 
-    private static UInt128 HashSpirv(Dictionary<EnumShaderType, byte[]> spirv)
+    private static UInt128 HashSpirv(Dictionary<EnumShaderType, byte[]> spirv, NativeSpecialization? specialization)
     {
         using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(
             System.Security.Cryptography.HashAlgorithmName.SHA256);
@@ -112,6 +129,16 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
             BitConverter.TryWriteBytes(header[4..], spirv[stage].Length);
             hash.AppendData(header);
             hash.AppendData(spirv[stage]);
+        }
+        if (specialization != null)
+        {
+            foreach (NativeSpecialization.Entry entry in specialization.Entries)
+            {
+                BitConverter.TryWriteBytes(header, entry.Id);
+                BitConverter.TryWriteBytes(header[4..], entry.Offset);
+                hash.AppendData(header);
+            }
+            hash.AppendData(specialization.Data);
         }
         Span<byte> digest = stackalloc byte[32];
         hash.GetHashAndReset(digest);
@@ -153,6 +180,15 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// </summary>
     public const int FrameLocationBase = 1 << 28;
 
+    /// <summary>
+    /// Where a native program's push-member locations start: the member's offset in the push
+    /// block plus this. Above any record offset and below <see cref="FrameLocationBase" />.
+    /// </summary>
+    public const int PushLocationBase = 1 << 27;
+
+    /// <summary>Whether a location handed out by <see cref="LocationOf" /> is a push-block member.</summary>
+    public static bool IsPushLocation(int location) => location >= PushLocationBase && location < FrameLocationBase;
+
     /// <summary>Whether a location handed out by <see cref="LocationOf" /> names a sampler.</summary>
     public static bool IsSamplerLocation(int location) => location <= FirstSamplerLocation;
 
@@ -178,6 +214,11 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
             FrameGlobals.TryGetMember(name, out UniformMember frameMember))
         {
             return FrameLocationBase + frameMember.Offset;
+        }
+
+        if (Interface.PushMembersByName.TryGetValue(name, out UniformMember? pushMember))
+        {
+            return PushLocationBase + pushMember.Offset;
         }
 
         if (Interface.MembersByName.TryGetValue(name, out UniformMember? member))
@@ -220,6 +261,14 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
 
         data.CopyTo(destination);
         UniformVersion++;
+    }
+
+    /// <summary>Writes raw bytes at a push location previously handed out by <see cref="LocationOf" />.</summary>
+    public void SetPushUniform(int location, ReadOnlySpan<byte> data)
+    {
+        int offset = location - PushLocationBase;
+        if (PushShadow == null || offset < 0 || offset + data.Length > PushShadow.Length) return;
+        data.CopyTo(PushShadow.AsSpan(offset, data.Length));
     }
 
     /// <summary>Whether the shadow's current contents already sit in <paramref name="frame" />'s ring.</summary>

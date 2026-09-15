@@ -465,8 +465,29 @@ internal static class VulkanStats
                    AliasedLeases: Interlocked.Exchange(ref _aliasedLeases, 0),
                    ReadSelfCopies: Interlocked.Exchange(ref _readSelfCopies, 0),
                    ReadSelfPool: Interlocked.Read(ref _readSelfPool))) + "\n" +
-               FormatPipelinesLine(TakePipelineSample());
+               FormatPipelinesLine(TakePipelineSample()) + "\n" +
+               FormatShadersLine(Interlocked.Read(ref _shadersNative), Interlocked.Read(ref _shadersRewritten),
+                   Interlocked.Read(ref _shadersFailed));
     }
+
+    private static long _shadersNative;
+    private static long _shadersRewritten;
+    private static long _shadersFailed;
+
+    /// <summary>The counts of the latest shader load (docs/vulkan-native-shaders.md section 8); the device reports them once per load.</summary>
+    public static void NoteShaderLoad(long native, long rewritten, long failed)
+    {
+        Interlocked.Exchange(ref _shadersNative, native);
+        Interlocked.Exchange(ref _shadersRewritten, rewritten);
+        Interlocked.Exchange(ref _shadersFailed, failed);
+    }
+
+    /// <summary>
+    /// <c>stats.shaders</c>: the latest shader load's programs linked from the native manifest, through the
+    /// rewriter (no native program), and native programs that failed and fell back to the rewriter.
+    /// </summary>
+    public static string FormatShadersLine(long native, long rewritten, long failed) =>
+        string.Format(CultureInfo.InvariantCulture, "stats.shaders native={0} rewritten={1} failed={2}", native, rewritten, failed);
 
     private static double Mib(ulong bytes) => bytes / (1024.0 * 1024.0);
 

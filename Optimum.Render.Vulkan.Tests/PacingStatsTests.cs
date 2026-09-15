@@ -162,7 +162,9 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(7, lines.Length);
+        Assert.Equal(8, lines.Length);
+        // Native shader runtime seam: the latest shader load's native, rewritten and failed programs.
+        Assert.StartsWith("stats.shaders native=", lines[7]);
         // Caching follow-ups: pipelines compiled blocking/async/prewarmed, skipped draws, cache bytes, saves.
         Assert.StartsWith("stats.pipelines compiled_sync=", lines[6]);
         // Phase 2 step 4: transient and aliased MiB, the Transient pool's heap peak, ReadSelf copies.

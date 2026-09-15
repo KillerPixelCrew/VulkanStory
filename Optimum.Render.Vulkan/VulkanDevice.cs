@@ -46,6 +46,11 @@ public sealed unsafe class VulkanDevice : IDisposable
     private FrameRing _frames = null!;
     private ShaderCompiler _shaderCompiler = null!;
 
+    /// <summary>The native shaders loaded at device start; null when they are off (docs/vulkan-native-shaders.md section 8).</summary>
+    private NativeShaderLibrary? _nativeShaders;
+    private int _nativeLinks, _rewrittenLinks, _failedNativeLinks;
+    private int _nativeLinksReported, _rewrittenLinksReported, _failedNativeLinksReported;
+
     /// <summary>
     /// Where compiled SPIR-V and the driver's pipeline cache are kept between launches,
     /// set before <see cref="Initialize" />. Null keeps nothing, which is what tests get;
@@ -53,6 +58,28 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// overrides it: a path to use instead, or 0 to keep nothing.
     /// </summary>
     public string? ShaderCacheDirectory { get; set; }
+
+    /// <summary>
+    /// False forces the rewriter for every program, as <c>OPTIMUM_VK_NATIVE_SHADERS=0</c> does; null follows the
+    /// environment. Read at <see cref="Initialize" />.
+    /// </summary>
+    public bool? NativeShadersEnabled { get; set; }
+
+    /// <summary>
+    /// The directory holding <c>shaders.manifest.json</c>, in place of <c>shaders-vk</c> beside the renderer
+    /// assembly (and of <c>OPTIMUM_VK_SHADER_SOURCE</c>). Read at <see cref="Initialize" />. For tests.
+    /// </summary>
+    internal string? NativeShaderDirectory { get; set; }
+
+    /// <summary>What <see cref="Initialize" /> made of the native shaders: the origin and program count, or why they are off.</summary>
+    internal string NativeShaderStatus { get; private set; } = "not loaded";
+
+    /// <summary>Programs linked from the manifest, through the rewriter, and native programs that fell back, since the device came up.</summary>
+    internal (int Native, int Rewritten, int Failed) ShaderLinkCounts => (_nativeLinks, _rewrittenLinks, _failedNativeLinks);
+
+    /// <summary>Whether a linked program came from the native manifest.</summary>
+    internal bool IsNativeProgram(int programId) =>
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) && program.IsNative;
 
     /// <summary>The pipeline cache and key-log files and their saves; null when there is no cache root.</summary>
     private PipelineCachePersistence? _pipelinePersistence;
@@ -504,6 +531,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             BinaryCache = cacheRoot == null ? null : new ShaderBinaryCache(System.IO.Path.Combine(cacheRoot, "spirv")),
         };
+        LoadNativeShaders();
         MirrorValidationMessage(cacheRoot == null
             ? "--- shader cache off"
             : "--- shader cache " + cacheRoot + "; pipeline cache " +
@@ -737,6 +765,7 @@ public sealed unsafe class VulkanDevice : IDisposable
                 (frameStart - _lastFrameStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
         }
         _lastFrameStart = frameStart;
+        ReportShaderLoad();
 
         // The safe point for pipelines the background worker finished, and for the
         // opportunistic pipeline cache save (a timestamp check; the save runs on a worker).
@@ -1147,33 +1176,77 @@ public sealed unsafe class VulkanDevice : IDisposable
             return 0;
         }
 
-        // The include files the registry assembled the program from decide which
-        // of its uniforms read the shared frame block. A program built any other
-        // way - a mod's, a test's - keeps every uniform to itself.
-        TranslatedProgram translated = ShaderTranslator.Translate(stages, _shaderCompiler, null,
-            (program as Vintagestory.Client.NoObf.ShaderProgramBase)?.includes);
-        if (!translated.Success)
+        // The seam (docs/vulkan-native-shaders.md section 8): a program the manifest has links from its
+        // SPIR-V; one it has not links through the rewriter; one it has but cannot serve (a bad hash, an
+        // unreadable define, a module the driver refuses) links through the rewriter and counts as failed.
+        string passName = program.PassName ?? "";
+        ShaderProgramResources? resources = null;
+        TranslatedProgram? native = null;
+        bool nativeFailed = false;
+        string nativeDetail = "";
+        if (_nativeShaders != null)
         {
-            foreach (string error in translated.Errors)
-            {
-                AddDiagnostic($"{program.PassName}: {error}");
-            }
-            return 0;
+            NativeShaderLibrary.Outcome outcome = _nativeShaders.TryLink(passName, stages, out native, out nativeDetail);
+            nativeFailed = outcome == NativeShaderLibrary.Outcome.Failed;
+            if (outcome != NativeShaderLibrary.Outcome.Native) native = null;
         }
 
-        int programId = _nextProgramId++;
+        int programId = 0;
+        if (native != null)
+        {
+            programId = _nextProgramId++;
+            try
+            {
+                resources = new ShaderProgramResources(_context, programId, native, _sharedLayout!.Layout);
+            }
+            catch (InvalidOperationException error)
+            {
+                nativeFailed = true;
+                nativeDetail += ": " + error.Message;
+            }
+        }
+        if (nativeFailed) ReportNativeFailure(passName, nativeDetail);
+
+        TranslatedProgram translated;
+        if (resources != null)
+        {
+            translated = native!;
+            _nativeLinks++;
+        }
+        else
+        {
+            if (nativeFailed) _failedNativeLinks++;
+            else _rewrittenLinks++;
+
+            // The include files the registry assembled the program from decide which
+            // of its uniforms read the shared frame block. A program built any other
+            // way - a mod's, a test's - keeps every uniform to itself.
+            translated = ShaderTranslator.Translate(stages, _shaderCompiler, null,
+                (program as Vintagestory.Client.NoObf.ShaderProgramBase)?.includes);
+            if (!translated.Success)
+            {
+                foreach (string error in translated.Errors)
+                {
+                    AddDiagnostic($"{program.PassName}: {error}");
+                }
+                return 0;
+            }
+
+            if (programId == 0) programId = _nextProgramId++;
+        }
         if (RenderTrace.Enabled)
         {
             RenderTrace.DumpProgramSources(program.PassName, translated);
             RenderTrace.Write("program " + programId + " '" + program.PassName + "' uniformBlockBytes=" +
-                translated.Layout.BlockSize + " pushBytes=" + translated.Layout.PushConstantSize);
+                translated.Layout.BlockSize + " pushBytes=" + translated.Layout.PushConstantSize +
+                (translated.IsNative ? " native [" + nativeDetail + "]" : ""));
             foreach (UniformMember member in translated.Layout.Members)
             {
                 RenderTrace.Write("  uniform " + member.Name + " offset=" + member.Offset +
                     " type=" + member.Type + " count=" + member.ArrayLength);
             }
         }
-        var resources = new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
+        resources ??= new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
         _programs[programId] = resources;
         _programNames[programId] = program.PassName ?? "";
         // Pipelines an earlier launch used with this exact program start compiling now.
@@ -1183,6 +1256,73 @@ public sealed unsafe class VulkanDevice : IDisposable
             RenderTrace.Write("program " + programId + " prewarming " + prewarming + " pipelines");
         }
         return programId;
+    }
+
+    /// <summary>
+    /// Loads the native shaders once, at device start: the manifest beside the renderer assembly, the directory a
+    /// test named, or the source tree <c>OPTIMUM_VK_SHADER_SOURCE</c> names. One log line says what came of it.
+    /// </summary>
+    private void LoadNativeShaders()
+    {
+        string? assemblyDirectory = null;
+        try
+        {
+            assemblyDirectory = System.IO.Path.GetDirectoryName(typeof(VulkanDevice).Assembly.Location);
+        }
+        catch (Exception error) when (error is ArgumentException or System.IO.PathTooLongException)
+        {
+            // An assembly loaded from bytes has no location; the resolution below reports it.
+        }
+
+        (NativeShaderLibrary.Mode mode, string? path, string reason) = NativeShaderLibrary.Resolve(
+            NativeShadersEnabled, NativeShaderDirectory,
+            Environment.GetEnvironmentVariable(NativeShaderLibrary.EnabledVariable),
+            Environment.GetEnvironmentVariable(NativeShaderLibrary.SourceVariable),
+            assemblyDirectory);
+
+        _nativeShaders = mode switch
+        {
+            NativeShaderLibrary.Mode.Directory => NativeShaderLibrary.Load(path!, _shaderCompiler.Identity, out reason),
+            NativeShaderLibrary.Mode.Source => NativeShaderLibrary.BuildFromSource(path!, _shaderCompiler, out reason),
+            _ => null,
+        };
+
+        NativeShaderStatus = _nativeShaders == null
+            ? "off: " + reason
+            : _nativeShaders.Manifest.Programs.Count + " programs from " + _nativeShaders.Origin +
+              (reason.Length > 0 ? "; " + reason : "");
+        LogShaderLine("[Optimum] shaders: native " + NativeShaderStatus);
+    }
+
+    private void ReportNativeFailure(string passName, string detail)
+    {
+        string line = "[Optimum] shaders: native '" + passName + "' failed, linked through the rewriter: " + detail;
+        LogShaderLine(line);
+        if (RenderTrace.Enabled) RenderTrace.Write(line);
+    }
+
+    /// <summary>
+    /// The line after a shader load: the programs linked since the last report. ShaderRegistry links every program
+    /// of a load or reload in one synchronous call, so the first frame after links is the end of that load.
+    /// </summary>
+    private void ReportShaderLoad()
+    {
+        int native = _nativeLinks - _nativeLinksReported;
+        int rewritten = _rewrittenLinks - _rewrittenLinksReported;
+        int failed = _failedNativeLinks - _failedNativeLinksReported;
+        if (native + rewritten + failed == 0) return;
+
+        _nativeLinksReported = _nativeLinks;
+        _rewrittenLinksReported = _rewrittenLinks;
+        _failedNativeLinksReported = _failedNativeLinks;
+        LogShaderLine("[Optimum] shaders: " + native + " native, " + rewritten + " rewritten, " + failed + " failed");
+        VulkanStats.NoteShaderLoad(native, rewritten, failed);
+    }
+
+    private static void LogShaderLine(string line)
+    {
+        Console.WriteLine(line);
+        MirrorValidationMessage("--- " + line);
     }
 
     private void AddStage(List<ShaderStageSource> stages, IShader? shader, EnumShaderType stage, string passName)
@@ -1232,7 +1372,9 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
         {
-            program.SetUniform(location, data);
+            // A native program's push member (a DRAW uniform): kept per program, pushed per draw.
+            if (ShaderProgramResources.IsPushLocation(location)) program.SetPushUniform(location, data);
+            else program.SetUniform(location, data);
         }
     }
 
@@ -1252,6 +1394,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         data.CopyTo(destination);
         _frameGlobalsVersion++;
     }
+
+    /// <summary>A copy of a linked program's record shadow, initializers included; null for an unknown program. For tests.</summary>
+    internal byte[]? ProgramRecordForTests(int programId) =>
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) ? (byte[])program.UniformShadow.Clone() : null;
 
     /// <summary>A copy of the shared frame block's current bytes. For tests.</summary>
     internal byte[] FrameGlobalsForTests => (byte[])_frameGlobals.Clone();
@@ -2582,6 +2728,8 @@ public sealed unsafe class VulkanDevice : IDisposable
         SharedPipelineLayout shared = _sharedLayout!;
         SyncBoundDescriptors(commandBuffer);
 
+        // A native push block's members persist per program; the slots are resolved over them.
+        if (program.PushShadow != null) program.PushShadow.CopyTo(_pushShadow, 0);
         ResolveSamplers(program);
 
         // Set 0: the frame block and the fixed frame textures.

@@ -83,7 +83,7 @@ internal sealed class BlockBinding
 /// This is why a stage cannot be compiled to SPIR-V alone, and why
 /// <c>CompileShader</c> only stages work that <c>LinkProgram</c> finishes.
 /// </summary>
-internal sealed class ProgramInterfaceLayout
+internal sealed partial class ProgramInterfaceLayout
 {
     public const string BlockTypeName = "OptimumUniforms";
     public const string PushBlockTypeName = "OptimumDraw";
