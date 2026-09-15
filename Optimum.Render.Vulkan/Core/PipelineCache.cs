@@ -87,8 +87,28 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         }
         _dynamicStates = dynamicStates.ToArray();
 
+        // A rejected blob is not an error: the driver starts cold instead. Some
+        // drivers return an error rather than an empty cache for data they do not
+        // accept, so that case retries without it (docs/research/vulkan-caching.md §1).
+        if (initialData is { Length: > 0 } && TryCreateDriverCache(context, initialData, out _driverCache))
+        {
+            SeedAccepted = true;
+        }
+        else
+        {
+            TryCreateDriverCache(context, null, out _driverCache);
+        }
+    }
+
+    /// <summary>The driver created its cache from the initial data rather than empty.</summary>
+    public bool SeedAccepted { get; }
+
+    private static bool TryCreateDriverCache(
+        VulkanContext context, byte[]? initialData, out Silk.NET.Vulkan.PipelineCache cache)
+    {
         fixed (byte* data = initialData)
         {
+            // Never a non-null pointer with a zero size: one driver fails on exactly that.
             var createInfo = new PipelineCacheCreateInfo
             {
                 SType = StructureType.PipelineCacheCreateInfo,
@@ -96,12 +116,12 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                 PInitialData = initialData is { Length: > 0 } ? data : null,
             };
 
-            // A rejected blob is not an error: the driver simply starts cold.
-            if (context.Api.CreatePipelineCache(
-                    context.Device, &createInfo, null, out Silk.NET.Vulkan.PipelineCache cache) == Result.Success)
+            if (context.Api.CreatePipelineCache(context.Device, &createInfo, null, out cache) == Result.Success)
             {
-                _driverCache = cache;
+                return true;
             }
+            cache = default;
+            return false;
         }
     }
 
@@ -320,22 +340,33 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     /// <summary>
     /// The driver's cache blob, to be written next to the SPIR-V cache so the
-    /// next run starts warm.
+    /// next run starts warm (<see cref="PipelineCacheFile" />).
     /// </summary>
     public byte[] SerializeDriverCache()
     {
         if (_driverCache.Handle == 0) return Array.Empty<byte>();
 
-        nuint size = 0;
-        _context.Api.GetPipelineCacheData(_context.Device, _driverCache, ref size, null);
-        if (size == 0) return Array.Empty<byte>();
-
-        var data = new byte[(int)size];
-        fixed (byte* dataPtr = data)
+        // The cache can grow between the size query and the fetch while another
+        // thread creates a pipeline; VK_INCOMPLETE then means "ask again".
+        for (int attempt = 0; attempt < 4; attempt++)
         {
-            _context.Api.GetPipelineCacheData(_context.Device, _driverCache, ref size, dataPtr);
+            nuint size = 0;
+            if (_context.Api.GetPipelineCacheData(_context.Device, _driverCache, ref size, null) != Result.Success ||
+                size == 0)
+            {
+                return Array.Empty<byte>();
+            }
+
+            var data = new byte[(int)size];
+            Result result;
+            fixed (byte* dataPtr = data)
+            {
+                result = _context.Api.GetPipelineCacheData(_context.Device, _driverCache, ref size, dataPtr);
+            }
+            if (result == Result.Success) return size == (nuint)data.Length ? data : data[..(int)size];
+            if (result != Result.Incomplete) break;
         }
-        return data;
+        return Array.Empty<byte>();
     }
 
     public void Dispose()

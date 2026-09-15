@@ -46,6 +46,24 @@ public sealed unsafe class VulkanDevice : IDisposable
     private FrameRing _frames = null!;
     private ShaderCompiler _shaderCompiler = null!;
 
+    /// <summary>
+    /// Where compiled SPIR-V and the driver's pipeline cache are kept between launches,
+    /// set before <see cref="Initialize" />. Null keeps nothing, which is what tests get;
+    /// the platform points it at the game's per-user cache folder. OPTIMUM_VULKAN_SHADER_CACHE
+    /// overrides it: a path to use instead, or 0 to keep nothing.
+    /// </summary>
+    public string? ShaderCacheDirectory { get; set; }
+
+    private string? _pipelineCachePath;
+    private PipelineCacheIdentity _pipelineCacheIdentity;
+
+    internal static string? ResolveShaderCacheRoot(string? configured, string? environment)
+    {
+        if (string.IsNullOrWhiteSpace(environment)) return string.IsNullOrWhiteSpace(configured) ? null : configured;
+        string value = environment.Trim();
+        return value is "0" or "off" or "false" ? null : value;
+    }
+
     private readonly Dictionary<int, ShaderProgramResources> _programs = new();
 
     /// <summary>Pass names by program id, so a device-loss report can name the shader.</summary>
@@ -405,8 +423,17 @@ public sealed unsafe class VulkanDevice : IDisposable
         // Colour write tier (C4): draw buffers and motion windows are write masks.
         _state.ColorWriteTier = _context.Capabilities.ColorWriteTier;
         _state.DynamicBlend = _context.Capabilities.DynamicColorBlend;
+        string? cacheRoot = ResolveShaderCacheRoot(ShaderCacheDirectory,
+            Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SHADER_CACHE"));
+        byte[]? pipelineSeed = null;
+        if (cacheRoot != null)
+        {
+            _pipelineCacheIdentity = PipelineCacheIdentity.Of(_context.Capabilities);
+            _pipelineCachePath = PipelineCacheFile.PathFor(cacheRoot, _pipelineCacheIdentity);
+            pipelineSeed = PipelineCacheFile.Load(_pipelineCachePath, _pipelineCacheIdentity);
+        }
         _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
-            _context.Capabilities.DynamicColorBlend);
+            _context.Capabilities.DynamicColorBlend, pipelineSeed);
         _descriptors = new DescriptorCache(_context);
         // One layout for the shared frame block, named by every program's pipeline layout.
         _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
@@ -421,7 +448,14 @@ public sealed unsafe class VulkanDevice : IDisposable
         _targets.ScopeClosing = _queryRing.OnScopeClosing;
         _targets.ScopeClosed = _queryRing.OnScopeClosed;
         _targets.ScopeOpened = _queryRing.OnScopeOpened;
-        _shaderCompiler = new ShaderCompiler();
+        _shaderCompiler = new ShaderCompiler
+        {
+            BinaryCache = cacheRoot == null ? null : new ShaderBinaryCache(System.IO.Path.Combine(cacheRoot, "spirv")),
+        };
+        MirrorValidationMessage(cacheRoot == null
+            ? "--- shader cache off"
+            : "--- shader cache " + cacheRoot + "; pipeline cache " +
+              (pipelineSeed == null ? "cold" : _pipelines.SeedAccepted ? "warm (" + pipelineSeed.Length + " bytes)" : "rejected by the driver"));
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
         CreatePlaceholderUniformBuffer();
@@ -3254,6 +3288,21 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     // ------------------------------------------------------------------- teardown
 
+    /// <summary>
+    /// Writes the driver's pipeline cache for the next launch. On shutdown only, after
+    /// the device is idle; a failed write costs the next launch its warm start, nothing more.
+    /// </summary>
+    private void SavePipelineCache()
+    {
+        if (_pipelineCachePath == null || _pipelines == null) return;
+        byte[] blob = _pipelines.SerializeDriverCache();
+        if (blob.Length == 0) return;
+        if (!PipelineCacheFile.Save(_pipelineCachePath, blob, _pipelineCacheIdentity))
+        {
+            MirrorValidationMessage("--- pipeline cache not saved to " + _pipelineCachePath);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -3288,6 +3337,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         _shaderCompiler?.Dispose();
         _frames?.Dispose();
         _descriptors?.Dispose();
+        SavePipelineCache();
         _pipelines?.Dispose();
         _targets?.Dispose();
         _meshes?.Dispose();

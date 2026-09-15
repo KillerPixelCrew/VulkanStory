@@ -54,6 +54,11 @@ internal sealed class VulkanCapabilities
 {
     public string DeviceName = "";
     public string DriverName = "";
+    public uint VendorId;
+    public uint DeviceId;
+    public uint DriverVersion;
+    /// <summary>VkPhysicalDeviceProperties::pipelineCacheUUID; 16 bytes.</summary>
+    public byte[] PipelineCacheUuid = new byte[16];
     public uint ApiVersion;
     public PhysicalDeviceType DeviceType;
     public uint MaxImageDimension2D;
@@ -987,6 +992,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             DeviceName = SilkMarshal.PtrToString((nint)properties.DeviceName) ?? "unknown",
             DriverName = SilkMarshal.PtrToString((nint)driverProperties.DriverName) ?? "unknown",
+            VendorId = properties.VendorID,
+            DeviceId = properties.DeviceID,
+            DriverVersion = properties.DriverVersion,
+            PipelineCacheUuid = new ReadOnlySpan<byte>(properties.PipelineCacheUuid, 16).ToArray(),
             ApiVersion = properties.ApiVersion,
             DeviceType = properties.DeviceType,
             MaxImageDimension2D = properties.Limits.MaxImageDimension2D,

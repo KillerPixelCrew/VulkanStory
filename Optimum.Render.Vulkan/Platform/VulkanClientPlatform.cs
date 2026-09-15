@@ -154,8 +154,14 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         "OptimumFinishDeviceFrameBufferSetup",
     };
 
-    /// <summary>Test seam: the device to bring up (tests add validation capture).</summary>
-    internal Func<VulkanDevice> DeviceFactory = () => new VulkanDevice();
+    /// <summary>
+    /// Test seam: the device to bring up (tests add validation capture). The real one keeps
+    /// compiled shaders and the pipeline cache in the game's per-user cache folder.
+    /// </summary>
+    internal Func<VulkanDevice> DeviceFactory = () => new VulkanDevice
+    {
+        ShaderCacheDirectory = System.IO.Path.Combine(GamePaths.Cache, "optimum-vulkan"),
+    };
 
     /// <summary>Test seam: where the crash marker goes; null means <see cref="GamePaths.DataPath" />.</summary>
     internal string? CrashMarkerDataPath;
