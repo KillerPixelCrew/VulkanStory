@@ -624,3 +624,44 @@ stay on the rewriter. Decisions:
   `windWaveCounter` in the record (its owner `vertexwarp.vsh` is not included).
 - **Unproduced fragment inputs** the GLSL 330 stages declare but nothing writes or reads (`guitopsoil`'s `color`
   and `glowLevel`, `helditem`'s `n`) keep their declarations; the optimised modules drop them.
+
+### 9.1 Family 5: particles, decals, sky, clouds (2026-09-15)
+
+Ported: `particlescube`, `particlesquad`, `particlesquad2d`, `decals`, `sky`, `nightsky`, `celestialobject`,
+`aurora`, `cloudmap`. Not ported: the unregistered `clouds` pair, and `cloudvolumetric` (below).
+
+- **USEOIT on programs that include `oit.glsl`.** `oit.glsl` gates its outputs and functions on `USEOIT`, so every
+  includer gets the axis and the builder compiles `USEOIT=0` too. `particlesquad`, `particlesquad2d` and `aurora`
+  are registered with `Oit = true` (the `ShaderProgramBase` default); only `USEOIT=1` is ever selected, and the
+  GLSL 330 bodies do not compile with `USEOIT 0`. The native bodies put every statement that names an
+  `oit.glsl` symbol under `#if USEOIT == 1`. The `USEOIT=0` variant has no fragment outputs, matching the
+  preprocessed GLSL 330 declarations, and exists only to compile.
+- **GBUFFER as the motion location.** `decals` branches on the G-buffer only through `TAAMOTIONLOCATION`, so its
+  fragment stage declares `outMotion` at 4 under `#if GBUFFER == 1` and at 2 otherwise, which makes `GBUFFER` an
+  axis of the program (8 variants). `particlescube` does the same.
+- **VEC3SCALE** is tested as `#if VEC3SCALE == 1` where `particlescube.vsh` has `#if defined(VEC3SCALE)`.
+- **Motion writers.** `decals` writes `optimumWriteMotion(prevClip, taaRenderSize, taaJitterPx, 0.0,
+  gl_FragCoord.z)`; its behind-camera result `vec4(0, 0, 0, 0)` equals the GLSL 330 `vec4(0.0)`. `particlescube`
+  (the section 7 exception) writes `optimumWriteReactiveOnly(1.0)` behind the camera, which is the GLSL 330
+  `vec4(0, 0, 1, 0)`, and `vec4(optimumMotionVector(...), 1.0, gl_FragCoord.z)` otherwise.
+- **cloudmap's dither stub.** `cloudmap.fsh` defines `NoiseFromPixelPosition(a, b, c)` as `vec4(0.0)` before
+  `skycolor.fsh`, so its sky glow is undithered. Section 1's reading ("drops its own copy") would change pixels,
+  because `skycolor.glsl` would then call the real function. The port keeps the stub, placed after an explicit
+  `#include "dither.glsl"`: the function is defined (guarded, unused) and every call in `skycolor.glsl` still
+  expands to `vec4(0.0)`. `cloudmap.fsh`'s own `pointLightQuantity`, `pointLights`, `pointLightColors` and
+  `nightVisionStrength` are record members (no `fogandlight.vsh` owner). The arrays are sized
+  `FrameGlobals.MaxDynamicLights`, and `#if DYNLIGHTS` becomes an `OPTIMUM_DYNLIGHTS` branch.
+- **Varyings a vertex stage never writes stay unwritten.** Examples: `aurora`'s `shadowCoordsFar/Near`, declared
+  unconditionally at the `varyings.glsl` locations; `celestialobject`'s `fragPosition`/`gnormal`; `nightsky`'s
+  `worldPosY`; `particlescube`'s fragment `uv`.
+- **Placement.** Particles and the sky programs draw once per `Use()` or have no DRAW uniforms, so their push block
+  holds only sampler slots (`particlescube` and `sky` have none, so they have no push block). `decals` pushes both
+  slots plus `origin` and `modelViewMatrix` (84 B).
+- **cloudvolumetric is blocked on the harness/contract.** `cloudvolumetric.fsh` declares
+  `uniform sampler2D liquidDepth` itself, without including `underwatereffects.fsh`. `bindings.glsl` declares the
+  set 0 `liquidDepth` globally, so a push slot of that name cannot compile. Sampling the frame texture compiles,
+  but section 2's name set counts a frame texture only through an included port's `optimum-frame-texture`
+  header, and `NativeShaderParityTests` fails with `only GLSL 330 [liquidDepth]`. Pulling in
+  `underwatereffects.glsl` to get the header would add its frame members to the name set. Unblocking needs a
+  contract decision: either count the set 0 textures a program's own GLSL 330 source declares, or have
+  `bindings.glsl` stop declaring frame textures a program does not own.
