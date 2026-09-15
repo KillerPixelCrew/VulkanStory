@@ -29,5 +29,8 @@ layout(constant_id = 10) const int OPTIMUM_GREEDYMESH_GRAD = 0;
 // pointLightQuantity bounds the loop). Its zero value still selects fogandlight's
 // no-point-light path, so the value stays a constant.
 layout(constant_id = 11) const int OPTIMUM_DYNLIGHTS = 0;
+// Optimum AO: the class-channel writes and scene-ssao's GTAO compose branch. Gates no
+// output or varying, so it is a constant, not an axis.
+layout(constant_id = 12) const int OPTIMUM_OPTIMUMAO = 0;
 
 #endif
