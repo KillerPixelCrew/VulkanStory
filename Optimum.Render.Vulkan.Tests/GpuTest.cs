@@ -63,7 +63,10 @@ internal static class GpuTest
     public static VulkanDevice NewDevice()
     {
         var messages = new List<string>();
-        var device = new VulkanDevice { DebugMode = true };
+        // Blocking pipeline creation: these tests read pixels back after one frame, and a
+        // background compile would skip that frame's draw. The async path has its own tests
+        // (PipelineCacheTests), which set SynchronousPipelines = false before Initialize.
+        var device = new VulkanDevice { DebugMode = true, SynchronousPipelines = true };
         device.ConfigureContextOptions = options =>
         {
             options.EnableValidation = true;

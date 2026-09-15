@@ -265,8 +265,8 @@ before it lack the field and still parse, but cannot be compared against a basel
 [Optimum] fps window=<s> frames=<n> mean=<ms> min=<ms> max=<ms> p99=<ms> stddev=<ms>
 ```
 
-`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of five lines. The first line is
-unchanged from earlier builds; the other four carry stable `key=value` tokens:
+`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of seven lines. The first line is
+unchanged from earlier builds; the other six carry stable `key=value` tokens:
 
 ```
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
@@ -275,6 +275,7 @@ stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_s
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> leases=<n> aliased_leases=<n> readself_copies=<n> readself_pool=<n>
+stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draws_skipped=<n> pending=<n> cache_bytes=<bytes> saves=<n>
 ```
 
 - The first line's "blocking uploads" counts every synchronous setup submission (uploads and
@@ -316,6 +317,16 @@ stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> lease
   `leases` and `aliased_leases` (over the interval), `readself_copies` (draws that sampled a colour
   attachment they write and took a pooled copy) and `readself_pool` (copies the pool holds; a
   released copy is reused after the Frame timeline passed the frame that released it).
+- `stats.pipelines` (caching follow-ups, `GraphicsPipelineCache`): per interval, `compiled_sync`
+  (pipelines compiled blocking on the render thread: every one with `OPTIMUM_VULKAN_SYNC_PIPELINES=1` or
+  without pipelineCreationCacheControl, otherwise only when the background queue is full),
+  `compiled_async` (compiled by the background worker for a draw that was skipped meanwhile),
+  `prewarmed` (built from the pipeline-key log after their program linked, before any draw asked),
+  `warm` (FAIL_ON_PIPELINE_COMPILE_REQUIRED creations the driver cache satisfied without compiling),
+  `draws_skipped` (draws skipped because their pipeline was still compiling) and `saves` (driver cache
+  files written: growth-triggered saves from a worker, every 8 MiB of growth sampled at most every
+  10 s, plus the shutdown save); snapshots: `pending` (compiles queued or running) and `cache_bytes`
+  (serialised driver cache size at the last sample or save).
 - `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
   allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and
   `rebar_cap` (ReBAR class bytes and its cap, min(192 MiB, heap budget x 0.25)), `rebar_misses`

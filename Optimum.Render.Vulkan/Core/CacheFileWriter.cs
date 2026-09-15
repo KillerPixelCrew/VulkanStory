@@ -15,10 +15,19 @@ namespace Optimum.Render.Vulkan.Core;
 /// </summary>
 internal static class CacheFileWriter
 {
-    private const int MoveAttempts = 5;
+    internal const int MoveAttempts = 5;
 
     /// <summary>Writes <paramref name="bytes" /> to <paramref name="path" />; false when it could not.</summary>
-    public static bool WriteAtomically(string path, ReadOnlySpan<byte> bytes)
+    public static bool WriteAtomically(string path, ReadOnlySpan<byte> bytes) =>
+        WriteAtomically(path, bytes, static (from, to) => File.Move(from, to, overwrite: true), Thread.Sleep);
+
+    /// <summary>
+    /// The same, with the replace step and the backoff sleep supplied: tests stand in for a
+    /// scanner holding the new file open. <paramref name="replace" /> moves its first argument
+    /// over its second; <paramref name="sleep" /> takes milliseconds.
+    /// </summary>
+    internal static bool WriteAtomically(string path, ReadOnlySpan<byte> bytes, Action<string, string> replace,
+        Action<int> sleep)
     {
         string temporary = path + "." + Environment.ProcessId + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -33,12 +42,12 @@ internal static class CacheFileWriter
             {
                 try
                 {
-                    File.Move(temporary, path, overwrite: true);
+                    replace(temporary, path);
                     return true;
                 }
                 catch (Exception error) when (IsTransient(error) && attempt < MoveAttempts)
                 {
-                    Thread.Sleep(10 << attempt);
+                    sleep(10 << attempt);
                 }
             }
         }
