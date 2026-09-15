@@ -568,6 +568,19 @@ public static class OptimumConfig
     public static string AmbientOcclusionPreset = "medium";
 
     /// <summary>
+    /// The master switch for ambient occlusion, in the Optimum options tab: false skips both
+    /// the vanilla SSAO pass and the GTAO pass for the frame and changes nothing else in the
+    /// post chain.
+    ///
+    /// Orthogonal to <see cref="AmbientOcclusion" />, which decides which AO runs while this is
+    /// on. The shader defines (SSAOLEVEL, OPTIMUMAO) are stamped from the mode and the vanilla
+    /// SSAO quality, never from this, so flipping it needs no shader reload and no frame buffer
+    /// rebuild and the selected AO comes back exactly as it was - which is what makes it an A/B
+    /// comparison rather than a settings change.
+    /// </summary>
+    public static bool AmbientOcclusionEnabled = true;
+
+    /// <summary>
     /// Whether GTAO is selected for a backend: never on OpenGL; on Vulkan with "gtao", or
     /// with "auto" while TAA is active.
     /// </summary>
@@ -1022,6 +1035,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
         (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
         (nameof(OptimumConfigData.AmbientOcclusionPreset), AmbientOcclusionPreset),
+        (nameof(OptimumConfigData.AmbientOcclusionEnabled), AmbientOcclusionEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1143,6 +1157,7 @@ public static class OptimumConfig
             AmbientOcclusion = requestedAo is "vanilla" or "gtao" ? requestedAo : "auto";
             string requestedAoPreset = data.AmbientOcclusionPreset?.Trim().ToLowerInvariant() ?? "";
             AmbientOcclusionPreset = requestedAoPreset is "low" or "high" or "ultra" ? requestedAoPreset : "medium";
+            AmbientOcclusionEnabled = data.AmbientOcclusionEnabled;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1225,6 +1240,7 @@ public static class OptimumConfig
             TaaJitterDev = TaaJitterDev,
             AmbientOcclusion = AmbientOcclusion,
             AmbientOcclusionPreset = AmbientOcclusionPreset,
+            AmbientOcclusionEnabled = AmbientOcclusionEnabled,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1317,6 +1333,7 @@ internal sealed class OptimumConfigData
     public bool TaaJitterDev { get; set; } = false;
     public string AmbientOcclusion { get; set; } = "auto";
     public string AmbientOcclusionPreset { get; set; } = "medium";
+    public bool AmbientOcclusionEnabled { get; set; } = true;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

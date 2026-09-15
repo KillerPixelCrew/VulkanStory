@@ -274,6 +274,62 @@ public class AmbientOcclusionCoverageTests
             .Where(f => !f.EndsWith(".comp", StringComparison.Ordinal) && !f.EndsWith(".glsl", StringComparison.Ordinal)));
     }
 
+    // ------------------------------------------------------------------ the master switch
+
+    [Fact]
+    public void TheMasterSwitchDefaultsToOnAndPersistsThroughOptimumJson()
+    {
+        string config = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("public static bool AmbientOcclusionEnabled = true;", config);
+        Assert.Contains("public bool AmbientOcclusionEnabled { get; set; } = true;", config);
+        Assert.Contains("AmbientOcclusionEnabled = data.AmbientOcclusionEnabled;", config);
+        Assert.Contains("AmbientOcclusionEnabled = AmbientOcclusionEnabled,", config);
+        Assert.Contains("(nameof(OptimumConfigData.AmbientOcclusionEnabled), AmbientOcclusionEnabled.ToString())", config);
+    }
+
+    [Fact]
+    public void TheMasterSwitchGatesBothAoPathsThroughRenderSsao()
+    {
+        // Vanilla SSAO and RenderOptimumAmbientOcclusion hang off the same condition, so gating
+        // RenderSSAO switches off AO on both backends and in both modes.
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.Contains(
+            "RenderSSAO = ClientSettings.SSAOQuality > 0 && base.DoPostProcessingEffects && OptimumConfig.AmbientOcclusionEnabled;",
+            platform);
+        // SetupSSAO is deliberately not gated: the G-buffer and its frame buffers stay, which is
+        // what lets the switch flip without a rebuild.
+        Assert.Contains("SetupSSAO = ClientSettings.SSAOQuality > 0;", platform);
+        Assert.DoesNotContain("SetupSSAO = ClientSettings.SSAOQuality > 0 && OptimumConfig.AmbientOcclusionEnabled", platform);
+    }
+
+    [Fact]
+    public void TheMasterSwitchIsAnOptimumTabSwitchWiredToTheConfig()
+    {
+        string gui = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
+        Assert.Contains("Lang.Get(\"optimum-ao\")", gui);
+        Assert.Contains("Lang.Get(\"optimum-ao-tooltip\")", gui);
+        Assert.Contains("AddSwitch(onOptimumAmbientOcclusionChanged", gui);
+        Assert.Contains("\"optAo\")", gui);
+        Assert.Contains("composer.GetSwitch(\"optAo\").SetValue(Vintagestory.API.Config.OptimumConfig.AmbientOcclusionEnabled);", gui);
+
+        string handler = Between(gui, "private void onOptimumAmbientOcclusionChanged(bool on)", "\n\t}");
+        Assert.Contains("OptimumConfig.AmbientOcclusionEnabled = on;", handler);
+        Assert.Contains("OptimumConfig.Save();", handler);
+        // The point of the switch is the live A/B: no reload, no rebuild, no temporal reset.
+        Assert.DoesNotContain("ReloadShaders", handler);
+        Assert.DoesNotContain("RebuildFrameBuffers", handler);
+        Assert.DoesNotContain("RequestReset", handler);
+    }
+
+    [Fact]
+    public void TheMasterSwitchHasItsLangEntriesAndItsPatcherListing()
+    {
+        string lang = Read("sources/lang/en.json");
+        Assert.Contains("\"optimum-ao\":", lang);
+        Assert.Contains("\"optimum-ao-tooltip\":", lang);
+        Assert.Contains("\"onOptimumAmbientOcclusionChanged\"", Read("Optimum.Patcher/Program.cs"));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static string Between(string text, string start, string end)

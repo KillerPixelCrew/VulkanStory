@@ -294,8 +294,14 @@ window never mapped), implicit layers off, `sync,best` validation to a file. The
 8. **XeGTAO** (`docs/research/xegtao-integration.md`): compute pass kind in the frame graph, GLSL compute
    port (prefilter split into dispatches, main pass, one denoise pass with TAA), NoiseIndex = frame % 64,
    composition before the resolve, settings; OpenGL keeps vanilla SSAO; tests and a headless comparison.
-   **Status (2026-09-15, evening):** the frame-graph compute pass kind is implemented on its stage branch; the AO
-   passes, class channel, composition and settings are in progress.
+   **Status (2026-09-16):** landed on the branch - the frame-graph compute pass kind, the GTAO passes, the
+   class channel, the composition before the resolve and the settings, with the native port carrying
+   OPTIMUMAO as specialization constant 12. The Optimum options tab now also carries an ambient occlusion
+   master switch (`OptimumConfig.AmbientOcclusionEnabled`, default on, `optAo`): it gates `RenderSSAO` only,
+   so both AO paths stop together, the SSAO G-buffer and the stamped shader defines stay untouched, and it
+   flips live with no shader reload, no frame buffer rebuild and no temporal reset - the in-game A/B for
+   judging what AO contributes. Still open: the section D measurements and the deterministic stilled-scene
+   comparison.
 9. **General refactor:** split `VulkanDevice.cs`, restructure the project layout, remove GL-emulation leftovers.
 10. **Optimisation** (plan Phase 4): per-pass GPU timestamps, push-constant placement from the measured
     profile, transient aliasing on by default, DirectToSwapchain / transfer backend measured. Exit: Vulkan
