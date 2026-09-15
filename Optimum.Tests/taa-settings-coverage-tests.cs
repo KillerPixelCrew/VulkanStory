@@ -153,19 +153,20 @@ public class TaaSettingsCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
 
         // ComposerHeader lays the main-menu dialog out at a fixed 740px, and the
-        // tab starts at y0 = 87. The stock build now ends at row 21 (TAA mip
-        // bias) and the feature-flag build at row 25, so the row interval has to
-        // shrink in the latter or the last rows fall off the dialog.
-        Assert.Contains("double rowH = 28.0;", gui);
-        Assert.Contains("double rowH = 24.0;", gui);
+        // tab starts at y0 = 87. The stock build now ends at row 22 (the ambient
+        // occlusion switch) and the feature-flag build at row 26, so the row
+        // interval has to shrink or the last rows fall off the dialog.
+        Assert.Contains("double rowH = 27.0;", gui);
+        Assert.Contains("double rowH = 23.0;", gui);
 
         Assert.Contains("rowH * 19", gui); // TAA toggle
         Assert.Contains("rowH * 20", gui); // sharpness
         Assert.Contains("rowH * 21", gui); // mip bias
-        Assert.Contains("rowH * 25", gui); // greedy far distance, shifted down
+        Assert.Contains("rowH * 22", gui); // ambient occlusion, last stock row
+        Assert.Contains("rowH * 26", gui); // greedy far distance, shifted down
 
-        Assert.True(87.0 + 28.0 * 21 <= 740.0);
-        Assert.True(87.0 + 24.0 * 25 <= 740.0);
+        Assert.True(87.0 + 27.0 * 22 <= 740.0);
+        Assert.True(87.0 + 23.0 * 26 <= 740.0);
     }
 
     [Fact]
