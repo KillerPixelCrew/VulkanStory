@@ -444,34 +444,35 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
 7. **Before committing:** the full `Optimum.Render.Vulkan.Tests` run (SYNC- only from
    `SyncValidationControlTests`) and `dotnet test Optimum.Tests -c Release`.
 
-### Family 3: chunks (2026-09-15)
+### Family: entities (`entityanimated`, `shadowmapentityanimated`, `standard`, `instanced`; 2026-09-15)
 
-`chunkopaque`, `chunktopsoil`, `chunktransparent`, `chunkliquid`, `chunkliquiddepth`, `chunkshadowmap` (its
-`USESSBO=0` variant is `Chunkshadowmap_NoSSBOs`). Decisions this family took:
-- **Axes.** `chunkopaque`: `GBUFFER`, `GREEDYMESH`, `TAAMOTION`, `USESSBO` (16 variants); `chunktopsoil`: `GBUFFER`,
-  `TAAMOTION`, `USESSBO`; `chunktransparent`: `USEOIT`, `USESSBO`; `chunkliquid`: `USEOIT`; `chunkshadowmap`:
-  `USESSBO`; `chunkliquiddepth`: none. A GLSL 330 `#if SSAOLEVEL > 0` that gates a varying or an output becomes
-  `#if GBUFFER == 1` (in both stages, including the fragment `in vec4 gnormal` the GLSL 330 stage declared
-  unconditionally), and `layout(location = TAAMOTIONLOCATION)` becomes location 4 under `GBUFFER == 1`, else 2.
-- **`USEOIT` on the chunk OIT programs.** `oit.glsl` gates its outputs and `OIT()` on `USEOIT`, so both programs
-  branch on it although the client only links them with `Oit = true`. The `USEOIT=0` variant wraps the `OIT()`
-  call in `#if USEOIT > 0` and has no outputs, exactly what the GLSL 330 stage preprocesses to.
-- **Varying locations.** With every axis on `chunkopaque` has 17 varyings of its own; `lod0Fade` and `nb`
-  share location 8 as components 0 and 1 rather than leave locations 0-15. `chunkliquid.fsh` declares
-  `flat in int renderFoam`, which no stage writes or reads; it keeps location 14 and the optimiser drops it.
-- **Cross-stage owners.** Vertex stages that read `lightPosition`/`shadowIntensity` (`chunkopaque`) define
-  `OPTIMUM_FRAME_OWNER_FOGANDLIGHT_FSH`; every shaded fragment stage defines `OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH`
-  and `OPTIMUM_FRAME_OWNER_VERTEXWARP_VSH` (`fogandlight.frag.glsl`, `fogspheres.glsl`, and `chunkliquid.fsh`'s own
-  `waterWaveCounter`/`windSpeed`). Names a program declares itself but whose owner it includes
-  (`chunkopaque.vsh`'s `cameraUnderwater`, `shadowIntensity`, `lightPosition`) are frame members, not record
-  members. `chunkliquiddepth` includes no owner of `viewDistance`, so there it is a record member.
-- **Placement.** Push: sampler slots, `origin`, `modelViewMatrix` (`mvpMatrix` for the shadow map), and
-  `forcedTransparency` for `chunktransparent`: 76-84 B. Everything else, `projectionMatrix` and the twelve
-  `vertexwarp.glsl` `prev*` members included, is record.
-- **Braces across a spec-constant `#if`.** `chunkliquid.fsh` opens `if (skyExposed > 0) {` under
-  `#if SHADOWQUALITY == 0` and closes it under a second one; the port is
-  `if (OPTIMUM_SHADOWQUALITY != 0 || skyExposed > 0) {`, the same control flow.
-- **Motion.** `chunkopaque` and `chunktopsoil` write `optimumWriteMotion(taaPrevClip, taaRenderSize, taaJitterPx,
-  0.0, gl_FragCoord.z)`; the previous-position reconstruction in the vertex stages is unchanged.
-- **Initializers** the runtime seeds (section 8): `chunktopsoil`'s `alphaTest = 0.01`, `chunkliquid`'s
-  `dropletIntensity = 0`.
+Axes and variants: `entityanimated` ALLOWDEPTHOFFSET, GBUFFER, TAAMOTION, USEOIT (16; `Entityanimated_Oit` is
+USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `instanced` GBUFFER, TAAMOTION (4);
+`shadowmapentityanimated` none (1). No oracle quirk (section 2) was met. Decisions:
+
+- **`#if defined(X)` on a per-registration define** (`ALLOWDEPTHOFFSET`, `GLOWSUB`) becomes `#if X == 1`; the
+  nested `#if ALLOWDEPTHOFFSET > 0` folds into it, since every variant defines the axis as 0 or 1.
+- **Animation buffers:** `Animation`/`AnimationPrev` are `readonly buffer`s at `OPTIMUM_BINDING_ANIMATION`/
+  `_PREV`, std140, keeping the instance names `ElementTransforms`/`PrevElementTransforms` and the member
+  `values`, declared as a runtime array `mat4 values[]`: MAXANIMATEDELEMENTS is not a native define, and the
+  index (`jointId`) is unchanged.
+- **`AnimationPrev` exists only for TAAMOTION=1, USEOIT=0.** The GLSL 330 vertex stage declares it for every
+  TAAMOTION program, but the client creates the UBO only for the opaque program
+  (`ShaderProgramEntityanimated`, `!Oit && EffectiveTaa`), and the OIT fragment stage never reads `taaPrevClip`.
+  The OIT variant therefore writes `taaPrevClip = vec4(0.0)` and has no binding 2, so the runtime need not bind a
+  buffer the client never made. No pixel changes: nothing reads that varying under USEOIT=1.
+- **Placement:** push and record are identical in every variant of a program (the oracle's names do not depend
+  on defines).
+  - `entityanimated`: push = `entityTex`, `addRenderFlags`, `extraGlow`, `taaHistoryValid`, `taaReactive`,
+    `entityId`, `glitchFlicker` (28 B). Record = everything else (568 B).
+  - `standard`: push = `tex`, `tex2dOverlay`, the nine integer flags and `taaReactive` (48 B). Record 628 B.
+  - `instanced`: push = `tex` (every per-object value is an instance attribute). Record 328 B, including
+    `windWaveCounter`: its vertex stage includes no `vertexwarp.glsl`, so it has no owner in this program.
+  - `shadowmapentityanimated`: push = `entityTex`, `modelViewMatrix` (per entity in the shadow pass),
+    `addRenderFlags` (72 B). Record = `projectionMatrix`.
+- **Open for the runtime stage (not worked around here):** `EntityShapeRenderer` sets `windWaveIntensity` and
+  `waterWaveCounter` per entity (uniform-frequency map, section 3.2). In `entityanimated` both are frame members
+  (the program includes `vertexwarp.glsl`), so a native program reads the frame value unless the runtime treats
+  a per-draw write to an owned frame name specially. The GLSL 330 path honours the override.
+- **`instanced.fsh`'s `in float normalShadeIntensity`** is written by no vertex stage and read by nothing. It
+  keeps a location of its own (11), and the optimised module drops it.
