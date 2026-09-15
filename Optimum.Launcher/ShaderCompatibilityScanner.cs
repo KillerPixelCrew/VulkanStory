@@ -16,8 +16,60 @@ namespace Optimum.Launcher;
 /// </summary>
 public static class ShaderCompatibilityScanner
 {
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// 2 (2026-09-15): adds <see cref="ShaderCompatibilityReport.ShaderAssetOverrides" />,
+    /// <see cref="ShaderCompatibilityReport.RewriterPrograms" />, the PlatformInternals
+    /// indicator and <see cref="ShaderCompatibilityReport.OpenGlRequired" />. The launcher
+    /// rescans and overwrites the report on every start; <see cref="LoadReport" />
+    /// refuses any other version, so a v1 file is never read as if it carried the v2
+    /// verdicts.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
     public const string ReportFileName = "shader-compatibility.json";
+
+    /// <summary>
+    /// The single entry <see cref="ShaderCompatibilityReport.RewriterPrograms" /> holds
+    /// when every program has to take the rewriter: a shaderincludes override, or a
+    /// report the scanner could not complete.
+    /// </summary>
+    public const string AllPrograms = "all";
+
+    /// <summary>
+    /// Program base names the client registers from <c>assets/game/shaders</c>
+    /// (vanilla plus the Optimum overrides and stages that ship there). A mod file
+    /// <c>assets/&lt;domain&gt;/shaders/&lt;name&gt;.vsh|.fsh|.gsh</c> whose stem is one of
+    /// these replaces that program's source, so the Vulkan path must build it through
+    /// the rewriter from the mod's GLSL instead of linking the native SPIR-V. The scan
+    /// also adds every stem it finds in the installed game's own shaders directory.
+    /// </summary>
+    private static readonly string[] BuiltInPrograms =
+    [
+        "aurora", "autocamera", "bilateralblur", "blit", "blockhighlights", "blur", "celestialobject",
+        "chunkliquid", "chunkliquiddepth", "chunkliquidmotion", "chunkopaque", "chunkshadowmap", "chunktopsoil",
+        "chunktransparent", "cloudmap", "clouds", "cloudvolumetric", "colorgrade", "debugdepthbuffer", "decals",
+        "entityanimated", "final", "findbright", "fsr-easu", "fsr-rcas", "godrays", "gui", "guigear", "guitopsoil",
+        "helditem", "instanced", "lines", "luma", "nightsky", "optimum-map", "particlescube", "particlesquad",
+        "particlesquad2d", "scene-ssao", "shadowmapentityanimated", "sky", "ssao", "standard", "taa-debug",
+        "taa-resolve", "taa-sharpen", "taa-skymotion", "texture2texture", "transparentcompose", "ui-compose",
+        "upscale-ssao", "wireframe", "woittest"
+    ];
+
+    /// <summary>Program base names the scanner treats as overridable without an installed game.</summary>
+    public static IReadOnlyList<string> KnownPrograms => BuiltInPrograms;
+
+    /// <summary>
+    /// Platform graphics types a Harmony patch can target. The Vulkan backend replaces
+    /// the platform (<c>VulkanClientPlatform</c> overrides the graphics members) and
+    /// links programs itself, so a prefix/postfix on one of these members either never
+    /// runs or runs against state the Vulkan path does not use.
+    /// </summary>
+    private static readonly string[] PlatformInternalTypes =
+    [
+        "ClientPlatformWindows", "ShaderProgramBase"
+    ];
+
+    private static readonly byte[][] PlatformInternalTypesUtf16 =
+        [.. PlatformInternalTypes.Select(Encoding.Unicode.GetBytes)];
 
     private static readonly string[] ShaderFeatures =
     [
@@ -85,9 +137,63 @@ public static class ShaderCompatibilityScanner
             MarkFailed(report, "Mods", ex);
         }
 
-        FinalizeReport(report);
+        FinalizeReport(report, InstalledPrograms(gameDir));
         return report;
     }
+
+    /// <summary>
+    /// Reads a saved report, or null when there is none, it cannot be parsed, or it was
+    /// written under another schema version. A v1 report lacks the v2 verdicts
+    /// (rewriter programs, PlatformInternals routing), so it is invalidated rather than
+    /// migrated: its absence of a verdict must not read as "nothing found".
+    /// </summary>
+    public static ShaderCompatibilityReport? LoadReport(string dataPath)
+    {
+        string path = Path.Combine(dataPath, ".optimum", ReportFileName);
+        try
+        {
+            if (!File.Exists(path)) return null;
+            using FileStream stream = File.OpenRead(path);
+            using JsonDocument document = JsonDocument.Parse(stream);
+            if (!document.RootElement.TryGetProperty("schemaVersion", out JsonElement version) ||
+                version.ValueKind != JsonValueKind.Number ||
+                !version.TryGetInt32(out int schemaVersion) ||
+                schemaVersion != CurrentSchemaVersion)
+            {
+                return null;
+            }
+            return document.RootElement.Deserialize<ShaderCompatibilityReport>(JsonOptions);
+        }
+        catch (Exception ex) when (IsRecoverable(ex) || ex is JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static HashSet<string> InstalledPrograms(string gameDir)
+    {
+        var programs = new HashSet<string>(BuiltInPrograms, StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            string shaders = Path.Combine(gameDir, "assets", "game", "shaders");
+            if (!Directory.Exists(shaders)) return programs;
+            foreach (string file in Directory.EnumerateFiles(shaders))
+            {
+                if (IsStageExtension(Path.GetExtension(file)))
+                    programs.Add(Path.GetFileNameWithoutExtension(file).ToLowerInvariant());
+            }
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            // The built-in list still covers every program this build ships.
+        }
+        return programs;
+    }
+
+    private static bool IsStageExtension(string extension) =>
+        extension.Equals(".fsh", StringComparison.OrdinalIgnoreCase) ||
+        extension.Equals(".vsh", StringComparison.OrdinalIgnoreCase) ||
+        extension.Equals(".gsh", StringComparison.OrdinalIgnoreCase);
 
     public static string SaveReport(string dataPath, ShaderCompatibilityReport report)
     {
@@ -129,7 +235,7 @@ public static class ShaderCompatibilityScanner
             report.DisabledFeatures.Add(feature);
             report.FeatureReasons[feature] = ["scanner failure: conservative fallback"];
         }
-        FinalizeReport(report);
+        FinalizeReport(report, null);
         return report;
     }
 
@@ -210,7 +316,7 @@ public static class ShaderCompatibilityScanner
         byte[] bytes = File.ReadAllBytes(file);
         RecordContentHash(source, normalized, bytes);
         if (isModInfo) ReadModInfo(ReadTextBytes(bytes), source);
-        if (isAssembly) AddIndicators(ReadTextBytes(bytes), indicators);
+        if (isAssembly) AddIndicators(bytes, indicators);
     }
 
     private static void ScanArchive(string archivePath, HashSet<string> shaders, HashSet<string> indicators, ShaderModSource source, ShaderCompatibilityReport report)
@@ -234,7 +340,7 @@ public static class ShaderCompatibilityScanner
                 byte[] bytes = memory.ToArray();
                 RecordContentHash(source, relativePath, bytes);
                 if (isModInfo) ReadModInfo(ReadTextBytes(bytes), source);
-                if (isAssembly) AddIndicators(ReadTextBytes(bytes), indicators);
+                if (isAssembly) AddIndicators(bytes, indicators);
             }
         }
         catch (Exception ex) when (IsRecoverable(ex))
@@ -260,17 +366,45 @@ public static class ShaderCompatibilityScanner
         }
     }
 
-    private static void AddIndicators(string text, HashSet<string> indicators)
+    private static void AddIndicators(byte[] bytes, HashSet<string> indicators)
     {
-        string lower = text.ToLowerInvariant();
+        string lower = ReadTextBytes(bytes).ToLowerInvariant();
         foreach ((string token, string name) in IndicatorTokens)
         {
             if (lower.Contains(token, StringComparison.Ordinal)) indicators.Add(name);
         }
+
+        // PlatformInternals: the assembly references Harmony and names a platform
+        // graphics type. Type and member references, and the type names serialized
+        // into [HarmonyPatch(typeof(...))] attribute blobs, are UTF-8 in metadata;
+        // AccessTools.Method("...ClientPlatformWindows:RenderMesh") is a user string,
+        // which the #US heap stores as UTF-16. Both forms count. The other indicators
+        // keep their UTF-8-only match so their verdicts do not move.
+        if (!indicators.Contains("Harmony")) return;
+        bool namesPlatform =
+            PlatformInternalTypes.Any(type => lower.Contains(type.ToLowerInvariant(), StringComparison.Ordinal)) ||
+            PlatformInternalTypesUtf16.Any(pattern => bytes.AsSpan().IndexOf(pattern) >= 0);
+        if (namesPlatform) indicators.Add("PlatformInternals");
     }
 
-    private static void FinalizeReport(ShaderCompatibilityReport report)
+    private static void FinalizeReport(ShaderCompatibilityReport report, HashSet<string>? installedPrograms)
     {
+        AddShaderAssetOverrides(report, installedPrograms);
+
+        // A Harmony patch on a platform graphics member is not honoured on Vulkan:
+        // VulkanClientPlatform overrides those members and links programs itself,
+        // so the patched GL body never runs. Like RawOpenGL this routes the session
+        // to OpenGL, and like it the decision is not a ShaderFeature, so a scan
+        // failure alone never forces it.
+        report.OpenGlRequiredBy = report.Sources
+            .Where(x => x.Indicators.Contains("RawOpenGL") || x.Indicators.Contains("PlatformInternals"))
+            .Select(x => x.Id)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        AddFeatureDecision(report, "Vulkan", report.Sources.Any(x => x.Indicators.Contains("PlatformInternals")),
+            "a mod Harmony-patches a platform graphics member (ClientPlatformWindows or ShaderProgramBase), which the Vulkan backend does not honour");
+
         foreach (List<string> owners in report.ShaderOwners.Values)
             owners.Sort(StringComparer.OrdinalIgnoreCase);
 
@@ -386,6 +520,9 @@ public static class ShaderCompatibilityScanner
         {
             foreach (string feature in ShaderFeatures)
                 AddFeatureDecision(report, feature, true, "scanner failure: conservative fallback");
+            // A scan that did not finish cannot say which programs a mod replaced,
+            // so none of them may link the native SPIR-V over a mod's source.
+            report.RewriterPrograms = [AllPrograms];
         }
 
         report.Fingerprint = ComputeFingerprint(report);
@@ -428,6 +565,44 @@ public static class ShaderCompatibilityScanner
     {
         return report.ShaderOwners.Keys.Any(path =>
             path.Replace('\\', '/').Contains("shaderincludes/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// One finding per external shader asset that replaces a known program's stage
+    /// by file name, or any shaderincludes file. The union lands in
+    /// <see cref="ShaderCompatibilityReport.RewriterPrograms" />: sorted program base
+    /// names, or the single entry <see cref="AllPrograms" /> when an include was
+    /// overridden, because ShaderRegistry merges every include into the one dictionary
+    /// all programs compile against and an include has no program of its own.
+    /// A mod shader with a new name is not an override: it has no native blob and
+    /// takes the rewriter anyway.
+    /// </summary>
+    private static void AddShaderAssetOverrides(ShaderCompatibilityReport report, HashSet<string>? installedPrograms)
+    {
+        var known = installedPrograms ?? new HashSet<string>(BuiltInPrograms, StringComparer.OrdinalIgnoreCase);
+        var programs = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool all = false;
+        report.ShaderAssetOverrides.Clear();
+        foreach ((string asset, List<string> owners) in report.ShaderOwners.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            string normalized = asset.Replace('\\', '/');
+            ShaderAssetOverride finding;
+            if (normalized.Contains("shaderincludes/", StringComparison.OrdinalIgnoreCase))
+            {
+                all = true;
+                finding = new ShaderAssetOverride { Asset = asset, Programs = [AllPrograms] };
+            }
+            else
+            {
+                string program = Path.GetFileNameWithoutExtension(normalized).ToLowerInvariant();
+                if (!known.Contains(program)) continue;
+                programs.Add(program);
+                finding = new ShaderAssetOverride { Asset = asset, Programs = [program] };
+            }
+            finding.Owners = [.. owners];
+            report.ShaderAssetOverrides.Add(finding);
+        }
+        report.RewriterPrograms = all ? [AllPrograms] : [.. programs];
     }
 
     private static bool IsShaderHookIndicator(string indicator) =>
@@ -616,6 +791,35 @@ public sealed class ShaderCompatibilityReport
     public List<string> DisabledFeatures { get; set; } = [];
     public Dictionary<string, List<string>> FeatureReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> ScanErrors { get; set; } = [];
+
+    /// <summary>External assets that replace a known program's stage or a shaderinclude.</summary>
+    public List<ShaderAssetOverride> ShaderAssetOverrides { get; set; } = [];
+
+    /// <summary>
+    /// What the Vulkan runtime consumes: program base names that must be built through
+    /// the rewriter from the (mod) GLSL instead of the native SPIR-V, sorted; or the
+    /// single entry <see cref="ShaderCompatibilityScanner.AllPrograms" />. Empty when
+    /// every program may link natively.
+    /// </summary>
+    public List<string> RewriterPrograms { get; set; } = [];
+
+    /// <summary>Sources that route the session to OpenGL (RawOpenGL or PlatformInternals).</summary>
+    public List<string> OpenGlRequiredBy { get; set; } = [];
+
+    /// <summary>True when the scan explicitly vetoes the Vulkan backend.</summary>
+    public bool OpenGlRequired => DisabledFeatures.Contains("Vulkan", StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// ShaderAssetOverride finding: <see cref="Asset" /> (normalized path, e.g.
+/// <c>assets/mymod/shaders/chunkopaque.fsh</c>) replaces the listed programs'
+/// source; <see cref="Programs" /> is <c>["all"]</c> for a shaderincludes file.
+/// </summary>
+public sealed class ShaderAssetOverride
+{
+    public string Asset { get; set; } = string.Empty;
+    public List<string> Programs { get; set; } = [];
+    public List<string> Owners { get; set; } = [];
 }
 
 public sealed class ShaderModSource
