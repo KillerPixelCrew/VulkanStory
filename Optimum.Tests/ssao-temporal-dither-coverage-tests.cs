@@ -65,13 +65,15 @@ public class SsaoTemporalDitherCoverageTests
     [Fact]
     public void WithoutATemporalConsumerTheOverrideIsTheVanillaShader()
     {
-        string vanillaPath = Path.Combine(
-            Root(), ".vanilla", "win-x64", "vintagestory", "assets", "game", "shaders", "ssao.fsh");
-        // The vanilla shaders are proprietary and never committed: a checkout that
-        // has not bootstrapped has nothing to compare against.
-        if (!File.Exists(vanillaPath)) return;
+        // Read the pristine shader from the client archive, never from the deployed
+        // client directory: `make deploy` copies our own overrides in there, so a
+        // deployed checkout compared the override against itself - and against a
+        // copy that already carried the TAAMOTION blocks, which fails for the wrong
+        // reason. The vanilla shaders are proprietary and never committed, so a
+        // checkout without the archive has nothing to compare against.
+        string? vanilla = VanillaShaderArchive.TryRead("assets/game/shaders/ssao.fsh");
+        if (vanilla == null) return;
 
-        string vanilla = File.ReadAllText(vanillaPath);
         string preprocessed = StripTaaMotionBlocks(Read("sources/shaders/ssao.fsh"));
         Assert.Equal(vanilla.Replace("\r\n", "\n"), preprocessed.Replace("\r\n", "\n"));
     }
