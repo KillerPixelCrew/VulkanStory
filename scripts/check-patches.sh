@@ -47,6 +47,13 @@ case "${1:-}" in
   ;;
 esac
 
+# Portable null-delimited sort (GNU sort -z / BSD fallback).
+if printf '\0' | sort -z >/dev/null 2>&1; then
+  sort_null() { sort -z; }
+else
+  sort_null() { perl -0 -e 'print sort <STDIN>'; }
+fi
+
 try_patch_check() {
   local patch="$1"
   local reverse="$2"
@@ -274,7 +281,7 @@ while IFS= read -r -d '' patch; do
     fi
   fi
 done < <(find "$patches_dir" -type f -name '*.patch' \
-  -not -path "$patches_dir/runtime/*" -print0 | sort -z)
+  -not -path "$patches_dir/runtime/*" -print0 | sort_null)
 
 echo "Patches: $applied applied, $cecil cecil, $pending pending, $unavailable unavailable, $conflict conflict, $total total"
 
@@ -330,7 +337,7 @@ while IFS= read -r -d '' patch; do
     echo "ORPHAN: $rel (not in cecil-owned.list, will not ship)" >&2
     orphans=$((orphans+1))
   fi
-done < <(find "$patches_dir/VintagestoryLib" -type f -name '*.patch' -print0 2>/dev/null | sort -z)
+done < <(find "$patches_dir/VintagestoryLib" -type f -name '*.patch' -print0 2>/dev/null | sort_null)
 
 if [[ "$orphans" -gt 0 ]]; then
   echo "$orphans orphaned VintagestoryLib patch(es) found. Add to cecil-owned.list or remove." >&2

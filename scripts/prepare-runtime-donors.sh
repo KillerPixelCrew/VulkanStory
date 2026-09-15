@@ -95,7 +95,7 @@ if ! (
     actual_paths="$(find . -type f -not -name 'runtime-donor-manifest.sha256' -print | sort)"
     [[ "$manifest_paths" == "$actual_paths" ]]
     check_manifest
-    live_version_file="$(find "$vanilla_dir/assets" -maxdepth 1 -name 'version-*.txt' -print -quit 2>/dev/null || true)"
+    live_version_file="$(find "$vanilla_dir/assets" -maxdepth 1 -name 'version-*.txt' -print 2>/dev/null | head -n 1 || true)"
     live_version="${live_version_file##*/}"
     snapshot_version="$(tr -d '\r\n' < runtime-donor-version.txt)"
     [[ -n "$live_version" && "$live_version" == "$snapshot_version" ]]
@@ -140,7 +140,7 @@ decompile_mod() {
             "${reference_args[@]}" \
             --outputdir "$output" \
             "$assembly" >/dev/null
-        project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print -quit)"
+        project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print 2>/dev/null | head -n 1)"
         if [[ -n "$project_file" ]]; then
             break
         fi
@@ -225,8 +225,8 @@ exclude_compile_items() {
     ' "$project_file"
 }
 
-essentials_project="$(find "$runtime_root/VSEssentials" -maxdepth 1 -name '*.csproj' -print -quit)"
-survival_project="$(find "$runtime_root/VSSurvivalMod" -maxdepth 1 -name '*.csproj' -print -quit)"
+essentials_project="$(find "$runtime_root/VSEssentials" -maxdepth 1 -name '*.csproj' -print 2>/dev/null | head -n 1)"
+survival_project="$(find "$runtime_root/VSSurvivalMod" -maxdepth 1 -name '*.csproj' -print 2>/dev/null | head -n 1)"
 
 # On Windows (Git Bash), HintPaths must use native Windows paths for MSBuild.
 native_contracts_dll="$(native_path "$contracts_dll")"
