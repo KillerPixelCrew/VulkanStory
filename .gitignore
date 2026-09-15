@@ -79,6 +79,9 @@ docs/*
 # allowlist, and Optimum.Tests/parity-dump-coverage-tests.cs reads both.
 !docs/vulkan-acceptance.md
 !docs/parity-allowlist.md
+# ...and the Vulkan-native plan: the design, the decisions behind it and the roadmap, for anyone
+# picking the work up.
+!docs/vulkan-native-plan.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1
