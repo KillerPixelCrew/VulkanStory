@@ -62,6 +62,21 @@ public class TaaInstancedMotionWriterTests
         x,  y,  z,  1f,
     };
 
+    /// <summary>
+    /// A previous camera the block was behind: the previous view puts the quad at
+    /// view z = +1 and the previous projection's w row is -z, so the previous clip w
+    /// is -1 and the writer takes its behind-the-camera branch.
+    /// </summary>
+    private static readonly float[] BehindView = Translation(0f, 0f, 1f);
+
+    private static readonly float[] BehindProjection =
+    {
+        1, 0, 0,  0,
+        0, 1, 0,  0,
+        0, 0, 1, -1,
+        0, 0, 0,  0,
+    };
+
     // ------------------------------------------------------------------ tests
 
     /// <summary>
@@ -206,20 +221,56 @@ public class TaaInstancedMotionWriterTests
         }
     }
 
+    /// <summary>
+    /// A previous position behind the previous camera is not a motion vector, but
+    /// the contract (docs/temporal-frame-contract.md section 3.2) still wants the
+    /// reactive value: a writer that bails out of its vector delivers b and zeroes
+    /// only rg and a. The instanced helper used to return vec4(0.0) there and drop
+    /// the per-instance reactive value with the vector.
+    /// </summary>
+    [SkippableFact]
+    public void APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        using (device)
+        {
+            const float reactive = 0.6f;
+            var instance = new Instance(Identity, Identity, historyValid: true, reactive: reactive);
+            Decoded centre = RenderInstancedMotion(device!, new[] { instance }, 0f, 0f,
+                previousView: BehindView, previousProjection: BehindProjection)[Size / 2];
+
+            _output.WriteLine($"behind: mv = ({centre.MotionX}, {centre.MotionY}), " +
+                              $"reactive = {centre.Reactive}, writerDepth = {centre.WriterDepth}");
+
+            // No vector, and the zero alpha that routes the pixel to the camera
+            // fallback rather than pretending the writer owns it.
+            Assert.InRange(centre.MotionX, -0.3f, 0.3f);
+            Assert.InRange(centre.MotionY, -0.3f, 0.3f);
+            Assert.InRange(centre.WriterDepth, 0f, 0.01f);
+            // ... but the reactive value is still delivered.
+            Assert.InRange(centre.Reactive, reactive - 0.01f, reactive + 0.01f);
+        }
+    }
+
     // ---------------------------------------------------------------- harness
 
     private readonly struct Instance
     {
-        public Instance(float[] transform, float[] previousTransform, bool historyValid)
+        public Instance(float[] transform, float[] previousTransform, bool historyValid, float? reactive = null)
         {
             Transform = transform;
             PreviousTransform = previousTransform;
             HistoryValid = historyValid;
+            Reactive = reactive ?? (historyValid ? 0f : 1f);
         }
 
         public float[] Transform { get; }
         public float[] PreviousTransform { get; }
         public bool HistoryValid { get; }
+        /// <summary>The metadata's reactive channel; by default what the C# side stamps for the history state.</summary>
+        public float Reactive { get; }
     }
 
     private readonly struct Decoded
@@ -248,7 +299,8 @@ public class TaaInstancedMotionWriterTests
     /// both camera matrices are the identity and no jitter is applied.
     /// </summary>
     private unsafe Decoded[] RenderInstancedMotion(
-        VulkanDevice device, Instance[] instances, float cameraDeltaX, float cameraDeltaY)
+        VulkanDevice device, Instance[] instances, float cameraDeltaX, float cameraDeltaY,
+        float[]? previousView = null, float[]? previousProjection = null)
     {
         VulkanDevice seam = device;
 
@@ -309,8 +361,8 @@ public class TaaInstancedMotionWriterTests
         SetMatrix(seam, program, "toShadowMapSpaceMatrixNear", Identity);
         SetSceneUniforms(seam, program);
 
-        SetMatrix(seam, program, "prevProjectionMatrix", Identity);
-        SetMatrix(seam, program, "prevModelViewMatrix", Identity);
+        SetMatrix(seam, program, "prevProjectionMatrix", previousProjection ?? Identity);
+        SetMatrix(seam, program, "prevModelViewMatrix", previousView ?? Identity);
         SetFloat3(seam, program, "cameraPosDelta", cameraDeltaX, cameraDeltaY, 0f);
         SetFloat2(seam, program, "taaRenderSize", Size, Size);
         SetFloat2(seam, program, "taaJitterPx", 0f, 0f);
@@ -459,7 +511,7 @@ void main(void)
             Array.Copy(instances[i].Transform, 0, part.Values, j + OptimumInstanceMotion.TransformOffset, 16);
             Array.Copy(instances[i].PreviousTransform, 0, part.Values, j + OptimumInstanceMotion.PrevTransformOffset, 16);
             part.Values[j + OptimumInstanceMotion.MetaOffset] = instances[i].HistoryValid ? 1f : 0f;
-            part.Values[j + OptimumInstanceMotion.MetaOffset + 1] = instances[i].HistoryValid ? 0f : 1f;
+            part.Values[j + OptimumInstanceMotion.MetaOffset + 1] = instances[i].Reactive;
         }
         part.Count = instances.Length * OptimumInstanceMotion.InstanceFloats;
         mesh.CustomFloats = part;

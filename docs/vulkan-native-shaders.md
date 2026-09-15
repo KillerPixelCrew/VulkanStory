@@ -174,10 +174,12 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
 - **Behind the previous camera** (`prevClip.w <= 1e-6`), `optimumWriteMotion` returns `vec4(0, 0, reactive, 0)`.
   The frozen contract requires this: "a writer that bails out of its vector must still deliver b and zero only
   rg and a" (`docs/temporal-frame-contract.md` section 3.2).
-  - Today `chunkliquidmotion`, `particlescube` and `taa-skymotion` do so.
-  - `entityanimated`, `standard` and `instanced` drop `reactive` on that branch. That contradicts the contract
-    and is fixed in the GLSL 330 writers first, with GPU tests, so native-vs-330 differential tests compare
-    like with like.
+  - The GLSL 330 writers `chunkliquidmotion`, `particlescube`, `taa-skymotion`, `entityanimated`, `standard` and
+    `instanced` do so.
+  - `entityanimated`, `standard` and `instanced` used to drop `reactive` on that branch (their local helper
+    returned `vec4(0.0)`). That contradicted the contract and was fixed in the GLSL 330 writers first, pinned by
+    `APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue` in each writer's GPU test file, so
+    native-vs-330 differential tests compare like with like.
   - `chunkopaque`, `chunktopsoil` and `decals` pass a literal 0, so nothing observable changes for them.
 - **One exception:** `particlescube` keeps its writer depth on that branch (`a = gl_FragCoord.z`) and its
   reactive of 1. It calls `optimumMotionVector` directly and states why.

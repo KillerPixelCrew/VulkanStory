@@ -75,7 +75,7 @@ public class TaaStandardMotionCoverageTests
         Assert.Contains("vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;", fragment);
         Assert.Contains("vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;", fragment);
         Assert.Contains("return vec4(prevPixel - currentPixel, reactive, writerDepth);", fragment);
-        Assert.Contains("if (taaPrevClip.w <= 1e-6) return vec4(0.0);", fragment);
+        Assert.Contains("if (taaPrevClip.w <= 1e-6) return vec4(0.0, 0.0, reactive, 0.0);", fragment);
 
         // The first-person item program writes gl_FragDepth, so the writer depth
         // has to carry the same offset or the resolve's depth-match test rejects
