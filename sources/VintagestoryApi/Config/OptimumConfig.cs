@@ -138,6 +138,34 @@ public static class OptimumConfig
     public static bool OcclusionCullingScaleEnabled = true;
 
     /// <summary>
+    /// Issue #72: replace ChunkCuller's per-shell raycast visibility walk with a
+    /// breadth-first flood fill over the same per-chunk face-connectivity graph
+    /// (the technique Minecraft "cave culling" and Sodium use). The raycast marches
+    /// up to 3 rays per shell position and, at high view distance, runs against
+    /// thousands of chunks per recompute; the BFS is linear in loaded chunks and
+    /// visits them front-to-back. Falls back to the vanilla raycast when false.
+    ///
+    /// Correctness: the face-connectivity flood is the CONSERVATIVE model - a chunk
+    /// is culled only when EVERY path of mutually-open faces from the camera is
+    /// blocked, in which case no straight sightline can reach it either, so it can
+    /// never hide a chunk the player can see (Durand et al. SIGGRAPH 2000 PVS
+    /// criterion). The vanilla raycast is the approximation: it over-marks (marks a
+    /// chunk visible before testing it, plus a 2-chunk march overshoot) and samples
+    /// sightlines with only 3 sub-rays per shell endpoint. The one flood failure mode
+    /// that can hide a chunk (MC-70850) comes from testing only a single biased
+    /// incoming "flow" face; this implementation avoids it by testing reachability
+    /// through ALL incoming faces (bfsReachable), plus a first-ring exemption that
+    /// mirrors the raycast's `num2 > 1` pass-through and the same camera-neighbourhood
+    /// seeding vanilla does.
+    ///
+    /// Measured in-client (same fixed world, seed 72720): raycast ~12-13 ms/walk
+    /// marking ~1000-1090 chunks visible; BFS ~1.9 ms/walk marking ~1026-1030 - about
+    /// 6.5x faster with a comparable-or-slightly-tighter visible set (no deficit vs
+    /// the raycast). Default true.
+    /// </summary>
+    public static bool BfsChunkVisibilityEnabled = true;
+
+    /// <summary>
     /// Reuse the dynamic-light entity scan from the previous frame while the
     /// player is roughly stationary, instead of rescanning every frame.
     /// Refreshes on player movement past a small threshold or every 15
@@ -618,6 +646,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChiselLod), ChiselLodEnabled.ToString()),
         (nameof(OptimumConfigData.ChiselLodDistance), ChiselLodDistance.ToString()),
         (nameof(OptimumConfigData.OcclusionCullingScale), OcclusionCullingScaleEnabled.ToString()),
+        (nameof(OptimumConfigData.BfsChunkVisibility), BfsChunkVisibilityEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -705,6 +734,7 @@ public static class OptimumConfig
             ChiselLodDistance = data.ChiselLodDistance;
             ChiselLodDistanceSq = (double)data.ChiselLodDistance * data.ChiselLodDistance;
             OcclusionCullingScaleEnabled = data.OcclusionCullingScale;
+            BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -777,6 +807,7 @@ public static class OptimumConfig
             ChiselLod = ChiselLodEnabled,
             ChiselLodDistance = ChiselLodDistance,
             OcclusionCullingScale = OcclusionCullingScaleEnabled,
+            BfsChunkVisibility = BfsChunkVisibilityEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -853,6 +884,7 @@ internal sealed class OptimumConfigData
     public bool ChiselLod { get; set; } = true;
     public int ChiselLodDistance { get; set; } = 48;
     public bool OcclusionCullingScale { get; set; } = true;
+    public bool BfsChunkVisibility { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
@@ -1398,6 +1430,7 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter AnimBlockLodDeferred = new();
     public static readonly HitSkipCounter ParticleDistanceGate = new();
     public static readonly HitSkipCounter OcclusionCullingScale = new();
+    public static readonly HitSkipCounter BfsChunkVisibility = new();
     public static readonly HitSkipCounter DynamicLightCache = new();
     public static readonly HitSkipCounter ChunkUploadSort = new();
     public static readonly HitSkipCounter EntityLightBatch = new();
@@ -1428,6 +1461,7 @@ public static class OptimumDiagnostics
         [nameof(AnimBlockLodDeferred)] = AnimBlockLodDeferred,
         [nameof(ParticleDistanceGate)] = ParticleDistanceGate,
         [nameof(OcclusionCullingScale)] = OcclusionCullingScale,
+        [nameof(BfsChunkVisibility)] = BfsChunkVisibility,
         [nameof(DynamicLightCache)] = DynamicLightCache,
         [nameof(ChunkUploadSort)] = ChunkUploadSort,
         [nameof(EntityLightBatch)] = EntityLightBatch,
@@ -1951,6 +1985,121 @@ public static class OptimumDiagnostics
             sb.Append($", {WorldgenPassNames[i]}={meanMs:0.###}ms/col({cols}cols,{totalMs:0.#}ms)");
         }
         return sb.ToString();
+    }
+
+    // Chunk visibility culler walk timing (issue #72): compares the raycast vs
+    // BFS visibility walk in the running client. Records elapsed ticks per full
+    // CullInvisibleChunks recompute (the walk only re-runs when the camera changes
+    // chunk), tagged by which algorithm ran. Logs a summary every LogEvery walks so
+    // a headless timed run captures the number without in-game chat input.
+    private static long _cullWalkRaycastCount;
+    private static long _cullWalkRaycastTicks;
+    private static long _cullWalkRaycastVisible;
+    private static long _cullWalkBfsCount;
+    private static long _cullWalkBfsTicks;
+    private static long _cullWalkBfsVisible;
+    private static long _cullWalkSinceLog;
+    public static volatile bool CullWalkLogEnabled;
+    public const int CullWalkLogEvery = 20;
+
+    /// <summary>
+    /// Records one full visibility-walk recompute. bfs=true when runBfsVisibility
+    /// ran, false for the vanilla raycast. visibleMarked is the number of chunks the
+    /// walk left visible this pass (only counted when CullWalkLogEnabled, for the
+    /// raycast-vs-BFS superset A/B). Returns true when a summary should be logged now.
+    /// </summary>
+    public static bool RecordChunkCullerWalk(bool bfs, long elapsedTicks, int visibleMarked)
+    {
+        if (bfs)
+        {
+            Interlocked.Increment(ref _cullWalkBfsCount);
+            Interlocked.Add(ref _cullWalkBfsTicks, elapsedTicks);
+            Interlocked.Add(ref _cullWalkBfsVisible, visibleMarked);
+        }
+        else
+        {
+            Interlocked.Increment(ref _cullWalkRaycastCount);
+            Interlocked.Add(ref _cullWalkRaycastTicks, elapsedTicks);
+            Interlocked.Add(ref _cullWalkRaycastVisible, visibleMarked);
+        }
+        if (!CullWalkLogEnabled) return false;
+        return Interlocked.Increment(ref _cullWalkSinceLog) % CullWalkLogEvery == 0;
+    }
+
+    public static string GetChunkCullerWalkSummary()
+    {
+        long rc = Interlocked.Read(ref _cullWalkRaycastCount);
+        long rt = Interlocked.Read(ref _cullWalkRaycastTicks);
+        long rv = Interlocked.Read(ref _cullWalkRaycastVisible);
+        long bc = Interlocked.Read(ref _cullWalkBfsCount);
+        long bt = Interlocked.Read(ref _cullWalkBfsTicks);
+        long bv = Interlocked.Read(ref _cullWalkBfsVisible);
+        double rMs = rc == 0 ? 0 : rt * 1000.0 / Stopwatch.Frequency / rc;
+        double bMs = bc == 0 ? 0 : bt * 1000.0 / Stopwatch.Frequency / bc;
+        double rVis = rc == 0 ? 0 : (double)rv / rc;
+        double bVis = bc == 0 ? 0 : (double)bv / bc;
+        return $"Optimum chunk culler walk: raycast walks={rc}, meanMs={rMs:0.####}, meanVisible={rVis:0.0}; bfs walks={bc}, meanMs={bMs:0.####}, meanVisible={bVis:0.0}";
+    }
+
+    public static void ResetChunkCullerWalk()
+    {
+        Interlocked.Exchange(ref _cullWalkRaycastCount, 0);
+        Interlocked.Exchange(ref _cullWalkRaycastTicks, 0);
+        Interlocked.Exchange(ref _cullWalkRaycastVisible, 0);
+        Interlocked.Exchange(ref _cullWalkBfsCount, 0);
+        Interlocked.Exchange(ref _cullWalkBfsTicks, 0);
+        Interlocked.Exchange(ref _cullWalkBfsVisible, 0);
+        Interlocked.Exchange(ref _cullWalkSinceLog, 0);
+    }
+
+    // In-client frame-time sampler for the issue #72 FPS A/B. Gated by
+    // CullWalkLogEnabled so it costs nothing on a normal frame. Collects raw
+    // frame-time samples (ms) in a fixed ring; every FpsLogEvery frames it logs
+    // mean/P50/P95/P99 and the derived FPS, then keeps sampling. Runs entirely on
+    // the render thread (window_RenderFrame), so no locking is needed.
+    private const int FpsRingSize = 4096;
+    private static readonly double[] _fpsRing = new double[FpsRingSize];
+    private static int _fpsCount;
+    private static long _fpsTotalFrames;
+    public const int FpsLogEvery = 600; // ~ every 600 frames
+
+    /// <summary>
+    /// Records one client frame's time in milliseconds. Returns true when an FPS
+    /// summary should be logged now (caller logs GetFrameTimeSummary()).
+    /// </summary>
+    public static bool RecordFrameTime(double frameMs)
+    {
+        if (!CullWalkLogEnabled) return false;
+        int idx = _fpsCount % FpsRingSize;
+        _fpsRing[idx] = frameMs;
+        _fpsCount++;
+        _fpsTotalFrames++;
+        return _fpsCount % FpsLogEvery == 0;
+    }
+
+    public static string GetFrameTimeSummary()
+    {
+        int n = System.Math.Min(_fpsCount, FpsRingSize);
+        if (n == 0) return "Optimum frame time: no samples";
+        var copy = new double[n];
+        System.Array.Copy(_fpsRing, copy, n);
+        System.Array.Sort(copy);
+        double sum = 0;
+        for (int i = 0; i < n; i++) sum += copy[i];
+        double mean = sum / n;
+        double p50 = copy[(int)(n * 0.50)];
+        double p95 = copy[System.Math.Min(n - 1, (int)(n * 0.95))];
+        double p99 = copy[System.Math.Min(n - 1, (int)(n * 0.99))];
+        double meanFps = mean > 0 ? 1000.0 / mean : 0;
+        double p95Fps = p95 > 0 ? 1000.0 / p95 : 0;
+        return $"Optimum frame time: frames={_fpsTotalFrames}, samples={n}, meanMs={mean:0.###} ({meanFps:0.0} fps), p50Ms={p50:0.###}, p95Ms={p95:0.###} ({p95Fps:0.0} fps), p99Ms={p99:0.###}";
+    }
+
+    public static void ResetFrameTime()
+    {
+        _fpsCount = 0;
+        _fpsTotalFrames = 0;
+        System.Array.Clear(_fpsRing);
     }
 
     // Chunk deserialization parallelism diagnostics
