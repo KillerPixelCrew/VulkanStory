@@ -300,8 +300,13 @@ window never mapped), implicit layers off, `sync,best` validation to a file. The
    master switch (`OptimumConfig.AmbientOcclusionEnabled`, default on, `optAo`): it gates `RenderSSAO` only,
    so both AO paths stop together, the SSAO G-buffer and the stamped shader defines stay untouched, and it
    flips live with no shader reload, no frame buffer rebuild and no temporal reset - the in-game A/B for
-   judging what AO contributes. Still open: the section D measurements and the deterministic stilled-scene
-   comparison.
+   judging what AO contributes. Switching it off also sets `optimumSsaoInScene`: the scene shaders stay
+   compiled with `SSAOLEVEL > 0`, so `final.fsh` would otherwise multiply by an SSAO target nothing wrote
+   that frame and darken the whole image (found in game, 2026-09-16). Beside it, `AmbientOcclusionDebugView`
+   (`optAoDebug`) writes the AO term alone as greyscale in the final composition, sourced from the GTAO
+   output when it ran and the vanilla blurred target otherwise - the same branch in both shader twins
+   (`final.fsh`, `final.frag`), before colour grading. Still open: the section D measurements and the
+   deterministic stilled-scene comparison.
 9. **General refactor:** split `VulkanDevice.cs`, restructure the project layout, remove GL-emulation leftovers.
 10. **Optimisation** (plan Phase 4): per-pass GPU timestamps, push-constant placement from the measured
     profile, transient aliasing on by default, DirectToSwapchain / transfer backend measured. Exit: Vulkan

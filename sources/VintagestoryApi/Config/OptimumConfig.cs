@@ -581,6 +581,15 @@ public static class OptimumConfig
     public static bool AmbientOcclusionEnabled = true;
 
     /// <summary>
+    /// The ambient occlusion debug view (Optimum options tab): the final composition writes the
+    /// AO term alone as greyscale instead of the graded scene - white fully lit, dark fully
+    /// occluded. It shows whichever AO ran this frame, the platform's own visibility texture or
+    /// the vanilla blurred SSAO target, and does nothing while AO is off, because neither target
+    /// was written then. A view, not a render setting: one uniform per frame, no reload.
+    /// </summary>
+    public static bool AmbientOcclusionDebugView = false;
+
+    /// <summary>
     /// Whether GTAO is selected for a backend: never on OpenGL; on Vulkan with "gtao", or
     /// with "auto" while TAA is active.
     /// </summary>
@@ -1036,6 +1045,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
         (nameof(OptimumConfigData.AmbientOcclusionPreset), AmbientOcclusionPreset),
         (nameof(OptimumConfigData.AmbientOcclusionEnabled), AmbientOcclusionEnabled.ToString()),
+        (nameof(OptimumConfigData.AmbientOcclusionDebugView), AmbientOcclusionDebugView.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1158,6 +1168,7 @@ public static class OptimumConfig
             string requestedAoPreset = data.AmbientOcclusionPreset?.Trim().ToLowerInvariant() ?? "";
             AmbientOcclusionPreset = requestedAoPreset is "low" or "high" or "ultra" ? requestedAoPreset : "medium";
             AmbientOcclusionEnabled = data.AmbientOcclusionEnabled;
+            AmbientOcclusionDebugView = data.AmbientOcclusionDebugView;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1241,6 +1252,7 @@ public static class OptimumConfig
             AmbientOcclusion = AmbientOcclusion,
             AmbientOcclusionPreset = AmbientOcclusionPreset,
             AmbientOcclusionEnabled = AmbientOcclusionEnabled,
+            AmbientOcclusionDebugView = AmbientOcclusionDebugView,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1334,6 +1346,7 @@ internal sealed class OptimumConfigData
     public string AmbientOcclusion { get; set; } = "auto";
     public string AmbientOcclusionPreset { get; set; } = "medium";
     public bool AmbientOcclusionEnabled { get; set; } = true;
+    public bool AmbientOcclusionDebugView { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

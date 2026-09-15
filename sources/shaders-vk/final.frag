@@ -109,6 +109,16 @@ void main(void)
 		color.a=1;
 	}
 
+	// Optimum AO debug view: the ambient occlusion term alone, as greyscale, before colour
+	// grading and vignetting. ssaoScene holds whichever AO ran this frame (the vanilla blurred
+	// SSAO target, or the platform's own visibility texture), so white is fully lit and dark is
+	// fully occluded - the picture of what AO contributes, with nothing else in it.
+	if (optimumAoDebug != 0) {
+		float aoDebugTerm = texture(optimumTextures2D[ssaoScene], texCoord).r;
+		outColor = vec4(vec3(aoDebugTerm), 1.0);
+		return;
+	}
+
 	vec4 gradedColor = ColorGrade(color);
 	outColor = mix(color, gradedColor, gradedColor.a);
 
