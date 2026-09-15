@@ -6,7 +6,7 @@
 ## Roadmap (user, 2026-09-15)
 
 This branch, `feat/vulkan-taa`, carries the Vulkan backend and TAA as their own pull request. It starts at
-`c236676` (Milestone 1 on `main`, before the latency and DLSS work); upscaling, latency and frame
+`9ad0c70` (Milestone 1 on `main`, before the latency and DLSS work); upscaling, latency and frame
 generation stay on `feat/dlss-g` for later pull requests. The work runs in this order:
 
 1. **Fully Vulkan-native, no OpenGL mimicry** (decisions 7 and 8): native shaders with offline SPIR-V
@@ -25,10 +25,10 @@ application root, `run-client.sh` without a hard `prime-run`, `numpy` in the pre
 swapchain resize tests, the runtime donor drift, and a device-idle wait before the window is released.
 
 **Where the branch is (2026-09-15).** Two backports from the DLSS line are in, neither judged in game yet:
-- `f202d02`: the jittered AO is shaded into the scene before the TAA resolve, and the SSAO dither advances
-  per frame. On the DLSS line this pair (`e582ed0`, `8c33fa3`) removed the whole-frame jitter that the
+- `41373cf`: the jittered AO is shaded into the scene before the TAA resolve, and the SSAO dither advances
+  per frame. On the DLSS line this pair (`2acede1`, `52b9d6c`) removed the whole-frame jitter that the
   resolve's 3x3 nearest-depth test and anti-flicker weighting had only damped.
-- `af082c5`: the headless render harness (its roadmap item below).
+- `766aada`: the headless render harness (its roadmap item below).
 
 ## Context
 
@@ -111,8 +111,8 @@ reconciled below. Every file:line fact quoted was re-checked in the tree.
 
 ## Step 0: branching
 
-Historical: `feat/vulkan-native` started from `main` at `94e2cc0` after TAA merged, with the sky-direction
-fix on its own branch, and merged back into `main` at Milestone 1 (`c236676`). `feat/vulkan-taa` starts
+Historical: `feat/vulkan-native` started from `main` at `48174c1` after TAA merged, with the sky-direction
+fix on its own branch, and merged back into `main` at Milestone 1 (`9ad0c70`). `feat/vulkan-taa` starts
 there. Never `git stash`. WIP commits use the `wip:` prefix.
 
 ---
@@ -559,7 +559,7 @@ found, unfixed: Vulkan `BuildMipMaps` keeps the atlas texture LOD bias where Ope
 (affects shadow, liquid and transparent terrain passes; shadow maps measured identical, so not visible).
 **Correction (2026-09-15):** this damped the whole-frame jitter the user saw rather than removing it. On the
 DLSS line the jitter went away once the jittered AO was shaded into the scene before the temporal pass and
-its dither advanced per frame; both are backported for the TAA path in `f202d02`, not yet judged in game.
+its dither advanced per frame; both are backported for the TAA path in `41373cf`, not yet judged in game.
 
 ### Phase 2: frame graph → **Milestone 1**
 
@@ -601,7 +601,7 @@ and is a Cecil target.
   A11, A13, A14, A15, A17, A18 re-pass.
 - Then the user judges it in game on both backends, renderer line confirmed.
 
-**Milestone 1 accepted (user, 2026-09-11, at `6568556`).** Phase 2 complete: barriers from usage, frame
+**Milestone 1 accepted (user, 2026-09-11, at `f90cbac`).** Phase 2 complete: barriers from usage, frame
 graph (22.3 passes == 22.3 scopes per frame, 0 splits, 0 mask restarts, plan hits every frame), transient
 allocator (implemented, not yet wired to the graph), clear promotion, SSAO alpha gap closed, TAA
 anti-flicker resolve merged (distant-leaf rejection 1.05 % on both backends). Open and carried to Phase 4:
@@ -741,7 +741,7 @@ via `.cam load` / `.cam play`), `OPTIMUM_HEADLESS_FIXED_DT` (pins `ClientMain.De
 being focused. See `docs/vulkan-acceptance.md` section 3, "Headless render harness", for what it does not cover:
 a display server is still required, reproducibility is repeatable rather than bit-exact, and no camera path
 is checked in yet - which is why the acceptance sentence above is not yet a claim, only a capability.
-Backported to `feat/vulkan-taa` in `af082c5`.
+Backported to `feat/vulkan-taa` in `766aada`.
 
 ### Roadmap item: GTAO (XeGTAO) replaces the vanilla SSAO
 
@@ -768,7 +768,7 @@ Order of work, because the cheap parts are prerequisites and may settle the symp
 2. Make the dither temporally varying (rotate with the jitter phase) so any accumulator converges it.
 3. Only then port XeGTAO, and judge it against the fixed SSAO rather than against today's.
 
-**Status on this branch (2026-09-15):** steps 1 and 2 are in for the TAA path (`f202d02`: the AO multiplied
+**Status on this branch (2026-09-15):** steps 1 and 2 are in for the TAA path (`41373cf`: the AO multiplied
 into the scene before the resolve, the dither advanced per frame under `TAAMOTION`). Step 3 is roadmap step
 2, after the native backend, as native compute.
 
