@@ -228,9 +228,11 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>
     /// OPTIMUM_VULKAN_VALIDATION_FEATURES: comma list of "sync" (synchronization
-    /// validation), "best" (best practices, vendor checks included) and "gpu"
-    /// (GPU-assisted). Requested through VK_EXT_validation_features so it does
-    /// not depend on the layer's environment variable names, which changed.
+    /// validation), "best" (best practices with the NVIDIA and AMD sets), "mobile"
+    /// (the Arm and IMG sets), "gpu" (GPU-assisted) and "gpu-only" (GPU-assisted,
+    /// core off). Requested through VK_EXT_layer_settings (the deprecated
+    /// VK_EXT_validation_features on older layers) so it does not depend on the
+    /// layer's environment variable names, which changed.
     /// </summary>
     private static readonly string ValidationFeatureSetting =
         Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_VALIDATION_FEATURES") ?? "";
@@ -388,7 +390,8 @@ public sealed unsafe class VulkanDevice : IDisposable
         };
         VulkanResult.DescribeDeviceLoss = DescribeDeviceLoss;
         MirrorValidationMessage("--- device up on " + _context.Capabilities.DeviceName +
-            "; validation layers " + (_context.ValidationEnabled ? "ENABLED" : "NOT AVAILABLE") +
+            "; validation layers " + (_context.ValidationEnabled ? "ENABLED " + _context.ValidationLayerVersion : "NOT AVAILABLE") +
+            (_context.ValidationSettingsApplied.Length == 0 ? "" : "; " + _context.ValidationSettingsApplied) +
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off") +

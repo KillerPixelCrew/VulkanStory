@@ -8,16 +8,71 @@ using Xunit.Abstractions;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The extra validation features (sync validation, best practices) ride on
-/// VK_EXT_validation_features, chained into vkCreateInstance's pNext. A chained
-/// struct whose instance extension was never enabled is ignored by a conformant
-/// loader, so the two decisions have to be made together - that was the bug.
+/// The extra validation checks (sync validation, best practices with the vendor
+/// sets, GPU-assisted) are requested through VK_EXT_layer_settings, with the
+/// deprecated VK_EXT_validation_features as the fallback for older layers, both
+/// chained into vkCreateInstance's pNext. A chained struct whose instance extension
+/// was never enabled is ignored by a conformant loader, so the two decisions have
+/// to be made together - that was the bug.
 /// </summary>
 public class ValidationFeaturesTests
 {
     private readonly ITestOutputHelper _output;
 
     public ValidationFeaturesTests(ITestOutputHelper output) => _output = output;
+
+    private static Dictionary<string, VulkanContext.ValidationLayerSetting> SettingsFor(string features)
+    {
+        var byName = new Dictionary<string, VulkanContext.ValidationLayerSetting>();
+        foreach (VulkanContext.ValidationLayerSetting setting in VulkanContext.ValidationLayerSettings(features))
+        {
+            Assert.True(byName.TryAdd(setting.Name, setting), setting.Name + " is requested twice");
+        }
+        return byName;
+    }
+
+    /// <summary>
+    /// The layer's own setting names (docs/research/vulkan-validation.md §1): best practices report as
+    /// warnings and performance messages, so "best" also widens report_flags; the desktop vendor
+    /// sets come with it, the mobile ones only on request.
+    /// </summary>
+    [Fact]
+    public void TheFeatureNamesMapOntoTheLayersSettings()
+    {
+        Dictionary<string, VulkanContext.ValidationLayerSetting> settings = SettingsFor(" sync , BEST ");
+        Assert.True(settings["validate_sync"].Enabled);
+        Assert.True(settings.ContainsKey("syncval_message_extra_properties"));
+        Assert.True(settings["validate_best_practices"].Enabled);
+        Assert.True(settings.ContainsKey("validate_best_practices_nvidia"));
+        Assert.True(settings.ContainsKey("validate_best_practices_amd"));
+        Assert.False(settings.ContainsKey("validate_best_practices_arm"));
+        Assert.Equal("error,warn,perf", settings["report_flags"].Text);
+
+        Dictionary<string, VulkanContext.ValidationLayerSetting> mobile = SettingsFor("best,mobile");
+        Assert.True(mobile.ContainsKey("validate_best_practices_arm"));
+        Assert.True(mobile.ContainsKey("validate_best_practices_img"));
+    }
+
+    /// <summary>GPU-AV is advised against alongside CPU core validation, so "gpu-only" turns core off.</summary>
+    [Fact]
+    public void GpuOnlyTurnsCoreValidationOff()
+    {
+        Assert.True(SettingsFor("gpu")["gpuav_enable"].Enabled);
+        Assert.False(SettingsFor("gpu").ContainsKey("validate_core"));
+
+        Dictionary<string, VulkanContext.ValidationLayerSetting> gpuOnly = SettingsFor("gpu-only");
+        Assert.True(gpuOnly["gpuav_enable"].Enabled);
+        Assert.False(gpuOnly["validate_core"].Enabled);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("nonsense,,")]
+    public void AnEmptyOrUnknownFeatureListSetsNothing(string? setting)
+    {
+        Assert.Empty(VulkanContext.ValidationLayerSettings(setting));
+    }
 
     [Fact]
     public void TheFeatureListParsesTheDocumentedNames()
@@ -64,6 +119,16 @@ public class ValidationFeaturesTests
         {
             Skip.IfNot(context!.ValidationEnabled, "Validation layer not installed.");
             Assert.NotEqual(default, context.Instance);
+            _output.WriteLine("layer " + context.ValidationLayerVersion + ": " + context.ValidationSettingsApplied);
+
+            // A current layer takes the settings, not the deprecated struct.
+            using var api = Vk.GetApi();
+            if (VulkanContext.LayerAdvertisesExtension(api, "VK_LAYER_KHRONOS_validation", VulkanContext.LayerSettingsExtensionName))
+            {
+                Assert.StartsWith("layer settings validate_sync", context.ValidationSettingsApplied);
+                Assert.Contains("report_flags=error,warn,perf", context.ValidationSettingsApplied);
+            }
+            Assert.NotEmpty(context.ValidationLayerVersion);
         }
     }
 

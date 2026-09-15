@@ -17,7 +17,7 @@ internal sealed class VulkanContextOptions
     /// <summary>Turns on the validation layers and the debug messenger.</summary>
     public bool EnableValidation;
 
-    /// <summary>Comma list of extra layer features: sync, best, gpu.</summary>
+    /// <summary>Comma list of extra layer checks: sync, best, mobile, gpu, gpu-only (<see cref="VulkanContext.ValidationLayerSettings" />).</summary>
     public string ValidationFeatures = "";
 
     /// <summary>Pins a physical device by index; -1 picks automatically.</summary>
@@ -259,34 +259,90 @@ internal sealed unsafe class VulkanContext : IDisposable
         var extensions = new List<string>(options.RequiredInstanceExtensions);
         bool validation = options.EnableValidation && HasValidationLayer();
 
-        // Extra layer features (sync validation, best practices, GPU assisted)
-        // ride on VK_EXT_validation_features. Parse them before the extension
-        // list is marshalled, because the extension has to be enabled under
-        // exactly the same condition as the pNext chain below - a chained
-        // struct whose extension was never enabled is ignored at best.
-        // Only when the layer actually advertises it: the extension is deprecated
-        // in favour of VK_EXT_layer_settings, and naming one the layer does not
-        // have fails vkCreateInstance outright - which would turn a diagnostic
-        // environment variable into a silent fall back to OpenGL (rule 1).
+        // Extra layer checks (sync validation, best practices with the vendor sets,
+        // GPU-assisted validation) go through VK_EXT_layer_settings, which replaces
+        // the deprecated VK_EXT_validation_features (docs/research/vulkan-validation.md
+        // §1); a layer too old for it still gets the deprecated struct. Both are
+        // decided before the extension list is marshalled, because an extension has
+        // to be enabled under exactly the condition its struct is chained - a chained
+        // struct whose extension was never enabled is ignored at best. And only when
+        // the layer advertises it: naming an extension the layer does not have fails
+        // vkCreateInstance outright, which would turn a diagnostic environment
+        // variable into a silent fall back to OpenGL (rule 1).
+        List<ValidationLayerSetting> settings = ValidationLayerSettings(options.ValidationFeatures);
         List<ValidationFeatureEnableEXT> enables = ParseValidationFeatures(options.ValidationFeatures);
-        bool chainValidationFeatures = validation && enables.Count > 0
+        bool chainLayerSettings = validation && settings.Count > 0
+            && LayerAdvertisesExtension(Api, ValidationLayer, LayerSettingsExtensionName);
+        bool chainValidationFeatures = validation && !chainLayerSettings && enables.Count > 0
             && LayerAdvertisesExtension(Api, ValidationLayer, ValidationFeaturesExtensionName);
         if (validation)
         {
             extensions.Add(ExtDebugUtils.ExtensionName);
         }
+        if (chainLayerSettings)
+        {
+            extensions.Add(LayerSettingsExtensionName);
+        }
         if (chainValidationFeatures)
         {
             extensions.Add(ValidationFeaturesExtensionName);
         }
+        ValidationSettingsApplied =
+            chainLayerSettings ? "layer settings " + DescribeValidationLayerSettings(settings)
+            : chainValidationFeatures ? "deprecated validation features " + string.Join(",", enables)
+            : validation && settings.Count > 0
+                ? "extra checks NOT APPLIED (the layer has neither VK_EXT_layer_settings nor VK_EXT_validation_features)"
+            : "";
 
         byte* applicationName = (byte*)SilkMarshal.StringToPtr("Optimum");
         byte* engineName = (byte*)SilkMarshal.StringToPtr("Optimum.Render.Vulkan");
         nint extensionsPtr = SilkMarshal.StringArrayToPtr(extensions);
         nint layersPtr = validation ? SilkMarshal.StringArrayToPtr(new[] { ValidationLayer }) : 0;
+        // Every string a layer setting points at, freed with the rest below.
+        var settingStrings = new List<nint>();
 
         try
         {
+            int settingSlots = Math.Max(settings.Count, 1);
+            LayerSettingEXT* settingsPtr = stackalloc LayerSettingEXT[settingSlots];
+            Bool32* boolValues = stackalloc Bool32[settingSlots];
+            nint* textValues = stackalloc nint[settingSlots];
+            if (chainLayerSettings)
+            {
+                nint layerName = SilkMarshal.StringToPtr(ValidationLayer);
+                settingStrings.Add(layerName);
+                for (int i = 0; i < settings.Count; i++)
+                {
+                    nint settingName = SilkMarshal.StringToPtr(settings[i].Name);
+                    settingStrings.Add(settingName);
+                    settingsPtr[i] = new LayerSettingEXT
+                    {
+                        PLayerName = (byte*)layerName,
+                        PSettingName = (byte*)settingName,
+                        ValueCount = 1,
+                    };
+                    if (settings[i].Text == null)
+                    {
+                        boolValues[i] = settings[i].Enabled;
+                        settingsPtr[i].Type = LayerSettingTypeEXT.Bool32Ext;
+                        settingsPtr[i].PValues = &boolValues[i];
+                    }
+                    else
+                    {
+                        textValues[i] = SilkMarshal.StringToPtr(settings[i].Text);
+                        settingStrings.Add(textValues[i]);
+                        settingsPtr[i].Type = LayerSettingTypeEXT.StringExt;
+                        settingsPtr[i].PValues = &textValues[i];
+                    }
+                }
+            }
+            var layerSettings = new LayerSettingsCreateInfoEXT
+            {
+                SType = StructureType.LayerSettingsCreateInfoExt,
+                SettingCount = (uint)settings.Count,
+                PSettings = settingsPtr,
+            };
+
             var applicationInfo = new ApplicationInfo
             {
                 SType = StructureType.ApplicationInfo,
@@ -309,7 +365,9 @@ internal sealed unsafe class VulkanContext : IDisposable
             var createInfo = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
-                PNext = chainValidationFeatures ? &validationFeatures : null,
+                PNext = chainLayerSettings ? &layerSettings
+                    : chainValidationFeatures ? (void*)&validationFeatures
+                    : null,
                 PApplicationInfo = &applicationInfo,
                 EnabledExtensionCount = (uint)extensions.Count,
                 PpEnabledExtensionNames = (byte**)extensionsPtr,
@@ -331,6 +389,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             SilkMarshal.Free((nint)engineName);
             SilkMarshal.Free(extensionsPtr);
             if (layersPtr != 0) SilkMarshal.Free(layersPtr);
+            foreach (nint text in settingStrings) SilkMarshal.Free(text);
         }
 
         if (validation)
@@ -343,6 +402,84 @@ internal sealed unsafe class VulkanContext : IDisposable
 
     /// <summary>Name of VK_EXT_validation_features; Silk.NET has no wrapper class for it.</summary>
     internal const string ValidationFeaturesExtensionName = "VK_EXT_validation_features";
+
+    /// <summary>Name of VK_EXT_layer_settings, the layer's own replacement for it.</summary>
+    internal const string LayerSettingsExtensionName = "VK_EXT_layer_settings";
+
+    /// <summary>The validation layer's spec and implementation version, once it has been found.</summary>
+    public string ValidationLayerVersion { get; private set; } = "";
+
+    /// <summary>
+    /// Which extra checks reached the layer and how, for the device-up log line; empty when
+    /// none were asked for.
+    /// </summary>
+    public string ValidationSettingsApplied { get; private set; } = "";
+
+    /// <summary>One VK_EXT_layer_settings entry for the Khronos layer: a boolean, or a string when <see cref="Text" /> is set.</summary>
+    internal readonly record struct ValidationLayerSetting(string Name, bool Enabled = true, string? Text = null);
+
+    /// <summary>
+    /// Maps the comma list from OPTIMUM_VULKAN_VALIDATION_FEATURES onto the layer's settings
+    /// (VkLayer_khronos_validation.json; docs/research/vulkan-validation.md §1 and §2):
+    /// "sync" synchronization validation with structured message properties to filter on;
+    /// "best" best practices with the NVIDIA and AMD sets, whose messages are warnings and
+    /// performance reports; "mobile" the Arm and IMG sets, advisory on desktop GPUs;
+    /// "gpu" GPU-assisted validation; "gpu-only" the same with CPU core validation off.
+    /// </summary>
+    internal static List<ValidationLayerSetting> ValidationLayerSettings(string? features)
+    {
+        var settings = new List<ValidationLayerSetting>();
+        foreach (string feature in (features ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            switch (feature.ToLowerInvariant())
+            {
+                case "sync":
+                    AddSetting(settings, new ValidationLayerSetting("validate_sync"));
+                    AddSetting(settings, new ValidationLayerSetting("syncval_message_extra_properties"));
+                    break;
+                case "best":
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices"));
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices_nvidia"));
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices_amd"));
+                    AddSetting(settings, new ValidationLayerSetting("report_flags", Text: "error,warn,perf"));
+                    break;
+                case "mobile":
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices"));
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices_arm"));
+                    AddSetting(settings, new ValidationLayerSetting("validate_best_practices_img"));
+                    break;
+                case "gpu":
+                    AddSetting(settings, new ValidationLayerSetting("gpuav_enable"));
+                    break;
+                case "gpu-only":
+                    AddSetting(settings, new ValidationLayerSetting("gpuav_enable"));
+                    AddSetting(settings, new ValidationLayerSetting("validate_core", Enabled: false));
+                    break;
+            }
+        }
+        return settings;
+    }
+
+    private static void AddSetting(List<ValidationLayerSetting> settings, ValidationLayerSetting setting)
+    {
+        foreach (ValidationLayerSetting existing in settings)
+        {
+            if (existing.Name == setting.Name) return;
+        }
+        settings.Add(setting);
+    }
+
+    internal static string DescribeValidationLayerSettings(List<ValidationLayerSetting> settings)
+    {
+        var parts = new List<string>(settings.Count);
+        foreach (ValidationLayerSetting setting in settings)
+        {
+            parts.Add(setting.Text != null ? setting.Name + "=" + setting.Text
+                : setting.Enabled ? setting.Name
+                : setting.Name + "=false");
+        }
+        return string.Join(" ", parts);
+    }
 
     /// <summary>
     /// Whether <paramref name="layerName" /> advertises <paramref name="extensionName" />
@@ -395,7 +532,9 @@ internal sealed unsafe class VulkanContext : IDisposable
             {
                 case "sync": enables.Add(ValidationFeatureEnableEXT.SynchronizationValidationExt); break;
                 case "best": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
+                case "mobile": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
                 case "gpu": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
+                case "gpu-only": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
             }
         }
         return enables;
@@ -421,6 +560,8 @@ internal sealed unsafe class VulkanContext : IDisposable
             {
                 if (SilkMarshal.PtrToString((nint)layersPtr[i].LayerName) == ValidationLayer)
                 {
+                    ValidationLayerVersion = VersionString(layersPtr[i].SpecVersion) +
+                        " (implementation " + layersPtr[i].ImplementationVersion + ")";
                     return true;
                 }
             }
