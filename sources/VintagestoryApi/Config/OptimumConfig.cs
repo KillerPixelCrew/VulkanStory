@@ -254,6 +254,20 @@ public static class OptimumConfig
     /// </summary>
     public static bool MeshPartPoolActive => MeshPartPoolEnabled && OptimumDiagnostics.TessWorkerCount <= 1;
 
+    /// <summary>
+    /// Issue #74: reuse a per-render-thread scratch ItemRenderInfo in the GUI item
+    /// render path (InventoryItemRenderer.RenderItemstackToGui) instead of allocating
+    /// a fresh one per visible slot per frame. Profiling measured ~104 B/slot/frame
+    /// (up to 135 slots => ~14 KB/frame with an inventory open). The public
+    /// IRenderAPI.GetItemStackRenderInfo API still returns a fresh instance, so mods
+    /// that call it and retain the result are unaffected; only the internal per-slot
+    /// path reuses, and the reused instance never escapes the synchronous
+    /// RenderItemstackToGui call (the ItemRenderDelegate contract is per-call transient).
+    /// All collectible render hooks still run every frame with identical inputs, so
+    /// output is behaviour-identical. Set false to fall back to the vanilla allocation.
+    /// </summary>
+    public static bool ItemRenderInfoReuseEnabled = true;
+
     // Settings that live in VintagestoryLib (read per-frame from ClientSettings).
     // Mirrored here for persistence only.
     public static bool EntityShadowCull = true;
@@ -667,6 +681,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.OcclusionCullingScale), OcclusionCullingScaleEnabled.ToString()),
         (nameof(OptimumConfigData.BfsChunkVisibility), BfsChunkVisibilityEnabled.ToString()),
         (nameof(OptimumConfigData.MeshPartPool), MeshPartPoolEnabled.ToString()),
+        (nameof(OptimumConfigData.ItemRenderInfoReuse), ItemRenderInfoReuseEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -756,6 +771,7 @@ public static class OptimumConfig
             OcclusionCullingScaleEnabled = data.OcclusionCullingScale;
             BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
             MeshPartPoolEnabled = data.MeshPartPool;
+            ItemRenderInfoReuseEnabled = data.ItemRenderInfoReuse;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -830,6 +846,7 @@ public static class OptimumConfig
             OcclusionCullingScale = OcclusionCullingScaleEnabled,
             BfsChunkVisibility = BfsChunkVisibilityEnabled,
             MeshPartPool = MeshPartPoolEnabled,
+            ItemRenderInfoReuse = ItemRenderInfoReuseEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -908,6 +925,7 @@ internal sealed class OptimumConfigData
     public bool OcclusionCullingScale { get; set; } = true;
     public bool BfsChunkVisibility { get; set; } = true;
     public bool MeshPartPool { get; set; } = true;
+    public bool ItemRenderInfoReuse { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
@@ -1206,6 +1224,53 @@ public static class OptimumDiagnostics
             + $", cloneVertsPerChunk small={smallV / (double)chunks:0}/large={largeV / (double)chunks:0}"
             + $", partsPerChunk={parts / (double)chunks:0.0}"
             + $", totalAllocMB={totalAllocMB:0.0}";
+    }
+
+    // --- Issue #74 item-render profiler (diagnostic only) ---
+    // Counts GetItemStackRenderInfo calls (one per visible item slot per frame) and
+    // the thread-allocated bytes they cost, logged every ItemRenderProfileLogEvery
+    // frames. Runs on the render thread. Enabled by OPTIMUM_ITEM_PROFILE=1. This
+    // measures whether per-slot item render info is a real per-frame CPU/GC hotspot
+    // (e.g. inventory or chest open) before optimizing it.
+    public static volatile bool ItemRenderProfileEnabled;
+    public const int ItemRenderProfileLogEvery = 120;
+    private static long _itemRenderCalls;
+    private static long _itemRenderAllocBytes;
+    private static long _itemRenderFrames;
+    private static long _itemRenderSinceLog;
+    private static long _itemRenderCallsThisFrame;
+    private static long _itemRenderMaxCallsPerFrame;
+
+    /// <summary>Record one GetItemStackRenderInfo call and the bytes it allocated.</summary>
+    public static void RecordItemRender(long allocBytes)
+    {
+        _itemRenderCalls++;
+        _itemRenderCallsThisFrame++;
+        _itemRenderAllocBytes += allocBytes;
+    }
+
+    /// <summary>Call once per rendered frame; returns true when a summary is due.</summary>
+    public static bool ItemRenderEndFrame()
+    {
+        _itemRenderFrames++;
+        if (_itemRenderCallsThisFrame > _itemRenderMaxCallsPerFrame)
+            _itemRenderMaxCallsPerFrame = _itemRenderCallsThisFrame;
+        _itemRenderCallsThisFrame = 0;
+        if (!ItemRenderProfileEnabled) return false;
+        _itemRenderSinceLog++;
+        return _itemRenderSinceLog % ItemRenderProfileLogEvery == 0;
+    }
+
+    public static string GetItemRenderProfileSummary()
+    {
+        long frames = _itemRenderFrames;
+        if (frames == 0) return "Optimum item-render profile: no frames";
+        return $"Optimum item-render profile: frames={frames}"
+            + $", callsPerFrame={_itemRenderCalls / (double)frames:0.0}"
+            + $", maxCallsPerFrame={_itemRenderMaxCallsPerFrame}"
+            + $", allocPerFrame={_itemRenderAllocBytes / (double)frames:0} B"
+            + $", allocPerCall={(_itemRenderCalls == 0 ? 0 : _itemRenderAllocBytes / (double)_itemRenderCalls):0} B"
+            + $", totalCalls={_itemRenderCalls}";
     }
 
     public static void RecordChiselLod(int fullTriangles, int proxyTriangles, bool fallback, long elapsedTicks)

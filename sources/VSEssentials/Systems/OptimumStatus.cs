@@ -37,6 +37,16 @@ public class OptimumStatusModSystem : ModSystem
             OptimumDiagnostics.MeshProfileEnabled = true;
         }
 
+        // Issue #74 item-render profiler hook: OPTIMUM_ITEM_PROFILE=1 counts
+        // GetItemStackRenderInfo calls/frame and their allocation, logged every
+        // ItemRenderProfileLogEvery frames, to confirm whether per-slot item
+        // rendering (inventory/chest open) is a real per-frame CPU/GC hotspot.
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_ITEM_PROFILE") == "1")
+        {
+            OptimumDiagnostics.ItemRenderProfileEnabled = true;
+            api.Logger.Notification("[Optimum] item-render profiler ENABLED (OPTIMUM_ITEM_PROFILE=1)");
+        }
+
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
