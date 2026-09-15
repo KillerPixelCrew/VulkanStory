@@ -106,7 +106,10 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@# stale copy here makes the probe throw and the client fall back to OpenGL.
 	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
-	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/Lib/; fi
+	@# shaderc goes into the application root: Silk.NET.Shaderc probes the application
+	@# directory and LD_LIBRARY_PATH, not Lib/, and a copy it cannot find makes the
+	@# renderer fall back to OpenGL silently.
+	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/; fi
 	@# Every file, not *.fsh plus *.vsh: the packagers copy the whole directory,
 	@# and a stage that ships only on one of the two paths is the bug the
 	@# completeness check below exists to catch.
@@ -136,7 +139,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
-		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/Lib/; fi; \
+		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/; fi; \
 		for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done; \
 		if [ -d "sources/shaderincludes" ]; then mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi; \
 		for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(INSTALL_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \

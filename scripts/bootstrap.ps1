@@ -601,7 +601,9 @@ try {
             }
 
             Move-Item -Force $innounpPartial $innounpZip
-            Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
+            # Module-qualified: another module's Expand-Archive earlier on PSModulePath
+            # (Pscx ships one) shadows the built-in cmdlet and has no -DestinationPath.
+            Microsoft.PowerShell.Archive\Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
             $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
             if ($found -and $found.FullName -ne $innounp) {
                 Copy-Item -Force $found.FullName $innounp

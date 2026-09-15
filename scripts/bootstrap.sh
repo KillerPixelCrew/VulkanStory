@@ -462,6 +462,9 @@ done
 forks_file="$repo_root/forks.json"
 if [[ -f "$forks_file" ]]; then
   while IFS=$'\t' read -r name url ref; do
+    # A Windows python3 writes CRLF into the pipe and read keeps the \r on the last
+    # field, so "git checkout <sha>\r" fails with an unknown pathspec.
+    ref="${ref%$'\r'}"
     base="$snapshot_dir/$name"
 
     if [[ ! -d "$base" || "$refresh" == "1" ]]; then
@@ -499,6 +502,7 @@ fi
 ref_dir="$repo_root/ref/source"
 if [[ -f "$forks_file" ]]; then
   while IFS=$'\t' read -r name url ref; do
+    ref="${ref%$'\r'}"
     dest="$ref_dir/$name"
     if [[ ! -d "$dest" ]]; then
       echo "Cloning reference: $name"

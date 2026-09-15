@@ -169,9 +169,10 @@ cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$APP_DIR/"
 for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
     [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$APP_DIR/"
 done
+# shaderc goes into the application directory, where Silk.NET.Shaderc probes; not Lib/.
 SHADERC_NATIVE="$MOD_OUT/runtimes/osx-x64/native/libshaderc_shared.dylib"
 if [[ -f "$SHADERC_NATIVE" ]]; then
-    cp -f "$SHADERC_NATIVE" "$APP_DIR/Lib/"
+    cp -f "$SHADERC_NATIVE" "$APP_DIR/"
 else
     echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
 fi

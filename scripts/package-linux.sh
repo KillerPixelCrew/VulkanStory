@@ -296,10 +296,12 @@ for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
     [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$STAGE_DIR/"
 done
 
-# shaderc is a native library; the game loads natives out of Lib/.
+# shaderc is a native library loaded by Silk.NET.Shaderc, which probes the
+# application directory and LD_LIBRARY_PATH, not Lib/ - a copy it cannot find
+# makes the renderer fall back to OpenGL silently.
 SHADERC_NATIVE="$MOD_OUT/runtimes/linux-x64/native/libshaderc_shared.so"
 if [[ -f "$SHADERC_NATIVE" ]]; then
-    cp -f "$SHADERC_NATIVE" "$STAGE_DIR/Lib/"
+    cp -f "$SHADERC_NATIVE" "$STAGE_DIR/"
 else
     echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
 fi
