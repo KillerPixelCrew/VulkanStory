@@ -68,6 +68,20 @@ public sealed unsafe class VulkanDevice : IDisposable
     internal static bool ResolveSynchronousPipelines(bool? configured, string? environment) =>
         configured ?? environment?.Trim() is "1" or "on" or "true";
 
+    /// <summary>
+    /// The same, where a frame capture also forces blocking creation: OPTIMUM_PARITY_DUMP and
+    /// OPTIMUM_HEADLESS_FRAMES write exact frames to disk, and a background compile would leave
+    /// draws out of them. Each counts when it names an absolute directory, which is when the
+    /// capture code acts on it. An explicit <paramref name="configured" /> still wins.
+    /// </summary>
+    internal static bool ResolveSynchronousPipelines(bool? configured, string? environment, string? parityDump,
+        string? headlessFrames) =>
+        configured ?? (ResolveSynchronousPipelines(null, environment) || NamesCaptureDirectory(parityDump) ||
+                       NamesCaptureDirectory(headlessFrames));
+
+    private static bool NamesCaptureDirectory(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && System.IO.Path.IsPathRooted(value);
+
     /// <summary>The pipeline cache. Tests only.</summary>
     internal GraphicsPipelineCache PipelinesForTests => _pipelines;
 
@@ -466,7 +480,9 @@ public sealed unsafe class VulkanDevice : IDisposable
         // Background compiles (docs/research/vulkan-caching.md, design item 4): a draw whose
         // pipeline is not in the driver cache is skipped while a worker compiles it.
         bool synchronousPipelines = ResolveSynchronousPipelines(SynchronousPipelines,
-            Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SYNC_PIPELINES"));
+            Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SYNC_PIPELINES"),
+            Environment.GetEnvironmentVariable("OPTIMUM_PARITY_DUMP"),
+            Environment.GetEnvironmentVariable("OPTIMUM_HEADLESS_FRAMES"));
         _pipelines.AsyncCompiles = !synchronousPipelines;
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
@@ -499,7 +515,7 @@ public sealed unsafe class VulkanDevice : IDisposable
               "; pipeline key log " + (_pipelinePersistence?.KeyLog.Count ?? 0) + " entries");
         MirrorValidationMessage("--- pipelines " + (_pipelines.AsyncCompiles
             ? "compile in the background"
-            : synchronousPipelines ? "compile blocking (OPTIMUM_VULKAN_SYNC_PIPELINES)" : "compile blocking (no pipelineCreationCacheControl)"));
+            : synchronousPipelines ? "compile blocking (OPTIMUM_VULKAN_SYNC_PIPELINES, a frame capture or the device setting)" : "compile blocking (no pipelineCreationCacheControl)"));
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
         CreatePlaceholderUniformBuffer();

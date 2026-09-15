@@ -360,6 +360,23 @@ public class PipelineCacheTests
     }
 
     /// <summary>
+    /// A frame written to disk must hold every draw, and OPTIMUM_PARITY_DUMP and
+    /// OPTIMUM_HEADLESS_FRAMES are documented as standalone switches: set without the capture
+    /// scripts (which also export OPTIMUM_VULKAN_SYNC_PIPELINES), they still force blocking
+    /// creation. Explicit settings keep the last word.
+    /// </summary>
+    [Fact]
+    public void AFrameCaptureForcesBlockingPipelinesWithoutTheScripts()
+    {
+        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "/tmp/dump", headlessFrames: null));
+        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: null, headlessFrames: "/tmp/frames"));
+        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, "0", parityDump: "/tmp/dump", headlessFrames: null));
+        // The capture code ignores a relative or blank directory, so the pipelines do too.
+        Assert.False(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "relative", headlessFrames: " "));
+        Assert.False(VulkanDevice.ResolveSynchronousPipelines(false, null, parityDump: "/tmp/dump", headlessFrames: "/tmp/frames"));
+    }
+
+    /// <summary>
     /// The opportunistic save on a real driver: once the cache has grown past the threshold,
     /// a due sample writes the file from a worker, and the file seeds a new cache.
     /// </summary>
@@ -680,6 +697,133 @@ public class PipelineCacheTests
             catch (System.IO.DirectoryNotFoundException)
             {
             }
+        }
+    }
+
+    /// <summary>
+    /// One blocking session under <paramref name="root" /> that draws <paramref name="fragment" />
+    /// once, so the root then holds a key log entry and a driver cache that contain that
+    /// pipeline. False when there is no device with pipelineCreationCacheControl.
+    /// </summary>
+    private bool RecordSession(string root, string fragment, byte[] colour, int size)
+    {
+        using VulkanDevice? first = OpenDevice(synchronousPipelines: true, cacheRoot: root);
+        if (first == null || !first.ContextForTests.Capabilities.PipelineCreationCacheControl) return false;
+        int program = VulkanDeviceIntegrationTests.LinkProgram(first, FullscreenVertex, fragment);
+        int framebuffer = ColourTarget(first, size);
+        BeginDraw(first, framebuffer, size, program);
+        first.DrawFullscreenTriangle();
+        first.Present();
+        Assert.Equal(colour, ReadCentre(first, framebuffer, size));
+        GpuTest.AssertClean(first);
+        return true;
+    }
+
+    private static void DeleteRoot(string root)
+    {
+        try
+        {
+            System.IO.Directory.Delete(root, recursive: true);
+        }
+        catch (System.IO.DirectoryNotFoundException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// A prewarm job still waiting in its queue must not cost a draw the driver cache can serve
+    /// on the spot: on a warm start (or a shader reload with unchanged sources) every program
+    /// queues its prewarm when it links, and the workers reach the last of them seconds later.
+    /// The lookup tries the driver cache itself, takes the pipeline, and the queued job is
+    /// dropped rather than built a second time.
+    /// </summary>
+    [SkippableFact]
+    public void AQueuedPrewarmDoesNotSkipADrawTheDriverCacheCanServe()
+    {
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-pipeline-queued-prewarm-" + Guid.NewGuid().ToString("N"));
+        const int size = 8;
+        byte[] colour = UniqueColour();
+        string fragment = SolidFragment(colour);
+        try
+        {
+            Skip.IfNot(RecordSession(root, fragment, colour, size), "No device with pipelineCreationCacheControl.");
+
+            using VulkanDevice? second = OpenDevice(synchronousPipelines: false, cacheRoot: root);
+            Skip.If(second == null, "No usable Vulkan device.");
+            GraphicsPipelineCache pipelines = second!.PipelinesForTests;
+            Skip.IfNot(pipelines.SeedAccepted, "The driver rejected its own saved cache.");
+            pipelines.HoldBackgroundCompilesForTests = true;
+
+            int program = VulkanDeviceIntegrationTests.LinkProgram(second, FullscreenVertex, fragment);
+            Assert.Equal(1, pipelines.PendingCompiles);
+
+            int target = ColourTarget(second, size);
+            BeginDraw(second, target, size, program);
+            second.DrawFullscreenTriangle();
+            second.Present();
+
+            Assert.Equal(colour, ReadCentre(second, target, size));
+            Assert.Equal(0, pipelines.DrawsSkipped);
+            Assert.Equal(0, pipelines.CompiledSync);
+            Assert.Equal(1, pipelines.Warm);
+
+            pipelines.HoldBackgroundCompilesForTests = false;
+            Assert.True(pipelines.WaitForBackgroundCompiles(TimeSpan.FromSeconds(60)), "the workers did not drain");
+            BeginDraw(second, target, size, program);
+            second.DrawFullscreenTriangle();
+            second.Present();
+
+            Assert.Equal(0, pipelines.PendingCompiles);
+            Assert.Equal(0, pipelines.PrewarmedWaiting);
+            Assert.Equal(0, pipelines.Prewarmed);
+            Assert.Equal(1, pipelines.Count);
+            GpuTest.AssertClean(second);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// A compile that finished but was not yet published when its program was deleted (the
+    /// window between the worker's completion and the next frame start) belongs to the
+    /// deleted program like a queued or running one: it is destroyed at publication, never
+    /// parked as a prewarmed pipeline no lookup can claim.
+    /// </summary>
+    [SkippableFact]
+    public void AFinishedCompileOfADeletedProgramIsDestroyedNotPublished()
+    {
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-pipeline-deleted-program-" + Guid.NewGuid().ToString("N"));
+        const int size = 8;
+        byte[] colour = UniqueColour();
+        string fragment = SolidFragment(colour);
+        try
+        {
+            Skip.IfNot(RecordSession(root, fragment, colour, size), "No device with pipelineCreationCacheControl.");
+
+            using VulkanDevice? second = OpenDevice(synchronousPipelines: false, cacheRoot: root);
+            Skip.If(second == null, "No usable Vulkan device.");
+            GraphicsPipelineCache pipelines = second!.PipelinesForTests;
+
+            int program = VulkanDeviceIntegrationTests.LinkProgram(second, FullscreenVertex, fragment);
+            Assert.Equal(1, pipelines.PendingCompiles);
+            Assert.True(pipelines.WaitForBackgroundCompiles(TimeSpan.FromSeconds(60)), "the prewarm did not finish");
+
+            second.DeleteProgram(program);
+            int target = ColourTarget(second, size);
+            second.BeginFrame();
+            second.BindFramebuffer(target);
+            second.ClearColor(0, 0f, 0f, 0f, 1f);
+            second.Present();
+
+            Assert.Equal(0, pipelines.PendingCompiles);
+            Assert.Equal(0, pipelines.PrewarmedWaiting);
+            GpuTest.AssertClean(second);
+        }
+        finally
+        {
+            DeleteRoot(root);
         }
     }
 }
