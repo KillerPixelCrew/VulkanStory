@@ -208,6 +208,44 @@ internal static class VulkanStats
     /// </summary>
     public static void NoteFeedbackSplit() => Interlocked.Increment(ref _feedbackSplits);
 
+    private static long _passes;
+    private static long _planHits;
+    private static long _planMisses;
+    private static long _inPassClears;
+    private static long _promotedClears;
+    private static long _standaloneClears;
+    private static long _passSplits;
+
+    /// <summary>A frame-graph pass opened its scope (a declared pass, or a scope no declaration covered).</summary>
+    public static void NotePass() => Interlocked.Increment(ref _passes);
+
+    /// <summary>A frame whose passes matched the plan solved from the previous frame exactly.</summary>
+    public static void NotePlanHit() => Interlocked.Increment(ref _planHits);
+
+    /// <summary>A frame recorded conservatively because it did not match the plan.</summary>
+    public static void NotePlanMiss() => Interlocked.Increment(ref _planMisses);
+
+    /// <summary>A clear recorded as vkCmdClearAttachments inside an open pass.</summary>
+    public static void NoteInPassClear() => Interlocked.Increment(ref _inPassClears);
+
+    /// <summary>A clear issued with no pass open that became LOAD_OP_CLEAR.</summary>
+    public static void NotePromotedClear() => Interlocked.Increment(ref _promotedClears);
+
+    /// <summary>A promoted clear recorded as a clear-image command (its image was used before a pass attached it).</summary>
+    public static void NoteStandaloneClear() => Interlocked.Increment(ref _standaloneClears);
+
+    /// <summary>A second rendering scope inside one declared pass.</summary>
+    public static void NotePassSplit() => Interlocked.Increment(ref _passSplits);
+
+    private static long _computePasses;
+    private static long _dispatches;
+
+    /// <summary>A compute pass recorded (its barriers, pipeline and set), outside any rendering scope.</summary>
+    public static void NoteComputePass() => Interlocked.Increment(ref _computePasses);
+
+    /// <summary>One vkCmdDispatch.</summary>
+    public static void NoteDispatch() => Interlocked.Increment(ref _dispatches);
+
     private static long _transientBytes;
     private static long _aliasedBytesPeak;
     private static long _transientLeases;
@@ -441,10 +479,8 @@ internal static class VulkanStats
             PromotedClears: Interlocked.Exchange(ref _promotedClears, 0),
             StandaloneClears: Interlocked.Exchange(ref _standaloneClears, 0),
             PassSplits: Interlocked.Exchange(ref _passSplits, 0),
-            PushConstantWrites: Interlocked.Exchange(ref _intervalPushConstantWrites, 0),
-            StorageSetBinds: Interlocked.Exchange(ref _intervalStorageSetBinds, 0),
-            BindlessSlots: Interlocked.Exchange(ref _intervalBindlessSlots, 0),
-            BindlessPlaceholders: Interlocked.Exchange(ref _intervalBindlessPlaceholders, 0));
+            ComputePasses: Interlocked.Exchange(ref _computePasses, 0),
+            Dispatches: Interlocked.Exchange(ref _dispatches, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -549,14 +585,13 @@ internal static class VulkanStats
             "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7} " +
             "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11} " +
             "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
-            "standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} " +
-            "bindless_slots={21} bindless_placeholders={22}",
+            "standalone_clears={17} pass_splits={18} compute_passes={19} dispatches={20}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
             counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
             counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits,
-            counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders);
+            counters.ComputePasses, counters.Dispatches);
 
     private static long _lastSample;
 
@@ -648,10 +683,8 @@ internal readonly record struct CounterSample(
     long PromotedClears = 0,
     long StandaloneClears = 0,
     long PassSplits = 0,
-    long PushConstantWrites = 0,
-    long StorageSetBinds = 0,
-    long BindlessSlots = 0,
-    long BindlessPlaceholders = 0);
+    long ComputePasses = 0,
+    long Dispatches = 0);
 
 /// <summary>The values on the <c>stats.transients</c> line.</summary>
 internal readonly record struct TransientSample(

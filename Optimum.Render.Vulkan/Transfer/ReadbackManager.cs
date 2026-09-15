@@ -60,7 +60,7 @@ internal sealed unsafe class ReadbackManager : IDisposable
     /// The caller has closed any open rendering scope and submits afterwards.
     /// </summary>
     public ReadbackTicket CopyToHost(VulkanTexture texture, int x, int y, uint width, uint height,
-        ImageAspectFlags aspect, ulong bytes)
+        ImageAspectFlags aspect, ulong bytes, uint mipLevel = 0)
     {
         FrameSlot slot = _frames.Current;
         CommandBuffer commandBuffer = slot.CommandBuffer;
@@ -76,7 +76,7 @@ internal sealed unsafe class ReadbackManager : IDisposable
         var region = new BufferImageCopy
         {
             BufferOffset = offset,
-            ImageSubresource = new ImageSubresourceLayers(aspect, 0, 0, 1),
+            ImageSubresource = new ImageSubresourceLayers(aspect, mipLevel, 0, 1),
             ImageOffset = new Offset3D(x, y, 0),
             ImageExtent = new Extent3D(width, height, 1),
         };
