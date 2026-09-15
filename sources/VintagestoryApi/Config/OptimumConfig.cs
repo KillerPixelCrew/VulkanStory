@@ -235,6 +235,25 @@ public static class OptimumConfig
     [ThreadStatic]
     public static bool RouteChiselLodMeshes;
 
+    /// <summary>
+    /// Issue #73: pool the per-clone CustomMeshDataPart buffers that chunk mesh
+    /// finalization (MeshData.CloneUsingRecycler) allocates. Profiling attributed
+    /// ~45 KB/chunk (99% of finalize allocation) to these clones. Default on; the
+    /// pool is bypassed (fresh clone) whenever the caller is not the single
+    /// tessellation worker, so it is safe with the current 1-worker setup and
+    /// degrades to vanilla behavior if that ever changes. Set false to disable.
+    /// </summary>
+    public static bool MeshPartPoolEnabled = true;
+
+    /// <summary>
+    /// Issue #73: true when the CustomMeshDataPart pool may be used. Requires the
+    /// feature flag AND at most one tessellation worker, so the pool's
+    /// single-thread-owned free lists are never touched by concurrent pulls. If a
+    /// second worker ever registers this returns false and clones fall back to
+    /// fresh allocation (vanilla behavior), which is always correct.
+    /// </summary>
+    public static bool MeshPartPoolActive => MeshPartPoolEnabled && OptimumDiagnostics.TessWorkerCount <= 1;
+
     // Settings that live in VintagestoryLib (read per-frame from ClientSettings).
     // Mirrored here for persistence only.
     public static bool EntityShadowCull = true;
@@ -647,6 +666,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChiselLodDistance), ChiselLodDistance.ToString()),
         (nameof(OptimumConfigData.OcclusionCullingScale), OcclusionCullingScaleEnabled.ToString()),
         (nameof(OptimumConfigData.BfsChunkVisibility), BfsChunkVisibilityEnabled.ToString()),
+        (nameof(OptimumConfigData.MeshPartPool), MeshPartPoolEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -735,6 +755,7 @@ public static class OptimumConfig
             ChiselLodDistanceSq = (double)data.ChiselLodDistance * data.ChiselLodDistance;
             OcclusionCullingScaleEnabled = data.OcclusionCullingScale;
             BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
+            MeshPartPoolEnabled = data.MeshPartPool;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -808,6 +829,7 @@ public static class OptimumConfig
             ChiselLodDistance = ChiselLodDistance,
             OcclusionCullingScale = OcclusionCullingScaleEnabled,
             BfsChunkVisibility = BfsChunkVisibilityEnabled,
+            MeshPartPool = MeshPartPoolEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -885,6 +907,7 @@ internal sealed class OptimumConfigData
     public int ChiselLodDistance { get; set; } = 48;
     public bool OcclusionCullingScale { get; set; } = true;
     public bool BfsChunkVisibility { get; set; } = true;
+    public bool MeshPartPool { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
@@ -1097,6 +1120,92 @@ public static class OptimumDiagnostics
         double poolMBSaved = quadsSaved * 88.0 / (1024.0 * 1024.0);
 
         return $"Optimum greedy mesh: enabled={OptimumConfig.GreedyMeshEnabled}, maxMergeWidth={OptimumConfig.GreedyMeshMaxMergeWidth}, maxMergeHeight={OptimumConfig.GreedyMeshMaxMergeHeight}, lightTolerance={OptimumConfig.GreedyMeshLightTolerance}, farDistance={OptimumConfig.GreedyMeshFarDistance}, chunks={chunks}, quads={quads}, blocksConsumed={blocksConsumed}, blocksPerQuad={blocksPerQuad:0.00}, quadsSaved={quadsSaved}, estPoolMBSaved={poolMBSaved:0.00}";
+    }
+
+    // --- Issue #73 mesh-construction profiler (diagnostic only) ---
+    // Per NowProcessChunk call: wall-clock ticks and thread-allocated bytes,
+    // split into the tessellation phase (BuildBlockPolygons: the per-block
+    // loop) and the finalize phase (populateTesselatedChunkPart +
+    // MergeTesselatedChunkParts: the part-object + clone allocations). Runs on
+    // the tesselation thread. Enabled by OPTIMUM_MESH_PROFILE=1 via
+    // OptimumConfig.MeshProfileEnabled.
+    private static long _meshChunks;
+    private static long _meshTessTicks;
+    private static long _meshFinalizeTicks;
+    private static long _meshTotalTicks;
+    private static long _meshTessAllocBytes;
+    private static long _meshFinalizeAllocBytes;
+    private static long _meshPartsCreated;
+    private static long _meshCloneAllocBytes;
+    private static long _meshCloneSmallVerts;
+    private static long _meshCloneLargeVerts;
+    private static long _meshSinceLog;
+
+    public static void RecordMeshClone(long bytes, int smallVerts, int largeVerts)
+    {
+        Interlocked.Add(ref _meshCloneAllocBytes, bytes);
+        Interlocked.Add(ref _meshCloneSmallVerts, smallVerts);
+        Interlocked.Add(ref _meshCloneLargeVerts, largeVerts);
+    }
+    public static volatile bool MeshProfileEnabled;
+    public const int MeshProfileLogEvery = 200;
+
+    public static void RecordMeshTess(long tessTicks, long tessAllocBytes)
+    {
+        Interlocked.Add(ref _meshTessTicks, tessTicks);
+        Interlocked.Add(ref _meshTessAllocBytes, tessAllocBytes);
+    }
+
+    /// <summary>Returns true when a mesh-profile summary should be logged now.</summary>
+    public static bool RecordMeshFinalize(long finalizeTicks, long finalizeAllocBytes, int partsCreated, long totalTicks)
+    {
+        Interlocked.Increment(ref _meshChunks);
+        Interlocked.Add(ref _meshFinalizeTicks, finalizeTicks);
+        Interlocked.Add(ref _meshFinalizeAllocBytes, finalizeAllocBytes);
+        Interlocked.Add(ref _meshPartsCreated, partsCreated);
+        Interlocked.Add(ref _meshTotalTicks, totalTicks);
+        if (!MeshProfileEnabled) return false;
+        return Interlocked.Increment(ref _meshSinceLog) % MeshProfileLogEvery == 0;
+    }
+
+    public static void ResetMeshProfile()
+    {
+        Interlocked.Exchange(ref _meshChunks, 0);
+        Interlocked.Exchange(ref _meshTessTicks, 0);
+        Interlocked.Exchange(ref _meshFinalizeTicks, 0);
+        Interlocked.Exchange(ref _meshTotalTicks, 0);
+        Interlocked.Exchange(ref _meshTessAllocBytes, 0);
+        Interlocked.Exchange(ref _meshFinalizeAllocBytes, 0);
+        Interlocked.Exchange(ref _meshCloneAllocBytes, 0);
+        Interlocked.Exchange(ref _meshCloneSmallVerts, 0);
+        Interlocked.Exchange(ref _meshCloneLargeVerts, 0);
+        Interlocked.Exchange(ref _meshPartsCreated, 0);
+    }
+
+    public static string GetMeshProfileSummary()
+    {
+        long chunks = Interlocked.Read(ref _meshChunks);
+        if (chunks == 0) return "Optimum mesh profile: no chunks tesselated";
+        double f = System.Diagnostics.Stopwatch.Frequency / 1000.0;
+        long tessTicks = Interlocked.Read(ref _meshTessTicks);
+        long finTicks = Interlocked.Read(ref _meshFinalizeTicks);
+        long totalTicks = tessTicks + finTicks;
+        long tessAlloc = Interlocked.Read(ref _meshTessAllocBytes);
+        long finAlloc = Interlocked.Read(ref _meshFinalizeAllocBytes);
+        long cloneAlloc = Interlocked.Read(ref _meshCloneAllocBytes);
+        long smallV = Interlocked.Read(ref _meshCloneSmallVerts);
+        long largeV = Interlocked.Read(ref _meshCloneLargeVerts);
+        long parts = Interlocked.Read(ref _meshPartsCreated);
+        double totalAllocMB = (tessAlloc + finAlloc) / (1024.0 * 1024.0);
+        return $"Optimum mesh profile: chunks={chunks}"
+            + $", total meanMs={totalTicks / f / chunks:0.000}"
+            + $", tess meanMs={tessTicks / f / chunks:0.000}"
+            + $", finalize meanMs={finTicks / f / chunks:0.000}"
+            + $", allocPerChunk={(tessAlloc + finAlloc) / (double)chunks:0} B"
+            + $" (tess={tessAlloc / (double)chunks:0} B, finalize={finAlloc / (double)chunks:0} B, ofWhichClone={cloneAlloc / (double)chunks:0} B)"
+            + $", cloneVertsPerChunk small={smallV / (double)chunks:0}/large={largeV / (double)chunks:0}"
+            + $", partsPerChunk={parts / (double)chunks:0.0}"
+            + $", totalAllocMB={totalAllocMB:0.0}";
     }
 
     public static void RecordChiselLod(int fullTriangles, int proxyTriangles, bool fallback, long elapsedTicks)
@@ -1438,6 +1547,9 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter EntityTesselationBudget = new();
     public static readonly HitSkipCounter EntityOutfitShapeCache = new();
     public static readonly HitSkipCounter EntityOutfitAnimatorCache = new();
+    // Issue #73: hit = a CustomMeshDataPart clone served from the pool, skip = a
+    // fresh allocation (cold pool, non-poolable part, or pool inactive).
+    public static readonly HitSkipCounter MeshPartPool = new();
 
     /// <summary>
     /// Every hit/skip counter above, keyed by name, for .optimum status and
@@ -1469,6 +1581,7 @@ public static class OptimumDiagnostics
         [nameof(EntityTesselationBudget)] = EntityTesselationBudget,
         [nameof(EntityOutfitShapeCache)] = EntityOutfitShapeCache,
         [nameof(EntityOutfitAnimatorCache)] = EntityOutfitAnimatorCache,
+        [nameof(MeshPartPool)] = MeshPartPool,
     };
 
     public static void ResetAllCounters()
@@ -1896,6 +2009,12 @@ public static class OptimumDiagnostics
                 _tessWorkerIds.Add(threadId);
             }
         }
+    }
+
+    /// <summary>Number of distinct registered tessellation worker threads.</summary>
+    public static int TessWorkerCount
+    {
+        get { lock (_tessWorkerGate) { return _tessWorkerIds.Count; } }
     }
 
     /// <summary>Check if a chunk has exceeded the retry threshold (50) and should log a warning.</summary>
