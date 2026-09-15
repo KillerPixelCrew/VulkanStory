@@ -293,6 +293,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             this.device = device;
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
             RenderStageListener = new FrameGraphStageListener(this);
+            // Phase 5: registered mod motion writers reach this platform's motion window.
+            InstallModPassHooks();
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
             OptimumForkGraphics.Active = new VulkanForkGraphics(device);
             return true;
@@ -321,6 +323,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
+        RemoveModPassHooks();
         try
         {
             device?.Dispose();
