@@ -136,7 +136,7 @@ run_server() {
 
 find_database() {
     local datapath="$1"
-    find "$datapath/Saves" -type f -name "*.vcdbs" -print -quit 2>/dev/null
+    find "$datapath/Saves" -type f -name "*.vcdbs" -print 2>/dev/null | head -n 1
 }
 
 sqlite_query() {
