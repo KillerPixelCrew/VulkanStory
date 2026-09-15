@@ -53,6 +53,7 @@
     <Compile Remove="Config\optimum-api-bridge.cs" />
     <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
     <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
+    <Compile Remove="Client\Render\OptimumModPasses.cs" />
   </ItemGroup>
 
   <ItemGroup>

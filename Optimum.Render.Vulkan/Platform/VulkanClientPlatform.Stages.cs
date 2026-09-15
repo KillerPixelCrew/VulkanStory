@@ -29,6 +29,9 @@ public partial class VulkanClientPlatform
 
     public override void EndRenderStage(EnumRenderStage stage)
     {
+        // Phase 5: the passes mods declared for this slot run after the stage's renderers,
+        // still inside the stage (VulkanClientPlatform.ModPasses.cs).
+        RunModPasses(stage);
         InRenderStage = false;
         RenderStageListener?.OnEndRenderStage(stage);
     }
