@@ -27,7 +27,7 @@ public class BindlessCapabilityTests
         MaxPerStageDescriptorUpdateAfterBindSamplers: DescriptorIndexingFloor.RequiredSampledImages,
         MaxDescriptorSetUpdateAfterBindSampledImages: DescriptorIndexingFloor.RequiredSampledImages,
         MaxDescriptorSetUpdateAfterBindSamplers: DescriptorIndexingFloor.RequiredSampledImages,
-        MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic: 1,
+        MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic: DescriptorIndexingFloor.RequiredDynamicUniformBuffers,
         MaxPushConstantsSize: DescriptorIndexingFloor.RequiredPushConstantBytes);
 
     [Fact]
@@ -71,8 +71,10 @@ public class BindlessCapabilityTests
             "maxDescriptorSetUpdateAfterBindSampledImages", below, required);
         AssertSingle(AtFloor() with { MaxDescriptorSetUpdateAfterBindSamplers = below },
             "maxDescriptorSetUpdateAfterBindSamplers", below, required);
-        AssertSingle(AtFloor() with { MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic = 0 },
-            "maxDescriptorSetUpdateAfterBindUniformBuffersDynamic", 0, "1");
+        uint dynamicBelow = DescriptorIndexingFloor.RequiredDynamicUniformBuffers - 1;
+        AssertSingle(AtFloor() with { MaxDescriptorSetUpdateAfterBindUniformBuffersDynamic = dynamicBelow },
+            "maxDescriptorSetUpdateAfterBindUniformBuffersDynamic", dynamicBelow,
+            DescriptorIndexingFloor.RequiredDynamicUniformBuffers.ToString());
         AssertSingle(AtFloor() with { MaxPushConstantsSize = 64 }, "maxPushConstantsSize", 64, "128");
     }
 
