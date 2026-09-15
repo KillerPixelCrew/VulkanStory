@@ -653,6 +653,8 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("ValidationFeatureEnableEXT.SynchronizationValidationExt", context);
         Assert.Contains("ValidationFeatureEnableEXT.BestPracticesExt", context);
         Assert.Contains("StructureType.ValidationFeaturesExt", context);
+        Assert.Contains("StructureType.LayerSettingsCreateInfoExt", context);
+        Assert.Contains("\"validate_best_practices_nvidia\"", context);
     }
 
     [Fact]

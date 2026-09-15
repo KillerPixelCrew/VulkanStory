@@ -317,7 +317,14 @@ pacing seen in Phase 0 and Phase 1 was the moving world, not the build. Evidence
 
 ### Validation log
 - `OPTIMUM_VULKAN_VALIDATION=1 OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best` (log:
-  `$TMPDIR/optimum-vulkan-validation.log`, or set the first variable to a path). Read it before
+  `$TMPDIR/optimum-vulkan-validation.log`, or set the first variable to a path). The feature list is a
+  comma list: `sync` (synchronization validation with structured message properties), `best` (best
+  practices with the NVIDIA and AMD sets, reporting performance warnings too), `mobile` (the Arm and IMG
+  sets, advisory on desktop GPUs), `gpu` (GPU-assisted validation) and `gpu-only` (GPU-assisted with CPU
+  core validation off, as the layer's documentation advises). They reach the layer through
+  `VK_EXT_layer_settings`, or the deprecated `VK_EXT_validation_features` on a layer without it; the
+  device-up line of the log names the layer version and the settings actually applied. Run one area per
+  session (`docs/research/vulkan-validation.md` §1). Read it before
   instrumenting anything: a bug that flickers between frames is invisible to screenshots and to
   per-frame probes (`CLAUDE.md` rule 9).
 
