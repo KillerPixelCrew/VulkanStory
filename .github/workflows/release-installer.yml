@@ -35,16 +35,16 @@ jobs:
           - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
           - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
           - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
-          - { os: macos-13, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
+          - { os: macos-14, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -210,7 +210,7 @@ jobs:
         run: echo "signtool step goes here once a certificate secret exists"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.label }}
           path: releases/
@@ -222,10 +222,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -251,7 +251,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download the feeds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           path: feeds
