@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..5dc1182 100644
+index d6eb844..b7f9663 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,473 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,496 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -101,6 +101,29 @@ index d6eb844..5dc1182 100644
 +	public virtual bool RenderOptimumSkyMotion()
 +	{
 +		return false;
++	}
++
++	/// <summary>
++	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the sky dome's draw,
++	/// as a seam of its own.
++	///
++	/// What it draws: the 250-unit icosahedron SystemRenderSkyColor renders the sky gradient onto,
++	/// once per frame at the start of the Opaque stage.
++	/// The other side: the neutral body below is the OpenGL path - it is exactly the
++	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, so "OFF is vanilla" holds - and
++	/// VulkanClientPlatform.RenderSkyDome is the native one.
++	/// Target and slots: whatever the Opaque stage has bound, which is Primary; the sky writes
++	/// colour 0 and the glow slot 1 and nothing else, and never the motion attachment.
++	/// State that is not obvious: the caller has already turned the depth test off and left the
++	/// projection and model-view matrices on the program, so the seam changes no state of its own.
++	/// The sky and glow textures are passed because a native pass resolves the textures it samples
++	/// from handles, not from the texture units the program's setters bound them to.
++	/// What pins it: NativeSkyTests (old route against native route) and
++	/// Optimum.Tests/native-sky-coverage-tests.cs.
++	/// </summary>
++	public virtual void RenderSkyDome(MeshRef skyDome, int skyTextureId, int glowTextureId, float[] modelViewMatrix)
++	{
++		RenderMesh(skyDome);
 +	}
 +
 +	public virtual bool RenderOptimumTaaResolve()

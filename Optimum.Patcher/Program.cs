@@ -82,6 +82,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "BeginMotionOnlyWrite",
         "EndMotionOnlyWrite",
         "RenderOptimumSkyMotion",
+        // Phase 3b stage 2: the sky dome's draw seam, so a native platform records that pass
+        // itself. The neutral body is the RenderMesh call it replaced.
+        "RenderSkyDome",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
         // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform

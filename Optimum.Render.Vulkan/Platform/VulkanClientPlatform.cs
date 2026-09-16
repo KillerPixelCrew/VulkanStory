@@ -137,6 +137,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "EndRenderStage", new[] { "EnumRenderStage" }),
         // Phase 2 step 2: the TAA post methods declare their frame-graph passes.
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
+        // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.
+        new(true, "RenderSkyDome", new[] { "MeshRef", "Int32", "Int32", "Single[]" }),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
         // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.
