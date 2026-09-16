@@ -244,9 +244,9 @@ jobs:
             tag_clean="${tag_clean#v}"
             version="$tag_clean"
           else
-            tag="installer-v${version:-$(cat VERSION)}"
+            version="${version:-$(cat VERSION)}"
+            tag="v$version"
           fi
-          [ -n "$version" ] || version="$(cat VERSION)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -272,7 +272,7 @@ jobs:
                 --outputDir "feeds/installer-$channel" \
                 --channel "$channel" \
                 --tag "$tag" \
-                --releaseName "Optimum installer v$version" \
+                --releaseName "$tag" \
                 --merge \
                 --publish
             fi
