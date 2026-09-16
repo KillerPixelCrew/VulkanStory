@@ -139,6 +139,18 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.
         new(true, "RenderSkyDome", new[] { "MeshRef", "Int32", "Int32", "Single[]" }),
+        // Phase 3b stage 2: the chunk draw-group scope every ChunkRenderer pass brackets
+        // its pools with, which routes the terrain multi-draws through the native API.
+        new(true, "BeginChunkPass", new[] { "String", "Boolean", "Boolean", "Boolean", "Boolean" }),
+        new(true, "EndChunkPass", Array.Empty<string>()),
+        // Phase 3b stage 2: the entity draw seam - every sub-mesh of a multi-texture mesh.
+        new(true, "RenderEntityMesh", new[] { "MeshRef", "String", "Int32" }),
+        // Phase 3b stage 2: the remaining sky, particle and decal draw seams.
+        new(true, "RenderNightSkyBox", new[] { "MeshRef", "Int32" }),
+        new(true, "RenderCelestialQuad", new[] { "MeshRef", "Int32", "Int32", "Int32" }),
+        new(true, "RenderParticles", new[] { "MeshRef", "Int32", "Int32" }),
+        new(true, "BeginDecalPass", new[] { "Int32", "Int32" }),
+        new(true, "EndDecalPass", Array.Empty<string>()),
         // Phase 3b stage 2, GUI and text: the texture-into-texture blit and the aiming reticle's
         // line draws, the two GUI systems whose fixed state is stated at their call site.
         new(true, "RenderTextureQuad", new[] { "MeshRef", "Int32", "Boolean" }),

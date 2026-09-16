@@ -85,6 +85,27 @@ var membersToInject = new Dictionary<string, List<string>>
         // Phase 3b stage 2: the sky dome's draw seam, so a native platform records that pass
         // itself. The neutral body is the RenderMesh call it replaced.
         "RenderSkyDome",
+        // Phase 3b stage 2: the chunk draw-group scope, so a native platform can state a
+        // terrain pipeline's fixed state instead of reading it back off the GL state. Neutral
+        // bodies: BeginChunkPass returns false and EndChunkPass does nothing, so the OpenGL
+        // path draws exactly what it drew before.
+        "BeginChunkPass",
+        "EndChunkPass",
+        // Phase 3b stage 2: the entity draw seam (every sub-mesh of a multi-texture mesh), so a
+        // native platform records the entityanimated and shadowmapentityanimated passes itself.
+        // The neutral body is the RenderMesh call it replaced.
+        "RenderEntityMesh",
+        // Phase 3b stage 2: the draw seams of the remaining sky, particle and decal systems,
+        // each with the neutral body of the draw it replaced.
+        "RenderNightSkyBox",
+        "RenderCelestialQuad",
+        "RenderParticles",
+        // The decal pool draws through a scope seam, not a draw seam: the mesh handle stays
+        // inside MeshDataPool (internal in the vanilla API), so the lib runs the vanilla
+        // MeshDataPool.Draw between Begin and End and a native platform takes its RenderMesh
+        // multi-draw while the scope is open. Neutral bodies are empty.
+        "BeginDecalPass",
+        "EndDecalPass",
         // Phase 3b stage 2, GUI and text: the two GUI draw seams, so a native platform records
         // those passes itself. Both neutral bodies are the RenderMesh call they replaced.
         "RenderTextureQuad",
@@ -1061,7 +1082,7 @@ var targets = new List<MethodTarget>
     // Phase 3b stage 2, GUI and text: the two callers that draw through the new GUI seams -
     // the texture-into-texture blit that bakes every Cairo GUI and text surface, and the
     // aiming reticle's line draws.
-    new("Vintagestory.Client.NoObf.ClientMain", "RenderTextureIntoFrameBuffer", 9),
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderTextureIntoFrameBuffer", 10),
     new("Vintagestory.Client.NoObf.SystemRenderPlayerAimAcc", "OnRenderFrame2DOverlay", 1),
     // SystemSoundEngine: audio listener update threshold + periodic refresh
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),

@@ -171,7 +171,139 @@ extends the API and ports the simplest system through it.
   for the lib seam. The four system stages add their systems to those files rather than to files named
   after the stage.
 
-## 3c. Stage 2 scope: GUI and text
+### Chunks: the terrain on the mesh-draw API
+
+The first of the four system stages, and the heaviest draw path in the game.
+
+- **Seam:** `ClientPlatformAbstract.BeginChunkPass(string chunkPass, bool blend, bool depthTest,
+  bool depthWrite, bool cullFace)` / `EndChunkPass()`, with neutral bodies that do nothing at all -
+  so the OpenGL path keeps drawing today's bodies under today's `GlToggleBlend` / depth / cull
+  calls. Every `ChunkRenderer` draw group brackets its pool loop with the pair in a `try` /
+  `finally`: the two shadow cascades' four groups, the Opaque stage's five, the OIT liquid and
+  transparent groups, the liquid velocity redraw and the AfterOIT terrain overlay - thirteen in all,
+  each naming itself and stating the fixed state it runs under.
+- **Platform** (`VulkanClientPlatform.NativeChunks.cs`): the scope opens a declared pass on the
+  bound target at its first draw, and the pool's multi-draw reaches
+  `VulkanDevice.DrawNativeMeshMulti` from the existing `RenderMesh(MeshRef, int[], int[], int, bool)`
+  seam. It stays multi-draw indirect over per-chunk meshes with the FaceData storage buffer, because
+  the real mesh id reaches `BindProgramSets`. The greedy-mesh and NoSSBO variants are just other
+  vertex layouts and other program variants, and the pipeline is keyed on both.
+- **The motion window is a colour-write mask.** With a window open the motion attachment joins the
+  pass's colour slots with replace blending; the liquid velocity redraw's motion-only window is the
+  same slots with the write mask zeroed on every other one. No `SetDrawBuffers` appears in the native
+  chunk path.
+- **State the platform states rather than reads:** the standard blend mode, replace blending on the
+  SSAO G-buffer slots and the motion slot (what `GlToggleBlend` and `ApplyOptimumMotionBlendState`
+  apply), and - for the Transparent target - whichever contract the client last applied, recorded at
+  `ApplyTransparentPassBlendState` and `BeginOitAccumulation` rather than read back out of
+  `GlStateTracker`. The texture behind each sampler is recorded at `BindProgramTexture2D`, the seam
+  where the client states it, so the draw resolves handles rather than units. `chunkliquid` samples
+  the depth attachment it draws against with writes off, which the pipeline declares through
+  `SamplesBoundDepth`.
+- **Still emulated inside a chunk group:** the uniform values the group sets by name (the per-pool
+  `origin` from `MeshDataPoolManager` and the generated program setters). They land in the same
+  per-program record and push shadows the native draw snapshots, so the image is identical; removing
+  that dispatch means moving `MeshDataPoolManager`, which is API-fork code and a later stage.
+- **Tests:** `NativeChunkTests` (old route against native route per group: blend and cull
+  combinations, the motion attachment bit for bit, the motion-only mask, the shadow cascade, one
+  declared pass and one indirect draw per group, pipelines built once) and the chunk facts in
+  `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+
+### Entities (stage 2, one of the four system stages)
+
+- **Seam:** `ClientPlatformAbstract.RenderEntityMesh(MeshRef, string samplerName, int textureId)`,
+  whose neutral body is the `RenderMesh(MeshRef)` call it replaced, drawn through by
+  `RenderAPIBase.RenderMultiTextureMesh` - the one place every entity sub-mesh already went. The
+  seam is generic, so the GUI and block-entity stages widen its native side rather than adding
+  another seam.
+- **Native:** `VulkanClientPlatform.NativeEntities.cs` takes the native route for the two programs
+  SystemRenderEntities itself drives, `entityanimated` (Opaque, into Primary) and
+  `shadowmapentityanimated` (the two shadow stages, into colourless targets), and hands every other
+  caller of the seam to the neutral body. `NativeEntitiesEnabled` keeps the old route reachable.
+  - The motion window is a **colour write mask on the pipeline**, from the platform's own
+    `OptimumMotionWriteActive` and `MotionAttachmentIndex`: replace-blend on the motion slot while
+    it is open, no write at all while it is shut. No `SetDrawBuffers` anywhere on this path.
+  - The draw is recorded **inside the stage's own declared pass** - it names `BoundPassName()` with
+    every slot, so `RenderTargetManager.DeclarePass` coalesces - and closed with
+    `EndNativePass(keepScope: true)`. A pass of its own per entity would end and restart the
+    rendering scope hundreds of times a frame. The native-pass bookkeeping still clears, so the
+    uniforms the renderers set by name between draws stay outside a native pass and the
+    "no emulation inside a native pass" invariant holds exactly as before.
+  - Bone matrices need no new API and are not copied into the draw: `UBO.Update("Animation", ...)`
+    keeps feeding the device's ring with its per-(frame, version) snapshot dedup, and the native
+    draw passes its real mesh id into `BindProgramSets` so that snapshot resolves for it.
+  - A native draw resolves **every** sampler its program declares, from what the client declared
+    for it by name (`BindProgramTexture2D` records it), because the emulated resolve that fills the
+    push block's sampler slots from the texture units never runs for a program whose draws are all
+    native. That table is a name-keyed record of the client's own declaration, not the unit table.
+- **Not taken native here, and why:** held items through `standard` - their cull mode is decided per
+  draw by `renderInfo.CullFaces` inside `EntityShapeRenderer.RenderItem` in the VSEssentials fork and
+  no seam carries it, so a native pipeline would have to read the tracker back, which decision 3
+  forbids; it needs a seam in the fork. And the `instanced` program, which has no vanilla call site
+  in this tree.
+- **Tests:** `NativeEntityDrawTests` (old route against native route across the SSAO G-buffer and
+  motion-window sweep, the motion attachment on its own, the emulation boundary, pipeline identity)
+  and the entity section of `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+
+## 3c. Stage 2, second wave: the remaining sky systems, the particles and the decals
+
+The sky dome proved the mesh-draw API; this wave takes the systems whose shape it did not exercise
+- a cube map, an instanced pool, an indirect multi-draw - and the first two systems that write the
+motion attachment.
+
+- **Seams** (`ClientPlatformAbstract`, each with the neutral body of the draw it replaced, each
+  listed in `Optimum.Patcher/Program.cs` and in `VulkanClientPlatform.ExpectedVirtuals`):
+  - `RenderNightSkyBox(MeshRef, int cubeTextureId)` - `SystemRenderNightSky`'s star cube;
+  - `RenderCelestialQuad(MeshRef, int bodyTextureId, int skyTextureId, int glowTextureId)` - the
+    moon, under `celestialobject`;
+  - `RenderParticles(MeshRef, int quantity, int particleTextureId)` - one particle pool's
+    instanced draw;
+  - `BeginDecalPass(int decalTextureId, int blockTextureId)` / `EndDecalPass()` - the decal pool's
+    scope, both neutral bodies empty. This one is a **scope** seam rather than a draw seam:
+    `MeshDataPool.modelRef` is `internal` in the vanilla API, and a new public member on a vanilla
+    API type never ships (the shipped `VintagestoryAPI-patched.dll` is vanilla plus the hooks in
+    `Optimum.Patcher/api-patcher.cs`), so a `MeshRef` parameter is not available to the lib at all -
+    an earlier `RenderDecalPool(MeshRef, ...)` seam fed by a fork-only `MeshDataPool.ModelRef` threw
+    `MissingMethodException` in the shipped client on both backends. `SystemRenderDecals` therefore
+    opens the scope, runs the **vanilla** `decalPool.Draw(game.api, game.frustumCuller,
+    EnumFrustumCullMode.CullInstant)` - which culls and issues the pool's own
+    `RenderMesh(MeshRef, int[], int[], int)` multi-draw - and closes the scope in a `finally`. The
+    Vulkan platform's `RenderMesh(MeshRef, int[], int[], int, bool)` override routes that multi-draw
+    to `TryDrawDecalPoolNative` while the scope is open, the same shape `BeginChunkPass`/
+    `EndChunkPass` uses for the chunk pools.
+- **Platform:** `VulkanClientPlatform.NativeWorld.cs`, one `NativeWorldEnabled` switch keeping
+  every neutral body reachable. Two derivations are shared by all four passes and are the reason
+  none of them reads `GlStateTracker`:
+  - `NativeWorldPassColorSlots` - the colour slots of the pass are the set the emulated route's
+    draw-buffer mask would hold, computed from `MotionAttachmentIndex` and
+    `OptimumMotionWriteActive`: every bound slot with TAA off, Primary's default colour set with
+    TAA on, plus the motion attachment exactly while a motion window is open.
+  - `NativeWorldBlend` - the caller's blend mode per attachment, with replace-blending
+    (ONE, ZERO, ADD) forced on the motion attachment inside a window, which is what
+    `ApplyOptimumMotionBlendState` does for an emulated draw.
+- **Tests:** `Optimum.Render.Vulkan.Tests/NativeWorldSystemsTests.cs` (old route against native
+  route on every attachment of Primary for all four systems, the motion attachment compared bit
+  for bit for the two systems that write it, the draw kinds counted apart, and the slot
+  derivation checked against all three window states) and the seam coverage in
+  `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+- **Deliberately not in this wave, with the reason:**
+  - **the sun.** `SystemRenderSunMoon` draws it under `standard`, the shared program the entity
+    stage owns (held items, dropped items); porting it means porting `standard`'s whole sampler
+    set, so it belongs to that stage and keeps `RenderMesh`.
+  - **the quad particle pool.** It draws into `Transparent` in the OIT stage, whose
+    per-attachment weighted-blend state belongs to the OIT pass rather than to the particle
+    system and is not something this seam can state. The pipeline request names `particlescube`,
+    so the quad pool falls through to the neutral body by construction rather than by a check.
+  - **aurora and the two cloud renderers.** They live in the `VSEssentials` fork and reach the
+    device through a second emulation surface, `OptimumForkGraphics` / `VulkanForkGraphics`
+    (`VintagestoryApi/Client/optimum-render-device.cs`,
+    `Optimum.Render.Vulkan/Platform/VulkanForkGraphics.cs`), which has no native counterpart and
+    is not in section 1's emulation inventory. `CloudRendererMap` also renders into a target the
+    mod creates itself rather than one of `SetupDefaultFrameBuffers`'. Deciding whether that
+    surface gets a native equivalent or stays permanently emulated mod-adapter surface is its
+    own call, and it blocks those three systems until it is made.
+
+## 3d. Stage 2 scope: GUI and text
 
 The GUI and text group of decision 5 step 2 (`gui`, `guigear`, `guitopsoil`, `helditem`, `lines`,
 `texture2texture`, block highlights, wireframe, autocamera) splits in two on decision 3, and only one

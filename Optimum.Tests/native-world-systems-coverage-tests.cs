@@ -191,6 +191,454 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("_meshes.LayoutOf(description.VertexLayoutId)", native);
     }
 
+    /// <summary>
+    /// The chunk groups have a seam of their own, and its neutral bodies do nothing at all -
+    /// which is what keeps the OpenGL path drawing exactly the bodies it drew before, with its
+    /// GlToggleBlend / depth / cull calls still in place.
+    /// </summary>
+    [Fact]
+    public void TheChunkGroupsHaveAScopeSeamWhoseNeutralBodyDoesNothing()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        Assert.Contains(
+            "public virtual bool BeginChunkPass(string chunkPass, bool blend, bool depthTest, bool depthWrite, bool cullFace)",
+            platform);
+        Assert.Contains("public virtual void EndChunkPass()", platform);
+
+        // The OpenGL platform leaves both alone: nothing about the GL path changes.
+        string windows = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.DoesNotContain("BeginChunkPass", windows);
+        Assert.DoesNotContain("EndChunkPass", windows);
+    }
+
+    /// <summary>
+    /// Every ChunkRenderer draw group brackets its pools with the seam and states the fixed
+    /// state that group runs under - and still makes the GL state calls the OpenGL path needs,
+    /// because those are what the GL body draws with.
+    /// </summary>
+    [Fact]
+    public void EveryChunkDrawGroupDrawsInsideTheScope()
+    {
+        string renderer = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+
+        foreach (string group in new[]
+                 {
+                     "chunk-shadow-opaque", "chunk-shadow-topsoil", "chunk-shadow-vegetation",
+                     "chunk-shadow-blendnocull", "chunk-opaque", "chunk-topsoil", "chunk-vegetation",
+                     "chunk-blendnocull", "chunk-decorative", "chunk-oit-liquid", "chunk-oit-transparent",
+                     "chunk-liquid-motion", "chunk-overlay",
+                 })
+        {
+            Assert.Contains("platform.BeginChunkPass(\"" + group + "\"", renderer);
+        }
+
+        // One close per open, and each in a finally, so a throwing pool draw cannot leave a
+        // pass open for the rest of the frame.
+        int opens = Count(renderer, "platform.BeginChunkPass(");
+        int closes = Count(renderer, "platform.EndChunkPass();");
+        Assert.Equal(13, opens);
+        Assert.Equal(opens, closes);
+
+        // "OFF is vanilla": the GL state the OpenGL body draws under is still set.
+        Assert.Contains("platform.GlToggleBlend(on: false);", renderer);
+        Assert.Contains("platform.GlEnableCullFace();", renderer);
+        Assert.Contains("platform.GlDepthMask(flag: true);", renderer);
+    }
+
+    /// <summary>Every new or changed lib member of the chunk port is listed for the Cecil transplant.</summary>
+    [Fact]
+    public void TheChunkSeamAndItsCallersAreListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"BeginChunkPass\"", patcher);
+        Assert.Contains("\"EndChunkPass\"", patcher);
+        foreach (string method in new[] { "RenderShadow", "RenderOpaque", "RenderOIT", "RenderAfterOIT" })
+        {
+            Assert.Contains("\"Vintagestory.Client.NoObf.ChunkRenderer\", \"" + method + "\", 1", patcher);
+        }
+        // RenderLiquidMotion is an injected member rather than a transplanted vanilla one.
+        Assert.Contains("\"RenderLiquidMotion\"", patcher);
+    }
+
+    /// <summary>
+    /// The Vulkan platform records the chunk groups as native passes with indirect multi-draws,
+    /// states its own fixed state, expresses the motion window as a colour-write mask, and keeps
+    /// the old route reachable behind a switch.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformRecordsTheChunkGroupsNativelyAndKeepsTheOldRoute()
+    {
+        string chunks = Read(ChunkPlatformFile);
+
+        Assert.Contains("internal bool NativeChunksEnabled { get; set; } = true;", chunks);
+        Assert.Contains("public override bool BeginChunkPass(", chunks);
+        Assert.Contains("public override void EndChunkPass()", chunks);
+        Assert.Contains("device.BeginNativePass(", chunks);
+        Assert.Contains("device.EndNativePass();", chunks);
+
+        // The multi-draw stays a multi-draw, over the mesh's own vertex layout.
+        Assert.Contains("device.DrawNativeMeshMulti(", chunks);
+        Assert.Contains("VertexLayoutId = layoutId", chunks);
+        Assert.Contains("device.NativeMeshLayoutId(", chunks);
+
+        // The motion window is a write mask, never a draw-buffer toggle.
+        Assert.Contains("if (chunkScopeMotionOnly && slot != motion) entry.WriteMask = 0;", chunks);
+        Assert.DoesNotContain("SetDrawBuffers", chunks);
+
+        // The state is stated, not read back off the tracker.
+        Assert.Contains("DepthTest = chunkScopeDepthTest", chunks);
+        Assert.Contains("DepthWrite = chunkScopeDepthWrite", chunks);
+        Assert.Contains("Cull = chunkScopeCull ? CullModeFlags.BackBit : CullModeFlags.None", chunks);
+        Assert.Contains("SamplesBoundDepth = samplesBoundDepth", chunks);
+
+        // The route in: the pool's multi-draw seam takes the native path only inside a scope.
+        string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
+        Assert.Contains("if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;", meshes);
+        Assert.Contains("device.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);", meshes);
+    }
+
+    /// <summary>
+    /// The values a native chunk pass cannot read off GL state are recorded where the client
+    /// states them: the texture behind each sampler, and the Transparent target's blend contract.
+    /// </summary>
+    [Fact]
+    public void TheClientStateANativeChunkPassNeedsIsRecordedAtItsOwnSeam()
+    {
+        string shaders = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Shaders.cs");
+        Assert.Contains("NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);", shaders);
+        // A relinked program's cached interface and pipelines go with it.
+        Assert.Contains("ForgetNativeChunkProgram(program.ProgramId);", shaders);
+
+        string leaf = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
+        Assert.Contains("NoteNativeTransparentBlend(0, 32774, 774, 0, 774, 0);", leaf);
+
+        string buffers = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
+        Assert.Contains("NoteNativeTransparentBlend(2, 32774, 770, 771, 770, 771);", buffers);
+    }
+
+    // ------------------------------------------------------------- entities (stage 2)
+
+    /// <summary>
+    /// The entity draw seam exists on the platform abstraction, its neutral body is exactly the
+    /// RenderMesh call it replaced, and ClientPlatformWindows does not override it - which is what
+    /// makes "OFF is vanilla" true for OpenGL.
+    /// </summary>
+    [Fact]
+    public void TheEntityDrawHasASeamWhoseNeutralBodyIsTheDrawItReplaced()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        Assert.Contains(
+            "public virtual void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)",
+            platform);
+        Assert.Contains("RenderMesh(mesh);", platform);
+
+        string windows = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.DoesNotContain("RenderEntityMesh", windows);
+    }
+
+    /// <summary>
+    /// The entity renderers reach the seam where they already were: RenderMultiTextureMesh draws
+    /// each sub-mesh through it and hands it the sampler name and texture id it just bound, which
+    /// is what a native pass needs to resolve the draw's texture from a handle.
+    /// </summary>
+    [Fact]
+    public void TheMultiTextureDrawGoesThroughTheSeam()
+    {
+        string api = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs");
+
+        Assert.Contains("plat.RenderEntityMesh(vao, textureSampleName, mmr.textureids[i]);", api);
+        Assert.DoesNotContain("plat.RenderMesh(vao);", api);
+    }
+
+    /// <summary>The seam and its caller are listed for the Cecil transplant.</summary>
+    [Fact]
+    public void TheEntitySeamAndItsCallerAreListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"RenderEntityMesh\"", patcher);
+        Assert.Contains("\"Vintagestory.Client.RenderAPIBase\", \"RenderMultiTextureMesh\", 3", patcher);
+    }
+
+    /// <summary>
+    /// The Vulkan platform records the entity draws natively for the two programs it owns, states
+    /// its own fixed state rather than reading the tracker's, treats the motion window as a colour
+    /// write mask, and keeps the neutral body reachable behind a switch.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformRecordsEntitiesNativelyAndKeepsTheOldRoute()
+    {
+        string entities = Read(EntityPlatformFile);
+
+        Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = true;", entities);
+        Assert.Contains("public override void RenderEntityMesh(", entities);
+        Assert.Contains("base.RenderEntityMesh(", entities);
+        Assert.Contains("device.BeginNativePass(", entities);
+        Assert.Contains("device.DrawNativeMesh(", entities);
+
+        // The two programs it owns, and nothing else.
+        Assert.Contains("private const string EntityAnimatedPass = \"entityanimated\";", entities);
+        Assert.Contains("private const string EntityShadowPass = \"shadowmapentityanimated\";", entities);
+
+        // The fixed state stated outright, from the values SystemRenderEntities sets.
+        Assert.Contains("DepthTest = true", entities);
+        Assert.Contains("DepthWrite = true", entities);
+        Assert.Contains("DepthCompare = CompareOp.Less", entities);
+        Assert.Contains("Cull = CullModeFlags.None", entities);
+        Assert.Contains("VertexLayoutId = layoutId", entities);
+
+        // The motion window is a write mask on the pipeline, never a draw-buffer toggle.
+        Assert.Contains("OptimumMotionWriteActive", entities);
+        Assert.Contains("attachment.WriteMask = 0;", entities);
+        Assert.DoesNotContain("SetDrawBuffers", entities);
+    }
+
+    /// <summary>
+    /// The native draw is recorded inside the stage's own declared pass, so a loop of hundreds of
+    /// entities does not end and restart the rendering scope once per entity, and the device has
+    /// the close that makes that safe.
+    /// </summary>
+    [Fact]
+    public void TheEntityDrawsShareTheStagesPassInsteadOfOnePassPerEntity()
+    {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("Name = BoundPassName(),", entities);
+        Assert.Contains("ColorSlots = uint.MaxValue,", entities);
+        Assert.Contains("device.EndNativePass(keepScope: true);", entities);
+
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal void EndNativePass(bool keepScope)", native);
+        Assert.Contains("if (!_frameActive || keepScope) return;", native);
+    }
+
+    /// <summary>
+    /// A native draw resolves every sampler its program declares, from what the client declared
+    /// for it by name - not from a texture unit, which decision 3 forbids and which the emulated
+    /// resolve (never run for a program whose draws are all native) would otherwise have filled.
+    /// </summary>
+    [Fact]
+    public void ANativeDrawResolvesEverySamplerTheProgramDeclares()
+    {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("string[] names = pipeline.SamplerNames;", entities);
+        Assert.Contains("DeclaredProgramTexture(programId, names[i])", entities);
+
+        string shaders = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Shaders.cs");
+        Assert.Contains("NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);", shaders);
+
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal string[] SamplerNames { get; }", native);
+    }
+
+    // ------------------------------------- the night sky, the moon, the particles, the decals
+
+    /// <summary>
+    /// The four seams of the second wave exist on the platform abstraction, each with the
+    /// neutral body of the draw it replaced - which is what makes "OFF is vanilla" true for
+    /// OpenGL, because ClientPlatformWindows overrides none of them.
+    /// </summary>
+    [Fact]
+    public void TheWorldSeamsHaveNeutralBodiesThatAreTheDrawsTheyReplaced()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        Assert.Contains("public virtual void RenderNightSkyBox(MeshRef nightSkyBox, int cubeTextureId)", platform);
+        Assert.Contains("RenderMesh(nightSkyBox);", platform);
+
+        Assert.Contains(
+            "public virtual void RenderCelestialQuad(MeshRef quad, int bodyTextureId, int skyTextureId, int glowTextureId)",
+            platform);
+        Assert.Contains("RenderMesh(quad);", platform);
+
+        Assert.Contains("public virtual void RenderParticles(MeshRef model, int quantity, int particleTextureId)",
+            platform);
+        Assert.Contains("RenderMeshInstanced(model, quantity);", platform);
+
+        // The decals are a scope seam, not a draw seam: the mesh handle lives in MeshDataPool,
+        // which is internal in the vanilla API, so it can never be a seam parameter. Both neutral
+        // bodies are empty and the lib runs the vanilla MeshDataPool.Draw between them.
+        Assert.Contains("public virtual void BeginDecalPass(int decalTextureId, int blockTextureId)", platform);
+        Assert.Contains("public virtual void EndDecalPass()", platform);
+        Assert.DoesNotContain("RenderDecalPool", platform);
+
+        // The OpenGL platform leaves every one of them alone: nothing about the GL path changes.
+        string windows = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        foreach (string seam in new[]
+                 {
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "BeginDecalPass", "EndDecalPass",
+                 })
+        {
+            Assert.DoesNotContain(seam, windows);
+        }
+    }
+
+    /// <summary>
+    /// Each render system draws through its seam and hands it the values a native pass cannot
+    /// read off the GL state: the textures it samples, and for the decals the cull results the
+    /// pool produced.
+    /// </summary>
+    [Fact]
+    public void TheWorldRenderersDrawThroughTheirSeams()
+    {
+        string nightSky = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs");
+        Assert.Contains("game.Platform.RenderNightSkyBox(nightSkyBox, textureId);", nightSky);
+        Assert.DoesNotContain("game.Platform.RenderMesh(nightSkyBox);", nightSky);
+
+        string sunMoon = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs");
+        Assert.Contains(
+            "platform.RenderCelestialQuad(quadModel, moontextureIds[4], game.skyTextureId, game.skyGlowTextureId);",
+            sunMoon);
+
+        string particles = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs");
+        Assert.Contains("game.Platform.RenderParticles(particlePool.Model, particlePool.QuantityAlive, 0);", particles);
+        Assert.Contains("game.Platform.RenderParticles(particlePool2.Model, particlePool2.QuantityAlive, 0);", particles);
+        Assert.DoesNotContain("game.Platform.RenderMeshInstanced(", particles);
+
+        // The motion window still wraps the draw: the cube pool writes the motion attachment
+        // through the one writer include, and the window is what puts that attachment in the
+        // colour set on both routes.
+        Assert.Contains("optimumPlatform.BeginMotionWrite()", particles);
+        Assert.Contains("optimumPlatform.EndMotionWrite();", particles);
+
+        string decals = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs");
+        // The scope, then the VANILLA MeshDataPool.Draw inside it: both routes cull and draw the
+        // same ranges and only the draw command differs. Nothing here may reach a member that
+        // exists only in the API fork - MeshDataPool.ModelRef did, and the shipped client threw
+        // MissingMethodException on both backends because a new public member on a vanilla API
+        // type never ships (the shipped API dll is vanilla plus api-patcher.cs's hooks only).
+        Assert.Contains(
+            "game.Platform.BeginDecalPass(decalTextureAtlas.TextureId, game.BlockAtlasManager.AtlasTextures[0].TextureId);",
+            decals);
+        Assert.Contains("decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);", decals);
+        Assert.Contains("game.Platform.EndDecalPass();", decals);
+        Assert.DoesNotContain(".ModelRef", decals);
+
+        // And the API fork itself no longer declares it, so the lib cannot start depending on it
+        // again. The fork is git-ignored, so the shipped truth is its patch.
+        Assert.DoesNotContain("ModelRef", Read("patches/VintagestoryApi/Client/MeshPool/MeshDataPool.cs.patch"));
+        Assert.Contains("optimumPlatform.BeginMotionWrite()", decals);
+    }
+
+    /// <summary>Every new or changed lib member of this wave is listed for the Cecil transplant.</summary>
+    [Fact]
+    public void TheWorldSeamsAndTheirCallersAreListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        foreach (string seam in new[]
+                 {
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "BeginDecalPass", "EndDecalPass",
+                 })
+        {
+            Assert.Contains(Q + seam + Q, patcher);
+        }
+
+        foreach (string caller in new[]
+                 {
+                     "SystemRenderNightSky" + Q + ", " + Q + "OnRenderFrame3D" + Q + ", 1",
+                     "SystemRenderSunMoon" + Q + ", " + Q + "OnRenderFrame3D" + Q + ", 1",
+                     "SystemRenderParticles" + Q + ", " + Q + "Render" + Q + ", 2",
+                     "SystemRenderDecals" + Q + ", " + Q + "OnRenderFrame3D" + Q + ", 1",
+                 })
+        {
+            Assert.Contains(caller, patcher);
+        }
+    }
+
+    /// <summary>
+    /// The Vulkan platform records all four systems as native passes, states their fixed state
+    /// rather than reading the tracker's, and keeps every neutral body reachable behind one
+    /// switch in the pattern of NativeSkyEnabled.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformRecordsTheWorldSystemsNativelyAndKeepsTheOldRoutes()
+    {
+        string world = Read(WorldPlatformFile);
+
+        Assert.Contains("internal bool NativeWorldEnabled { get; set; } = true;", world);
+        foreach (string seam in new[]
+                 {
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                 })
+        {
+            Assert.Contains("public override void " + seam + "(", world);
+            Assert.Contains("base." + seam + "(", world);
+        }
+
+        // The decal scope seam: Begin/End on the platform, and the pool's multi-draw taken
+        // natively from the mesh seam while the scope is open. Its "old route" is falling out of
+        // TryDrawDecalPoolNative into the emulated multi-draw RenderMesh would have made anyway.
+        Assert.Contains("public override void BeginDecalPass(int decalTextureId, int blockTextureId)", world);
+        Assert.Contains("public override void EndDecalPass()", world);
+        Assert.Contains("internal bool TryDrawDecalPoolNative(", world);
+        Assert.Contains("TryDrawDecalPoolNative(modelRef, indices, indicesSizes, groupCount)",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
+
+        // Each mesh-draw kind the device API grew for world systems is used by the system whose
+        // shape needs it: a single mesh, an instanced pool, an indirect multi-draw.
+        Assert.Contains("device.DrawNativeMesh(", world);
+        Assert.Contains("device.DrawNativeMeshInstanced(", world);
+        Assert.Contains("device.DrawNativeMeshMulti(", world);
+        Assert.Contains("device.BeginNativePass(", world);
+        Assert.Contains("device.EndNativePass();", world);
+
+        // The pipelines are built for each mesh's own vertex layout rather than the fullscreen
+        // one: NativeWorldPrepare resolves it and hands it to the shared NativeMeshPipelineFor,
+        // whose VertexLayoutId wiring is pinned by TheVulkanPlatformRecordsTheSkyNativelyAndKeepsTheOldRoute.
+        Assert.Contains("device.NativeMeshLayoutId(", world);
+    }
+
+    /// <summary>
+    /// The colour slots and the per-attachment blend of a native world pass come from the
+    /// platform's own motion-window state, not from the GL state tracker (decision 3), and the
+    /// motion attachment replaces rather than blends inside the window - what
+    /// ApplyOptimumMotionBlendState does for an emulated draw.
+    /// </summary>
+    [Fact]
+    public void TheWorldPassesDeriveTheirSlotsAndBlendFromTheMotionWindowNotTheTracker()
+    {
+        string world = Read(WorldPlatformFile);
+
+        Assert.Contains("private uint NativeWorldPassColorSlots(FrameBufferRef target)", world);
+        Assert.Contains("OptimumMotionWriteActive", world);
+        Assert.Contains("MotionAttachmentIndex", world);
+        Assert.Contains("(1u << (motion + 1)) - 1u", world);
+        Assert.Contains("(1u << motion) - 1u", world);
+
+        string blend = Section(world, "private AttachmentBlend[] NativeWorldBlend(", "return blend;");
+        Assert.Contains("BlendFactor.One", blend);
+        Assert.Contains("BlendFactor.Zero", blend);
+
+        // Nothing in a native world pass asks the tracker what state it is in.
+        Assert.DoesNotContain("GlStateTracker.", world);
+    }
+
     // ------------------------------------------------------- GUI and text (stage 2)
 
     /// <summary>
