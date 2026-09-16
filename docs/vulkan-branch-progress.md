@@ -117,6 +117,17 @@ compared before and after for every branch.
 
 ### Plan status, audited 2026-09-16 (scoped to this branch)
 
+**Phase 3b stage 1 completed and verified in game, 2026-09-16 (merge `2c9bc70`).** All nine post/TAA chain
+passes draw through the native device API: OIT merge, sky motion, SSAO + bilateral blur + AO composite (both AO
+modes), TAA resolve and sharpen (the lib body keeps the temporal contract, only the draw is re-routed), the bloom
+chain, god rays, FXAA luma and the final composition (write slot 0 while sampling slot 1, no feedback copy), plus
+the stage-1a blit. Suites on the merged state: Optimum.Tests 1243 passed, GPU 1065 passed, 0 failed, patches
+157/0 conflict. Headless both-backends run on the RTX 4070, AO pinned to vanilla so the backends compare like for
+like: renderer line confirmed per run, 0 client errors, validation 0 errors and 0 `SYNC-`, native chain active in
+the real client. Per-frame SSIM Vulkan vs OpenGL 0.9756 / 0.9573 / 0.9697 against this session's OpenGL-vs-OpenGL
+noise floor of 0.9597 / 0.9611 / 0.9670 - at or above the floor, i.e. the backends differ no more than two OpenGL
+launches of the same save differ from each other.
+
 Every item of `/home/n1ght/.claude/plans/i-never-wanted-this-sequential-kernighan.md` checked against this tree.
 The plan predates the PR #69 split, so it also contains DLSS, upscaler, frame-generation, HDR and ray-tracing work:
 those are marked `[out]` and are NOT owed on this branch.
@@ -191,17 +202,16 @@ Legend: `[x]` done, `[~]` partly done (what is left follows it), `[ ]` not start
 
 - [x] DONE — **Phase 3b decision 1**: Runtime rewriter stays permanently as mod-shader adapter
 - [~] PARTIAL — **Phase 3b decision 2**: Seams are existing virtuals, overridden without calling base
-  - left: 6 of 7 post/TAA virtuals still call base; no world-system transplanted seams exist (ChunkRenderer, entities, particles, GUI unchanged).
+  - left: Post/TAA chain done: the nine passes are native (TAA resolve/sharpen keep the lib body for the temporal contract and re-route only the draw). No world-system transplanted seams exist yet (ChunkRenderer, entities, particles, GUI unchanged).
 - [~] PARTIAL — **Phase 3b decision 3**: A native system reads client state, never GL state
   - left: Rule only exercised by the blit; unverified for any world-render system since none has been ported.
 - [x] DONE — **Phase 3b decision 4**: Device API for native systems (NativePasses)
 - [~] PARTIAL — **Phase 3b decision 5: order and parallelism**: Stage 1 (device API + post/TAA chain) then parallel world systems then removal
-  - left: Stage 1 itself incomplete (8 of 9 chain passes still on base); stage 2 (chunks, entities, particles/decals/sky/clouds, GUI/text) not started; stage 3 removal not started.
+  - left: Stage 1 COMPLETE (2026-09-16, merge 2c9bc70): all nine chain passes native. Stage 2 (chunks, entities, particles/decals/sky/clouds, GUI/text) not started; stage 3 removal not started.
 - [~] PARTIAL — **Phase 3b decision 6**: Behavioural identity is the acceptance rule (old-route vs native-route GPU tests)
-  - left: Differential tests needed for the remaining 8 passes once each goes native; none exist because none is native.
+  - left: Chain passes have differential old-route-vs-native tests. World systems still need theirs once each goes native.
 - [x] DONE — **Phase 3b decision 7**: FSR input identity preserved (BlitPrimaryToDefault keeps reading Primary colour 0)
-- [~] PARTIAL — **Phase 3b stage 1 scope: 9 chain passes**: Which of the nine post/TAA chain passes are native today
-  - left: 8 of 9 passes (everything except the final blit) still run the OpenGL body via base.<Method>() and therefore still go through GlStateTracker, texture units and uniform-by-location.
+- [x] DONE — **Phase 3b stage 1 scope: 9 chain passes**: Which of the nine post/TAA chain passes are native today
 - [ ] LEFT — **Phase 3b: world render systems still on the emulation layer**: Every world render system still on the GL-emulation layer
   - left: All world render systems (chunks, entities, particles, decals, sky/clouds, GUI/text) - stage 2 of decision 5 - are entirely unstarted.
 - [ ] LEFT — **Phase 3b: GlStateTracker / texture-unit tables / uniform-by-location reachability**: GlStateTracker, texture-unit tables and uniform-by-location still reachable from the Vulkan path
