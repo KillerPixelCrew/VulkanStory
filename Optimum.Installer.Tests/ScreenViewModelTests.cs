@@ -519,7 +519,7 @@ public class CompletionViewModelTests
     public async Task LaunchDisablesTheButtonAndThenAsksTheShellToExit()
     {
         string launcher = Path.Combine(Path.GetTempPath(), "optimum-launch-" + Guid.NewGuid().ToString("N") + ".sh");
-        await File.WriteAllTextAsync(launcher, "#!/bin/sh\nexit 0\n");
+        await File.WriteAllTextAsync(launcher, "#!/bin/sh\nexit 0\n", TestContext.Current.CancellationToken);
         if (!OperatingSystem.IsWindows())
             File.SetUnixFileMode(launcher,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -537,7 +537,7 @@ public class CompletionViewModelTests
             Assert.False(vm.LaunchCommand.CanExecute(null));
             Assert.Equal("Launching Optimum...", vm.LaunchLabel);
 
-            await run.WaitAsync(TimeSpan.FromSeconds(20));
+            await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
             Assert.True(exitAsked);
         }
         finally

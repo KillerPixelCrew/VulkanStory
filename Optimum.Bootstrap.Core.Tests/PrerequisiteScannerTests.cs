@@ -152,7 +152,7 @@ public class PrerequisiteScannerTests
         Assert.DoesNotContain(results, r => r.Definition.Id is PrerequisiteId.Perl
             or PrerequisiteId.Python3 or PrerequisiteId.Chmod or PrerequisiteId.Tar
             or PrerequisiteId.Curl or PrerequisiteId.Appimagetool);
-        Assert.Empty(results.Where(r => r.BlocksBuild));
+        Assert.DoesNotContain(results, r => r.BlocksBuild);
         Assert.Equal(PrerequisiteState.Ok, results.Single(r => r.Definition.Id == PrerequisiteId.Pwsh).State);
     }
 

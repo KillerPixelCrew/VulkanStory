@@ -27,10 +27,10 @@ jobs:
     timeout-minutes: 45
     if: inputs.platform == 'all' || inputs.platform == 'windows'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: ga
@@ -55,7 +55,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Cache client archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: cache_client
         with:
           path: .vanilla/archives
@@ -73,7 +73,7 @@ jobs:
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-windows-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-logs-windows
           path: |
@@ -123,7 +123,7 @@ jobs:
     timeout-minutes: 45
     if: inputs.platform == 'all' || inputs.platform == 'macos-intel'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install bash 4+
         run: |
@@ -131,7 +131,7 @@ jobs:
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: ga
@@ -156,7 +156,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Cache client archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: cache_client
         with:
           path: .vanilla/archives
@@ -174,7 +174,7 @@ jobs:
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-macos-intel-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
@@ -206,7 +206,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-logs-macos-intel
           path: |
@@ -220,7 +220,7 @@ jobs:
     timeout-minutes: 45
     if: inputs.platform == 'all' || inputs.platform == 'macos-arm'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install bash 4+
         run: |
@@ -228,7 +228,7 @@ jobs:
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: ga
@@ -253,7 +253,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Cache client archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: cache_client
         with:
           path: .vanilla/archives
@@ -271,7 +271,7 @@ jobs:
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-macos-arm-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
@@ -301,7 +301,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-logs-macos-arm
           path: |
@@ -315,10 +315,10 @@ jobs:
     timeout-minutes: 60
     if: inputs.platform == 'all' || inputs.platform == 'linux'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: ga
@@ -343,7 +343,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Cache client archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: cache_client
         with:
           path: .vanilla/archives
@@ -361,7 +361,7 @@ jobs:
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-linux-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
@@ -405,7 +405,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-logs-linux
           path: |
@@ -420,10 +420,10 @@ jobs:
     timeout-minutes: 45
     if: inputs.platform == 'all' || inputs.platform == 'linux-arm'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: ga
@@ -448,7 +448,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Cache client archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         id: cache_client
         with:
           path: .vanilla/archives
@@ -466,7 +466,7 @@ jobs:
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-linux-arm-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
@@ -496,7 +496,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-logs-linux-arm
           path: |
