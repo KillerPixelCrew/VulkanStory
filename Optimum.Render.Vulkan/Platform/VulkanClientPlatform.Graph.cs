@@ -295,23 +295,41 @@ public partial class VulkanClientPlatform
 
     // ------------------------------------------------------------ post methods
 
+    /// <summary>
+    /// Phase 3b stage 1: the chain's first pass, drawn natively
+    /// (VulkanClientPlatform.NativePostChain.cs). <see cref="NativePostChainEnabled" /> puts the
+    /// whole chain back on the OpenGL body for the differential tests.
+    /// </summary>
     public override void MergeTransparentRenderPass()
     {
-        SetPassContext("MergeTransparent", PassFlags.None);
-        base.MergeTransparentRenderPass();
-        SetPassContext("Frame", PassFlags.AllowSplit);
+        NotePostStep(NativePostStep.OitMerge);
+        if (UseNativePostChain)
+        {
+            NativeOitMerge();
+            return;
+        }
+        LegacyOitMerge();
     }
 
+    /// <summary>Phase 3b stage 1: the chain's second pass, drawn natively.</summary>
     public override bool RenderOptimumSkyMotion()
     {
-        SetPassContext("SkyMotion", PassFlags.None);
-        bool drawn = base.RenderOptimumSkyMotion();
-        SetPassContext("Frame", PassFlags.AllowSplit);
-        return drawn;
+        NotePostStep(NativePostStep.SkyMotion);
+        return UseNativePostChain ? NativeSkyMotion() : LegacySkyMotion();
     }
 
+    /// <summary>
+    /// Phase 3b stage 1: Optimum owns the post chain's order. The native route runs the steps
+    /// this method holds - AO, TAA resolve and sharpen, bloom, god rays, the Luma step and the
+    /// epilogue - and never calls base.
+    /// </summary>
     public override void RenderPostprocessingEffects(float[] projectMatrix)
     {
+        if (UseNativePostChain)
+        {
+            RunNativePostChain(projectMatrix);
+            return;
+        }
         SetPassContext("Post", PassFlags.None);
         base.RenderPostprocessingEffects(projectMatrix);
         SetPassContext("Frame", PassFlags.AllowSplit);
@@ -337,11 +355,11 @@ public partial class VulkanClientPlatform
         return sharpened;
     }
 
+    /// <summary>Phase 3b stage 1: the chain's ninth pass. Stage 1g makes it native.</summary>
     public override void RenderFinalComposition()
     {
-        SetPassContext("FinalComposition", PassFlags.None);
-        base.RenderFinalComposition();
-        SetPassContext("Frame", PassFlags.AllowSplit);
+        NotePostStep(NativePostStep.FinalComposition);
+        LegacyFinalComposition();
     }
 
     /// <summary>
@@ -352,7 +370,8 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BlitPrimaryToDefault()
     {
-        if (NativeBlitEnabled && device != null)
+        NotePostStep(NativePostStep.Blit);
+        if (NativeBlitEnabled && UseNativePostChain)
         {
             RenderNativeBlit();
             return;

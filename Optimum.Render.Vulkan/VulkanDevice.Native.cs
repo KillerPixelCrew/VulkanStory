@@ -251,6 +251,13 @@ public sealed unsafe partial class VulkanDevice
         return _targets.ScopeFormats(target, exclusion);
     }
 
+    /// <summary>
+    /// The viewport the GL-shaped state last set. A native pass that keeps the viewport - the
+    /// OIT merge and sky motion bind their target without touching it, as the OpenGL body's
+    /// bind-only setter does - states this as its own.
+    /// </summary>
+    internal Rect2D NativeCurrentViewport => _state.Viewport;
+
     /// <summary>The manifest variant a program was linked for; "" for a program the rewriter linked.</summary>
     internal string NativeVariantOf(int programId) =>
         _programVariants.TryGetValue(programId, out string? key) ? key : "";
