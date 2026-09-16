@@ -7,7 +7,7 @@ Optimum is a performance mod for Vintage Story: a patched client (OpenGL path in
 `ClientPlatformWindows`) plus a Vulkan backend that substitutes the platform
 (`VulkanClientPlatform : ClientPlatformWindows` in `Optimum.Render.Vulkan/Platform/`). Read this before touching anything. The
 skills in `.claude/skills/` (tracked) hold the step-by-step procedures; this file holds the rules and the
-working knowledge. A lesson learned during a session belongs here, in the repository; the harness memory
+working knowledge. Work happens in the session, one step at a time, visibly (rule 8). A lesson learned during a session belongs here, in the repository; the harness memory
 store on one machine is a cache, not the record.
 
 ## Where the truth lives (edit these, never the generated copies)
@@ -34,6 +34,7 @@ dotnet build VintageStory.slnx -c Release          # everything
 dotnet test Optimum.Render.Vulkan.Tests            # GPU tests, validation layers on (needs a GPU)
 dotnet test Optimum.Tests -c Release               # source/patch coverage tests
 bash scripts/extract-patches.sh && bash scripts/check-patches.sh   # after editing build/, forks, API
+make patch-il                                      # Cecil patch only, no deploy: run after every lib/patcher change; "N/N required methods patched" or it fails
 make deploy                                        # Cecil patch + copy into .vanilla/win-x64/vintagestory
 scripts/dev/run-client.sh ["world name"]           # detached launch; RENDERER=vulkan|opengl env switches
 scripts/dev/client-renderer.sh                     # which renderer ACTUALLY started (read this every time)
@@ -111,17 +112,19 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
    Commit only when asked or when a phase is verified; say what was verified in the message.
 7. **Batch reads.** Read whole methods and both paths in one command (`sed -n` ranges + `rg`), not
    ten single greps. Codex found in one pass what took an afternoon of small probes.
-8. **Agents, models, effort.** The main session does the hard parts itself and never spawns an agent that
-   inherits its own model. Everything else runs as a Workflow (ultracode): sonnet at **high or xhigh** for the
-   rare read-only search stage (cheap, and lower effort gives untrustworthy results), opus at **medium, never
-   higher** for implementation and integration. Shape: every independent implementation stage at once with
-   `isolation: 'worktree'` (each commits on its own branch), then one integration stage that merges into the
-   feature branch and runs the finish sequence. No map stage by default (rule 15) and no review stage by default
-   (rule 14); serial stages only for genuinely dependent work. Worktrees are created at `origin/main`, which need
-   not be an ancestor of the feature branch: a stage's first commands are `git checkout -B <stage branch>
-   <feature branch>` (never `merge --ff-only`) and `bash scripts/dev/worktree-bootstrap.sh`; integration merges
-   into the feature branch, never main. Details: `.claude/skills/workflow-policy`. Codex (`.claude/skills/codex-handoff`,
-   gpt-6-astra, weekly quota) takes genuinely stuck rendering bugs with a neutral brief and full machine access.
+8. **Work directly in the session, sequentially. No workflows, no background agents.** (Owner, 2026-09-16:
+   "The Workflow approach does not work for me. I cant see whats happening.") The session reads, edits, builds,
+   tests and reports each step itself, in order, so the owner can watch every change land. A subagent is allowed
+   only for a read-only search the session would otherwise do by hand, returns text, and never edits. Codex
+   (`.claude/skills/codex-handoff`) remains available for a genuinely stuck rendering bug on the owner's say-so.
+
+19. **Build and tests cannot see two crash classes; `make patch-il` and the API-drift check can.** Both compile
+   against the fork, so a transplant tuple with the wrong parameter count or a lib call to a member that exists only
+   in the API fork passes them and ships as a crash (2026-09-16: 1271 + 1107 tests green, then
+   RenderTextureIntoFrameBuffer listed with 9 params against vanilla's 10, and `MeshDataPool.get_ModelRef` crashing
+   both backends). After any lib or fork change run `make patch-il` and `diff -r .baseline/VintagestoryApi
+   VintagestoryApi`, and grep the lib for each added public member. A new member on a vanilla API type never ships
+   unless api-patcher.cs injects it: use a scope seam (BeginChunkPass/EndChunkPass pattern) or a contracts type.
 
 9. **Undefined behaviour differs between the APIs.** GL keeps an attachment the shader never writes;
    Vulkan writes garbage into it (pipelines now mask those off). A bug that only flickers between
@@ -156,21 +159,14 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
    is genuinely the owner's (money, scope, upstream, destructive acts) and you cannot resolve it from what they
    already said. Turning an instruction they just gave you back into a question is the failure mode.
 
-14. **Reviews are expensive; verification is not.** Implement-only stages by default. The integration stage runs
-   the full suites on the merged state, which is where defects actually show. Reserve a review stage for the
-   genuinely high-risk change in a wave, not for every stage.
+14. **Verification, not review rounds.** After each change: build, both suites, `make patch-il`, and for anything
+   that touches the screen the headless both-backends capture. No separate review passes.
 
-15. **No map stage by default - document the seams instead.** Map stages rediscovered the tree at five figures of
-   tokens each and were thrown away with the run. Every render seam carries a doc comment at its declaration: what
+15. **Grep, don't map - and document the seams.** Every render seam carries a doc comment at its declaration: what
    it draws, where the OpenGL body is, target and slots, the state that is not obvious and why, and the test that
-   pins it (`docs/vulkan-native-render-systems.md` section 4). An implementation stage documents what it touches as
-   part of the change and greps instead of mapping. Map only what the code cannot answer - measured behaviour,
-   vendor documentation, a tree the repo does not contain. `scripts/dev/harvest-maps.py` recovers the map output of
-   past runs from the workflow journals when one is needed again.
+   pins it (`docs/vulkan-native-render-systems.md` section 4). Document what you touch as part of the change.
 
-16. **Agents never launch the game, never `make deploy`, never push.** In-game verification, deployment and pushing
-   are the session's own work, because they touch the owner's machine and their branches. A stage that needs the
-   game verified says so in its return value.
+16. **Only the session launches the game, deploys or pushes**, and only after the checks in rule 14.
 
 17. **Identity and attribution.** Commit as `NightHammer1000 <nightstorm@kpc.bz>` (global config only). The work
    e-mail from the environment context must never appear in git config, commits, PRs, docs or output. No tooling or
@@ -334,17 +330,13 @@ User, 2026-09-15, after naming MXAO, Alchemy AO, low-sample GTAO + spatial denoi
 
 **How to apply:** delete a capture directory as soon as its numbers are recorded in `docs/vulkan-acceptance.md` or the plan - the conclusions are the deliverable, the frames are not. Shallow-clone vendor SDKs, read them, then remove them; the synthesis stays. Anything a test or a later session needs (the NVIDIA NGX libraries, headers and guides) goes to `~/.local/share/optimum-ngx`, never the scratchpad: on tmpfs it vanishes at reboot and the NGX tests then *skip* rather than fail, which hides the breakage. Check `df -h /tmp` before writing GB-scale dumps, and prefer per-attachment dumps at one frame over frame sequences. Related: `testing-suite-too-heavy`, `ngx-needs-a-native-shim`.
 
-### Speed and parallelism over testing
+### Sequential, visible work (supersedes "speed and parallelism", 2026-09-16)
 
-*"2026-09-11 user direction during the Vulkan-native rebuild - \"enough testing, speed this up, more parallelism in the workflow\"; fewer in-game verification rounds, wider parallel stages."*
-
-After the Phase 1 exit (several in-game capture rounds plus an A/B/A pacing investigation) the user said: "enough testing. Speed this up a bit. More paralellism in the workflow as well".
-
-Capture sessions stay short: 3 minutes is plenty for a session measurement ("That 10 Minute run was excessive", 2026-09-11); never schedule a 10-minute run again.
-
-**Why:** the rebuild spent hours in serial chains (one stage per worktree after another) and in repeated in-game measurement rounds; the user wants throughput.
-
-**How to apply:** design each phase's workflow as wide parallel waves with explicit file ownership and interface contracts in the prompts (no map stage when the touch points are already known), one merge agent per wave, one review at the end. Keep in-game runs to the phase's single exit capture; do not add investigation launches unless a result blocks the next phase. Unit and source tests inside stages stay mandatory. Related: `vulkan-native-rebuild-decision`, `no-subagents`, `research-before-repeating-loops`.
+Earlier direction favoured wide parallel workflow waves. The owner reversed it on 2026-09-16 after a day of
+merges landing work they could not watch: "The Workflow approach does not work for me. I cant see whats
+happening." One change at a time in the session, verified before the next. What survives from the earlier
+direction: capture sessions stay short (3 minutes is plenty; never a 10-minute run) and in-game runs are for the
+exit of a piece of work, not for investigation loops.
 
 ### Taa p2 vulkan parity lessons
 
@@ -355,7 +347,7 @@ TAA P2 (in-house resolve) was accepted by the user on 2026-09-10 ("TAA is CHEFSK
 2. `ClearColor` on Vulkan is a no-op for an attachment masked out of `SetDrawBuffers`; the motion attachment kept stale vectors (8e4a970). Clear = enable, clear, restore mask.
 Both slipped past single-frame GPU tests; Codex's regression test spans frames in flight with Present between them. Acceptance is numeric: still camera, wind stilled (`/weather setw still`), luminance diff of screenshot pairs; parity was Vulkan 1.84 vs OpenGL 1.87.
 
-**How to apply:** for any Vulkan "looks wrong" report, check the format table and clear-vs-mask first (now in the vulkan-parity-debug skill, sections 2 and 2c), and write multi-frame tests for temporal state. P3+ of TAA-PLAN.md continue via workflows (sonnet map, opus stages). Related: `verify-end-to-end-not-components`, `delegating-to-codex`, `optimum-upscaling-roadmap`.
+**How to apply:** for any Vulkan "looks wrong" report, check the format table and clear-vs-mask first (now in the vulkan-parity-debug skill, sections 2 and 2c), and write multi-frame tests for temporal state. Related: `verify-end-to-end-not-components`, `delegating-to-codex`, `optimum-upscaling-roadmap`.
 
 ### Testing suite too heavy
 
