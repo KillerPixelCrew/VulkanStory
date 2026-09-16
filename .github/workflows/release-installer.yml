@@ -76,11 +76,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Bundle the Optimum logo into every generated installer so the Setup
+          # window, the AppImage/desktop entry, and the app shortcut all show the
+          # Optimum icon instead of the Velopack default. Velopack wants an .ico
+          # on Windows and a .png on Linux/macOS (where --icon is required).
+          rid="${{ matrix.rid }}"
+          case "$rid" in
+            win-x64) icon="Optimum.Launcher/optimum.ico" ;;
+            *)       icon="Optimum.Installer/Assets/optimum-logo.png" ;;
+          esac
+          if [ ! -f "$icon" ]; then
+            echo "icon asset not found: $icon" >&2
+            exit 1
+          fi
+
+          extra_args=()
+          if [ "$rid" = "win-x64" ] && [ -f Optimum.Installer/Assets/optimum-logo.png ]; then
+            # Splash shown while the Windows installer runs.
+            extra_args+=(--splashImage Optimum.Installer/Assets/optimum-logo.png)
+          fi
+
           dotnet vpk pack \
             --packId Optimum.Installer \
+            --packTitle Optimum \
             --packVersion "${{ steps.v.outputs.version }}" \
             --packDir publish/${{ matrix.rid }} \
             --mainExe ${{ matrix.exe }} \
+            --icon "$icon" \
+            "${extra_args[@]}" \
             --outputDir releases
 
       # vpk has no name-override flag. Rename the user-facing artifacts (setup,
