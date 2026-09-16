@@ -170,19 +170,26 @@ public class TaaPipelineCoverageTests
 
         // postSceneTexture/postGlowTexture are derived from the resolve result
         // right after the call, before the bloom block reads them.
+        // Phase 3b: the choice moved into its own virtual, which the chain calls right after
+        // the resolve and before the bloom step reads it.
+        Assert.Contains(
+            "return TaaResolvedThisFrame ? taaResolvedColorTexture : frameBuffers[0].ColorTextureIds[0];",
+            platform);
+        Assert.Contains(
+            "return TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];",
+            platform);
         int postSceneDecl = platform.IndexOf(
-            "int postSceneTexture = TaaResolvedThisFrame ? taaResolvedColorTexture : frameBuffers[0].ColorTextureIds[0];",
-            resolveCall,
-            StringComparison.Ordinal);
+            "int postSceneTexture = OptimumPostSceneTexture();", resolveCall, StringComparison.Ordinal);
         int postGlowDecl = platform.IndexOf(
-            "int postGlowTexture = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];",
-            resolveCall,
-            StringComparison.Ordinal);
+            "int postGlowTexture = OptimumPostGlowTexture();", resolveCall, StringComparison.Ordinal);
         Assert.True(postSceneDecl > resolveCall);
         Assert.True(postGlowDecl > postSceneDecl);
 
-        int bloomBlock = platform.IndexOf("if (RenderBloom)", postGlowDecl, StringComparison.Ordinal);
-        Assert.True(bloomBlock > postGlowDecl);
+        int bloomStep = platform.IndexOf(
+            "OptimumPostBloom(postSceneTexture, postGlowTexture);", postGlowDecl, StringComparison.Ordinal);
+        Assert.True(bloomStep > postGlowDecl);
+        int bloomBlock = platform.IndexOf("if (RenderBloom)", bloomStep, StringComparison.Ordinal);
+        Assert.True(bloomBlock > bloomStep);
 
         // Bloom's findbright pass reads the resolved colour+glow, not the raw
         // primary attachments.
