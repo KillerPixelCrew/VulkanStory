@@ -79,11 +79,13 @@ jobs:
 
           # Bundle the Optimum logo into every generated installer so the Setup
           # window, the AppImage/desktop entry, and the app shortcut all show the
-          # Optimum icon instead of the Velopack default. Velopack wants an .ico
-          # on Windows and a .png on Linux/macOS (where --icon is required).
+          # Optimum icon instead of the Velopack default. Velopack wants a
+          # platform-native icon: an .ico on Windows, an .icns on macOS, and a
+          # .png on Linux (where --icon is required for the AppImage).
           rid="${{ matrix.rid }}"
           case "$rid" in
             win-x64) icon="Optimum.Launcher/optimum.ico" ;;
+            osx-*)   icon="logo.icns" ;;
             *)       icon="Optimum.Installer/Assets/optimum-logo.png" ;;
           esac
           if [ ! -f "$icon" ]; then
