@@ -20,8 +20,11 @@ public static class SymlinkComponentCheck
     /// </summary>
     public static string? FirstSymlinkComponent(ISystemProbe probe, string path, bool requireExists = false)
     {
-        string full = Path.GetFullPath(path);
-        string? current = full;
+        // Walk the components as given rather than through Path.GetFullPath /
+        // Path.GetDirectoryName, which on Windows rewrite a POSIX path against the
+        // host drive and split on '\'. The probe already holds absolute paths; in
+        // production probe.Os matches the host so behaviour is unchanged.
+        string? current = path;
 
         while (!string.IsNullOrEmpty(current))
         {
@@ -35,13 +38,22 @@ public static class SymlinkComponentCheck
                 throw new DirectoryNotFoundException($"Path component does not exist: {current}");
             }
 
-            string? parent = Path.GetDirectoryName(current);
+            string? parent = ParentOf(current);
             if (parent is null || parent == current)
                 break;
             current = parent;
         }
 
         return null;
+    }
+
+    /// <summary>Parent of a path, honouring both separators; null at the root.</summary>
+    private static string? ParentOf(string dir)
+    {
+        int cut = dir.TrimEnd('/', '\\').LastIndexOfAny(['/', '\\']);
+        if (cut < 0)
+            return null;
+        return cut == 0 ? dir[..1] : dir[..cut];
     }
 
     public static bool IsClean(ISystemProbe probe, string path) => FirstSymlinkComponent(probe, path) is null;

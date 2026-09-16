@@ -244,9 +244,10 @@ public static class CliRunner
             return installError;
 
         ShortcutKinds shortcuts = ParseShortcuts(parsed.Get("--shortcuts"));
+        bool clean = parsed.Has("--clean") || parsed.Has("--force");
 
         DeployResult result = new PackageDeployer(probe).Deploy(
-            new DeployRequest(package, installDir, parsed.Get("--data-path"), shortcuts), output);
+            new DeployRequest(package, installDir, parsed.Get("--data-path"), shortcuts, clean), output);
 
         return result.Ok
             ? output.Success(result.InstallDirectory!)
@@ -346,7 +347,10 @@ public static class CliRunner
             return null;
         }
         errorCode = ExitOk;
-        return Path.GetFullPath(value);
+        // The value is already validated as absolute; trim a trailing separator
+        // but do not run it through Path.GetFullPath, which on Windows rewrites a
+        // POSIX path against the host drive (e.g. /abs/game -> C:\abs\game).
+        return value.Length > 1 ? value.TrimEnd('/', '\\') : value;
     }
 
     private static ShortcutKinds ParseShortcuts(string? value)

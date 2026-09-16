@@ -57,7 +57,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (!Path.IsPathRooted(request.GameDirectory))
             return Task.FromResult(PatchResult.Failure(FailureReason.BadInput, $"--game-dir must be an absolute path: {request.GameDirectory}"));
 
-        string gameDir = Path.GetFullPath(request.GameDirectory);
+        string gameDir = NormalizeAbsolute(request.GameDirectory);
         if (!probe.DirectoryExists(gameDir))
             return Task.FromResult(PatchResult.Failure(FailureReason.BadInput, $"the game directory does not exist: {gameDir}"));
 
@@ -90,7 +90,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             if (!Path.IsPathRooted(request.OverlayDirectory))
                 return Task.FromResult(PatchResult.Failure(FailureReason.BadInput, $"--overlay must be an absolute path: {request.OverlayDirectory}"));
 
-            overlayDir = Path.GetFullPath(request.OverlayDirectory);
+            overlayDir = NormalizeAbsolute(request.OverlayDirectory);
             if (!probe.DirectoryExists(overlayDir))
                 return Task.FromResult(PatchResult.Failure(FailureReason.BadInput, $"the overlay directory does not exist: {overlayDir}"));
         }
@@ -343,6 +343,17 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         return Task.FromResult(PatchResult.Success(gameDir, patchedTargets));
     }
 
+    /// <summary>
+    /// Normalises an already-absolute path without rewriting it against the host
+    /// drive. <see cref="Path.GetFullPath(string)"/> would turn a POSIX path like
+    /// <c>/game</c> into <c>C:\game</c> on Windows, which is wrong whenever the
+    /// probe models another platform (and in cross-platform tests). Relative
+    /// paths are rejected by the caller before this runs, so the input is always
+    /// rooted; collapse only redundant separators.
+    /// </summary>
+    private static string NormalizeAbsolute(string path) =>
+        path.Length > 1 ? path.TrimEnd('/', '\\') : path;
+
     private PatchResult Rollback(string gameDir, IBuildObserver? observer)
     {
         string vanillaBackupDir = Path.Combine(gameDir, ".optimum", "vanilla");
@@ -494,10 +505,18 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
 
         foreach (string dir in dirs)
         {
-            string exeName = probe.Os == OsKind.Windows ? "Optimum.Patcher.exe" : "Optimum.Patcher";
-            string exePath = Path.Combine(dir, exeName);
-            if (probe.FileExists(exePath) && (probe.Os == OsKind.Windows || probe.IsExecutable(exePath)))
-                return (exePath, false);
+            // On Windows the patcher may ship as a native .exe or, in dev and test
+            // setups, a .bat/.cmd wrapper; accept either. On Unix it is the
+            // extensionless executable.
+            string[] exeNames = probe.Os == OsKind.Windows
+                ? ["Optimum.Patcher.exe", "Optimum.Patcher.bat", "Optimum.Patcher.cmd"]
+                : ["Optimum.Patcher"];
+            foreach (string exeName in exeNames)
+            {
+                string exePath = Path.Combine(dir, exeName);
+                if (probe.FileExists(exePath) && (probe.Os == OsKind.Windows || probe.IsExecutable(exePath)))
+                    return (exePath, false);
+            }
 
             string dllPath = Path.Combine(dir, "Optimum.Patcher.dll");
             if (probe.FileExists(dllPath))
@@ -584,6 +603,17 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             var commandArgs = new List<string> { patcherPath };
             commandArgs.AddRange(args);
             return probe.Run("dotnet", commandArgs, TimeSpan.FromMinutes(5));
+        }
+
+        // A .bat/.cmd cannot be launched directly when UseShellExecute is false;
+        // route it through the command interpreter. Native executables run as-is.
+        if (probe.Os == OsKind.Windows
+            && (patcherPath.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+                || patcherPath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase)))
+        {
+            var commandArgs = new List<string> { "/c", patcherPath };
+            commandArgs.AddRange(args);
+            return probe.Run("cmd.exe", commandArgs, TimeSpan.FromMinutes(5));
         }
 
         return probe.Run(patcherPath, args, TimeSpan.FromMinutes(5));

@@ -71,6 +71,9 @@ public sealed partial class OptionsViewModel : ViewModelBase
     private bool _createDesktopShortcut;
 
     [ObservableProperty]
+    private bool _cleanInstallDirectory = true;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanContinue))]
     private string? _validationError;
 
@@ -92,6 +95,8 @@ public sealed partial class OptionsViewModel : ViewModelBase
 
     partial void OnInstallDirectoryChanged(string value) => Validate();
 
+    partial void OnCleanInstallDirectoryChanged(bool value) => Validate();
+
     partial void OnUseSeparateDataFolderChanged(bool value) => Validate();
 
     partial void OnDataPathChanged(string value) => Validate();
@@ -105,7 +110,8 @@ public sealed partial class OptionsViewModel : ViewModelBase
         }
 
         string? data = UseSeparateDataFolder && DataPath.Length > 0 ? DataPath : null;
-        InstallPathVerdict verdict = InstallPathGuard.Check(_probe, new InstallPathRequest(InstallDirectory, data));
+        InstallPathVerdict verdict = InstallPathGuard.Check(_probe, new InstallPathRequest(
+            InstallDirectory, data, CleanDestination: CleanInstallDirectory));
         ValidationError = verdict.Ok ? null : verdict.Rejection;
     }
 

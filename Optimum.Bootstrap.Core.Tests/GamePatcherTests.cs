@@ -185,7 +185,11 @@ public sealed class GamePatcherTests
             string patcherExe = Path.Combine(overlayDir, OperatingSystem.IsWindows() ? "Optimum.Patcher.bat" : "Optimum.Patcher");
             if (OperatingSystem.IsWindows())
             {
-                File.WriteAllText(patcherExe, "@echo off\r\necho patched > %~dpnx3\r\nexit /b 0\r\n");
+                // Mirror the Unix stub: write "patched" to the LAST argument,
+                // whichever position it is (the lib call passes 3 args, the --api
+                // call passes 4). A for-loop keeps the final token in %%t.
+                File.WriteAllText(patcherExe,
+                    "@echo off\r\nset \"target=\"\r\nfor %%t in (%*) do set \"target=%%~t\"\r\necho patched > \"%target%\"\r\nexit /b 0\r\n");
             }
             else
             {

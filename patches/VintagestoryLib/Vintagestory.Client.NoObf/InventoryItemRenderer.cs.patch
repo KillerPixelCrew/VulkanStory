@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-index 0a45eb1..c7d80b3 100644
+index 35bb9ac..8193b14 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 @@ -13,10 +13,16 @@ namespace Vintagestory.Client.NoObf;
@@ -14,12 +14,12 @@ index 0a45eb1..c7d80b3 100644
 +	[System.ThreadStatic]
 +	private static ItemRenderInfo optimumGuiRenderInfoScratch;
 +
- 	private Dictionary<string, LoadedTexture> StackSizeTextures = new Dictionary<string, LoadedTexture>();
+ 	private Dictionary<string, LoadedTexture> StackSizeTextures;
  
  	private MeshRef quadModelRef;
  
  	private CairoFont stackSizeFont;
-@@ -237,11 +243,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -243,11 +249,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  	public void RenderItemstackToGui(ItemSlot inSlot, double posX, double posY, double posZ, float size, int color, float dt, bool shading = true, bool origRotate = false, bool showStackSize = true)
  	{
  		try
@@ -54,7 +54,7 @@ index 0a45eb1..c7d80b3 100644
  				return;
  			}
  			bool flag = dt == -1.0125f;
-@@ -346,17 +374,31 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -352,17 +380,31 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		cairoFont.UnscaledFontsize *= fontSizeMultiplier;
  		return game.api.guiapi.TextTexture.GenTextTexture(stackSize.ToString() ?? "", cairoFont);
  	}
@@ -88,7 +88,7 @@ index 0a45eb1..c7d80b3 100644
  		{
  		case EnumItemRenderTarget.Ground:
  			renderinfo.Transform = itemstack.Collectible.GroundTransform;
-@@ -425,10 +467,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -431,10 +473,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		inSlot.OnBeforeRender(renderinfo);
  		itemstack.Collectible.OnBeforeRender(game.api, itemstack, target, ref renderinfo);
  		return renderinfo;

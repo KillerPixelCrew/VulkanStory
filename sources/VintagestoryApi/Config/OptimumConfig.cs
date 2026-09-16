@@ -866,7 +866,7 @@ public static class OptimumConfig
             ChunkDeserializeParallelMinY = Math.Clamp(data.ChunkDeserializeParallelMinY, 2, 64);
             ShaderPreprocessParallel = data.ShaderPreprocessParallel;
             AdaptiveRadiusEnabled = data.AdaptiveRadius;
-            AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 12);
+            AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 48);
             AdaptiveRadiusHighThreshold = Math.Max(1, data.AdaptiveRadiusHighThreshold);
             AdaptiveRadiusLowThreshold = Math.Max(1, data.AdaptiveRadiusLowThreshold);
             LaunchTaskBudgetEnabled = data.LaunchTaskBudgetEnabled;

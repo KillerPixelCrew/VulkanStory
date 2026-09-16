@@ -94,7 +94,7 @@ ilspycmd_version_bounds() {
     grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' "$manifest" | tr -d '"'
     return
   fi
-  printf '%s\n' '10.1.0.8386' '10.1.1.8388'
+  printf '%s\n' '11.0.0.9375' '11.0.0.9375'
 }
 
 ilspycmd_version_at_least() {
@@ -1465,7 +1465,7 @@ if [[ "${#ownership_conflicts[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print 2>/dev/null | head -n 1 | grep -q .; then
+if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.patch' -print 2>/dev/null | head -n 1 | grep -q .); then
 
   # ZIP downloads (non-clone) lack a .git/ directory. git add and git apply
   # both exit 128 without one. Create a temporary repo so patches can apply.

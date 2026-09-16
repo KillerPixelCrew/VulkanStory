@@ -70,14 +70,14 @@ public class PrerequisiteScannerTests
         probe.OnCommand("/home/tester/.dotnet/dotnet", "--list-sdks", "10.0.100 [/user/sdk]\n");
         probe.OnCommand("/home/tester/.dotnet/dotnet", "--version", "10.0.100\n");
         probe.AddFile("/home/tester/.dotnet/tools/ilspycmd");
-        probe.OnCommand("/home/tester/.dotnet/tools/ilspycmd", "--version", "ilspycmd: 10.1.1.8388\n");
+        probe.OnCommand("/home/tester/.dotnet/tools/ilspycmd", "--version", "ilspycmd: 11.0.0.9375\n");
 
         var scanner = new PrerequisiteScanner(probe, "/repo");
         Assert.True(scanner.AllRequiredPresent());
 
         PrerequisiteResult ilspy = scanner.Scan().Single(r => r.Definition.Id == PrerequisiteId.Ilspycmd);
         Assert.Equal(PrerequisiteState.Ok, ilspy.State);
-        Assert.Equal("10.1.1.8388", ilspy.DetectedVersion);
+        Assert.Equal("11.0.0.9375", ilspy.DetectedVersion);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public class PrerequisiteScannerTests
 
         Assert.Equal(PrerequisiteState.Outdated, ilspy.State);
         Assert.Equal(
-            "dotnet tool update -g ilspycmd --version 10.1.1.8388 --allow-downgrade",
+            "dotnet tool update -g ilspycmd --version 11.0.0.9375 --allow-downgrade",
             ilspy.AcquisitionCommand);
     }
 

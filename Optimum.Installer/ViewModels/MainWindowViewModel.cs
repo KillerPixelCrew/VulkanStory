@@ -137,10 +137,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private static readonly string[] StepNames = ["System", "Options", "Review", "Install"];
 
-    /// <summary>The rail labels for <c>suki:VerticalStepper</c>.</summary>
+    /// <summary>The rail labels for the step navigation.</summary>
     public IReadOnlyList<string> StepLabels => StepNames;
 
-    /// <summary>Zero-based current step for <c>suki:VerticalStepper.Index</c>.
+    /// <summary>Zero-based current step for the step rail.
     /// On a successful completion it points past the last step so the rail
     /// shows every step done rather than the last one still "current".</summary>
     public int StepIndex =>
@@ -201,7 +201,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         WizardScreen.Options => "Where Optimum goes, the game data it uses, and the shortcuts to add.",
         WizardScreen.Review => "Confirm the summary, then read and accept the build notice.",
         WizardScreen.Progress => "This runs on your computer and can take a few minutes the first time.",
-        WizardScreen.Completion when Completion?.Succeeded == true => "Optimum is ready to launch.",
+        WizardScreen.Completion when Completion?.Succeeded == true => "Optimum is installed and ready to play.",
         WizardScreen.Completion => "Nothing on your system was changed. Fix the issue below, then try again.",
         _ => string.Empty,
     };
@@ -277,7 +277,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Options.ResolvedDataPath,
             Options.SelectedVersion,
             (Options.CreateMenuEntry ? ShortcutKinds.Menu : ShortcutKinds.None)
-                | (Options.CreateDesktopShortcut ? ShortcutKinds.Desktop : ShortcutKinds.None));
+                | (Options.CreateDesktopShortcut ? ShortcutKinds.Desktop : ShortcutKinds.None),
+            Options.CleanInstallDirectory);
 
         var progress = new ProgressViewModel(_services, session, _services.UiPost);
         progress.Finished += OnBuildFinished;

@@ -41,24 +41,29 @@ public static class DataPathProbe
         {
             OsKind.Windows =>
             [
-                Combine(probe.GetEnvironmentVariable("APPDATA"), "VintagestoryData"),
-                Combine(probe.GetEnvironmentVariable("APPDATA"), "OptimumData"),
+                WinCombine(probe.GetEnvironmentVariable("APPDATA"), "VintagestoryData"),
+                WinCombine(probe.GetEnvironmentVariable("APPDATA"), "OptimumData"),
             ],
             OsKind.MacOs =>
             [
-                System.IO.Path.Combine(home, "Library", "Application Support", "VintagestoryData"),
-                System.IO.Path.Combine(home, "Library", "Application Support", "OptimumVintagestoryData"),
-                System.IO.Path.Combine(home, ".config", "VintagestoryData"),
+                Posix(home, "Library", "Application Support", "VintagestoryData"),
+                Posix(home, "Library", "Application Support", "OptimumVintagestoryData"),
+                Posix(home, ".config", "VintagestoryData"),
             ],
             _ =>
             [
-                System.IO.Path.Combine(home, ".config", "VintagestoryData"),
-                System.IO.Path.Combine(home, ".config", "OptimumVintagestoryData"),
-                System.IO.Path.Combine(home, "ApplicationData", "vintagestorydata"),
+                Posix(home, ".config", "VintagestoryData"),
+                Posix(home, ".config", "OptimumVintagestoryData"),
+                Posix(home, "ApplicationData", "vintagestorydata"),
             ],
         };
 
-        static string Combine(string? root, string child) =>
+        // The macOS and Linux data folders follow POSIX '/' convention regardless
+        // of the host the installer binary happens to run on, so join with '/'
+        // rather than System.IO.Path.Combine (which would emit '\' on Windows).
+        static string Posix(params string[] parts) => string.Join('/', parts);
+
+        static string WinCombine(string? root, string child) =>
             root is { Length: > 0 } ? System.IO.Path.Combine(root, child) : child;
     }
 }

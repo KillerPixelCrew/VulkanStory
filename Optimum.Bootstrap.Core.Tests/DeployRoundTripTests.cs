@@ -74,6 +74,22 @@ public sealed class DeployRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void DeployCleansANonEmptyDirectoryWhenCleanDestinationIsTrue()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string occupied = Path.Combine(_root, "occupied-clean");
+        Directory.CreateDirectory(occupied);
+        File.WriteAllText(Path.Combine(occupied, "someone-elses-file"), "x");
+
+        DeployResult result = new PackageDeployer(probe).Deploy(new DeployRequest(package, occupied, CleanDestination: true));
+
+        Assert.True(result.Ok);
+        Assert.False(File.Exists(Path.Combine(occupied, "someone-elses-file")));
+        Assert.True(File.Exists(Path.Combine(occupied, "run.sh")));
+    }
+
+    [Fact]
     public void DeployReplacesAnExistingOptimumInstallInPlace()
     {
         var probe = SystemProbe.Default;

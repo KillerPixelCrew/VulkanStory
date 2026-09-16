@@ -51,17 +51,29 @@ public static class SourceCache
     public static string Directory(ISystemProbe probe, string version, string? overrideRoot = null)
     {
         string root = overrideRoot ?? DefaultRoot(probe);
-        return Path.Combine(root, "optimum", "src-" + SanitizeVersion(version));
+        return Join(probe, root, "optimum", "src-" + SanitizeVersion(version));
     }
 
     private static string DefaultRoot(ISystemProbe probe) => probe.Os switch
     {
         OsKind.Windows => probe.GetEnvironmentVariable("LOCALAPPDATA")
-            ?? Path.Combine(probe.HomeDirectory, "AppData", "Local"),
-        OsKind.MacOs => Path.Combine(probe.HomeDirectory, "Library", "Caches"),
+            ?? Join(probe, probe.HomeDirectory, "AppData", "Local"),
+        OsKind.MacOs => Join(probe, probe.HomeDirectory, "Library", "Caches"),
         _ => probe.GetEnvironmentVariable("XDG_CACHE_HOME")
-            ?? Path.Combine(probe.HomeDirectory, ".cache"),
+            ?? Join(probe, probe.HomeDirectory, ".cache"),
     };
+
+    /// <summary>
+    /// Joins path parts with the separator of the <em>probed</em> platform. In
+    /// production probe.Os matches the host, so a Windows install gets native
+    /// backslash paths and a Linux/macOS install gets '/'. The FakeSystemProbe
+    /// normalises separators, so cross-platform tests match either form.
+    /// </summary>
+    private static string Join(ISystemProbe probe, string root, params string[] parts)
+    {
+        char sep = probe.Os == OsKind.Windows ? '\\' : '/';
+        return root.TrimEnd('/', '\\') + sep + string.Join(sep, parts);
+    }
 
     /// <summary>
     /// A filesystem-safe token for the version, prefixed <c>v</c> when it starts

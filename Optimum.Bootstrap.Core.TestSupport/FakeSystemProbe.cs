@@ -25,34 +25,34 @@ public sealed class FakeSystemProbe : ISystemProbe
 
     public FakeSystemProbe AddFile(string path, string? content = null)
     {
-        Files.Add(path);
+        Files.Add(Norm(path));
         if (content is not null)
-            FileContents[path] = content;
+            FileContents[Norm(path)] = content;
         return this;
     }
 
     public FakeSystemProbe AddDirectory(string path)
     {
-        Directories.Add(path);
+        Directories.Add(Norm(path));
         return this;
     }
 
     public FakeSystemProbe AddSymlink(string path)
     {
-        Symlinks.Add(path);
+        Symlinks.Add(Norm(path));
         return this;
     }
 
     public FakeSystemProbe AddNonExecutableFile(string path)
     {
-        Files.Add(path);
-        NonExecutable.Add(path);
+        Files.Add(Norm(path));
+        NonExecutable.Add(Norm(path));
         return this;
     }
 
     public FakeSystemProbe OnCommand(string exe, string args, string stdout = "", int exitCode = 0)
     {
-        Commands[$"{exe}|{args}"] = new ProcessOutcome(true, exitCode, stdout, string.Empty);
+        Commands[$"{Norm(exe)}|{args}"] = new ProcessOutcome(true, exitCode, stdout, string.Empty);
         return this;
     }
 
@@ -61,25 +61,39 @@ public sealed class FakeSystemProbe : ISystemProbe
 
     IReadOnlyList<string> ISystemProbe.PathDirectories => Path;
 
-    bool ISystemProbe.FileExists(string path) => Files.Contains(path);
+    bool ISystemProbe.FileExists(string path) => Files.Contains(Norm(path));
 
-    bool ISystemProbe.IsExecutable(string path) => Files.Contains(path) && !NonExecutable.Contains(path);
+    bool ISystemProbe.IsExecutable(string path) => Files.Contains(Norm(path)) && !NonExecutable.Contains(Norm(path));
 
-    bool ISystemProbe.DirectoryExists(string path) => Directories.Contains(path);
+    bool ISystemProbe.DirectoryExists(string path) => Directories.Contains(Norm(path));
 
     bool ISystemProbe.PathExists(string path) =>
-        Files.Contains(path) || Directories.Contains(path) || Symlinks.Contains(path);
+        Files.Contains(Norm(path)) || Directories.Contains(Norm(path)) || Symlinks.Contains(Norm(path));
 
-    bool ISystemProbe.IsSymbolicLink(string path) => Symlinks.Contains(path);
+    bool ISystemProbe.IsSymbolicLink(string path) => Symlinks.Contains(Norm(path));
 
     string? ISystemProbe.ReadText(string path) =>
-        FileContents.TryGetValue(path, out string? content) ? content : null;
+        FileContents.TryGetValue(Norm(path), out string? content) ? content : null;
 
     IEnumerable<string> ISystemProbe.EnumerateFiles(string directory, string searchPattern) =>
-        Files.Where(f => System.IO.Path.GetDirectoryName(f) == directory && Matches(f, searchPattern));
+        Files.Where(f => DirOf(f) == Norm(directory) && Matches(f, searchPattern));
 
     IEnumerable<string> ISystemProbe.EnumerateDirectories(string directory, string searchPattern) =>
-        Directories.Where(d => System.IO.Path.GetDirectoryName(d) == directory && Matches(d, searchPattern));
+        Directories.Where(d => DirOf(d) == Norm(directory) && Matches(d, searchPattern));
+
+    /// <summary>
+    /// The fake models a POSIX filesystem with '/' separators. Production code
+    /// builds candidate paths with <see cref="System.IO.Path.Combine"/>, which on
+    /// Windows inserts '\'. Normalise both the stored keys and every lookup to '/'
+    /// so the tests behave identically on Linux CI and a Windows developer box.
+    /// </summary>
+    private static string Norm(string path) => path.Replace('\\', '/');
+
+    private static string? DirOf(string path)
+    {
+        int slash = path.LastIndexOf('/');
+        return slash <= 0 ? (slash == 0 ? "/" : null) : path[..slash];
+    }
 
     private static bool Matches(string path, string searchPattern)
     {
@@ -91,7 +105,7 @@ public sealed class FakeSystemProbe : ISystemProbe
     }
 
     ProcessOutcome ISystemProbe.Run(string executable, IReadOnlyList<string> arguments, TimeSpan timeout) =>
-        Commands.TryGetValue($"{executable}|{string.Join(' ', arguments)}", out ProcessOutcome outcome)
+        Commands.TryGetValue($"{Norm(executable)}|{string.Join(' ', arguments)}", out ProcessOutcome outcome)
             ? outcome
             : ProcessOutcome.NotStarted;
 }

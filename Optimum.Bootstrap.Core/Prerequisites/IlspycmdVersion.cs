@@ -59,9 +59,9 @@ public readonly record struct IlspycmdCompatibility(IlspycmdVersion Minimum, Ils
 {
     /// <summary>The hard-coded fallback in <c>scripts/install-linux.sh</c> when the config files are missing.</summary>
     public static readonly IlspycmdCompatibility Fallback = new(
-        new IlspycmdVersion(10, 1, 0, 8386),
-        new IlspycmdVersion(10, 1, 1, 8388),
-        "10.1.1.8388");
+        new IlspycmdVersion(11, 0, 0, 9375),
+        new IlspycmdVersion(11, 0, 0, 9375),
+        "11.0.0.9375");
 
     public bool Supports(string? version) =>
         IlspycmdVersion.TryParse(version, out var parsed) && parsed >= Minimum && parsed <= Maximum;

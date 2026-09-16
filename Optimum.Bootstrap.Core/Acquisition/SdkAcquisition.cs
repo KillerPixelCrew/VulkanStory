@@ -34,9 +34,10 @@ public static class SdkAcquisition
                 "This is a non-FHS system: the SDK from dot.net is a glibc build whose dynamic linker is not present here.", null);
         }
 
-        string installDir = Path.Combine(probe.HomeDirectory, ".dotnet");
-        string globalJson = Path.Combine(repoRoot, "global.json");
         bool windows = probe.Os == OsKind.Windows;
+        char sep = windows ? '\\' : '/';
+        string installDir = probe.HomeDirectory.TrimEnd('/', '\\') + sep + ".dotnet";
+        string globalJson = repoRoot.TrimEnd('/', '\\') + sep + "global.json";
 
         var args = windows
             ? new List<string> { "-InstallDir", installDir, "-NoPath" }
