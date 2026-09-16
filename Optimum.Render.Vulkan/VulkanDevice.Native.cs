@@ -138,14 +138,24 @@ internal sealed class NativePipeline
                 _uniforms[name] = new NativeUniform(NativeUniformBlock.Frame, frame.Offset, frame.Size);
             }
         }
+        SamplerNames = new string[layout.Samplers.Count];
         for (int i = 0; i < layout.Samplers.Count; i++)
         {
             SamplerBinding sampler = layout.Samplers[i];
             TextureKind kind = sampler.Kind;
             if (sampler.IsFrameTexture) BindlessKinds.TryFromGlslType(sampler.TypeName, out kind);
             _samplers[sampler.Name] = new NativeSamplerSlot(i, sampler.PushOffset, sampler.FrameBinding, kind);
+            SamplerNames[i] = sampler.Name;
         }
     }
+
+    /// <summary>
+    /// Every sampler the program declares, in binding order. A system whose draws are all
+    /// native has to resolve all of them: the emulated resolve that would otherwise fill the
+    /// push block's slots from the texture units never runs for such a program, so a sampler
+    /// left out would read whatever slot index was last written there.
+    /// </summary>
+    internal string[] SamplerNames { get; }
 
     internal ShaderProgramResources Program { get; }
 
@@ -537,13 +547,27 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>Closes the native pass and its scope.</summary>
-    internal void EndNativePass()
+    internal void EndNativePass() => EndNativePass(keepScope: false);
+
+    /// <summary>
+    /// Closes the native pass. <paramref name="keepScope" /> leaves the rendering scope and the
+    /// pass declaration exactly as they were, for a native draw recorded inside a pass the
+    /// surrounding stage has already declared - the entity loop, which records one native draw
+    /// per entity into the Opaque stage's own pass and would otherwise end and restart the
+    /// rendering scope once per entity. It is only correct when the pass description named that
+    /// same declaration, so <see cref="BeginNativePass" /> coalesced into it rather than opening
+    /// one of its own; a pass with its own name, slots or clears must be closed the normal way.
+    ///
+    /// The native-pass bookkeeping is cleared either way, so the emulated calls a render system
+    /// makes between its draws (its uniforms by name) still count as outside a native pass.
+    /// </summary>
+    internal void EndNativePass(bool keepScope)
     {
         if (_nativePass == null) return;
 
         _nativePass = null;
         _nativeTarget = null;
-        if (!_frameActive) return;
+        if (!_frameActive || keepScope) return;
 
         CommandBuffer commandBuffer = Commands;
         _targets.EndPass(commandBuffer);

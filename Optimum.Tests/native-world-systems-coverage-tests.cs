@@ -20,6 +20,9 @@ public class NativeWorldSystemsCoverageTests
     private const string DeviceMeshFile = "Optimum.Render.Vulkan/VulkanDevice.NativeMesh.cs";
     private const string DeviceNativeFile = "Optimum.Render.Vulkan/VulkanDevice.Native.cs";
 
+    private const string EntityPlatformFile =
+        "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeEntities.cs";
+
     /// <summary>
     /// The seam exists on the platform abstraction, and its neutral body is exactly the
     /// RenderMesh call it replaced - which is what makes "OFF is vanilla" true for OpenGL,
@@ -184,148 +187,124 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("_meshes.LayoutOf(description.VertexLayoutId)", native);
     }
 
+    // ------------------------------------------------------------- entities (stage 2)
+
     /// <summary>
-    /// The chunk groups have a seam of their own, and its neutral bodies do nothing at all -
-    /// which is what keeps the OpenGL path drawing exactly the bodies it drew before, with its
-    /// GlToggleBlend / depth / cull calls still in place.
+    /// The entity draw seam exists on the platform abstraction, its neutral body is exactly the
+    /// RenderMesh call it replaced, and ClientPlatformWindows does not override it - which is what
+    /// makes "OFF is vanilla" true for OpenGL.
     /// </summary>
     [Fact]
-    public void TheChunkGroupsHaveAScopeSeamWhoseNeutralBodyDoesNothing()
+    public void TheEntityDrawHasASeamWhoseNeutralBodyIsTheDrawItReplaced()
     {
         string platform = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
 
         Assert.Contains(
-            "public virtual bool BeginChunkPass(string chunkPass, bool blend, bool depthTest, bool depthWrite, bool cullFace)",
+            "public virtual void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)",
             platform);
-        Assert.Contains("public virtual void EndChunkPass()", platform);
+        Assert.Contains("RenderMesh(mesh);", platform);
 
-        // The OpenGL platform leaves both alone: nothing about the GL path changes.
         string windows = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        Assert.DoesNotContain("BeginChunkPass", windows);
-        Assert.DoesNotContain("EndChunkPass", windows);
+        Assert.DoesNotContain("RenderEntityMesh", windows);
     }
 
     /// <summary>
-    /// Every ChunkRenderer draw group brackets its pools with the seam and states the fixed
-    /// state that group runs under - and still makes the GL state calls the OpenGL path needs,
-    /// because those are what the GL body draws with.
+    /// The entity renderers reach the seam where they already were: RenderMultiTextureMesh draws
+    /// each sub-mesh through it and hands it the sampler name and texture id it just bound, which
+    /// is what a native pass needs to resolve the draw's texture from a handle.
     /// </summary>
     [Fact]
-    public void EveryChunkDrawGroupDrawsInsideTheScope()
+    public void TheMultiTextureDrawGoesThroughTheSeam()
     {
-        string renderer = ReadPatchedOrSource(
-            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
-            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+        string api = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs");
 
-        foreach (string group in new[]
-                 {
-                     "chunk-shadow-opaque", "chunk-shadow-topsoil", "chunk-shadow-vegetation",
-                     "chunk-shadow-blendnocull", "chunk-opaque", "chunk-topsoil", "chunk-vegetation",
-                     "chunk-blendnocull", "chunk-decorative", "chunk-oit-liquid", "chunk-oit-transparent",
-                     "chunk-liquid-motion", "chunk-overlay",
-                 })
-        {
-            Assert.Contains("platform.BeginChunkPass(\"" + group + "\"", renderer);
-        }
-
-        // One close per open, and each in a finally, so a throwing pool draw cannot leave a
-        // pass open for the rest of the frame.
-        int opens = Count(renderer, "platform.BeginChunkPass(");
-        int closes = Count(renderer, "platform.EndChunkPass();");
-        Assert.Equal(13, opens);
-        Assert.Equal(opens, closes);
-
-        // "OFF is vanilla": the GL state the OpenGL body draws under is still set.
-        Assert.Contains("platform.GlToggleBlend(on: false);", renderer);
-        Assert.Contains("platform.GlEnableCullFace();", renderer);
-        Assert.Contains("platform.GlDepthMask(flag: true);", renderer);
+        Assert.Contains("plat.RenderEntityMesh(vao, textureSampleName, mmr.textureids[i]);", api);
+        Assert.DoesNotContain("plat.RenderMesh(vao);", api);
     }
 
-    /// <summary>Every new or changed lib member of the chunk port is listed for the Cecil transplant.</summary>
+    /// <summary>The seam and its caller are listed for the Cecil transplant.</summary>
     [Fact]
-    public void TheChunkSeamAndItsCallersAreListedForTheTransplant()
+    public void TheEntitySeamAndItsCallerAreListedForTheTransplant()
     {
         string patcher = Read("Optimum.Patcher/Program.cs");
-        Assert.Contains("\"BeginChunkPass\"", patcher);
-        Assert.Contains("\"EndChunkPass\"", patcher);
-        foreach (string method in new[] { "RenderShadow", "RenderOpaque", "RenderOIT", "RenderAfterOIT" })
-        {
-            Assert.Contains("\"Vintagestory.Client.NoObf.ChunkRenderer\", \"" + method + "\", 1", patcher);
-        }
-        // RenderLiquidMotion is an injected member rather than a transplanted vanilla one.
-        Assert.Contains("\"RenderLiquidMotion\"", patcher);
+        Assert.Contains("\"RenderEntityMesh\"", patcher);
+        Assert.Contains("\"Vintagestory.Client.RenderAPIBase\", \"RenderMultiTextureMesh\", 3", patcher);
     }
 
     /// <summary>
-    /// The Vulkan platform records the chunk groups as native passes with indirect multi-draws,
-    /// states its own fixed state, expresses the motion window as a colour-write mask, and keeps
-    /// the old route reachable behind a switch.
+    /// The Vulkan platform records the entity draws natively for the two programs it owns, states
+    /// its own fixed state rather than reading the tracker's, treats the motion window as a colour
+    /// write mask, and keeps the neutral body reachable behind a switch.
     /// </summary>
     [Fact]
-    public void TheVulkanPlatformRecordsTheChunkGroupsNativelyAndKeepsTheOldRoute()
+    public void TheVulkanPlatformRecordsEntitiesNativelyAndKeepsTheOldRoute()
     {
-        string chunks = Read(ChunkPlatformFile);
+        string entities = Read(EntityPlatformFile);
 
-        Assert.Contains("internal bool NativeChunksEnabled { get; set; } = true;", chunks);
-        Assert.Contains("public override bool BeginChunkPass(", chunks);
-        Assert.Contains("public override void EndChunkPass()", chunks);
-        Assert.Contains("device.BeginNativePass(", chunks);
-        Assert.Contains("device.EndNativePass();", chunks);
+        Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = true;", entities);
+        Assert.Contains("public override void RenderEntityMesh(", entities);
+        Assert.Contains("base.RenderEntityMesh(", entities);
+        Assert.Contains("device.BeginNativePass(", entities);
+        Assert.Contains("device.DrawNativeMesh(", entities);
 
-        // The multi-draw stays a multi-draw, over the mesh's own vertex layout.
-        Assert.Contains("device.DrawNativeMeshMulti(", chunks);
-        Assert.Contains("VertexLayoutId = layoutId", chunks);
-        Assert.Contains("device.NativeMeshLayoutId(", chunks);
+        // The two programs it owns, and nothing else.
+        Assert.Contains("private const string EntityAnimatedPass = \"entityanimated\";", entities);
+        Assert.Contains("private const string EntityShadowPass = \"shadowmapentityanimated\";", entities);
 
-        // The motion window is a write mask, never a draw-buffer toggle.
-        Assert.Contains("if (chunkScopeMotionOnly && slot != motion) entry.WriteMask = 0;", chunks);
-        Assert.DoesNotContain("SetDrawBuffers", chunks);
+        // The fixed state stated outright, from the values SystemRenderEntities sets.
+        Assert.Contains("DepthTest = true", entities);
+        Assert.Contains("DepthWrite = true", entities);
+        Assert.Contains("DepthCompare = CompareOp.Less", entities);
+        Assert.Contains("Cull = CullModeFlags.None", entities);
+        Assert.Contains("VertexLayoutId = layoutId", entities);
 
-        // The state is stated, not read back off the tracker.
-        Assert.Contains("DepthTest = chunkScopeDepthTest", chunks);
-        Assert.Contains("DepthWrite = chunkScopeDepthWrite", chunks);
-        Assert.Contains("Cull = chunkScopeCull ? CullModeFlags.BackBit : CullModeFlags.None", chunks);
-        Assert.Contains("SamplesBoundDepth = samplesBoundDepth", chunks);
-
-        // The route in: the pool's multi-draw seam takes the native path only inside a scope.
-        string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
-        Assert.Contains("if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;", meshes);
-        Assert.Contains("device.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);", meshes);
+        // The motion window is a write mask on the pipeline, never a draw-buffer toggle.
+        Assert.Contains("OptimumMotionWriteActive", entities);
+        Assert.Contains("attachment.WriteMask = 0;", entities);
+        Assert.DoesNotContain("SetDrawBuffers", entities);
     }
 
     /// <summary>
-    /// The values a native chunk pass cannot read off GL state are recorded where the client
-    /// states them: the texture behind each sampler, and the Transparent target's blend contract.
+    /// The native draw is recorded inside the stage's own declared pass, so a loop of hundreds of
+    /// entities does not end and restart the rendering scope once per entity, and the device has
+    /// the close that makes that safe.
     /// </summary>
     [Fact]
-    public void TheClientStateANativeChunkPassNeedsIsRecordedAtItsOwnSeam()
+    public void TheEntityDrawsShareTheStagesPassInsteadOfOnePassPerEntity()
     {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("Name = BoundPassName(),", entities);
+        Assert.Contains("ColorSlots = uint.MaxValue,", entities);
+        Assert.Contains("device.EndNativePass(keepScope: true);", entities);
+
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal void EndNativePass(bool keepScope)", native);
+        Assert.Contains("if (!_frameActive || keepScope) return;", native);
+    }
+
+    /// <summary>
+    /// A native draw resolves every sampler its program declares, from what the client declared
+    /// for it by name - not from a texture unit, which decision 3 forbids and which the emulated
+    /// resolve (never run for a program whose draws are all native) would otherwise have filled.
+    /// </summary>
+    [Fact]
+    public void ANativeDrawResolvesEverySamplerTheProgramDeclares()
+    {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("string[] names = pipeline.SamplerNames;", entities);
+        Assert.Contains("DeclaredProgramTexture(programId, names[i])", entities);
+
         string shaders = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Shaders.cs");
-        Assert.Contains("NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);", shaders);
-        // A relinked program's cached interface and pipelines go with it.
-        Assert.Contains("ForgetNativeChunkProgram(program.ProgramId);", shaders);
+        Assert.Contains("NoteProgramTexture(program.ProgramId, samplerName, textureId);", shaders);
 
-        string leaf = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
-        Assert.Contains("NoteNativeTransparentBlend(0, 32774, 774, 0, 774, 0);", leaf);
-
-        string buffers = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
-        Assert.Contains("NoteNativeTransparentBlend(2, 32774, 770, 771, 770, 771);", buffers);
-    }
-
-    private static int Count(string source, string needle)
-    {
-        int count = 0;
-        int at = source.IndexOf(needle, StringComparison.Ordinal);
-        while (at >= 0)
-        {
-            count++;
-            at = source.IndexOf(needle, at + needle.Length, StringComparison.Ordinal);
-        }
-        return count;
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal string[] SamplerNames { get; }", native);
     }
 
     // ------------------------------------------------------------------------ helpers

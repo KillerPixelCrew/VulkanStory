@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..632275c 100644
+index d6eb844..117e492 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,536 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,524 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -127,43 +127,31 @@ index d6eb844..632275c 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the scope one
-+	/// ChunkRenderer draw group draws its chunk pools under.
++	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the draw of one
++	/// sub-mesh of a multi-texture mesh, as a seam of its own.
 +	///
-+	/// What it draws: nothing itself. It brackets one group of terrain multi-draws - a shadow
-+	/// cascade, an opaque terrain group, a topsoil group, the OIT liquid or transparent group,
-+	/// the liquid velocity redraw or the AfterOIT terrain overlay - and states the fixed state
-+	/// that group runs under, so a native platform can build a pipeline from stated values
-+	/// instead of reading them back out of tracked GL state (decision 3).
-+	/// The other side: the neutral body below is the OpenGL path. It does nothing and returns
-+	/// false, so ClientPlatformWindows keeps drawing exactly the bodies it draws today ("OFF is
-+	/// vanilla"); the GlToggleBlend / GlEnableDepthTest / GlDepthMask / cull calls around the
-+	/// group stay where they are and are what the GL path still runs on.
-+	/// VulkanClientPlatform.BeginChunkPass is the native one: it opens a declared pass on the
-+	/// bound target and routes the group's multi-draws through the native device API.
-+	/// Target and slots: whatever the stage bound - Primary for the opaque, overlay and liquid
-+	/// velocity groups, the Transparent target for the OIT groups, a shadow map for the
-+	/// cascades. The motion window is expressed as the pass's colour-write mask, never as a
-+	/// draw-buffer toggle.
-+	/// State that is not obvious: <paramref name="blend" /> is the global GL_BLEND toggle the
-+	/// group runs with, not a blend mode; the per-attachment functions are the ones the client
-+	/// applied for that target (the standard mode plus the replace-blended SSAO G-buffer and
-+	/// motion slots, or the OIT accumulation contract on the Transparent target).
-+	/// What pins it: NativeChunkTests (old route against native route, per pass) and
++	/// What it draws: an entity's shape - the animated body through entityanimated in the Opaque
++	/// stage, the same body through shadowmapentityanimated in the two shadow stages - and, for
++	/// every other caller of <see cref="Vintagestory.Client.RenderAPIBase.RenderMultiTextureMesh" />,
++	/// whatever that caller draws.
++	/// The other side: the neutral body below is the OpenGL path - it is exactly the
++	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, and ClientPlatformWindows does not
++	/// override it, so "OFF is vanilla" holds - and VulkanClientPlatform.RenderEntityMesh is the
++	/// native one, which takes the native route only for the entity programs it owns.
++	/// Target and slots: whatever stage bound - Primary for the opaque draws, including the motion
++	/// attachment while <see cref="BeginMotionWrite" />'s window is open, and the shadow map for
++	/// the shadow draws, which has no colour attachment at all.
++	/// State that is not obvious: the caller already set the state (cull off, blend on, depth test
++	/// and depth write on) and every uniform, and the bone matrices are already in the program's
++	/// "Animation" block; the seam changes nothing. <paramref name="samplerName" /> and
++	/// <paramref name="textureId" /> are passed because a native pass resolves what it samples from
++	/// handles rather than from the texture unit the caller's BindTexture2D put it on.
++	/// What pins it: NativeEntityDrawTests (old route against native route, colour and motion) and
 +	/// Optimum.Tests/native-world-systems-coverage-tests.cs.
 +	/// </summary>
-+	/// <returns>Whether a native platform took the group; false means the ordinary draw route.</returns>
-+	public virtual bool BeginChunkPass(string chunkPass, bool blend, bool depthTest, bool depthWrite, bool cullFace)
++	public virtual void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)
 +	{
-+		return false;
-+	}
-+
-+	/// <summary>
-+	/// Optimum (Phase 3b stage 2): closes the scope <see cref="BeginChunkPass" /> opened. A
-+	/// no-op on the OpenGL path, and safe to call when Begin returned false.
-+	/// </summary>
-+	public virtual void EndChunkPass()
-+	{
++		RenderMesh(mesh);
 +	}
 +
 +	public virtual bool RenderOptimumTaaResolve()
