@@ -143,6 +143,18 @@ vertex layout, blend and dynamic state on both routes, so the cause is not in th
 decision 1 mod programs belong on the adapter anyway, so the route admits vanilla programs only; the question stays
 open for when mod renderers get native passes. Repro: `OPTIMUM_VK_NATIVE_ENTITIES=all OPTIMUM_VK_NATIVE_SHADERS=force`,
 headless Vulkan, TAA on.
+**Sun native (2026-09-16).** `ClientPlatformAbstract.RenderSunQuad` carries the visible sun; the occlusion-query
+probe stays on `RenderMesh` (a Vulkan occlusion query has to begin and end inside one render pass). Vanilla
+`ShaderPrograms.Standard` only. 33 native sun passes in a headless run, 0 errors, validation clean.
+**The native world-system GPU tests were vacuous until 2026-09-16.** Every comparison in `NativeWorldSystemsTests`
+compared two untouched attachments: the fixture never wrote the frame block (zero `viewDistance` discards every
+`standard` fragment) or the transforms (zero model/view collapse every vertex). Seeded now, and the helper refuses a
+comparison whose scene slot is still the clear. That exposed one fixture asymmetry (the decal test never bound the
+atlases to units, as `ShaderProgramDecals` does) - fixed; decals match with real pixels. Still vacuous and marked:
+the particle tests, whose quad carries no per-instance attributes.
+**Residual Vulkan-vs-OpenGL difference is not from stage 2.** Bisected with the route switches, same session:
+all stage-2 routes off 0.981/0.971/0.964; chunks only 0.982/0.965/0.969; world only 0.981/0.968/0.968; sky only
+0.980/0.974/0.967; GUI only 0.977/0.963/0.970; entities only 0.986/0.980/0.972.
 Verified on the deployed build, both backends headless, TAA on: 0 client errors, validation 0 errors and 0 `SYNC-`,
 entity GPU tests 25 passed, coverage 28 passed. Scene SSIM Vulkan vs OpenGL 0.9631/0.9617/0.9658 against a same-session
 OpenGL floor of 0.9853/0.9750/0.9785; the frames match on inspection and the residual is run timing (the two runs

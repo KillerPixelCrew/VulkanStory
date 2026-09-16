@@ -471,6 +471,8 @@ public class NativeWorldSystemsCoverageTests
             platform);
         Assert.Contains("RenderMesh(quad);", platform);
 
+        Assert.Contains("public virtual void RenderSunQuad(MeshRef quad, int sunTextureId)", platform);
+
         Assert.Contains("public virtual void RenderParticles(MeshRef model, int quantity, int particleTextureId)",
             platform);
         Assert.Contains("RenderMeshInstanced(model, quantity);", platform);
@@ -488,7 +490,7 @@ public class NativeWorldSystemsCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderSunQuad", "RenderParticles",
                      "BeginDecalPass", "EndDecalPass",
                  })
         {
@@ -516,6 +518,9 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains(
             "platform.RenderCelestialQuad(quadModel, moontextureIds[4], game.skyTextureId, game.skyGlowTextureId);",
             sunMoon);
+        // The visible sun draws through its seam; the occlusion-query probe keeps RenderMesh,
+        // because a Vulkan occlusion query has to begin and end inside one render pass.
+        Assert.Contains("platform.RenderSunQuad(quadModel, suntextureId);", sunMoon);
 
         string particles = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs.patch",
@@ -558,7 +563,7 @@ public class NativeWorldSystemsCoverageTests
         string patcher = Read("Optimum.Patcher/Program.cs");
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderSunQuad", "RenderParticles",
                      "BeginDecalPass", "EndDecalPass",
                  })
         {
@@ -591,7 +596,7 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("internal bool NativeWorldEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_WORLD\") != \"0\";", world);
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderSunQuad", "RenderParticles",
                  })
         {
             Assert.Contains("public override void " + seam + "(", world);
