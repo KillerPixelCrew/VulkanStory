@@ -268,10 +268,12 @@ jobs:
             if [ -d "feeds/installer-$channel" ]; then
               dotnet vpk upload github \
                 --repoUrl "https://github.com/${{ github.repository }}" \
+                --token "$GITHUB_TOKEN" \
                 --outputDir "feeds/installer-$channel" \
                 --channel "$channel" \
                 --tag "$tag" \
                 --releaseName "Optimum installer v$version" \
+                --merge \
                 --publish
             fi
           done
