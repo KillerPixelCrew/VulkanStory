@@ -121,7 +121,7 @@ Every item of `/home/n1ght/.claude/plans/i-never-wanted-this-sequential-kernigha
 The plan predates the PR #69 split, so it also contains DLSS, upscaler, frame-generation, HDR and ray-tracing work:
 those are marked `[out]` and are NOT owed on this branch.
 
-**In scope for this branch: 44 done, 15 partial, 17 left, 1 blocked, 2 superseded.**
+**In scope for this branch: 44 done, 15 partial, 19 left, 1 blocked, 2 superseded** (the 17 audited items plus the two foundations below).**
 **Out of scope for this branch: 11 items** - PR #69 carries the Vulkan backend and TAA only; DLSS, upscalers,
 frame generation, the vendor latency backends, NGX, HDR and ray tracing live on `feat/dlss`, `feat/dlss-g` and
 `feat/latency` and are NOT work owed here. They appear in the plan because the plan predates that split.
@@ -265,12 +265,13 @@ Legend: `[x]` done, `[~]` partly done (what is left follows it), `[ ]` not start
 - [out] Roadmap: HDR output: HDR output — not this branch; tracked on feat/dlss / feat/dlss-g / feat/latency
 - [out] Roadmap: ray tracing: Ray tracing — not this branch; tracked on feat/dlss / feat/dlss-g / feat/latency
 
-#### Owner-requested, 2026-09-16: the two foundations - SCOPE DECISION OPEN
+#### Vulkan foundation, in scope for this branch (owner's call, 2026-09-16)
 
-The owner asked for frame marking and GUI separation to be prepared here. These are foundations, NOT vendor code:
-no DLSS, no upscaler, no frame generation, no vendor latency backend is pulled in with them. They are listed apart
-from the in-scope plan items because landing them grows PR #69, which the maintainer wants small and Vulkan-only.
-Decide before starting: land them before PR #69, or after it on their own branch.
+Frame structure is part of the Vulkan backend, not vendor work. A backend with an explicit frame graph needs one
+identity per frame, with markers around simulation, submit and present, and it needs the world frame separated from
+UI composition; both stand on their own whether or not an upscaler ever exists, and both are what make pacing
+measurable and keep the HUD out of the scene image. They are IN SCOPE here. What stays off this branch is the vendor
+layer that later sits on top of them: DLSS, XeSS, FSR, frame generation, the NV/AMD/XeLL latency backends and NGX.
 
 - [ ] Foundation A, frame marking (source `feat/latency`): L0 latency types, the pre-input `LatencySleep` lib seam,
   `IDeviceRequirementContributor` and the pNext chain builder in `CreateDevice`, one frame id per frame,
