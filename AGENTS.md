@@ -6,10 +6,9 @@ Branch scope, status and decisions are in `docs/vulkan-branch-progress.md`, not 
 Optimum is a performance mod for Vintage Story: a patched client (OpenGL path in
 `ClientPlatformWindows`) plus a Vulkan backend that substitutes the platform
 (`VulkanClientPlatform : ClientPlatformWindows` in `Optimum.Render.Vulkan/Platform/`). Read this before touching anything. The
-skills in `.claude/skills/` hold the step-by-step procedures; this file holds the rules.
-Everything an agent needs is in THIS file: the rules, the procedures they point at, and the project
-knowledge folded in below. A lesson learned during a session belongs here, in the repository - the
-harness memory store on one machine is a cache, not the record.
+skills in `.claude/skills/` (tracked) hold the step-by-step procedures; this file holds the rules and the
+working knowledge. A lesson learned during a session belongs here, in the repository; the harness memory
+store on one machine is a cache, not the record.
 
 ## Where the truth lives (edit these, never the generated copies)
 
@@ -19,6 +18,7 @@ harness memory store on one machine is a cache, not the record.
 | Game API | `VintagestoryApi/**` (hand-maintained fork, git-ignored) | `sources/VintagestoryApi/**` via extract | `VintagestoryAPI-patched.dll`; new files also go in `optimum-api-contracts/optimum-api-contracts.csproj` (path `..\sources\VintagestoryApi\...`) and get a `<Compile Remove>` in both `VintagestoryApi/VintagestoryAPI.csproj` and `sources/VintagestoryApi/VintagestoryAPI.csproj` |
 | Mods | `VSEssentials/`, `VSSurvivalMod/`, `VSCreativeMod/` (forks) | `patches/<mod>/*.patch` via extract | recompiled mod DLLs plus `Optimum.Patcher/mod-patcher.cs` manifests for the installed-runtime path |
 | Shaders | `sources/shaders/*.vsh/.fsh` (override vanilla by file name) | shipped by `make deploy` and `scripts/package-*` | includes: `sources/shaderincludes/` (add to deploy and packagers when first used) |
+| Native Vulkan shaders | `sources/shaders-vk/*.vert/.frag/.interface.glsl` + `include/` (contract: `docs/vulkan-native-shaders.md`) | `shaders.manifest.json` + SPIR-V by `tools/shader-compiler` (MSBuild target) | `shaders-vk/` beside the client; runtime falls back per program to the rewriter |
 | Vulkan backend | `Optimum.Render.Vulkan/**` | - | `Optimum.Render.Vulkan.dll` + `Silk.NET.*.dll` beside the client (`make deploy` copies them) |
 | Vanilla reference | `_ref/**` and `.vanilla/**/assets` | read-only | - |
 
@@ -60,16 +60,19 @@ trace: `program N 'name'`, `fullscreen program= tex0= target=`, `bind unit= text
 (legacy line plus `key=value` lines: blocking uploads, waits per site, frame p50/p95/p99/stddev, scopes, barriers),
 `OPTIMUM_FPS_LOG=<file>` (per-second `mean min max p99 stddev`), `OPTIMUM_PARITY_DUMP=<abs dir> OPTIMUM_PARITY_FRAME=<n>`
 (every framebuffer attachment on both backends at in-world frame n, PPM/PFM, GL row order),
-`OPTIMUM_VULKAN_POISON=1` (fresh images NaN/magenta/0xDEADBEEF, depth 0.5, buffers 0xDEADBEEF: undefined reads become loud).
+`OPTIMUM_VULKAN_POISON=1` (fresh images NaN/magenta/0xDEADBEEF, depth 0.5, buffers 0xDEADBEEF: undefined reads become loud),
+`OPTIMUM_VK_NATIVE_SHADERS=force|0` (force: link every program from the native manifest even without a mod scan; 0: rewriter for all;
+the log line `[Optimum] shaders: N native, M rewritten, K failed` says what happened), `OPTIMUM_VK_SHADER_SOURCE=<dir>` (compile the
+native tree at runtime for the dev loop), `OPTIMUM_VULKAN_SYNC_PIPELINES=1` (blocking pipeline creation instead of the background worker).
 Headless capture: `OPTIMUM_HEADLESS=1` (window created but never mapped or focused, both backends),
 `OPTIMUM_HEADLESS_FRAMES=<dir>` plus `OPTIMUM_HEADLESS_FIRST_FRAME`/`_FRAME_COUNT`/`_FRAME_STRIDE` or
 `_FRAME_LIST` (which in-world frames to write as PPM), `OPTIMUM_HEADLESS_COMMANDS=<file>` with
 `OPTIMUM_HEADLESS_COMMAND_FRAME` (chat lines fed on that frame: `/time`, `/weather`, `.cam load`/`.cam play`),
 `OPTIMUM_HEADLESS_FIXED_DT` (pins the simulated step). A display server is still required - headless here
 means no visible window, not no display.
-DLSS/NGX: the NVIDIA feature libraries, headers and programming guides live in `~/.local/share/optimum-ngx`
-(never in the scratchpad - that is tmpfs and a reboot would make the NGX tests skip instead of fail).
-Run the NGX tests with `OPTIMUM_NGX_FEATURE_PATH=~/.local/share/optimum-ngx/lib/Linux_x86_64/rel`.
+DLSS/NGX (branches `feat/dlss*` only; not present on the Vulkan-only branches): the NVIDIA feature libraries live in
+`~/.local/share/optimum-ngx`, never in the scratchpad (tmpfs; after a reboot the NGX tests would skip instead of fail);
+`OPTIMUM_NGX_FEATURE_PATH=~/.local/share/optimum-ngx/lib/Linux_x86_64/rel` runs them.
 **Implicit Vulkan layers poison validation and must be switched off deliberately.** On this machine MangoHud is
 enabled globally (`~/.config/environment.d/mangohud.conf`) and `VK_LAYER_LS_frame_generation` (Lossless Scaling)
 has no enable variable at all, so both hook every Vulkan process, the GPU test host included, and draw or present
@@ -100,7 +103,7 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
 5. **Process hygiene.** Launch through `scripts/dev/*.sh` (setsid wrappers). Never put `pkill -f` or
    `pgrep -f` in a command that also contains the process name in a heredoc or string: it matches the
    calling shell, so `pkill` kills it (exit 144) and `pgrep` reports the process as running when it is not -
-   on 2026-09-16 that made me tell the owner the game was running long after they had closed it. Ask with
+   on 2026-09-16 that produced a "client is running" report hours after the owner had closed it. Ask with
    `ps -eo pid,stat,args | grep -i <name> | grep -v grep`, or read the client log. Close the game with the kill script (window close
    first) to avoid shutdown-race crash reports. Close the game as soon as a check is done; never leave it running.
 6. **Git.** Never `git stash`. Commit WIP on the branch with a `wip:` prefix instead. Branch from
@@ -108,18 +111,17 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
    Commit only when asked or when a phase is verified; say what was verified in the message.
 7. **Batch reads.** Read whole methods and both paths in one command (`sed -n` ranges + `rg`), not
    ten single greps. Codex found in one pass what took an afternoon of small probes.
-8. **Agents, models, effort.** The session model is Fable; it does only the hard parts, at low
-   effort, high only for a hard bug. Everything else runs as a Workflow (ultracode): sonnet for
-   map/search stages at **high or xhigh** (cheap, needs it to be trustworthy), opus for
-   implementation and review at **medium, never higher**. Never launch an agent that inherits Fable.
-   Parallelise: map stage first, then every independent implementation stage at once with
-   `isolation: 'worktree'` (each commits on its own branch), then one integration stage that merges
-   into the feature branch and runs the finish sequence, then review. Serial stages are only for
-   genuinely dependent work. Worktree stages are created at `origin/main`, which is NOT an ancestor of the
-   feature branch (`feat/vulkan-taa` diverged from it): their first commands are `git checkout -B <stage branch> <feature branch>`
-   (never `merge --ff-only`, which fails) and `bash scripts/dev/worktree-bootstrap.sh`; integration merges into the feature branch, never main.
-   Rules live in `.claude/skills/workflow-policy`. Codex (`.claude/skills/codex-handoff`, gpt-6-astra) has quota again since
-   2026-09-12: hard rendering bugs can go to it (neutral brief, full machine access, low effort) or to Fable directly.
+8. **Agents, models, effort.** The main session does the hard parts itself and never spawns an agent that
+   inherits its own model. Everything else runs as a Workflow (ultracode): sonnet at **high or xhigh** for the
+   rare read-only search stage (cheap, and lower effort gives untrustworthy results), opus at **medium, never
+   higher** for implementation and integration. Shape: every independent implementation stage at once with
+   `isolation: 'worktree'` (each commits on its own branch), then one integration stage that merges into the
+   feature branch and runs the finish sequence. No map stage by default (rule 15) and no review stage by default
+   (rule 14); serial stages only for genuinely dependent work. Worktrees are created at `origin/main`, which need
+   not be an ancestor of the feature branch: a stage's first commands are `git checkout -B <stage branch>
+   <feature branch>` (never `merge --ff-only`) and `bash scripts/dev/worktree-bootstrap.sh`; integration merges
+   into the feature branch, never main. Details: `.claude/skills/workflow-policy`. Codex (`.claude/skills/codex-handoff`,
+   gpt-6-astra, weekly quota) takes genuinely stuck rendering bugs with a neutral brief and full machine access.
 
 9. **Undefined behaviour differs between the APIs.** GL keeps an attachment the shader never writes;
    Vulkan writes garbage into it (pipelines now mask those off). A bug that only flickers between
@@ -130,8 +132,8 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
    log with `sync,best`; a multi-frame GPU test (Present between frames, no readback in the loop);
    `pacing-gate.sh` numbers against the OpenGL baseline of the same scene; `ssim.py` per-attachment
    tables; a 60 fps `ffmpeg -f x11grab` capture with consecutive-frame diffs for flicker; poison mode
-   for suspected undefined reads. The Vulkan-native rebuild plan and its phases:
-   `/home/n1ght/.claude/plans/i-never-wanted-this-sequential-kernighan.md`, acceptance in `docs/vulkan-acceptance.md`.
+   for suspected undefined reads. Where the numbers are recorded: `docs/vulkan-acceptance.md`; branch status and the plan pointer:
+   `docs/vulkan-branch-progress.md`.
 
 11. **TAA on sub-pixel foliage: audit the resolve, not the backend.** The three-day Vulkan "distant
    trees jitter, TAA looks disabled" bug (fixed 2026-09-11) was `sources/shaders/taa-resolve.fsh` itself:
@@ -147,7 +149,7 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
 
 12. **Say only what you verified, and name the evidence.** A status in a plan, a handoff or a comment is a claim,
    not a fact; a passing test, a file:line, a log line or a measured number is a fact. On 2026-09-16 an audit found
-   items marked done that were never done, and separately I asserted a model, a process state and a branch scope
+   items marked done that were never done, and separately a model, a process state and a branch scope were asserted
    from documents instead of from checks - each one wrong. If it was not checked this session, say that it was not.
 
 13. **Decide, don't ask.** Research the open question to a decision and act on it. Hand a choice back only when it
@@ -189,7 +191,7 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
   the loading screen from a8f09ae until 2026-09-13 and nobody saw it, because every check ran Vulkan. The headless
   harness makes the OpenGL run cost nothing: run it in the same pass as the Vulkan one.
 - **Injected fields never run their initializers** (Cecil copies no constructor IL): an injected `= new T()` is null,
-  an injected `= -1` is 0. `NoInjectedFieldAnywhereCarriesAnInitializer` enforces it for manifest fields. Use the CLR
+  an injected `= -1` is 0. `CecilInjectedFieldInitializerTests` enforces it for every injected field, with no allowance list. Use the CLR
   default as the starting state, or allocate lazily at the use site.
 - **Do not touch a vanilla static class before vanilla does.** Its type initializer may not be inert:
   `ShaderRegistry`'s publishes uncompiled programs into `ShaderPrograms.*`, which is what crashed the OpenGL loading
@@ -226,7 +228,7 @@ User, 2026-09-12: "We do Code documentation and comment cleanup at the very end.
 
 **Why:** the comments in this repo are the record of what each defect cost, and many carry measured numbers - the 1.05 % distant-leaf TAA rejection, the 0.37 to 0.02 display-pixel jitter residual, why NGX's shutdown is gated, why the acquire wait stage may never be ALL_COMMANDS. While the renderer is still moving, trimming them deletes the reasoning that keeps the next agent from reintroducing the bug.
 
-**How to apply:** never open a "tidy the comments" task, and never let a refactor quietly drop an xml-doc - a consolidation or a move carries every "why" forward verbatim. Stale comments that are actively wrong are still fixed on the spot, as part of the change that made them wrong. One cleanup pass at the end, when the renderer settles. Related: [[testing-suite-too-heavy]], [[speed-and-parallelism-over-testing]].
+**How to apply:** never open a "tidy the comments" task, and never let a refactor quietly drop an xml-doc - a consolidation or a move carries every "why" forward verbatim. Stale comments that are actively wrong are still fixed on the spot, as part of the change that made them wrong. One cleanup pass at the end, when the renderer settles. Related: `testing-suite-too-heavy`, `speed-and-parallelism-over-testing`.
 
 ### Delegating to codex
 
@@ -259,18 +261,18 @@ The user delegates hard problems to the local `codex` CLI and has been specific 
   draws in a frame) plus a dozen wrong assumptions. Brief it with the plan path and the source
   locations, ask for CONFIRMED/WRONG/UNVERIFIABLE with file:line, and tell it to write to a file
   in the scratchpad. Launch through a wrapper script with `setsid` so the tool timeout cannot kill
-  it, and monitor for a sentinel line (see [[pkill-self-match]]).
+  it, and monitor for a sentinel line (see `pkill-self-match`).
 
 **Why:** on the Vulkan backend it found three real bugs in one pass that I had missed over
 a long session, and verified them by playing the game across several views and two worlds.
 
 **How to apply:** when stuck on something the user is getting frustrated with, offer Codex
 early rather than late, brief it neutrally, and give it the whole machine. See
-[[verify-end-to-end-not-components]].
+`verify-end-to-end-not-components`.
 
 Steering (2026-09-10): `codex queue --thread <id> --message` only reaches a running session; messages queued after exit are lost, so continue with `codex exec resume <session-id>`. Monitor on `^CODEX_EXIT [0-9]+$` (Codex narrates the word and false-matched a looser pattern). Relay the user's observations verbatim and promptly; each one ("gets worse with distance") narrowed the search. Codex does not push; verify its claims in-game, then push.
 
-Quota: exhausted on 2026-09-10; **reset and available again from 2026-09-12** (user). Codex handoffs are back on the table for genuinely stuck rendering bugs and for plan reviews at `high`; it still costs a weekly quota, so keep briefs tight and do not launch speculatively.
+It is on a weekly quota the owner tracks: keep briefs tight and do not launch speculatively.
 
 ### Git remotes
 
@@ -280,7 +282,7 @@ Remote layout (set 2026-09-10 at the user's request):
 - `origin` = https://github.com/KillerPixelCrew/VulkanStory.git ("ours"; the repository moved into the KillerPixelCrew organisation on 2026-09-15, it used to be NightHammer1000/VulkanStory). `main` tracks `origin/main`. PRs for the Vulkan work go here; `gh` default repo is set to it.
 - `upstream` = https://github.com/StratumServer/Optimum.git. Does not have the Vulkan backend yet.
 
-**How to apply:** push branches and open PRs against `origin`. Only touch `upstream` when the user asks to sync with or contribute to StratumServer. Related: [[optimum-upscaling-roadmap]].
+**How to apply:** push branches and open PRs against `origin`. Only touch `upstream` when the user asks to sync with or contribute to StratumServer. Related: `optimum-upscaling-roadmap`.
 
 ### Look before you work
 
@@ -290,7 +292,7 @@ User, 2026-09-13: "This is the third time i have to tell you to actually look be
 
 **Why:** I designed DLSS-G frame pacing from one chapter of NVIDIA's guide plus my own reasoning and launched a 7-agent workflow on it. The user's own reference checkouts in `~/Projekte/ReScaleFrame/references/` (Streamline, FidelityFX-SDK, xess, OptiScaler) and their ReScaleFrame design docs already contradicted it: AMD paces both presents from the previous present with a 10-frame moving average, CPU-waits for GPU completion before presenting, keeps one frame in flight, caps render slightly below half the output rate; Streamline measures pacing by display change, not present call; only generated frames are dropped. Two workflows were stopped as a result.
 
-**How to apply:** for any feature with vendor SDKs or prior art: (1) read the vendor guides in full, not the chapter that matches the question; (2) read the reference implementations on disk - check `~/Projekte/ReScaleFrame/references/` and the user's ReScaleFrame docs first, they are the user's own research; (3) search online for best practice; (4) write the design with a source for every decision and mark what is reasoning; (5) show the user the sourced design before launching an implementation wave. A map of *our* code is not research into *how it should be done*. Related: [[research-before-repeating-loops]], [[audit-the-component-the-user-names]], [[frame-generation-needs-pacing]], [[user-graphics-expertise]].
+**How to apply:** for any feature with vendor SDKs or prior art: (1) read the vendor guides in full, not the chapter that matches the question; (2) read the reference implementations on disk - check `~/Projekte/ReScaleFrame/references/` and the user's ReScaleFrame docs first, they are the user's own research; (3) search online for best practice; (4) write the design with a source for every decision and mark what is reasoning; (5) show the user the sourced design before launching an implementation wave. A map of *our* code is not research into *how it should be done*. Related: `research-before-repeating-loops`, `audit-the-component-the-user-names`, `frame-generation-needs-pacing`, `user-graphics-expertise`.
 
 ### Nvidia driver update needs reboot
 
@@ -300,7 +302,7 @@ On 2026-09-11 a pacman update at 14:38 moved nvidia-utils 610.57.04 to 615.71.09
 
 **Why:** it looked like a Phase 0 regression and cost a capture round; the user watched the clients crash.
 
-**How to apply:** before any in-game capture run `nvidia-smi` (must print the GPU and driver, not a mismatch) and, after each launch, require `Graphics Card Renderer: NVIDIA` in the client log (on Vulkan that line is the selected Vulkan device name). If the mismatch shows, tell the user a reboot is needed instead of launching. Related: [[confirm-renderer-from-log]], [[vulkan-native-rebuild-decision]].
+**How to apply:** before any in-game capture run `nvidia-smi` (must print the GPU and driver, not a mismatch) and, after each launch, require `Graphics Card Renderer: NVIDIA` in the client log (on Vulkan that line is the selected Vulkan device name). If the mismatch shows, tell the user a reboot is needed instead of launching. Related: `confirm-renderer-from-log`, `vulkan-native-rebuild-decision`.
 
 ### Research before repeating loops
 
@@ -310,7 +312,7 @@ On 2026-09-11 the Vulkan TAA distance shimmer came back (distant trees jitter be
 
 **Why:** the user judges effort by whether new information enters the loop. Re-running the same in-game checks with a measurement already documented as blind to the bug class is visible as churn. Yesterday's fix came from reading the validation log, which was new information; today nothing new was read.
 
-**How to apply:** for a Vulkan-only or TAA-quality bug, before any second launch: (1) web-search the symptom (TAA shimmer on thin/distant geometry, history rejection, jitter phase alternation, swapchain/frame-pacing causes) and the relevant Vulkan spec/best-practice pages, (2) write down the competing mechanisms and the one observation that separates them, (3) only then launch, and only for that observation (e.g. a TaaDebugView validity view over the shimmering region, or an OpenGL eyes-on control). Never offer luma-diff pairs as evidence for frame-to-frame flicker. Related: [[vulkan-validation-log-and-flicker]], [[verify-end-to-end-not-components]], [[taa-p2-vulkan-parity-lessons]].
+**How to apply:** for a Vulkan-only or TAA-quality bug, before any second launch: (1) web-search the symptom (TAA shimmer on thin/distant geometry, history rejection, jitter phase alternation, swapchain/frame-pacing causes) and the relevant Vulkan spec/best-practice pages, (2) write down the competing mechanisms and the one observation that separates them, (3) only then launch, and only for that observation (e.g. a TaaDebugView validity view over the shimmering region, or an OpenGL eyes-on control). Never offer luma-diff pairs as evidence for frame-to-frame flicker. Related: `vulkan-validation-log-and-flicker`, `verify-end-to-end-not-components`, `taa-p2-vulkan-parity-lessons`.
 
 ### Research combines sources
 
@@ -320,7 +322,7 @@ User, 2026-09-15, after naming MXAO, Alchemy AO, low-sample GTAO + spatial denoi
 
 **Why:** I answered each named source with a verdict (use / reference only / not adopted) and kept steering toward one implementation, instead of studying every source in depth for the parts worth combining.
 
-**How to apply:** when the owner lists sources or alternatives for a design, launch a deep research task (Fable, high effort - an explicit exception to the no-Fable-agents rule) that reads the actual papers and code of every source, compares them against this renderer's constraints and writes a combined design with per-component provenance and licence notes; hold implementation until it is back. Licence limits still decide what may be taken as code versus as an idea. Related: [[look-before-you-work]], [[decide-dont-ask]], [[xegtao-default-with-taa]].
+**How to apply:** when the owner lists sources or alternatives for a design, launch a deep research task (Fable, high effort - an explicit exception to the no-Fable-agents rule) that reads the actual papers and code of every source, compares them against this renderer's constraints and writes a combined design with per-component provenance and licence notes; hold implementation until it is back. Licence limits still decide what may be taken as code versus as an idea. Related: `look-before-you-work`, `decide-dont-ask`, `xegtao-default-with-taa`.
 
 ### Scratchpad is tmpfs
 
@@ -330,7 +332,7 @@ User, 2026-09-15, after naming MXAO, Alchemy AO, low-sample GTAO + spatial denoi
 
 **Why:** `/tmp` is RAM on this machine and shared with everything else the user runs; a full tmpfs fails package transactions, not just my own commands.
 
-**How to apply:** delete a capture directory as soon as its numbers are recorded in `docs/vulkan-acceptance.md` or the plan - the conclusions are the deliverable, the frames are not. Shallow-clone vendor SDKs, read them, then remove them; the synthesis stays. Anything a test or a later session needs (the NVIDIA NGX libraries, headers and guides) goes to `~/.local/share/optimum-ngx`, never the scratchpad: on tmpfs it vanishes at reboot and the NGX tests then *skip* rather than fail, which hides the breakage. Check `df -h /tmp` before writing GB-scale dumps, and prefer per-attachment dumps at one frame over frame sequences. Related: [[testing-suite-too-heavy]], [[ngx-needs-a-native-shim]].
+**How to apply:** delete a capture directory as soon as its numbers are recorded in `docs/vulkan-acceptance.md` or the plan - the conclusions are the deliverable, the frames are not. Shallow-clone vendor SDKs, read them, then remove them; the synthesis stays. Anything a test or a later session needs (the NVIDIA NGX libraries, headers and guides) goes to `~/.local/share/optimum-ngx`, never the scratchpad: on tmpfs it vanishes at reboot and the NGX tests then *skip* rather than fail, which hides the breakage. Check `df -h /tmp` before writing GB-scale dumps, and prefer per-attachment dumps at one frame over frame sequences. Related: `testing-suite-too-heavy`, `ngx-needs-a-native-shim`.
 
 ### Speed and parallelism over testing
 
@@ -342,7 +344,7 @@ Capture sessions stay short: 3 minutes is plenty for a session measurement ("Tha
 
 **Why:** the rebuild spent hours in serial chains (one stage per worktree after another) and in repeated in-game measurement rounds; the user wants throughput.
 
-**How to apply:** design each phase's workflow as wide parallel waves with explicit file ownership and interface contracts in the prompts (no map stage when the touch points are already known), one merge agent per wave, one review at the end. Keep in-game runs to the phase's single exit capture; do not add investigation launches unless a result blocks the next phase. Unit and source tests inside stages stay mandatory. Related: [[vulkan-native-rebuild-decision]], [[no-subagents]], [[research-before-repeating-loops]].
+**How to apply:** design each phase's workflow as wide parallel waves with explicit file ownership and interface contracts in the prompts (no map stage when the touch points are already known), one merge agent per wave, one review at the end. Keep in-game runs to the phase's single exit capture; do not add investigation launches unless a result blocks the next phase. Unit and source tests inside stages stay mandatory. Related: `vulkan-native-rebuild-decision`, `no-subagents`, `research-before-repeating-loops`.
 
 ### Taa p2 vulkan parity lessons
 
@@ -353,7 +355,7 @@ TAA P2 (in-house resolve) was accepted by the user on 2026-09-10 ("TAA is CHEFSK
 2. `ClearColor` on Vulkan is a no-op for an attachment masked out of `SetDrawBuffers`; the motion attachment kept stale vectors (8e4a970). Clear = enable, clear, restore mask.
 Both slipped past single-frame GPU tests; Codex's regression test spans frames in flight with Present between them. Acceptance is numeric: still camera, wind stilled (`/weather setw still`), luminance diff of screenshot pairs; parity was Vulkan 1.84 vs OpenGL 1.87.
 
-**How to apply:** for any Vulkan "looks wrong" report, check the format table and clear-vs-mask first (now in the vulkan-parity-debug skill, sections 2 and 2c), and write multi-frame tests for temporal state. P3+ of TAA-PLAN.md continue via workflows (sonnet map, opus stages). Related: [[verify-end-to-end-not-components]], [[delegating-to-codex]], [[optimum-upscaling-roadmap]].
+**How to apply:** for any Vulkan "looks wrong" report, check the format table and clear-vs-mask first (now in the vulkan-parity-debug skill, sections 2 and 2c), and write multi-frame tests for temporal state. P3+ of TAA-PLAN.md continue via workflows (sonnet map, opus stages). Related: `verify-end-to-end-not-components`, `delegating-to-codex`, `optimum-upscaling-roadmap`.
 
 ### Testing suite too heavy
 
@@ -363,7 +365,7 @@ User, 2026-09-11, during the Milestone 1 exit capture: "That 10 Minute run was e
 
 **Why:** the heavy rows measure world noise, not the backend. Two OpenGL launches of one save differed at SSIM 0.86 on the primary colour, so the per-attachment parity matrix cannot separate a real gap from weather, chunk streaming and entity movement; the fixed scene helps pacing but not parity. The long session added nothing the first minute had not shown.
 
-**How to apply:** keep the cheap numeric evidence that actually catches regressions (pacing gate on a 60 s run, the Vulkan stats counters, `taa-rejection.py` on one dump per backend, the GPU suite's `sync,best` validation) and drop the rest: no 10-minute sessions, no multi-launch SSIM matrices, no repeated interleaves unless a number disagrees. One short Vulkan launch for the user to judge closes a milestone. Always set MANGOHUD=0 for validation runs: MangoHud's overlay render pass trips sync validation on the swapchain image and produced 10 phantom errors. Related: [[speed-and-parallelism-over-testing]], [[verify-end-to-end-not-components]], [[run-for-user-no-input]].
+**How to apply:** keep the cheap numeric evidence that actually catches regressions (pacing gate on a 60 s run, the Vulkan stats counters, `taa-rejection.py` on one dump per backend, the GPU suite's `sync,best` validation) and drop the rest: no 10-minute sessions, no multi-launch SSIM matrices, no repeated interleaves unless a number disagrees. One short Vulkan launch for the user to judge closes a milestone. Always set MANGOHUD=0 for validation runs: MangoHud's overlay render pass trips sync validation on the swapchain image and produced 10 phantom errors. Related: `speed-and-parallelism-over-testing`, `verify-end-to-end-not-components`, `run-for-user-no-input`.
 
 ### User graphics expertise
 
@@ -371,7 +373,7 @@ User, 2026-09-11, during the Milestone 1 exit capture: "That 10 Minute run was e
 
 The user authored the XeSS integration PR for Skyrim Community Shaders and judges TAA/upscaler behaviour live by eye with precision (distance-dependent instability, frame-to-frame flicker, "TAA has a distinctive blur"). Their observations have been right every time this project doubted them.
 
-**How to apply:** no primers on jitter, motion vectors or reactive masks; when their live observation contradicts a measurement, the measurement is the suspect. Related: [[vulkan-validation-log-and-flicker]], [[run-for-user-no-input]].
+**How to apply:** no primers on jitter, motion vectors or reactive masks; when their live observation contradicts a measurement, the measurement is the suspect. Related: `vulkan-validation-log-and-flicker`, `run-for-user-no-input`.
 
 ### Vulkan validation log and flicker
 
@@ -379,7 +381,7 @@ The user authored the XeSS integration PR for Skyrim Community Shaders and judge
 
 2026-09-11: the Vulkan-only "everything jitters, no AA, worse at the horizon" after P3/P4 survived every single-frame probe (motion, validity, history, uniforms all identical to GL) because the defect alternated between frames: fullscreen passes left the SSAO normal/position attachments write-enabled without storing to them, Vulkan wrote undefined values, SSAO outlines flickered. Found within minutes once the validation log was actually read (it had been going to a file named "1" or nowhere) with sync + best-practices validation. Fix 95bf71d: mask unwritten fragment outputs in the pipeline, present-path wait stage AllCommands, per-image semaphores, layout-accurate barrier accesses. User: "that fixed the instability issue fully".
 
-**How to apply:** for any Vulkan-only artefact, first run with `OPTIMUM_VULKAN_VALIDATION=/abs/log OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best` and read `[error]` lines; screenshots and per-frame diag shaders cannot see one-frame alternation. The user judges live; when they say it flickers between frames, believe it and look for API-level undefined behaviour, not resolve maths. Related: [[taa-p2-vulkan-parity-lessons]], [[run-for-user-no-input]].
+**How to apply:** for any Vulkan-only artefact, first run with `OPTIMUM_VULKAN_VALIDATION=/abs/log OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best` and read `[error]` lines; screenshots and per-frame diag shaders cannot see one-frame alternation. The user judges live; when they say it flickers between frames, believe it and look for API-level undefined behaviour, not resolve maths. Related: `taa-p2-vulkan-parity-lessons`, `run-for-user-no-input`.
 
 ### Waiting on long running processes
 
@@ -387,5 +389,5 @@ The user authored the XeSS integration PR for Skyrim Community Shaders and judge
 
 Blind sleeps repeatedly captured the loading screen or typed into a game that was not accepting input yet. The reliable markers: `[Client Chat] Welcome` for "player is in the world" (savegame-loaded and AssetsFinalize come ~20 s earlier), `^CODEX_EXIT [0-9]+$` for the Codex wrapper, workflow task notifications for agents. Kill leftovers through the wrapper scripts before a new launch.
 
-**How to apply:** poll the log for the marker with a bounded loop, then a short fixed margin; never `sleep 60` and hope. Related: [[pkill-self-match]], [[run-for-user-no-input]].
+**How to apply:** poll the log for the marker with a bounded loop, then a short fixed margin; never `sleep 60` and hope. Related: `pkill-self-match`, `run-for-user-no-input`.
 
