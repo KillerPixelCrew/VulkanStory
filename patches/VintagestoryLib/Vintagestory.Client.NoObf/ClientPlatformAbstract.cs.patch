@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..0d7c6f9 100644
+index d6eb844..5dc1182 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,453 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,473 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -111,6 +111,26 @@ index d6eb844..0d7c6f9 100644
 +	public virtual int RenderOptimumTaaSharpen(int resolvedScene)
 +	{
 +		return resolvedScene;
++	}
++
++	/// <summary>
++	/// Optimum (Vulkan-native render systems, Phase 3b): the TAA resolve's draw, as a seam of
++	/// its own. Every temporal decision stays in <see cref="RenderOptimumTaaResolve" /> - the
++	/// guards, the jittered and previous view-projections, the reset test, the resolved
++	/// textures, the history validity and the parity flip - so a platform that owns this pass
++	/// natively replaces the draw and nothing else, and the contract cannot drift between the
++	/// two backends. The neutral body draws nothing.
++	/// </summary>
++	public virtual void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)
++	{
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b): the TAA sharpen's draw, as its own seam, on the same terms as
++	/// <see cref="OptimumTaaResolveDraw" />. The neutral body draws nothing.
++	/// </summary>
++	public virtual void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)
++	{
 +	}
 +
 +	/// <summary>

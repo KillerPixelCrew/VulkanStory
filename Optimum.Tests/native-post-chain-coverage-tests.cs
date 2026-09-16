@@ -213,15 +213,107 @@ public class NativePostChainCoverageTests
             Assert.Contains(helper, chain);
         }
 
-        foreach (string stage in new[] { "Stage 1d makes it native",
+        foreach (string stage in new[] {
                      "Stage 1e makes it native", "Stage 1f makes it native", "Stage 1g makes it native" })
         {
             Assert.Contains(stage, chain);
         }
-        // One per remaining pass: the six steps above plus the merge, sky motion and the final
-        // composition, whose old routes stay reachable through the chain switch. The AO step is
-        // native as of stage 1c and its old route is the lib virtual itself, not a legacy helper.
-        Assert.Equal(9, Count(chain, "LEGACY -"));
+        // Stages 1c and 1d are done: the AO step draws natively behind the lib virtual, and the
+        // TAA resolve and sharpen draw natively behind their draw seams, so none of the three is
+        // a legacy helper any more.
+        Assert.DoesNotContain("Stage 1c makes it native", chain);
+        Assert.DoesNotContain("Stage 1d makes it native", chain);
+        // One per remaining pass: the bloom chain, god rays, the FXAA luma step, the epilogue,
+        // the final composition, the merge and sky motion, whose old routes stay reachable
+        // through the chain switch.
+        Assert.Equal(7, Count(chain, "LEGACY -"));
+    }
+
+    /// <summary>
+    /// Stage 1d: the TAA resolve and the TAA sharpen draw natively, through a draw seam that
+    /// leaves every temporal decision in the lib body. The contract is what this pins - the
+    /// reset test, the resolved textures, the history validity and the parity flip have to stay
+    /// where both backends run the same code, or the two routes can drift a frame apart.
+    /// </summary>
+    [Fact]
+    public void TheTwoTaaPassesDrawNativelyAndKeepTheirContractInTheLibBody()
+    {
+        string platform = Platform();
+        string abstractPlatform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        // The seams exist on the abstract platform, so a platform can override them, and the
+        // Windows body is the OpenGL draw.
+        Assert.Contains("public virtual void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", abstractPlatform);
+        Assert.Contains("public virtual void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", abstractPlatform);
+        Assert.Contains("public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", platform);
+        Assert.Contains("public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", platform);
+
+        // The temporal contract stays in the pass, on the far side of the seam.
+        string resolve = MethodBody(platform, "public override bool RenderOptimumTaaResolve()");
+        Assert.Contains("bool reset = frame.Reset || !_taaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || invViewProj == null;", resolve);
+        Assert.Contains("OptimumTaaResolveDraw(write, read, invViewProj, prevViewProj, reset);", resolve);
+        foreach (string state in new[]
+                 {
+                     "taaResolvedColorTexture = write.ColorTextureIds[0];",
+                     "taaResolvedGlowTexture = write.ColorTextureIds[1];",
+                     "_taaHistoryValid = true;",
+                     "_taaFrameParity ^= 1;",
+                     "optimumTaaResolvedThisFrame = true;",
+                 })
+        {
+            Assert.Contains(state, resolve);
+        }
+        // And nothing of it leaked into the draw.
+        string draw = MethodBody(platform,
+            "public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)");
+        Assert.DoesNotContain("_taaFrameParity", draw);
+        Assert.DoesNotContain("_taaHistoryValid", draw);
+        Assert.DoesNotContain("optimumTaaResolvedThisFrame", draw);
+
+        // The native route: a pipeline with stated fixed state, a pass with stated reads and
+        // colour slots, uniforms by placement, textures straight to bindless slots.
+        string chain = Read(ChainFile);
+        Assert.Contains("private void NativeTaaResolve(FrameBufferRef write, FrameBufferRef read,", chain);
+        Assert.Contains("private void NativeTaaSharpen(FrameBufferRef target, int resolvedScene)", chain);
+        Assert.Contains("nativeTaaResolve = new(\"taa-resolve\"", chain);
+        Assert.Contains("nativeTaaSharpen = new(\"taa-sharpen\"", chain);
+        // All three history attachments are the pass's colour slots.
+        Assert.Contains("const uint slots = 0b111u;", chain);
+        // The nine resolve uniforms and the seven textures the OpenGL body writes and binds.
+        foreach (string uniform in new[]
+                 {
+                     "renderSize", "jitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix",
+                     "cameraDelta", "resetHistory", "blendAlpha", "varianceGamma",
+                 })
+        {
+            Assert.Contains("\"" + uniform + "\"", chain);
+        }
+        foreach (string sampler in new[]
+                 {
+                     "sceneTex", "glowTex", "motionTex", "depthTex",
+                     "historyColor", "historyGlow", "historyDepth", "inputScene",
+                 })
+        {
+            Assert.Contains("\"" + sampler + "\"", chain);
+        }
+        // The two literals the OpenGL body passes, unchanged.
+        Assert.Contains("nativeTaaResolve.Uniforms[7], 0.1f", chain);
+        Assert.Contains("nativeTaaResolve.Uniforms[8], 1.25f", chain);
+        // And the strength, clamped exactly as the OpenGL body clamps it.
+        Assert.Contains("GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f)", chain);
+
+        // Registered everywhere a new lib member has to be.
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
+        string selfCheck = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
+        foreach (string member in new[] { "OptimumTaaResolveDraw", "OptimumTaaSharpenDraw" })
+        {
+            Assert.Contains("\"" + member + "\"", patcher);
+            Assert.Contains("\"" + member + "\"", regions);
+            Assert.Contains("new(true, \"" + member + "\"", selfCheck);
+        }
     }
 
     private static string Platform() => ReadPatchedOrSource(
@@ -238,6 +330,19 @@ public class NativePostChainCoverageTests
             offset += value.Length;
         }
         return count;
+    }
+
+    /// <summary>
+    /// The text from a method's signature to the start of the next member declaration at the
+    /// same indentation ("\n\t}" followed by a newline).
+    /// </summary>
+    private static string MethodBody(string source, string signature)
+    {
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, "method not found: " + signature);
+        int end = source.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
+        Assert.True(end > start, "method end not found: " + signature);
+        return source.Substring(start, end - start);
     }
 
     private static string ReadPatchedOrSource(string patchPath, string sourcePath)
