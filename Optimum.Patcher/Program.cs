@@ -84,6 +84,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumSkyMotion",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
+        // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform
+        // replaces the draw while the temporal contract stays in the lib body.
+        "OptimumTaaResolveDraw",
+        "OptimumTaaSharpenDraw",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
         // Optimum AO: the platform's own ambient occlusion (0 = vanilla SSAO) and its debug outputs.
@@ -255,6 +259,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumPostLuma",
         "OptimumPostFinish",
         "OptimumBindKeepViewport",
+        // Phase 3b stage 1d: the two TAA passes' draws, lifted out of their bodies so the
+        // native chain replaces the draw while the temporal contract - the reset decision,
+        // the resolved textures, the history validity and the parity flip - stays put.
+        "OptimumTaaResolveDraw",
+        "OptimumTaaSharpenDraw",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).

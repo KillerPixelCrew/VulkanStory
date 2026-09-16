@@ -21,7 +21,7 @@ namespace Optimum.Render.Vulkan.Platform;
 // and last the blit/FSR/debug step that is already native (VulkanClientPlatform.NativeBlit.cs).
 // RenderPostprocessingEffects' override runs the steps that live inside it and never calls base.
 //
-// Two helpers draw natively here - the OIT merge and sky motion - through RequestNativePipeline,
+// Four helpers draw natively here - the OIT merge, sky motion and the two TAA passes - through RequestNativePipeline,
 // BeginNativePass, WriteNative and DrawNativeFullscreen, exactly as the blit does. Every other
 // helper is LEGACY: the same work through the GL-shaped platform calls, which after the split in
 // ClientPlatformWindows is one lib virtual per pass, so the chain is complete and correct at
@@ -305,7 +305,14 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>The motion attachment alone, unblended; every other slot masked out of the pass.</summary>
-    private AttachmentBlend[] NativeMotionOnlyBlend(uint slots)
+    private AttachmentBlend[] NativeMotionOnlyBlend(uint slots) => NativeOpaqueBlend(slots);
+
+    /// <summary>
+    /// Unblended writes on every slot the pass owns, every other slot masked out of it: what a
+    /// fullscreen pass that owns its pixels asks for, and what the OpenGL body expresses as
+    /// blending off plus a draw-buffer mask.
+    /// </summary>
+    private AttachmentBlend[] NativeOpaqueBlend(uint slots)
     {
         var blend = new AttachmentBlend[NativeSlotCount(slots)];
         for (int i = 0; i < blend.Length; i++)
@@ -314,6 +321,151 @@ public partial class VulkanClientPlatform
             else blend[i] = AttachmentBlend.Default;
         }
         return blend;
+    }
+
+    // ------------------------------------------------------- native passes 4 and 5: TAA
+
+    private readonly NativeFullscreenPass nativeTaaResolve = new("taa-resolve",
+        new[]
+        {
+            "renderSize", "jitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix",
+            "cameraDelta", "resetHistory", "blendAlpha", "varianceGamma",
+        },
+        new[] { "sceneTex", "glowTex", "motionTex", "depthTex", "historyColor", "historyGlow", "historyDepth" });
+
+    private readonly NativeFullscreenPass nativeTaaSharpen = new("taa-sharpen",
+        new[] { "inputTexelSize", "sharpness" },
+        new[] { "inputScene" });
+
+    /// <summary>
+    /// The TAA resolve's draw, drawn natively. Every decision stays in the lib body
+    /// (ClientPlatformWindows.RenderOptimumTaaResolve) - the guards, the jittered and previous
+    /// view-projections, the reset test, and afterwards the resolved textures, the history
+    /// validity and the parity flip - so the temporal contract is bit-identical whichever route
+    /// draws: this helper only replaces the draw.
+    ///
+    /// The history slot owns all three of its attachments (colour, glow and linear depth), so
+    /// the pass writes all three colour slots with no blending, no depth test and no depth
+    /// attachment, at the slot's own size. The seven inputs are the pass's declared reads and
+    /// resolve straight to bindless slots; the nine uniform values are the OpenGL body's, at
+    /// their placements. CLAUDE.md rule 11 lives in taa-resolve.fsh, which both routes run
+    /// unchanged - the 3x3 nearest-depth disocclusion and the luminance anti-flicker weighting
+    /// are the shader's, and nothing here touches them.
+    /// </summary>
+    private void NativeTaaResolve(FrameBufferRef write, FrameBufferRef read,
+        float[] invViewProjJittered, float[] prevViewProj, bool reset)
+    {
+        List<FrameBufferRef> buffers = FrameBuffers;
+        FrameBufferRef primary = buffers != null && buffers.Count > 0 ? buffers[0] : null!;
+        ShaderProgram resolve = ShaderPrograms.TaaResolve;
+        if (primary == null || primary.Disposed || primary.ColorTextureIds == null ||
+            MotionAttachmentIndex < 0 || primary.ColorTextureIds.Length <= MotionAttachmentIndex ||
+            write.ColorTextureIds == null || write.ColorTextureIds.Length < 3 ||
+            read.ColorTextureIds == null || read.ColorTextureIds.Length < 3 ||
+            resolve == null || resolve.LoadError || resolve.Disposed)
+        {
+            base.OptimumTaaResolveDraw(write, read, invViewProjJittered, prevViewProj, reset);
+            return;
+        }
+
+        // Colour, glow and linear depth: the three attachments the history framebuffer was
+        // built with, all written by this one draw.
+        const uint slots = 0b111u;
+        NativePipeline? pipeline = NativePostPipeline(nativeTaaResolve, resolve, write.FboId, slots,
+            NativeOpaqueBlend(slots), depthTest: false, depthWrite: false, CompareOp.Less);
+        if (pipeline == null)
+        {
+            base.OptimumTaaResolveDraw(write, read, invViewProjJittered, prevViewProj, reset);
+            return;
+        }
+
+        int scene = primary.ColorTextureIds[0];
+        int glow = primary.ColorTextureIds[1];
+        int motion = primary.ColorTextureIds[MotionAttachmentIndex];
+        int depth = primary.DepthTextureId;
+        int historyColor = read.ColorTextureIds[0];
+        int historyGlow = read.ColorTextureIds[1];
+        int historyDepth = read.ColorTextureIds[2];
+
+        OptimumTemporalFrame frame = OptimumTemporal.Frame;
+        if (BeginNativeTargetPass("TaaResolve/" + write.FboId, write.FboId, slots,
+            write.Width, write.Height,
+            new[] { scene, glow, motion, depth, historyColor, historyGlow, historyDepth }))
+        {
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[0], write.Width, write.Height);
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[1], frame.JitterPx.X, frame.JitterPx.Y);
+            WriteNativeMatrix(pipeline, nativeTaaResolve.Uniforms[2], invViewProjJittered);
+            WriteNativeMatrix(pipeline, nativeTaaResolve.Uniforms[3], prevViewProj);
+            WriteNativeMatrix(pipeline, nativeTaaResolve.Uniforms[4], frame.CameraMatrixOrigin);
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[5],
+                frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z);
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[6], reset ? 1 : 0);
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[7], 0.1f);
+            device.WriteNative(pipeline, nativeTaaResolve.Uniforms[8], 1.25f);
+            device.DrawNativeFullscreen(pipeline, new[]
+            {
+                new NativeTexture(nativeTaaResolve.Samplers[0], scene),
+                new NativeTexture(nativeTaaResolve.Samplers[1], glow),
+                new NativeTexture(nativeTaaResolve.Samplers[2], motion),
+                new NativeTexture(nativeTaaResolve.Samplers[3], depth),
+                new NativeTexture(nativeTaaResolve.Samplers[4], historyColor),
+                new NativeTexture(nativeTaaResolve.Samplers[5], historyGlow),
+                new NativeTexture(nativeTaaResolve.Samplers[6], historyDepth),
+            });
+        }
+        device.EndNativePass();
+        FinishNativeTaaPass();
+    }
+
+    /// <summary>
+    /// The TAA sharpen's draw, drawn natively: one colour slot at the sharpen target's own
+    /// size, unblended, no depth. The conditions, the input texture and the texture the pass
+    /// hands on stay in the lib body (ClientPlatformWindows.RenderOptimumTaaSharpen).
+    /// </summary>
+    private void NativeTaaSharpen(FrameBufferRef target, int resolvedScene)
+    {
+        ShaderProgram sharpen = ShaderPrograms.TaaSharpen;
+        if (target.ColorTextureIds == null || target.ColorTextureIds.Length < 1 || target.Disposed ||
+            sharpen == null || sharpen.LoadError || sharpen.Disposed)
+        {
+            base.OptimumTaaSharpenDraw(target, resolvedScene);
+            return;
+        }
+
+        NativePipeline? pipeline = NativePostPipeline(nativeTaaSharpen, sharpen, target.FboId, 1u,
+            NativeOpaqueBlend(1u), depthTest: false, depthWrite: false, CompareOp.Less);
+        if (pipeline == null)
+        {
+            base.OptimumTaaSharpenDraw(target, resolvedScene);
+            return;
+        }
+
+        if (BeginNativeTargetPass("TaaSharpen/" + target.FboId, target.FboId, 1u,
+            target.Width, target.Height, new[] { resolvedScene }))
+        {
+            device.WriteNative(pipeline, nativeTaaSharpen.Uniforms[0], 1f / target.Width, 1f / target.Height);
+            device.WriteNative(pipeline, nativeTaaSharpen.Uniforms[1],
+                GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f));
+            device.DrawNativeFullscreen(pipeline, new[]
+            {
+                new NativeTexture(nativeTaaSharpen.Samplers[0], resolvedScene),
+            });
+        }
+        device.EndNativePass();
+        FinishNativeTaaPass();
+    }
+
+    /// <summary>
+    /// What both TAA draws hand back to the rest of the post chain, which is what the OpenGL
+    /// body's restore leaves: blending on in the standard mode, the depth test on and Primary
+    /// bound with its full-resolution viewport. Outside the native pass, on the GL-shaped
+    /// state, because that is what the steps after it read.
+    /// </summary>
+    private void FinishNativeTaaPass()
+    {
+        GlToggleBlend(on: true);
+        GlEnableDepthTest();
+        LoadFrameBuffer(EnumFrameBuffer.Primary);
     }
 
     // ------------------------------------------------------------------ legacy helpers
@@ -341,10 +493,14 @@ public partial class VulkanClientPlatform
     /// </summary>
     private void PostStepAmbientOcclusion(float[] projectMatrix) => OptimumPostAmbientOcclusion(projectMatrix);
 
-    /// <summary>LEGACY - pass 4, the TAA resolve. Stage 1d makes it native.</summary>
+    /// <summary>
+    /// Pass 4, the TAA resolve. The lib body keeps the temporal contract - the guards, the
+    /// reset decision, the resolved textures and the history parity - and its draw seam is
+    /// <see cref="NativeTaaResolve" /> on the native route.
+    /// </summary>
     private bool PostStepTaaResolve() => RenderOptimumTaaResolve();
 
-    /// <summary>LEGACY - pass 5, the TAA sharpen. Stage 1d makes it native.</summary>
+    /// <summary>Pass 5, the TAA sharpen; its draw seam is <see cref="NativeTaaSharpen" />.</summary>
     private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);
 
     /// <summary>LEGACY - pass 6, the bloom chain. Stage 1e makes it native.</summary>
@@ -419,6 +575,23 @@ public partial class VulkanClientPlatform
             ViewportHeight = (int)viewport.Extent.Height,
         });
     }
+
+    /// <summary>
+    /// A pass that owns its viewport, the way the OpenGL body's full CurrentFrameBuffer setter
+    /// does: bind the target and set the viewport to its own size.
+    /// </summary>
+    private bool BeginNativeTargetPass(string name, int framebufferId, uint colorSlots,
+        int width, int height, int[] reads) =>
+        device.BeginNativePass(new NativePassDescription
+        {
+            Name = name,
+            FramebufferId = framebufferId,
+            ColorSlots = colorSlots,
+            Reads = reads,
+            Flags = PassFlags.None,
+            ViewportWidth = width,
+            ViewportHeight = height,
+        });
 
     /// <summary>
     /// The pipeline for one native pass of the chain, with the fixed state stated outright. The

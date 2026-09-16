@@ -162,17 +162,25 @@ public class TaaSharpenCoverageTests
 
         Assert.Contains("if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)", body);
         Assert.Contains("if (sharpen == null || sharpen.LoadError || target == null)", body);
+        // The conditions stay in the pass; the draw is a seam of its own, so a platform that
+        // owns the pass natively replaces the draw and inherits every condition above it
+        // (docs/vulkan-native-render-systems.md, Phase 3b stage 1).
+        Assert.Contains("OptimumTaaSharpenDraw(target, resolvedScene);", body);
+        Assert.Contains("return target.ColorTextureIds[0];", body);
+
+        string draw = MethodBody(platform,
+            "public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)");
         // Same set/restore discipline as the resolve (TAA-PLAN "Blend state").
-        int blendOff = body.IndexOf("GlToggleBlend(on: false);", StringComparison.Ordinal);
-        int depthOff = body.IndexOf("GlDisableDepthTest();", StringComparison.Ordinal);
-        int draw = body.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
-        int blendOn = body.IndexOf("GlToggleBlend(on: true);", StringComparison.Ordinal);
-        int depthOn = body.IndexOf("GlEnableDepthTest();", StringComparison.Ordinal);
-        int primary = body.IndexOf("LoadFrameBuffer(EnumFrameBuffer.Primary);", StringComparison.Ordinal);
-        Assert.True(blendOff >= 0 && depthOff > blendOff && draw > depthOff);
-        Assert.True(blendOn > draw && depthOn > blendOn && primary > depthOn);
+        int blendOff = draw.IndexOf("GlToggleBlend(on: false);", StringComparison.Ordinal);
+        int depthOff = draw.IndexOf("GlDisableDepthTest();", StringComparison.Ordinal);
+        int triangle = draw.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
+        int blendOn = draw.IndexOf("GlToggleBlend(on: true);", StringComparison.Ordinal);
+        int depthOn = draw.IndexOf("GlEnableDepthTest();", StringComparison.Ordinal);
+        int primary = draw.IndexOf("LoadFrameBuffer(EnumFrameBuffer.Primary);", StringComparison.Ordinal);
+        Assert.True(blendOff >= 0 && depthOff > blendOff && triangle > depthOff);
+        Assert.True(blendOn > triangle && depthOn > blendOn && primary > depthOn);
         // The strength reaching the shader is the configured one, clamped.
-        Assert.Contains("sharpen.Uniform(\"sharpness\", GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f));", body);
+        Assert.Contains("sharpen.Uniform(\"sharpness\", GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f));", draw);
     }
 
     [Fact]
@@ -190,7 +198,7 @@ public class TaaSharpenCoverageTests
 
         string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
         int guard = body.IndexOf("if (OptimumFsrBlitActive())", StringComparison.Ordinal);
-        int draw = body.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
+        int draw = body.IndexOf("OptimumTaaSharpenDraw(target, resolvedScene);", StringComparison.Ordinal);
         Assert.True(guard >= 0 && guard < draw);
         // And the rule is written down where the next reader will look.
         Assert.Contains("two RCAS passes to the same pixels", platform);
