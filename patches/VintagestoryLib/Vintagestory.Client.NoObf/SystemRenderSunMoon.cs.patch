@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
-index ac7f262..ba9f43a 100644
+index ac7f262..d3ae0f6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
 @@ -52,11 +52,11 @@ public class SystemRenderSunMoon : ClientSystem
@@ -70,7 +70,23 @@ index ac7f262..ba9f43a 100644
  	public void OnRenderFrame3D(float dt)
  	{
  		ClientPlatformAbstract platform = game.Platform;
-@@ -420,11 +417,11 @@ public class SystemRenderSunMoon : ClientSystem
+@@ -266,11 +263,14 @@ public class SystemRenderSunMoon : ClientSystem
+ 		celestialobject.ExtraGodray = 0.5f;
+ 		celestialobject.UniformMatrix("modelMatrix", ref moonmat);
+ 		celestialobject.ViewMatrix = game.api.renderapi.CameraMatrixOriginf;
+ 		celestialobject.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		celestialobject.Tex2D = moontextureIds[4];
+-		platform.RenderMesh(quadModel);
++		// Optimum (Phase 3b): the moon's draw goes through the platform's celestial seam, whose
++		// neutral body is this RenderMesh call. The sun's draw above keeps RenderMesh, because it
++		// runs under the shared "standard" program that the entity stage owns.
++		platform.RenderCelestialQuad(quadModel, moontextureIds[4], game.skyTextureId, game.skyGlowTextureId);
+ 		celestialobject.WeirdMathToMakeMoonLookNicer = 0;
+ 		celestialobject.Stop();
+ 		platform.GlToggleBlend(on: false);
+ 		platform.GlEnableDepthTest();
+ 	}
+@@ -420,11 +420,11 @@ public class SystemRenderSunMoon : ClientSystem
  		game.Platform.GLDeleteTexture(suntextureId);
  		for (int i = 0; i < moontextureIds.Length; i++)
  		{

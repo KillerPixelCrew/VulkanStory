@@ -95,6 +95,12 @@ var membersToInject = new Dictionary<string, List<string>>
         // native platform records the entityanimated and shadowmapentityanimated passes itself.
         // The neutral body is the RenderMesh call it replaced.
         "RenderEntityMesh",
+        // Phase 3b stage 2: the draw seams of the remaining sky, particle and decal systems,
+        // each with the neutral body of the draw it replaced.
+        "RenderNightSkyBox",
+        "RenderCelestialQuad",
+        "RenderParticles",
+        "RenderDecalPool",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
         // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform
@@ -1003,6 +1009,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "MergeTransparentRenderPass", 0),
     // TAA P4: the cube-particle motion window and its uniforms.
     new("Vintagestory.Client.NoObf.SystemRenderParticles", "OnRenderFrame3D", 1),
+    // Phase 3b stage 2: the pools' instanced draws go through the platform's particle seam.
+    new("Vintagestory.Client.NoObf.SystemRenderParticles", "Render", 2),
+    // Phase 3b stage 2: the star box and the moon draw through their own platform seams.
+    new("Vintagestory.Client.NoObf.SystemRenderNightSky", "OnRenderFrame3D", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderSunMoon", "OnRenderFrame3D", 1),
     // TAA P4: the decal motion window.
     new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),

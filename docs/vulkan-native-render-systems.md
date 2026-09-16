@@ -245,6 +245,55 @@ The first of the four system stages, and the heaviest draw path in the game.
   motion-window sweep, the motion attachment on its own, the emulation boundary, pipeline identity)
   and the entity section of `Optimum.Tests/native-world-systems-coverage-tests.cs`.
 
+## 3c. Stage 2, second wave: the remaining sky systems, the particles and the decals
+
+The sky dome proved the mesh-draw API; this wave takes the systems whose shape it did not exercise
+- a cube map, an instanced pool, an indirect multi-draw - and the first two systems that write the
+motion attachment.
+
+- **Seams** (`ClientPlatformAbstract`, each with the neutral body of the draw it replaced, each
+  listed in `Optimum.Patcher/Program.cs` and in `VulkanClientPlatform.ExpectedVirtuals`):
+  - `RenderNightSkyBox(MeshRef, int cubeTextureId)` - `SystemRenderNightSky`'s star cube;
+  - `RenderCelestialQuad(MeshRef, int bodyTextureId, int skyTextureId, int glowTextureId)` - the
+    moon, under `celestialobject`;
+  - `RenderParticles(MeshRef, int quantity, int particleTextureId)` - one particle pool's
+    instanced draw;
+  - `RenderDecalPool(MeshRef, int[] starts, int[] sizes, int groupCount, int decalTextureId, int blockTextureId)` -
+    the decal pool's multi-draw. `SystemRenderDecals` now runs the pool's own public `FrustumCull`
+    and hands the seam its results, which is `MeshDataPool.Draw` split in two; `MeshDataPool`
+    gained a read-only `ModelRef` for the mesh half of that.
+- **Platform:** `VulkanClientPlatform.NativeWorld.cs`, one `NativeWorldEnabled` switch keeping
+  every neutral body reachable. Two derivations are shared by all four passes and are the reason
+  none of them reads `GlStateTracker`:
+  - `NativeWorldPassColorSlots` - the colour slots of the pass are the set the emulated route's
+    draw-buffer mask would hold, computed from `MotionAttachmentIndex` and
+    `OptimumMotionWriteActive`: every bound slot with TAA off, Primary's default colour set with
+    TAA on, plus the motion attachment exactly while a motion window is open.
+  - `NativeWorldBlend` - the caller's blend mode per attachment, with replace-blending
+    (ONE, ZERO, ADD) forced on the motion attachment inside a window, which is what
+    `ApplyOptimumMotionBlendState` does for an emulated draw.
+- **Tests:** `Optimum.Render.Vulkan.Tests/NativeWorldSystemsTests.cs` (old route against native
+  route on every attachment of Primary for all four systems, the motion attachment compared bit
+  for bit for the two systems that write it, the draw kinds counted apart, and the slot
+  derivation checked against all three window states) and the seam coverage in
+  `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+- **Deliberately not in this wave, with the reason:**
+  - **the sun.** `SystemRenderSunMoon` draws it under `standard`, the shared program the entity
+    stage owns (held items, dropped items); porting it means porting `standard`'s whole sampler
+    set, so it belongs to that stage and keeps `RenderMesh`.
+  - **the quad particle pool.** It draws into `Transparent` in the OIT stage, whose
+    per-attachment weighted-blend state belongs to the OIT pass rather than to the particle
+    system and is not something this seam can state. The pipeline request names `particlescube`,
+    so the quad pool falls through to the neutral body by construction rather than by a check.
+  - **aurora and the two cloud renderers.** They live in the `VSEssentials` fork and reach the
+    device through a second emulation surface, `OptimumForkGraphics` / `VulkanForkGraphics`
+    (`VintagestoryApi/Client/optimum-render-device.cs`,
+    `Optimum.Render.Vulkan/Platform/VulkanForkGraphics.cs`), which has no native counterpart and
+    is not in section 1's emulation inventory. `CloudRendererMap` also renders into a target the
+    mod creates itself rather than one of `SetupDefaultFrameBuffers`'. Deciding whether that
+    surface gets a native equivalent or stays permanently emulated mod-adapter surface is its
+    own call, and it blocks those three systems until it is made.
+
 ## 4. Documentation that makes map stages unnecessary
 
 Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five
