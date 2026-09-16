@@ -13,6 +13,7 @@ namespace Optimum.Tests;
 public class NativePostChainCoverageTests
 {
     private const string ChainFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostChain.cs";
+    private const string TailFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostFinal.cs";
 
     /// <summary>
     /// The lib body is split into one virtual per pass, and RenderPostprocessingEffects is only
@@ -189,11 +190,11 @@ public class NativePostChainCoverageTests
     }
 
     /// <summary>
-    /// Every step that is not native yet has a legacy helper naming the stage that replaces it,
-    /// so the chain is complete at every commit and a later stage moves exactly one helper.
+    /// Every pass of the chain draws natively, and each pass whose OpenGL body is a legacy helper
+    /// keeps that helper as the old route the differential tests compare against.
     /// </summary>
     [Fact]
-    public void EveryRemainingStepHasALegacyHelperNamingItsStage()
+    public void EveryChainStepIsNativeAndKeepsItsOldRouteReachable()
     {
         string chain = Read(ChainFile);
 
@@ -201,10 +202,13 @@ public class NativePostChainCoverageTests
                  {
                      "private bool PostStepTaaResolve() => RenderOptimumTaaResolve();",
                      "private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);",
-                     "private void PostStepBloom(int scene, int glow) => OptimumPostBloom(scene, glow);",
-                     "private void PostStepGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);",
-                     "private void PostStepFxaaOrBlit(int scene) => OptimumPostLuma(scene);",
+                     "private void PostStepBloom(int scene, int glow) => NativeBloom(scene, glow);",
+                     "private void PostStepGodRays(int scene, int glow) => NativeGodRays(scene, glow);",
+                     "private void PostStepFxaaOrBlit(int scene) => NativePostLuma(scene);",
                      "private void PostStepFinish() => OptimumPostFinish();",
+                     "private void LegacyBloom(int scene, int glow) => OptimumPostBloom(scene, glow);",
+                     "private void LegacyGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);",
+                     "private void LegacyPostLuma(int scene) => OptimumPostLuma(scene);",
                      "private void LegacyFinalComposition()",
                      "private void LegacyOitMerge()",
                      "private bool LegacySkyMotion()",
@@ -213,20 +217,14 @@ public class NativePostChainCoverageTests
             Assert.Contains(helper, chain);
         }
 
-        foreach (string stage in new[] {
-                     "Stage 1e makes it native", "Stage 1f makes it native", "Stage 1g makes it native" })
-        {
-            Assert.Contains(stage, chain);
-        }
-        // Stages 1c and 1d are done: the AO step draws natively behind the lib virtual, and the
-        // TAA resolve and sharpen draw natively behind their draw seams, so none of the three is
-        // a legacy helper any more.
-        Assert.DoesNotContain("Stage 1c makes it native", chain);
-        Assert.DoesNotContain("Stage 1d makes it native", chain);
-        // One per remaining pass: the bloom chain, god rays, the FXAA luma step, the epilogue,
-        // the final composition, the merge and sky motion, whose old routes stay reachable
-        // through the chain switch.
-        Assert.Equal(7, Count(chain, "LEGACY -"));
+        // Every pass of the chain is native now: no step carries a "Stage 1x makes it native"
+        // marker any more.
+        Assert.DoesNotContain("makes it native", chain);
+        // One LEGACY helper per native pass whose OpenGL body stays reachable for the
+        // differential tests: the merge, sky motion, bloom, god rays, the Luma step and the
+        // final composition. The AO step and the two TAA passes keep their old route in the lib
+        // virtual itself, not in a legacy helper.
+        Assert.Equal(6, Count(chain, "LEGACY -"));
     }
 
     /// <summary>
@@ -313,6 +311,113 @@ public class NativePostChainCoverageTests
             Assert.Contains("\"" + member + "\"", patcher);
             Assert.Contains("\"" + member + "\"", regions);
             Assert.Contains("new(true, \"" + member + "\"", selfCheck);
+        }
+    }
+
+    /// <summary>
+    /// The chain's tail - bloom, god rays, the Luma step and the final composition - draws through
+    /// the device API, with the OpenGL body's conditions, inputs and uniform values, and the final
+    /// composition declares the attachment subset that lets it sample Primary colour 1 while it
+    /// writes Primary colour 0.
+    /// </summary>
+    [Fact]
+    public void TheChainTailDrawsNatively()
+    {
+        string tail = Read(TailFile);
+
+        Assert.Contains("device.BeginNativePass(new NativePassDescription", tail);
+        Assert.Contains("device.DrawNativeFullscreen(pipeline, new[]", tail);
+        Assert.Contains("device.EndNativePass();", tail);
+
+        // Bloom: find-bright then the two blur ping-pongs, the stale full-resolution frameSize
+        // the OpenGL body reuses for all four blur draws, and the block's blend and viewport
+        // handoff outside the passes.
+        Assert.Contains("private void NativeBloom(int scene, int glow)", tail);
+        Assert.Contains("if (!OptimumRenderBloom) return;", tail);
+        Assert.Contains("float blurWidth = client.Width * ssaa;", tail);
+        Assert.Contains("NativeBlurStep(lowV, nativeBlurLowVertical", tail);
+        Assert.Contains("GlToggleBlend(on: false);", tail);
+        Assert.Contains("GlToggleBlend(on: true);", tail);
+
+        // God rays: the half-resolution target, the full-resolution input texel size, and
+        // LightPosition3D behind sunPos3dIn.
+        Assert.Contains("private void NativeGodRays(int scene, int glow)", tail);
+        Assert.Contains("if (!OptimumRenderGodRays) return;", tail);
+        Assert.Contains("ShaderUniforms.LightPosition3D", tail);
+        Assert.Contains("device.WriteNative(pipeline, nativeGodRays.Uniforms[1], OptimumConfig.GodRaysSampleLimit);", tail);
+
+        // The Luma branch: the raw jittered Primary colour for the FXAA prepass, the chain's
+        // scene for the blit, and blending left off.
+        Assert.Contains("bool fxaa = OptimumRenderFxaa && !TaaResolvedThisFrame;", tail);
+        Assert.Contains("int source = fxaa ? primary!.ColorTextureIds[0] : scene;", tail);
+        Assert.Contains("SetBlendEnabled(false);", tail);
+
+        // The final composition: the attachment subset, the unconditional uniform writes and the
+        // draw-buffer handoff around the pass.
+        Assert.Contains("private void NativeFinalComposition()", tail);
+        Assert.Contains("const uint slots = ~(1u << 1);", tail);
+        Assert.Contains("BeginFinalCompositionDrawBuffers();", tail);
+        Assert.Contains("RestoreWorldDrawBuffers(renderSsao);", tail);
+        Assert.Contains("device.WriteNative(pipeline, u[1], (OptimumSsaoInScene || !renderSsao) ? 1 : 0);", tail);
+        Assert.Contains("device.WriteNative(pipeline, u[2], aoDebugView ? 1 : 0);", tail);
+        Assert.Contains("ShaderUniforms.SunPosition3D", tail);
+        Assert.Contains("aoDebugView && aoTexture != 0", tail);
+        Assert.Contains("int glow = OptimumPostGlowTexture();", tail);
+
+        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
+        Assert.Contains("NativeFinalComposition();", graph);
+    }
+
+    /// <summary>
+    /// The client state the native tail reads instead of GL state (decision 3) is a lib accessor,
+    /// a patcher target and an owned region, and the two post steps that sized themselves from
+    /// NativeWindow.ClientSize now read the same window-size seam the blit does.
+    /// </summary>
+    [Fact]
+    public void TheNativeTailReadsClientStateThroughListedLibSeams()
+    {
+        string platform = Platform().Replace("\r\n", "\n");
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
+
+        foreach (string member in new[]
+                 {
+                     "public bool OptimumRenderBloom => RenderBloom;",
+                     "public bool OptimumRenderGodRays => RenderGodRays;",
+                     "public bool OptimumRenderFxaa => RenderFXAA;",
+                     "public float OptimumSsaaLevel => ssaaLevel;",
+                     "public int OptimumAmbientOcclusionTexture => optimumAmbientOcclusionTexture;",
+                     "public bool OptimumSsaoInScene => optimumSsaoInScene;",
+                 })
+        {
+            Assert.Contains(member, platform);
+        }
+        foreach (string member in new[]
+                 {
+                     "OptimumRenderBloom", "OptimumRenderGodRays", "OptimumRenderFxaa", "OptimumSsaaLevel",
+                     "OptimumAmbientOcclusionTexture", "OptimumSsaoInScene",
+                 })
+        {
+            Assert.Contains("\"" + member + "\"", patcher);
+            Assert.Contains("\"" + member + "\"", regions);
+        }
+
+        // The bloom, god-rays and final-composition bodies take the window size from the seam, so
+        // both routes compute the same value; nothing in them reads NativeWindow.ClientSize.
+        foreach (string body in new[]
+                 {
+                     "public virtual void OptimumPostBloom(int postSceneTexture, int postGlowTexture)",
+                     "public virtual void OptimumPostGodRays(int postSceneTexture, int postGlowTexture)",
+                     "public override void RenderFinalComposition()",
+                 })
+        {
+            int start = platform.IndexOf(body, StringComparison.Ordinal);
+            Assert.True(start >= 0, body + " is missing");
+            int end = platform.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
+            Assert.True(end > start);
+            string source = platform.Substring(start, end - start);
+            Assert.Contains("Size2i optimumClientSize = OptimumWindowClientSize();", source);
+            Assert.DoesNotContain("((NativeWindow)window).ClientSize", source);
         }
     }
 
