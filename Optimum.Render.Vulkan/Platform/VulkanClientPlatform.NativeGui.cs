@@ -114,6 +114,40 @@ public partial class VulkanClientPlatform
         }
     }
 
+    /// <summary>
+    /// Any other draw under the vanilla gui program - block highlights, the wireframe, gear and
+    /// progress overlays, mods drawing with the gui shader through IRenderAPI.RenderMesh - through
+    /// its own pass cache, so line and triangle pipelines of different callers do not evict the
+    /// quads'.
+    /// </summary>
+    private readonly NativeMeshPass nativeGuiMesh =
+        new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
+
+    /// <summary>
+    /// A plain RenderMesh under the vanilla gui program, recorded natively under the state the
+    /// client stated: blend, depth, depth function, scissor, cull, line width. The sampled
+    /// textures are the program's declared ones. False: the caller runs the emulated draw.
+    /// Called from VulkanClientPlatform.RenderMesh; the seams' neutral bodies reach it too, which
+    /// is why it honours <see cref="NativeGuiEnabled" /> itself.
+    /// </summary>
+    private bool TryRenderGuiMeshNative(MeshRef mesh)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (!NativeGuiEnabled || device == null || mesh == null || program == null ||
+            !ReferenceEquals(program, ShaderPrograms.Gui))
+        {
+            return false;
+        }
+        CullModeFlags cull = statedCull
+            ? (statedCullBack ? CullModeFlags.BackBit : CullModeFlags.FrontBit)
+            : CullModeFlags.None;
+        return DrawNativeGuiMesh(nativeGuiMesh, mesh,
+            DeclaredProgramTexture(program.ProgramId, "tex2d"),
+            DeclaredProgramTexture(program.ProgramId, "tex2dOverlay"),
+            statedLineWidth, statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite,
+            GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, "GuiMesh", cull);
+    }
+
     /// <summary>The texture-into-texture blit's draw: the native pass, or the neutral body's RenderMesh.</summary>
     public override void RenderTextureQuad(MeshRef quad, int textureId, bool blend)
     {
@@ -156,11 +190,11 @@ public partial class VulkanClientPlatform
     private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
         float lineWidth, bool blend, string passLabel)
         => DrawNativeGuiMesh(pass, mesh, textureId, overlayTextureId, lineWidth, blend, EnumBlendMode.Standard,
-            depthTest: false, depthWrite: false, CompareOp.Less, scissor: null, passLabel);
+            depthTest: false, depthWrite: false, CompareOp.Less, scissor: null, passLabel, CullModeFlags.None);
 
     private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
         float lineWidth, bool blend, EnumBlendMode blendMode, bool depthTest, bool depthWrite, CompareOp depthCompare,
-        Rect2D? scissor, string passLabel)
+        Rect2D? scissor, string passLabel, CullModeFlags cull = CullModeFlags.None)
     {
         FrameBufferRef target = CurrentFrameBuffer;
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
@@ -187,7 +221,7 @@ public partial class VulkanClientPlatform
                 DepthTest = depthTest,
                 DepthWrite = depthWrite,
                 DepthCompare = depthCompare,
-                Cull = CullModeFlags.None,
+                Cull = cull,
                 Topology = device.NativeMeshTopology(vao.VaoId),
                 LineWidth = lineWidth,
             });
