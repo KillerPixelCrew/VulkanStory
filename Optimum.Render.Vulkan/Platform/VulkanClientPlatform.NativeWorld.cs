@@ -95,6 +95,9 @@ public partial class VulkanClientPlatform
         new("particlesquad", Array.Empty<string>(), Array.Empty<string>());
 
     /// <summary>Any plain RenderMesh under the vanilla standard program (RenderStandardMeshNative).</summary>
+    private readonly NativeMeshPass nativeStandardGui =
+        new("standard", Array.Empty<string>(), Array.Empty<string>());
+
     private readonly NativeMeshPass nativeStandardMesh =
         new("standard", Array.Empty<string>(), Array.Empty<string>());
 
@@ -485,6 +488,7 @@ public partial class VulkanClientPlatform
                 blend[i] = AttachmentBlend.For(statedBlendOn, statedBlendMode);
             }
             if (i == motion) blend[i] = ReplaceBlend(statedBlendOn);
+            blend[i].WriteMask &= ~statedColorMaskOff;
         }
         return blend;
     }
@@ -494,14 +498,17 @@ public partial class VulkanClientPlatform
     /// entity models, the sun's disc outside its seam - recorded natively under the state the
     /// client stated: blend, depth test, depth mask, depth function, cull. Every sampler the
     /// pipeline declares resolves from the program's declared textures. False: the caller runs the
-    /// emulated draw. Skipped while an occlusion query is open (the sun probe) and for the default
-    /// framebuffer (GUI item icons stay on the emulated route for now).
+    /// emulated draw. The colour mask the client stated is applied per slot. An open occlusion
+    /// query (the sun probe) is carried across the native pass: the pass opens its scope through
+    /// the target manager, whose scope hooks suspend the query in the closing scope and resume it
+    /// in the native one. The default framebuffer (GUI item icons) goes to
+    /// <see cref="TryRenderStandardMeshToDefault" />.
     /// </summary>
     private bool TryRenderStandardMeshNative(MeshRef mesh)
     {
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
-        if (!NativeWorldEnabled || device == null || mesh == null || program == null || occlusionQueryOpen ||
-            !ReferenceEquals(program, ShaderPrograms.Standard) || CurrentFrameBuffer == null)
+        if (!NativeWorldEnabled || device == null || mesh == null || program == null ||
+            !ReferenceEquals(program, ShaderPrograms.Standard))
         {
             return false;
         }
@@ -510,6 +517,10 @@ public partial class VulkanClientPlatform
         CullModeFlags cull = statedCull
             ? (statedCullBack ? CullModeFlags.BackBit : CullModeFlags.FrontBit)
             : CullModeFlags.None;
+        if (bound == null)
+        {
+            return TryRenderStandardMeshToDefault(program, mesh, cull);
+        }
         if (!NativeWorldPrepare(nativeStandardMesh, mesh, blending: statedBlendOn, depth: statedDepthTest,
                 out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
                 count => StatedWorldBlend(bound, count), depthWrite: statedDepthWrite,
@@ -536,6 +547,77 @@ public partial class VulkanClientPlatform
             drawn = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
         }
         NativeWorldEndPass(target, outer, outerFlags);
+        return drawn;
+    }
+
+    /// <summary>
+    /// A standard-program draw into the default framebuffer: the GUI's item icons (hotbar,
+    /// inventory, held-item slots), which InventoryItemRenderer draws in the Ortho stage with
+    /// CurrentFrameBuffer null. The OpenGL side is ClientPlatformWindows.RenderMesh. Slot 0 takes
+    /// the stated blend through the tracker's factor table; depth test, mask, function, cull and
+    /// scissor are what the client stated (item icons use depth to sort their own faces).
+    /// </summary>
+    private AttachmentBlend[] StatedGuiSlots(RenderTargetFormats formats)
+    {
+        AttachmentBlend[] slots = GuiSlots(formats, statedBlendOn, statedBlendMode);
+        slots[0].WriteMask &= ~statedColorMaskOff;
+        return slots;
+    }
+
+    private bool TryRenderStandardMeshToDefault(ShaderProgramBase program, MeshRef mesh, CullModeFlags cull)
+    {
+        var vao = mesh as VAO;
+        if (vao == null || vao.VaoId == 0 || vao.Disposed) return false;
+        int framebufferId = PassDeclaration.DefaultFramebuffer;
+        int layoutId = device.NativeMeshLayoutId(vao.VaoId);
+        if (layoutId < 0) return false;
+        RenderTargetFormats? formats = device.NativeTargetFormats(framebufferId, 1u);
+        if (formats == null) return false;
+
+        NativePipeline? pipeline = NativeMeshPipelineFor(nativeStandardGui, program, framebufferId, 1u, layoutId,
+            new NativePipelineDescription
+            {
+                Blend = StatedGuiSlots(formats),
+                DepthTest = statedDepthTest,
+                DepthWrite = statedDepthWrite,
+                DepthCompare = GlEnums.CompareOpFrom(statedDepthFunc),
+                Cull = cull,
+                Topology = device.NativeMeshTopology(vao.VaoId),
+            });
+        if (pipeline == null) return false;
+
+        string[] names = pipeline.SamplerNames;
+        var textures = new NativeTexture[names.Length];
+        var reads = new int[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            int id = DeclaredProgramTexture(program.ProgramId, names[i]);
+            textures[i] = new NativeTexture(pipeline.Sampler(names[i]), id);
+            reads[i] = id;
+        }
+
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        Rect2D viewport = device.NativeCurrentViewport;
+        bool drawn = false;
+        if (device.BeginNativePass(new NativePassDescription
+        {
+            Name = "StandardGui/" + framebufferId,
+            FramebufferId = framebufferId,
+            ColorSlots = 1u,
+            Reads = reads,
+            Flags = PassFlags.AllowSplit,
+            ViewportX = viewport.Offset.X,
+            ViewportY = viewport.Offset.Y,
+            ViewportWidth = (int)viewport.Extent.Width,
+            ViewportHeight = (int)viewport.Extent.Height,
+            Scissor = scissorEnabled ? statedScissor : null,
+        }))
+        {
+            drawn = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
+        }
+        device.EndNativePass();
+        SetPassContext(outer, outerFlags);
         return drawn;
     }
 
