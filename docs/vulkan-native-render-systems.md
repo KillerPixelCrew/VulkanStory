@@ -133,3 +133,38 @@ Inputs:
   - validation clean;
   - the full suites.
 - **Not in stage 1:** world systems, GUI, and removal of the emulation layer.
+
+## 4. Documentation that makes map stages unnecessary
+
+Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five
+figures of tokens each, and thrown the result away when the run ended. The fix is not a map document -
+that is a second source of truth and it rots. The fix is that the code answers the question at the
+declaration, so an implementer greps and reads instead of mapping.
+
+**The convention.** Every render seam - a platform virtual a system draws through, a native pass, a
+device API entry point - carries a doc comment that answers, in this order:
+
+1. **What it draws**, in one sentence, in the game's vocabulary ("the far shadow map for chunk meshes",
+   not "a draw call").
+2. **Where the other side is**: the OpenGL body's type and method, so the two paths can be diffed
+   without searching. For a native pass, also the pass it replaced.
+3. **Target and slots**: which framebuffer and which colour slots it writes, whether it writes depth,
+   and any colour-write mask that matters (motion windows are masks, never draw-buffer toggles).
+4. **State that is not obvious**: blend mode per attachment, depth compare, cull, and anything the pass
+   deliberately does differently from the tracked GL state, with the reason.
+5. **What pins it**: the test that fails if this changes - the differential test name for a native pass,
+   the coverage test for a lib seam.
+
+**Greppability is the point.** A system's name appears in the comment of every member that serves it, so
+`rg -n "shadow map"` finds the seam, the native pass, the pipeline and the test in one search. When a
+system moves to a native pass, its old body keeps its comment and gains the pointer to the new one.
+
+**Applies to:** `Optimum.Render.Vulkan/Platform/VulkanClientPlatform.*.cs`, `VulkanDevice.Native.cs` and
+the transplanted seams in `build/VintagestoryLib/**`. An implementation stage documents the seams it
+touches as part of the change, not afterwards; a stage that adds a seam without this comment is
+incomplete, and review should send it back.
+
+**Map stages** are then only for questions the code genuinely cannot answer - measured behaviour, vendor
+documentation, or a tree the repository does not contain. `scripts/dev/harvest-maps.py` recovers the map
+output of past runs from the workflow journals when one of those is needed again.
+
