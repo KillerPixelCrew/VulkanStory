@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
-index a9db192..5434211 100644
+index a9db192..c1e1a3a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
 @@ -127,15 +127,65 @@ public class SystemRenderParticles : ClientSystem, IAsyncParticleManager
@@ -70,3 +70,23 @@ index a9db192..5434211 100644
  		ShaderProgramParticlesquad particlesquad = ShaderPrograms.Particlesquad;
  		particlesquad.Use();
  		Render(0, deltaTime);
+@@ -157,12 +207,17 @@ public class SystemRenderParticles : ClientSystem, IAsyncParticleManager
+ 			((IShaderProgram)currentShaderProgram).UniformMatrix("modelViewMatrix", game.CurrentModelViewMatrix);
+ 			IParticlePool particlePool = mainthreadpools[poolindex];
+ 			IParticlePool particlePool2 = offthreadpools[poolindex];
+ 			particlePool.OnNewFrame(dt, game.EntityPlayer.CameraPos);
+ 			particlePool2.OnNewFrame(dt, game.EntityPlayer.CameraPos);
+-			game.Platform.RenderMeshInstanced(particlePool.Model, particlePool.QuantityAlive);
+-			game.Platform.RenderMeshInstanced(particlePool2.Model, particlePool2.QuantityAlive);
++			// Optimum (Phase 3b): the two pools' instanced draws go through the platform's
++			// particle seam, whose neutral body is the RenderMeshInstanced call it replaced. A
++			// native platform records the pass itself; the cube program samples nothing and the
++			// quad program's particleTex is never bound by the game, so the texture the seam
++			// carries is 0 and resolves to the bindless placeholder on both routes.
++			game.Platform.RenderParticles(particlePool.Model, particlePool.QuantityAlive, 0);
++			game.Platform.RenderParticles(particlePool2.Model, particlePool2.QuantityAlive, 0);
+ 			((IShaderProgram)currentShaderProgram).Stop();
+ 			game.GlPopMatrix();
+ 		}
+ 	}
+ 
