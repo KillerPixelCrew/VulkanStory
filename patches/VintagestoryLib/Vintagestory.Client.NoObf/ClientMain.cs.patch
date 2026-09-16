@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..4037dee 100644
+index 67feafa..0848a9b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -487,7 +487,25 @@ index 67feafa..4037dee 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1674,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1314,11 +1568,16 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			texture2texture.AlphaTest = alphaTest;
+ 			texture2texture.Xs = targetX / (float)fb.Width;
+ 			texture2texture.Ys = targetY / (float)fb.Height;
+ 			texture2texture.Width = sourceWidth / (float)fb.Width;
+ 			texture2texture.Height = sourceHeight / (float)fb.Height;
+-			Platform.RenderMesh(quadModel);
++			// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the draw is a
++			// seam, so a native platform records this pass itself. The neutral body is the
++			// RenderMesh call it replaced, and the two values it carries - the texture the program
++			// samples and the blend state this method just computed from alphaTest - are the ones a
++			// native pass may not read back off tracked GL state.
++			Platform.RenderTextureQuad(quadModel, fromTexture.TextureId, alphaTest >= 0f);
+ 			Platform.GlEnableDepthTest();
+ 			Platform.LoadFrameBuffer((currentShaderProgram?.PassName == "gui") ? EnumFrameBuffer.Default : EnumFrameBuffer.Primary);
+ 			texture2texture.Stop();
+ 			currentShaderProgram?.Use();
+ 		}
+@@ -1420,10 +1679,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -502,7 +520,7 @@ index 67feafa..4037dee 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1823,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1828,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -526,7 +544,7 @@ index 67feafa..4037dee 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2382,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2387,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -551,7 +569,7 @@ index 67feafa..4037dee 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2811,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2816,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -565,7 +583,7 @@ index 67feafa..4037dee 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3802,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3807,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

@@ -101,6 +101,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderCelestialQuad",
         "RenderParticles",
         "RenderDecalPool",
+        // Phase 3b stage 2, GUI and text: the two GUI draw seams, so a native platform records
+        // those passes itself. Both neutral bodies are the RenderMesh call they replaced.
+        "RenderTextureQuad",
+        "RenderOverlayLines",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
         // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform
@@ -1046,6 +1050,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.AmbientManager", "updateColorGradingValues", 1),
     // SystemRenderSkyColor: reusable scratch vectors instead of per-frame Vec3f allocations
     new("Vintagestory.Client.NoObf.SystemRenderSkyColor", "OnRenderFrame3D", 1),
+    // Phase 3b stage 2, GUI and text: the two callers that draw through the new GUI seams -
+    // the texture-into-texture blit that bakes every Cairo GUI and text surface, and the
+    // aiming reticle's line draws.
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderTextureIntoFrameBuffer", 9),
+    new("Vintagestory.Client.NoObf.SystemRenderPlayerAimAcc", "OnRenderFrame2DOverlay", 1),
     // SystemSoundEngine: audio listener update threshold + periodic refresh
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)

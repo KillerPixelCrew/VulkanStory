@@ -31,6 +31,48 @@ internal struct AttachmentBlend : IEquatable<AttachmentBlend>
     };
 
     /// <summary>
+    /// The factor pairs one of the game's named blend modes means, which
+    /// <c>ClientPlatformWindows.GlToggleBlend</c> selects and
+    /// <see cref="GlStateTracker.SetBlend" /> applies to every attachment.
+    ///
+    /// A native render system states its blend outright rather than reading the tracker's
+    /// (docs/vulkan-native-render-systems.md, decision 3), and its call site says "blend on,
+    /// standard" the same way the OpenGL body does, so it builds the attachment through here
+    /// instead of restating the factors and risking a pair that drifts from the tracker's.
+    /// </summary>
+    public static AttachmentBlend For(bool enabled, EnumBlendMode mode)
+    {
+        (BlendFactor srcColor, BlendFactor dstColor, BlendFactor srcAlpha, BlendFactor dstAlpha) = FactorsFor(mode);
+        AttachmentBlend blend = Default;
+        blend.Enabled = enabled;
+        blend.SrcColor = srcColor;
+        blend.DstColor = dstColor;
+        blend.ColorOp = BlendOp.Add;
+        blend.SrcAlpha = srcAlpha;
+        blend.DstAlpha = dstAlpha;
+        blend.AlphaOp = BlendOp.Add;
+        return blend;
+    }
+
+    /// <summary>The one table of factor pairs, shared by the tracker and by native systems.</summary>
+    internal static (BlendFactor SrcColor, BlendFactor DstColor, BlendFactor SrcAlpha, BlendFactor DstAlpha)
+        FactorsFor(EnumBlendMode mode) => mode switch
+    {
+        EnumBlendMode.Brighten => (BlendFactor.DstColor, BlendFactor.One,
+            BlendFactor.DstColor, BlendFactor.One),
+        EnumBlendMode.Multiply => (BlendFactor.Zero, BlendFactor.OneMinusSrcAlpha,
+            BlendFactor.One, BlendFactor.OneMinusSrcAlpha),
+        EnumBlendMode.PremultipliedAlpha => (BlendFactor.One, BlendFactor.OneMinusSrcAlpha,
+            BlendFactor.One, BlendFactor.OneMinusSrcAlpha),
+        EnumBlendMode.Glow => (BlendFactor.SrcAlpha, BlendFactor.One,
+            BlendFactor.One, BlendFactor.Zero),
+        EnumBlendMode.Overlay => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
+            BlendFactor.One, BlendFactor.One),
+        _ => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
+            BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha),
+    };
+
+    /// <summary>
     /// Squeezes the whole attachment state into 32 bits so a set of eight hashes
     /// as cheaply as an array of ints. Every field is a small enum; the widest is
     /// a blend factor at 19 values.
@@ -318,21 +360,8 @@ internal sealed class GlStateTracker
     /// </summary>
     public void SetBlend(bool enabled, EnumBlendMode mode)
     {
-        (BlendFactor srcColor, BlendFactor dstColor, BlendFactor srcAlpha, BlendFactor dstAlpha) = mode switch
-        {
-            EnumBlendMode.Brighten => (BlendFactor.DstColor, BlendFactor.One,
-                BlendFactor.DstColor, BlendFactor.One),
-            EnumBlendMode.Multiply => (BlendFactor.Zero, BlendFactor.OneMinusSrcAlpha,
-                BlendFactor.One, BlendFactor.OneMinusSrcAlpha),
-            EnumBlendMode.PremultipliedAlpha => (BlendFactor.One, BlendFactor.OneMinusSrcAlpha,
-                BlendFactor.One, BlendFactor.OneMinusSrcAlpha),
-            EnumBlendMode.Glow => (BlendFactor.SrcAlpha, BlendFactor.One,
-                BlendFactor.One, BlendFactor.Zero),
-            EnumBlendMode.Overlay => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
-                BlendFactor.One, BlendFactor.One),
-            _ => (BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha,
-                BlendFactor.SrcAlpha, BlendFactor.OneMinusSrcAlpha),
-        };
+        (BlendFactor srcColor, BlendFactor dstColor, BlendFactor srcAlpha, BlendFactor dstAlpha) =
+            AttachmentBlend.FactorsFor(mode);
 
         for (int i = 0; i < _blend.Length; i++)
         {

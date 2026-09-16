@@ -150,6 +150,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderCelestialQuad", new[] { "MeshRef", "Int32", "Int32", "Int32" }),
         new(true, "RenderParticles", new[] { "MeshRef", "Int32", "Int32" }),
         new(true, "RenderDecalPool", new[] { "MeshRef", "Int32[]", "Int32[]", "Int32", "Int32", "Int32" }),
+        // Phase 3b stage 2, GUI and text: the texture-into-texture blit and the aiming reticle's
+        // line draws, the two GUI systems whose fixed state is stated at their call site.
+        new(true, "RenderTextureQuad", new[] { "MeshRef", "Int32", "Boolean" }),
+        new(true, "RenderOverlayLines", new[] { "MeshRef", "Int32", "Single", "Boolean" }),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
         // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.

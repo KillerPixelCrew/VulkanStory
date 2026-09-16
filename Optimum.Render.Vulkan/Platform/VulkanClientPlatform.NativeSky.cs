@@ -104,7 +104,8 @@ public partial class VulkanClientPlatform
         if (formats == null) return null;
 
         if (pass.Pipeline != null && pass.Pipeline.ProgramId == program.ProgramId &&
-            formats.Equals(pass.Formats) && pass.LayoutId == layoutId && device.IsNativePipelineLive(pass.Pipeline))
+            formats.Equals(pass.Formats) && pass.LayoutId == layoutId &&
+            SameFixedState(pass.Pipeline.Description, description) && device.IsNativePipelineLive(pass.Pipeline))
         {
             return pass.Pipeline;
         }
@@ -129,6 +130,35 @@ public partial class VulkanClientPlatform
         pass.Reported = false;
         pass.Adopt(pipeline, formats, layoutId);
         return pipeline;
+    }
+
+    /// <summary>
+    /// Whether two descriptions ask for the same fixed state, which is what makes the cached
+    /// pipeline of a <see cref="NativeMeshPass" /> usable for the next draw through it.
+    ///
+    /// Without this the one-entry cache answered any request for the same program, target and
+    /// mesh shape with the pipeline it happened to build first: the aiming reticle's 0.5 and
+    /// 1.0 line widths would then both rasterize at whichever came first, and a system that
+    /// turns blending on and off between draws would blend both or neither. The device's own
+    /// table keys on all of it (NativePipelineCacheKey), so falling through to
+    /// <see cref="VulkanDevice.RequestNativePipeline" /> costs a dictionary lookup, not a
+    /// pipeline.
+    /// </summary>
+    private static bool SameFixedState(NativePipelineDescription cached, NativePipelineDescription wanted)
+    {
+        if (cached.DepthTest != wanted.DepthTest || cached.DepthWrite != wanted.DepthWrite ||
+            cached.DepthCompare != wanted.DepthCompare || cached.Cull != wanted.Cull ||
+            cached.FrontFace != wanted.FrontFace || cached.Topology != wanted.Topology ||
+            cached.PolygonMode != wanted.PolygonMode || cached.SamplesBoundDepth != wanted.SamplesBoundDepth ||
+            !cached.LineWidth.Equals(wanted.LineWidth) || cached.Blend.Length != wanted.Blend.Length)
+        {
+            return false;
+        }
+        for (int i = 0; i < cached.Blend.Length; i++)
+        {
+            if (!cached.Blend[i].Equals(wanted.Blend[i])) return false;
+        }
+        return true;
     }
 
     /// <summary>Every bound colour slot of a target: the scope the emulated draw would open.</summary>
