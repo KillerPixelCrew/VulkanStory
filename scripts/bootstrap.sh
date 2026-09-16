@@ -191,6 +191,48 @@ extract_archive() {
         python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$archive" "$dest"
       fi
       ;;
+    *.exe)
+      local innoextract_bin=""
+      if [[ -x "$repo_root/.tools/innoextract" ]]; then
+        innoextract_bin="$repo_root/.tools/innoextract"
+      elif command -v innoextract >/dev/null 2>&1; then
+        local ver
+        ver="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"
+        if [[ -n "$ver" ]] && awk -v v="$ver" 'BEGIN { exit (v >= 1.11 ? 0 : 1) }'; then
+          innoextract_bin="$(command -v innoextract)"
+        fi
+      fi
+      if [[ -z "$innoextract_bin" ]]; then
+        echo "Downloading innoextract 1.13.0 (crazy-max fork)..." >&2
+        mkdir -p "$repo_root/.tools"
+        local os_type="$(uname -s)"
+        local machine="$(uname -m)"
+        local arch="linux-amd64"
+        if [[ "$os_type" == "Darwin" ]]; then
+          if [[ "$machine" == "arm64" ]]; then arch="darwin-arm64"; else arch="darwin-amd64"; fi
+        elif [[ "$machine" == "aarch64" || "$machine" == "arm64" ]]; then
+          arch="linux-arm64"
+        fi
+        local inno_url="https://github.com/crazy-max/innoextract/releases/download/v1.13.0/innoextract-$arch"
+        curl -sSL -o "$repo_root/.tools/innoextract" "$inno_url" || {
+          echo "Failed to download innoextract from $inno_url" >&2
+          exit 1
+        }
+        chmod +x "$repo_root/.tools/innoextract"
+        innoextract_bin="$repo_root/.tools/innoextract"
+      fi
+      local stage_dir="$dest/.innoextract-stage-$RANDOM"
+      rm -rf "$stage_dir"
+      mkdir -p "$stage_dir"
+      "$innoextract_bin" --silent --extract --output-dir "$stage_dir" "$archive"
+      local app_dir="$stage_dir/app"
+      if [[ ! -d "$app_dir" ]]; then
+        app_dir="$stage_dir"
+      fi
+      mkdir -p "$dest/vintagestory"
+      cp -a "$app_dir"/* "$dest/vintagestory/"
+      rm -rf "$stage_dir"
+      ;;
     *) echo "Unsupported archive: $archive" >&2; exit 1 ;;
   esac
 

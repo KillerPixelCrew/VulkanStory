@@ -1,4 +1,4 @@
-﻿<#
+<#
 Shared host-capability detection for the packaging scripts.
 Dot-source it:  . "$PSScriptRoot/_hostcaps.ps1"
 
@@ -20,14 +20,23 @@ function Get-HostOS {
 
 function Test-Cmd { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
 
-function Get-InnoextractVersion {
+function Get-InnoextractPath {
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $toolsBinary = Join-Path (Join-Path $repoRoot '.tools') ($(if ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'innoextract.exe' } else { 'innoextract' }))
+    if (Test-Path $toolsBinary) { return $toolsBinary }
     $command = Get-Command innoextract -ErrorAction SilentlyContinue
-    if (-not $command) { return $null }
+    if ($command) { return $command.Path }
+    return $null
+}
+
+function Get-InnoextractVersion {
+    $commandPath = Get-InnoextractPath
+    if (-not $commandPath) { return $null }
 
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = @(& $command.Path --version 2>&1)
+        $output = @(& $commandPath --version 2>&1)
         $exitCode = $LASTEXITCODE
     } catch {
         return $null
