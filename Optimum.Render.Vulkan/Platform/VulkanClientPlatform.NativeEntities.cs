@@ -64,7 +64,11 @@ public partial class VulkanClientPlatform
     /// instead of the native pass: the old route the differential tests compare against, in the
     /// pattern of <see cref="NativeBlitEnabled" /> and <see cref="NativeSkyEnabled" />.
     /// </summary>
-    internal bool NativeEntitiesEnabled { get; set; } = true;
+    // Opt-in until the TAA-on defect is fixed: with TAA on, the first-person hand draws its hidden joints
+    // (2026-09-16, headless both-backends run); with TAA off the route matches OpenGL. Every value bound to
+    // the draw - record, Animation/AnimationPrev offsets, textures, mesh, blend - was traced identical to
+    // the emulated route, so the difference is in the motion-window or TAAMOTION-variant handling.
+    internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_ENTITIES") == "1";
 
     /// <summary>The programs this file owns. Anything else takes the seam's neutral body.</summary>
     private const string EntityAnimatedPass = "entityanimated";

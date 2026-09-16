@@ -63,7 +63,7 @@ public partial class VulkanClientPlatform
     /// the route the OpenGL body takes - instead of the native pass: the old route the
     /// differential test compares against, in the pattern of <see cref="NativeSkyEnabled" />.
     /// </summary>
-    internal bool NativeChunksEnabled { get; set; } = true;
+    internal bool NativeChunksEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_CHUNKS") != "0";
 
     /// <summary>
     /// The texture each program sampler was last pointed at, recorded where the client points
