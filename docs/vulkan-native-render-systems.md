@@ -171,54 +171,52 @@ extends the API and ports the simplest system through it.
   for the lib seam. The four system stages add their systems to those files rather than to files named
   after the stage.
 
-## 3c. Stage 2, second wave: the remaining sky systems, the particles and the decals
+## 3c. Stage 2 scope: GUI and text
 
-The sky dome proved the mesh-draw API; this wave takes the systems whose shape it did not exercise
-- a cube map, an instanced pool, an indirect multi-draw - and the first two systems that write the
-motion attachment.
+The GUI and text group of decision 5 step 2 (`gui`, `guigear`, `guitopsoil`, `helditem`, `lines`,
+`texture2texture`, block highlights, wireframe, autocamera) splits in two on decision 3, and only one
+half can move yet.
 
-- **Seams** (`ClientPlatformAbstract`, each with the neutral body of the draw it replaced, each
-  listed in `Optimum.Patcher/Program.cs` and in `VulkanClientPlatform.ExpectedVirtuals`):
-  - `RenderNightSkyBox(MeshRef, int cubeTextureId)` - `SystemRenderNightSky`'s star cube;
-  - `RenderCelestialQuad(MeshRef, int bodyTextureId, int skyTextureId, int glowTextureId)` - the
-    moon, under `celestialobject`;
-  - `RenderParticles(MeshRef, int quantity, int particleTextureId)` - one particle pool's
-    instanced draw;
-  - `RenderDecalPool(MeshRef, int[] starts, int[] sizes, int groupCount, int decalTextureId, int blockTextureId)` -
-    the decal pool's multi-draw. `SystemRenderDecals` now runs the pool's own public `FrustumCull`
-    and hands the seam its results, which is `MeshDataPool.Draw` split in two; `MeshDataPool`
-    gained a read-only `ModelRef` for the mesh half of that.
-- **Platform:** `VulkanClientPlatform.NativeWorld.cs`, one `NativeWorldEnabled` switch keeping
-  every neutral body reachable. Two derivations are shared by all four passes and are the reason
-  none of them reads `GlStateTracker`:
-  - `NativeWorldPassColorSlots` - the colour slots of the pass are the set the emulated route's
-    draw-buffer mask would hold, computed from `MotionAttachmentIndex` and
-    `OptimumMotionWriteActive`: every bound slot with TAA off, Primary's default colour set with
-    TAA on, plus the motion attachment exactly while a motion window is open.
-  - `NativeWorldBlend` - the caller's blend mode per attachment, with replace-blending
-    (ONE, ZERO, ADD) forced on the motion attachment inside a window, which is what
-    `ApplyOptimumMotionBlendState` does for an emulated draw.
-- **Tests:** `Optimum.Render.Vulkan.Tests/NativeWorldSystemsTests.cs` (old route against native
-  route on every attachment of Primary for all four systems, the motion attachment compared bit
-  for bit for the two systems that write it, the draw kinds counted apart, and the slot
-  derivation checked against all three window states) and the seam coverage in
-  `Optimum.Tests/native-world-systems-coverage-tests.cs`.
-- **Deliberately not in this wave, with the reason:**
-  - **the sun.** `SystemRenderSunMoon` draws it under `standard`, the shared program the entity
-    stage owns (held items, dropped items); porting it means porting `standard`'s whole sampler
-    set, so it belongs to that stage and keeps `RenderMesh`.
-  - **the quad particle pool.** It draws into `Transparent` in the OIT stage, whose
-    per-attachment weighted-blend state belongs to the OIT pass rather than to the particle
-    system and is not something this seam can state. The pipeline request names `particlescube`,
-    so the quad pool falls through to the neutral body by construction rather than by a check.
-  - **aurora and the two cloud renderers.** They live in the `VSEssentials` fork and reach the
-    device through a second emulation surface, `OptimumForkGraphics` / `VulkanForkGraphics`
-    (`VintagestoryApi/Client/optimum-render-device.cs`,
-    `Optimum.Render.Vulkan/Platform/VulkanForkGraphics.cs`), which has no native counterpart and
-    is not in section 1's emulation inventory. `CloudRendererMap` also renders into a target the
-    mod creates itself rather than one of `SetupDefaultFrameBuffers`'. Deciding whether that
-    surface gets a native equivalent or stays permanently emulated mod-adapter surface is its
-    own call, and it blocks those three systems until it is made.
+**Moved, because the caller states the fixed state:**
+
+- **The texture-into-texture blit** (`texture2texture`), `ClientMain.RenderTextureIntoFrameBuffer` -
+  how every Cairo-drawn GUI and text surface is baked into a texture, and the highest-frequency GUI
+  draw there is. That method computes both pieces of state itself (`GlDisableDepthTest`, and
+  `GlToggleBlend(alphaTest >= 0f)`), so the seam
+  `ClientPlatformAbstract.RenderTextureQuad(MeshRef, int textureId, bool blend)` carries them and the
+  native pipeline states them rather than reading them back. Descriptor churn is answered by
+  construction: a native draw resolves its texture into the frame's bindless arena, so a fresh Cairo
+  texture costs one slot in that frame and no permanent descriptor.
+- **The aiming reticle's lines**, `SystemRenderPlayerAimAcc` on the `gui` program with `noTexture` set.
+  It sets `GLLineWidth` and `GlToggleBlend(on: true)` immediately before each draw, so the seam
+  `ClientPlatformAbstract.RenderOverlayLines(MeshRef, int textureId, float lineWidth, bool blend)`
+  carries both. These are the first native draws with line topology (taken from the mesh's own draw
+  mode through `VulkanDevice.NativeMeshTopology`) and with a caller-chosen line width, which is in the
+  native pipeline key - the 0.5 and the 1.0 draws of one frame are two pipelines.
+
+Two device-level corrections came out of it, both places where the two routes could have disagreed:
+
+- `vkCmdSetLineWidth` refuses a width outside `VkPhysicalDeviceLimits::lineWidthRange`, where
+  `glLineWidth` silently clamps, and the game asks for 0.5. Both routes now clamp through
+  `VulkanCapabilities.ClampLineWidth`.
+- A `NativeMeshPass`'s one-entry pipeline cache keyed only on program, target formats and vertex
+  layout, so it answered any request with the pipeline it built first. A system that changes blend or
+  line width between draws - which is exactly what the reticle does - would have drawn both with the
+  first one's state. It now compares the fixed state and falls through to the device's own table.
+
+**Not moved, and why.** `Render2DTexture`'s `gui` quads, `guigear`, the block highlights, the wireframe
+cube and the camera path (`autocamera`) all draw with whatever blend and depth state the frame left on
+the tracker; none of them sets it. The same `ClientMain.Render2DTexture` body is reached with standard
+alpha and with premultiplied alpha, because `RenderAPIGame.Render2DTexturePremultipliedAlpha` brackets
+it with `GlToggleBlend`. Decision 3 forbids a native pass from reading that back off tracked GL state,
+so these move when their blend mode is stated at the seam - a change that reaches through the GUI
+element tree in the API fork, and its own piece of work. `guitopsoil`, `helditem` and `lines` have no
+vanilla call site in this tree at all and should be confirmed with `OPTIMUM_RENDER_TRACE` before anyone
+ports them.
+
+Tests: `NativeGuiTests` (old route against native route for both systems, blending on and off, both
+line widths, the pipeline identity across line widths, and twenty fresh textures through one pipeline)
+and the GUI section of `Optimum.Tests/native-world-systems-coverage-tests.cs` for the lib seams.
 
 ## 4. Documentation that makes map stages unnecessary
 

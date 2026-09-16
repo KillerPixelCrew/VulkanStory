@@ -1,0 +1,211 @@
+using System;
+using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Graph;
+using Silk.NET.Vulkan;
+using Vintagestory.API.Client;
+using Vintagestory.Client;
+using Vintagestory.Client.NoObf;
+
+namespace Optimum.Render.Vulkan.Platform;
+
+// Vulkan-native render systems (docs/vulkan-native-render-systems.md), Phase 3b decision 5
+// stage 2: the GUI and text systems whose fixed state is stated at their call site.
+//
+// Two of the systems in that group draw through the native device API here. The rest of the
+// group - Render2DTexture's gui quads, guigear, the block highlights, the wireframe cube and
+// the camera path - stay on the emulated route for now, and the reason is written down in
+// docs/vulkan-native-render-systems.md section 3c: their blend and depth state is not the
+// caller's, it is whatever the frame left on the tracker, and the same Render2DTexture call is
+// reached both with standard alpha and with premultiplied alpha (RenderAPIGame's
+// Render2DTexturePremultipliedAlpha brackets it with GlToggleBlend). Decision 3 forbids a
+// native pass from reading that back off tracked GL state, so those systems move once their
+// blend mode is stated at the seam, which is a change across the GUI element tree and its own
+// piece of work.
+//
+// What these two draw:
+//   - RenderTextureQuad: the unit quad ClientMain.RenderTextureIntoFrameBuffer stretches one
+//     texture's rectangle over another's - how every Cairo-drawn GUI and text surface is baked
+//     into a texture. It is the highest-frequency GUI draw there is, and the one the stage
+//     brief flags for descriptor churn: a native draw resolves its texture into the device's
+//     per-frame bindless arena (VulkanDevice.BeginNativeDraw -> BindlessTextureTable.Resolve),
+//     so a fresh Cairo texture costs one slot in this frame's arena and no permanent
+//     descriptor, which is exactly what the emulated unit route could not promise.
+//   - RenderOverlayLines: SystemRenderPlayerAimAcc's aiming reticle, five line-topology draws
+//     through the gui program with noTexture set, at two line widths.
+// Where the other side is: ClientPlatformAbstract.RenderTextureQuad and
+// ClientPlatformAbstract.RenderOverlayLines, whose neutral bodies are the RenderMesh calls
+// these seams replaced and which the OpenGL path still runs (ClientPlatformWindows.RenderMesh
+// -> GL.DrawElements). NativeGuiEnabled false takes that route on the Vulkan device too, which
+// is what the differential tests compare against.
+// Target and slots: CurrentFrameBuffer, which for the texture blit is the framebuffer the
+// caller just bound over the destination texture and for the reticle is the default
+// framebuffer the Ortho stage draws into. Every bound colour slot is in the pass, so the scope
+// is the one the emulated draw opens; both fragment shaders write outColor at 0 only and the
+// pipeline masks every other slot off (rule 9). Neither writes depth, and neither writes the
+// motion attachment - the Ortho stage runs after the TAA resolve, so there is no motion slot
+// to mask in the first place.
+// State that is not obvious:
+//   - no depth test and no depth write: RenderTextureIntoFrameBuffer calls GlDisableDepthTest
+//     itself, and the reticle is a 2D overlay whose ortho projection puts it in front;
+//   - blend: the value the caller computed, through the same factor table the tracker uses
+//     (AttachmentBlend.For), never read back off the tracker;
+//   - no culling: both meshes are screen-facing quads and lines, which GL rasterizes whatever
+//     the cull state, and lines are not culled at all;
+//   - the topology is the mesh's own draw mode (VulkanDevice.NativeMeshTopology), because that
+//     is where the tesselator put it - EnumDrawMode.Lines for the reticle - not a state toggle;
+//   - the line width is the caller's, and it is the one piece of dynamic state a fullscreen
+//     pass never needed; it is in the native pipeline key, so the 0.5 and the 1.0 draws of one
+//     frame do not share a pipeline.
+// What pins it: NativeGuiTests (old route against native route, both systems, both line
+// widths, blend on and off) and Optimum.Tests/native-world-systems-coverage-tests.cs (the lib
+// seams).
+public partial class VulkanClientPlatform
+{
+    /// <summary>
+    /// False runs the seams' neutral bodies - the OpenGL bodies' RenderMesh - on the Vulkan
+    /// device instead of the native passes: the old route the differential tests compare
+    /// against, in the pattern of <see cref="NativeSkyEnabled" />.
+    /// </summary>
+    internal bool NativeGuiEnabled { get; set; } = true;
+
+    /// <summary>
+    /// The texture-into-texture blit's pipeline and placements. Nothing is written per draw:
+    /// the source rectangle, the destination rectangle and the alpha test are all in the
+    /// program's own shadow by the time the seam is reached, put there by the setters
+    /// RenderTextureIntoFrameBuffer calls.
+    /// </summary>
+    private readonly NativeMeshPass nativeTextureQuad =
+        new("texture2texture", Array.Empty<string>(), new[] { "tex2d" });
+
+    /// <summary>
+    /// The 2D line overlay's pipeline and placements, on the gui program. "tex2dOverlay" is
+    /// resolved as well as "tex2d" so neither sampler slot keeps a stale bindless index out of
+    /// the push shadow; the reticle sets noTexture, so gui.fsh samples neither.
+    /// </summary>
+    private readonly NativeMeshPass nativeOverlayLines =
+        new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
+
+    /// <summary>The texture-into-texture blit's draw: the native pass, or the neutral body's RenderMesh.</summary>
+    public override void RenderTextureQuad(MeshRef quad, int textureId, bool blend)
+    {
+        if (!NativeGuiEnabled || device == null || quad == null)
+        {
+            base.RenderTextureQuad(quad!, textureId, blend);
+            return;
+        }
+
+        if (!DrawNativeGuiMesh(nativeTextureQuad, quad, textureId, 0, 1.0f, blend, "TextureQuad"))
+        {
+            base.RenderTextureQuad(quad, textureId, blend);
+        }
+    }
+
+    /// <summary>The 2D line overlay's draw: the native pass, or the neutral body's RenderMesh.</summary>
+    public override void RenderOverlayLines(MeshRef lines, int textureId, float lineWidth, bool blend)
+    {
+        if (!NativeGuiEnabled || device == null || lines == null)
+        {
+            base.RenderOverlayLines(lines!, textureId, lineWidth, blend);
+            return;
+        }
+
+        if (!DrawNativeGuiMesh(nativeOverlayLines, lines, textureId, 0, lineWidth, blend, "OverlayLines"))
+        {
+            base.RenderOverlayLines(lines, textureId, lineWidth, blend);
+        }
+    }
+
+    /// <summary>
+    /// One GUI mesh recorded as its own native pass: the target the caller bound, every bound
+    /// colour slot in scope, the fixed state the caller stated, the mesh's own vertex layout
+    /// and topology, and the sampled textures resolved from handles.
+    ///
+    /// False means nothing was recorded and the caller must run the seam's neutral body - a
+    /// missing target, a program that is not the one this pass is for, a mesh the device does
+    /// not know, or a pipeline that is still compiling.
+    /// </summary>
+    private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
+        float lineWidth, bool blend, string passLabel)
+    {
+        FrameBufferRef target = CurrentFrameBuffer;
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        var vao = mesh as VAO;
+        if (program == null || vao == null || vao.VaoId == 0 || vao.Disposed) return false;
+        if (!string.Equals(program.PassName, pass.PassName, StringComparison.Ordinal)) return false;
+
+        // The Ortho stage draws into the default framebuffer, which has no FrameBufferRef of
+        // its own (ClientPlatformWindows.LoadFrameBuffer sets CurrentFrameBuffer null for it);
+        // the pass API names it the same way the post chain does.
+        int framebufferId = target?.FboId ?? PassDeclaration.DefaultFramebuffer;
+        uint slots = target != null ? NativeAllColorSlots(target) : 1u;
+
+        int layoutId = device.NativeMeshLayoutId(vao.VaoId);
+        if (layoutId < 0) return false;
+
+        RenderTargetFormats? formats = device.NativeTargetFormats(framebufferId, slots);
+        if (formats == null) return false;
+
+        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, framebufferId, slots, layoutId,
+            new NativePipelineDescription
+            {
+                Blend = GuiSlots(formats, blend),
+                DepthTest = false,
+                DepthWrite = false,
+                Cull = CullModeFlags.None,
+                Topology = device.NativeMeshTopology(vao.VaoId),
+                LineWidth = lineWidth,
+            });
+        if (pipeline == null) return false;
+
+        RuntimeStats.drawCallsCount++;
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        Rect2D viewport = device.NativeCurrentViewport;
+        bool recorded = false;
+        if (device.BeginNativePass(new NativePassDescription
+        {
+            Name = passLabel + "/" + framebufferId,
+            FramebufferId = framebufferId,
+            ColorSlots = slots,
+            Reads = pass.SamplerNames.Length > 1
+                ? new[] { textureId, overlayTextureId }
+                : new[] { textureId },
+            Flags = PassFlags.AllowSplit,
+            ViewportX = viewport.Offset.X,
+            ViewportY = viewport.Offset.Y,
+            ViewportWidth = (int)viewport.Extent.Width,
+            ViewportHeight = (int)viewport.Extent.Height,
+        }))
+        {
+            Span<NativeTexture> textures = stackalloc NativeTexture[pass.Samplers.Length];
+            textures[0] = new NativeTexture(pass.Samplers[0], textureId);
+            if (textures.Length > 1) textures[1] = new NativeTexture(pass.Samplers[1], overlayTextureId);
+            recorded = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
+        }
+        device.EndNativePass();
+
+        // Whatever the stage was drawing into before this pass keeps drawing into it through
+        // the emulated route, so its own pass context is declared again - the same restore the
+        // sky pass and the TAA resolve do.
+        if (target != null) device.BindFramebuffer(target.FboId);
+        SetPassContext(outer, outerFlags);
+        return recorded;
+    }
+
+    /// <summary>
+    /// A 2D overlay's fixed state per colour attachment: the caller's blend on slot 0 through
+    /// the tracker's own factor table, and every other slot masked off so an attachment the
+    /// fragment shader never writes keeps its contents as it does on GL (rule 9).
+    /// </summary>
+    private static AttachmentBlend[] GuiSlots(RenderTargetFormats formats, bool blend)
+    {
+        var slots = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
+        slots[0] = AttachmentBlend.For(blend, EnumBlendMode.Standard);
+        for (int i = 1; i < slots.Length; i++)
+        {
+            slots[i] = AttachmentBlend.Default;
+            slots[i].WriteMask = 0;
+        }
+        return slots;
+    }
+}

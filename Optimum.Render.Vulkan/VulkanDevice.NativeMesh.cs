@@ -42,6 +42,17 @@ internal enum NativeDrawKind : byte
 /// </summary>
 public sealed unsafe partial class VulkanDevice
 {
+    /// <summary>
+    /// The topology a mesh was uploaded with, as the primitive a native pipeline rasterizes it
+    /// as. A mesh carries its own <c>EnumDrawMode</c> from the tesselator (triangles for most
+    /// geometry, lines for the aiming reticle, a line strip for the camera path), so a native
+    /// system states it from the mesh rather than from the tracker's topology, which the
+    /// emulated draw sets per draw in <see cref="PrepareDraw" />. Triangles for a mesh that
+    /// does not exist, so a caller that has already been refused a pipeline sees no surprise.
+    /// </summary>
+    internal PrimitiveTopology NativeMeshTopology(int meshId) =>
+        GlEnums.TopologyFrom(_meshes.Get(meshId)?.DrawMode ?? Vintagestory.API.Client.EnumDrawMode.Triangles);
+
     /// <summary>Counts one native draw, once in the total and once in its own kind.</summary>
     private void NoteNativeDraw(NativeDrawKind kind)
     {

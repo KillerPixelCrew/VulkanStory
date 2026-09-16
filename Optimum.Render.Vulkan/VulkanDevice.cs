@@ -3319,7 +3319,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             StencilCompareMask = _state.StencilCompareMask,
             StencilWriteMask = _state.StencilWriteMask,
             StencilReference = _state.StencilReference,
-            LineWidth = _context.Capabilities.WideLines ? _state.LineWidth : 1.0f,
+            // glLineWidth clamps to GL's own range; vkCmdSetLineWidth makes an out-of-range
+            // width a validation error, so the device's lineWidthRange decides (the game asks
+            // for 0.5 on the aiming reticle, which is below several drivers' minimum).
+            LineWidth = _context.Capabilities.ClampLineWidth(_state.LineWidth),
             ColorWrite = colorWrite,
             BlendStateId = dynamicBlend ? _state.BlendId(GlStateTracker.MaxColorAttachments) : 0,
         };
