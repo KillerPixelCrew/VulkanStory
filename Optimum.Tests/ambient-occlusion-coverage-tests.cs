@@ -82,7 +82,12 @@ public class AmbientOcclusionCoverageTests
     public void ThePlatformReplacesVanillaSsaoAndComposesBeforeTheResolve()
     {
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        string post = Between(platform, "public override void RenderPostprocessingEffects", "public override void ClearSsaoTarget");
+        // Phase 3b: the post body is one virtual per pass; the AO step is this one, and the
+        // chain that calls it before the resolve is RenderPostprocessingEffects.
+        string post = Between(platform, "public virtual void OptimumPostAmbientOcclusion",
+            "public virtual int OptimumPostSceneTexture");
+        string chain = Between(platform, "public override void RenderPostprocessingEffects",
+            "public virtual void OptimumPostAmbientOcclusion");
 
         int reset = post.IndexOf("optimumAmbientOcclusionTexture = 0;", StringComparison.Ordinal);
         int ask = post.IndexOf("optimumAmbientOcclusionTexture = RenderOptimumAmbientOcclusion(projectMatrix);", StringComparison.Ordinal);
@@ -90,11 +95,13 @@ public class AmbientOcclusionCoverageTests
         int ssao = post.IndexOf("ssao.Use();", StringComparison.Ordinal);
         int gtaoGuard = post.IndexOf("if (optimumAmbientOcclusionTexture != 0)", StringComparison.Ordinal);
         int compose = post.IndexOf("ApplyOptimumSceneSsao();", gtaoGuard, StringComparison.Ordinal);
-        int resolve = post.IndexOf("RenderOptimumTaaResolve();", StringComparison.Ordinal);
+        int aoStep = chain.IndexOf("OptimumPostAmbientOcclusion(projectMatrix);", StringComparison.Ordinal);
+        int resolve = chain.IndexOf("RenderOptimumTaaResolve();", StringComparison.Ordinal);
         Assert.True(reset >= 0 && reset < ask, "the texture is cleared before the platform is asked");
         Assert.True(ask < vanillaGuard && vanillaGuard < ssao, "vanilla SSAO runs only when the platform returned nothing");
-        Assert.True(ssao < gtaoGuard && gtaoGuard < compose && compose < resolve,
-            "the platform's AO is composed after the vanilla block and before the resolve");
+        Assert.True(ssao < gtaoGuard && gtaoGuard < compose,
+            "the platform's AO is composed after the vanilla block");
+        Assert.True(aoStep >= 0 && aoStep < resolve, "the AO step runs before the resolve");
         Assert.Contains("if (RenderSSAO && projectMatrix != null)\n\t\t{\n\t\t\toptimumAmbientOcclusionTexture = RenderOptimumAmbientOcclusion(projectMatrix);",
             post.Replace("\r\n", "\n"));
 

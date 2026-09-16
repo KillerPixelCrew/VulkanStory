@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..cda5b34 100644
+index bba43f6..18d1f36 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 @@ -18,85 +18,107 @@ public class SystemRenderOITLayers : ClientSystem
@@ -189,13 +189,24 @@ index bba43f6..cda5b34 100644
  		public void Dispose()
  		{
  		}
-@@ -122,19 +150,47 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +150,58 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  
  	private static int revealTextureId;
  
 +	private static bool optimumOitDisabled;
++
++	/// <summary>
++	/// Optimum (Vulkan-native render systems, Phase 3b): the OIT reveal target the merge
++	/// samples, for a native render system that binds textures by handle instead of by unit.
++	/// 0 when the OIT renderer is off or its targets are gone, which is the placeholder the
++	/// unit tables would have held.
++	/// </summary>
++	public static int OptimumOitRevealTexture => (optimumOitDisabled ? 0 : revealTextureId);
++
++	/// <summary>Optimum (Phase 3b): the OIT accumulation array, same contract.</summary>
++	public static int OptimumOitAccumTexture => (optimumOitDisabled ? 0 : accumTextureId);
 +
 +	private static bool optimumOitFailureLogged;
 +

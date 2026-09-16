@@ -16,17 +16,21 @@ public class SceneSsaoCoverageTests
     public void JitteredAoIsComposedBeforeTheResolveAndIsNotAppliedTwice()
     {
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        int start = platform.IndexOf("public override void RenderPostprocessingEffects", StringComparison.Ordinal);
+        // Phase 3b: the AO step is its own virtual, and the chain calls it before the resolve.
+        int start = platform.IndexOf("public virtual void OptimumPostAmbientOcclusion", StringComparison.Ordinal);
         Assert.True(start > 0);
-        string post = platform[start..platform.IndexOf("public override void ClearSsaoTarget", start, StringComparison.Ordinal)];
+        string post = platform[start..platform.IndexOf("public virtual int OptimumPostSceneTexture", start, StringComparison.Ordinal)];
+        int chainStart = platform.IndexOf("public override void RenderPostprocessingEffects", StringComparison.Ordinal);
+        string chain = platform[chainStart..start];
 
         int reset = post.IndexOf("optimumSsaoInScene = false;", StringComparison.Ordinal);
         int ssao = post.IndexOf("ssao.Use();", StringComparison.Ordinal);
         int apply = post.IndexOf("ApplyOptimumSceneSsao();", StringComparison.Ordinal);
-        int resolve = post.IndexOf("RenderOptimumTaaResolve();", StringComparison.Ordinal);
+        int aoStep = chain.IndexOf("OptimumPostAmbientOcclusion(projectMatrix);", StringComparison.Ordinal);
+        int resolve = chain.IndexOf("RenderOptimumTaaResolve();", StringComparison.Ordinal);
         Assert.True(reset >= 0 && reset < ssao, "the flag is cleared before the SSAO pass");
         Assert.True(ssao < apply, "the AO is computed before it is composed");
-        Assert.True(apply < resolve, "the AO is composed before the resolve");
+        Assert.True(aoStep >= 0 && aoStep < resolve, "the AO is composed before the resolve");
         Assert.Equal(1, Count(post, "ssao.Use();"));
         Assert.Contains("if (OptimumTaaRequested && TaaTargetsReady)", post);
 

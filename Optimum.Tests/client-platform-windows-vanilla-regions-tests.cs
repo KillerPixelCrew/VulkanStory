@@ -45,6 +45,10 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumWindowClientSize", "OptimumYieldThresholdMs",
         "ProbeThickLineSupport",
+        // Phase 3b: the post chain as one virtual per pass, and the keep-the-viewport bind.
+        "OptimumPostAmbientOcclusion", "OptimumPostSceneTexture", "OptimumPostGlowTexture",
+        "OptimumPostBloom", "OptimumPostGodRays", "OptimumPostLuma", "OptimumPostFinish",
+        "OptimumBindKeepViewport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderOptimumSkyMotion",
         "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RestorePrimaryDrawBuffers",
         "RestoreWorldDrawBuffers", "SelectBackDrawBuffer", "SelectFsrDrawBuffer", "SetBlendEnabled",

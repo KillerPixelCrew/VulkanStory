@@ -258,6 +258,17 @@ var membersToInject = new Dictionary<string, List<string>>
         // Phase 3b: the window's client size as a seam, so the native blit and the OpenGL body
         // read the same value (docs/vulkan-native-render-systems.md, decision 3).
         "OptimumWindowClientSize",
+        // Phase 3b: the post chain split into one virtual per pass, so a native chain
+        // (VulkanClientPlatform.NativePostChain) owns the order and replaces one step at a
+        // time, plus the keep-the-viewport bind a native pass restores the GL-shaped state with.
+        "OptimumPostAmbientOcclusion",
+        "OptimumPostSceneTexture",
+        "OptimumPostGlowTexture",
+        "OptimumPostBloom",
+        "OptimumPostGodRays",
+        "OptimumPostLuma",
+        "OptimumPostFinish",
+        "OptimumBindKeepViewport",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).
@@ -464,6 +475,9 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumOitDisabled",
         "optimumOitFailureLogged",
+        // Phase 3b: the two OIT targets by handle, for the native OIT merge.
+        "OptimumOitRevealTexture",
+        "OptimumOitAccumTexture",
         "RestoreVanillaTransparentState",
         "DisableOptimumOit",
     },

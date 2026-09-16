@@ -74,7 +74,7 @@ public class FsrPipelineCoverageTests
     {
         string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
         Assert.Contains("public override void BlitPrimaryToDefault()", graph);
-        Assert.Contains("if (NativeBlitEnabled && device != null)", graph);
+        Assert.Contains("if (NativeBlitEnabled && UseNativePostChain)", graph);
         Assert.Contains("RenderNativeBlit();", graph);
 
         string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
