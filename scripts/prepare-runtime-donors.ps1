@@ -10,6 +10,34 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 . "$scriptDir/_exec.ps1"
+
+# Resolve dotnet the same way ilspycmd is resolved below: prefer one on PATH,
+# then fall back to the user-profile install at ~/.dotnet. The installer and
+# bootstrap can place the SDK under %USERPROFILE%\.dotnet without adding it to
+# PATH, so a bare "dotnet" call from here found no SDK and the donor build died
+# with "No .NET SDKs were found" (issue #90). When the resolved dotnet lives in
+# the profile install, DOTNET_ROOT has to point at it so the host discovers the
+# SDK there, matching what IlspycmdInstaller.cs does for the tool it spawns.
+$dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($dotnetCmd) {
+    $dotnetPath = $dotnetCmd.Source
+} else {
+    $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+    $dotnetPath = Join-Path $profileRoot '.dotnet/dotnet.exe'
+    if (-not (Test-Path $dotnetPath)) {
+        $dotnetPath = Join-Path $profileRoot '.dotnet/dotnet'
+    }
+    if (-not (Test-Path $dotnetPath)) {
+        throw 'dotnet is required. Install the .NET SDK or run scripts/bootstrap.ps1 first.'
+    }
+}
+$dotnetDir = Split-Path -Parent $dotnetPath
+$profileRootForCheck = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+$profileDotnet = [IO.Path]::GetFullPath((Join-Path $profileRootForCheck '.dotnet'))
+if ($dotnetDir -ieq $profileDotnet) {
+    $env:DOTNET_ROOT = $dotnetDir
+}
+
 if (-not $VanillaDir) {
     $VanillaDir = Join-Path $repoRoot '.vanilla/win-x64/vintagestory'
 }
@@ -367,12 +395,12 @@ Remove-Item Env:Platform -ErrorAction SilentlyContinue
 $buildErrors = @()
 try {
     Write-Host "  Building VSEssentials..."
-    Invoke-NativeStep { & dotnet build $essentialsProject -c $Configuration --nologo }
+    Invoke-NativeStep { & $dotnetPath build $essentialsProject -c $Configuration --nologo }
     if ($LASTEXITCODE -ne 0) {
         $buildErrors += 'VSEssentials'
     }
     Write-Host "  Building VSSurvivalMod..."
-    Invoke-NativeStep { & dotnet build $survivalProject -c $Configuration --nologo }
+    Invoke-NativeStep { & $dotnetPath build $survivalProject -c $Configuration --nologo }
     if ($LASTEXITCODE -ne 0) {
         $buildErrors += 'VSSurvivalMod'
     }

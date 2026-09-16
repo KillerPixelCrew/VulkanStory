@@ -11,6 +11,27 @@ vanilla_parent="$(cd -- "$vanilla_dir/.." && pwd)"
 runtime_donor_dir="${RUNTIME_DONOR_DIR:-$vanilla_parent/runtime-donors}"
 configuration="${CONFIGURATION:-Release}"
 runtime_root="$repo_root/.build/runtime-donors"
+
+# Resolve dotnet the same way the PowerShell mirror does: prefer one on PATH,
+# then fall back to the user-profile install at ~/.dotnet. The installer and
+# bootstrap can place the SDK under $HOME/.dotnet without adding it to PATH, so
+# a bare "dotnet" call from here found no SDK and the donor build died with
+# "No .NET SDKs were found" (issue #90). When the resolved dotnet lives in the
+# profile install, DOTNET_ROOT has to point at it so the host discovers the SDK
+# there.
+if command -v dotnet >/dev/null 2>&1; then
+    dotnet_cmd="$(command -v dotnet)"
+elif [[ -x "$HOME/.dotnet/dotnet" ]]; then
+    dotnet_cmd="$HOME/.dotnet/dotnet"
+else
+    echo "dotnet is required. Install the .NET SDK or run scripts/bootstrap.sh first." >&2
+    exit 1
+fi
+dotnet_dir="$(cd -- "$(dirname -- "$dotnet_cmd")" && pwd)"
+if [[ "$dotnet_dir" == "$HOME/.dotnet" ]]; then
+    export DOTNET_ROOT="$dotnet_dir"
+fi
+
 contracts_dll="$repo_root/bin/$configuration/net10.0/Optimum.Api.Contracts.dll"
 game_content_dll="$repo_root/bin/$configuration/net10.0/Optimum.GameContent.dll"
 api_dll="$repo_root/bin/$configuration/net10.0/VintagestoryAPI.dll"
@@ -350,13 +371,13 @@ unset Platform
 build_errors=""
 if [[ " ${eligible_projects[*]} " == *" VSEssentials "* ]]; then
     echo "  Building VSEssentials..."
-    if ! dotnet build "$essentials_project" -c "$configuration" --nologo; then
+    if ! "$dotnet_cmd" build "$essentials_project" -c "$configuration" --nologo; then
         build_errors="${build_errors}VSEssentials "
     fi
 fi
 if [[ " ${eligible_projects[*]} " == *" VSSurvivalMod "* ]]; then
     echo "  Building VSSurvivalMod..."
-    if ! dotnet build "$survival_project" -c "$configuration" --nologo; then
+    if ! "$dotnet_cmd" build "$survival_project" -c "$configuration" --nologo; then
         build_errors="${build_errors}VSSurvivalMod "
     fi
 fi
