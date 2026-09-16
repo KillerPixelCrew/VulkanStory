@@ -84,6 +84,11 @@ public partial class VulkanClientPlatform
         // OpenGL body takes.
         if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;
 
+        // Phase 3b stage 2: inside SystemRenderDecals' BeginDecalPass/EndDecalPass scope this is
+        // the decal pool's multi-draw - vanilla MeshDataPool.Draw's own RenderMesh call - and
+        // VulkanClientPlatform.NativeWorld.cs records it as a native pass.
+        if (TryDrawDecalPoolNative(modelRef, indices, indicesSizes, groupCount)) return;
+
         // The chunk renderer's one multidraw per pool. GL takes byte offsets
         // into the index buffer; the device converts them to index counts and
         // issues a single indirect draw.

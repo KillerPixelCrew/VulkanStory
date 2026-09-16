@@ -471,10 +471,12 @@ public class NativeWorldSystemsCoverageTests
             platform);
         Assert.Contains("RenderMeshInstanced(model, quantity);", platform);
 
-        Assert.Contains(
-            "public virtual void RenderDecalPool(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount, int decalTextureId, int blockTextureId)",
-            platform);
-        Assert.Contains("RenderMesh(decalMesh, indicesStarts, indicesSizes, groupCount);", platform);
+        // The decals are a scope seam, not a draw seam: the mesh handle lives in MeshDataPool,
+        // which is internal in the vanilla API, so it can never be a seam parameter. Both neutral
+        // bodies are empty and the lib runs the vanilla MeshDataPool.Draw between them.
+        Assert.Contains("public virtual void BeginDecalPass(int decalTextureId, int blockTextureId)", platform);
+        Assert.Contains("public virtual void EndDecalPass()", platform);
+        Assert.DoesNotContain("RenderDecalPool", platform);
 
         // The OpenGL platform leaves every one of them alone: nothing about the GL path changes.
         string windows = ReadPatchedOrSource(
@@ -482,7 +484,8 @@ public class NativeWorldSystemsCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles", "RenderDecalPool",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "BeginDecalPass", "EndDecalPass",
                  })
         {
             Assert.DoesNotContain(seam, windows);
@@ -526,13 +529,21 @@ public class NativeWorldSystemsCoverageTests
         string decals = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs");
-        // The cull half of MeshDataPool.Draw, then the seam with its cull results: both routes
-        // draw the same ranges and only the draw command differs.
-        Assert.Contains("decalPool.FrustumCull(game.frustumCuller, EnumFrustumCullMode.CullInstant);", decals);
+        // The scope, then the VANILLA MeshDataPool.Draw inside it: both routes cull and draw the
+        // same ranges and only the draw command differs. Nothing here may reach a member that
+        // exists only in the API fork - MeshDataPool.ModelRef did, and the shipped client threw
+        // MissingMethodException on both backends because a new public member on a vanilla API
+        // type never ships (the shipped API dll is vanilla plus api-patcher.cs's hooks only).
         Assert.Contains(
-            "game.Platform.RenderDecalPool(decalPool.ModelRef, decalPool.indicesStartsByte, decalPool.indicesSizes, decalPool.indicesGroupsCount,",
+            "game.Platform.BeginDecalPass(decalTextureAtlas.TextureId, game.BlockAtlasManager.AtlasTextures[0].TextureId);",
             decals);
-        Assert.DoesNotContain("decalPool.Draw(game.api,", decals);
+        Assert.Contains("decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);", decals);
+        Assert.Contains("game.Platform.EndDecalPass();", decals);
+        Assert.DoesNotContain(".ModelRef", decals);
+
+        // And the API fork itself no longer declares it, so the lib cannot start depending on it
+        // again. The fork is git-ignored, so the shipped truth is its patch.
+        Assert.DoesNotContain("ModelRef", Read("patches/VintagestoryApi/Client/MeshPool/MeshDataPool.cs.patch"));
         Assert.Contains("optimumPlatform.BeginMotionWrite()", decals);
     }
 
@@ -543,7 +554,8 @@ public class NativeWorldSystemsCoverageTests
         string patcher = Read("Optimum.Patcher/Program.cs");
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles", "RenderDecalPool",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
+                     "BeginDecalPass", "EndDecalPass",
                  })
         {
             Assert.Contains(Q + seam + Q, patcher);
@@ -574,12 +586,21 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("internal bool NativeWorldEnabled { get; set; } = true;", world);
         foreach (string seam in new[]
                  {
-                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles", "RenderDecalPool",
+                     "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
                  })
         {
             Assert.Contains("public override void " + seam + "(", world);
             Assert.Contains("base." + seam + "(", world);
         }
+
+        // The decal scope seam: Begin/End on the platform, and the pool's multi-draw taken
+        // natively from the mesh seam while the scope is open. Its "old route" is falling out of
+        // TryDrawDecalPoolNative into the emulated multi-draw RenderMesh would have made anyway.
+        Assert.Contains("public override void BeginDecalPass(int decalTextureId, int blockTextureId)", world);
+        Assert.Contains("public override void EndDecalPass()", world);
+        Assert.Contains("internal bool TryDrawDecalPoolNative(", world);
+        Assert.Contains("TryDrawDecalPoolNative(modelRef, indices, indicesSizes, groupCount)",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
 
         // Each mesh-draw kind the device API grew for world systems is used by the system whose
         // shape needs it: a single mesh, an instanced pool, an indirect multi-draw.
