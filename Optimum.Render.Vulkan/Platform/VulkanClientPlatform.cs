@@ -143,6 +143,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // its pools with, which routes the terrain multi-draws through the native API.
         new(true, "BeginChunkPass", new[] { "String", "Boolean", "Boolean", "Boolean", "Boolean" }),
         new(true, "EndChunkPass", Array.Empty<string>()),
+        // Phase 3b stage 2: the entity draw seam - every sub-mesh of a multi-texture mesh.
+        new(true, "RenderEntityMesh", new[] { "MeshRef", "String", "Int32" }),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
         // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.

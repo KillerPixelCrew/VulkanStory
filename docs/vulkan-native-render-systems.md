@@ -209,6 +209,42 @@ The first of the four system stages, and the heaviest draw path in the game.
   declared pass and one indirect draw per group, pipelines built once) and the chunk facts in
   `Optimum.Tests/native-world-systems-coverage-tests.cs`.
 
+### Entities (stage 2, one of the four system stages)
+
+- **Seam:** `ClientPlatformAbstract.RenderEntityMesh(MeshRef, string samplerName, int textureId)`,
+  whose neutral body is the `RenderMesh(MeshRef)` call it replaced, drawn through by
+  `RenderAPIBase.RenderMultiTextureMesh` - the one place every entity sub-mesh already went. The
+  seam is generic, so the GUI and block-entity stages widen its native side rather than adding
+  another seam.
+- **Native:** `VulkanClientPlatform.NativeEntities.cs` takes the native route for the two programs
+  SystemRenderEntities itself drives, `entityanimated` (Opaque, into Primary) and
+  `shadowmapentityanimated` (the two shadow stages, into colourless targets), and hands every other
+  caller of the seam to the neutral body. `NativeEntitiesEnabled` keeps the old route reachable.
+  - The motion window is a **colour write mask on the pipeline**, from the platform's own
+    `OptimumMotionWriteActive` and `MotionAttachmentIndex`: replace-blend on the motion slot while
+    it is open, no write at all while it is shut. No `SetDrawBuffers` anywhere on this path.
+  - The draw is recorded **inside the stage's own declared pass** - it names `BoundPassName()` with
+    every slot, so `RenderTargetManager.DeclarePass` coalesces - and closed with
+    `EndNativePass(keepScope: true)`. A pass of its own per entity would end and restart the
+    rendering scope hundreds of times a frame. The native-pass bookkeeping still clears, so the
+    uniforms the renderers set by name between draws stay outside a native pass and the
+    "no emulation inside a native pass" invariant holds exactly as before.
+  - Bone matrices need no new API and are not copied into the draw: `UBO.Update("Animation", ...)`
+    keeps feeding the device's ring with its per-(frame, version) snapshot dedup, and the native
+    draw passes its real mesh id into `BindProgramSets` so that snapshot resolves for it.
+  - A native draw resolves **every** sampler its program declares, from what the client declared
+    for it by name (`BindProgramTexture2D` records it), because the emulated resolve that fills the
+    push block's sampler slots from the texture units never runs for a program whose draws are all
+    native. That table is a name-keyed record of the client's own declaration, not the unit table.
+- **Not taken native here, and why:** held items through `standard` - their cull mode is decided per
+  draw by `renderInfo.CullFaces` inside `EntityShapeRenderer.RenderItem` in the VSEssentials fork and
+  no seam carries it, so a native pipeline would have to read the tracker back, which decision 3
+  forbids; it needs a seam in the fork. And the `instanced` program, which has no vanilla call site
+  in this tree.
+- **Tests:** `NativeEntityDrawTests` (old route against native route across the SSAO G-buffer and
+  motion-window sweep, the motion attachment on its own, the emulation boundary, pipeline identity)
+  and the entity section of `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+
 ## 4. Documentation that makes map stages unnecessary
 
 Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five

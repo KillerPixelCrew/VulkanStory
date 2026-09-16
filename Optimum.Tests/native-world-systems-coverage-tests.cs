@@ -20,6 +20,9 @@ public class NativeWorldSystemsCoverageTests
     private const string DeviceMeshFile = "Optimum.Render.Vulkan/VulkanDevice.NativeMesh.cs";
     private const string DeviceNativeFile = "Optimum.Render.Vulkan/VulkanDevice.Native.cs";
 
+    private const string EntityPlatformFile =
+        "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeEntities.cs";
+
     /// <summary>
     /// The seam exists on the platform abstraction, and its neutral body is exactly the
     /// RenderMesh call it replaced - which is what makes "OFF is vanilla" true for OpenGL,
@@ -314,6 +317,126 @@ public class NativeWorldSystemsCoverageTests
 
         string buffers = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
         Assert.Contains("NoteNativeTransparentBlend(2, 32774, 770, 771, 770, 771);", buffers);
+    }
+
+    // ------------------------------------------------------------- entities (stage 2)
+
+    /// <summary>
+    /// The entity draw seam exists on the platform abstraction, its neutral body is exactly the
+    /// RenderMesh call it replaced, and ClientPlatformWindows does not override it - which is what
+    /// makes "OFF is vanilla" true for OpenGL.
+    /// </summary>
+    [Fact]
+    public void TheEntityDrawHasASeamWhoseNeutralBodyIsTheDrawItReplaced()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        Assert.Contains(
+            "public virtual void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)",
+            platform);
+        Assert.Contains("RenderMesh(mesh);", platform);
+
+        string windows = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.DoesNotContain("RenderEntityMesh", windows);
+    }
+
+    /// <summary>
+    /// The entity renderers reach the seam where they already were: RenderMultiTextureMesh draws
+    /// each sub-mesh through it and hands it the sampler name and texture id it just bound, which
+    /// is what a native pass needs to resolve the draw's texture from a handle.
+    /// </summary>
+    [Fact]
+    public void TheMultiTextureDrawGoesThroughTheSeam()
+    {
+        string api = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs");
+
+        Assert.Contains("plat.RenderEntityMesh(vao, textureSampleName, mmr.textureids[i]);", api);
+        Assert.DoesNotContain("plat.RenderMesh(vao);", api);
+    }
+
+    /// <summary>The seam and its caller are listed for the Cecil transplant.</summary>
+    [Fact]
+    public void TheEntitySeamAndItsCallerAreListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"RenderEntityMesh\"", patcher);
+        Assert.Contains("\"Vintagestory.Client.RenderAPIBase\", \"RenderMultiTextureMesh\", 3", patcher);
+    }
+
+    /// <summary>
+    /// The Vulkan platform records the entity draws natively for the two programs it owns, states
+    /// its own fixed state rather than reading the tracker's, treats the motion window as a colour
+    /// write mask, and keeps the neutral body reachable behind a switch.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformRecordsEntitiesNativelyAndKeepsTheOldRoute()
+    {
+        string entities = Read(EntityPlatformFile);
+
+        Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = true;", entities);
+        Assert.Contains("public override void RenderEntityMesh(", entities);
+        Assert.Contains("base.RenderEntityMesh(", entities);
+        Assert.Contains("device.BeginNativePass(", entities);
+        Assert.Contains("device.DrawNativeMesh(", entities);
+
+        // The two programs it owns, and nothing else.
+        Assert.Contains("private const string EntityAnimatedPass = \"entityanimated\";", entities);
+        Assert.Contains("private const string EntityShadowPass = \"shadowmapentityanimated\";", entities);
+
+        // The fixed state stated outright, from the values SystemRenderEntities sets.
+        Assert.Contains("DepthTest = true", entities);
+        Assert.Contains("DepthWrite = true", entities);
+        Assert.Contains("DepthCompare = CompareOp.Less", entities);
+        Assert.Contains("Cull = CullModeFlags.None", entities);
+        Assert.Contains("VertexLayoutId = layoutId", entities);
+
+        // The motion window is a write mask on the pipeline, never a draw-buffer toggle.
+        Assert.Contains("OptimumMotionWriteActive", entities);
+        Assert.Contains("attachment.WriteMask = 0;", entities);
+        Assert.DoesNotContain("SetDrawBuffers", entities);
+    }
+
+    /// <summary>
+    /// The native draw is recorded inside the stage's own declared pass, so a loop of hundreds of
+    /// entities does not end and restart the rendering scope once per entity, and the device has
+    /// the close that makes that safe.
+    /// </summary>
+    [Fact]
+    public void TheEntityDrawsShareTheStagesPassInsteadOfOnePassPerEntity()
+    {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("Name = BoundPassName(),", entities);
+        Assert.Contains("ColorSlots = uint.MaxValue,", entities);
+        Assert.Contains("device.EndNativePass(keepScope: true);", entities);
+
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal void EndNativePass(bool keepScope)", native);
+        Assert.Contains("if (!_frameActive || keepScope) return;", native);
+    }
+
+    /// <summary>
+    /// A native draw resolves every sampler its program declares, from what the client declared
+    /// for it by name - not from a texture unit, which decision 3 forbids and which the emulated
+    /// resolve (never run for a program whose draws are all native) would otherwise have filled.
+    /// </summary>
+    [Fact]
+    public void ANativeDrawResolvesEverySamplerTheProgramDeclares()
+    {
+        string entities = Read(EntityPlatformFile);
+        Assert.Contains("string[] names = pipeline.SamplerNames;", entities);
+        Assert.Contains("DeclaredProgramTexture(programId, names[i])", entities);
+
+        string shaders = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Shaders.cs");
+        Assert.Contains("NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);", shaders);
+
+        string native = Read(DeviceNativeFile);
+        Assert.Contains("internal string[] SamplerNames { get; }", native);
     }
 
     private static int Count(string source, string needle)

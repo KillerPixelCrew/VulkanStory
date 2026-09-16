@@ -174,9 +174,12 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
-        // Phase 3b stage 2: this is where the client states which texture a sampler reads, so
-        // it is where a native pass takes the handle from (VulkanClientPlatform.NativeChunks.cs).
-        // The unit binding below still happens, so the emulated route is unchanged.
+        // Phase 3b stage 2: this is where the client states which texture a sampler reads -
+        // "this program's sampler <name> is this texture" - so it is where a native pass takes
+        // the handle from (VulkanClientPlatform.NativeChunks.cs, .NativeEntities.cs). It is not
+        // the texture-unit table: no unit is involved, and the native path never reads one
+        // (docs/vulkan-native-render-systems.md, decision 3). The unit binding below still
+        // happens, so the emulated route is unchanged.
         NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         device.BindTexture(textureNumber, textureId);

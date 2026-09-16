@@ -91,6 +91,10 @@ var membersToInject = new Dictionary<string, List<string>>
         // path draws exactly what it drew before.
         "BeginChunkPass",
         "EndChunkPass",
+        // Phase 3b stage 2: the entity draw seam (every sub-mesh of a multi-texture mesh), so a
+        // native platform records the entityanimated and shadowmapentityanimated passes itself.
+        // The neutral body is the RenderMesh call it replaced.
+        "RenderEntityMesh",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
         // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform

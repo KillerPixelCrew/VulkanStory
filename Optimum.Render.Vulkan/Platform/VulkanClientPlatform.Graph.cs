@@ -75,19 +75,31 @@ public partial class VulkanClientPlatform
         DeclareBoundPass();
     }
 
-    /// <summary>Declares the (context, bound target) pass; a repeat of the current one changes nothing.</summary>
-    private void DeclareBoundPass()
+    /// <summary>
+    /// The name <see cref="DeclareBoundPass" /> gives the (context, bound target) pass. A native
+    /// pass that wants to be recorded inside the stage's own pass rather than one of its own -
+    /// the entity draws - names this, so RenderTargetManager.DeclarePass coalesces instead of
+    /// ending the rendering scope and starting another.
+    /// </summary>
+    private string BoundPassName()
     {
-        if (device == null || !device.FrameGraphEnabled) return;
-        int index = FrameBufferIndexOf(device.BoundFramebufferId);
+        int index = FrameBufferIndexOf(device!.BoundFramebufferId);
         string target = index >= 0
             ? index.ToString(CultureInfo.InvariantCulture)
             : device.BoundFramebufferId == device.DefaultFramebufferId
                 ? "Default"
                 : "fbo" + device.BoundFramebufferId.ToString(CultureInfo.InvariantCulture);
+        return passContext + "/" + target;
+    }
+
+    /// <summary>Declares the (context, bound target) pass; a repeat of the current one changes nothing.</summary>
+    private void DeclareBoundPass()
+    {
+        if (device == null || !device.FrameGraphEnabled) return;
+        int index = FrameBufferIndexOf(device.BoundFramebufferId);
         device.DeclarePass(new PassDeclaration
         {
-            Name = passContext + "/" + target,
+            Name = BoundPassName(),
             FramebufferId = PassDeclaration.BoundFramebuffer,
             Reads = PassReads(passContext, index),
             TransientSlots = PassTransientSlots(passContext, index),
