@@ -159,8 +159,12 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
    is genuinely the owner's (money, scope, upstream, destructive acts) and you cannot resolve it from what they
    already said. Turning an instruction they just gave you back into a question is the failure mode.
 
-14. **Verification, not review rounds.** After each change: build, both suites, `make patch-il`, and for anything
-   that touches the screen the headless both-backends capture. No separate review passes.
+14. **Feature phase: move fast (owner, 2026-09-16).** After each change: build, `make patch-il` when the lib or
+   patcher changed, the tests that cover what changed, and one quick in-game look when it touches the screen.
+   No full suites per change, no SSIM tables, no bisection runs, no harness work, no fixing old tests beyond what the
+   change breaks. Measurement, test cleanup and the harness belong to the optimisation/refactor pass at the end,
+   where half of it would be rewritten anyway. Rules 3 and 10 apply to that pass and to claims of "done" for the
+   branch, not to every intermediate step.
 
 15. **Grep, don't map - and document the seams.** Every render seam carries a doc comment at its declaration: what
    it draws, where the OpenGL body is, target and slots, the state that is not obvious and why, and the test that
