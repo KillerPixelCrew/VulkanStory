@@ -355,10 +355,18 @@ public partial class VulkanClientPlatform
         return sharpened;
     }
 
-    /// <summary>Phase 3b stage 1: the chain's ninth pass. Stage 1g makes it native.</summary>
+    /// <summary>
+    /// Phase 3b stage 1: the chain's ninth pass, drawn natively - the attachment-subset pass that
+    /// writes Primary colour 0 while sampling Primary colour 1 (VulkanClientPlatform.NativePostFinal.cs).
+    /// </summary>
     public override void RenderFinalComposition()
     {
         NotePostStep(NativePostStep.FinalComposition);
+        if (UseNativePostChain)
+        {
+            NativeFinalComposition();
+            return;
+        }
         LegacyFinalComposition();
     }
 
