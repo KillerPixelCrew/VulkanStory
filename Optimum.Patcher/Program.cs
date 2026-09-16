@@ -99,6 +99,7 @@ var membersToInject = new Dictionary<string, List<string>>
         // each with the neutral body of the draw it replaced.
         "RenderNightSkyBox",
         "RenderCelestialQuad",
+        "RenderSunQuad",
         "RenderParticles",
         // The decal pool draws through a scope seam, not a draw seam: the mesh handle stays
         // inside MeshDataPool (internal in the vanilla API), so the lib runs the vanilla

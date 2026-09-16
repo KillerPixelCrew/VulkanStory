@@ -109,11 +109,78 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         GpuTest.AssertClean(session.Seam);
     }
 
+    // -------------------------------------------------------------------------- sun
+
+    /// <summary>
+    /// The sun's native pass matches its seam's neutral body: standard's samplers resolved from the
+    /// pipeline's own declaration, the sun texture from its handle, blended with no depth test.
+    /// </summary>
+    [SkippableFact]
+    public void TheSunMatchesTheSeamsNeutralBody()
+    {
+        using Session session = Open("standard");
+        int sun = session.Gradient(0);
+
+        void Draw(Session s)
+        {
+            // What SystemRenderSunMoon writes, reduced to what makes the quad land: lit white,
+            // untinted, identity transforms, a low alpha test.
+            float[] identity = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+            s.Program.UniformMatrix("modelMatrix", identity);
+            s.Program.UniformMatrix("viewMatrix", identity);
+            s.Program.Uniform("rgbaTint", 1f, 1f, 1f, 1f);
+            s.Program.Uniform("rgbaLightIn", 1f, 1f, 1f, 1f);
+            s.Program.Uniform("rgbaAmbientIn", 1f, 1f, 1f);
+            s.Program.Uniform("alphaTest", 0.01f);
+            // The fixture's frame block is zero, and the global warp reads it; the route under
+            // test does not depend on the warp, so the fixture skips it.
+            s.Program.Uniform("dontWarpVertices", 1);
+            s.Platform.BindProgramTexture2D(s.Program, "tex", sun, 0);
+            s.Platform.RenderSunQuad(s.Mesh, sun);
+        }
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: false, motion: false, Draw);
+
+        long meshes = session.Seam.NativeMeshDrawsForTests;
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: false, motion: false, Draw);
+
+        Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        AssertSameAttachments(emulated, native, "standard");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>A mod program registered under "standard" is not the vanilla one and stays on the neutral body.</summary>
+    [SkippableFact]
+    public void AModStandardProgramStaysOnTheNeutralBody()
+    {
+        using Session session = Open("standard");
+        int sun = session.Gradient(0);
+        ShaderProgramStandard registered = ShaderPrograms.Standard;
+        ShaderPrograms.Standard = new ShaderProgramStandard();
+        try
+        {
+            long meshes = session.Seam.NativeMeshDrawsForTests;
+            session.RunFrame(native: true, blending: true, depth: false, motion: false,
+                s => s.Platform.RenderSunQuad(s.Mesh, sun));
+            Assert.Equal(0, session.Seam.NativeMeshDrawsForTests - meshes);
+        }
+        finally
+        {
+            ShaderPrograms.Standard = registered;
+        }
+        GpuTest.AssertClean(session.Seam);
+    }
+
     // -------------------------------------------------------------------------- particles
 
     /// <summary>
     /// The cube pool's native pass matches its seam's neutral body, and the draw is recorded as
     /// an instanced draw rather than as as many single draws.
+    /// Known gap: the fixture's quad carries no per-instance attributes, so the cubes do not land
+    /// on the scene slot and the pixel comparison is between two untouched attachments. What this
+    /// pins is the route and the draw kind, not the pixels.
     /// </summary>
     [SkippableFact]
     public void TheNativeParticlePassMatchesTheSeamsNeutralBody()
@@ -130,7 +197,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
 
         Assert.Equal(1, session.Seam.NativeInstancedDrawsForTests - instanced);
         Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "particlescube");
+        AssertSameAttachments(emulated, native, "particlescube", mustDraw: false);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -152,7 +219,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             s => s.Platform.RenderParticles(s.Mesh, 4, 0));
 
         Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
-        AssertSameAttachments(emulated, native, "particlescube (motion window)");
+        AssertSameAttachments(emulated, native, "particlescube (motion window)", mustDraw: false);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -176,6 +243,9 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
                 // multi-draw runs inside it, the scope closes.
+                // What ShaderProgramDecals' setters do before the scope: the atlases on units.
+                s.Platform.BindProgramTexture2D(s.Program, "blockTexture", block, 0);
+                s.Platform.BindProgramTexture2D(s.Program, "decalTexture", decal, 1);
                 s.Platform.BeginDecalPass(decal, block);
                 try
                 {
@@ -194,6 +264,9 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
                 // multi-draw runs inside it, the scope closes.
+                // What ShaderProgramDecals' setters do before the scope: the atlases on units.
+                s.Platform.BindProgramTexture2D(s.Program, "blockTexture", block, 0);
+                s.Platform.BindProgramTexture2D(s.Program, "decalTexture", decal, 1);
                 s.Platform.BeginDecalPass(decal, block);
                 try
                 {
@@ -231,6 +304,9 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
                 // multi-draw runs inside it, the scope closes.
+                // What ShaderProgramDecals' setters do before the scope: the atlases on units.
+                s.Platform.BindProgramTexture2D(s.Program, "blockTexture", block, 0);
+                s.Platform.BindProgramTexture2D(s.Program, "decalTexture", decal, 1);
                 s.Platform.BeginDecalPass(decal, block);
                 try
                 {
@@ -246,6 +322,9 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
                 // multi-draw runs inside it, the scope closes.
+                // What ShaderProgramDecals' setters do before the scope: the atlases on units.
+                s.Platform.BindProgramTexture2D(s.Program, "blockTexture", block, 0);
+                s.Platform.BindProgramTexture2D(s.Program, "decalTexture", decal, 1);
                 s.Platform.BeginDecalPass(decal, block);
                 try
                 {
@@ -316,7 +395,10 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
 
     // ---------------------------------------------------------------------------- helpers
 
-    private void AssertSameAttachments(byte[][] emulated, byte[][] native, string what)
+    /// <summary>The scene slot's centre as RunFrame clears it (0.125, 0.25, 0.5).</summary>
+    private const string ClearedSceneCentre = "32,64,127,255";
+
+    private void AssertSameAttachments(byte[][] emulated, byte[][] native, string what, bool mustDraw = true)
     {
         for (int slot = 0; slot < emulated.Length; slot++)
         {
@@ -324,6 +406,9 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
                 " native " + Centre(native[slot]));
             Assert.Equal(emulated[slot], native[slot]);
         }
+        // Two untouched attachments are equal too. Until the fixture seeded the frame block and
+        // the transforms, every comparison in this file was exactly that.
+        if (mustDraw) Assert.NotEqual(ClearedSceneCentre, Centre(native[SceneSlot]));
     }
 
     private static string Centre(byte[] pixels)
@@ -371,6 +456,11 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
 
         private ShaderProgram program = null!;
         private ClientPlatformAbstract? previousPlatform;
+        private ShaderProgramStandard? previousStandard;
+        private bool registeredStandard;
+
+        /// <summary>The linked program, for a test that sets uniforms of its own.</summary>
+        public ShaderProgram Program => program;
         private string dataPath = "";
         private int gradients;
 
@@ -413,9 +503,23 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             // the window-derived slot masks under test mean something.
             platform.SetOptimumMotionAttachmentIndex(MotionSlot);
 
-            var linked = new ShaderProgram { PassName = programName };
-            Link(seam, linked, programName, new[] { "projectionMatrix" });
+            // standard is the one vanilla program the native route checks by identity (a mod can
+            // register its own under the same name), so it is built as the vanilla type and
+            // registered where the client registers it.
+            bool standard = programName == "standard";
+            ShaderProgram linked = standard
+                ? new ShaderProgramStandard { PassName = programName }
+                : new ShaderProgram { PassName = programName };
+            Link(seam, linked, programName, standard
+                ? new[] { "projectionMatrix", "modelMatrix", "viewMatrix", "rgbaTint", "rgbaLightIn", "rgbaAmbientIn", "alphaTest", "dontWarpVertices" }
+                : new[] { "projectionMatrix" });
             session.program = linked;
+            if (standard)
+            {
+                session.previousStandard = ShaderPrograms.Standard;
+                ShaderPrograms.Standard = (ShaderProgramStandard)linked;
+                session.registeredStandard = true;
+            }
             session.Mesh = platform.UploadMesh(BuildQuad());
             return session;
         }
@@ -423,6 +527,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         public void Dispose()
         {
             ShaderProgramBase.CurrentShaderProgram = null;
+            if (registeredStandard) ShaderPrograms.Standard = previousStandard!;
             // The mesh goes first: VAO's finalizer reaches for ScreenManager.Platform, which is
             // about to be the client's again, and a live handle there would crash the test host.
             if (Mesh != null) Platform.DeleteMesh(Mesh);
@@ -473,6 +578,8 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             seam.UseProgram(program.ProgramId);
             ShaderProgramBase.CurrentShaderProgram = program;
             seam.SetUniformMatrix(program.ProgramId, program.uniformLocations["projectionMatrix"], Identity);
+            SeedFrameGlobals(seam, program.ProgramId);
+            SeedDrawUniforms(seam, program.ProgramId);
 
             draw(this);
 
@@ -480,6 +587,43 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             for (int slot = 0; slot < pixels.Length; slot++) pixels[slot] = Read(seam, Primary.ColorTextureIds[slot]);
             Platform.EndFrame();
             return pixels;
+        }
+
+        /// <summary>
+        /// The frame globals ShaderProgramBase.Use() would have written. RunFrame binds the program
+        /// directly, so without these the shared frame block stays zero - and a zero viewDistance
+        /// makes standard.vsh's distance fade a division by zero that discards every fragment, which
+        /// is how these comparisons were once equal without anything having been drawn.
+        /// </summary>
+        private static void SeedFrameGlobals(VulkanDevice seam, int programId)
+        {
+            foreach ((string name, float value) in new[]
+            {
+                ("zNear", 0.1f), ("zFar", 1000f), ("viewDistance", 1000f), ("viewDistanceLod0", 1000f),
+            })
+            {
+                int location = seam.GetUniformLocation(programId, name);
+                if (location != -1) seam.SetUniform(programId, location, value);
+            }
+        }
+
+        /// <summary>
+        /// Identity transforms and white light for whichever of them the program declares, so the
+        /// quad lands on the scene slot. Left at zero, the matrices collapse every vertex to one
+        /// point and the comparison is between two untouched attachments.
+        /// </summary>
+        private static void SeedDrawUniforms(VulkanDevice seam, int programId)
+        {
+            foreach (string matrix in new[] { "modelMatrix", "viewMatrix", "modelViewMatrix" })
+            {
+                int location = seam.GetUniformLocation(programId, matrix);
+                if (location != -1) seam.SetUniformMatrix(programId, location, Identity);
+            }
+            foreach (string colour in new[] { "rgbaAmbientIn", "rgbaLightIn", "rgbaTint" })
+            {
+                int location = seam.GetUniformLocation(programId, colour);
+                if (location != -1) seam.SetUniform(programId, location, 1f, 1f, 1f, 1f);
+            }
         }
 
         /// <summary>One attachment's pixels, read through a framebuffer that holds only it.</summary>
@@ -674,7 +818,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             var merged = new NativeShaderBuildResult();
             merged.Manifest.Toolchain = compiler!.Identity;
             string source = Path.Combine(ShaderCorpus.RepositoryRoot, "sources", "shaders-vk");
-            foreach (string program in new[] { "nightsky", "celestialobject", "particlescube", "decals" })
+            foreach (string program in new[] { "nightsky", "celestialobject", "particlescube", "decals", "standard" })
             {
                 NativeShaderBuildResult one = builder.Build(source, program);
                 merged.Errors.AddRange(one.Errors);

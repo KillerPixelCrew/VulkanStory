@@ -78,6 +78,14 @@ public partial class VulkanClientPlatform
     private readonly NativeMeshPass nativeCelestial =
         new("celestialobject", Array.Empty<string>(), new[] { "tex", "sky", "glow" });
 
+    /// <summary>
+    /// The sun's pipeline, through the standard program. Its samplers are resolved from the
+    /// pipeline's own declaration (<see cref="RenderSunQuad" />), because standard also reads frame
+    /// textures a native draw has to name by handle.
+    /// </summary>
+    private readonly NativeMeshPass nativeSun =
+        new("standard", Array.Empty<string>(), Array.Empty<string>());
+
     /// <summary>The cube particle pool's pipeline: no per-draw uniform and no sampler at all.</summary>
     private readonly NativeMeshPass nativeParticlesCube =
         new("particlescube", Array.Empty<string>(), Array.Empty<string>());
@@ -285,6 +293,48 @@ public partial class VulkanClientPlatform
                 new NativeTexture(nativeCelestial.Samplers[1], skyTextureId),
                 new NativeTexture(nativeCelestial.Samplers[2], glowTextureId),
             });
+        }
+        NativeWorldEndPass(target, outer, outerFlags);
+    }
+
+    /// <summary>
+    /// The sun's visible quad: the native pass, or the seam's neutral body.
+    /// What it draws: the sun disc of SystemRenderSunMoon.OnRenderFrame3D. The other side:
+    /// ClientPlatformAbstract.RenderSunQuad, whose neutral body is the RenderMesh it replaced.
+    /// Target and slots: the stage's bound target and <see cref="NativeWorldPassColorSlots" />.
+    /// State: blended in the standard mode, no depth test, no culling - SystemRenderSunMoon's
+    /// GlToggleBlend(on: true), GlDisableDepthTest and GlDisableCullFace, stated on the pipeline.
+    /// Only the registered vanilla standard program is taken: a mod can register its own program
+    /// under the same pass name (VSEssentials' first-person item shader does).
+    /// What pins it: NativeWorldSystemsTests.TheSunMatchesTheSeamsNeutralBody.
+    /// </summary>
+    public override void RenderSunQuad(MeshRef quad, int sunTextureId)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (program == null || !ReferenceEquals(program, ShaderPrograms.Standard) ||
+            !NativeWorldPrepare(nativeSun, quad, blending: true, depth: false,
+                out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline))
+        {
+            base.RenderSunQuad(quad, sunTextureId);
+            return;
+        }
+
+        string[] names = pipeline.SamplerNames;
+        var textures = new NativeTexture[names.Length];
+        var reads = new int[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            int id = names[i] == "tex" ? sunTextureId : DeclaredProgramTexture(program.ProgramId, names[i]);
+            textures[i] = new NativeTexture(pipeline.Sampler(names[i]), id);
+            reads[i] = id;
+        }
+
+        RuntimeStats.drawCallsCount++;
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        if (NativeWorldBeginPass("Sun", target, slots, reads))
+        {
+            device.DrawNativeMesh(pipeline, vao.VaoId, textures);
         }
         NativeWorldEndPass(target, outer, outerFlags);
     }

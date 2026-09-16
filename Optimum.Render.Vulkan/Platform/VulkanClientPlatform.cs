@@ -148,6 +148,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // Phase 3b stage 2: the remaining sky, particle and decal draw seams.
         new(true, "RenderNightSkyBox", new[] { "MeshRef", "Int32" }),
         new(true, "RenderCelestialQuad", new[] { "MeshRef", "Int32", "Int32", "Int32" }),
+        new(true, "RenderSunQuad", new[] { "MeshRef", "Int32" }),
         new(true, "RenderParticles", new[] { "MeshRef", "Int32", "Int32" }),
         new(true, "BeginDecalPass", new[] { "Int32", "Int32" }),
         new(true, "EndDecalPass", Array.Empty<string>()),
