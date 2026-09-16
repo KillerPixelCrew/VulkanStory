@@ -86,6 +86,14 @@ public partial class VulkanClientPlatform
     private readonly NativeMeshPass nativeSun =
         new("standard", Array.Empty<string>(), Array.Empty<string>());
 
+    /// <summary>
+    /// The quad particle pool's pipeline: drawn in the OIT stage onto the Transparent target, under
+    /// the blend contract the client applied to that target (the chunk route records it), with
+    /// depth test on and depth writes off - what LoadFrameBuffer(Transparent) sets.
+    /// </summary>
+    private readonly NativeMeshPass nativeParticlesQuad =
+        new("particlesquad", Array.Empty<string>(), Array.Empty<string>());
+
     /// <summary>The cube particle pool's pipeline: no per-draw uniform and no sampler at all.</summary>
     private readonly NativeMeshPass nativeParticlesCube =
         new("particlescube", Array.Empty<string>(), Array.Empty<string>());
@@ -163,7 +171,8 @@ public partial class VulkanClientPlatform
     /// its seam's neutral body, which is always a legal answer.
     /// </summary>
     private bool NativeWorldPrepare(NativeMeshPass pass, MeshRef mesh, bool blending, bool depth,
-        out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline)
+        out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
+        Func<int, AttachmentBlend[]>? blendFor = null, bool? depthWrite = null)
     {
         target = null!;
         vao = null!;
@@ -192,9 +201,9 @@ public partial class VulkanClientPlatform
         NativePipeline? built = NativeMeshPipelineFor(pass, program, bound.FboId, colorSlots, layoutId,
             new NativePipelineDescription
             {
-                Blend = NativeWorldBlend(formats, blending),
+                Blend = blendFor != null ? blendFor(formats.ColorFormats.Length) : NativeWorldBlend(formats, blending),
                 DepthTest = depth,
-                DepthWrite = depth,
+                DepthWrite = depthWrite ?? depth,
                 DepthCompare = CompareOp.Less,
                 Cull = CullModeFlags.None,
                 Topology = PrimitiveTopology.TriangleList,
@@ -342,17 +351,22 @@ public partial class VulkanClientPlatform
     /// <summary>
     /// One particle pool's instanced draw: the native pass, or the seam's neutral body.
     ///
-    /// Only the cube pool takes the native route. The quad pool draws into the Transparent
-    /// target in the OIT stage, whose per-attachment weighted-blend state belongs to the OIT
-    /// pass rather than to the particle system, and which this seam cannot state; the pipeline
-    /// request names "particlescube", so a draw under any other program falls through to the
-    /// neutral body on its own rather than by a separate test.
+    /// Both pools take the native route. The cube pool draws on Primary here; the quad pool draws
+    /// in the OIT stage onto the Transparent target and goes through <see cref="RenderQuadParticles" />,
+    /// which states the Transparent blend contract the client applied. A draw under any other
+    /// program falls through to the neutral body: the pipeline request names the vanilla program.
     /// </summary>
     public override void RenderParticles(MeshRef model, int quantity, int particleTextureId)
     {
         if (quantity <= 0)
         {
             base.RenderParticles(model, quantity, particleTextureId);
+            return;
+        }
+
+        if (ReferenceEquals(ShaderProgramBase.CurrentShaderProgram, ShaderPrograms.Particlesquad))
+        {
+            RenderQuadParticles(model, quantity, particleTextureId);
             return;
         }
 
@@ -375,6 +389,63 @@ public partial class VulkanClientPlatform
         if (NativeWorldBeginPass("Particles", target, slots, Array.Empty<int>()))
         {
             device.DrawNativeMeshInstanced(pipeline, vao.VaoId, quantity, ReadOnlySpan<NativeTexture>.Empty);
+        }
+        NativeWorldEndPass(target, outer, outerFlags);
+    }
+
+    /// <summary>
+    /// The quad particle pool's instanced draw in the OIT stage: the native pass, or the seam's
+    /// neutral body. The other side is ClientPlatformAbstract.RenderParticles' neutral body, drawn
+    /// under the state LoadFrameBuffer(Transparent) and ApplyTransparentPassBlendState left.
+    /// Target and slots: the Transparent target, every bound slot; the pipeline masks the outputs
+    /// particlesquad does not write. State: the Transparent blend contract the client last applied
+    /// (weighted accumulation, revealage, glow), depth test on, depth writes off, no culling.
+    /// Falls back while that contract has not been recorded or the bound target is not
+    /// Transparent. particleTex resolves from the program's declared texture: the lib binds it
+    /// through the program's setter and hands the seam 0.
+    /// </summary>
+    private void RenderQuadParticles(MeshRef model, int quantity, int particleTextureId)
+    {
+        FrameBufferRef bound = CurrentFrameBuffer;
+        AttachmentBlend[]? contract = nativeTransparentBlend;
+        if (bound == null || contract == null || !IsTransparentTarget(bound) ||
+            !NativeWorldPrepare(nativeParticlesQuad, model, blending: true, depth: true,
+                out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
+                count =>
+                {
+                    var blend = new AttachmentBlend[Math.Max(count, 1)];
+                    for (int i = 0; i < blend.Length; i++)
+                    {
+                        blend[i] = i < contract.Length ? contract[i] : AttachmentBlend.Default;
+                        blend[i].Enabled = true;
+                    }
+                    return blend;
+                },
+                depthWrite: false))
+        {
+            base.RenderParticles(model, quantity, particleTextureId);
+            return;
+        }
+
+        ShaderProgramBase program = ShaderProgramBase.CurrentShaderProgram!;
+        string[] names = pipeline.SamplerNames;
+        var textures = new NativeTexture[names.Length];
+        var reads = new int[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            int id = names[i] == "particleTex" && particleTextureId != 0
+                ? particleTextureId
+                : DeclaredProgramTexture(program.ProgramId, names[i]);
+            textures[i] = new NativeTexture(pipeline.Sampler(names[i]), id);
+            reads[i] = id;
+        }
+
+        RuntimeStats.drawCallsCount++;
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        if (NativeWorldBeginPass("ParticlesOit", target, slots, reads))
+        {
+            device.DrawNativeMeshInstanced(pipeline, vao.VaoId, quantity, textures);
         }
         NativeWorldEndPass(target, outer, outerFlags);
     }
