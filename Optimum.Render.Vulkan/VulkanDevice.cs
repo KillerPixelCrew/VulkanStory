@@ -3254,6 +3254,30 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             }
         }
 
+        if (RenderTrace.Enabled && meshId > 0)
+        {
+            // Diagnostic: what this draw binds, so the emulated and the native route can be diffed per draw.
+            var trace = new System.Text.StringBuilder("  sets program=").Append(program.ProgramId).Append(" mesh=").Append(meshId)
+                .Append(" record=").Append(recordOffset);
+            foreach (BlockBinding block in program.Interface.UniformBlocks)
+            {
+                trace.Append(' ').Append(block.BlockName).Append('@').Append(block.Binding).Append('=')
+                    .Append(buffers[block.Binding].Offset).Append('/').Append(buffers[block.Binding].Resource);
+            }
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            trace.Append(" recordBytes=").Append(program.UniformShadow.Length);
+            foreach (UniformMember member in program.Interface.Members)
+            {
+                if (member.Name is not ("projectionMatrix" or "viewMatrix" or "modelMatrix")) continue;
+                if (member.Offset < 0 || member.Offset + 64 > program.UniformShadow.Length) continue;
+                var f = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(program.UniformShadow.AsSpan(member.Offset, 64));
+                trace.Append(' ').Append(member.Name).Append('@').Append(member.Offset).Append("=[")
+                    .Append(f[0].ToString("G4", inv)).Append(',').Append(f[5].ToString("G4", inv)).Append(";t=")
+                    .Append(f[12].ToString("G4", inv)).Append(',').Append(f[13].ToString("G4", inv)).Append(',').Append(f[14].ToString("G4", inv)).Append(']');
+            }
+            RenderTrace.Write(trace.ToString());
+        }
+
         _lastUniformAllocationOk = allocationOk;
 
         var contents = new DescriptorSetContents(0, SetConvention.StorageSet, Array.Empty<SamplerBindingValue>(), buffers);

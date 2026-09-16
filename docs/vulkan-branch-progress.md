@@ -123,6 +123,26 @@ compared before and after for every branch.
 
 ### Plan status, audited 2026-09-16 (scoped to this branch)
 
+**Phase 3b stage 2 landed 2026-09-16 (`8278bad` + fixes), native entity route PARKED as opt-in.** Native on
+Vulkan: sky dome, all 13 chunk groups, night sky, moon, cube particles, decals, the texture-into-texture GUI blit and
+the reticle. Still emulated: entities (see below), sun, quad particles, held items, aurora and clouds (fork surface
+`OptimumForkGraphics`/`VulkanForkGraphics`, no native counterpart, undecided), 7 of 9 GUI systems. `GlStateTracker`,
+the texture-unit tables and uniform-by-name are still load-bearing; removal (stage 3) cannot start.
+Two shipped-client crashes came out of the merge and are fixed: a transplant tuple with the wrong parameter count
+(`RenderTextureIntoFrameBuffer` 9 vs 10) and a lib call to a fork-only API member (`MeshDataPool.ModelRef`) - both
+invisible to build and tests, now AGENTS.md rule 19 (`make patch-il` + fork diff after every lib/fork change).
+Route switches: `OPTIMUM_VK_NATIVE_{CHUNKS,WORLD,SKY,GUI}=0` disable a native route; `OPTIMUM_VK_NATIVE_ENTITIES=1`
+enables the parked one.
+**Open defect, next step:** with TAA on, the native entity route draws the first-person hand with its hidden joints
+visible (headless run, `scratchpad/s2`); with TAA off it matches OpenGL (0.983). Traced identical between the routes
+for that draw: program record (matrices), Animation/AnimationPrev ring offsets, all four textures, mesh and index
+buffers, layout id, blend on every slot, specialization source. The difference is therefore in the TAA-on path only:
+motion window, TAAMOTION variant outputs, or the entity motion writer hooks that the neutral `RenderMesh` body ran and
+the native route bypasses. Repro: `OPTIMUM_VK_NATIVE_ENTITIES=1 OPTIMUM_VK_NATIVE_SHADERS=force` headless Vulkan with
+TAA on. Verified deployed state (entities emulated, TAA on, AO vanilla): 0 client errors both backends, validation 0
+errors 0 `SYNC-`, scene SSIM 0.9838/0.9736/0.9820 against a GL-vs-GL floor of 0.9961/0.9853/0.9932 - residual
+predates stage 2 (pre-stage-2 diff 1.6-2.6, now 1.0-1.4).
+
 **Phase 3b stage 1 completed and verified in game, 2026-09-16 (merge `2c9bc70`).** All nine post/TAA chain
 passes draw through the native device API: OIT merge, sky motion, SSAO + bilateral blur + AO composite (both AO
 modes), TAA resolve and sharpen (the lib body keeps the temporal contract, only the draw is re-routed), the bloom

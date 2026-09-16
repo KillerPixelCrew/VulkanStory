@@ -66,7 +66,7 @@ public partial class VulkanClientPlatform
     /// device instead of the native passes: the old route the differential tests compare
     /// against, in the pattern of <see cref="NativeSkyEnabled" />.
     /// </summary>
-    internal bool NativeGuiEnabled { get; set; } = true;
+    internal bool NativeGuiEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_GUI") != "0";
 
     /// <summary>
     /// The texture-into-texture blit's pipeline and placements. Nothing is written per draw:

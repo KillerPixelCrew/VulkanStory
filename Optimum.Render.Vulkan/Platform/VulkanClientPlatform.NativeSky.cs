@@ -43,7 +43,7 @@ public partial class VulkanClientPlatform
     /// instead of the native pass: the old route the differential test compares against, in the
     /// pattern of <see cref="NativeBlitEnabled" />.
     /// </summary>
-    internal bool NativeSkyEnabled { get; set; } = true;
+    internal bool NativeSkyEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_SKY") != "0";
 
     /// <summary>
     /// The sky program's pipeline and the placements its draw writes through. "modelViewMatrix"

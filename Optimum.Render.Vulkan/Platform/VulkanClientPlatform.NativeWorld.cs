@@ -63,7 +63,7 @@ public partial class VulkanClientPlatform
     /// instead of the native pass: the old route the differential tests compare against, in the
     /// pattern of <see cref="NativeSkyEnabled" />.
     /// </summary>
-    internal bool NativeWorldEnabled { get; set; } = true;
+    internal bool NativeWorldEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_WORLD") != "0";
 
     /// <summary>The star cube's pipeline: no per-draw uniform, one samplerCube.</summary>
     private readonly NativeMeshPass nativeNightSky =
