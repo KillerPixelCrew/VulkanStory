@@ -849,7 +849,9 @@ public sealed unsafe partial class VulkanDevice
             StencilCompareMask = 0xFF,
             StencilWriteMask = 0xFF,
             StencilReference = 0,
-            LineWidth = description.LineWidth,
+            // Clamped through the same device range as the emulated path's, so a native line
+            // draw and the seam's neutral body rasterize identically.
+            LineWidth = _context.Capabilities.ClampLineWidth(description.LineWidth),
             ColorWrite = colorWrite,
             BlendStateId = dynamicBlend ? pipeline.DynamicBlendId : 0,
         };

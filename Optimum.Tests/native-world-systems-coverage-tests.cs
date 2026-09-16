@@ -16,6 +16,7 @@ namespace Optimum.Tests;
 public class NativeWorldSystemsCoverageTests
 {
     private const string SkyPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSky.cs";
+    private const string GuiPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs";
     private const string DeviceMeshFile = "Optimum.Render.Vulkan/VulkanDevice.NativeMesh.cs";
     private const string DeviceNativeFile = "Optimum.Render.Vulkan/VulkanDevice.Native.cs";
 
@@ -181,6 +182,139 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("VertexLayoutId: description.VertexLayoutId,", native);
         Assert.Contains("PolygonMode: description.PolygonMode,", native);
         Assert.Contains("_meshes.LayoutOf(description.VertexLayoutId)", native);
+    }
+
+    // ------------------------------------------------------- GUI and text (stage 2)
+
+    /// <summary>
+    /// Both GUI seams exist on the platform abstraction with the neutral body that is exactly
+    /// the RenderMesh call they replaced, and the OpenGL platform overrides neither, so nothing
+    /// about the GL path changes.
+    /// </summary>
+    [Fact]
+    public void TheGuiSeamsHaveNeutralBodiesThatAreTheDrawsTheyReplaced()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        Assert.Contains("public virtual void RenderTextureQuad(MeshRef quad, int textureId, bool blend)", platform);
+        Assert.Contains("RenderMesh(quad);", platform);
+        Assert.Contains(
+            "public virtual void RenderOverlayLines(MeshRef lines, int textureId, float lineWidth, bool blend)",
+            platform);
+        Assert.Contains("RenderMesh(lines);", platform);
+
+        string windows = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.DoesNotContain("RenderTextureQuad", windows);
+        Assert.DoesNotContain("RenderOverlayLines", windows);
+    }
+
+    /// <summary>
+    /// The texture-into-texture blit draws through its seam and hands it the two values a
+    /// native pass may not read back off tracked GL state: the texture the program samples and
+    /// the blend state this very method computed from its alphaTest argument.
+    /// </summary>
+    [Fact]
+    public void TheTextureBlitDrawsThroughTheSeamAndCarriesItsOwnBlendState()
+    {
+        string client = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
+
+        Assert.Contains(
+            "Platform.RenderTextureQuad(quadModel, fromTexture.TextureId, alphaTest >= 0f);",
+            client);
+        // The seam replaced the draw and nothing else: the RenderMesh call is gone from this
+        // method, and the state calls that bracket it are untouched for the OpenGL path.
+        Assert.DoesNotContain("Platform.RenderMesh(quadModel);\n\t\t\tPlatform.GlEnableDepthTest();", client);
+    }
+
+    /// <summary>
+    /// The aiming reticle draws through its seam and passes the line width and blend state it
+    /// sets itself - 0.5 for the accuracy rectangle and 1 for the four crosshair lines.
+    /// </summary>
+    [Fact]
+    public void TheAimOverlayDrawsThroughTheSeamWithBothLineWidths()
+    {
+        string aim = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs");
+
+        Assert.Contains("game.Platform.RenderOverlayLines(aimRectangleRef, 0, 0.5f, blend: true);", aim);
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.Contains("game.Platform.RenderOverlayLines(aimLinesRef[" + i + "], 0, 1f, blend: true);", aim);
+        }
+        Assert.DoesNotContain("game.Platform.RenderMesh(", aim);
+    }
+
+    /// <summary>Every new or changed lib member of the GUI stage is listed for the Cecil transplant.</summary>
+    [Fact]
+    public void TheGuiSeamsAndTheirCallersAreListedForTheTransplant()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"RenderTextureQuad\"", patcher);
+        Assert.Contains("\"RenderOverlayLines\"", patcher);
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"RenderTextureIntoFrameBuffer\", 9", patcher);
+        Assert.Contains(
+            "\"Vintagestory.Client.NoObf.SystemRenderPlayerAimAcc\", \"OnRenderFrame2DOverlay\", 1", patcher);
+
+        // Both are declared virtuals the Vulkan platform expects on the patched host, so a lib
+        // that lost the transplant is caught at startup rather than at the first GUI draw.
+        string expected = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
+        Assert.Contains("new(true, \"RenderTextureQuad\"", expected);
+        Assert.Contains("new(true, \"RenderOverlayLines\"", expected);
+    }
+
+    /// <summary>
+    /// The Vulkan platform records both GUI systems as native passes with their fixed state
+    /// stated outright, takes the topology and the vertex layout from the mesh rather than from
+    /// tracked state, and keeps the neutral bodies reachable behind one switch.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformRecordsTheGuiSystemsNativelyAndKeepsTheOldRoute()
+    {
+        string gui = Read(GuiPlatformFile);
+
+        Assert.Contains("internal bool NativeGuiEnabled { get; set; } = true;", gui);
+        Assert.Contains("public override void RenderTextureQuad(", gui);
+        Assert.Contains("public override void RenderOverlayLines(", gui);
+        Assert.Contains("base.RenderTextureQuad(", gui);
+        Assert.Contains("base.RenderOverlayLines(", gui);
+        Assert.Contains("device.BeginNativePass(", gui);
+        Assert.Contains("device.DrawNativeMesh(", gui);
+        Assert.Contains("device.EndNativePass();", gui);
+
+        // Fixed state the pass states, never reads back: the caller's blend through the one
+        // factor table, the caller's line width, and the mesh's own topology and layout.
+        Assert.Contains("AttachmentBlend.For(blend, EnumBlendMode.Standard)", gui);
+        Assert.Contains("LineWidth = lineWidth", gui);
+        Assert.Contains("Topology = device.NativeMeshTopology(vao.VaoId)", gui);
+        Assert.Contains("device.NativeMeshLayoutId(", gui);
+        Assert.Contains("DepthTest = false", gui);
+        Assert.Contains("DepthWrite = false", gui);
+    }
+
+    /// <summary>
+    /// The named blend modes have exactly one factor table, which the tracker and every native
+    /// system that states "blend on, standard" both read - so the two can never drift.
+    /// </summary>
+    [Fact]
+    public void TheNamedBlendModesHaveOneFactorTable()
+    {
+        string tracker = Read("Optimum.Render.Vulkan/Core/GlStateTracker.cs");
+
+        Assert.Contains("public static AttachmentBlend For(bool enabled, EnumBlendMode mode)", tracker);
+        Assert.Contains("FactorsFor(EnumBlendMode mode) => mode switch", tracker);
+        Assert.Contains("AttachmentBlend.FactorsFor(mode);", tracker);
+
+        // One table only: the premultiplied-alpha pair appears once in the file.
+        int first = tracker.IndexOf("EnumBlendMode.PremultipliedAlpha =>", StringComparison.Ordinal);
+        Assert.True(first >= 0);
+        Assert.Equal(-1, tracker.IndexOf("EnumBlendMode.PremultipliedAlpha =>", first + 1, StringComparison.Ordinal));
     }
 
     // ------------------------------------------------------------------------ helpers

@@ -63,6 +63,30 @@ internal sealed class VulkanCapabilities
     public PhysicalDeviceType DeviceType;
     public uint MaxImageDimension2D;
     public bool WideLines;
+
+    /// <summary>
+    /// VkPhysicalDeviceLimits::lineWidthRange, the only widths <c>vkCmdSetLineWidth</c> accepts
+    /// once wideLines is on. GL silently clamps glLineWidth to its own range; Vulkan makes an
+    /// out-of-range width a validation error, and the game asks for 0.5 (the aiming reticle's
+    /// accuracy rectangle) and 2 (the camera path), so both routes clamp through
+    /// <see cref="ClampLineWidth" /> rather than passing the caller's value on.
+    /// </summary>
+    public float LineWidthMin = 1.0f;
+    public float LineWidthMax = 1.0f;
+
+    /// <summary>
+    /// The width a line draw may actually rasterize with: the caller's, clamped to the device's
+    /// range, or exactly 1 on a device without wideLines. Used by the emulated draw path and by
+    /// a native pipeline's dynamic state, so the two routes can never disagree about it.
+    /// </summary>
+    public float ClampLineWidth(float width)
+    {
+        if (!WideLines) return 1.0f;
+        if (width < LineWidthMin) return LineWidthMin;
+        if (width > LineWidthMax) return LineWidthMax;
+        return width;
+    }
+
     public bool FillModeNonSolid;
     public bool SamplerAnisotropy;
     public bool MultiDrawIndirect;
@@ -1215,6 +1239,8 @@ internal sealed unsafe class VulkanContext : IDisposable
             DeviceType = properties.DeviceType,
             MaxImageDimension2D = properties.Limits.MaxImageDimension2D,
             WideLines = features.WideLines,
+            LineWidthMin = properties.Limits.LineWidthRange[0],
+            LineWidthMax = properties.Limits.LineWidthRange[1],
             FillModeNonSolid = features.FillModeNonSolid,
             SamplerAnisotropy = features.SamplerAnisotropy,
             MultiDrawIndirect = features.MultiDrawIndirect,
