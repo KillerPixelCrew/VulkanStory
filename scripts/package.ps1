@@ -134,7 +134,10 @@ function Resolve-WindowsVanilla {
         Write-Host "Using cached $InstallerPath"
     }
 
-    $innoextract = (Get-Command innoextract -ErrorAction Stop).Path
+    $innoextract = Get-InnoextractPath
+    if (-not $innoextract) {
+        throw "innoextract not found. Install a current release from https://github.com/crazy-max/innoextract/releases."
+    }
     $info = @(Invoke-NativeStep { & $innoextract --info $InstallerPath 2>&1 })
     $infoExitCode = $LASTEXITCODE
     if ($infoExitCode -ne 0 -or (($info -join "`n") -notmatch '(?i)setup data version')) {

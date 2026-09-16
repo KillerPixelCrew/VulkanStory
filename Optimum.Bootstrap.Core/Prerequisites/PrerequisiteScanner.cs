@@ -160,7 +160,10 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
 
     private PrerequisiteResult DetectInnoextract(PrerequisiteDefinition def)
     {
-        string? path = CommandSearch.Which(probe, "innoextract");
+        string binaryName = probe.Os == OsKind.Windows ? "innoextract.exe" : "innoextract";
+        string? path = CommandSearch.Which(probe, "innoextract")
+            ?? ExecutableOrNull(Path.Combine(repoRoot, ".tools", binaryName))
+            ?? ExecutableOrNull(Path.Combine(probe.HomeDirectory, ".tools", binaryName));
         if (path is null)
             return Missing(def, AcquisitionKind.DownloadPage, null,
                 "https://github.com/crazy-max/innoextract/releases");
