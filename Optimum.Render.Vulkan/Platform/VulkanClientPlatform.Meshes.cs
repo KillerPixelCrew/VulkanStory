@@ -106,6 +106,7 @@ public partial class VulkanClientPlatform
     {
         RuntimeStats.drawCallsCount++;
         VAO vAO = (VAO)modelRef;
+        if (TryRenderParticles2dNative(modelRef, quantity)) { RuntimeStats.drawCallsCount--; return; }
         device.DrawMeshInstanced(vAO.VaoId, quantity);
     }
 
