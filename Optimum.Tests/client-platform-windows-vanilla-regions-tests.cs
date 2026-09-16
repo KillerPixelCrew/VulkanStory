@@ -49,6 +49,7 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumPostAmbientOcclusion", "OptimumPostSceneTexture", "OptimumPostGlowTexture",
         "OptimumPostBloom", "OptimumPostGodRays", "OptimumPostLuma", "OptimumPostFinish",
         "OptimumBindKeepViewport",
+        "OptimumPostAmbientOcclusionTexture", "OptimumPostSsaoInScene", "OptimumPostSsaaLevel",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderOptimumSkyMotion",
         "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RestorePrimaryDrawBuffers",
         "RestoreWorldDrawBuffers", "SelectBackDrawBuffer", "SelectFsrDrawBuffer", "SetBlendEnabled",

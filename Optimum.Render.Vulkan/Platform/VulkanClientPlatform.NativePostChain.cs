@@ -78,6 +78,13 @@ public partial class VulkanClientPlatform
 
     private void NotePostStep(NativePostStep step) => NativePostStepLog?.Add(step);
 
+    /// <summary>
+    /// Test seam: one chain step on whichever route <see cref="NativePostChainEnabled" /> selects,
+    /// without the eight steps around it. The differential tests run the same inputs through both.
+    /// </summary>
+    internal void RunPostStepAmbientOcclusionForTests(float[] projectMatrix) =>
+        PostStepAmbientOcclusion(projectMatrix);
+
     // ------------------------------------------------------------------ the chain
 
     /// <summary>
@@ -336,10 +343,20 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// LEGACY - pass 3, the SSAO pass, its bilateral blur and the AO composite, through the lib
-    /// virtual that now holds the OpenGL body's inline code. Stage 1c makes it native.
+    /// Pass 3 - the SSAO pass, its bilateral blur and the AO composite - drawn natively
+    /// (VulkanClientPlatform.NativeSsao.cs). The lib virtual, which holds the OpenGL body's inline
+    /// code, is the old route: the differential tests compare the two, and a frame the native
+    /// route cannot draw (no device, no targets, no shader programs) falls back to it whole.
     /// </summary>
-    private void PostStepAmbientOcclusion(float[] projectMatrix) => OptimumPostAmbientOcclusion(projectMatrix);
+    private void PostStepAmbientOcclusion(float[] projectMatrix)
+    {
+        if (UseNativePostChain && NativeAmbientOcclusionReady())
+        {
+            NativeAmbientOcclusion(projectMatrix);
+            return;
+        }
+        OptimumPostAmbientOcclusion(projectMatrix);
+    }
 
     /// <summary>LEGACY - pass 4, the TAA resolve. Stage 1d makes it native.</summary>
     private bool PostStepTaaResolve() => RenderOptimumTaaResolve();
@@ -464,5 +481,12 @@ public partial class VulkanClientPlatform
 
     /// <summary>A mat4 at its placement: sixteen floats, column-major, as the program declares it.</summary>
     private void WriteNativeMatrix(NativePipeline pipeline, NativeUniform uniform, float[] values) =>
+        WriteNativeFloats(pipeline, uniform, values);
+
+    /// <summary>
+    /// A float array at its placement. The record and push blocks are scalar-packed, so a float[]
+    /// the game already holds - a matrix, or the SSAO sample kernel - copies straight in.
+    /// </summary>
+    private void WriteNativeFloats(NativePipeline pipeline, NativeUniform uniform, float[] values) =>
         device.WriteNative(pipeline, uniform, MemoryMarshal.AsBytes(new ReadOnlySpan<float>(values)));
 }

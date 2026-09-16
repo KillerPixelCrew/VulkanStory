@@ -159,6 +159,16 @@ internal sealed class NativePassDescription
     public uint TransientSlots;
     public PassFlags Flags = PassFlags.None;
 
+    /// <summary>
+    /// Bit i: colour slot i starts the pass cleared to <see cref="ClearValue" />. The pass states
+    /// its own clear instead of a glClearBuffer against a draw-buffer mask, so it lands as the
+    /// scope's load op.
+    /// </summary>
+    public uint ClearSlots;
+
+    /// <summary>The value <see cref="ClearSlots" /> clears to.</summary>
+    public float[] ClearValue = { 0f, 0f, 0f, 0f };
+
     public int ViewportX;
     public int ViewportY;
 
@@ -429,6 +439,13 @@ public sealed unsafe partial class VulkanDevice
             Flags = pass.Flags,
         }, id);
         if (!ReferenceEquals(_targets.Bound, target)) _targets.Bind(commandBuffer, id);
+
+        for (int slot = 0; slot < GlStateTracker.MaxColorAttachments && pass.ClearSlots != 0; slot++)
+        {
+            if (((pass.ClearSlots >> slot) & 1) == 0) continue;
+            _targets.ClearPassAttachment(commandBuffer, slot,
+                pass.ClearValue[0], pass.ClearValue[1], pass.ClearValue[2], pass.ClearValue[3]);
+        }
 
         _nativePass = pass;
         _nativeTarget = target;

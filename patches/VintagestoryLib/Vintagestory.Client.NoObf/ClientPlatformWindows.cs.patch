@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..c402ea4 100644
+index 6edf0c9..68a67d2 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -2202,7 +2202,7 @@ index 6edf0c9..c402ea4 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,50 +3250,403 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,110 +3250,343 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2252,14 +2252,26 @@ index 6edf0c9..c402ea4 100644
 +			ApplyOptimumMotionBlendState();
 +			EndMotionWrite();
 +		}
-+	}
-+
+ 	}
+ 
+-	public override void RenderPostprocessingEffects(float[] projectMatrix)
 +	/// <summary>
 +	/// Optimum (Phase 1A step 4): the GL half of the OIT merge's state - depth test off,
 +	/// blending on with the global source-alpha mode.
 +	/// </summary>
 +	public override void ApplyTransparentMergeBlendState()
-+	{
+ 	{
+-		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0189: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_01a8: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_023b: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0254: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_035c: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0375: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_05b0: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
+-		if (!OffscreenBuffer)
 +		GL.Disable((EnableCap)2929);
 +		GL.Enable((EnableCap)3042);
 +		GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
@@ -2301,17 +2313,55 @@ index 6edf0c9..c402ea4 100644
 +		}
 +		ShaderProgram resolve = ShaderPrograms.TaaResolve;
 +		if (resolve == null || resolve.LoadError)
-+		{
+ 		{
+-			return;
 +			_taaHistoryValid = false;
 +			return false;
-+		}
+ 		}
+-		int x = ((NativeWindow)window).ClientSize.X;
+-		int y = ((NativeWindow)window).ClientSize.Y;
+-		if (RenderBloom)
 +		FrameBufferRef write = TaaHistory(_taaFrameParity);
 +		FrameBufferRef read = TaaHistory(_taaFrameParity + 1);
 +		if (write == null || read == null)
-+		{
+ 		{
+-			GlToggleBlend(on: false);
+-			LoadFrameBuffer(EnumFrameBuffer.FindBright);
+-			ShaderProgramFindbright findbright = ShaderPrograms.Findbright;
+-			findbright.Use();
+-			findbright.ColorTex2D = frameBuffers[0].ColorTextureIds[0];
+-			findbright.GlowTex2D = frameBuffers[0].ColorTextureIds[1];
+-			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+-			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
+-			RenderFullscreenTriangle(screenQuad);
+-			findbright.Stop();
+-			ShaderProgramBlur blur = ShaderPrograms.Blur;
+-			blur.Use();
+-			blur.Uniform("frameSize", (float)x * ssaaLevel, (float)y * ssaaLevel);
+-			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalMedRes);
+-			blur.IsVertical = 0;
+-			blur.InputTexture2D = frameBuffers[4].ColorTextureIds[0];
+-			RenderFullscreenTriangle(screenQuad);
+-			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
+-			blur.IsVertical = 1;
+-			blur.InputTexture2D = frameBuffers[2].ColorTextureIds[0];
+-			RenderFullscreenTriangle(screenQuad);
+-			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
+-			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalLowRes);
+-			blur.IsVertical = 0;
+-			blur.InputTexture2D = frameBuffers[3].ColorTextureIds[0];
+-			RenderFullscreenTriangle(screenQuad);
+-			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalLowRes);
+-			blur.IsVertical = 1;
+-			blur.InputTexture2D = frameBuffers[9].ColorTextureIds[0];
+-			RenderFullscreenTriangle(screenQuad);
+-			blur.Stop();
+-			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
+-			GlToggleBlend(on: true);
 +			_taaHistoryValid = false;
 +			return false;
-+		}
+ 		}
+-		if (RenderGodRays)
 +
 +		OptimumTemporalFrame frame = OptimumTemporal.Frame;
 +		float[] projection = frame.GetProjection(EnumTemporalView.World);
@@ -2470,9 +2520,23 @@ index 6edf0c9..c402ea4 100644
 +		// replaces that one step and inherits the rest, and the OpenGL path runs the
 +		// identical sequence it ran before the split.
 +		if (!OffscreenBuffer)
-+		{
+ 		{
+-			LoadFrameBuffer(EnumFrameBuffer.GodRays);
+-			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
+-			godrays.Use();
+-			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
+-			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
+-			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
+-			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
+-			godrays.Dusk = ShaderUniforms.Dusk;
+-			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
+-			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
+-			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
+-			RenderFullscreenTriangle(screenQuad);
+-			godrays.Stop();
+-			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
 +			return;
-+		}
+ 		}
 +		OptimumPostAmbientOcclusion(projectMatrix);
 +		// Optimum TAA: resolve first, so bloom, god rays and the final input read
 +		// the temporally stable image instead of the jittered one.
@@ -2508,27 +2572,32 @@ index 6edf0c9..c402ea4 100644
 +		// vanilla SSAO pass when it returns a texture - the Vulkan platform with GTAO selected.
 +		// The neutral body returns 0, so the OpenGL path always runs vanilla SSAO.
 +		optimumAmbientOcclusionTexture = 0;
-+		if (RenderSSAO && projectMatrix != null)
-+		{
+ 		if (RenderSSAO && projectMatrix != null)
+ 		{
 +			optimumAmbientOcclusionTexture = RenderOptimumAmbientOcclusion(projectMatrix);
 +		}
 +		if (optimumAmbientOcclusionTexture == 0 && RenderSSAO && projectMatrix != null)
 +		{
-+			int x = ((NativeWindow)window).ClientSize.X;
-+			int y = ((NativeWindow)window).ClientSize.Y;
-+			GlToggleBlend(on: false);
-+			LoadFrameBuffer(EnumFrameBuffer.SSAO);
++			// Optimum (Phase 3b, decision 3): through the window-size seam, so this step and
++			// the native one that replaces it scale by the same value - and so a test can
++			// drive either without a window.
++			Size2i optimumClientSize = OptimumWindowClientSize();
++			int x = optimumClientSize.Width;
++			int y = optimumClientSize.Height;
+ 			GlToggleBlend(on: false);
+ 			LoadFrameBuffer(EnumFrameBuffer.SSAO);
+-			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
 +			ClearSsaoTarget();
-+			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
-+			ssao.Use();
-+			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
-+			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
-+			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-+			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
-+			ssao.Uniform("screenSize", ssaaLevel * (float)x * num, ssaaLevel * (float)y * num);
-+			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
-+			ssao.Projection = projectMatrix;
-+			ssao.SamplesArray(64, ssaoKernel);
+ 			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
+ 			ssao.Use();
+ 			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
+ 			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
+ 			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
+ 			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
+ 			ssao.Uniform("screenSize", ssaaLevel * (float)x * num, ssaaLevel * (float)y * num);
+ 			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
+ 			ssao.Projection = projectMatrix;
+ 			ssao.SamplesArray(64, ssaoKernel);
 +			// Optimum TAA: the clock the sample kernel's dither rotates with.
 +			// Vanilla's Bayer-128 is locked to the pixel grid, so a jittered camera
 +			// hands every surface point a different kernel every frame and the
@@ -2541,29 +2610,19 @@ index 6edf0c9..c402ea4 100644
 +			{
 +				ssao.Uniform("temporalFrameIndex", (float)(OptimumTemporal.Frame.FrameIndex & 1023L));
 +			}
-+			RenderFullscreenTriangle(screenQuad);
-+			ssao.Stop();
-+			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
-+			bilateralblur.Use();
-+			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
-+			for (int i = 0; i < num2; i++)
-+			{
-+				FrameBufferRef frameBufferRef = frameBuffers[15];
-+				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurHorizontal);
-+				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
-+				bilateralblur.IsVertical = 0;
-+				bilateralblur.InputTexture2D = frameBuffers[(i == 0) ? 13 : 14].ColorTextureIds[0];
-+				bilateralblur.DepthTexture2D = frameBuffers[0].DepthTextureId;
-+				RenderFullscreenTriangle(screenQuad);
-+				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
-+				bilateralblur.IsVertical = 1;
-+				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
-+				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
-+				RenderFullscreenTriangle(screenQuad);
-+			}
-+			bilateralblur.Stop();
-+			GlToggleBlend(on: true);
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
+ 			RenderFullscreenTriangle(screenQuad);
+ 			ssao.Stop();
+ 			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
+ 			bilateralblur.Use();
+ 			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
+@@ -1915,35 +3605,254 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
+ 				RenderFullscreenTriangle(screenQuad);
+ 			}
+ 			bilateralblur.Stop();
+ 			GlToggleBlend(on: true);
+-			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, (int)(ssaaLevel * (float)x), (int)(ssaaLevel * (float)y));
 +			if (OptimumTaaRequested && TaaTargetsReady)
 +			{
 +				ApplyOptimumSceneSsao();
@@ -2575,9 +2634,8 @@ index 6edf0c9..c402ea4 100644
 +		{
 +			ApplyOptimumSceneSsao();
 +		}
- 	}
- 
--	public override void RenderPostprocessingEffects(float[] projectMatrix)
++	}
++
 +	/// <summary>
 +	/// Optimum (Phase 3b): the scene texture the rest of the chain reads - the TAA resolve's
 +	/// output where it ran this frame, the jittered Primary colour otherwise.
@@ -2595,128 +2653,70 @@ index 6edf0c9..c402ea4 100644
 +
 +	/// <summary>Optimum (Phase 3b): the post chain's bloom step - find-bright and the two blur ping-pongs.</summary>
 +	public virtual void OptimumPostBloom(int postSceneTexture, int postGlowTexture)
- 	{
--		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
--		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
--		//IL_0189: Unknown result type (might be due to invalid IL or missing references)
--		//IL_01a8: Unknown result type (might be due to invalid IL or missing references)
--		//IL_023b: Unknown result type (might be due to invalid IL or missing references)
--		//IL_0254: Unknown result type (might be due to invalid IL or missing references)
--		//IL_035c: Unknown result type (might be due to invalid IL or missing references)
--		//IL_0375: Unknown result type (might be due to invalid IL or missing references)
--		//IL_05b0: Unknown result type (might be due to invalid IL or missing references)
--		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
--		if (!OffscreenBuffer)
--		{
--			return;
--		}
--		int x = ((NativeWindow)window).ClientSize.X;
--		int y = ((NativeWindow)window).ClientSize.Y;
- 		if (RenderBloom)
- 		{
++	{
++		if (RenderBloom)
++		{
 +			int x = ((NativeWindow)window).ClientSize.X;
 +			int y = ((NativeWindow)window).ClientSize.Y;
- 			GlToggleBlend(on: false);
- 			LoadFrameBuffer(EnumFrameBuffer.FindBright);
- 			ShaderProgramFindbright findbright = ShaderPrograms.Findbright;
- 			findbright.Use();
--			findbright.ColorTex2D = frameBuffers[0].ColorTextureIds[0];
--			findbright.GlowTex2D = frameBuffers[0].ColorTextureIds[1];
++			GlToggleBlend(on: false);
++			LoadFrameBuffer(EnumFrameBuffer.FindBright);
++			ShaderProgramFindbright findbright = ShaderPrograms.Findbright;
++			findbright.Use();
 +			findbright.ColorTex2D = postSceneTexture;
 +			findbright.GlowTex2D = postGlowTexture;
- 			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
- 			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
- 			RenderFullscreenTriangle(screenQuad);
- 			findbright.Stop();
- 			ShaderProgramBlur blur = ShaderPrograms.Blur;
-@@ -1848,102 +3658,151 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			RenderFullscreenTriangle(screenQuad);
- 			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
- 			blur.IsVertical = 1;
- 			blur.InputTexture2D = frameBuffers[2].ColorTextureIds[0];
- 			RenderFullscreenTriangle(screenQuad);
--			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
++			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
++			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
++			RenderFullscreenTriangle(screenQuad);
++			findbright.Stop();
++			ShaderProgramBlur blur = ShaderPrograms.Blur;
++			blur.Use();
++			blur.Uniform("frameSize", (float)x * ssaaLevel, (float)y * ssaaLevel);
++			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalMedRes);
++			blur.IsVertical = 0;
++			blur.InputTexture2D = frameBuffers[4].ColorTextureIds[0];
++			RenderFullscreenTriangle(screenQuad);
++			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
++			blur.IsVertical = 1;
++			blur.InputTexture2D = frameBuffers[2].ColorTextureIds[0];
++			RenderFullscreenTriangle(screenQuad);
 +			// Mono.Cecil transplant: GlViewport is the routed form of GL.Viewport
 +			// and its GL body is the identical call.
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
- 			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalLowRes);
- 			blur.IsVertical = 0;
- 			blur.InputTexture2D = frameBuffers[3].ColorTextureIds[0];
- 			RenderFullscreenTriangle(screenQuad);
- 			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalLowRes);
- 			blur.IsVertical = 1;
- 			blur.InputTexture2D = frameBuffers[9].ColorTextureIds[0];
- 			RenderFullscreenTriangle(screenQuad);
- 			blur.Stop();
--			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalLowRes);
++			blur.IsVertical = 0;
++			blur.InputTexture2D = frameBuffers[3].ColorTextureIds[0];
++			RenderFullscreenTriangle(screenQuad);
++			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalLowRes);
++			blur.IsVertical = 1;
++			blur.InputTexture2D = frameBuffers[9].ColorTextureIds[0];
++			RenderFullscreenTriangle(screenQuad);
++			blur.Stop();
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
- 			GlToggleBlend(on: true);
- 		}
++			GlToggleBlend(on: true);
++		}
 +	}
 +
 +	/// <summary>Optimum (Phase 3b): the post chain's god-rays step.</summary>
 +	public virtual void OptimumPostGodRays(int postSceneTexture, int postGlowTexture)
 +	{
- 		if (RenderGodRays)
- 		{
++		if (RenderGodRays)
++		{
 +			int x = ((NativeWindow)window).ClientSize.X;
 +			int y = ((NativeWindow)window).ClientSize.Y;
- 			LoadFrameBuffer(EnumFrameBuffer.GodRays);
- 			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
- 			godrays.Use();
- 			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
++			LoadFrameBuffer(EnumFrameBuffer.GodRays);
++			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
++			godrays.Use();
++			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
 +			godrays.Uniform("maxGodRaySamples", OptimumConfig.GodRaysSampleLimit);
- 			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
- 			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
- 			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
- 			godrays.Dusk = ShaderUniforms.Dusk;
- 			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
--			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
--			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
++			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
++			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
++			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
++			godrays.Dusk = ShaderUniforms.Dusk;
++			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
 +			godrays.InputTexture2D = postSceneTexture;
 +			godrays.GlowParts2D = postGlowTexture;
- 			RenderFullscreenTriangle(screenQuad);
- 			godrays.Stop();
--			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
--		}
--		if (RenderSSAO && projectMatrix != null)
--		{
--			GlToggleBlend(on: false);
--			LoadFrameBuffer(EnumFrameBuffer.SSAO);
--			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
--			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
--			ssao.Use();
--			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
--			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
--			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
--			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
--			ssao.Uniform("screenSize", ssaaLevel * (float)x * num, ssaaLevel * (float)y * num);
--			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
--			ssao.Projection = projectMatrix;
--			ssao.SamplesArray(64, ssaoKernel);
--			RenderFullscreenTriangle(screenQuad);
--			ssao.Stop();
--			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
--			bilateralblur.Use();
--			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
--			for (int i = 0; i < num2; i++)
--			{
--				FrameBufferRef frameBufferRef = frameBuffers[15];
--				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurHorizontal);
--				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
--				bilateralblur.IsVertical = 0;
--				bilateralblur.InputTexture2D = frameBuffers[(i == 0) ? 13 : 14].ColorTextureIds[0];
--				bilateralblur.DepthTexture2D = frameBuffers[0].DepthTextureId;
--				RenderFullscreenTriangle(screenQuad);
--				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
--				bilateralblur.IsVertical = 1;
--				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
--				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
--				RenderFullscreenTriangle(screenQuad);
--			}
--			bilateralblur.Stop();
--			GlToggleBlend(on: true);
--			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			RenderFullscreenTriangle(screenQuad);
++			godrays.Stop();
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
  		}
 -		if (RenderFXAA)
@@ -2782,6 +2782,52 @@ index 6edf0c9..c402ea4 100644
 +	/// </summary>
 +	private int optimumAmbientOcclusionTexture;
 +
++	/// <summary>
++	/// Optimum (Vulkan-native render systems, Phase 3b): the ambient-occlusion step's own two
++	/// pieces of frame state, as accessors, so a platform that draws the step natively
++	/// (VulkanClientPlatform's NativePostChain) sets exactly what the body's step sets and the
++	/// steps that read it - the final composition's debug-view texture choice and its "AO is not
++	/// Final's to apply" flag - see the same values. The body keeps writing the fields directly,
++	/// so the OpenGL path runs unchanged.
++	/// </summary>
++	public int OptimumPostAmbientOcclusionTexture
++	{
++		get
++		{
++			return optimumAmbientOcclusionTexture;
++		}
++		set
++		{
++			optimumAmbientOcclusionTexture = value;
++		}
++	}
++
++	/// <summary>Optimum (Phase 3b): see <see cref="OptimumPostAmbientOcclusionTexture" />.</summary>
++	public bool OptimumPostSsaoInScene
++	{
++		get
++		{
++			return optimumSsaoInScene;
++		}
++		set
++		{
++			optimumSsaoInScene = value;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b): the SSAA factor the post chain's steps scale the window size by. A
++	/// native step computes the same uniform values as the body, so it reads the body's own field
++	/// rather than ClientSettings, which can have moved since the frame buffers were built.
++	/// </summary>
++	public float OptimumPostSsaaLevel
++	{
++		get
++		{
++			return ssaaLevel;
++		}
++	}
++
 +	/// <summary>Optimum TAA: multiply the jittered AO into Primary colour 0 before the resolve, touching nothing else.</summary>
 +	private void ApplyOptimumSceneSsao()
 +	{
@@ -2828,7 +2874,7 @@ index 6edf0c9..c402ea4 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,25 +3812,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,25 +3862,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2873,7 +2919,7 @@ index 6edf0c9..c402ea4 100644
  			final.ExtraGamma = ClientSettings.ExtraGammaLevel;
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
-@@ -1987,24 +3860,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +3910,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2930,7 +2976,7 @@ index 6edf0c9..c402ea4 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3915,496 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3965,496 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3428,7 +3474,7 @@ index 6edf0c9..c402ea4 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4563,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4613,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3468,7 +3514,7 @@ index 6edf0c9..c402ea4 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4961,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5011,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3521,7 +3567,7 @@ index 6edf0c9..c402ea4 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5056,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5106,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3566,7 +3612,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5093,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5143,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3587,7 +3633,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5112,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5162,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3608,7 +3654,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5131,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5181,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3629,7 +3675,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5150,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5200,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3650,7 +3696,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5173,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5223,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3671,7 +3717,7 @@ index 6edf0c9..c402ea4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5735,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5785,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3695,7 +3741,7 @@ index 6edf0c9..c402ea4 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6094,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6144,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

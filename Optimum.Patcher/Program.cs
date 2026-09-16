@@ -269,6 +269,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumPostLuma",
         "OptimumPostFinish",
         "OptimumBindKeepViewport",
+        // Phase 3b stage 1c: the AO step's own frame state and the SSAA factor as accessors, so a
+        // native AO step sets and reads exactly what the body's step does.
+        "OptimumPostAmbientOcclusionTexture",
+        "OptimumPostSsaoInScene",
+        "OptimumPostSsaaLevel",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).
