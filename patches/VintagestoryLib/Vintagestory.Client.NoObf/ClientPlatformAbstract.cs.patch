@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..8954cae 100644
+index d6eb844..be13842 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,713 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,723 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -265,16 +265,19 @@ index d6eb844..8954cae 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum (Phase 3b decision 2, stage 2): the decal pool's multi-draw.
++	/// Optimum (Phase 3b decision 2, stage 2): opens the scope the decal pool's multi-draw runs
++	/// under.
 +	///
-+	/// What it draws: every visible decal in one indirect multi-draw of the decal pool, once per
-+	/// frame in SystemRenderDecals.OnRenderFrame3D (the AfterOIT stage).
-+	/// The other side: the neutral body below is the OpenGL path - exactly the
-+	/// <see cref="RenderMesh(MeshRef, int[], int[], int)" /> call that the second half of
-+	/// <c>MeshDataPool.Draw</c> makes, which is what the caller's <c>decalPool.Draw</c>
-+	/// reached - and VulkanClientPlatform.RenderDecalPool is the native one. The caller runs
-+	/// the pool's own public FrustumCull first, so both routes draw the same ranges and only
-+	/// the draw command differs.
++	/// What it draws: nothing itself. SystemRenderDecals.OnRenderFrame3D (the AfterOIT stage)
++	/// opens the scope, runs the vanilla <c>MeshDataPool.Draw</c> - which culls and issues the
++	/// pool's <see cref="RenderMesh(MeshRef, int[], int[], int, bool)" /> multi-draw of every
++	/// visible decal - and closes it again in a finally.
++	/// The other side: the neutral body here is empty, so the OpenGL path is vanilla; the native
++	/// one is VulkanClientPlatform.BeginDecalPass, whose RenderMesh override takes the pool's
++	/// multi-draw natively while the scope is open. The scope, not a parameter, is how the mesh
++	/// handle reaches a native platform: <c>MeshDataPool.modelRef</c> is internal in the vanilla
++	/// API and a new public member on a vanilla API type never ships (the shipped
++	/// VintagestoryAPI-patched.dll is vanilla plus Optimum.Patcher/api-patcher.cs's hooks only).
 +	/// Target and slots: Primary, inside the caller's motion window - a decal nudges the depth
 +	/// buffer in front of the block it sits on, so it has to write that surface's motion vector
 +	/// itself.
@@ -284,9 +287,16 @@ index d6eb844..8954cae 100644
 +	/// handles, not from the units ShaderProgramDecals' setters bound them to.
 +	/// What pins it: NativeWorldSystemsTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
 +	/// </summary>
-+	public virtual void RenderDecalPool(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount, int decalTextureId, int blockTextureId)
++	public virtual void BeginDecalPass(int decalTextureId, int blockTextureId)
 +	{
-+		RenderMesh(decalMesh, indicesStarts, indicesSizes, groupCount);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b decision 2, stage 2): closes the scope <see cref="BeginDecalPass" />
++	/// opened. A no-op on the OpenGL path, and safe to call when the scope never opened.
++	/// </summary>
++	public virtual void EndDecalPass()
++	{
 +	}
 +
 +	/// <summary>

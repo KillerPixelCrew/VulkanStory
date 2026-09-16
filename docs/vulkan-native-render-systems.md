@@ -258,10 +258,19 @@ motion attachment.
     moon, under `celestialobject`;
   - `RenderParticles(MeshRef, int quantity, int particleTextureId)` - one particle pool's
     instanced draw;
-  - `RenderDecalPool(MeshRef, int[] starts, int[] sizes, int groupCount, int decalTextureId, int blockTextureId)` -
-    the decal pool's multi-draw. `SystemRenderDecals` now runs the pool's own public `FrustumCull`
-    and hands the seam its results, which is `MeshDataPool.Draw` split in two; `MeshDataPool`
-    gained a read-only `ModelRef` for the mesh half of that.
+  - `BeginDecalPass(int decalTextureId, int blockTextureId)` / `EndDecalPass()` - the decal pool's
+    scope, both neutral bodies empty. This one is a **scope** seam rather than a draw seam:
+    `MeshDataPool.modelRef` is `internal` in the vanilla API, and a new public member on a vanilla
+    API type never ships (the shipped `VintagestoryAPI-patched.dll` is vanilla plus the hooks in
+    `Optimum.Patcher/api-patcher.cs`), so a `MeshRef` parameter is not available to the lib at all -
+    an earlier `RenderDecalPool(MeshRef, ...)` seam fed by a fork-only `MeshDataPool.ModelRef` threw
+    `MissingMethodException` in the shipped client on both backends. `SystemRenderDecals` therefore
+    opens the scope, runs the **vanilla** `decalPool.Draw(game.api, game.frustumCuller,
+    EnumFrustumCullMode.CullInstant)` - which culls and issues the pool's own
+    `RenderMesh(MeshRef, int[], int[], int)` multi-draw - and closes the scope in a `finally`. The
+    Vulkan platform's `RenderMesh(MeshRef, int[], int[], int, bool)` override routes that multi-draw
+    to `TryDrawDecalPoolNative` while the scope is open, the same shape `BeginChunkPass`/
+    `EndChunkPass` uses for the chunk pools.
 - **Platform:** `VulkanClientPlatform.NativeWorld.cs`, one `NativeWorldEnabled` switch keeping
   every neutral body reachable. Two derivations are shared by all four passes and are the reason
   none of them reads `GlStateTracker`:

@@ -172,12 +172,38 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         int[] sizes = { 3, 3 };
 
         byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
-            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+            s =>
+            {
+                // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
+                // multi-draw runs inside it, the scope closes.
+                s.Platform.BeginDecalPass(decal, block);
+                try
+                {
+                    s.Platform.RenderMesh(s.Mesh, starts, sizes, 2, false);
+                }
+                finally
+                {
+                    s.Platform.EndDecalPass();
+                }
+            });
 
         long indirect = session.Seam.NativeIndirectDrawsForTests;
         long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: false,
-            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+            s =>
+            {
+                // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
+                // multi-draw runs inside it, the scope closes.
+                s.Platform.BeginDecalPass(decal, block);
+                try
+                {
+                    s.Platform.RenderMesh(s.Mesh, starts, sizes, 2, false);
+                }
+                finally
+                {
+                    s.Platform.EndDecalPass();
+                }
+            });
 
         Assert.Equal(1, session.Seam.NativeIndirectDrawsForTests - indirect);
         Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
@@ -201,9 +227,35 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         int[] sizes = { 3, 3 };
 
         byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
-            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+            s =>
+            {
+                // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
+                // multi-draw runs inside it, the scope closes.
+                s.Platform.BeginDecalPass(decal, block);
+                try
+                {
+                    s.Platform.RenderMesh(s.Mesh, starts, sizes, 2, false);
+                }
+                finally
+                {
+                    s.Platform.EndDecalPass();
+                }
+            });
         byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: true,
-            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+            s =>
+            {
+                // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
+                // multi-draw runs inside it, the scope closes.
+                s.Platform.BeginDecalPass(decal, block);
+                try
+                {
+                    s.Platform.RenderMesh(s.Mesh, starts, sizes, 2, false);
+                }
+                finally
+                {
+                    s.Platform.EndDecalPass();
+                }
+            });
 
         Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
         AssertSameAttachments(emulated, native, "decals (motion window)");

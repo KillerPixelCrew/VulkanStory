@@ -149,7 +149,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderNightSkyBox", new[] { "MeshRef", "Int32" }),
         new(true, "RenderCelestialQuad", new[] { "MeshRef", "Int32", "Int32", "Int32" }),
         new(true, "RenderParticles", new[] { "MeshRef", "Int32", "Int32" }),
-        new(true, "RenderDecalPool", new[] { "MeshRef", "Int32[]", "Int32[]", "Int32", "Int32", "Int32" }),
+        new(true, "BeginDecalPass", new[] { "Int32", "Int32" }),
+        new(true, "EndDecalPass", Array.Empty<string>()),
         // Phase 3b stage 2, GUI and text: the texture-into-texture blit and the aiming reticle's
         // line draws, the two GUI systems whose fixed state is stated at their call site.
         new(true, "RenderTextureQuad", new[] { "MeshRef", "Int32", "Boolean" }),

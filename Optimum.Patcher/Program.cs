@@ -100,7 +100,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderNightSkyBox",
         "RenderCelestialQuad",
         "RenderParticles",
-        "RenderDecalPool",
+        // The decal pool draws through a scope seam, not a draw seam: the mesh handle stays
+        // inside MeshDataPool (internal in the vanilla API), so the lib runs the vanilla
+        // MeshDataPool.Draw between Begin and End and a native platform takes its RenderMesh
+        // multi-draw while the scope is open. Neutral bodies are empty.
+        "BeginDecalPass",
+        "EndDecalPass",
         // Phase 3b stage 2, GUI and text: the two GUI draw seams, so a native platform records
         // those passes itself. Both neutral bodies are the RenderMesh call they replaced.
         "RenderTextureQuad",
@@ -1053,7 +1058,7 @@ var targets = new List<MethodTarget>
     // Phase 3b stage 2, GUI and text: the two callers that draw through the new GUI seams -
     // the texture-into-texture blit that bakes every Cairo GUI and text surface, and the
     // aiming reticle's line draws.
-    new("Vintagestory.Client.NoObf.ClientMain", "RenderTextureIntoFrameBuffer", 9),
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderTextureIntoFrameBuffer", 10),
     new("Vintagestory.Client.NoObf.SystemRenderPlayerAimAcc", "OnRenderFrame2DOverlay", 1),
     // SystemSoundEngine: audio listener update threshold + periodic refresh
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),

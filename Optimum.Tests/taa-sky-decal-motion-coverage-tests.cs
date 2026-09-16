@@ -330,6 +330,12 @@ public class TaaSkyDecalMotionCoverageTests
 
         string restores = FinallyBlock(pass);
         Assert.Contains("optimumPlatform.EndMotionWrite();", restores);
+        // The decal scope closes in the same finally, before the window it sits inside.
+        Assert.Contains("game.Platform.EndDecalPass();", restores);
+        Assert.True(
+            restores.IndexOf("game.Platform.EndDecalPass();", System.StringComparison.Ordinal)
+            < restores.IndexOf("optimumPlatform.EndMotionWrite();", System.StringComparison.Ordinal),
+            "the decal scope must close before the motion window that encloses it");
 
         // Nothing but the window's own bookkeeping happens between the open and
         // the try: every statement below runs guarded.
@@ -341,10 +347,10 @@ public class TaaSkyDecalMotionCoverageTests
             "shaderProgramDecals.Use();",
             "shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;",
             "SetOptimumMotionUniforms(shaderProgramDecals);",
-            // Phase 3b stage 2: the pool's Draw was split into its cull and the platform's
-            // decal seam; both halves still run inside the window.
-            "decalPool.FrustumCull(game.frustumCuller, EnumFrustumCullMode.CullInstant);",
-            "game.Platform.RenderDecalPool(decalPool.ModelRef,",
+            // Phase 3b stage 2: the pool's vanilla Draw runs inside the platform's decal scope;
+            // the scope and the draw both run inside the motion window.
+            "game.Platform.BeginDecalPass(",
+            "decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);",
         })
         {
             Assert.Contains(statement, guarded);

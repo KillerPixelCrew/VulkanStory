@@ -21,9 +21,12 @@ namespace Optimum.Render.Vulkan.Platform;
 //   - the cube particles  - SystemRenderParticles' instanced pool draw on Primary, seam
 //                           ClientPlatformAbstract.RenderParticles, neutral body
 //                           RenderMeshInstanced;
-//   - the decals          - SystemRenderDecals' pooled multi-draw, seam
-//                           ClientPlatformAbstract.RenderDecalPool, neutral body the
-//                           RenderMesh multi-draw the second half of MeshDataPool.Draw made.
+//   - the decals          - SystemRenderDecals' pooled multi-draw, scope seam
+//                           ClientPlatformAbstract.BeginDecalPass / EndDecalPass with empty
+//                           neutral bodies: the lib runs the vanilla MeshDataPool.Draw between
+//                           them and the pool's RenderMesh multi-draw is taken natively while
+//                           the scope is open (the mesh handle is internal in the vanilla API,
+//                           so it can never be a seam parameter).
 // NativeWorldEnabled false takes the neutral body on the Vulkan device too, which is the route
 // the differential tests compare against.
 //
@@ -326,45 +329,89 @@ public partial class VulkanClientPlatform
         NativeWorldEndPass(target, outer, outerFlags);
     }
 
-    /// <summary>
-    /// The decal pool's multi-draw: the native pass, or the seam's neutral body.
-    ///
-    /// The caller has already run the pool's own public MeshDataPool.FrustumCull - the first
-    /// half of MeshDataPool.Draw - so both routes draw the same ranges and only the draw
-    /// command differs.
-    /// </summary>
-    public override void RenderDecalPool(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes,
-        int groupCount, int decalTextureId, int blockTextureId)
-    {
-        if (groupCount <= 0 || indicesStarts == null || indicesSizes == null)
-        {
-            base.RenderDecalPool(decalMesh, indicesStarts!, indicesSizes!, groupCount, decalTextureId, blockTextureId);
-            return;
-        }
+    // ------------------------------------------------------------------- the decal scope
 
-        // Blending on in the standard mode and the AfterOIT stage's depth test and depth writes,
-        // which ClientMain sets before the stage; SystemRenderDecals turns culling off itself.
+    /// <summary>True between <see cref="BeginDecalPass" /> and <see cref="EndDecalPass" />.</summary>
+    private bool decalScopeActive;
+
+    /// <summary>The decal atlas handle the open scope passed in.</summary>
+    private int decalScopeDecalTextureId;
+
+    /// <summary>The block atlas handle the open scope passed in.</summary>
+    private int decalScopeBlockTextureId;
+
+    /// <summary>
+    /// Opens the decal pool's scope: the two atlas handles, which a native pass resolves what it
+    /// samples from, instead of from the units ShaderProgramDecals' setters bound them to.
+    ///
+    /// The mesh handle is deliberately not a parameter. MeshDataPool.modelRef is internal in the
+    /// vanilla API and the shipped VintagestoryAPI-patched.dll is vanilla plus api-patcher.cs's
+    /// hooks only, so a new public member on MeshDataPool would never reach the running client
+    /// (it did not, and the shipped client threw MissingMethodException on both backends). The
+    /// lib therefore runs the vanilla MeshDataPool.Draw, whose own
+    /// <c>capi.Render.RenderMesh(modelRef, starts, sizes, count)</c> lands in this platform's
+    /// <see cref="RenderMesh(MeshRef, int[], int[], int, bool)" /> override, and that override
+    /// routes to <see cref="TryDrawDecalPoolNative" /> while this scope is open. The caller's
+    /// Draw runs the pool's cull first on both routes, so both draw the same ranges and only the
+    /// draw command differs.
+    ///
+    /// Where the other side is: ClientPlatformAbstract.BeginDecalPass / EndDecalPass have empty
+    /// neutral bodies, so the OpenGL path is vanilla MeshDataPool.Draw into
+    /// ClientPlatformWindows.RenderMesh -> GL.MultiDrawElements, exactly as before the seam.
+    /// Target and slots: Primary, inside SystemRenderDecals' motion window - a decal nudges the
+    /// depth buffer in front of the block it sits on and writes that surface's motion vector
+    /// itself, so the motion attachment is one of NativeWorldPassColorSlots and replaces rather
+    /// than blends (NativeWorldBlend).
+    /// State that is not obvious: standard blending on and the AfterOIT stage's depth test and
+    /// depth writes, which ClientMain sets before the stage; SystemRenderDecals turns culling
+    /// off itself.
+    /// What pins it: NativeWorldSystemsTests (old route against native route, including the
+    /// motion attachment bit for bit) and Optimum.Tests/native-world-systems-coverage-tests.cs.
+    /// </summary>
+    public override void BeginDecalPass(int decalTextureId, int blockTextureId)
+    {
+        decalScopeActive = true;
+        decalScopeDecalTextureId = decalTextureId;
+        decalScopeBlockTextureId = blockTextureId;
+    }
+
+    /// <summary>Closes the scope <see cref="BeginDecalPass" /> opened.</summary>
+    public override void EndDecalPass()
+    {
+        decalScopeActive = false;
+        decalScopeDecalTextureId = 0;
+        decalScopeBlockTextureId = 0;
+    }
+
+    /// <summary>
+    /// The decal pool's multi-draw, recorded natively, when it arrives through
+    /// <see cref="RenderMesh(MeshRef, int[], int[], int, bool)" /> inside an open decal scope.
+    /// False means the scope is closed, the native route is off, or the pass could not be
+    /// prepared, and the caller takes the emulated multi-draw the OpenGL body takes.
+    /// </summary>
+    internal bool TryDrawDecalPoolNative(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount)
+    {
+        if (!decalScopeActive) return false;
+        if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
+
         if (!NativeWorldPrepare(nativeDecals, decalMesh, blending: true, depth: true,
                 out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline))
         {
-            base.RenderDecalPool(decalMesh, indicesStarts, indicesSizes, groupCount, decalTextureId, blockTextureId);
-            return;
+            return false;
         }
 
-        RuntimeStats.drawCallsCount++;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
-        // Inside the caller's motion window the motion attachment is one of the pass's colour
-        // slots and replaces rather than blends, so decals.fsh's motion.glsl writer lands the
-        // surface's vector with the decal's own depth exactly as it does on the GL path.
-        if (NativeWorldBeginPass("Decals", target, slots, new[] { decalTextureId, blockTextureId }))
+        if (NativeWorldBeginPass("Decals", target, slots,
+                new[] { decalScopeDecalTextureId, decalScopeBlockTextureId }))
         {
             device.DrawNativeMeshMulti(pipeline, vao.VaoId, indicesStarts, indicesSizes, groupCount, new[]
             {
-                new NativeTexture(nativeDecals.Samplers[0], decalTextureId),
-                new NativeTexture(nativeDecals.Samplers[1], blockTextureId),
+                new NativeTexture(nativeDecals.Samplers[0], decalScopeDecalTextureId),
+                new NativeTexture(nativeDecals.Samplers[1], decalScopeBlockTextureId),
             });
         }
         NativeWorldEndPass(target, outer, outerFlags);
+        return true;
     }
 }
