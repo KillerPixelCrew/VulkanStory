@@ -424,7 +424,169 @@ public class AmbientOcclusionCoverageTests
         Assert.Contains("\"onOptimumAmbientOcclusionDebugChanged\"", Read("Optimum.Patcher/Program.cs"));
     }
 
+    // ------------------------------------- the AO step drawn natively (Phase 3b stage 1c)
+
+    /// <summary>
+    /// The Vulkan platform draws the AO step through the native device API: a pipeline with
+    /// stated fixed state per pass, a pass that names its target, its written colour slot and its
+    /// reads, uniforms written by resolved placement, and textures resolved straight to bindless
+    /// slots. The chain step routes to it, with the lib virtual as the old route.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformDrawsTheAoStepNatively()
+    {
+        string chain = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostChain.cs");
+        Assert.Contains("if (UseNativePostChain && NativeAmbientOcclusionReady())", chain);
+        Assert.Contains("NativeAmbientOcclusion(projectMatrix);", chain);
+        Assert.Contains("OptimumPostAmbientOcclusion(projectMatrix);", chain);
+
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+
+        // One NativeFullscreenPass per program, with the uniform and sampler names the passes
+        // resolve once instead of looking up per draw.
+        Assert.Contains("nativeSsao = new(\"ssao\",", native);
+        Assert.Contains("nativeBilateralBlur = new(\"bilateralblur\",", native);
+        Assert.Contains("nativeSceneSsao = new(\"scene-ssao\",", native);
+        Assert.Contains("\"screenSize\", \"projection\", \"samples\", \"temporalFrameIndex\"", native);
+        Assert.Contains("\"gPosition\", \"gNormal\", \"texNoise\", \"revealage\"", native);
+        Assert.Contains("\"frameSize\", \"isVertical\"", native);
+        Assert.Contains("\"inputTexture\", \"depthTexture\"", native);
+        Assert.Contains("\"invRenderHeight\", \"optimumAoMode\"", native);
+        Assert.Contains("\"ssaoScene\", \"gPositionScene\", \"revealageScene\"", native);
+
+        // Every pass states its fixed state and writes colour slot 0 alone.
+        Assert.Equal(3, Count(native, "depthTest: false, depthWrite: false, CompareOp.Less)"));
+        Assert.Contains("ColorSlots = 1u,", native);
+        Assert.Contains("device.DrawNativeFullscreen(pipeline,", native);
+        Assert.Contains("device.EndNativePass();", native);
+    }
+
+    /// <summary>
+    /// The values are the OpenGL body's, expression for expression: the half-resolution
+    /// screenSize, the raw unjittered projection, the 64-sample kernel, the temporal dither index
+    /// under exactly the condition that compiles the uniform in, the blur's shared frameSize and
+    /// its iteration count, and the composite's inverse render height.
+    /// </summary>
+    [Fact]
+    public void TheNativeAoStepUsesTheOpenGlBodysValues()
+    {
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+
+        Assert.Contains("float half = ssaa == 1f ? 0.5f : 1f;", native);
+        Assert.Contains("ssaa * client.Width * half, ssaa * client.Height * half", native);
+        Assert.Contains("WriteNativeFloats(pipeline, nativeSsao.Uniforms[1], projectMatrix);", native);
+        Assert.Contains("WriteNativeFloats(pipeline, nativeSsao.Uniforms[2], OptimumSsaoKernel);", native);
+        Assert.Contains("if (OptimumConfig.EffectiveTaa)", native);
+        Assert.Contains("(float)(OptimumTemporal.Frame.FrameIndex & 1023L)", native);
+
+        Assert.Contains("int iterations = ClientSettings.SSAOQuality == 1 ? 1 : 3;", native);
+        Assert.Contains("buffers[i == 0 ? NativeSsaoTargetIndex : NativeSsaoBlurVerticalIndex].ColorTextureIds[0]", native);
+        // The blur's frameSize is frameBuffers[15]'s size on both halves, reproduced not fixed.
+        Assert.Contains("(float)frameSizeSource.Width, (float)frameSizeSource.Height", native);
+
+        Assert.Contains("device.WriteNative(pipeline, nativeSceneSsao.Uniforms[0], 1f / primary.Height);", native);
+        Assert.Contains("OptimumPostAmbientOcclusionTexture != 0 ? 1 : 0", native);
+    }
+
+    /// <summary>
+    /// Both AO modes reach the composite, and the step records that AO is in the scene so the
+    /// final composition never applies it twice. The GTAO branch binds the attenuation inputs and
+    /// sets optimumAoMode exactly where the body does - under AmbientOcclusionShadersUseGtao,
+    /// which is what stamps the OPTIMUMAO variant.
+    /// </summary>
+    [Fact]
+    public void TheNativeAoStepCarriesBothModesAndTheirFlags()
+    {
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+
+        Assert.Contains("OptimumPostAmbientOcclusionTexture = RenderOptimumAmbientOcclusion(projectMatrix);", native);
+        Assert.Contains("if (OptimumPostAmbientOcclusionTexture == 0 && OptimumRenderSsao && projectMatrix != null)", native);
+        Assert.Contains("if (OptimumTaaRequested && TaaTargetsReady)", native);
+        Assert.Contains("bool gtao = OptimumConfig.AmbientOcclusionShadersUseGtao;", native);
+        Assert.Contains("aoTexture = blurred.ColorTextureIds[0];", native);
+        Assert.Contains("OptimumPostSsaoInScene = false;", native);
+        Assert.Contains("OptimumPostSsaoInScene = true;", native);
+
+        // The Multiply blend is the pipeline's, not a tracked GL state.
+        string multiply = Between(native, "private static AttachmentBlend[] NativeMultiplySlotZeroBlend()", "\n    }");
+        Assert.Contains("blend.SrcColor = BlendFactor.Zero;", multiply);
+        Assert.Contains("blend.DstColor = BlendFactor.OneMinusSrcAlpha;", multiply);
+        Assert.Contains("blend.SrcAlpha = BlendFactor.One;", multiply);
+        Assert.Contains("blend.DstAlpha = BlendFactor.OneMinusSrcAlpha;", multiply);
+        Assert.Contains("blend.ColorOp = BlendOp.Add;", multiply);
+        Assert.Contains("blend.AlphaOp = BlendOp.Add;", multiply);
+    }
+
+    /// <summary>
+    /// The two pieces of AO frame state and the SSAA factor are lib accessors, so the native step
+    /// sets and reads exactly what the OpenGL body's step does, and all three are listed for Cecil
+    /// and in the vanilla-regions test.
+    /// </summary>
+    [Fact]
+    public void TheAoStepsFrameStateIsALibSeamListedForCecil()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        Assert.Contains("public int OptimumPostAmbientOcclusionTexture", platform);
+        Assert.Contains("public bool OptimumPostSsaoInScene", platform);
+        Assert.Contains("public float OptimumPostSsaaLevel", platform);
+        // The body keeps writing the fields directly: "OFF is vanilla".
+        Assert.Contains("optimumSsaoInScene = false;", platform);
+        Assert.Contains("optimumAmbientOcclusionTexture = 0;", platform);
+
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
+        foreach (string member in new[]
+                 {
+                     "OptimumPostAmbientOcclusionTexture", "OptimumPostSsaoInScene", "OptimumPostSsaaLevel",
+                 })
+        {
+            Assert.Contains("\"" + member + "\"", patcher);
+            Assert.Contains("\"" + member + "\"", regions);
+        }
+    }
+
+    /// <summary>
+    /// The white clear the SSAO target starts from is the pass's own load, declared with the pass
+    /// - not a glClearBuffer against a draw-buffer mask.
+    /// </summary>
+    [Fact]
+    public void TheSsaoTargetsWhiteClearIsThePassesOwnLoad()
+    {
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+        Assert.Contains("ClearSlots = clearWhite ? 1u : 0u,", native);
+        Assert.Contains("ClearValue = new[] { 1f, 1f, 1f, 1f },", native);
+        Assert.Contains("clearWhite: true", native);
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.Native.cs");
+        Assert.Contains("public uint ClearSlots;", device);
+        Assert.Contains("_targets.ClearPassAttachment(commandBuffer, slot,", device);
+
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("public void ClearPassAttachment(CommandBuffer commandBuffer, int attachment,", targets);
+        Assert.Contains("_graph.PromoteColorClear(texture, _bound.Color[attachment].Layer, r, g, b, a);", targets);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private static int Count(string text, string value)
+    {
+        int count = 0;
+        int offset = 0;
+        while ((offset = text.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            offset += value.Length;
+        }
+        return count;
+    }
+
+    private static string ReadPatchedOrSource(string patchPath, string sourcePath)
+    {
+        string full = Path.Combine(Root(), patchPath);
+        return File.Exists(full) ? PatchReader.ReadPatchedContent(full) : Read(sourcePath);
+    }
 
     private static string Between(string text, string start, string end)
     {

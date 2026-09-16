@@ -597,6 +597,47 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
     // ------------------------------------------------------------------- clears
 
+    /// <summary>
+    /// Clears one colour slot of a declared native pass (docs/vulkan-native-render-systems.md,
+    /// decision 4). Unlike <see cref="ClearColor" /> this consults no draw-buffer mask and no
+    /// tracked colour mask - a native pass states the slots it writes, and a slot it states is a
+    /// slot it may clear. With the frame graph on and no scope open yet the clear is promoted, so
+    /// it becomes the scope's load op instead of a second write.
+    /// </summary>
+    public void ClearPassAttachment(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
+    {
+        if (_bound == null) return;
+        if ((uint)attachment >= (uint)_bound.Color.Length) return;
+        if (!_bound.Color[attachment].IsBound) return;
+
+        if (_graph.Enabled && (!_renderingActive || _needsRestart))
+        {
+            VulkanTexture? texture = _textures.Get(_bound.Color[attachment].TextureId);
+            if (texture == null) return;
+            EndRendering(commandBuffer);
+            _graph.PromoteColorClear(texture, _bound.Color[attachment].Layer, r, g, b, a);
+            return;
+        }
+
+        EnsureRendering(commandBuffer);
+        if (!_renderingActive) return;
+        if (_graph.Enabled) _graph.NoteInPassClear();
+
+        var clear = new ClearAttachment
+        {
+            AspectMask = ImageAspectFlags.ColorBit,
+            ColorAttachment = (uint)attachment,
+            ClearValue = new ClearValue(new ClearColorValue(r, g, b, a)),
+        };
+        var rect = new ClearRect
+        {
+            Rect = new Rect2D(new Offset2D(0, 0), new Extent2D(_bound.Width, _bound.Height)),
+            BaseArrayLayer = 0,
+            LayerCount = 1,
+        };
+        _context.Api.CmdClearAttachments(commandBuffer, 1, &clear, 1, &rect);
+    }
+
     public void ClearColor(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
     {
         if (_bound == null) return;
