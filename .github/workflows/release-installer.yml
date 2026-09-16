@@ -99,33 +99,18 @@ jobs:
             extra_args+=(--splashImage Optimum.Installer/Assets/optimum-logo.png)
           fi
 
-          pack() {
-            dotnet vpk pack \
-              --packId Optimum.Installer \
-              --packTitle Optimum \
-              --packVersion "${{ steps.v.outputs.version }}" \
-              --packDir publish/${{ matrix.rid }} \
-              --mainExe ${{ matrix.exe }} \
-              "$@" \
-              --outputDir releases
-          }
-
-          # Windows and Linux take the Optimum icon directly. On macOS the icon is
-          # best effort: vpk auto-creates the .app bundle from --icon, and if that
-          # bundling step fails on the runner we still ship the archival macOS
-          # package without a custom icon rather than losing the artifact.
-          case "$rid" in
-            osx-*)
-              if ! pack --icon "$icon" "${extra_args[@]}"; then
-                echo "vpk pack with --icon failed on $rid; retrying without a custom icon" >&2
-                rm -rf releases
-                pack "${extra_args[@]}"
-              fi
-              ;;
-            *)
-              pack --icon "$icon" "${extra_args[@]}"
-              ;;
-          esac
+          # macOS runners ship bash 3.2, where "${arr[@]}" on an empty array is an
+          # unbound-variable error under set -u. Expand with the +alternate form so
+          # an empty extra_args disappears instead of aborting the pack.
+          dotnet vpk pack \
+            --packId Optimum.Installer \
+            --packTitle Optimum \
+            --packVersion "${{ steps.v.outputs.version }}" \
+            --packDir publish/${{ matrix.rid }} \
+            --mainExe ${{ matrix.exe }} \
+            --icon "$icon" \
+            ${extra_args[@]+"${extra_args[@]}"} \
+            --outputDir releases
 
       # vpk has no name-override flag. Rename the user-facing artifacts (setup,
       # portable, AppImage, pkg) to Optimum-v<version>-<rid>-Installer.<ext> and fix
