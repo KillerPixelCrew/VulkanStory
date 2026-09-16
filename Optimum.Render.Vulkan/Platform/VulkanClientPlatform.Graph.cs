@@ -356,35 +356,17 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// Phase 3b stage 1: the resolve's draw, natively. The lib body above keeps every temporal
-    /// decision and every field it writes afterwards, so only the draw changes route.
+    /// Phase 3b stage 1: the chain's ninth pass, drawn natively - the attachment-subset pass that
+    /// writes Primary colour 0 while sampling Primary colour 1 (VulkanClientPlatform.NativePostFinal.cs).
     /// </summary>
-    public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read,
-        float[] invViewProjJittered, float[] prevViewProj, bool reset)
-    {
-        if (UseNativePostChain)
-        {
-            NativeTaaResolve(write, read, invViewProjJittered, prevViewProj, reset);
-            return;
-        }
-        base.OptimumTaaResolveDraw(write, read, invViewProjJittered, prevViewProj, reset);
-    }
-
-    /// <summary>Phase 3b stage 1: the sharpen's draw, natively.</summary>
-    public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)
-    {
-        if (UseNativePostChain)
-        {
-            NativeTaaSharpen(target, resolvedScene);
-            return;
-        }
-        base.OptimumTaaSharpenDraw(target, resolvedScene);
-    }
-
-    /// <summary>Phase 3b stage 1: the chain's ninth pass. Stage 1g makes it native.</summary>
     public override void RenderFinalComposition()
     {
         NotePostStep(NativePostStep.FinalComposition);
+        if (UseNativePostChain)
+        {
+            NativeFinalComposition();
+            return;
+        }
         LegacyFinalComposition();
     }
 

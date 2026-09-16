@@ -273,11 +273,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumPostLuma",
         "OptimumPostFinish",
         "OptimumBindKeepViewport",
-        // Phase 3b stage 1d: the two TAA passes' draws, lifted out of their bodies so the
-        // native chain replaces the draw while the temporal contract - the reset decision,
-        // the resolved textures, the history validity and the parity flip - stays put.
-        "OptimumTaaResolveDraw",
-        "OptimumTaaSharpenDraw",
+        // Phase 3b stage 1e-1g: the per-frame switches, the render scale and the two AO
+        // fields a native bloom, god-rays, Luma and final-composition pass reads as client
+        // state instead of GL state (decision 3).
+        "OptimumRenderBloom",
+        "OptimumRenderGodRays",
+        "OptimumRenderFxaa",
+        "OptimumSsaaLevel",
+        "OptimumAmbientOcclusionTexture",
+        "OptimumSsaoInScene",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
         // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).

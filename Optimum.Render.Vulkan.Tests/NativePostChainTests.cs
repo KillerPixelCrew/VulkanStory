@@ -44,17 +44,9 @@ public class NativePostChainTests(ITestOutputHelper output)
     private const int Size = 16;
 
     private static readonly string[] Programs =
-        { "transparentcompose", "taa-skymotion", "taa-resolve", "taa-sharpen", "blit" };
-
-    /// <summary>
-    /// A jitter phase per loop step, pinned so two runs of the same length see the same sequence
-    /// whatever the global frame counter happens to be. The values are Halton-shaped: sub-pixel,
-    /// never zero, never repeating inside one run.
-    /// </summary>
-    private static readonly (float X, float Y)[] JitterPhases =
     {
-        (0.25f, -0.375f), (-0.125f, 0.25f), (0.375f, 0.125f),
-        (-0.375f, -0.25f), (0.125f, 0.375f), (-0.25f, -0.125f),
+        "transparentcompose", "taa-skymotion", "taa-resolve", "blit",
+        "findbright", "blur", "godrays", "luma", "final",
     };
 
     /// <summary>The Vulkan platform without a window: the size seam answers for one.</summary>
@@ -64,18 +56,44 @@ public class NativePostChainTests(ITestOutputHelper output)
         {
         }
 
-        public override Size2i OptimumWindowClientSize() => new(NativePostChainTests.Size, NativePostChainTests.Size);
+        /// <summary>
+        /// The window the size seam answers with. Render scale below 1 is this size divided by
+        /// the render targets' size, exactly as the client computes it: client 32 at ssaa 0.5
+        /// gives the same 16-pixel targets as client 16 at ssaa 1.
+        /// </summary>
+        public Size2i ClientSize { get; set; } = new(NativePostChainTests.Size, NativePostChainTests.Size);
 
         /// <summary>
-        /// No window is opened here, and the base's Primary case sizes its viewport from
-        /// NativeWindow.ClientSize, which is GLFW-backed. Primary is the render resolution, so
-        /// the full CurrentFrameBuffer setter is the same bind and the same viewport.
+        /// The god-rays pass takes its time uniform from here. Pinned so the two routes of a
+        /// differential run cannot be handed different values by the wall clock.
+        /// </summary>
+        public override long EllapsedMs => 4242;
+
+        public override Size2i OptimumWindowClientSize() => ClientSize;
+
+        /// <summary>
+        /// No window is opened here, and the base's cases size their viewports from
+        /// NativeWindow.ClientSize, which is GLFW-backed. Every post target in this fixture is
+        /// built at exactly the size its case computes - Primary and Luma at the render
+        /// resolution, the bloom pair at half and at a quarter of it, god rays at half - so
+        /// binding the target and taking the viewport from it is the same bind and the same
+        /// viewport, for the OpenGL route and the native one alike.
         /// </summary>
         public override void LoadFrameBuffer(EnumFrameBuffer framebuffer)
         {
             if (framebuffer == EnumFrameBuffer.Primary)
             {
                 CurrentFrameBuffer = FrameBuffers[0];
+                return;
+            }
+            switch (framebuffer)
+            {
+            case EnumFrameBuffer.BlurHorizontalMedRes:
+            case EnumFrameBuffer.BlurVerticalMedRes:
+            case EnumFrameBuffer.BlurHorizontalLowRes:
+            case EnumFrameBuffer.BlurVerticalLowRes:
+            case EnumFrameBuffer.GodRays:
+                CurrentFrameBuffer = FrameBuffers[(int)framebuffer];
                 return;
             }
             base.LoadFrameBuffer(framebuffer);
@@ -262,168 +280,122 @@ public class NativePostChainTests(ITestOutputHelper output)
         GpuTest.AssertClean(seam);
     }
 
+    // ------------------------------------------------- the chain's tail, both routes
+
     /// <summary>
-    /// The TAA resolve, natively: all three attachments of the history slot it writes - the
-    /// resolved colour, the resolved glow and the linear depth - have to be the OpenGL body's,
-    /// from a cold history (the reset frame, which copies the scene through) and from a warm one
-    /// (the frame that actually blends history in).
-    ///
-    /// CLAUDE.md rule 11 is the shader's, and both routes run the same taa-resolve.fsh: what is
-    /// asserted here is that the native route feeds it the same seven textures and the same nine
-    /// uniform values, so the 3x3 nearest-depth disocclusion and the luminance anti-flicker
-    /// weighting see identical inputs and produce identical pixels.
+    /// The settings that change the chain's tail. Each row is one run of the whole chain on both
+    /// routes: bloom, god rays, FXAA, vanilla SSAO, TAA, the render scale (client size over target
+    /// size), the AO debug view and which AO texture the frame produced.
+    /// </summary>
+    public static TheoryData<string, bool, bool, bool, bool, bool, float, int, bool, bool> TailSettings()
+    {
+        var data = new TheoryData<string, bool, bool, bool, bool, bool, float, int, bool, bool>();
+        //      name                 bloom  rays   fxaa   ssao   taa    ssaa  client  debug  gtao
+        data.Add("everything-off",   false, false, false, false, false, 1f,   Size,   false, false);
+        data.Add("bloom",            true,  false, false, false, false, 1f,   Size,   false, false);
+        data.Add("god-rays",         false, true,  false, false, false, 1f,   Size,   false, false);
+        data.Add("fxaa",             false, false, true,  false, false, 1f,   Size,   false, false);
+        data.Add("bloom-rays-fxaa",  true,  true,  true,  false, false, 1f,   Size,   false, false);
+        data.Add("ssao",             true,  true,  false, true,  false, 1f,   Size,   false, false);
+        data.Add("ssao-debug-view",  false, false, false, true,  false, 1f,   Size,   true,  false);
+        data.Add("ssao-gtao",        false, false, false, true,  false, 1f,   Size,   false, true);
+        data.Add("ssao-gtao-debug",  false, false, false, true,  false, 1f,   Size,   true,  true);
+        data.Add("taa",              true,  true,  true,  false, true,  1f,   Size,   false, false);
+        data.Add("taa-ssao",         true,  true,  true,  true,  true,  1f,   Size,   false, false);
+        data.Add("render-scale-half", true, true,  true,  true,  false, 0.5f, Size * 2, false, false);
+        return data;
+    }
+
+    /// <summary>
+    /// Behavioural identity (decision 6) for the four passes this stage made native: the bloom
+    /// chain, god rays, the Luma step and the final composition. The whole chain runs twice from
+    /// identically seeded targets - once on the OpenGL body, once natively - and every target the
+    /// tail writes has to come out the same, bitwise: the find-bright image, the low-resolution
+    /// bloom result the composition reads, the god-ray target, the Luma target and Primary colour
+    /// 0. The motion attachment is checked too, because the composition keeps it in its scope
+    /// while writing colour 0 and must not touch it.
     /// </summary>
     [SkippableTheory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void TheTaaResolveMatchesTheOpenGlBody(bool warmHistory)
+    [MemberData(nameof(TailSettings))]
+    public void TheChainTailMatchesTheOpenGlBodyAcrossThePostSettings(string name, bool bloom, bool godRays,
+        bool fxaa, bool ssao, bool taa, float ssaa, int clientSize, bool debugView, bool gtao)
     {
         using Session session = Open();
-        session.EnableTaa(jitterActive: true);
-        session.PatternedScene = true;
+        if (taa) session.EnableTaa(jitterActive: true);
+        else OptimumConfig.Taa = false;
+        OptimumConfig.AmbientOcclusionDebugView = debugView;
+        session.ApplyPostSettings(bloom, godRays, fxaa, ssao, ssaa, clientSize);
 
-        Resolved emulated = RunResolve(session, native: false, warmHistory);
+        int aoTexture = gtao ? session.SsaoBlurTexture : 0;
+        TailFrame emulated = RunTail(session, native: false, aoInScene: gtao, aoTexture: aoTexture);
 
         long passesBefore = session.Seam.NativePassesForTests;
-        long drawsBefore = session.Seam.NativeDrawsForTests;
         long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
-        Resolved nativeRoute = RunResolve(session, native: true, warmHistory);
+        long copiesBefore = session.Seam.ReadSelfCopiesForTests.Created;
+        TailFrame nativeRoute = RunTail(session, native: true, aoInScene: gtao, aoTexture: aoTexture);
 
-        Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
-        Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
+        // The Luma step and the final composition always draw; bloom adds five passes and god
+        // rays one. No native pass reached the emulation layer, and the composition's self-read
+        // took no feedback copy - the declared attachment subset is what makes it safe.
+        long expectedPasses = 2 + (bloom ? 5 : 0) + (godRays ? 1 : 0);
+        Assert.Equal(expectedPasses, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+        Assert.Equal(copiesBefore, session.Seam.ReadSelfCopiesForTests.Created);
 
-        Assert.Equal(emulated.Color, nativeRoute.Color);
-        Assert.Equal(emulated.Glow, nativeRoute.Glow);
-        Assert.Equal(emulated.Depth, nativeRoute.Depth);
+        Assert.Equal(emulated.FindBright, nativeRoute.FindBright);
+        Assert.Equal(emulated.BloomLow, nativeRoute.BloomLow);
+        Assert.Equal(emulated.GodRays, nativeRoute.GodRays);
+        Assert.Equal(emulated.Luma, nativeRoute.Luma);
+        Assert.Equal(emulated.Final, nativeRoute.Final);
+        Assert.Equal(emulated.Motion, nativeRoute.Motion);
 
-        // The pass wrote a resolved image over the seed, or the comparison above would hold
-        // for two routes that both wrote nothing.
-        Assert.NotEqual(session.HistorySeedColor, nativeRoute.Color);
+        // The composition really wrote something, or "the two routes agree" would be vacuous.
+        Assert.NotEqual(session.SceneSeed, nativeRoute.Final);
 
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
-    /// The TAA resolve with TAA off: the lib body returns before any draw, so the native route
-    /// declares no pass at all and the history is marked invalid on both routes.
+    /// The final composition samples Primary colour 1 as the glow on a frame with no TAA resolve,
+    /// while it writes Primary colour 0. The pass declares the attachment subset, so colour 1 is
+    /// moved to the shader-read layout for the pass and back afterwards - the frame takes no
+    /// feedback copy - and the glow attachment itself comes out of the pass unchanged.
     /// </summary>
     [SkippableFact]
-    public void TheTaaResolveDrawsNothingWithTaaOff()
+    public void TheFinalCompositionReadsPrimaryColourOneWithoutAFeedbackCopy()
     {
         using Session session = Open();
-        session.EnableTaa(jitterActive: true);
         OptimumConfig.Taa = false;
+        OptimumConfig.AmbientOcclusionDebugView = false;
+        session.ApplyPostSettings(bloom: false, godRays: false, fxaa: false, ssao: false, ssaa: 1f,
+            clientSize: Size);
 
         ChainPlatform platform = session.Platform;
         platform.NativePostChainEnabled = true;
+        session.ResetTaaHistory();
+
+        long copiesBefore = session.Seam.ReadSelfCopiesForTests.Created;
         long passesBefore = session.Seam.NativePassesForTests;
+        long drawsBefore = session.Seam.NativeDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
 
         platform.BeginFrame();
         session.SeedFrame();
         platform.CurrentFrameBuffer = session.Primary;
-        Assert.False(platform.RenderOptimumTaaResolve());
+        Assert.False(platform.TaaResolvedThisFrame);
+
+        platform.RenderFinalComposition();
+
+        byte[] glow = session.ReadGlow();
+        byte[] scene = session.ReadScene();
         platform.EndFrame();
 
-        Assert.Equal(0, session.Seam.NativePassesForTests - passesBefore);
-        Assert.False(platform.TaaResolvedThisFrame);
-        Assert.False(HistoryValid(platform));
-
-        GpuTest.AssertClean(session.Seam);
-    }
-
-    /// <summary>
-    /// The TAA sharpen, natively: the sharpen target's single attachment has to be the OpenGL
-    /// body's at every strength the setting can take, and the texture the pass hands on to the
-    /// rest of the chain has to be the sharpen target either way.
-    /// </summary>
-    [SkippableTheory]
-    [InlineData(1f)]
-    [InlineData(0.35f)]
-    public void TheTaaSharpenMatchesTheOpenGlBody(float sharpness)
-    {
-        using Session session = Open();
-        session.EnableTaa(jitterActive: true);
-        session.PatternedScene = true;
-        OptimumConfig.TaaSharpness = sharpness;
-
-        byte[] emulated = RunSharpen(session, native: false, out int emulatedTexture);
-
-        long passesBefore = session.Seam.NativePassesForTests;
-        long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
-        byte[] nativeRoute = RunSharpen(session, native: true, out int nativeTexture);
-
-        // One native pass for the resolve that has to run first, one for the sharpen.
-        Assert.Equal(2, session.Seam.NativePassesForTests - passesBefore);
-        Assert.Equal(2, session.Seam.NativeDrawsForTests - drawsBefore);
+        Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
+        Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
         Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
-
-        Assert.Equal(session.Sharpen.ColorTextureIds[0], emulatedTexture);
-        Assert.Equal(session.Sharpen.ColorTextureIds[0], nativeTexture);
-        Assert.Equal(emulated, nativeRoute);
-        Assert.NotEqual(session.SharpenSeed, nativeRoute);
-
-        GpuTest.AssertClean(session.Seam);
-    }
-
-    /// <summary>
-    /// The sharpen's conditions live in the lib body, so both routes skip it on exactly the same
-    /// frames: sharpness at zero hands the resolved texture straight on and draws nothing.
-    /// </summary>
-    [SkippableFact]
-    public void TheTaaSharpenIsSkippedOnBothRoutesWhenThereIsNothingToSharpen()
-    {
-        using Session session = Open();
-        session.EnableTaa(jitterActive: true);
-        OptimumConfig.TaaSharpness = 0f;
-
-        ChainPlatform platform = session.Platform;
-        foreach (bool native in new[] { false, true })
-        {
-            platform.NativePostChainEnabled = native;
-            long passesBefore = session.Seam.NativePassesForTests;
-
-            platform.BeginFrame();
-            session.SeedFrame();
-            platform.CurrentFrameBuffer = session.Primary;
-            Assert.True(platform.RenderOptimumTaaResolve());
-            int resolved = platform.OptimumPostSceneTexture();
-            Assert.Equal(resolved, platform.RenderOptimumTaaSharpen(resolved));
-            platform.EndFrame();
-
-            // The resolve's pass on the native route, and nothing for the sharpen.
-            Assert.Equal(native ? 1 : 0, session.Seam.NativePassesForTests - passesBefore);
-        }
-
-        GpuTest.AssertClean(session.Seam);
-    }
-
-    /// <summary>
-    /// Several frames of the native resolve with nothing read back between them: the history is
-    /// still being accumulated, not replaced. Five frames do not land where one frame lands -
-    /// each frame reprojects the previous slot at its own sub-pixel jitter and blends it in -
-    /// and where they land is the OpenGL body's answer to the identical sequence.
-    ///
-    /// A single-frame readback cannot see this: it passed while the R32F-history and
-    /// masked-clear bugs were live (P2, 2026-09-10), which is why the loop below reads nothing.
-    /// </summary>
-    [SkippableFact]
-    public void TheNativeResolveKeepsAccumulatingHistoryAcrossFrames()
-    {
-        using Session session = Open();
-        session.EnableTaa(jitterActive: true);
-        session.PatternedScene = true;
-
-        // The same last frame - the same jitter phase, the same scene, the same slot - reached
-        // two ways: cold, and after four frames of history. Pinning the phase is what makes the
-        // difference between them history and nothing else.
-        byte[] lastFrameAlone = RunResolveFrames(session, native: true, frames: 1, startPhase: 4);
-        byte[] fiveFrames = RunResolveFrames(session, native: true, frames: 5, startPhase: 0);
-        Assert.NotEqual(lastFrameAlone, fiveFrames);
-
-        byte[] emulatedFive = RunResolveFrames(session, native: false, frames: 5, startPhase: 0);
-        Assert.Equal(emulatedFive, fiveFrames);
+        Assert.Equal(copiesBefore, session.Seam.ReadSelfCopiesForTests.Created);
+        Assert.NotEqual(session.SceneSeed, scene);
+        Assert.Equal(session.GlowSeed, glow);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -432,91 +404,39 @@ public class NativePostChainTests(ITestOutputHelper output)
 
     private readonly record struct Frame(byte[] Scene, byte[] Glow, byte[] Motion);
 
-    /// <summary>The three attachments of the history slot a resolve wrote.</summary>
-    private readonly record struct Resolved(byte[] Color, byte[] Glow, byte[] Depth);
+    /// <summary>Everything the chain's tail writes, on one route.</summary>
+    private readonly record struct TailFrame(byte[] FindBright, byte[] BloomLow, byte[] GodRays,
+        byte[] Luma, byte[] Final, byte[] Motion);
 
     /// <summary>
-    /// One TAA resolve on the route under test, from an identically seeded frame: the history
-    /// parity pinned to slot A, both history slots seeded, and the jitter pinned to phase 0 so
-    /// the two routes see the same sub-pixel offset.
+    /// One whole post chain plus the final composition, on the route under test, from identically
+    /// seeded targets. The two AO fields are set between the two calls because the chain's first
+    /// step - the AO step, which is still the OpenGL body on both routes - resets them, exactly as
+    /// a real frame's GTAO pass would then fill them in.
     /// </summary>
-    private Resolved RunResolve(Session session, bool native, bool warmHistory)
+    private TailFrame RunTail(Session session, bool native, bool aoInScene, int aoTexture)
     {
         ChainPlatform platform = session.Platform;
         platform.NativePostChainEnabled = native;
-        session.AdvanceTemporalFrame(0);
-        SetParity(platform, 0);
-        SetHistoryValid(platform, warmHistory);
+        session.ResetTaaHistory();
 
         platform.BeginFrame();
         session.SeedFrame();
-        session.SeedHistory();
         platform.CurrentFrameBuffer = session.Primary;
 
-        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
-        Assert.Equal(1, Parity(platform));
+        platform.RenderPostprocessingEffects(null);
+        session.ApplyAmbientOcclusionState(aoInScene, aoTexture);
+        platform.RenderFinalComposition();
 
-        var resolved = new Resolved(session.ReadHistoryColor(0), session.ReadHistoryGlow(0),
-            session.ReadHistoryDepth(0));
+        var frame = new TailFrame(
+            session.ReadPostTarget(4),
+            session.ReadPostTarget(8),
+            session.ReadPostTarget(7),
+            session.ReadPostTarget(10),
+            session.ReadScene(),
+            session.ReadMotion());
         platform.EndFrame();
-        return resolved;
-    }
-
-    /// <summary>One resolve and one sharpen on the route under test, from an identically seeded frame.</summary>
-    private byte[] RunSharpen(Session session, bool native, out int handedOn)
-    {
-        ChainPlatform platform = session.Platform;
-        platform.NativePostChainEnabled = native;
-        session.AdvanceTemporalFrame(0);
-        SetParity(platform, 0);
-        SetHistoryValid(platform, true);
-
-        platform.BeginFrame();
-        session.SeedFrame();
-        session.SeedHistory();
-        session.SeedSharpen();
-        platform.CurrentFrameBuffer = session.Primary;
-
-        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
-        handedOn = platform.RenderOptimumTaaSharpen(platform.OptimumPostSceneTexture());
-
-        byte[] sharpened = session.ReadSharpen();
-        platform.EndFrame();
-        return sharpened;
-    }
-
-    /// <summary>
-    /// <paramref name="frames" /> resolves on the route under test, with no readback inside the
-    /// loop - only the frame boundary between them - and the history read once at the end. The
-    /// run starts cold, so the first frame is the reset frame and every frame after it blends.
-    /// An odd frame count always ends on slot A, so two runs of different length are comparable.
-    /// </summary>
-    private byte[] RunResolveFrames(Session session, bool native, int frames, int startPhase)
-    {
-        Assert.True(frames % 2 == 1, "an even frame count would end on the other history slot");
-        ChainPlatform platform = session.Platform;
-        platform.NativePostChainEnabled = native;
-        SetParity(platform, 0);
-        SetHistoryValid(platform, false);
-
-        platform.BeginFrame();
-        session.SeedHistory();
-        platform.EndFrame();
-
-        for (int frame = 0; frame < frames; frame++)
-        {
-            session.AdvanceTemporalFrame(startPhase + frame);
-            platform.BeginFrame();
-            session.SeedFrame();
-            platform.CurrentFrameBuffer = session.Primary;
-            Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run on frame " + frame);
-            platform.EndFrame();
-        }
-
-        platform.BeginFrame();
-        byte[] history = session.ReadHistoryColor(0);
-        platform.EndFrame();
-        return history;
+        return frame;
     }
 
     /// <summary>One OIT merge, on the route under test, from an identically seeded frame.</summary>
@@ -626,6 +546,9 @@ public class NativePostChainTests(ITestOutputHelper output)
         /// <summary>The shaded image's seed, as read back.</summary>
         public byte[] SceneSeed { get; private set; } = Array.Empty<byte>();
 
+        /// <summary>The glow attachment's seed, decoded the way <see cref="ReadGlow" /> decodes it.</summary>
+        public byte[] GlowSeed { get; private set; } = Array.Empty<byte>();
+
         private readonly List<FrameBufferRef> buffers = new();
         private int oitReveal;
         private int oitAccumulation;
@@ -633,6 +556,7 @@ public class NativePostChainTests(ITestOutputHelper output)
         private int decodeProgram;
         private int decodeTarget;
         private int decodeFramebuffer;
+        private readonly Dictionary<(int Width, int Height), int> decodeFramebuffers = new();
         private ClientPlatformAbstract? previousPlatform;
         private string dataPath = "";
         private ShaderProgramTransparentcompose? composeBefore;
@@ -640,8 +564,14 @@ public class NativePostChainTests(ITestOutputHelper output)
         private ShaderProgram? resolveBefore;
         private ShaderProgram? sharpenBefore;
         private ShaderProgramBlit? blitBefore;
+        private ShaderProgramFindbright? findbrightBefore;
+        private ShaderProgramBlur? blurBefore;
+        private ShaderProgramGodrays? godraysBefore;
+        private ShaderProgramLuma? lumaBefore;
+        private ShaderProgramFinal? finalBefore;
         private bool taaBefore;
         private float sharpnessBefore;
+        private bool debugViewBefore;
         private object? oitRevealBefore;
         private object? oitAccumBefore;
         private DefaultShaderUniforms uniforms = new();
@@ -684,8 +614,14 @@ public class NativePostChainTests(ITestOutputHelper output)
                 resolveBefore = ShaderPrograms.TaaResolve,
                 sharpenBefore = ShaderPrograms.TaaSharpen,
                 blitBefore = ShaderPrograms.Blit,
+                findbrightBefore = ShaderPrograms.Findbright,
+                blurBefore = ShaderPrograms.Blur,
+                godraysBefore = ShaderPrograms.Godrays,
+                lumaBefore = ShaderPrograms.Luma,
+                finalBefore = ShaderPrograms.Final,
                 taaBefore = OptimumConfig.Taa,
                 sharpnessBefore = OptimumConfig.TaaSharpness,
+                debugViewBefore = OptimumConfig.AmbientOcclusionDebugView,
             };
             ScreenManager.Platform = platform;
             ScreenManager.FrameProfiler ??= new FrameProfilerUtil(static (string _) => { });
@@ -705,8 +641,14 @@ public class NativePostChainTests(ITestOutputHelper output)
             ShaderPrograms.TaaResolve = resolveBefore!;
             ShaderPrograms.TaaSharpen = sharpenBefore!;
             ShaderPrograms.Blit = blitBefore!;
+            ShaderPrograms.Findbright = findbrightBefore!;
+            ShaderPrograms.Blur = blurBefore!;
+            ShaderPrograms.Godrays = godraysBefore!;
+            ShaderPrograms.Luma = lumaBefore!;
+            ShaderPrograms.Final = finalBefore!;
             OptimumConfig.Taa = taaBefore;
             OptimumConfig.TaaSharpness = sharpnessBefore;
+            OptimumConfig.AmbientOcclusionDebugView = debugViewBefore;
             OptimumTemporal.Frame.JitterActive = false;
             typeof(SystemRenderOITLayers).GetField("revealTextureId", HiddenStatic)!.SetValue(null, oitRevealBefore);
             typeof(SystemRenderOITLayers).GetField("accumTextureId", HiddenStatic)!.SetValue(null, oitAccumBefore);
@@ -739,6 +681,8 @@ public class NativePostChainTests(ITestOutputHelper output)
             seam.ClearColor(4, 0.10f, 0.25f, 0.05f, 0.35f);
             seam.ClearColor(5, 0.05f, 0.10f, 0.30f, 0.2f);
 
+            SeedPostTargets();
+
             seam.BindFramebuffer(Primary.FboId);
             seam.SetDrawBuffers(Primary.FboId, 0b111);
             if (!PatternedScene) seam.ClearColor(0, 0.25f, 0.5f, 0.75f, 1f);
@@ -763,56 +707,76 @@ public class NativePostChainTests(ITestOutputHelper output)
             seam.BindTexture(7, oitAccumulation);
         }
 
-        /// <summary>
-        /// The scene pattern into Primary's colour 0, the same every frame: a clear can only
-        /// write a flat image, and a flat image collapses the resolve's variance clip box.
-        /// </summary>
-        private void DrawScenePattern()
-        {
-            VulkanDevice seam = Seam;
-            seam.SetDrawBuffers(Primary.FboId, 0b001);
-            seam.UseProgram(decodeProgram);
-            seam.SetSamplerUnit(decodeProgram, "source", 15);
-            seam.BindTexture(15, scenePattern);
-            SetInt(seam, decodeProgram, "motionMode", 0);
-            seam.SetViewport(0, 0, Size, Size);
-            seam.SetDepthTest(false);
-            seam.SetDepthMask(false);
-            seam.SetCullFace(false);
-            seam.SetBlend(false, EnumBlendMode.Standard);
-            seam.DrawFullscreenTriangle();
-        }
+        /// <summary>The post chain's targets, indexed by their EnumFrameBuffer slot.</summary>
+        private static readonly int[] PostTargetIndices = { 2, 3, 4, 7, 8, 9, 10, 14 };
 
         /// <summary>
-        /// Both history slots to a flat seed, so a resolve starts from known content on either
-        /// route. Inside a frame: a clear between frames is a no-op on this seam.
+        /// Every post target seeded to its own constant, and the TAA history slots with it: the
+        /// final composition samples the bloom and god-ray targets whether or not their passes ran
+        /// this frame, so both routes have to start a run from identical contents.
         /// </summary>
-        public void SeedHistory()
+        private void SeedPostTargets()
         {
             VulkanDevice seam = Seam;
+            for (int i = 0; i < PostTargetIndices.Length; i++)
+            {
+                FrameBufferRef target = buffers[PostTargetIndices[i]];
+                if (target == null) continue;
+                float level = 0.08f + i * 0.09f;
+                seam.BindFramebuffer(target.FboId);
+                seam.SetDrawBuffers(target.FboId, 0b1);
+                seam.ClearColor(0, level, 1f - level, level * 0.5f, 1f);
+            }
+
             for (int parity = 0; parity < 2; parity++)
             {
-                FrameBufferRef slot = History(parity);
-                seam.BindFramebuffer(slot.FboId);
-                seam.SetDrawBuffers(slot.FboId, 0b111);
-                seam.ClearColor(0, 0.9f, 0.1f, 0.4f, 1f);
-                seam.ClearColor(1, 0.4f, 0.9f, 0.1f, 1f);
-                seam.ClearColor(2, 12.5f, 0f, 0f, 1f);
+                FrameBufferRef history = History(parity);
+                if (history == null) continue;
+                seam.BindFramebuffer(history.FboId);
+                seam.SetDrawBuffers(history.FboId, 0b111);
+                seam.ClearColor(0, 0.2f + parity * 0.1f, 0.3f, 0.4f, 1f);
+                seam.ClearColor(1, 0.1f, 0.2f + parity * 0.1f, 0.3f, 1f);
+                seam.ClearColor(2, 0.5f, 0f, 0f, 1f);
             }
-            seam.BindFramebuffer(Primary.FboId);
-            seam.SetDrawBuffers(Primary.FboId, 0b011);
         }
 
-        /// <summary>The sharpen target to a flat seed, so "the pass wrote something" is checkable.</summary>
-        public void SeedSharpen()
+        /// <summary>
+        /// The TAA resolve's history slot selection put back to its starting state, so two
+        /// differential runs of the same chain resolve into the same slot from the same history.
+        /// </summary>
+        public void ResetTaaHistory()
         {
-            VulkanDevice seam = Seam;
-            seam.BindFramebuffer(Sharpen.FboId);
-            seam.SetDrawBuffers(Sharpen.FboId, 0b1);
-            seam.ClearColor(0, 0.05f, 0.95f, 0.55f, 1f);
-            seam.BindFramebuffer(Primary.FboId);
-            seam.SetDrawBuffers(Primary.FboId, 0b011);
+            typeof(ClientPlatformWindows).GetField("_taaFrameParity", Hidden)!.SetValue(Platform, 0);
+            typeof(ClientPlatformWindows).GetField("_taaHistoryValid", Hidden)!.SetValue(Platform, false);
         }
+
+        /// <summary>
+        /// The per-frame post switches window_RenderFrame computes, and the render scale: private
+        /// fields of ClientPlatformWindows, which is where the chain reads them from on both
+        /// routes (through OptimumRenderBloom and friends on the native one).
+        /// </summary>
+        public void ApplyPostSettings(bool bloom, bool godRays, bool fxaa, bool ssao, float ssaa, int clientSize)
+        {
+            SetField("RenderBloom", bloom);
+            SetField("RenderGodRays", godRays);
+            SetField("RenderFXAA", fxaa);
+            SetField("RenderSSAO", ssao);
+            SetField("ssaaLevel", ssaa);
+            Platform.ClientSize = new Size2i(clientSize, clientSize);
+        }
+
+        /// <summary>The two AO fields the final composition reads, as the AO step would have left them.</summary>
+        public void ApplyAmbientOcclusionState(bool inScene, int platformTexture)
+        {
+            SetField("optimumSsaoInScene", inScene);
+            SetField("optimumAmbientOcclusionTexture", platformTexture);
+        }
+
+        /// <summary>The blurred vanilla-SSAO target the final composition binds when AO is on.</summary>
+        public int SsaoBlurTexture => buffers[14].ColorTextureIds[0];
+
+        private void SetField(string name, object value) =>
+            typeof(ClientPlatformWindows).GetField(name, Hidden)!.SetValue(Platform, value);
 
         /// <summary>TAA on, with the jitter window open or closed, and no sharpen pass.</summary>
         public void EnableTaa(bool jitterActive)
@@ -862,56 +826,67 @@ public class NativePostChainTests(ITestOutputHelper output)
 
         // ---------------------------------------------------------------- readback
 
-        public byte[] ReadScene() => ReadAttachmentZero(Primary.FboId);
+        public byte[] ReadScene() => ReadAttachmentZero(Primary.FboId, Size, Size);
 
-        public byte[] ReadGlow() => Decode(Primary.ColorTextureIds[1], motion: false);
+        public byte[] ReadGlow() => Decode(Primary.ColorTextureIds[1], Size, Size, motion: false);
 
-        public byte[] ReadMotion() => Decode(Primary.ColorTextureIds[2], motion: true);
+        public byte[] ReadMotion() => Decode(Primary.ColorTextureIds[2], Size, Size, motion: true);
 
-        public byte[] ReadHistoryColor(int parity) => Decode(History(parity).ColorTextureIds[0], motion: false);
-
-        public byte[] ReadHistoryGlow(int parity) => Decode(History(parity).ColorTextureIds[1], motion: false);
-
-        /// <summary>
-        /// The history's linear depth, through the motion decode: it is an R32F in view-space
-        /// metres, which the clamping colour decode would flatten to white everywhere.
-        /// </summary>
-        public byte[] ReadHistoryDepth(int parity) => Decode(History(parity).ColorTextureIds[2], motion: true);
-
-        public byte[] ReadSharpen() => Decode(Sharpen.ColorTextureIds[0], motion: false);
-
-        private unsafe byte[] ReadAttachmentZero(int framebufferId)
+        /// <summary>One post target's colour 0, decoded at that target's own size.</summary>
+        public byte[] ReadPostTarget(int index)
         {
-            var pixels = new byte[Size * Size * 4];
+            FrameBufferRef target = buffers[index];
+            return Decode(target.ColorTextureIds[0], target.Width, target.Height, motion: false);
+        }
+
+        private unsafe byte[] ReadAttachmentZero(int framebufferId, int width, int height)
+        {
+            var pixels = new byte[width * height * 4];
             fixed (byte* destination = pixels)
             {
                 Seam.BindFramebuffer(framebufferId);
-                Seam.ReadDefaultFramebuffer(0, 0, Size, Size, (IntPtr)destination);
+                Seam.ReadDefaultFramebuffer(0, 0, width, height, (IntPtr)destination);
             }
             return pixels;
         }
 
         /// <summary>
-        /// Any attachment through an RGBA8 copy, because the seam's readback is four bytes per
-        /// pixel from attachment 0. The motion mode encodes the vector into the two low
-        /// channels so a difference in it cannot hide behind a clamp.
+        /// Any attachment through an RGBA8 copy of its own size, because the seam's readback is
+        /// four bytes per pixel from attachment 0. The motion mode encodes the vector into the two
+        /// low channels so a difference in it cannot hide behind a clamp.
         /// </summary>
-        private unsafe byte[] Decode(int textureId, bool motion)
+        private byte[] Decode(int textureId, int width, int height, bool motion)
         {
             VulkanDevice seam = Seam;
-            seam.BindFramebuffer(decodeFramebuffer);
+            int framebuffer = DecodeFramebuffer(width, height);
+            seam.BindFramebuffer(framebuffer);
             seam.ClearColor(0, 0f, 0f, 0f, 1f);
             seam.UseProgram(decodeProgram);
             seam.SetSamplerUnit(decodeProgram, "source", 15);
             seam.BindTexture(15, textureId);
             SetInt(seam, decodeProgram, "motionMode", motion ? 1 : 0);
-            seam.SetViewport(0, 0, Size, Size);
+            seam.SetViewport(0, 0, width, height);
             seam.SetDepthTest(false);
             seam.SetDepthMask(false);
             seam.SetCullFace(false);
             seam.SetBlend(false, EnumBlendMode.Standard);
             seam.DrawFullscreenTriangle();
-            return ReadAttachmentZero(decodeFramebuffer);
+            return ReadAttachmentZero(framebuffer, width, height);
+        }
+
+        /// <summary>The RGBA8 decode target of one size, made once.</summary>
+        private int DecodeFramebuffer(int width, int height)
+        {
+            if (width == Size && height == Size) return decodeFramebuffer;
+            if (decodeFramebuffers.TryGetValue((width, height), out int existing)) return existing;
+
+            int texture = Seam.CreateTexture2D(width, height, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = Seam.CreateFramebuffer(width, height);
+            Seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+            Seam.SetDrawBuffers(framebuffer, 0b1);
+            decodeFramebuffers[(width, height)] = framebuffer;
+            return framebuffer;
         }
 
         private static void SetInt(VulkanDevice seam, int program, string name, int value)
@@ -981,7 +956,17 @@ public class NativePostChainTests(ITestOutputHelper output)
             for (int i = 0; i <= 24; i++) buffers.Add(null!);
             buffers[0] = Primary;
             buffers[1] = Transparent;
-            buffers[10] = SingleTarget(EnumTextureInternalFormat.Rgba8);
+            // The post chain's targets at the sizes and formats SetupDefaultFrameBuffers builds
+            // them at: the bloom ping-pongs at half and quarter resolution, find-bright, god rays
+            // and Luma at full, and the blurred vanilla-SSAO target the final composition binds.
+            buffers[2] = SingleTarget(Size / 2, Size / 2, EnumTextureInternalFormat.Rgba8);
+            buffers[3] = SingleTarget(Size / 2, Size / 2, EnumTextureInternalFormat.Rgba8);
+            buffers[4] = SingleTarget(Size, Size, EnumTextureInternalFormat.Rgba16f);
+            buffers[7] = SingleTarget(Size / 2, Size / 2, EnumTextureInternalFormat.Rgba16f);
+            buffers[8] = SingleTarget(Size / 4, Size / 4, EnumTextureInternalFormat.Rgba8);
+            buffers[9] = SingleTarget(Size / 4, Size / 4, EnumTextureInternalFormat.Rgba8);
+            buffers[10] = SingleTarget(Size, Size, EnumTextureInternalFormat.Rgba16f);
+            buffers[14] = SingleTarget(Size, Size, EnumTextureInternalFormat.Rgba8);
             buffers[19] = HistoryTarget();
             buffers[20] = HistoryTarget();
             Sharpen = SingleTarget(EnumTextureInternalFormat.Rgba16f);
@@ -1019,14 +1004,17 @@ public class NativePostChainTests(ITestOutputHelper output)
             }
         }
 
-        private FrameBufferRef SingleTarget(EnumTextureInternalFormat format)
+        private FrameBufferRef SingleTarget(int width, int height, EnumTextureInternalFormat format)
         {
             var target = new FrameBufferRef
             {
-                Width = Size,
-                Height = Size,
-                FboId = Seam.CreateFramebuffer(Size, Size),
-                ColorTextureIds = new[] { Texture(format) },
+                Width = width,
+                Height = height,
+                FboId = Seam.CreateFramebuffer(width, height),
+                ColorTextureIds = new[]
+                {
+                    Seam.CreateTexture2D(width, height, format, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false),
+                },
             };
             Seam.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
             Seam.SetDrawBuffers(target.FboId, 0b1);
@@ -1081,11 +1069,40 @@ public class NativePostChainTests(ITestOutputHelper output)
             var blit = new ShaderProgramBlit { PassName = "blit" };
             Link(seam, blit, "blit", variant, Array.Empty<string>());
 
+            // The chain's tail: find-bright, the blur ladder, god rays, the FXAA luma prepass and
+            // the final composition, with every uniform the OpenGL body sets on them registered
+            // so the old route can run too.
+            var findbright = new ShaderProgramFindbright { PassName = "findbright" };
+            Link(seam, findbright, "findbright", variant, new[] { "ambientBloomLevel", "extraBloom" });
+            var blur = new ShaderProgramBlur { PassName = "blur" };
+            Link(seam, blur, "blur", variant, new[] { "frameSize", "isVertical" });
+            var godrays = new ShaderProgramGodrays { PassName = "godrays" };
+            Link(seam, godrays, "godrays", variant, new[]
+            {
+                "invFrameSizeIn", "maxGodRaySamples", "sunPosScreenIn", "sunPos3dIn",
+                "playerViewVector", "dusk", "iGlobalTimeIn",
+            });
+            var luma = new ShaderProgramLuma { PassName = "luma" };
+            Link(seam, luma, "luma", variant, Array.Empty<string>());
+            var final = new ShaderProgramFinal { PassName = "final" };
+            Link(seam, final, "final", variant, new[]
+            {
+                "ambientBloomLevel", "optimumSsaoInScene", "optimumAoDebug", "invFrameSizeIn",
+                "gammaLevel", "extraGamma", "contrastLevel", "brightnessLevel", "sepiaLevel",
+                "windWaveCounter", "glitchEffectStrength", "sunPosScreenIn", "sunPos3dIn",
+                "playerViewVector", "damageVignetting", "damageVignettingSide", "frostVignetting",
+            });
+
             ShaderPrograms.Transparentcompose = compose;
             ShaderPrograms.TaaSkyMotion = skyMotion;
             ShaderPrograms.TaaResolve = resolve;
             ShaderPrograms.TaaSharpen = sharpen;
             ShaderPrograms.Blit = blit;
+            ShaderPrograms.Findbright = findbright;
+            ShaderPrograms.Blur = blur;
+            ShaderPrograms.Godrays = godrays;
+            ShaderPrograms.Luma = luma;
+            ShaderPrograms.Final = final;
 
             decodeProgram = LinkDecode(seam);
         }
@@ -1194,6 +1211,7 @@ void main(void)
             SeedHistory();
             SeedSharpen();
             SceneSeed = ReadScene();
+            GlowSeed = ReadGlow();
             MotionSeed = ReadMotion();
             HistorySeedColor = ReadHistoryColor(0);
             SharpenSeed = ReadSharpen();

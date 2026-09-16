@@ -13,6 +13,7 @@ namespace Optimum.Tests;
 public class NativePostChainCoverageTests
 {
     private const string ChainFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostChain.cs";
+    private const string TailFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostFinal.cs";
 
     /// <summary>
     /// The lib body is split into one virtual per pass, and RenderPostprocessingEffects is only
@@ -201,10 +202,13 @@ public class NativePostChainCoverageTests
                  {
                      "private bool PostStepTaaResolve() => RenderOptimumTaaResolve();",
                      "private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);",
-                     "private void PostStepBloom(int scene, int glow) => OptimumPostBloom(scene, glow);",
-                     "private void PostStepGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);",
-                     "private void PostStepFxaaOrBlit(int scene) => OptimumPostLuma(scene);",
+                     "private void PostStepBloom(int scene, int glow) => NativeBloom(scene, glow);",
+                     "private void PostStepGodRays(int scene, int glow) => NativeGodRays(scene, glow);",
+                     "private void PostStepFxaaOrBlit(int scene) => NativePostLuma(scene);",
                      "private void PostStepFinish() => OptimumPostFinish();",
+                     "private void LegacyBloom(int scene, int glow) => OptimumPostBloom(scene, glow);",
+                     "private void LegacyGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);",
+                     "private void LegacyPostLuma(int scene) => OptimumPostLuma(scene);",
                      "private void LegacyFinalComposition()",
                      "private void LegacyOitMerge()",
                      "private bool LegacySkyMotion()",
@@ -213,103 +217,120 @@ public class NativePostChainCoverageTests
             Assert.Contains(helper, chain);
         }
 
-        foreach (string stage in new[] { "Stage 1c makes it native",
-                     "Stage 1e makes it native", "Stage 1f makes it native", "Stage 1g makes it native" })
+        foreach (string stage in new[] { "Stage 1c makes it native", "Stage 1d makes it native" })
         {
             Assert.Contains(stage, chain);
         }
-        // Stage 1d is done: the TAA resolve and sharpen draw natively, so neither is a legacy
-        // helper any more.
-        Assert.DoesNotContain("Stage 1d makes it native", chain);
-        // One per remaining pass: the five steps above plus the merge, sky motion and the
-        // final composition, whose old routes stay reachable through the chain switch.
-        Assert.Equal(8, Count(chain, "LEGACY -"));
+        // One old route per pass that is not native yet, plus one per native pass that keeps its
+        // OpenGL body reachable for the differential tests: the merge, sky motion, the AO step,
+        // the resolve, the sharpen, bloom, god rays, the Luma step and the final composition.
+        Assert.Equal(9, Count(chain, "LEGACY -"));
     }
 
     /// <summary>
-    /// Stage 1d: the TAA resolve and the TAA sharpen draw natively, through a draw seam that
-    /// leaves every temporal decision in the lib body. The contract is what this pins - the
-    /// reset test, the resolved textures, the history validity and the parity flip have to stay
-    /// where both backends run the same code, or the two routes can drift a frame apart.
+    /// The chain's tail - bloom, god rays, the Luma step and the final composition - draws through
+    /// the device API, with the OpenGL body's conditions, inputs and uniform values, and the final
+    /// composition declares the attachment subset that lets it sample Primary colour 1 while it
+    /// writes Primary colour 0.
     /// </summary>
     [Fact]
-    public void TheTwoTaaPassesDrawNativelyAndKeepTheirContractInTheLibBody()
+    public void TheChainTailDrawsNatively()
     {
-        string platform = Platform();
-        string abstractPlatform = ReadPatchedOrSource(
-            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
-            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+        string tail = Read(TailFile);
 
-        // The seams exist on the abstract platform, so a platform can override them, and the
-        // Windows body is the OpenGL draw.
-        Assert.Contains("public virtual void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", abstractPlatform);
-        Assert.Contains("public virtual void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", abstractPlatform);
-        Assert.Contains("public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", platform);
-        Assert.Contains("public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", platform);
+        Assert.Contains("device.BeginNativePass(new NativePassDescription", tail);
+        Assert.Contains("device.DrawNativeFullscreen(pipeline, new[]", tail);
+        Assert.Contains("device.EndNativePass();", tail);
 
-        // The temporal contract stays in the pass, on the far side of the seam.
-        string resolve = MethodBody(platform, "public override bool RenderOptimumTaaResolve()");
-        Assert.Contains("bool reset = frame.Reset || !_taaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || invViewProj == null;", resolve);
-        Assert.Contains("OptimumTaaResolveDraw(write, read, invViewProj, prevViewProj, reset);", resolve);
-        foreach (string state in new[]
-                 {
-                     "taaResolvedColorTexture = write.ColorTextureIds[0];",
-                     "taaResolvedGlowTexture = write.ColorTextureIds[1];",
-                     "_taaHistoryValid = true;",
-                     "_taaFrameParity ^= 1;",
-                     "optimumTaaResolvedThisFrame = true;",
-                 })
-        {
-            Assert.Contains(state, resolve);
-        }
-        // And nothing of it leaked into the draw.
-        string draw = MethodBody(platform,
-            "public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)");
-        Assert.DoesNotContain("_taaFrameParity", draw);
-        Assert.DoesNotContain("_taaHistoryValid", draw);
-        Assert.DoesNotContain("optimumTaaResolvedThisFrame", draw);
+        // Bloom: find-bright then the two blur ping-pongs, the stale full-resolution frameSize
+        // the OpenGL body reuses for all four blur draws, and the block's blend and viewport
+        // handoff outside the passes.
+        Assert.Contains("private void NativeBloom(int scene, int glow)", tail);
+        Assert.Contains("if (!OptimumRenderBloom) return;", tail);
+        Assert.Contains("float blurWidth = client.Width * ssaa;", tail);
+        Assert.Contains("NativeBlurStep(lowV, nativeBlurLowVertical", tail);
+        Assert.Contains("GlToggleBlend(on: false);", tail);
+        Assert.Contains("GlToggleBlend(on: true);", tail);
 
-        // The native route: a pipeline with stated fixed state, a pass with stated reads and
-        // colour slots, uniforms by placement, textures straight to bindless slots.
-        string chain = Read(ChainFile);
-        Assert.Contains("private void NativeTaaResolve(FrameBufferRef write, FrameBufferRef read,", chain);
-        Assert.Contains("private void NativeTaaSharpen(FrameBufferRef target, int resolvedScene)", chain);
-        Assert.Contains("nativeTaaResolve = new(\"taa-resolve\"", chain);
-        Assert.Contains("nativeTaaSharpen = new(\"taa-sharpen\"", chain);
-        // All three history attachments are the pass's colour slots.
-        Assert.Contains("const uint slots = 0b111u;", chain);
-        // The nine resolve uniforms and the seven textures the OpenGL body writes and binds.
-        foreach (string uniform in new[]
-                 {
-                     "renderSize", "jitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix",
-                     "cameraDelta", "resetHistory", "blendAlpha", "varianceGamma",
-                 })
-        {
-            Assert.Contains("\"" + uniform + "\"", chain);
-        }
-        foreach (string sampler in new[]
-                 {
-                     "sceneTex", "glowTex", "motionTex", "depthTex",
-                     "historyColor", "historyGlow", "historyDepth", "inputScene",
-                 })
-        {
-            Assert.Contains("\"" + sampler + "\"", chain);
-        }
-        // The two literals the OpenGL body passes, unchanged.
-        Assert.Contains("nativeTaaResolve.Uniforms[7], 0.1f", chain);
-        Assert.Contains("nativeTaaResolve.Uniforms[8], 1.25f", chain);
-        // And the strength, clamped exactly as the OpenGL body clamps it.
-        Assert.Contains("GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f)", chain);
+        // God rays: the half-resolution target, the full-resolution input texel size, and
+        // LightPosition3D behind sunPos3dIn.
+        Assert.Contains("private void NativeGodRays(int scene, int glow)", tail);
+        Assert.Contains("if (!OptimumRenderGodRays) return;", tail);
+        Assert.Contains("ShaderUniforms.LightPosition3D", tail);
+        Assert.Contains("device.WriteNative(pipeline, nativeGodRays.Uniforms[1], OptimumConfig.GodRaysSampleLimit);", tail);
 
-        // Registered everywhere a new lib member has to be.
+        // The Luma branch: the raw jittered Primary colour for the FXAA prepass, the chain's
+        // scene for the blit, and blending left off.
+        Assert.Contains("bool fxaa = OptimumRenderFxaa && !TaaResolvedThisFrame;", tail);
+        Assert.Contains("int source = fxaa ? primary!.ColorTextureIds[0] : scene;", tail);
+        Assert.Contains("SetBlendEnabled(false);", tail);
+
+        // The final composition: the attachment subset, the unconditional uniform writes and the
+        // draw-buffer handoff around the pass.
+        Assert.Contains("private void NativeFinalComposition()", tail);
+        Assert.Contains("const uint slots = ~(1u << 1);", tail);
+        Assert.Contains("BeginFinalCompositionDrawBuffers();", tail);
+        Assert.Contains("RestoreWorldDrawBuffers(renderSsao);", tail);
+        Assert.Contains("device.WriteNative(pipeline, u[1], (OptimumSsaoInScene || !renderSsao) ? 1 : 0);", tail);
+        Assert.Contains("device.WriteNative(pipeline, u[2], aoDebugView ? 1 : 0);", tail);
+        Assert.Contains("ShaderUniforms.SunPosition3D", tail);
+        Assert.Contains("aoDebugView && aoTexture != 0", tail);
+        Assert.Contains("int glow = OptimumPostGlowTexture();", tail);
+
+        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
+        Assert.Contains("NativeFinalComposition();", graph);
+    }
+
+    /// <summary>
+    /// The client state the native tail reads instead of GL state (decision 3) is a lib accessor,
+    /// a patcher target and an owned region, and the two post steps that sized themselves from
+    /// NativeWindow.ClientSize now read the same window-size seam the blit does.
+    /// </summary>
+    [Fact]
+    public void TheNativeTailReadsClientStateThroughListedLibSeams()
+    {
+        string platform = Platform().Replace("\r\n", "\n");
         string patcher = Read("Optimum.Patcher/Program.cs");
         string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
-        string selfCheck = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
-        foreach (string member in new[] { "OptimumTaaResolveDraw", "OptimumTaaSharpenDraw" })
+
+        foreach (string member in new[]
+                 {
+                     "public bool OptimumRenderBloom => RenderBloom;",
+                     "public bool OptimumRenderGodRays => RenderGodRays;",
+                     "public bool OptimumRenderFxaa => RenderFXAA;",
+                     "public float OptimumSsaaLevel => ssaaLevel;",
+                     "public int OptimumAmbientOcclusionTexture => optimumAmbientOcclusionTexture;",
+                     "public bool OptimumSsaoInScene => optimumSsaoInScene;",
+                 })
+        {
+            Assert.Contains(member, platform);
+        }
+        foreach (string member in new[]
+                 {
+                     "OptimumRenderBloom", "OptimumRenderGodRays", "OptimumRenderFxaa", "OptimumSsaaLevel",
+                     "OptimumAmbientOcclusionTexture", "OptimumSsaoInScene",
+                 })
         {
             Assert.Contains("\"" + member + "\"", patcher);
             Assert.Contains("\"" + member + "\"", regions);
-            Assert.Contains("new(true, \"" + member + "\"", selfCheck);
+        }
+
+        // The bloom, god-rays and final-composition bodies take the window size from the seam, so
+        // both routes compute the same value; nothing in them reads NativeWindow.ClientSize.
+        foreach (string body in new[]
+                 {
+                     "public virtual void OptimumPostBloom(int postSceneTexture, int postGlowTexture)",
+                     "public virtual void OptimumPostGodRays(int postSceneTexture, int postGlowTexture)",
+                     "public override void RenderFinalComposition()",
+                 })
+        {
+            int start = platform.IndexOf(body, StringComparison.Ordinal);
+            Assert.True(start >= 0, body + " is missing");
+            int end = platform.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
+            Assert.True(end > start);
+            string source = platform.Substring(start, end - start);
+            Assert.Contains("Size2i optimumClientSize = OptimumWindowClientSize();", source);
+            Assert.DoesNotContain("((NativeWindow)window).ClientSize", source);
         }
     }
 

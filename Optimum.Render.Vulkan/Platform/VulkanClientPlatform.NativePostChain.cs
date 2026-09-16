@@ -21,12 +21,13 @@ namespace Optimum.Render.Vulkan.Platform;
 // and last the blit/FSR/debug step that is already native (VulkanClientPlatform.NativeBlit.cs).
 // RenderPostprocessingEffects' override runs the steps that live inside it and never calls base.
 //
-// Four helpers draw natively here - the OIT merge, sky motion and the two TAA passes - through RequestNativePipeline,
+// Two helpers draw natively in this file - the OIT merge and sky motion - through RequestNativePipeline,
 // BeginNativePass, WriteNative and DrawNativeFullscreen, exactly as the blit does. Every other
 // helper is LEGACY: the same work through the GL-shaped platform calls, which after the split in
 // ClientPlatformWindows is one lib virtual per pass, so the chain is complete and correct at
-// every commit and a later stage replaces one helper at a time. Each legacy helper names the
-// stage that will replace it.
+// every commit and a later stage replaces one helper at a time. The bloom chain, god rays, the
+// Luma step and the final composition are native in VulkanClientPlatform.NativePostFinal.cs;
+// their LEGACY helpers stay as the old route the differential tests compare against.
 public partial class VulkanClientPlatform
 {
     /// <summary>The chain's passes, in the order the frame runs them (section 3).</summary>
@@ -520,19 +521,31 @@ public partial class VulkanClientPlatform
     /// <summary>Pass 5, the TAA sharpen; its draw seam is <see cref="NativeTaaSharpen" />.</summary>
     private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);
 
-    /// <summary>LEGACY - pass 6, the bloom chain. Stage 1e makes it native.</summary>
-    private void PostStepBloom(int scene, int glow) => OptimumPostBloom(scene, glow);
+    /// <summary>Pass 6, the bloom chain, drawn natively (VulkanClientPlatform.NativePostFinal.cs).</summary>
+    private void PostStepBloom(int scene, int glow) => NativeBloom(scene, glow);
 
-    /// <summary>LEGACY - pass 7, god rays. Stage 1e makes it native.</summary>
-    private void PostStepGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);
+    /// <summary>Pass 7, god rays, drawn natively.</summary>
+    private void PostStepGodRays(int scene, int glow) => NativeGodRays(scene, glow);
 
-    /// <summary>LEGACY - pass 8, the FXAA luma prepass or the pass-through blit into Luma. Stage 1f makes it native.</summary>
-    private void PostStepFxaaOrBlit(int scene) => OptimumPostLuma(scene);
+    /// <summary>Pass 8, the FXAA luma prepass or the pass-through blit into Luma, drawn natively.</summary>
+    private void PostStepFxaaOrBlit(int scene) => NativePostLuma(scene);
 
-    /// <summary>LEGACY - the chain's epilogue: blending back on, Primary bound again. Stage 1f makes it native.</summary>
+    /// <summary>
+    /// The chain's epilogue: blending back on and Primary bound again. State, not a draw - it is
+    /// the GL-shaped handoff every stage after the chain inherits, so it stays as it is.
+    /// </summary>
     private void PostStepFinish() => OptimumPostFinish();
 
-    /// <summary>LEGACY - pass 9, the final composition. Stage 1g makes it native.</summary>
+    /// <summary>LEGACY - pass 6 on the OpenGL body. <see cref="NativeBloom" /> replaces it; kept as the old route.</summary>
+    private void LegacyBloom(int scene, int glow) => OptimumPostBloom(scene, glow);
+
+    /// <summary>LEGACY - pass 7 on the OpenGL body. <see cref="NativeGodRays" /> replaces it; kept as the old route.</summary>
+    private void LegacyGodRays(int scene, int glow) => OptimumPostGodRays(scene, glow);
+
+    /// <summary>LEGACY - pass 8 on the OpenGL body. <see cref="NativePostLuma" /> replaces it; kept as the old route.</summary>
+    private void LegacyPostLuma(int scene) => OptimumPostLuma(scene);
+
+    /// <summary>LEGACY - pass 9 on the OpenGL body. <see cref="NativeFinalComposition" /> replaces it; kept as the old route.</summary>
     private void LegacyFinalComposition()
     {
         SetPassContext("FinalComposition", PassFlags.None);

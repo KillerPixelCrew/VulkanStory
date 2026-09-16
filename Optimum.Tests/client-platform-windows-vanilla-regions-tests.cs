@@ -48,7 +48,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         // Phase 3b: the post chain as one virtual per pass, and the keep-the-viewport bind.
         "OptimumPostAmbientOcclusion", "OptimumPostSceneTexture", "OptimumPostGlowTexture",
         "OptimumPostBloom", "OptimumPostGodRays", "OptimumPostLuma", "OptimumPostFinish",
-        "OptimumBindKeepViewport", "OptimumTaaResolveDraw", "OptimumTaaSharpenDraw",
+        "OptimumBindKeepViewport",
+        // Phase 3b stage 1e-1g: the client state a native bloom, god-rays, Luma and
+        // final-composition pass reads.
+        "OptimumRenderBloom", "OptimumRenderGodRays", "OptimumRenderFxaa", "OptimumSsaaLevel",
+        "OptimumAmbientOcclusionTexture", "OptimumSsaoInScene",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderOptimumSkyMotion",
         "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RestorePrimaryDrawBuffers",
         "RestoreWorldDrawBuffers", "SelectBackDrawBuffer", "SelectFsrDrawBuffer", "SetBlendEnabled",
