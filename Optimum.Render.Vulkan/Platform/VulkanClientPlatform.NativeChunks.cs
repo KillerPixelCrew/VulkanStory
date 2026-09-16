@@ -82,6 +82,15 @@ public partial class VulkanClientPlatform
     /// </summary>
     private AttachmentBlend[]? nativeTransparentBlend;
 
+    /// <summary>
+    /// The colour slots the client last selected on the Transparent target, recorded with the
+    /// blend contract: 0x7 for the vanilla set (ApplyTransparentPassBlendState), 0x3F for the OIT
+    /// accumulation set (BeginOitAccumulation), whose colour accumulation lives on slots 3-5 -
+    /// attachments the target's FrameBufferRef does not list, so its texture count is not the
+    /// slot set. 0 until the client has stated one.
+    /// </summary>
+    private uint nativeTransparentSlots;
+
     /// <summary>Bumped when that contract changes, so its pipelines are rebuilt rather than reused.</summary>
     private int nativeBlendEpoch;
 
@@ -339,6 +348,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private uint ChunkColorSlots(FrameBufferRef target)
     {
+        if (IsTransparentTarget(target) && nativeTransparentSlots != 0) return nativeTransparentSlots;
         if (!IsPrimaryTarget(target)) return NativeAllColorSlots(target);
 
         int motion = MotionAttachmentIndex;

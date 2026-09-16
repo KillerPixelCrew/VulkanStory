@@ -121,6 +121,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private uint NativeWorldPassColorSlots(FrameBufferRef target)
     {
+        if (IsTransparentTarget(target) && nativeTransparentSlots != 0) return nativeTransparentSlots;
         uint all = NativeAllColorSlots(target);
         int motion = MotionAttachmentIndex;
         if (motion < 0 || motion >= 32) return all;

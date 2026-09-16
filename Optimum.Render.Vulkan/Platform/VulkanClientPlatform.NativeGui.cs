@@ -85,6 +85,35 @@ public partial class VulkanClientPlatform
     private readonly NativeMeshPass nativeOverlayLines =
         new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
 
+    /// <summary>
+    /// The GUI quads' pipeline and placements, on the gui program - a pass of its own so the
+    /// reticle's line pipeline and these triangle pipelines do not evict each other.
+    /// </summary>
+    private readonly NativeMeshPass nativeGuiQuad =
+        new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
+
+    /// <summary>
+    /// One Render2DTexture quad: the native pass, or the neutral body's RenderMesh.
+    /// What it draws: a GUI element's texture. The other side: ClientPlatformAbstract.RenderGuiQuad.
+    /// Target and slots: the caller's target, slot 0. State: the blend mode, depth test, depth
+    /// mask, depth function and scissor the caller last stated through this platform's virtuals
+    /// (VulkanClientPlatform.State.cs), so premultiplied-alpha blits and scrolled, clipped lists
+    /// draw as they do on GL. Only the vanilla gui program is taken.
+    /// </summary>
+    public override void RenderGuiQuad(MeshRef quad, int textureId)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (!NativeGuiEnabled || device == null || quad == null || program == null ||
+            !ReferenceEquals(program, ShaderPrograms.Gui) ||
+            !DrawNativeGuiMesh(nativeGuiQuad, quad, textureId,
+                DeclaredProgramTexture(program.ProgramId, "tex2dOverlay"), 1.0f,
+                statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite,
+                GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, "GuiQuad"))
+        {
+            base.RenderGuiQuad(quad!, textureId);
+        }
+    }
+
     /// <summary>The texture-into-texture blit's draw: the native pass, or the neutral body's RenderMesh.</summary>
     public override void RenderTextureQuad(MeshRef quad, int textureId, bool blend)
     {
@@ -126,6 +155,12 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
         float lineWidth, bool blend, string passLabel)
+        => DrawNativeGuiMesh(pass, mesh, textureId, overlayTextureId, lineWidth, blend, EnumBlendMode.Standard,
+            depthTest: false, depthWrite: false, CompareOp.Less, scissor: null, passLabel);
+
+    private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
+        float lineWidth, bool blend, EnumBlendMode blendMode, bool depthTest, bool depthWrite, CompareOp depthCompare,
+        Rect2D? scissor, string passLabel)
     {
         FrameBufferRef target = CurrentFrameBuffer;
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
@@ -148,9 +183,10 @@ public partial class VulkanClientPlatform
         NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, framebufferId, slots, layoutId,
             new NativePipelineDescription
             {
-                Blend = GuiSlots(formats, blend),
-                DepthTest = false,
-                DepthWrite = false,
+                Blend = GuiSlots(formats, blend, blendMode),
+                DepthTest = depthTest,
+                DepthWrite = depthWrite,
+                DepthCompare = depthCompare,
                 Cull = CullModeFlags.None,
                 Topology = device.NativeMeshTopology(vao.VaoId),
                 LineWidth = lineWidth,
@@ -175,6 +211,7 @@ public partial class VulkanClientPlatform
             ViewportY = viewport.Offset.Y,
             ViewportWidth = (int)viewport.Extent.Width,
             ViewportHeight = (int)viewport.Extent.Height,
+            Scissor = scissor,
         }))
         {
             Span<NativeTexture> textures = stackalloc NativeTexture[pass.Samplers.Length];
@@ -197,10 +234,11 @@ public partial class VulkanClientPlatform
     /// the tracker's own factor table, and every other slot masked off so an attachment the
     /// fragment shader never writes keeps its contents as it does on GL (rule 9).
     /// </summary>
-    private static AttachmentBlend[] GuiSlots(RenderTargetFormats formats, bool blend)
+    private static AttachmentBlend[] GuiSlots(RenderTargetFormats formats, bool blend,
+        EnumBlendMode mode = EnumBlendMode.Standard)
     {
         var slots = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
-        slots[0] = AttachmentBlend.For(blend, EnumBlendMode.Standard);
+        slots[0] = AttachmentBlend.For(blend, mode);
         for (int i = 1; i < slots.Length; i++)
         {
             slots[i] = AttachmentBlend.Default;

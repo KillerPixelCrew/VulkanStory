@@ -149,6 +149,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderNightSkyBox", new[] { "MeshRef", "Int32" }),
         new(true, "RenderCelestialQuad", new[] { "MeshRef", "Int32", "Int32", "Int32" }),
         new(true, "RenderSunQuad", new[] { "MeshRef", "Int32" }),
+        new(true, "RenderGuiQuad", new[] { "MeshRef", "Int32" }),
         new(true, "RenderParticles", new[] { "MeshRef", "Int32", "Int32" }),
         new(true, "BeginDecalPass", new[] { "Int32", "Int32" }),
         new(true, "EndDecalPass", Array.Empty<string>()),
