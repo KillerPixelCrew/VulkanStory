@@ -1,7 +1,7 @@
 # Optimum: working rules for agents
 
-*Single source of truth for agent instructions. `CLAUDE.md` is a symlink to this file; both are in
-`.git/info/exclude` and must never be committed.*
+*How to work on this repository, for any agent on any branch. `CLAUDE.md` is a symlink to this file.
+Branch scope, status and decisions are in `docs/vulkan-branch-progress.md`, not here.*
 
 Optimum is a performance mod for Vintage Story: a patched client (OpenGL path in
 `ClientPlatformWindows`) plus a Vulkan backend that substitutes the platform
@@ -10,18 +10,6 @@ skills in `.claude/skills/` hold the step-by-step procedures; this file holds th
 Everything an agent needs is in THIS file: the rules, the procedures they point at, and the project
 knowledge folded in below. A lesson learned during a session belongs here, in the repository - the
 harness memory store on one machine is a cache, not the record.
-
-## What this branch is
-
-`feat/vulkan-taa` carries **the Vulkan backend and TAA only**: upstream PR #69 was split so the maintainer can land
-those first. DLSS, XeSS, FSR, frame generation, the vendor latency backends (Reflex, anti-lag, XeLL) and NGX live on
-`feat/dlss`, `feat/dlss-g` and `feat/latency` and are NOT work owed here. The plan file predates that split and still
-describes them, which is why its items carry an explicit `[out]` mark.
-
-**Frame structure is Vulkan foundation and IS in scope**: one frame identity per frame with markers around
-simulation, render submit and present, and the world frame separated from UI composition (`SceneNoHud` plus a UI
-target, HUD composed afterwards). They make pacing measurable and keep the HUD out of the scene image whether or not
-an upscaler ever exists. What stays off the branch is the vendor layer that later sits on top of them.
 
 ## Where the truth lives (edit these, never the generated copies)
 
@@ -226,9 +214,9 @@ an unlisted `SYNC-` message fails `ValidationAssert.NoSyncHazards`.
 
 ## Project knowledge (folded in from the agent memory, 2026-09-16)
 
-These were hard-won in earlier sessions and lived only on one machine until the owner pointed out that makes
-them useless. They are instructions, not history: read them the same way as the numbered rules. When a new
-lesson appears, it belongs HERE, in this file - the harness memory store is a local cache, not the record.
+Working practice learned the hard way, branch-agnostic. Decisions, roadmap and branch scope are NOT here:
+they live in `docs/vulkan-branch-progress.md` and the plan. A new working lesson belongs here; a new decision
+belongs there.
 
 ### Cleanup comes last
 
@@ -284,16 +272,6 @@ Steering (2026-09-10): `codex queue --thread <id> --message` only reaches a runn
 
 Quota: exhausted on 2026-09-10; **reset and available again from 2026-09-12** (user). Codex handoffs are back on the table for genuinely stuck rendering bugs and for plan reviews at `high`; it still costs a weekly quota, so keep briefs tight and do not launch speculatively.
 
-### Frame generation needs pacing
-
-*DLSS-FG (and any frame generation) ships only together with a present-thread pacer and correct Reflex out-of-band presentation; never an unpaced intermediate step.*
-
-User, 2026-09-13: "DLSSFG without pacing (Reflex) is useless and unplayable."
-
-**Why:** I had split frame generation into a synchronous step 5 (both presents issued from the render thread) and a later step 6 (present thread + pacer), and launched step 5 on its own with a user-facing setting. Unpaced generated frames judder and add latency, so the intermediate step is not a usable feature - it is a regression the player can switch on. NVIDIA's DLSS-FG guide section 7 says the feature does no timing or presentation itself; the app must present the generated frame on evaluate completion and the real frame (OutputReal) at an equal interval, asynchronously from the render thread, with Reflex keeping the held-back real frame's latency in check.
-
-**How to apply:** treat the FG evaluate, the present thread, the pacer and Reflex out-of-band presentation (own queue, vkQueueNotifyOutOfBandNV, out-of-band markers) as one deliverable. Do not expose any FG setting to players before the pacer lands; internal test switches are fine. The same holds for XeFG and FSR frame interpolation later. Related: [[own-vendor-orchestrator-decision]], [[low-latency-layer-reference]], [[user-graphics-expertise]].
-
 ### Git remotes
 
 *"In the Optimum checkout, origin is KillerPixelCrew/VulkanStory (the org repo, migrated from NightHammer1000/VulkanStory on 2026-09-15) and upstream is StratumServer/Optimum; main tracks origin/main."*
@@ -314,35 +292,6 @@ User, 2026-09-13: "This is the third time i have to tell you to actually look be
 
 **How to apply:** for any feature with vendor SDKs or prior art: (1) read the vendor guides in full, not the chapter that matches the question; (2) read the reference implementations on disk - check `~/Projekte/ReScaleFrame/references/` and the user's ReScaleFrame docs first, they are the user's own research; (3) search online for best practice; (4) write the design with a source for every decision and mark what is reasoning; (5) show the user the sourced design before launching an implementation wave. A map of *our* code is not research into *how it should be done*. Related: [[research-before-repeating-loops]], [[audit-the-component-the-user-names]], [[frame-generation-needs-pacing]], [[user-graphics-expertise]].
 
-### Low latency layer reference
-
-*"Korthos low_latency_layer (MIT, github.com/Korthos-Software/low_latency_layer) implements VK_NV_low_latency2 and VK_AMD_anti_lag on any GPU; its algorithm is the model for Optimum's vendor-neutral latency tier."*
-
-User pointed at https://github.com/Korthos-Software/low_latency_layer on 2026-09-11 (clone in the session scratchpad vendor-research/low_latency_layer, commit 3138b14).
-
-What it does: an implicit Vulkan layer (`LOW_LATENCY_LAYER=1`, `LOW_LATENCY_LAYER_REFLEX=1` to expose VK_NV_low_latency2 instead of VK_AMD_anti_lag) that paces without driver support. At the sleep point (vkLatencySleepNV signal semaphore, or vkAntiLagUpdateAMD INPUT stage) it waits until every graphics-queue submission of the previous frame has finished on the GPU (timestamp queries at top/bottom of pipe; for low_latency2 submissions are grouped by present ID), then applies the frame cap (minimumIntervalUs or maxFPS, measured release to release), then releases the app to sample input. A jitter/drain controller exists only for games with a decoupled simulation queue (Marvel Rivals). Benchmarks with a Reflex Analyzer on an RX 7900 XTX: matches or beats Windows Anti-Lag 2; the Mesa anti-lag layer measured as a no-op.
-
-How to apply (user, 2026-09-11: "Requiring a layer might be a bad idea but replicating what it does here might work out"): never depend on the layer; Optimum's vendor-neutral latency tier is this algorithm done natively. The renderer owns the Frame timeline semaphore, so "previous frame's GPU work finished" is a timeline wait on the previous frame's present-submit value placed before input sampling, with no timestamp queries and no layer. It covers the Arc 140V (no XeLL on Vulkan) and AMD. Vintage Story's client simulation and render share one thread, so the decoupled-queue controller is not needed. Detect the layer (instance layer `VK_LAYER_KORTHOS_low_latency`) and log it, since it would pace on top of Optimum. Related: [[own-vendor-orchestrator-decision]], [[optimum-upscaling-roadmap]].
-
-### Ngx needs a native shim
-
-*"NVIDIA NGX aborts when called from a .NET P/Invoke stub (it resolves the caller module by return address), so every NGX call needs a small native shim .so/.dll; DLSS SR and DLSS-G both report available on native Linux."*
-
-Spike on 2026-09-12 (branch feat/dlss, commit bad1122; RTX 4070 Laptop, driver 615.71.09, X11, DLSS SDK 310.9.1, no Proton):
-
-- DLSS Super Resolution and DLSS Frame Generation both report `Available = 1` with `NeedsUpdatedDriver = 0` on native Linux Vulkan (min driver 470 and 520). Optimal settings at 2560x1490: Quality 1707x993, Performance 1280x745, dynamic range 50-100 %.
-- **`libnvidia-ngx.so.1` resolves its caller's module from the return address.** A .NET P/Invoke stub lives in anonymous JIT memory, so NGX builds a string from a null path and aborts the process (`std::logic_error`, `basic_string::_M_construct null not valid`). Proved with `scripts/dev/ngx-probe.c`: identical calls succeed from C and abort through a trampoline in an anonymous mmap page. NGX checks only the immediate caller, so there is no managed workaround.
-- The per-feature extension queries return `FAIL_NotImplemented` on Linux; use the SDK wrapper's fixed lists: instance `VK_KHR_get_physical_device_properties2`, device `VK_NVX_binary_import`, `VK_NVX_image_view_handle`, `VK_KHR_buffer_device_address`, `VK_KHR_push_descriptor`.
-- Interop traps: the exported `Init_ProjectID` is not the header prototype (no `vkGet*ProcAddr` arguments, SDKVersion before FeatureCommonInfo); `PathListInfo.Path` is `wchar_t**` (UTF-32) on Linux; the driver exports no C accessors for `NVSDK_NGX_Parameter`, so parameters go through the C++ vtable in declaration order with no virtual destructor. NGX writes no log on Linux.
-
-Shim built 2026-09-12 (commit c5272ad, `native/optimum-ngx/`): C99, dlopen's libnvidia-ngx.so.1 lazily, flat C ABI, exported version checked by the managed side, source committed and built by `make native` plus an MSBuild target that degrades to "DLSS unavailable" when no compiler exists. **The shim must never tail-call NGX**: `return ngx_entry(args);` compiles to `jmp` at -O2, the wrapper's frame is gone and NGX reads the managed caller's return address again, so it aborts exactly as before. Fixed with a volatile local plus `-fno-optimize-sibling-calls`; the first build had this bug and it looked identical to the original failure.
-
-DLSS SR ran end to end on 2026-09-12 (commit c1fb719): 1280x745 to 2560x1490, Success on create and every evaluate, pattern preserved, eight accumulating frames with no validation output. Two more NGX rules found there: **NGX needs the `bufferDeviceAddress` feature enabled**, not just `VK_KHR_buffer_device_address` (without it every evaluate trips VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324, and NGX's own extension queries never mention it); and, believed at the time, "NGX allows exactly one lifetime per process" - **that was wrong** (see below).
-
-**The real shutdown crash, found 2026-09-12 (commit 19f9645):** `NVSDK_NGX_VULKAN_Shutdown1` is declared with one parameter in `nvsdk_ngx_vk.h` and implemented with **two** in driver 615.71.09 - the second is an out-parameter (`int*` remaining reference count) the driver writes through with no null check (libnvidia-ngx.so.1 0xa64b0 -> 0xa1750, store at 0xa1898; the deprecated one-arg `Shutdown` passes `lea 0xc(%rsp)` there). Called through the header prototype from a .NET process the register holds 0x2000, so NGX segfaults on the **first** shutdown - both earlier core dumps were first shutdowns, and the "second Shutdown1 segfaults / one lifetime per process" conclusion was a misattribution of the same undefined store. Fix: the shim calls it as `(void*, int*)` with a local int. A/B on the same test binary: old shim crashed the host 3/3, new shim 5/5 clean. Features are still released and the frame timeline drained before shutdown, through a single process-wide owner (`NgxLifetime`), because `ReleaseFeature` after `Shutdown1` remains untested. NGX's own `vkCmdClearColorImage` trips a sync hazard against its own barrier on the first evaluate; both sides are NGX's images, so it is pinned as a vendor entry in KnownSyncHazards.
-
-**How to apply:** every NGX call goes through a small native shim (`libOptimumNgx.so` / `OptimumNgx.dll`) that forwards the entry points and the parameter vtable; never plan a design around direct P/Invoke, and never let an NGX failure path run unguarded, since the failure mode is a process abort rather than an error code. Related: [[own-vendor-orchestrator-decision]], [[optimum-upscaling-roadmap]], [[vulkan-native-rebuild-decision]].
-
 ### Nvidia driver update needs reboot
 
 *GLXBadFBConfig on every OpenGL launch plus Vulkan silently picking the Intel iGPU means the NVIDIA userspace driver was updated without a reboot; check nvidia-smi and the log's GPU line before any capture.*
@@ -352,44 +301,6 @@ On 2026-09-11 a pacman update at 14:38 moved nvidia-utils 610.57.04 to 615.71.09
 **Why:** it looked like a Phase 0 regression and cost a capture round; the user watched the clients crash.
 
 **How to apply:** before any in-game capture run `nvidia-smi` (must print the GPU and driver, not a mismatch) and, after each launch, require `Graphics Card Renderer: NVIDIA` in the client log (on Vulkan that line is the selected Vulkan device name). If the mismatch shows, tell the user a reboot is needed instead of launching. Related: [[confirm-renderer-from-log]], [[vulkan-native-rebuild-decision]].
-
-### Optimum upscaling roadmap
-
-*"Optimum rendering roadmap: TAA (done, P0-P6 on feat/taa 2026-09-11) -> XeSS/DLSS/FSR upscalers -> frame generation, maybe path tracing + ray reconstruction; target hardware includes an Arc 140V handheld."*
-
-Order agreed with the user: in-house TAA first (feat/taa, PR #2 on origin), then vendor upscalers (XeSS 2 / DLSS / FSR 3.1) as separate consumers of the frozen temporal contract, then frame generation, possibly path tracing with ray reconstruction later. Target hardware includes an Intel Arc 140V handheld, so performance must be measured there, not only on the RTX 4070 laptop.
-
-Status 2026-09-11: TAA plan P0-P6 all landed on feat/taa (c60a4cc); P2 and P4 accepted in game by the user; the contract is frozen in docs/temporal-frame-contract.md v1 with stability tests (Optimum.Tests/temporal-contract-tests.cs). Open: the user's 18-row acceptance matrix (docs/taa-acceptance.md) and the default-on decision (TAA default off until then); Arc 140V frame times (the laptop's compositor caps at 165 Hz, see TAA-PLAN P5 note); shader patch system ([[shader-patch-system-todo]]); then the vendor upscaler/FG plan.
-
-**How to apply:** new temporal consumers adapt to the contract document, never to the resolve; bump the contract version through its change procedure. Related: [[taa-p2-vulkan-parity-lessons]], [[vulkan-validation-log-and-flicker]], [[git-remotes]].
-
-Update 2026-09-11: TAA on Vulkan is now stable (resolve fix, see [[vulkan-taa-jitter-root-cause]]). The user wants DLSS next, as soon as the Vulkan-native backend reaches Milestone 1; DLSS needs only Phase 2's native device and graph handles, so it can precede native shaders, perf and the mod API. XeSS for the Arc 140V follows through the same upscaler seam. Related: [[vulkan-native-rebuild-decision]].
-
-### Own vendor orchestrator decision
-
-*"2026-09-11 user decision - Optimum builds its own multi-vendor orchestrator (upscaler, latency, frame generation); Streamline rejected as the multi-vendor layer (NVIDIA-signed plugins only) and as the NVIDIA backend (Reflex via VK_NV_low_latency2, DLSS/DLSS-G via NGX directly)."*
-
-Decision: Optimum owns a thin vendor orchestrator with three slots and one backend per vendor: upscaler (DLSS, XeSS, FSR), latency (Reflex via VK_NV_low_latency2, Intel XeLL, AMD VK_AMD_anti_lag / AntiLag 2) and frame generation (DLSS-G, XeFG, FSR frame interpolation). No Streamline at all, on either OS (recommended 2026-09-11 after the direct-vs-Streamline research): Reflex = VK_NV_low_latency2 called directly; DLSS SR and DLSS-G = NGX Vulkan helpers from the DLSS SDK (NGX_VK_CREATE_DLSSG / NGX_VK_EVALUATE_DLSSG, Linux libnvidia-ngx-dlssg.so), with Optimum owning DLSS-G pacing (DLSS-FG guide section 7: present the generated frame when evaluate completes, retained real frame at equal spacing, async from the render thread).
-Evidence: NVIDIA's own Linux driver guide says native Linux Reflex works "not via the Reflex SDK but directly via the Vulkan extension VK_NV_low_latency2"; the spec says VK_NV_low_latency is legacy for the Reflex SDK's NvLowLatencyVk.dll (the 615.71.09 note is only about that DLL under Proton). On this machine driver 615.71.09 advertises VK_NV_low_latency2 revision 2, so explicit VkLatencySubmissionPresentIdNV attribution (revision 3+) is not honoured: check the revision at runtime. Before 615 the extension did not cut latency on Wayland and VK_KHR_display swapchains. Mesa ships VK_LAYER_MESA_anti_lag (VK_AMD_anti_lag revision 1 on the Intel iGPU). Slot coupling (user, 2026-09-12): a vendor latency backend only when the active upscaler's vendor matches the GPU vendor, otherwise Optimum's own pacing. DLSS/DLSS-G on NVIDIA = Reflex (VK_NV_low_latency2); FSR on AMD = VK_AMD_anti_lag; XeSS(+XeFG) on Intel = XeLL, but only on the Windows D3D12 bridge, Native on Vulkan/Linux; every cross-vendor pair (FSR on NVIDIA or Intel, XeSS on AMD or NVIDIA) = Native. With no upscaler active the device-based auto order applies. Wire it into LatencyBackendSelector (device-only today) when the upscaler slot lands on the DLSS branch.
-
-Measured 2026-09-12 on the RTX 4070 (three 60 s runs, fixed scene, vsync off): input-to-present 7.67 ms with latency off, 1.84 ms with Optimum's own completion pacing and 1.85 ms with Reflex; mean frame time 7.70 / 9.43 / 7.66 ms, so Reflex is free and own pacing costs 18 % of the frame rate. VK_NV_low_latency2 works on the Linux driver at revision 2 and fills its driver/OS-queue/GPU intervals. User decision: **latency reduction ships on by default, Native pacing included** (auto order NV, AMD, Native, None; OPTIMUM_VULKAN_LATENCY forces one).
-
-Intel (user, 2026-09-11): XeFG is a D3D12 proxy swapchain only, so no Linux; on Windows Optimum adds a D3D12 bridge present path (Vulkan images and a timeline semaphore shared with a D3D12 device, DXGI flip swapchain wrapped by XeFG), and XeLL rides on it (XeFG requires XeLL, one shared frame counter, no other latency tech; XeLL needs DXGI Present). Latency backend follows the present path; in XeLL mode Optimum adds no waits of its own.
-Licence settled by the user (2026-09-11): the NVIDIA feature libraries are redistributables shipped as binaries, never as source; OptiScaler (GPL-3.0) does the same (loads the driver's NGX core at runtime, ships no NVIDIA DLLs, vendors only headers). Binding: driver 615 `libnvidia-ngx.so.1` (nvidia-utils) exports `NVSDK_NGX_VULKAN_*` itself, so C# P/Invokes the driver library directly, no native shim linking `libnvsdk_ngx.a`; the driver also ships `/usr/lib/nvidia/wine/nvngx_dlssg.dll`, so the Linux driver supports DLSS-G. OptiScaler clone (vendor-research/optiscaler) is the design reference for the orchestrator: `low_latency/` (XeLL, LatencyFlex, VK_AMD_anti_lag, AntiLag 2, Reflex input) and `framegen/IFGFeature` (its frame generation is D3D12-only, so no Vulkan pacer to copy).
-
-**Why:** Streamline advertises cross-IHV but ships only NVIDIA features (plus D3D12 DirectSR); NVIDIA said in NVIDIA-RTX/Streamline issue #12 (2024-03) "implement the plugins yourself"; production `sl::security::loadLibrary` requires `verifyEmbeddedSignature`, which demands a secondary NVIDIA signature (include/sl_security.h isSignedByNVIDIA), so custom Intel/AMD plugins cannot load; Streamline is Windows-only while Optimum also targets Linux.
-
-**How to apply:** design the orchestrator after the vendor research synthesis (workflow on 2026-09-11, local SDK clones under the session scratchpad vendor-research/); it starts on the DLSS branch after Milestone 1 merges to main. Latency seams (frame IDs, markers, sleep point before input, swapchain creation extension point, present IDs) can land in the Phase 2 follow-up. Related: [[optimum-upscaling-roadmap]], [[vulkan-native-rebuild-decision]], [[user-graphics-expertise]].
-
-### Physically correct rendering direction
-
-*Owner decision 2026-09-15 - rendering targets physically correct results, not vanilla's look: AO radiometric (no floor/contrast hack); the long-term path is generated PBR materials and finally ray/path tracing.*
-
-User, 2026-09-15, asked whether the new AO should reproduce vanilla SSAO's look (0.5/0.7 floor, 1.4x contrast) or the radiometric value: "physically correct. as we go for better graphics later on with Generated PBR like some minecraft shaders do and ray/pathtracing in the end."
-
-**Why:** later stages (generated PBR materials as some Minecraft shader packs do, then ray/path tracing) need physically based inputs; art-direction hacks in AO or lighting would have to be undone and would make RT/denoiser comparisons meaningless.
-
-**How to apply:** when a choice is "match vanilla's look" versus "physically correct", pick physically correct (e.g. AO power per the research, no floor or contrast boost; multi-bounce and albedo-dependent terms become real once PBR albedo exists). Keep OpenGL "OFF is vanilla" unchanged. Design data paths (G-buffer channels, material classes) so a PBR material pass can feed them later. Related: [[xegtao-default-with-taa]], [[research-combines-sources]], roadmap items HDR and ray tracing in docs/vulkan-native-plan.md.
 
 ### Research before repeating loops
 
@@ -420,14 +331,6 @@ User, 2026-09-15, after naming MXAO, Alchemy AO, low-sample GTAO + spatial denoi
 **Why:** `/tmp` is RAM on this machine and shared with everything else the user runs; a full tmpfs fails package transactions, not just my own commands.
 
 **How to apply:** delete a capture directory as soon as its numbers are recorded in `docs/vulkan-acceptance.md` or the plan - the conclusions are the deliverable, the frames are not. Shallow-clone vendor SDKs, read them, then remove them; the synthesis stays. Anything a test or a later session needs (the NVIDIA NGX libraries, headers and guides) goes to `~/.local/share/optimum-ngx`, never the scratchpad: on tmpfs it vanishes at reboot and the NGX tests then *skip* rather than fail, which hides the breakage. Check `df -h /tmp` before writing GB-scale dumps, and prefer per-attachment dumps at one frame over frame sequences. Related: [[testing-suite-too-heavy]], [[ngx-needs-a-native-shim]].
-
-### Shader patch system todo
-
-*"Future task: build a shader patch system for Optimum; shaders are whole-file overrides today and game updates shadow them silently."*
-
-Raised by the user on 2026-09-10 while P3 of the TAA plan was adding more shader overrides ("might be a nightmare to upkeep with future Updates"). Whole-file overrides in `sources/shaders/` predate TAA (upstream v0.1.0). Agreed: note it and build it later, not during TAA. Design sketch is in TAA-PLAN.md "Follow-up: shader patch system" and CLAUDE.md "Known debt": patches against `.vanilla/archives/vs_client_*.tar.gz`, produced by extract-patches, verified by check-patches, overrides kept additive.
-
-**How to apply:** when the user asks about upkeep, game updates or "shader patches", this is the task; keep new shader edits additive meanwhile. Related: [[taa-p2-vulkan-parity-lessons]], [[optimum-upscaling-roadmap]].
 
 ### Speed and parallelism over testing
 
@@ -470,24 +373,6 @@ The user authored the XeSS integration PR for Skyrim Community Shaders and judge
 
 **How to apply:** no primers on jitter, motion vectors or reactive masks; when their live observation contradicts a measurement, the measurement is the suspect. Related: [[vulkan-validation-log-and-flicker]], [[run-for-user-no-input]].
 
-### Vulkan native rebuild decision
-
-*"2026-09-11 decision to rebuild the Vulkan backend as a proper renderer via platform substitution (VulkanClientPlatform : ClientPlatformWindows); plan file path, branches, Milestone 1 definition."*
-
-On 2026-09-11 the user rejected the OpenGL-under-Vulkan emulation design ("I never wanted this as an OpenGL under Vulkan emulator") and approved a plan to rebuild it as a proper Vulkan backend. Plan file: /home/n1ght/.claude/plans/i-never-wanted-this-sequential-kernighan.md. Branch: feat/vulkan-native from origin/main 94e2cc0 (feat/taa merged 2026-09-11). The sky-direction fix lives on fix/taa-sky-direction as its own PR; GPU tests prove it, the user has not accepted it by eye.
-
-Decisions: the client drives a frame graph (the lib only announces frame and stage boundaries); Vulkan-aware mods only (raw GL or Harmony-on-platform mods are routed to OpenGL by the launcher scan); Vulkan-native GLSL for the 48 vanilla programs compiled offline, rewriter kept for mod shaders; Milestone 1 = stable frame delivery with TAA (blocking uploads 0, pacing gate against the OpenGL baseline, sync+best validation clean), judged in game only after the numbers; integration = unseal ClientPlatformWindows through the patcher and ship VulkanClientPlatform : ClientPlatformWindows inside Optimum.Render.Vulkan.dll, deleting the IOptimumGraphicsDevice seam.
-
-Status 2026-09-11 evening: Phase 0 merged (cdd7412) and exit-verified on the RTX 4070 (numbers in docs/vulkan-acceptance.md "Phase 0 exit results"). Vulkan fails the pacing gate (stddev 4.96 ms vs GL 0.55, blocking uploads ~50/s, a FlushFrame per frame from occlusion queries); the user saw no distance jitter on the two Phase 0 exit runs, but it was back on Vulkan in every later run (Phase 1 build included) and never appears on OpenGL: Vulkan-only, intermittent between sessions, still unexplained. Next: Phase 1A and 1B in parallel.
-
-Status 2026-09-11 night: **Milestone 1 accepted by the user** at 6568556 after a 10-minute Vulkan session. Phases 0, 1A, 1B and 2 are done and merged into main locally (not pushed): blocking uploads 0, passes == scopes (22.3 per frame), 0 pass splits or mask restarts, validation clean, SSAO alpha gap closed, TAA distant-leaf rejection 1.05 % on both backends. Carried to Phase 4: Vulkan costs ~25 % more frame time than OpenGL on the fixed scene (7.59 ms vs 6.08, stddev 0.37 vs 0.12) and is GPU-bound (5.43 ms of the frame in the frame-pacing wait), so the pacing gate still fails its stddev rule. Also open: TransientAllocator is not wired into the frame graph, ClearDepth ignores the depth write mask, BuildMipMaps LOD-bias parity. Next: the latency seams (plan section "Latency seams", branch feat/latency) and DLSS.
-
-Branching rule (user, 2026-09-11): at Milestone 1, merge feat/vulkan-native back into main (after merging fix/taa-antiflicker-disocclusion into it), then start a new branch from main for the next work (DLSS). Confirm the merge mechanics (PR on origin, as with feat/taa PR #2) with the user at that point.
-
-**Why:** the GL-shaped seam forced GL semantics per call (scope inference, ALL_COMMANDS barriers, synchronous uploads, coupled present) and the user judged the backend brittle at the foundation.
-
-**How to apply:** work phase by phase from the plan file (0 foundations, 1A platform substitution, 1B sync foundation, 2 frame graph = Milestone 1, 3 native shaders, 4 performance, 5 mod API, 6 upscaler seams); in-game runs only at phase exits, both backends, renderer line confirmed; evidence is numbers and logs, never screenshot pairs. Related: [[research-before-repeating-loops]], [[vulkan-validation-log-and-flicker]], [[taa-p2-vulkan-parity-lessons]], [[no-subagents]].
-
 ### Vulkan validation log and flicker
 
 *"Vulkan validation messages go to a file, not the client log (OPTIMUM_VULKAN_VALIDATION=1 -> $TMP/optimum-vulkan-validation.log; FEATURES=sync,best); frame-to-frame flicker cannot be seen in screenshots. P4 accepted 2026-09-11."*
@@ -504,19 +389,3 @@ Blind sleeps repeatedly captured the loading screen or typed into a game that wa
 
 **How to apply:** poll the log for the marker with a bounded loop, then a short fixed margin; never `sleep 60` and hope. Related: [[pkill-self-match]], [[run-for-user-no-input]].
 
-### Xegtao default with taa
-
-*Owner decision 2026-09-15 - XeGTAO is the default ambient occlusion on Vulkan whenever TAA is active; vanilla SSAO otherwise and always on OpenGL.*
-
-User, 2026-09-15: "XeGTAO should become default when TAA is active."
-
-The AO setting on Vulkan is Auto by default: XeGTAO while TAA (the temporal consumer) is active, vanilla SSAO when it is off; an explicit choice overrides Auto. OpenGL keeps vanilla SSAO ("OFF is vanilla").
-
-**Why:** the user, same day: "the games SSAO is worst case for Temporal Rendering" (screen-locked Bayer dither re-rolled every jittered frame). XeGTAO's noise is designed to converge through a temporal accumulator; without TAA vanilla SSAO's fixed dither is the better fallback, and the whole-frame jitter work already moved AO into the scene before the resolve.
-
-**How to apply:** any XeGTAO stage, setting default, coverage test or acceptance note follows this rule; handoff item 8 in docs/vulkan-branch-progress.md should state it. Related: [[vulkan-taa-jitter-root-cause]], [[frame-generation-needs-pacing]].
-
-## Known debt
-- Shaders are whole-file overrides, not patches. A shader patch system (`patches/shaders/*.patch`
-  against the vanilla archive, extract + check) is planned; until then keep overrides additive and
-  diff against `.vanilla/archives/vs_client_*.tar.gz` after every game update (see TAA-PLAN.md follow-up).

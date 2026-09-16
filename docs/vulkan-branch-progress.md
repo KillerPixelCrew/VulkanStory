@@ -19,6 +19,12 @@ PR itself; do not push to upstream or touch the PR.
 
 **Base.** Branched from the last TAA-only commit before the DLSS work (9ad0c70 after the identity rewrite).
 
+**Scope, stated by the owner 2026-09-16.** Frame structure is Vulkan foundation and IS in scope here: one frame
+identity per frame with markers around simulation, render submit and present, and the world frame separated from
+UI composition (`SceneNoHud` plus a UI target). The vendor layer on top of them - DLSS, XeSS, FSR, frame generation,
+the NV/AMD/XeLL latency backends, NGX - stays on `feat/dlss`, `feat/dlss-g`, `feat/latency`. Standing rendering
+direction: physically correct over the vanilla look; AO defaults to GTAO while TAA is active on Vulkan.
+
 **History rewrite that already happened.** All 14 fork branches had their author identity rewritten to
 NightHammer1000 <nightstorm@kpc.bz> on 2026-09-15. A first attempt also re-created upstream's signed
 commits, which broke the common history with StratumServer:main and closed PR #69 irrecoverably; the redo
