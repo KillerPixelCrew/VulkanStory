@@ -120,6 +120,32 @@ public partial class VulkanClientPlatform
     /// its own pass cache, so line and triangle pipelines of different callers do not evict the
     /// quads'.
     /// </summary>
+    private readonly NativeMeshPass nativeParticles2d =
+        new("particlesquad2d", Array.Empty<string>(), new[] { "particleTex" });
+
+    /// <summary>
+    /// The main menu's 2D particle pool (ParticleRenderer2D.Render -> RenderMeshInstanced under the
+    /// vanilla particlesquad2d program) as a native instanced pass on whatever target is bound -
+    /// the default framebuffer in the menu. The OpenGL side is ClientPlatformWindows.RenderMeshInstanced.
+    /// State is what the client stated: blend on in the non-OIT mode (GlToggleBlend), depth test and
+    /// mask as left by the menu. particleTex resolves from the program's declared texture.
+    /// </summary>
+    private bool TryRenderParticles2dNative(MeshRef mesh, int quantity)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (!NativeGuiEnabled || device == null || mesh == null || program == null || quantity <= 0 ||
+            !ReferenceEquals(program, ShaderPrograms.Particlesquad2d))
+        {
+            return false;
+        }
+
+        return DrawNativeGuiMesh(nativeParticles2d, mesh,
+            DeclaredProgramTexture(program.ProgramId, "particleTex"), 0,
+            statedLineWidth, statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite,
+            GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, "Particles2d",
+            CullModeFlags.None, quantity);
+    }
+
     private readonly NativeMeshPass nativeGuiMesh =
         new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
 
@@ -194,7 +220,7 @@ public partial class VulkanClientPlatform
 
     private bool DrawNativeGuiMesh(NativeMeshPass pass, MeshRef mesh, int textureId, int overlayTextureId,
         float lineWidth, bool blend, EnumBlendMode blendMode, bool depthTest, bool depthWrite, CompareOp depthCompare,
-        Rect2D? scissor, string passLabel, CullModeFlags cull = CullModeFlags.None)
+        Rect2D? scissor, string passLabel, CullModeFlags cull = CullModeFlags.None, int instanceCount = 1)
     {
         FrameBufferRef target = CurrentFrameBuffer;
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
@@ -251,7 +277,7 @@ public partial class VulkanClientPlatform
             Span<NativeTexture> textures = stackalloc NativeTexture[pass.Samplers.Length];
             textures[0] = new NativeTexture(pass.Samplers[0], textureId);
             if (textures.Length > 1) textures[1] = new NativeTexture(pass.Samplers[1], overlayTextureId);
-            recorded = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
+            recorded = device.DrawNativeMeshInstanced(pipeline, vao.VaoId, instanceCount, textures);
         }
         device.EndNativePass();
 
