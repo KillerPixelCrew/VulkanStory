@@ -713,7 +713,7 @@ public class NativeWorldSystemsCoverageTests
         string patcher = Read("Optimum.Patcher/Program.cs");
         Assert.Contains("\"RenderTextureQuad\"", patcher);
         Assert.Contains("\"RenderOverlayLines\"", patcher);
-        Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"RenderTextureIntoFrameBuffer\", 9", patcher);
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"RenderTextureIntoFrameBuffer\", 10", patcher);
         Assert.Contains(
             "\"Vintagestory.Client.NoObf.SystemRenderPlayerAimAcc\", \"OnRenderFrame2DOverlay\", 1", patcher);
 
