@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..b1ec207 100644
+index d6eb844..8cb0f04 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,741 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,761 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -269,6 +269,26 @@ index d6eb844..b1ec207 100644
 +	/// What pins it: NativeWorldSystemsTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
 +	/// </summary>
 +	public virtual void RenderSunQuad(MeshRef quad, int sunTextureId)
++	{
++		RenderMesh(quad);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b decision 2, stage 2): one 2D GUI quad of ClientMain.Render2DTexture and its
++	/// overloads, through the gui program.
++	/// What it draws: every dialog, icon and text surface the GUI tree blits onto the screen.
++	/// The other side: the neutral body below is the OpenGL path - the RenderMesh call it replaced,
++	/// and ClientPlatformWindows does not override it - and VulkanClientPlatform.RenderGuiQuad is
++	/// the native one.
++	/// Target and slots: whatever the caller bound (the default framebuffer in the Ortho stage, or
++	/// a GUI render target), colour slot 0.
++	/// State that is not obvious: blend mode, depth test, depth mask and scissor are whatever the
++	/// caller stated before - standard alpha for most dialogs, premultiplied alpha under
++	/// Render2DTexturePremultipliedAlpha, a scissor for scrolled lists. <paramref name="textureId" />
++	/// is passed because a native pass resolves what it samples from handles.
++	/// What pins it: NativeGuiTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
++	/// </summary>
++	public virtual void RenderGuiQuad(MeshRef quad, int textureId)
 +	{
 +		RenderMesh(quad);
 +	}

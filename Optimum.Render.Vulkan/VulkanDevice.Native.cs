@@ -212,6 +212,12 @@ internal sealed class NativePassDescription
     public int ViewportX;
     public int ViewportY;
 
+    /// <summary>
+    /// The scissor the client stated for this draw, in the target's own (GL-oriented) pixels;
+    /// null: the full target. A GUI draw inside a clipped dialog needs it.
+    /// </summary>
+    public Rect2D? Scissor;
+
     /// <summary>Negative: the full target.</summary>
     public int ViewportWidth = -1;
     public int ViewportHeight = -1;
@@ -867,7 +873,7 @@ public sealed unsafe partial class VulkanDevice
         var values = new DynamicStateValues
         {
             Viewport = new Viewport(pass.ViewportX, pass.ViewportY, width, height, 0f, 1f),
-            Scissor = new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
+            Scissor = pass.Scissor ?? new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
             CullMode = description.Cull,
             FrontFace = description.FrontFace,
             Topology = description.Topology,

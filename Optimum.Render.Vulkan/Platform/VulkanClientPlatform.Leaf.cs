@@ -161,6 +161,7 @@ public partial class VulkanClientPlatform
         NoteNativeTransparentBlend(3, 32774, 1, 1, 1, 1);
         NoteNativeTransparentBlend(4, 32774, 1, 1, 1, 1);
         NoteNativeTransparentBlend(5, 32774, 1, 1, 1, 1);
+        nativeTransparentSlots = 0x3F;
         device.ClearColor(0, 1f, 1f, 1f, 1f);
         device.ClearColor(1, 1f, 1f, 1f, 1f);
         device.ClearColor(3, 0f, 0f, 0f, 0f);

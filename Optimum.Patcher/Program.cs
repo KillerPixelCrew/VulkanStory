@@ -100,6 +100,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderNightSkyBox",
         "RenderCelestialQuad",
         "RenderSunQuad",
+        "RenderGuiQuad",
         "RenderParticles",
         // The decal pool draws through a scope seam, not a draw seam: the mesh handle stays
         // inside MeshDataPool (internal in the vanilla API), so the lib runs the vanilla
@@ -889,6 +890,15 @@ var targets = new List<MethodTarget>
     // the tesselation worker thread. See
     // docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md.
     new("Vintagestory.Client.NoObf.ClientMain", "Start", 0),
+    // Phase 3b stage 2: Render2DTexture's GUI quads draw through RenderGuiQuad. Two overloads
+    // share a parameter count, so every target names its parameter types.
+    new("Vintagestory.Client.NoObf.ClientMain", "Render2DTexture", 8,
+        new[] { "Vintagestory.API.Client.MeshRef", "System.Int32", "System.Single", "System.Single", "System.Single", "System.Single", "System.Single", "Vintagestory.API.MathTools.Vec4f" }),
+    new("Vintagestory.Client.NoObf.ClientMain", "Render2DTexture", 7,
+        new[] { "Vintagestory.API.Client.MultiTextureMeshRef", "System.Single", "System.Single", "System.Single", "System.Single", "System.Single", "Vintagestory.API.MathTools.Vec4f" }),
+    new("Vintagestory.Client.NoObf.ClientMain", "Render2DTexture", 3,
+        new[] { "System.Int32", "Vintagestory.API.Common.ModelTransform", "Vintagestory.API.MathTools.Vec4f" }),
+    new("Vintagestory.Client.NoObf.ClientMain", "Render2DTextureFlipped", 7),
     // SystemRenderPlayerEffects: dynamic light radius (lambda-free rewrite)
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
     // ClientPlatformWindows: persistent mapped VBO and index uploads. ParameterTypes

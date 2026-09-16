@@ -758,12 +758,15 @@ public class NativeWorldSystemsCoverageTests
 
         // Fixed state the pass states, never reads back: the caller's blend through the one
         // factor table, the caller's line width, and the mesh's own topology and layout.
-        Assert.Contains("AttachmentBlend.For(blend, EnumBlendMode.Standard)", gui);
+        // The caller's blend mode, Standard unless a seam states another (the GUI quads do).
+        Assert.Contains("AttachmentBlend.For(blend, mode)", gui);
+        Assert.Contains("EnumBlendMode mode = EnumBlendMode.Standard", gui);
         Assert.Contains("LineWidth = lineWidth", gui);
         Assert.Contains("Topology = device.NativeMeshTopology(vao.VaoId)", gui);
         Assert.Contains("device.NativeMeshLayoutId(", gui);
-        Assert.Contains("DepthTest = false", gui);
-        Assert.Contains("DepthWrite = false", gui);
+        // The reticle and the texture blit state no depth; the GUI quads pass the caller's.
+        Assert.Contains("depthTest: false, depthWrite: false, CompareOp.Less, scissor: null", gui);
+        Assert.Contains("DepthTest = depthTest", gui);
     }
 
     /// <summary>
@@ -829,5 +832,46 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("!IsTransparentTarget(bound)", world);
         Assert.Contains("depthWrite: false", world);
         Assert.Contains("NativeWorldBeginPass(\"ParticlesOit\"", world);
+    }
+    /// <summary>
+    /// Render2DTexture's quads draw through RenderGuiQuad, and the native route takes the blend,
+    /// depth and scissor the client stated through the platform's virtuals, never the tracker.
+    /// </summary>
+    [Fact]
+    public void TheGuiQuadsDrawThroughTheirSeamUnderTheStatedState()
+    {
+        string main = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
+        Assert.Contains("Platform.RenderGuiQuad(quadModel, textureid);", main);
+        Assert.Contains("Platform.RenderGuiQuad(vao, meshRef.textureids[i]);", main);
+
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"RenderGuiQuad\"", patcher);
+        Assert.Contains("\"Render2DTextureFlipped\", 7", patcher);
+
+        string gui = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs");
+        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Gui)", gui);
+        Assert.Contains("statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite", gui);
+        Assert.Contains("scissorEnabled ? statedScissor : null", gui);
+
+        string state = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.State.cs");
+        Assert.Contains("statedBlendMode = blendMode;", state);
+        Assert.Contains("statedDepthWrite = flag;", state);
+    }
+    /// <summary>
+    /// The Transparent target's colour slots are the set the client selected, not the target's
+    /// texture count: the OIT accumulation set keeps its colour accumulation on slots 3-5, which
+    /// the FrameBufferRef does not list. Dropping them made every native OIT draw add no colour.
+    /// </summary>
+    [Fact]
+    public void NativeOitPassesUseTheTransparentSlotSetTheClientSelected()
+    {
+        Assert.Contains("nativeTransparentSlots = 7;", Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs"));
+        Assert.Contains("nativeTransparentSlots = 0x3F;", Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs"));
+        string chunks = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeChunks.cs");
+        Assert.Contains("if (IsTransparentTarget(target) && nativeTransparentSlots != 0) return nativeTransparentSlots;", chunks);
+        string world = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs");
+        Assert.Contains("if (IsTransparentTarget(target) && nativeTransparentSlots != 0) return nativeTransparentSlots;", world);
     }
 }

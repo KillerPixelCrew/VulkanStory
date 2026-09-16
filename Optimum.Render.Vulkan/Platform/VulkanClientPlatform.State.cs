@@ -1,3 +1,4 @@
+using Silk.NET.Vulkan;
 using System;
 using System.Runtime.InteropServices;
 using Cairo;
@@ -134,8 +135,23 @@ public partial class VulkanClientPlatform
 
     public override void GlScissor(int x, int y, int width, int height)
     {
+        // Clipped the way GlStateTracker.SetScissor clips, kept as client state for native passes.
+        int clippedX = Math.Max(0, x);
+        int clippedY = Math.Max(0, y);
+        statedScissor = new Rect2D(new Offset2D(clippedX, clippedY),
+            new Extent2D((uint)Math.Max(0, width - (clippedX - x)), (uint)Math.Max(0, height - (clippedY - y))));
         device.SetScissor(x, y, width, height);
     }
+
+    // The fixed state the client last stated through this platform's own virtuals. A native pass
+    // that draws "with whatever the caller set" (the GUI quads) reads these - client statements,
+    // recorded where they are made - never the device's GL state tracker (Phase 3b decision 3).
+    private bool statedBlendOn;
+    private EnumBlendMode statedBlendMode = EnumBlendMode.Standard;
+    private bool statedDepthTest;
+    private bool statedDepthWrite = true;
+    private int statedDepthFunc = 513; // GL_LESS
+    private Rect2D statedScissor;
 
     public override void GlScissorFlag(bool enable)
     {
@@ -145,11 +161,13 @@ public partial class VulkanClientPlatform
 
     public override void GlEnableDepthTest()
     {
+        statedDepthTest = true;
         device.SetDepthTest(true);
     }
 
     public override void GlDisableDepthTest()
     {
+        statedDepthTest = false;
         device.SetDepthTest(false);
     }
 
@@ -175,6 +193,8 @@ public partial class VulkanClientPlatform
 
     public override void GlToggleBlend(bool on, EnumBlendMode blendMode = EnumBlendMode.Standard)
     {
+        statedBlendOn = on;
+        statedBlendMode = blendMode;
         device.SetBlend(on, blendMode);
         if (on && OptimumRenderSsao)
         {
@@ -222,6 +242,7 @@ public partial class VulkanClientPlatform
 
     public override void GlDepthMask(bool flag)
     {
+        statedDepthWrite = flag;
         device.SetDepthMask(flag);
     }
 
@@ -230,6 +251,7 @@ public partial class VulkanClientPlatform
         // EnumDepthFunction's values are the GL constants, which is the form
         // the seam takes: it cannot reference this enum, since it lives in
         // VintagestoryLib and the contracts assembly does not depend on it.
+        statedDepthFunc = (int)depthFunc;
         device.SetDepthFunc((int)depthFunc);
     }
 

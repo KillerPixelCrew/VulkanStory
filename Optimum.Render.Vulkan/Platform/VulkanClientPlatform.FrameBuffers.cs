@@ -652,6 +652,7 @@ public partial class VulkanClientPlatform
         NoteNativeTransparentBlend(0, 32774, 1, 1, 1, 1);
         NoteNativeTransparentBlend(1, 32774, 0, 769, 0, 769);
         NoteNativeTransparentBlend(2, 32774, 770, 771, 770, 771);
+        nativeTransparentSlots = 7;
     }
 
     /// <summary>
