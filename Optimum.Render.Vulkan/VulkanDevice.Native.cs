@@ -327,6 +327,15 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal int NativeMeshLayoutId(int meshId) => _meshes.LayoutIdOf(meshId);
 
+    /// <summary>
+    /// The state of a sampler object the client created (glGenSamplers), so a native system
+    /// can read a program's own sampler override - the chunk terrain's linear sampler on the
+    /// same atlas texture the nearest sampler reads - straight from the handle the client holds,
+    /// instead of through the texture unit it was bound to. False for an id that is not one.
+    /// </summary>
+    internal bool TryNativeSamplerState(int samplerId, out SamplerState state) =>
+        _standaloneSamplers.TryGetValue(samplerId, out state);
+
     private int ResolveNativeFramebuffer(int framebufferId) =>
         framebufferId == PassDeclaration.DefaultFramebuffer ? _defaultFramebuffer : framebufferId;
 
