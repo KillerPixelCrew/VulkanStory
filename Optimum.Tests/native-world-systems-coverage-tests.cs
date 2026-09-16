@@ -816,4 +816,18 @@ public class NativeWorldSystemsCoverageTests
             return null;
         }
     }
+    /// <summary>
+    /// The quad particle pool draws natively in the OIT stage under the Transparent target's
+    /// recorded blend contract, with depth writes off, and only for the vanilla program.
+    /// </summary>
+    [Fact]
+    public void TheQuadParticlePoolDrawsNativelyUnderTheTransparentContract()
+    {
+        string world = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs");
+        Assert.Contains("ReferenceEquals(ShaderProgramBase.CurrentShaderProgram, ShaderPrograms.Particlesquad)", world);
+        Assert.Contains("AttachmentBlend[]? contract = nativeTransparentBlend;", world);
+        Assert.Contains("!IsTransparentTarget(bound)", world);
+        Assert.Contains("depthWrite: false", world);
+        Assert.Contains("NativeWorldBeginPass(\"ParticlesOit\"", world);
+    }
 }
