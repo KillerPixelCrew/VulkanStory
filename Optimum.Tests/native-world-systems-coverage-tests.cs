@@ -892,4 +892,22 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("statedCull = true;", state);
         Assert.Contains("statedLineWidth = width;", state);
     }
+    /// <summary>
+    /// Plain draws under the vanilla standard program go native from RenderMesh under the stated
+    /// state and the world blend exceptions, but never inside an occlusion query (a Vulkan query
+    /// must begin and end inside one render pass) and never on the default framebuffer.
+    /// </summary>
+    [Fact]
+    public void PlainStandardProgramDrawsGoNativeOutsideOcclusionQueries()
+    {
+        Assert.Contains("if (TryRenderStandardMeshNative(modelRef)) return;",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
+        string world = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs");
+        Assert.Contains("occlusionQueryOpen ||", world);
+        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Standard) || CurrentFrameBuffer == null", world);
+        Assert.Contains("private AttachmentBlend[] StatedWorldBlend(FrameBufferRef target, int count)", world);
+        string leaf = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
+        Assert.Contains("occlusionQueryOpen = true;", leaf);
+        Assert.Contains("occlusionQueryOpen = false;", leaf);
+    }
 }

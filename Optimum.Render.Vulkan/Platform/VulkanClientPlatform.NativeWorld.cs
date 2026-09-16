@@ -94,6 +94,10 @@ public partial class VulkanClientPlatform
     private readonly NativeMeshPass nativeParticlesQuad =
         new("particlesquad", Array.Empty<string>(), Array.Empty<string>());
 
+    /// <summary>Any plain RenderMesh under the vanilla standard program (RenderStandardMeshNative).</summary>
+    private readonly NativeMeshPass nativeStandardMesh =
+        new("standard", Array.Empty<string>(), Array.Empty<string>());
+
     /// <summary>The cube particle pool's pipeline: no per-draw uniform and no sampler at all.</summary>
     private readonly NativeMeshPass nativeParticlesCube =
         new("particlescube", Array.Empty<string>(), Array.Empty<string>());
@@ -173,7 +177,8 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool NativeWorldPrepare(NativeMeshPass pass, MeshRef mesh, bool blending, bool depth,
         out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
-        Func<int, AttachmentBlend[]>? blendFor = null, bool? depthWrite = null)
+        Func<int, AttachmentBlend[]>? blendFor = null, bool? depthWrite = null,
+        CompareOp? depthCompare = null, CullModeFlags? cull = null)
     {
         target = null!;
         vao = null!;
@@ -205,8 +210,8 @@ public partial class VulkanClientPlatform
                 Blend = blendFor != null ? blendFor(formats.ColorFormats.Length) : NativeWorldBlend(formats, blending),
                 DepthTest = depth,
                 DepthWrite = depthWrite ?? depth,
-                DepthCompare = CompareOp.Less,
-                Cull = CullModeFlags.None,
+                DepthCompare = depthCompare ?? CompareOp.Less,
+                Cull = cull ?? CullModeFlags.None,
                 Topology = PrimitiveTopology.TriangleList,
             });
         if (built == null) return false;
@@ -449,6 +454,89 @@ public partial class VulkanClientPlatform
             device.DrawNativeMeshInstanced(pipeline, vao.VaoId, quantity, textures);
         }
         NativeWorldEndPass(target, outer, outerFlags);
+    }
+
+    /// <summary>
+    /// The per-attachment blend a world draw inherits from what the client stated: the stated
+    /// mode on every slot, with GlToggleBlend's own exceptions - the SSAO G-buffer slots and the
+    /// open motion attachment replace rather than blend - and on the Transparent target the
+    /// recorded OIT contract with the stated enable.
+    /// </summary>
+    private AttachmentBlend[] StatedWorldBlend(FrameBufferRef target, int count)
+    {
+        var blend = new AttachmentBlend[Math.Max(count, 1)];
+        AttachmentBlend[]? contract = nativeTransparentBlend;
+        bool transparent = contract != null && IsTransparentTarget(target);
+        bool primary = IsPrimaryTarget(target);
+        int motion = primary && OptimumMotionWriteActive ? MotionAttachmentIndex : -1;
+        for (int i = 0; i < blend.Length; i++)
+        {
+            if (transparent)
+            {
+                blend[i] = i < contract!.Length ? contract[i] : AttachmentBlend.Default;
+                blend[i].Enabled = statedBlendOn;
+            }
+            else if (primary && statedBlendOn && OptimumRenderSsao && (i == 2 || i == 3))
+            {
+                blend[i] = ReplaceBlend(true);
+            }
+            else
+            {
+                blend[i] = AttachmentBlend.For(statedBlendOn, statedBlendMode);
+            }
+            if (i == motion) blend[i] = ReplaceBlend(statedBlendOn);
+        }
+        return blend;
+    }
+
+    /// <summary>
+    /// A plain RenderMesh under the vanilla standard program - held and dropped items, block
+    /// entity models, the sun's disc outside its seam - recorded natively under the state the
+    /// client stated: blend, depth test, depth mask, depth function, cull. Every sampler the
+    /// pipeline declares resolves from the program's declared textures. False: the caller runs the
+    /// emulated draw. Skipped while an occlusion query is open (the sun probe) and for the default
+    /// framebuffer (GUI item icons stay on the emulated route for now).
+    /// </summary>
+    private bool TryRenderStandardMeshNative(MeshRef mesh)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (!NativeWorldEnabled || device == null || mesh == null || program == null || occlusionQueryOpen ||
+            !ReferenceEquals(program, ShaderPrograms.Standard) || CurrentFrameBuffer == null)
+        {
+            return false;
+        }
+
+        FrameBufferRef bound = CurrentFrameBuffer;
+        CullModeFlags cull = statedCull
+            ? (statedCullBack ? CullModeFlags.BackBit : CullModeFlags.FrontBit)
+            : CullModeFlags.None;
+        if (!NativeWorldPrepare(nativeStandardMesh, mesh, blending: statedBlendOn, depth: statedDepthTest,
+                out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
+                count => StatedWorldBlend(bound, count), depthWrite: statedDepthWrite,
+                depthCompare: GlEnums.CompareOpFrom(statedDepthFunc), cull: cull))
+        {
+            return false;
+        }
+
+        string[] names = pipeline.SamplerNames;
+        var textures = new NativeTexture[names.Length];
+        var reads = new int[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            int id = DeclaredProgramTexture(program.ProgramId, names[i]);
+            textures[i] = new NativeTexture(pipeline.Sampler(names[i]), id);
+            reads[i] = id;
+        }
+
+        string outer = passContext;
+        PassFlags outerFlags = passContextFlags;
+        bool drawn = false;
+        if (NativeWorldBeginPass("Standard", target, slots, reads))
+        {
+            drawn = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
+        }
+        NativeWorldEndPass(target, outer, outerFlags);
+        return drawn;
     }
 
     // ------------------------------------------------------------------- the decal scope
