@@ -139,6 +139,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.
         new(true, "RenderSkyDome", new[] { "MeshRef", "Int32", "Int32", "Single[]" }),
+        // Phase 3b stage 2: the entity draw seam - every sub-mesh of a multi-texture mesh.
+        new(true, "RenderEntityMesh", new[] { "MeshRef", "String", "Int32" }),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
         // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.

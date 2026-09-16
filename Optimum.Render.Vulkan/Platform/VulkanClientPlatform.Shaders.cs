@@ -173,6 +173,11 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
+        // The client's own declaration - "this program's sampler <name> is this texture" - kept
+        // by name so a native pass of that program can resolve every sampler it declares from a
+        // handle. It is not the texture-unit table: no unit is involved, and the native path
+        // never reads one (docs/vulkan-native-render-systems.md, decision 3).
+        NoteProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         device.BindTexture(textureNumber, textureId);
         if (program.customSamplers.TryGetValue(samplerName, out var optimumSampler))
@@ -195,6 +200,7 @@ public partial class VulkanClientPlatform
 
     public override void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
+        NoteProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         device.BindTextureCube(textureNumber, textureId);
         if (program.clampTToEdge)
