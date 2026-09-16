@@ -373,6 +373,48 @@ internal static class VulkanStats
     public static long NativePasses => Interlocked.Read(ref _nativePasses);
     public static long NativeDraws => Interlocked.Read(ref _nativeDraws);
 
+    private static long _nativeFullscreenDraws;
+    private static long _nativeMeshDraws;
+    private static long _nativeInstancedDraws;
+    private static long _nativeIndirectDraws;
+    private static long _intervalNativeFullscreenDraws;
+    private static long _intervalNativeMeshDraws;
+    private static long _intervalNativeInstancedDraws;
+    private static long _intervalNativeIndirectDraws;
+
+    /// <summary>A native draw of the fullscreen triangle: a post or TAA chain pass.</summary>
+    public static void NoteNativeFullscreenDraw()
+    {
+        Interlocked.Increment(ref _nativeFullscreenDraws);
+        Interlocked.Increment(ref _intervalNativeFullscreenDraws);
+    }
+
+    /// <summary>A native draw of one mesh (indexed or not), one instance: sky, entities, GUI quads.</summary>
+    public static void NoteNativeMeshDraw()
+    {
+        Interlocked.Increment(ref _nativeMeshDraws);
+        Interlocked.Increment(ref _intervalNativeMeshDraws);
+    }
+
+    /// <summary>A native draw of one mesh with more than one instance: the particle pools.</summary>
+    public static void NoteNativeInstancedDraw()
+    {
+        Interlocked.Increment(ref _nativeInstancedDraws);
+        Interlocked.Increment(ref _intervalNativeInstancedDraws);
+    }
+
+    /// <summary>A native indirect multi-draw out of the per-slot indirect ring: chunk pools and decals.</summary>
+    public static void NoteNativeIndirectDraw()
+    {
+        Interlocked.Increment(ref _nativeIndirectDraws);
+        Interlocked.Increment(ref _intervalNativeIndirectDraws);
+    }
+
+    public static long NativeFullscreenDraws => Interlocked.Read(ref _nativeFullscreenDraws);
+    public static long NativeMeshDraws => Interlocked.Read(ref _nativeMeshDraws);
+    public static long NativeInstancedDraws => Interlocked.Read(ref _nativeInstancedDraws);
+    public static long NativeIndirectDraws => Interlocked.Read(ref _nativeIndirectDraws);
+
     /// <summary>A draw's frame texture (set 0) resolved to its placeholder: nothing suitable bound.</summary>
     public static void NoteSamplerPlaceholder()
     {
@@ -504,7 +546,11 @@ internal static class VulkanStats
             ComputePasses: Interlocked.Exchange(ref _computePasses, 0),
             Dispatches: Interlocked.Exchange(ref _dispatches, 0),
             NativePasses: Interlocked.Exchange(ref _intervalNativePasses, 0),
-            NativeDraws: Interlocked.Exchange(ref _intervalNativeDraws, 0));
+            NativeDraws: Interlocked.Exchange(ref _intervalNativeDraws, 0),
+            NativeFullscreenDraws: Interlocked.Exchange(ref _intervalNativeFullscreenDraws, 0),
+            NativeMeshDraws: Interlocked.Exchange(ref _intervalNativeMeshDraws, 0),
+            NativeInstancedDraws: Interlocked.Exchange(ref _intervalNativeInstancedDraws, 0),
+            NativeIndirectDraws: Interlocked.Exchange(ref _intervalNativeIndirectDraws, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -611,14 +657,17 @@ internal static class VulkanStats
             "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
             "standalone_clears={17} pass_splits={18} push_constants={19} storage_set_binds={20} " +
             "bindless_slots={21} bindless_placeholders={22} compute_passes={23} dispatches={24}" +
-            " native_passes={25} native_draws={26}",
+            " native_passes={25} native_draws={26} native_fullscreen_draws={27} " +
+            "native_mesh_draws={28} native_instanced_draws={29} native_indirect_draws={30}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
             counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
             counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits,
             counters.PushConstantWrites, counters.StorageSetBinds, counters.BindlessSlots, counters.BindlessPlaceholders,
-            counters.ComputePasses, counters.Dispatches, counters.NativePasses, counters.NativeDraws);
+            counters.ComputePasses, counters.Dispatches, counters.NativePasses, counters.NativeDraws,
+            counters.NativeFullscreenDraws, counters.NativeMeshDraws, counters.NativeInstancedDraws,
+            counters.NativeIndirectDraws);
 
     private static long _lastSample;
 
@@ -713,7 +762,11 @@ internal readonly record struct CounterSample(
     long ComputePasses = 0,
     long Dispatches = 0,
     long NativePasses = 0,
-    long NativeDraws = 0);
+    long NativeDraws = 0,
+    long NativeFullscreenDraws = 0,
+    long NativeMeshDraws = 0,
+    long NativeInstancedDraws = 0,
+    long NativeIndirectDraws = 0);
 
 /// <summary>The values on the <c>stats.transients</c> line.</summary>
 internal readonly record struct TransientSample(

@@ -68,7 +68,37 @@ internal sealed class NativePipelineDescription
     public bool DepthWrite;
     public CompareOp DepthCompare = CompareOp.Less;
     public CullModeFlags Cull = CullModeFlags.None;
+
+    /// <summary>
+    /// The winding a front face has. The game never calls glFrontFace, so every vanilla system
+    /// states <see cref="GlStateTracker.FrontFace" />; a native system that needs the other one
+    /// says so here rather than through a tracked toggle.
+    /// </summary>
+    public FrontFace FrontFace = GlStateTracker.FrontFace;
+
     public PrimitiveTopology Topology = PrimitiveTopology.TriangleList;
+
+    /// <summary>Fill for every vanilla system; Line is the wireframe debug render's.</summary>
+    public PolygonMode PolygonMode = PolygonMode.Fill;
+
+    /// <summary>The width a line-topology draw rasterizes with (autocamera's debug path sets 2).</summary>
+    public float LineWidth = 1.0f;
+
+    /// <summary>
+    /// The vertex layout the pipeline's draws feed it with: <see cref="MeshManager.EmptyLayoutId" />
+    /// for a pass that generates its vertices (the fullscreen triangle), otherwise the layout id of
+    /// the mesh the system draws (<see cref="VulkanDevice.NativeMeshLayoutId" />). It is part of the
+    /// pipeline key, so a mesh pipeline can never be handed a fullscreen one.
+    /// </summary>
+    public int VertexLayoutId = MeshManager.EmptyLayoutId;
+
+    /// <summary>
+    /// The draws sample the depth attachment of the target they draw into, with depth writes off -
+    /// what the liquid pass does to fade water at its edges. The scope then holds depth read-only
+    /// for the draw. Only legal with <see cref="DepthWrite" /> false; a fullscreen pass leaves it
+    /// false and sampling its own attachment stays an error.
+    /// </summary>
+    public bool SamplesBoundDepth;
 
     /// <summary>The attachment formats of the target the pipeline renders into.</summary>
     public RenderTargetFormats Targets = null!;
@@ -202,10 +232,23 @@ public sealed unsafe partial class VulkanDevice
     private long _emulationCallsInNativePasses;
     private long _nativePasses;
     private long _nativeDraws;
+    private long _nativeFullscreenDraws;
+    private long _nativeMeshDraws;
+    private long _nativeInstancedDraws;
+    private long _nativeIndirectDraws;
 
+    /// <summary>
+    /// The identity of a native pipeline: every field of its description that changes what a draw
+    /// through it does. The vertex layout is in it, so a mesh pipeline never collides with the
+    /// fullscreen one of the same program, formats and blend; so are the dynamic pieces (front
+    /// face, line width) that are not in <see cref="PipelineKey" />, because the cached
+    /// <see cref="NativePipeline" /> carries the description its draws emit.
+    /// </summary>
     private readonly record struct NativePipelineCacheKey(
         int ProgramId, int FormatsId, int BlendId, bool DepthTest, bool DepthWrite,
-        CompareOp DepthCompare, CullModeFlags Cull, PrimitiveTopology Topology);
+        CompareOp DepthCompare, CullModeFlags Cull, PrimitiveTopology Topology,
+        int VertexLayoutId, PolygonMode PolygonMode, FrontFace FrontFace, float LineWidth,
+        bool SamplesBoundDepth);
 
     /// <summary>Calls into the GL-emulation layer (state, units, uniforms by location, draws). Tests only.</summary>
     internal long EmulationCallsForTests => _emulationCalls;
@@ -213,9 +256,15 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Calls into the GL-emulation layer while a native pass was open: must stay 0. Tests only.</summary>
     internal long EmulationCallsInNativePassesForTests => _emulationCallsInNativePasses;
 
-    /// <summary>Native passes declared and native draws recorded. Tests only.</summary>
+    /// <summary>Native passes declared and native draws recorded (every kind). Tests only.</summary>
     internal long NativePassesForTests => _nativePasses;
     internal long NativeDrawsForTests => _nativeDraws;
+
+    /// <summary>Native draws by kind: the fullscreen triangle, a mesh, an instanced mesh, a multi-draw. Tests only.</summary>
+    internal long NativeFullscreenDrawsForTests => _nativeFullscreenDraws;
+    internal long NativeMeshDrawsForTests => _nativeMeshDraws;
+    internal long NativeInstancedDrawsForTests => _nativeInstancedDraws;
+    internal long NativeIndirectDrawsForTests => _nativeIndirectDraws;
 
     /// <summary>Distinct native pipelines this device holds. Tests only.</summary>
     internal int NativePipelinesForTests => _nativePipelines.Count;
@@ -272,6 +321,12 @@ public sealed unsafe partial class VulkanDevice
     internal string NativeVariantOf(int programId) =>
         _programVariants.TryGetValue(programId, out string? key) ? key : "";
 
+    /// <summary>
+    /// The interned vertex layout of a mesh, which a native system states on the pipeline it
+    /// draws that mesh through. -1 for a mesh that does not exist.
+    /// </summary>
+    internal int NativeMeshLayoutId(int meshId) => _meshes.LayoutIdOf(meshId);
+
     private int ResolveNativeFramebuffer(int framebufferId) =>
         framebufferId == PassDeclaration.DefaultFramebuffer ? _defaultFramebuffer : framebufferId;
 
@@ -308,6 +363,16 @@ public sealed unsafe partial class VulkanDevice
             error = "the request names no target formats";
             return null;
         }
+        if (description.SamplesBoundDepth && description.DepthWrite)
+        {
+            error = "a pipeline that samples the bound depth attachment cannot also write depth";
+            return null;
+        }
+        if (description.VertexLayoutId < 0 || description.VertexLayoutId >= _meshes.LayoutCount)
+        {
+            error = "vertex layout " + description.VertexLayoutId + " does not exist";
+            return null;
+        }
 
         ColorWriteTier tier = _context.Capabilities.ColorWriteTier;
         bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
@@ -339,26 +404,29 @@ public sealed unsafe partial class VulkanDevice
 
         var cacheKey = new NativePipelineCacheKey(description.ProgramId, formatsId, bakedBlendId,
             description.DepthTest, description.DepthWrite, description.DepthCompare,
-            description.Cull, description.Topology);
+            description.Cull, description.Topology, description.VertexLayoutId, description.PolygonMode,
+            description.FrontFace, description.LineWidth, description.SamplesBoundDepth);
         if (_nativePipelines.TryGetValue(cacheKey, out NativePipeline? cached) &&
             ReferenceEquals(cached.Program, program))
         {
             return cached;
         }
 
-        // A native draw generates its vertices, so the layout is the reserved empty one plus
-        // the constant attribute defaults GL promises for anything the program declares.
-        VertexLayoutDescription vertexLayout = _meshes.LayoutOf(MeshManager.EmptyLayoutId)
+        // The system's own vertex layout - the reserved empty one for a pass that generates its
+        // vertices, the mesh's interned layout for a mesh draw - plus the constant attribute
+        // defaults GL promises for anything the program declares and the layout does not carry.
+        VertexLayoutDescription vertexLayout = _meshes.LayoutOf(description.VertexLayoutId)
             .WithDefaultsFor(program.Interface.VertexInputs);
 
         // The blend id is negative so a native key can never collide with an emulated one,
-        // whose ids come from the tracker's interners.
+        // whose ids come from the tracker's interners. The vertex layout is in the key, so a
+        // mesh pipeline and a fullscreen pipeline of the same program are never the same entry.
         var key = new PipelineKey(
             ProgramId: description.ProgramId,
-            VertexLayoutId: MeshManager.EmptyLayoutId,
+            VertexLayoutId: description.VertexLayoutId,
             TargetFormatsId: formatsId,
             BlendId: -(bakedBlendId + 1),
-            PolygonMode: PolygonMode.Fill,
+            PolygonMode: description.PolygonMode,
             TopologyClass: GlEnums.TopologyClassOf(description.Topology));
 
         var request = new GraphicsPipelineCache.PipelineRequest
@@ -367,7 +435,7 @@ public sealed unsafe partial class VulkanDevice
             VertexLayout = vertexLayout,
             Targets = description.Targets,
             Blend = baked,
-            PolygonMode = PolygonMode.Fill,
+            PolygonMode = description.PolygonMode,
             Topology = description.Topology,
         };
 
@@ -516,15 +584,67 @@ public sealed unsafe partial class VulkanDevice
         WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 4 * sizeof(float)));
     }
 
+    /// <summary>
+    /// A float run at a placement: a matrix, a vector array, a kernel. The model-view matrix a
+    /// world system writes before each of its draws goes through here, which is what makes the
+    /// write draw-frequency - a record member is snapshotted into this frame's uniform ring when
+    /// the draw binds set 2, a push member is pushed with the draw's push block.
+    /// </summary>
+    internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, ReadOnlySpan<float> values)
+    {
+        if (values.IsEmpty) return;
+        fixed (float* first = values)
+        {
+            WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(first, values.Length * sizeof(float)));
+        }
+    }
+
     // ------------------------------------------------------------------------ draws
 
     /// <summary>
     /// Records the fullscreen triangle of a native pass: the pass's reads are made
     /// shader-readable, the sampled textures resolve to bindless slots straight from their
     /// handles and sampler state, and the pipeline's fixed state is what the draw runs with.
+    ///
+    /// The mesh-drawing siblings are in VulkanDevice.NativeMesh.cs; all of them share
+    /// <see cref="BeginNativeDraw" />, which is this method's old body.
     /// </summary>
     internal bool DrawNativeFullscreen(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)
     {
+        if (!BeginNativeDraw(pipeline, textures, 0, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
+        {
+            return false;
+        }
+
+        Checkpoint(commandBuffer,
+            CheckpointMarker.Draw(CheckpointKind.Fullscreen, pipeline.ProgramId, target!.Id, 0));
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("native fullscreen program=" + pipeline.ProgramId + " pass='" + _nativePass!.Name +
+                "' target=" + target.Id);
+        }
+        _context.Api.CmdDraw(commandBuffer, 3, 1, 0, 0);
+        NoteNativeDraw(NativeDrawKind.Fullscreen);
+        return true;
+    }
+
+    /// <summary>
+    /// Everything a native draw needs before its draw command: the pass and pipeline are
+    /// checked, the textures the draw samples are put into the layout a shader read needs,
+    /// the rendering scope is opened, the pipeline is bound, the sampled textures resolve to
+    /// bindless slots straight from their handles and sampler state, the program's sets are
+    /// bound (with <paramref name="meshId" />, so a chunk's storage-buffer vertex fetch and an
+    /// entity's animation block resolve to this draw's mesh) and the dynamic state is emitted.
+    ///
+    /// Shared by the fullscreen draw and every mesh draw. None of it reads the GL state
+    /// tracker, a texture unit or a draw-buffer mask.
+    /// </summary>
+    private bool BeginNativeDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures, int meshId,
+        out CommandBuffer commandBuffer, out VulkanFramebuffer? target)
+    {
+        commandBuffer = default;
+        target = null;
+
         if (!_frameActive || _nativePass == null || _nativeTarget == null)
         {
             if (RenderTrace.Enabled) RenderTrace.Write("native draw skipped: no open native pass");
@@ -532,8 +652,8 @@ public sealed unsafe partial class VulkanDevice
         }
 
         NativePassDescription pass = _nativePass;
-        VulkanFramebuffer target = _nativeTarget;
-        if (!ReferenceEquals(_targets.Bound, target))
+        VulkanFramebuffer bound = _nativeTarget;
+        if (!ReferenceEquals(_targets.Bound, bound))
         {
             AddDiagnostic("native pass '" + pass.Name + "' lost its target before its draw");
             return false;
@@ -547,18 +667,32 @@ public sealed unsafe partial class VulkanDevice
             return false;
         }
 
-        CommandBuffer commandBuffer = Commands;
+        commandBuffer = Commands;
         ReleaseReadSelfCopies();
         EnsureBindlessPlaceholdersReadable(commandBuffer);
 
-        // The pass's reads, put into the layout a shader read needs. A pass never samples
-        // its own attachment: that would be feedback, which a native system resolves by
-        // declaring two passes instead.
+        // The pass's reads, put into the layout a shader read needs. A pass never samples a
+        // colour attachment of its own target: that would be feedback, which a native system
+        // resolves by declaring two passes instead. The one exception the API allows is the
+        // bound depth attachment with depth writes off, which the pipeline declares
+        // (NativePipelineDescription.SamplesBoundDepth) and the scope then holds read-only.
+        bool depthReadOnly = false;
         for (int i = 0; i < textures.Length; i++)
         {
             VulkanTexture? texture = _textures.Get(textures[i].TextureId);
             if (texture == null) continue;
-            if (_targets.IsAttachmentOfBound(textures[i].TextureId) || _targets.IsBoundDepth(textures[i].TextureId))
+            if (_targets.IsBoundDepth(textures[i].TextureId))
+            {
+                if (!pipeline.Description.SamplesBoundDepth)
+                {
+                    AddDiagnostic("native pass '" + pass.Name + "' samples texture " + textures[i].TextureId +
+                        ", the depth attachment of its own target, through a pipeline that does not declare it");
+                    return false;
+                }
+                depthReadOnly = true;
+                continue;
+            }
+            if (_targets.IsAttachmentOfBound(textures[i].TextureId))
             {
                 AddDiagnostic("native pass '" + pass.Name + "' samples texture " + textures[i].TextureId +
                     ", an attachment of its own target");
@@ -575,10 +709,11 @@ public sealed unsafe partial class VulkanDevice
         }
         _barriers.Flush(commandBuffer);
 
-        _targets.SetDepthReadOnly(false);
+        // Decided before the scope opens, since it decides the depth attachment's layout.
+        _targets.SetDepthReadOnly(depthReadOnly);
         _targets.EnsureRendering(commandBuffer);
 
-        RenderTargetFormats scope = _targets.ScopeFormats(target);
+        RenderTargetFormats scope = _targets.ScopeFormats(bound);
         if (!scope.Equals(pipeline.Description.Targets))
         {
             AddDiagnostic("native pass '" + pass.Name + "' has target formats its pipeline was not built for");
@@ -640,35 +775,32 @@ public sealed unsafe partial class VulkanDevice
                     : texture.State;
             }
 
+            // The bound depth attachment is sampled in the read-only depth layout, the one the
+            // scope holds it in, exactly as the emulated resolve keys it.
+            ImageLayout layout = depthReadOnly && _targets.IsBoundDepth(sampled.TextureId)
+                ? ImageLayout.DepthReadOnlyOptimal
+                : ImageLayout.ShaderReadOnlyOptimal;
+
             if (sampler.FrameBinding >= 0)
             {
                 SamplerBindingValue value = texture == null
                     ? default
                     : new SamplerBindingValue((uint)sampler.FrameBinding, texture.View,
-                        _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, sampler.Kind)), texture.Id);
+                        _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, sampler.Kind)), texture.Id, layout);
                 if (texture == null) VulkanStats.NoteSamplerPlaceholder();
                 lock (_frameTextureLock) _frameTextureValues[FrameTextureIndex(sampler.FrameBinding)] = value;
                 continue;
             }
 
-            uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling);
+            uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling, layout);
             VulkanStats.NoteBindlessSlotResolution();
             BitConverter.TryWriteBytes(_pushShadow.AsSpan(sampler.PushOffset, ProgramInterfaceLayout.SlotBytes), slot);
         }
 
-        BindProgramSets(commandBuffer, program, 0);
-        EmitNativeDynamicState(commandBuffer, target, pass, pipeline);
+        BindProgramSets(commandBuffer, program, meshId);
+        EmitNativeDynamicState(commandBuffer, bound, pass, pipeline);
 
-        Checkpoint(commandBuffer,
-            CheckpointMarker.Draw(CheckpointKind.Fullscreen, program.ProgramId, target.Id, 0));
-        if (RenderTrace.Enabled)
-        {
-            RenderTrace.Write("native fullscreen program=" + program.ProgramId + " pass='" + pass.Name +
-                "' target=" + target.Id);
-        }
-        api.CmdDraw(commandBuffer, 3, 1, 0, 0);
-        _nativeDraws++;
-        VulkanStats.NoteNativeDraw();
+        target = bound;
         return true;
     }
 
@@ -704,7 +836,7 @@ public sealed unsafe partial class VulkanDevice
             Viewport = new Viewport(pass.ViewportX, pass.ViewportY, width, height, 0f, 1f),
             Scissor = new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
             CullMode = description.Cull,
-            FrontFace = GlStateTracker.FrontFace,
+            FrontFace = description.FrontFace,
             Topology = description.Topology,
             DepthTest = description.DepthTest,
             DepthWrite = description.DepthWrite,
@@ -717,7 +849,7 @@ public sealed unsafe partial class VulkanDevice
             StencilCompareMask = 0xFF,
             StencilWriteMask = 0xFF,
             StencilReference = 0,
-            LineWidth = 1.0f,
+            LineWidth = description.LineWidth,
             ColorWrite = colorWrite,
             BlendStateId = dynamicBlend ? pipeline.DynamicBlendId : 0,
         };

@@ -134,6 +134,43 @@ Inputs:
   - the full suites.
 - **Not in stage 1:** world systems, GUI, and removal of the emulation layer.
 
+## 3b. Stage 2 scope: mesh draws on the device API, proved on the sky
+
+Stage 1's device API records fullscreen draws only. World systems are mesh draws, so stage 2
+extends the API and ports the simplest system through it.
+
+- **Device** (`VulkanDevice.NativeMesh.cs`, plus the description and key in `VulkanDevice.Native.cs`):
+  - `DrawNativeMesh`, `DrawNativeMeshInstanced`, `DrawNativeMeshArrays` (non-indexed) and
+    `DrawNativeMeshMulti`, all sharing `BeginNativeDraw` - the old `DrawNativeFullscreen` body - and
+    all recording through the existing `MeshManager` and the existing per-slot indirect ring. There is
+    no second mesh path.
+  - The real mesh id reaches `BindProgramSets`, so a chunk's storage-buffer vertex fetch and an
+    entity's `Animation` block resolve per draw instead of against the fullscreen path's hardcoded 0.
+    Bone matrices therefore need no new API: `UBO.Update("Animation", ...)` keeps working as it does.
+  - `NativePipelineDescription` gains what a mesh draw needs and a fullscreen draw did not: the vertex
+    layout (`VertexLayoutId`, from `VulkanDevice.NativeMeshLayoutId`), polygon mode, line width, front
+    face, and `SamplesBoundDepth` - the explicit declaration that the pass reads the depth attachment
+    it draws into with writes off, which is the one case where sampling its own target is legal and
+    which puts the scope's depth in the read-only layout. Every one of those is in the native pipeline
+    cache key, and the vertex layout is in `PipelineKey`, so a mesh pipeline never collides with the
+    fullscreen pipeline of the same program.
+  - Per-draw writes stay `WriteNative` by placement, with a float-run overload for a matrix. A record
+    member is snapshotted into the frame's uniform ring when the draw binds set 2, a push member is
+    pushed with the draw's push block: both are per draw.
+  - Stats count the kinds apart: `native_fullscreen_draws`, `native_mesh_draws`,
+    `native_instanced_draws`, `native_indirect_draws`, summing to `native_draws`.
+- **Platform:** the sky dome (`VulkanClientPlatform.NativeSky.cs`). Its lib seam is
+  `ClientPlatformAbstract.RenderSkyDome(MeshRef, int skyTextureId, int glowTextureId, float[] modelViewMatrix)`,
+  whose neutral body is the `RenderMesh` call it replaced - so OpenGL is unchanged - and which hands
+  the native pass the values it cannot read off GL state. `NativeSkyEnabled` keeps the old route
+  reachable.
+- **Tests:** `NativeSkyTests` (old route against native route, scene and glow pixels, no emulation
+  inside the pass), `NativeMeshDrawTests` (a native mesh draw against the emulated draw of the same
+  mesh, pipeline-key uniqueness across the new dimensions, two multi-draws taking two regions of the
+  indirect ring, the layout-mismatch refusal) and `Optimum.Tests/native-world-systems-coverage-tests.cs`
+  for the lib seam. The four system stages add their systems to those files rather than to files named
+  after the stage.
+
 ## 4. Documentation that makes map stages unnecessary
 
 Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five

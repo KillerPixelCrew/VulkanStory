@@ -96,7 +96,8 @@ public class FsrPipelineCoverageTests
         Assert.Contains("internal bool BeginNativePass(NativePassDescription pass)", device);
         Assert.Contains("internal bool DrawNativeFullscreen(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)", device);
         Assert.Contains("VulkanStats.NoteNativePass();", device);
-        Assert.Contains("VulkanStats.NoteNativeDraw();", device);
+        // Counted by kind since stage 2; the fullscreen draw takes the Fullscreen one.
+        Assert.Contains("NoteNativeDraw(NativeDrawKind.Fullscreen);", device);
 
         string stats = Read("Optimum.Render.Vulkan/Core/VulkanStats.cs");
         Assert.Contains("native_passes={25} native_draws={26}", stats);
