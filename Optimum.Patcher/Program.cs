@@ -85,6 +85,12 @@ var membersToInject = new Dictionary<string, List<string>>
         // Phase 3b stage 2: the sky dome's draw seam, so a native platform records that pass
         // itself. The neutral body is the RenderMesh call it replaced.
         "RenderSkyDome",
+        // Phase 3b stage 2: the chunk draw-group scope, so a native platform can state a
+        // terrain pipeline's fixed state instead of reading it back off the GL state. Neutral
+        // bodies: BeginChunkPass returns false and EndChunkPass does nothing, so the OpenGL
+        // path draws exactly what it drew before.
+        "BeginChunkPass",
+        "EndChunkPass",
         "RenderOptimumTaaResolve",
         "RenderOptimumTaaSharpen",
         // Phase 3b stage 1d: the draw seams of the two TAA passes, so a native platform
@@ -811,6 +817,12 @@ var targets = new List<MethodTarget>
     // terrain overlay (pass 7) and the LiquidDepth prepass comment that records
     // why it stays jittered but writes no motion.
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderAfterOIT", 1),
+    // Phase 3b stage 2 (native chunks): every ChunkRenderer draw group now brackets its
+    // pools with the BeginChunkPass/EndChunkPass seam, so the shadow cascades and the OIT
+    // groups are transplant targets too (RenderOpaque and RenderAfterOIT already are, and
+    // RenderLiquidMotion is an injected member).
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderShadow", 1),
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOIT", 1),
     new("Vintagestory.Client.NoObf.ChunkRenderer", "OnRenderBefore", 1),
     // TAA P1: temporal frame contract - Advance()/JitterActive wiring in the
     // render loop, the jittered projection getter, its capture at both

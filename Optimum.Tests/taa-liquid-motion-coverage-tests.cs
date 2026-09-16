@@ -368,10 +368,17 @@ public class TaaLiquidMotionCoverageTests
     // ----------------------------------------------------------------- helpers
 
     /// <summary>The braced block of the method's finally clause.</summary>
+    /// <summary>
+    /// The pass's own restore block: the LAST finally in the method body. Phase 3b stage 2 put a
+    /// short inner try/finally around each pool loop (the native chunk-pass scope), so the first
+    /// finally in the method is no longer the one that restores the pass's state.
+    /// </summary>
     private static string FinallyBlock(string body)
     {
-        var match = System.Text.RegularExpressions.Regex.Match(body, @"finally\s*\{");
-        Assert.True(match.Success, "no finally block");
+        System.Text.RegularExpressions.MatchCollection matches =
+            System.Text.RegularExpressions.Regex.Matches(body, @"finally\s*\{");
+        Assert.True(matches.Count > 0, "no finally block");
+        var match = matches[matches.Count - 1];
         int open = body.IndexOf('{', match.Index);
         int depth = 0;
         for (int i = open; i < body.Length; i++)

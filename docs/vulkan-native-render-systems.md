@@ -171,6 +171,44 @@ extends the API and ports the simplest system through it.
   for the lib seam. The four system stages add their systems to those files rather than to files named
   after the stage.
 
+### Chunks: the terrain on the mesh-draw API
+
+The first of the four system stages, and the heaviest draw path in the game.
+
+- **Seam:** `ClientPlatformAbstract.BeginChunkPass(string chunkPass, bool blend, bool depthTest,
+  bool depthWrite, bool cullFace)` / `EndChunkPass()`, with neutral bodies that do nothing at all -
+  so the OpenGL path keeps drawing today's bodies under today's `GlToggleBlend` / depth / cull
+  calls. Every `ChunkRenderer` draw group brackets its pool loop with the pair in a `try` /
+  `finally`: the two shadow cascades' four groups, the Opaque stage's five, the OIT liquid and
+  transparent groups, the liquid velocity redraw and the AfterOIT terrain overlay - thirteen in all,
+  each naming itself and stating the fixed state it runs under.
+- **Platform** (`VulkanClientPlatform.NativeChunks.cs`): the scope opens a declared pass on the
+  bound target at its first draw, and the pool's multi-draw reaches
+  `VulkanDevice.DrawNativeMeshMulti` from the existing `RenderMesh(MeshRef, int[], int[], int, bool)`
+  seam. It stays multi-draw indirect over per-chunk meshes with the FaceData storage buffer, because
+  the real mesh id reaches `BindProgramSets`. The greedy-mesh and NoSSBO variants are just other
+  vertex layouts and other program variants, and the pipeline is keyed on both.
+- **The motion window is a colour-write mask.** With a window open the motion attachment joins the
+  pass's colour slots with replace blending; the liquid velocity redraw's motion-only window is the
+  same slots with the write mask zeroed on every other one. No `SetDrawBuffers` appears in the native
+  chunk path.
+- **State the platform states rather than reads:** the standard blend mode, replace blending on the
+  SSAO G-buffer slots and the motion slot (what `GlToggleBlend` and `ApplyOptimumMotionBlendState`
+  apply), and - for the Transparent target - whichever contract the client last applied, recorded at
+  `ApplyTransparentPassBlendState` and `BeginOitAccumulation` rather than read back out of
+  `GlStateTracker`. The texture behind each sampler is recorded at `BindProgramTexture2D`, the seam
+  where the client states it, so the draw resolves handles rather than units. `chunkliquid` samples
+  the depth attachment it draws against with writes off, which the pipeline declares through
+  `SamplesBoundDepth`.
+- **Still emulated inside a chunk group:** the uniform values the group sets by name (the per-pool
+  `origin` from `MeshDataPoolManager` and the generated program setters). They land in the same
+  per-program record and push shadows the native draw snapshots, so the image is identical; removing
+  that dispatch means moving `MeshDataPoolManager`, which is API-fork code and a later stage.
+- **Tests:** `NativeChunkTests` (old route against native route per group: blend and cull
+  combinations, the motion attachment bit for bit, the motion-only mask, the shadow cascade, one
+  declared pass and one indirect draw per group, pipelines built once) and the chunk facts in
+  `Optimum.Tests/native-world-systems-coverage-tests.cs`.
+
 ## 4. Documentation that makes map stages unnecessary
 
 Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five
