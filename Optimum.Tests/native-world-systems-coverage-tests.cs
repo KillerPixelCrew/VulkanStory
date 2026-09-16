@@ -753,7 +753,7 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("base.RenderTextureQuad(", gui);
         Assert.Contains("base.RenderOverlayLines(", gui);
         Assert.Contains("device.BeginNativePass(", gui);
-        Assert.Contains("device.DrawNativeMesh(", gui);
+        Assert.Contains("device.DrawNativeMeshInstanced(pipeline, vao.VaoId, instanceCount, textures)", gui);
         Assert.Contains("device.EndNativePass();", gui);
 
         // Fixed state the pass states, never reads back: the caller's blend through the one
@@ -894,20 +894,22 @@ public class NativeWorldSystemsCoverageTests
     }
     /// <summary>
     /// Plain draws under the vanilla standard program go native from RenderMesh under the stated
-    /// state and the world blend exceptions, but never inside an occlusion query (a Vulkan query
-    /// must begin and end inside one render pass) and never on the default framebuffer.
+    /// state (colour mask included), on world targets and on the default framebuffer, and the sun's
+    /// occlusion probe with them: the query rides the target manager's scope hooks.
     /// </summary>
     [Fact]
-    public void PlainStandardProgramDrawsGoNativeOutsideOcclusionQueries()
+    public void PlainStandardProgramDrawsGoNativeOnEveryTarget()
     {
         Assert.Contains("if (TryRenderStandardMeshNative(modelRef)) return;",
             Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
         string world = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs");
-        Assert.Contains("occlusionQueryOpen ||", world);
-        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Standard) || CurrentFrameBuffer == null", world);
+        Assert.DoesNotContain("occlusionQueryOpen", world);
+        Assert.Contains("return TryRenderStandardMeshToDefault(program, mesh, cull);", world);
+        Assert.Contains("blend[i].WriteMask &= ~statedColorMaskOff;", world);
         Assert.Contains("private AttachmentBlend[] StatedWorldBlend(FrameBufferRef target, int count)", world);
-        string leaf = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
-        Assert.Contains("occlusionQueryOpen = true;", leaf);
-        Assert.Contains("occlusionQueryOpen = false;", leaf);
+        Assert.Contains("statedColorMaskOff =",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.State.cs"));
+        Assert.Contains("_targets.ScopeClosing = _queryRing.OnScopeClosing;",
+            Read("Optimum.Render.Vulkan/VulkanDevice.cs"));
     }
 }

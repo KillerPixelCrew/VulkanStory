@@ -298,8 +298,16 @@ public partial class VulkanClientPlatform
         device.SetStencilOp(sfail, dpfail, dppass);
     }
 
+    /// <summary>
+    /// The colour channels the client last masked off with GlColorMask (None = all written),
+    /// stated for native draws: the sun's occlusion probe draws with every channel off.
+    /// </summary>
+    private ColorComponentFlags statedColorMaskOff;
+
     public override void GlColorMask(bool r, bool g, bool b, bool a)
     {
+        statedColorMaskOff = (r ? 0 : ColorComponentFlags.RBit) | (g ? 0 : ColorComponentFlags.GBit) |
+                             (b ? 0 : ColorComponentFlags.BBit) | (a ? 0 : ColorComponentFlags.ABit);
         device.SetColorMask(r, g, b, a);
     }
 

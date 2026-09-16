@@ -183,19 +183,11 @@ public partial class VulkanClientPlatform
 
     public override void BeginOcclusionQuery(int queryId)
     {
-        occlusionQueryOpen = true;
         device.BeginOcclusionQuery(queryId);
     }
 
-    /// <summary>
-    /// True between Begin and EndOcclusionQuery. A Vulkan occlusion query has to begin and end
-    /// inside one render pass, so no native draw - which opens its own pass - may run in between.
-    /// </summary>
-    private bool occlusionQueryOpen;
-
     public override void EndOcclusionQuery(int queryId)
     {
-        occlusionQueryOpen = false;
         device.EndOcclusionQuery(queryId);
     }
 
