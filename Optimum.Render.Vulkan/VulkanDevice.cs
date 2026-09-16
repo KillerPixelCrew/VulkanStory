@@ -3261,11 +3261,32 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             // Diagnostic: what this draw binds, so the emulated and the native route can be diffed per draw.
             var trace = new System.Text.StringBuilder("  sets program=").Append(program.ProgramId).Append(" mesh=").Append(meshId)
                 .Append(" record=").Append(recordOffset);
+            static ulong Fnv(ReadOnlySpan<byte> bytes)
+            {
+                ulong h = 14695981039346656037UL;
+                foreach (byte b in bytes) h = (h ^ b) * 1099511628211UL;
+                return h;
+            }
             foreach (BlockBinding block in program.Interface.UniformBlocks)
             {
                 trace.Append(' ').Append(block.BlockName).Append('@').Append(block.Binding).Append('=')
                     .Append(buffers[block.Binding].Offset).Append('/').Append(buffers[block.Binding].Resource);
+                if (_boundUniformBuffers.TryGetValue(block.BlockName, out int traceHandle) &&
+                    _uniformBuffers.TryGetValue(traceHandle, out ClientUniformBuffer? traceUbo))
+                {
+                    trace.Append(" h").Append(traceHandle).Append(":#").Append(Fnv(traceUbo.Shadow).ToString("x16"));
+                }
+                else
+                {
+                    trace.Append(" (unbound)");
+                }
             }
+            trace.Append(" rec#").Append(Fnv(program.UniformShadow).ToString("x16"))
+                .Append(" push#").Append(Fnv(_pushShadow).ToString("x16"));
+            trace.Append(" pushBytes=").Append(program.PushShadow?.Length ?? 0)
+                .Append(" frameBlock=").Append(program.Interface.UsesFrameBlock)
+                .Append(" frame@").Append(_frameGlobalsSnapshotOffset).Append(" v").Append(_frameGlobalsVersion)
+                .Append('#').Append(Fnv(_frameGlobals).ToString("x16"));
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             trace.Append(" recordBytes=").Append(program.UniformShadow.Length);
             foreach (UniformMember member in program.Interface.Members)

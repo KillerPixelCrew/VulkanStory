@@ -87,7 +87,8 @@ public class NativeWorldSystemsCoverageTests
     {
         string sky = Read(SkyPlatformFile);
 
-        Assert.Contains("internal bool NativeSkyEnabled { get; set; } = true;", sky);
+        // On by default; OPTIMUM_VK_NATIVE_SKY=0 turns the route off in the real client.
+        Assert.Contains("internal bool NativeSkyEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_SKY\") != \"0\";", sky);
         Assert.Contains("public override void RenderSkyDome(", sky);
         Assert.Contains("base.RenderSkyDome(", sky);
         Assert.Contains("device.BeginNativePass(", sky);
@@ -277,7 +278,8 @@ public class NativeWorldSystemsCoverageTests
     {
         string chunks = Read(ChunkPlatformFile);
 
-        Assert.Contains("internal bool NativeChunksEnabled { get; set; } = true;", chunks);
+        // On by default; OPTIMUM_VK_NATIVE_CHUNKS=0 turns the route off in the real client.
+        Assert.Contains("internal bool NativeChunksEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_CHUNKS\") != \"0\";", chunks);
         Assert.Contains("public override bool BeginChunkPass(", chunks);
         Assert.Contains("public override void EndChunkPass()", chunks);
         Assert.Contains("device.BeginNativePass(", chunks);
@@ -383,7 +385,11 @@ public class NativeWorldSystemsCoverageTests
     {
         string entities = Read(EntityPlatformFile);
 
-        Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = true;", entities);
+        // On by default; OPTIMUM_VK_NATIVE_ENTITIES=0 turns the route off in the real client.
+        // Vanilla entity programs only (decision 1): a mod program under the same pass name stays on the adapter.
+        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Entityanimated)", entities);
+        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Shadowmapentityanimated)", entities);
+        Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_ENTITIES\") != \"0\";", entities);
         Assert.Contains("public override void RenderEntityMesh(", entities);
         Assert.Contains("base.RenderEntityMesh(", entities);
         Assert.Contains("device.BeginNativePass(", entities);
@@ -581,7 +587,8 @@ public class NativeWorldSystemsCoverageTests
     {
         string world = Read(WorldPlatformFile);
 
-        Assert.Contains("internal bool NativeWorldEnabled { get; set; } = true;", world);
+        // On by default; OPTIMUM_VK_NATIVE_WORLD=0 turns the route off in the real client.
+        Assert.Contains("internal bool NativeWorldEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_WORLD\") != \"0\";", world);
         foreach (string seam in new[]
                  {
                      "RenderNightSkyBox", "RenderCelestialQuad", "RenderParticles",
@@ -734,7 +741,8 @@ public class NativeWorldSystemsCoverageTests
     {
         string gui = Read(GuiPlatformFile);
 
-        Assert.Contains("internal bool NativeGuiEnabled { get; set; } = true;", gui);
+        // On by default; OPTIMUM_VK_NATIVE_GUI=0 turns the route off in the real client.
+        Assert.Contains("internal bool NativeGuiEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_GUI\") != \"0\";", gui);
         Assert.Contains("public override void RenderTextureQuad(", gui);
         Assert.Contains("public override void RenderOverlayLines(", gui);
         Assert.Contains("base.RenderTextureQuad(", gui);

@@ -64,11 +64,8 @@ public partial class VulkanClientPlatform
     /// instead of the native pass: the old route the differential tests compare against, in the
     /// pattern of <see cref="NativeBlitEnabled" /> and <see cref="NativeSkyEnabled" />.
     /// </summary>
-    // Opt-in until the TAA-on defect is fixed: with TAA on, the first-person hand draws its hidden joints
-    // (2026-09-16, headless both-backends run); with TAA off the route matches OpenGL. Every value bound to
-    // the draw - record, Animation/AnimationPrev offsets, textures, mesh, blend - was traced identical to
-    // the emulated route, so the difference is in the motion-window or TAAMOTION-variant handling.
-    internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_ENTITIES") == "1";
+    // On by default; OPTIMUM_VK_NATIVE_ENTITIES=0 sends every entity draw to the neutral body.
+    internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_ENTITIES") != "0";
 
     /// <summary>The programs this file owns. Anything else takes the seam's neutral body.</summary>
     private const string EntityAnimatedPass = "entityanimated";
@@ -182,8 +179,27 @@ public partial class VulkanClientPlatform
         // A sampler the client gave its own filtering or wrap mode to is bound through the unit's
         // sampler override, which a native draw does not read. Neither vanilla entity program does
         // that; if one ever did, the neutral body keeps it correct instead of silently losing it.
-        return program.customSamplers.Count == 0 && !program.clampTToEdge;
+        if (program.customSamplers.Count != 0 || program.clampTToEdge) return false;
+
+        // Vanilla programs only (Phase 3b decision 1: mod renderers stay on the adapter). A mod can
+        // register its own program under the same pass name - VSEssentials' first-person hands
+        // (ModSystemFpHands.fpModeHandShader) is an entityanimated of its own with its own Animation
+        // and, under TAA, AnimationPrev blocks - and that program drew the arm wrong through this
+        // route with TAA on (2026-09-16, headless both-backends run). Every bound input traced equal
+        // to the neutral body's for that draw - record, both blocks, push block, textures, mesh,
+        // layout, blend, dynamic state - so the cause is still open; see the branch handoff.
+        // OPTIMUM_VK_NATIVE_ENTITIES=all admits mod programs again, for that investigation.
+        if (!AllEntityPrograms &&
+            !ReferenceEquals(program, ShaderPrograms.Entityanimated) &&
+            !ReferenceEquals(program, ShaderPrograms.Shadowmapentityanimated))
+        {
+            return false;
+        }
+        return true;
     }
+
+    private static readonly bool AllEntityPrograms =
+        Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_ENTITIES") == "all";
 
     /// <summary>
     /// The pipeline for this program, target, mesh shape and motion-window state, rebuilt only
