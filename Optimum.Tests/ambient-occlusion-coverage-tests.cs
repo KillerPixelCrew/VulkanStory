@@ -192,7 +192,12 @@ public class AmbientOcclusionCoverageTests
         // ChunkRenderer sets HaxyFade = 1 exactly for the OpaqueNoCull pool (plants, grass, cross-quads).
         string renderer = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
         string opaque = Between(renderer, "public void RenderOpaque(float dt)", "ScreenManager.FrameProfiler.Mark(\"rend3D-ret-opnc\");");
-        Assert.Matches(new Regex(@"chunkopaque\.HaxyFade = 1;\s*for \(int l = 0; l < textureIds\.Length; l\+\+\)\s*\{[^}]*poolsByRenderPass\[1\]"), opaque);
+        // The native chunk-pass scope (Phase 3b stage 2) brackets the loop, so the flag and the
+        // pool are still adjacent with the scope's Begin/try between them.
+        Assert.Matches(new Regex(
+                @"chunkopaque\.HaxyFade = 1;.{0,400}?for \(int l = 0; l < textureIds\.Length; l\+\+\).{0,300}?poolsByRenderPass\[1\]",
+                RegexOptions.Singleline),
+            opaque);
 
         string compose = Read("sources/shaders/scene-ssao.fsh").Replace("\r\n", "\n");
         Assert.Contains("#if OPTIMUMAO > 0\n    if (optimumAoMode == 1)", compose);

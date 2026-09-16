@@ -647,6 +647,11 @@ public partial class VulkanClientPlatform
         device.SetBlendFuncSeparate(1, 0, 769, 0, 769);
         device.SetBlendEquation(2, 32774);
         device.SetBlendFuncSeparate(2, 770, 771, 770, 771);
+        // Phase 3b stage 2: the same contract, recorded for the native chunk passes that draw
+        // into this target (VulkanClientPlatform.NativeChunks.cs).
+        NoteNativeTransparentBlend(0, 32774, 1, 1, 1, 1);
+        NoteNativeTransparentBlend(1, 32774, 0, 769, 0, 769);
+        NoteNativeTransparentBlend(2, 32774, 770, 771, 770, 771);
     }
 
     /// <summary>

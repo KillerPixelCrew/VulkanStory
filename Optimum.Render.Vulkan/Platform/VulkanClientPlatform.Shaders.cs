@@ -73,6 +73,7 @@ public partial class VulkanClientPlatform
         {
             device.DeleteSampler(optimumSampler.Value);
         }
+        ForgetNativeChunkProgram(program.ProgramId);
         device.DeleteProgram(program.ProgramId);
     }
 
@@ -173,6 +174,10 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
+        // Phase 3b stage 2: this is where the client states which texture a sampler reads, so
+        // it is where a native pass takes the handle from (VulkanClientPlatform.NativeChunks.cs).
+        // The unit binding below still happens, so the emulated route is unchanged.
+        NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         device.BindTexture(textureNumber, textureId);
         if (program.customSamplers.TryGetValue(samplerName, out var optimumSampler))
@@ -195,6 +200,7 @@ public partial class VulkanClientPlatform
 
     public override void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
+        NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         device.BindTextureCube(textureNumber, textureId);
         if (program.clampTToEdge)

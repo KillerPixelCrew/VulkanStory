@@ -152,6 +152,15 @@ public partial class VulkanClientPlatform
         device.SetBlendFuncSeparate(3, 1, 1, 1, 1);
         device.SetBlendFuncSeparate(4, 1, 1, 1, 1);
         device.SetBlendFuncSeparate(5, 1, 1, 1, 1);
+        // Phase 3b stage 2: the same contract, recorded for the native chunk passes that draw
+        // into this target - a native pipeline states its blend rather than reading the
+        // tracker's back (VulkanClientPlatform.NativeChunks.cs). Slot 2 keeps whatever the
+        // vanilla transparent set left there, exactly as GL does.
+        NoteNativeTransparentBlend(0, 32774, 774, 0, 774, 0);
+        NoteNativeTransparentBlend(1, 32774, 774, 0, 774, 0);
+        NoteNativeTransparentBlend(3, 32774, 1, 1, 1, 1);
+        NoteNativeTransparentBlend(4, 32774, 1, 1, 1, 1);
+        NoteNativeTransparentBlend(5, 32774, 1, 1, 1, 1);
         device.ClearColor(0, 1f, 1f, 1f, 1f);
         device.ClearColor(1, 1f, 1f, 1f, 1f);
         device.ClearColor(3, 0f, 0f, 0f, 0f);

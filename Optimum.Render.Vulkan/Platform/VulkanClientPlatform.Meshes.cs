@@ -78,6 +78,12 @@ public partial class VulkanClientPlatform
     {
         RuntimeStats.drawCallsCount++;
         VAO vAO = (VAO)modelRef;
+        // Phase 3b stage 2: inside a ChunkRenderer draw group this is a native multi-draw of
+        // the pool, recorded by VulkanClientPlatform.NativeChunks.cs. Outside one - the decal
+        // pool, a mod's pool, or with NativeChunksEnabled off - it is the emulated route the
+        // OpenGL body takes.
+        if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;
+
         // The chunk renderer's one multidraw per pool. GL takes byte offsets
         // into the index buffer; the device converts them to index counts and
         // issues a single indirect draw.

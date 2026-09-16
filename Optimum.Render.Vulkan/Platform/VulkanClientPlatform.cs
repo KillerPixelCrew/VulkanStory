@@ -139,6 +139,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.
         new(true, "RenderSkyDome", new[] { "MeshRef", "Int32", "Int32", "Single[]" }),
+        // Phase 3b stage 2: the chunk draw-group scope every ChunkRenderer pass brackets
+        // its pools with, which routes the terrain multi-draws through the native API.
+        new(true, "BeginChunkPass", new[] { "String", "Boolean", "Boolean", "Boolean", "Boolean" }),
+        new(true, "EndChunkPass", Array.Empty<string>()),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
         // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.

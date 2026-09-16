@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..2e2e836 100644
+index 431e51a..4586d6e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -142,9 +142,46 @@ index 431e51a..2e2e836 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,23 +294,59 @@ public class ChunkRenderer
- 			chunkshadowmap.Tex2d2D = textureIds[j];
- 			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
+@@ -195,36 +281,108 @@ public class ChunkRenderer
+ 		platform.GlDepthMask(flag: true);
+ 		platform.GlToggleBlend(on: false);
+ 		platform.GlEnableDepthTest();
+ 		platform.GlDisableCullFace();
+ 		EnumFrustumCullMode frustumCullMode = ((game.currentRenderStage == EnumRenderStage.ShadowFar) ? EnumFrustumCullMode.CullInstantShadowPassFar : EnumFrustumCullMode.CullInstantShadowPassNear);
+-		for (int i = 0; i < textureIds.Length; i++)
++		// Optimum (Phase 3b stage 2): the cascade's opaque terrain group: depth on and written, no blending, no culling, as RenderShadow set it.
++		platform.BeginChunkPass("chunk-shadow-opaque", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++		try
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[i];
+-			poolsByRenderPass[0][i].Render(cameraPos, "origin", frustumCullMode);
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkshadowmap.Tex2d2D = textureIds[i];
++				poolsByRenderPass[0][i].Render(cameraPos, "origin", frustumCullMode);
++			}
++		}
++		finally
++		{
++			platform.EndChunkPass();
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("rend3D-rets-op");
+-		for (int j = 0; j < textureIds.Length; j++)
++		// Optimum (Phase 3b stage 2): the cascade's topsoil group: depth on and written, no blending, no culling, as RenderShadow set it.
++		platform.BeginChunkPass("chunk-shadow-topsoil", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++		try
++		{
++			for (int j = 0; j < textureIds.Length; j++)
++			{
++				chunkshadowmap.Tex2d2D = textureIds[j];
++				poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
++			}
++		}
++		finally
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[j];
+-			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
++			platform.EndChunkPass();
  		}
  		ScreenManager.FrameProfiler.Mark("rend3D-rets-tpp");
  		platform.GlDisableCullFace();
@@ -155,22 +192,43 @@ index 431e51a..2e2e836 100644
 +		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
 +		{
 +			OptimumDiagnostics.ShadowFarVegetation.Hit();
-+			for (int k = 0; k < textureIds.Length; k++)
++			// Optimum (Phase 3b stage 2): the cascade's vegetation group: depth on and written, no blending, no culling, as RenderShadow set it.
++			platform.BeginChunkPass("chunk-shadow-vegetation", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++			try
 +			{
-+				chunkshadowmap.Tex2d2D = textureIds[k];
-+				poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++				for (int k = 0; k < textureIds.Length; k++)
++				{
++					chunkshadowmap.Tex2d2D = textureIds[k];
++					poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +		}
 +		else
++		{
++			OptimumDiagnostics.ShadowFarVegetation.Skip();
++		}
++		// Optimum (Phase 3b stage 2): the cascade's blend-no-cull group: depth on and written, no blending, no culling, as RenderShadow set it.
++		platform.BeginChunkPass("chunk-shadow-blendnocull", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++		try
  		{
 -			chunkshadowmap.Tex2d2D = textureIds[k];
 -			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
-+			OptimumDiagnostics.ShadowFarVegetation.Skip();
++			for (int l = 0; l < textureIds.Length; l++)
++			{
++				chunkshadowmap.Tex2d2D = textureIds[l];
++				poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
++			}
  		}
- 		for (int l = 0; l < textureIds.Length; l++)
+-		for (int l = 0; l < textureIds.Length; l++)
++		finally
  		{
- 			chunkshadowmap.Tex2d2D = textureIds[l];
- 			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
+-			chunkshadowmap.Tex2d2D = textureIds[l];
+-			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
++			platform.EndChunkPass();
  		}
  		platform.GlToggleBlend(on: true);
  	}
@@ -205,7 +263,7 @@ index 431e51a..2e2e836 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,105 +354,132 @@ public class ChunkRenderer
+@@ -232,105 +390,177 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
@@ -307,11 +365,20 @@ index 431e51a..2e2e836 100644
 +			{
 +				SetOptimumMotionUniforms(chunkopaque);
 +			}
-+			for (int i = 0; i < textureIds.Length; i++)
++			// Optimum (Phase 3b stage 2): the opaque terrain group (render pass 0): blending on, depth on and written, back faces culled, and the motion attachment in the pass's write mask while the window above is open.
++			platform.BeginChunkPass("chunk-opaque", blend: true, depthTest: true, depthWrite: true, cullFace: true);
++			try
 +			{
-+				chunkopaque.TerrainTex2D = textureIds[i];
-+				chunkopaque.TerrainTexLinear2D = textureIds[i];
-+				poolsByRenderPass[0][i].Render(cameraPos, "origin");
++				for (int i = 0; i < textureIds.Length; i++)
++				{
++					chunkopaque.TerrainTex2D = textureIds[i];
++					chunkopaque.TerrainTexLinear2D = textureIds[i];
++					poolsByRenderPass[0][i].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
 +			chunkopaque.Stop();
@@ -330,11 +397,20 @@ index 431e51a..2e2e836 100644
 +			{
 +				SetOptimumMotionUniforms(chunktopsoil);
 +			}
-+			for (int j = 0; j < textureIds.Length; j++)
++			// Optimum (Phase 3b stage 2): the topsoil group (render pass 5): the same state as the opaque group, a different program.
++			platform.BeginChunkPass("chunk-topsoil", blend: true, depthTest: true, depthWrite: true, cullFace: true);
++			try
 +			{
-+				chunktopsoil.TerrainTex2D = textureIds[j];
-+				chunktopsoil.TerrainTexLinear2D = textureIds[j];
-+				poolsByRenderPass[5][j].Render(cameraPos, "origin");
++				for (int j = 0; j < textureIds.Length; j++)
++				{
++					chunktopsoil.TerrainTex2D = textureIds[j];
++					chunktopsoil.TerrainTexLinear2D = textureIds[j];
++					poolsByRenderPass[5][j].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
 +			chunktopsoil.Stop();
@@ -349,30 +425,57 @@ index 431e51a..2e2e836 100644
 +			chunkopaque.AlphaTest = 0.25f;
 +			chunkopaque.HaxyFade = 0;
 +			platform.GlToggleBlend(on: true);
-+			for (int k = 0; k < textureIds.Length; k++)
++			// Optimum (Phase 3b stage 2): the vegetation group (render pass 2): culling off (GlDisableCullFace above), blending on, alpha test 0.25.
++			platform.BeginChunkPass("chunk-vegetation", blend: true, depthTest: true, depthWrite: true, cullFace: false);
++			try
 +			{
-+				chunkopaque.TerrainTex2D = textureIds[k];
-+				chunkopaque.TerrainTexLinear2D = textureIds[k];
-+				poolsByRenderPass[2][k].Render(cameraPos, "origin");
++				for (int k = 0; k < textureIds.Length; k++)
++				{
++					chunkopaque.TerrainTex2D = textureIds[k];
++					chunkopaque.TerrainTexLinear2D = textureIds[k];
++					poolsByRenderPass[2][k].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			platform.GlToggleBlend(on: false);
 +			chunkopaque.AlphaTest = 0.42f;
 +			chunkopaque.HaxyFade = 1;
-+			for (int l = 0; l < textureIds.Length; l++)
++			// Optimum (Phase 3b stage 2): the blend-no-cull group (render pass 1): blending off, culling off, alpha test 0.42 with the haxy fade on.
++			platform.BeginChunkPass("chunk-blendnocull", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++			try
 +			{
-+				chunkopaque.TerrainTex2D = textureIds[l];
-+				chunkopaque.TerrainTexLinear2D = textureIds[l];
-+				poolsByRenderPass[1][l].Render(cameraPos, "origin");
++				for (int l = 0; l < textureIds.Length; l++)
++				{
++					chunkopaque.TerrainTex2D = textureIds[l];
++					chunkopaque.TerrainTexLinear2D = textureIds[l];
++					poolsByRenderPass[1][l].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			platform.GlEnableCullFace();
 +			platform.GlToggleBlend(on: true);
 +			chunkopaque.AlphaTest = 0.2f;
 +			chunkopaque.HaxyFade = 0;
-+			for (int m = 0; m < textureIds.Length; m++)
++			// Optimum (Phase 3b stage 2): the decorative group (render pass 8): culling and blending back on, alpha test 0.2.
++			platform.BeginChunkPass("chunk-decorative", blend: true, depthTest: true, depthWrite: true, cullFace: true);
++			try
 +			{
-+				chunkopaque.TerrainTex2D = textureIds[m];
-+				chunkopaque.TerrainTexLinear2D = textureIds[m];
-+				poolsByRenderPass[8][m].Render(cameraPos, "origin");
++				for (int m = 0; m < textureIds.Length; m++)
++				{
++					chunkopaque.TerrainTex2D = textureIds[m];
++					chunkopaque.TerrainTexLinear2D = textureIds[m];
++					poolsByRenderPass[8][m].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			platform.GlToggleBlend(on: false);
 +			chunkopaque.Stop();
@@ -425,7 +528,62 @@ index 431e51a..2e2e836 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,51 +551,187 @@ public class ChunkRenderer
+@@ -369,14 +599,23 @@ public class ChunkRenderer
+ 		chunkliquid.DepthTex2D = frameBufferRef.DepthTextureId;
+ 		chunkliquid.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
+ 		chunkliquid.SunSpecularIntensity = game.shUniforms.SunSpecularIntensity;
+ 		bool useSSBOs = game.api.renderapi.useSSBOs;
+ 		game.api.renderapi.useSSBOs = false;
+-		for (int i = 0; i < textureIds.Length; i++)
++		// Optimum (Phase 3b stage 2): the OIT liquid group (render pass 4) on the Transparent target: depth tested but not written and culling off, both from LoadFrameBuffer(Transparent), under the per-attachment blend contract the client applied to that target. The program samples Primary's depth - the depth attachment it draws against - with writes off, which the pipeline declares.
++		platform.BeginChunkPass("chunk-oit-liquid", blend: true, depthTest: true, depthWrite: false, cullFace: false);
++		try
+ 		{
+-			chunkliquid.TerrainTex2D = textureIds[i];
+-			poolsByRenderPass[4][i].Render(cameraPos, "origin");
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkliquid.TerrainTex2D = textureIds[i];
++				poolsByRenderPass[4][i].Render(cameraPos, "origin");
++			}
++		}
++		finally
++		{
++			platform.EndChunkPass();
+ 		}
+ 		game.api.renderapi.useSSBOs = useSSBOs;
+ 		chunkliquid.Stop();
+ 		ScreenManager.FrameProfiler.Mark("rend3D-ret-lp");
+ 		game.GlPopMatrix();
+@@ -388,65 +627,228 @@ public class ChunkRenderer
+ 		chunktransparent.FogMinIn = game.AmbientManager.BlendedFogMin;
+ 		chunktransparent.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 		chunktransparent.ModelViewMatrix = game.CurrentModelViewMatrix;
+ 		chunktransparent.Uniform("subpixelPaddingX", subPixelPaddingX);
+ 		chunktransparent.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int j = 0; j < textureIds.Length; j++)
++		// Optimum (Phase 3b stage 2): the OIT transparent and meta-block groups (render passes 3 and 6): the same Transparent-target state as the liquid group.
++		platform.BeginChunkPass("chunk-oit-transparent", blend: true, depthTest: true, depthWrite: false, cullFace: false);
++		try
+ 		{
+-			chunktransparent.TerrainTex2D = textureIds[j];
+-			poolsByRenderPass[3][j].Render(cameraPos, "origin");
+-			if (ClientSettings.RenderMetaBlocks)
++			for (int j = 0; j < textureIds.Length; j++)
+ 			{
+-				poolsByRenderPass[6][j].Render(cameraPos, "origin");
++				chunktransparent.TerrainTex2D = textureIds[j];
++				poolsByRenderPass[3][j].Render(cameraPos, "origin");
++				if (ClientSettings.RenderMetaBlocks)
++				{
++					poolsByRenderPass[6][j].Render(cameraPos, "origin");
++				}
+ 			}
+ 		}
++		finally
++		{
++			platform.EndChunkPass();
++		}
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -517,9 +675,18 @@ index 431e51a..2e2e836 100644
 +			liquidMotion.Uniform("taaLiquidReactive", OptimumLiquidReactive);
 +			SetOptimumMotionUniforms(liquidMotion);
 +			game.api.renderapi.useSSBOs = false;
-+			for (int i = 0; i < textureIds.Length; i++)
++			// Optimum (Phase 3b stage 2): the liquid velocity redraw (TAA-PLAN.md accuracy rule 7): blending off, depth tested AND written, culling off - and every colour slot but the motion attachment masked out of the pass, which is what BeginMotionOnlyWrite means here.
++			platform.BeginChunkPass("chunk-liquid-motion", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++			try
 +			{
-+				poolsByRenderPass[4][i].Render(cameraPos, "origin");
++				for (int i = 0; i < textureIds.Length; i++)
++				{
++					poolsByRenderPass[4][i].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			liquidMotion.Stop();
 +			ScreenManager.FrameProfiler.Mark("rend3D-ret-lqmv");
@@ -575,7 +742,10 @@ index 431e51a..2e2e836 100644
 +		ClientPlatformAbstract optimumPlatform = platform;
 +		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
 +		try
-+		{
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[7][i].Render(cameraPos, "origin");
 +			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
 +			platform.GlDisableCullFace();
 +			platform.GlToggleBlend(on: false);
@@ -598,19 +768,25 @@ index 431e51a..2e2e836 100644
 +			{
 +				SetOptimumMotionUniforms(chunkopaque);
 +			}
-+			for (int i = 0; i < textureIds.Length; i++)
++			// Optimum (Phase 3b stage 2): the terrain overlay group (render pass 7): blending off, culling off, depth tested and written (ClientMain re-enables the depth mask before the AfterOIT stage), and the motion attachment in the write mask while the window is open.
++			platform.BeginChunkPass("chunk-overlay", blend: false, depthTest: true, depthWrite: true, cullFace: false);
++			try
 +			{
-+				chunkopaque.TerrainTex2D = textureIds[i];
-+				chunkopaque.TerrainTexLinear2D = textureIds[i];
-+				poolsByRenderPass[7][i].Render(cameraPos, "origin");
++				for (int i = 0; i < textureIds.Length; i++)
++				{
++					chunkopaque.TerrainTex2D = textureIds[i];
++					chunkopaque.TerrainTexLinear2D = textureIds[i];
++					poolsByRenderPass[7][i].Render(cameraPos, "origin");
++				}
++			}
++			finally
++			{
++				platform.EndChunkPass();
 +			}
 +			chunkopaque.Stop();
 +		}
 +		finally
- 		{
--			chunkopaque.TerrainTex2D = textureIds[i];
--			chunkopaque.TerrainTexLinear2D = textureIds[i];
--			poolsByRenderPass[7][i].Render(cameraPos, "origin");
++		{
 +			// Same contract as RenderOpaque: the window closes even if a shader
 +			// setup or a pool draw throws, so a failed overlay pass cannot leave
 +			// the motion attachment in the draw-buffer mask.
