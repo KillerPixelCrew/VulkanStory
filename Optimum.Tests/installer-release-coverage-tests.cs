@@ -39,8 +39,8 @@ public class InstallerReleaseCoverageTests
         JsonElement minimum = document.RootElement.GetProperty("minimumVersion");
         JsonElement maximum = document.RootElement.GetProperty("maximumVersion");
 
-        Assert.Equal("10.1.0.8386", minimum.GetString());
-        Assert.Equal("10.1.1.8388", maximum.GetString());
+        Assert.Equal("11.0.0.9375", minimum.GetString());
+        Assert.Equal("11.0.0.9375", maximum.GetString());
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/install-linux.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.ps1"));

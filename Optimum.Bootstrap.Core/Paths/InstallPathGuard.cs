@@ -9,7 +9,8 @@ public sealed record InstallPathRequest(
     string? DataPath = null,
     string? VintageStoryDirectory = null,
     string? WorkspaceRoot = null,
-    string? BuildRoot = null);
+    string? BuildRoot = null,
+    bool CleanDestination = false);
 
 public sealed record InstallPathVerdict(bool Ok, string? Rejection)
 {
@@ -61,7 +62,7 @@ public static partial class InstallPathGuard
                     $"The install directory cannot be inside a Vintage Story installation ({vsDir}). Optimum installs to a separate location.");
         }
 
-        if (LooksLikeVanillaGame(probe, install))
+        if (!request.CleanDestination && LooksLikeVanillaGame(probe, install))
             return InstallPathVerdict.Reject(
                 "The install directory already holds a vanilla Vintage Story installation. Optimum installs to a separate location.");
 
@@ -150,10 +151,12 @@ public static partial class InstallPathGuard
 
     private static bool LooksLikeVanillaGame(ISystemProbe probe, string directory)
     {
-        bool hasGame = probe.FileExists(Path.Combine(directory, "Vintagestory"))
-            || probe.FileExists(Path.Combine(directory, "Vintagestory.exe"));
-        bool hasOptimum = probe.FileExists(Path.Combine(directory, "Optimum"))
-            || probe.FileExists(Path.Combine(directory, "Optimum.exe"));
+        char sep = probe.Os == OsKind.Windows ? '\\' : '/';
+        string d = directory.TrimEnd('\\', '/');
+        bool hasGame = probe.FileExists(d + sep + "Vintagestory")
+            || probe.FileExists(d + sep + "Vintagestory.exe");
+        bool hasOptimum = probe.FileExists(d + sep + "Optimum")
+            || probe.FileExists(d + sep + "Optimum.exe");
         return hasGame && !hasOptimum;
     }
 
@@ -175,7 +178,7 @@ public static partial class InstallPathGuard
             return trimmed.TrimEnd('\\');
         }
 
-        trimmed = trimmed.TrimEnd('/');
+        trimmed = trimmed.Replace('\\', '/').TrimEnd('/');
         return trimmed.Length == 0 ? "/" : trimmed;
     }
 

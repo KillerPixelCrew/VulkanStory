@@ -45,18 +45,26 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         string home = probe.HomeDirectory;
         string dataHome = probe.GetEnvironmentVariable("XDG_DATA_HOME") is { Length: > 0 } x
             ? x
-            : Path.Combine(home, ".local", "share");
+            : Posix(home, ".local", "share");
 
-        string? icon = InstallIcon(installDirectory, Path.Combine(dataHome, "icons", "hicolor", "256x256", "apps", "optimum.png"));
+        string? icon = InstallIcon(installDirectory, Posix(dataHome, "icons", "hicolor", "256x256", "apps", "optimum.png"));
         string entry = DesktopEntry(launcherPath, installDirectory, icon);
 
         if (kinds.HasFlag(ShortcutKinds.Menu))
-            written.AddRange(WriteText(Path.Combine(dataHome, "applications", "optimum.desktop"), entry, executable: true));
+            written.AddRange(WriteText(Posix(dataHome, "applications", "optimum.desktop"), entry, executable: true));
         if (kinds.HasFlag(ShortcutKinds.Desktop))
-            written.AddRange(WriteText(Path.Combine(home, "Desktop", "Optimum.desktop"), entry, executable: true));
+            written.AddRange(WriteText(Posix(home, "Desktop", "Optimum.desktop"), entry, executable: true));
 
         return written;
     }
+
+    /// <summary>
+    /// Joins Linux paths with '/', the separator the target platform uses, rather
+    /// than System.IO.Path.Combine (which emits '\' on a Windows build host and
+    /// would produce mixed separators in the generated entries).
+    /// </summary>
+    private static string Posix(string root, params string[] parts) =>
+        root.TrimEnd('/', '\\') + "/" + string.Join('/', parts);
 
     private List<string> CreateMac(string installDirectory, ShortcutKinds kinds)
     {

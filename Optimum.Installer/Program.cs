@@ -23,7 +23,7 @@ internal static class Program
             .With(new FontManagerOptions
             {
                 // Lexend is also the app-wide default so any text outside a
-                // SukiUI template (tooltips, flyouts) matches.
+                // control template (tooltips, flyouts) matches.
                 DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend",
                 FontFallbacks = [new FontFallback { FontFamily = new FontFamily("Segoe UI") }],
             })

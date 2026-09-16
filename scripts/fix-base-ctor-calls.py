@@ -10,12 +10,22 @@ just as the first statement (ILSpy sometimes shows field-initializer-like
 code first); moving it to the initializer position doesn't change what that
 code does, since real field initializers always run after the base
 constructor per C# spec, which is the order this produces either way.
+
+ILSpy 11 introduced a third spelling for the base call: a cast-to-base-type
+receiver, `((BaseType)this)._002Ector(args);`. That is still a base
+constructor chain, so it maps to `: base(args)`.
 """
 import re
 import sys
 import glob
 
-CALL_RE = re.compile(r'[ \t]*(base|this)\._002Ector\(((?:[^()]|\([^()]*\))*)\);\n')
+# Matches the three spellings ILSpy emits for a constructor chain call:
+#   base._002Ector(args);              -> : base(args)
+#   this._002Ector(args);              -> : this(args)
+#   ((BaseType)this)._002Ector(args);  -> : base(args)   (ILSpy 11 cast form)
+CALL_RE = re.compile(
+    r'[ \t]*(?:(base|this)|\(\([\w.]+\)this\))\._002Ector'
+    r'\(((?:[^()]|\([^()]*\))*)\);\n')
 SIG_RE = re.compile(
     r'((?:public|private|protected|internal|static)[ \w]*\s\w+\(([^()]*)\)\s*\n)(\t*\{\n)'
 )
@@ -39,6 +49,10 @@ def fix_once(text):
         if not call_m:
             continue
         kind, args = call_m.group(1), call_m.group(2)
+        # The cast form ((BaseType)this)._002Ector(...) leaves group(1) unset;
+        # it is always a base constructor chain.
+        if not kind:
+            kind = 'base'
         new_body = body[:call_m.start()] + body[call_m.end():]
         header, brace_line = sig_m.group(1), sig_m.group(3)
         new_header = header.rstrip('\n') + f'\n\t\t: {kind}({args})\n'

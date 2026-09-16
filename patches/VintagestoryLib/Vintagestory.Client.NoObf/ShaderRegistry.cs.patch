@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..edaaa34 100644
+index d3edef9..edaaa34 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -116,7 +116,7 @@ index 4a24e75..edaaa34 100644
 +			for (int i = 0; i < nextPassId; i++)
  			{
 -				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() && flag;
+-				flag = shaderProgram.Compile() & flag;
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{

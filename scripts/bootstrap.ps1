@@ -173,8 +173,8 @@ function Get-IlspycmdVersionRange {
     $manifest = Join-Path $repoRoot '.config/ilspycmd-compat.json'
     if (-not (Test-Path $manifest)) {
         return [pscustomobject]@{
-            Minimum = [Version]'10.1.0.8386'
-            Maximum = [Version]'10.1.1.8388'
+            Minimum = [Version]'11.0.0.9375'
+            Maximum = [Version]'11.0.0.9375'
         }
     }
 
@@ -235,7 +235,7 @@ function Install-IlspycmdIfMissing {
 function Repair-BaseCtorCalls {
     param([string[]]$Roots)
 
-    $callRe = [regex]'[ \t]*(base|this)\._002Ector\(((?:[^()]|\([^()]*\))*)\);\n'
+    $callRe = [regex]'[ \t]*(?:(base|this)|\(\([\w.]+\)this\))\._002Ector\(((?:[^()]|\([^()]*\))*)\);\n'
     $sigRe = [regex]'((?:public|private|protected|internal|static)[ \w]*\s\w+\(([^()]*)\)\s*\n)(\t*\{\n)'
 
     function local:Invoke-FixOnce([string]$text) {
@@ -252,6 +252,9 @@ function Repair-BaseCtorCalls {
             $callM = $callRe.Match($body)
             if (-not $callM.Success) { continue }
             $kind = $callM.Groups[1].Value
+            # The cast form ((BaseType)this)._002Ector(...) leaves group 1 empty;
+            # it is always a base constructor chain.
+            if (-not $kind) { $kind = 'base' }
             $ctorArgs = $callM.Groups[2].Value
             $newBody = $body.Substring(0, $callM.Index) + $body.Substring($callM.Index + $callM.Length)
             $header = $sigM.Groups[1].Value
@@ -660,7 +663,7 @@ try {
                 $actual = (Get-FileHash -Path $innoPartial -Algorithm SHA256).Hash.ToLowerInvariant()
                 if ($actual -ne $expected) {
                     Remove-Item -Force -ErrorAction SilentlyContinue $innoPartial
-                    throw "SHA-256 verification failed for $assetName: expected $expected, got $actual"
+                    throw "SHA-256 verification failed for ${assetName}: expected $expected, got $actual"
                 }
             }
 
@@ -699,9 +702,18 @@ try {
                 throw "Extraction failed: Vintagestory.exe not found in $ClientArchive payload"
             }
 
+            if (Test-Path $winVanillaDir) {
+                Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+            }
             New-Item -ItemType Directory -Force -Path $winVanillaDir | Out-Null
-            Get-ChildItem -Path $sourceRoot -Force | ForEach-Object {
-                Move-Item -Path $_.FullName -Destination $winVanillaDir -Force
+            if ($isWin -and (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
+                & robocopy.exe "$sourceRoot" "$winVanillaDir" /E /MOVE /NFL /NDL /NJH /NJS /NP /R:3 /W:1 *>&1 | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit code $LASTEXITCODE) moving extracted files to $winVanillaDir." }
+                $global:LASTEXITCODE = 0
+            } else {
+                Get-ChildItem -Path $sourceRoot -Force | ForEach-Object {
+                    Move-Item -Path $_.FullName -Destination $winVanillaDir -Force
+                }
             }
         } finally {
             if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }

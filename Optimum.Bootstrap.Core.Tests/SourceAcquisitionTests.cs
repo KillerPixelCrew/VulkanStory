@@ -213,11 +213,11 @@ public class GitSourceProviderTests
     public async Task ReusesACompleteWindowsCheckoutFromTheSourceCache()
     {
         var probe = new FakeSystemProbe { Os = OsKind.Windows };
-        probe.Environment["LOCALAPPDATA"] = "/cache";
-        string cached = "/cache/optimum/src-v0.3.14";
-        probe.AddFile($"{cached}/forks.json");
-        probe.AddFile($"{cached}/scripts/bootstrap.ps1");
-        probe.AddFile($"{cached}/scripts/package.ps1");
+        probe.Environment["LOCALAPPDATA"] = @"C:\cache";
+        string cached = @"C:\cache\optimum\src-v0.3.14";
+        probe.AddFile($@"{cached}\forks.json");
+        probe.AddFile($@"{cached}\scripts\bootstrap.ps1");
+        probe.AddFile($@"{cached}\scripts\package.ps1");
         // No Git on PATH: proves the complete cached source is the one used.
 
         var result = await new GitSourceProvider(probe)

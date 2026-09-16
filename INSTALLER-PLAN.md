@@ -175,8 +175,8 @@ against a build that takes twenty minutes and allocates gigabytes.
   installer's `Resolve-DotNetPath` (`scripts/install-windows.ps1:336`),
   `Find-AllVintageStory` (`:204`), and `Find-ILSpyCmd` (`:523`).
 - The ilspycmd pin and accepted range, read from `.config/dotnet-tools.json`
-  (`10.1.1.8388`) and `.config/ilspycmd-compat.json` (`10.1.0.8386` through
-  `10.1.1.8388`). The Windows installer already reads both files in
+  (`11.0.0.9375`) and `.config/ilspycmd-compat.json` (`11.0.0.9375` through
+  `11.0.0.9375`). The Windows installer already reads both files in
   `Get-Pinned-ILSpyVersion` (`:565`) and `Get-Accepted-ILSpyVersionRange` (`:580`).
   Core reads them once and both front ends share the result.
 - Acquisition: the `dotnet-install` script runner, `dotnet tool install -g
@@ -275,7 +275,7 @@ integer. `detail` is a human string and carries no contract.
 Log:
 
 ```json
-{"type":"log","level":"info","message":"ilspycmd 10.1.1.8388 accepted"}
+{"type":"log","level":"info","message":"ilspycmd 11.0.0.9375 accepted"}
 ```
 
 `level` is one of `info`, `warn`, `error`.

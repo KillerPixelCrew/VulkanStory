@@ -511,38 +511,41 @@ public class ProgressViewModelTests
 
 public class CompletionViewModelTests
 {
-    private static InstallOutcome Success(string launcher) =>
+    private static InstallOutcome Success(string? installDir = "/opt/optimum") =>
         new(Succeeded: true, Cancelled: false, Message: "ok",
-            InstallDirectory: "/opt/optimum", Launcher: launcher, RawLogPath: "/does/not/exist.log");
+            InstallDirectory: installDir, Launcher: null, RawLogPath: "/does/not/exist.log");
 
     [Fact]
-    public async Task LaunchDisablesTheButtonAndThenAsksTheShellToExit()
+    public void FinishAsksTheShellToExit()
     {
-        string launcher = Path.Combine(Path.GetTempPath(), "optimum-launch-" + Guid.NewGuid().ToString("N") + ".sh");
-        await File.WriteAllTextAsync(launcher, "#!/bin/sh\nexit 0\n", TestContext.Current.CancellationToken);
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(launcher,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var vm = new CompletionViewModel(Success());
+        bool exitAsked = false;
+        vm.ExitRequested += () => exitAsked = true;
 
+        Assert.True(vm.FinishCommand.CanExecute(null));
+        vm.FinishCommand.Execute(null);
+
+        Assert.True(exitAsked);
+    }
+
+    [Fact]
+    public void OpenFolderIsEnabledOnlyWhenTheInstallDirectoryExists()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "optimum-install-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
         try
         {
-            var vm = new CompletionViewModel(Success(launcher));
-            bool exitAsked = false;
-            vm.ExitRequested += () => exitAsked = true;
+            var present = new CompletionViewModel(Success(dir));
+            Assert.True(present.CanOpenFolder);
+            Assert.True(present.OpenFolderCommand.CanExecute(null));
 
-            Assert.True(vm.LaunchCommand.CanExecute(null));
-
-            System.Threading.Tasks.Task run = vm.LaunchCommand.ExecuteAsync(null);
-            Assert.True(vm.Launching);
-            Assert.False(vm.LaunchCommand.CanExecute(null));
-            Assert.Equal("Launching Optimum...", vm.LaunchLabel);
-
-            await run.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
-            Assert.True(exitAsked);
+            var missing = new CompletionViewModel(Success("/does/not/exist"));
+            Assert.False(missing.CanOpenFolder);
+            Assert.False(missing.OpenFolderCommand.CanExecute(null));
         }
         finally
         {
-            File.Delete(launcher);
+            Directory.Delete(dir, recursive: true);
         }
     }
 }

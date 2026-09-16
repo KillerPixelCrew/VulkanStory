@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/EventManager.cs b/VintagestoryLib/Vintagestory.Common/EventManager.cs
-index 842d31f..7309654 100644
+index 1e91e34..ead904e 100644
 --- a/VintagestoryLib/Vintagestory.Common/EventManager.cs
 +++ b/VintagestoryLib/Vintagestory.Common/EventManager.cs
 @@ -27,10 +27,26 @@ public abstract class EventManager
@@ -29,19 +29,14 @@ index 842d31f..7309654 100644
  	public abstract string CommandPrefix { get; }
  
  	public abstract long InWorldEllapsedMs { get; }
-@@ -88,15 +104,22 @@ public abstract class EventManager
- 		}
- 	}
- 
- 	public virtual void TriggerOnGetClimate(ref ClimateCondition climate, BlockPos pos, EnumGetClimateMode mode = EnumGetClimateMode.WorldGenValues, double totalDays = 0.0)
+@@ -92,11 +108,18 @@ public abstract class EventManager
  	{
--		if (this.OnGetClimate == null)
-+		OnGetClimateDelegate current = this.OnGetClimate;
-+		if (current == null)
+ 		if (OnGetClimate == null)
  		{
  			return;
  		}
--		Delegate[] invocationList = this.OnGetClimate.GetInvocationList();
+-		Delegate[] invocationList = OnGetClimate.GetInvocationList();
++		OnGetClimateDelegate current = OnGetClimate;
 +		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
 +		if (!ReferenceEquals(current, optimumCachedClimateDelegate))
 +		{
@@ -54,19 +49,14 @@ index 842d31f..7309654 100644
  			OnGetClimateDelegate onGetClimateDelegate = (OnGetClimateDelegate)invocationList[i];
  			try
  			{
-@@ -110,15 +133,22 @@ public abstract class EventManager
- 		}
- 	}
- 
- 	public virtual void TriggerOnGetWindSpeed(Vec3d pos, ref Vec3d windSpeed)
+@@ -114,11 +137,18 @@ public abstract class EventManager
  	{
--		if (this.OnGetWindSpeed == null)
-+		OnGetWindSpeedDelegate current = this.OnGetWindSpeed;
-+		if (current == null)
+ 		if (OnGetWindSpeed == null)
  		{
  			return;
  		}
--		Delegate[] invocationList = this.OnGetWindSpeed.GetInvocationList();
+-		Delegate[] invocationList = OnGetWindSpeed.GetInvocationList();
++		OnGetWindSpeedDelegate current = OnGetWindSpeed;
 +		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
 +		if (!ReferenceEquals(current, optimumCachedWindDelegate))
 +		{

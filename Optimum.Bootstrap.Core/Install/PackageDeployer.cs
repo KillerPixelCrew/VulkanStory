@@ -16,7 +16,8 @@ public sealed record DeployRequest(
     string PackageDirectory,
     string InstallDirectory,
     string? DataPath = null,
-    ShortcutKinds Shortcuts = ShortcutKinds.None);
+    ShortcutKinds Shortcuts = ShortcutKinds.None,
+    bool CleanDestination = false);
 
 public sealed record DeployResult(bool Ok, FailureReason? Reason, string? Message, string? InstallDirectory, string? Launcher)
 {
@@ -42,7 +43,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
     public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null)
     {
         InstallPathVerdict guard = InstallPathGuard.Check(probe, new InstallPathRequest(
-            request.InstallDirectory, request.DataPath));
+            request.InstallDirectory, request.DataPath, CleanDestination: request.CleanDestination));
         if (!guard.Ok)
             return DeployResult.Failure(FailureReason.BadInput, guard.Rejection!);
 
@@ -57,7 +58,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             return DeployResult.Failure(FailureReason.BadInput, $"the install directory has no parent: {installDir}");
 
         bool hasExisting = Directory.Exists(installDir) && Directory.EnumerateFileSystemEntries(installDir).Any();
-        if (hasExisting && !File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)))
+        if (hasExisting && !request.CleanDestination && !File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)))
             return DeployResult.Failure(FailureReason.OutputExists, $"the install directory is not empty: {installDir}");
 
         Directory.CreateDirectory(parent);
@@ -115,7 +116,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             try
             {
                 if (backedUp && Directory.Exists(backupDir))
-                    Directory.Delete(backupDir, recursive: true);
+                    TryDelete(backupDir);
                 RegisterInstall(installDir, request, finalLauncher, observer);
             }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
@@ -333,7 +334,13 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         try
         {
             if (Directory.Exists(directory))
+            {
+                foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                {
+                    try { File.SetAttributes(file, FileAttributes.Normal); } catch { }
+                }
                 Directory.Delete(directory, recursive: true);
+            }
         }
         catch (IOException) { /* best effort */ }
         catch (UnauthorizedAccessException) { /* best effort */ }

@@ -36,7 +36,7 @@ if [[ "${1:-}" == "tool" ]]; then
     printf '%s\n' "$*" >> "$HOME/dotnet-tool.log"
     cat > "$HOME/.dotnet/tools/ilspycmd" <<'TOOL'
 #!/usr/bin/env bash
-echo "ilspycmd: 10.1.1.8388"
+echo "ilspycmd: 11.0.0.9375"
 TOOL
     chmod +x "$HOME/.dotnet/tools/ilspycmd"
     exit 0
@@ -64,43 +64,39 @@ offer_install_missing <<< "Y"
 check_dotnet10
 [[ "$DOTNET_BIN" == "$HOME/.dotnet/dotnet" ]]
 
-ilspycmd_version_supported "10.1.0.8386"
-ilspycmd_version_supported "10.1.0.8387"
-ilspycmd_version_supported "10.1.1.0"
-ilspycmd_version_supported "10.1.1.8387"
-ilspycmd_version_supported "10.1.1.8388"
-if ilspycmd_version_supported "10.1.0.8385"; then
+ilspycmd_version_supported "11.0.0.9375"
+if ilspycmd_version_supported "11.0.0.9374"; then
     echo "version below the ilspycmd range passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.1.1.8389"; then
+if ilspycmd_version_supported "11.0.0.9376"; then
     echo "unvalidated ilspycmd revision passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.1.2.9000"; then
+if ilspycmd_version_supported "11.0.1.0"; then
     echo "future ilspycmd version passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.0.1.8346"; then
+if ilspycmd_version_supported "10.1.1.8388"; then
     echo "old ilspycmd line passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.2.0.1"; then
+if ilspycmd_version_supported "12.0.0.0"; then
     echo "unsupported ilspycmd version passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.0.0.8323-preview3"; then
+if ilspycmd_version_supported "11.0.0.9375-preview3"; then
     echo "preview ilspycmd version passed validation" >&2
     exit 1
 fi
-if ilspycmd_version_supported "10.1.1.8388-rc1"; then
+if ilspycmd_version_supported "11.0.0.9375-rc1"; then
     echo "prerelease ilspycmd version passed validation" >&2
     exit 1
 fi
 
 cat > "$HOME/.dotnet/tools/ilspycmd" <<'EOF'
 #!/usr/bin/env bash
-echo "ilspycmd: 10.1.0.8386"
+echo "ilspycmd: 11.0.0.9375"
 EOF
 chmod +x "$HOME/.dotnet/tools/ilspycmd"
 export PATH="$HOME/.dotnet/tools:$PATH"
@@ -110,7 +106,7 @@ check_ilspycmd
 rm -f "$HOME/.dotnet/tools/ilspycmd" "$HOME/dotnet-tool.log"
 hash -r
 install_ilspycmd
-grep -Fx "tool update -g ilspycmd --version 10.1.1.8388 --allow-downgrade" "$HOME/dotnet-tool.log" >/dev/null
+grep -Fx "tool update -g ilspycmd --version 11.0.0.9375 --allow-downgrade" "$HOME/dotnet-tool.log" >/dev/null
 check_ilspycmd
 
 echo "Linux prerequisite tests passed."
