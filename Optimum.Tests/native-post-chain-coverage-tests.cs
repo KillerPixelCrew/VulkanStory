@@ -199,7 +199,6 @@ public class NativePostChainCoverageTests
 
         foreach (string helper in new[]
                  {
-                     "private void PostStepAmbientOcclusion(float[] projectMatrix) => OptimumPostAmbientOcclusion(projectMatrix);",
                      "private bool PostStepTaaResolve() => RenderOptimumTaaResolve();",
                      "private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);",
                      "private void PostStepBloom(int scene, int glow) => OptimumPostBloom(scene, glow);",
@@ -214,14 +213,15 @@ public class NativePostChainCoverageTests
             Assert.Contains(helper, chain);
         }
 
-        foreach (string stage in new[] { "Stage 1c makes it native", "Stage 1d makes it native",
+        foreach (string stage in new[] { "Stage 1d makes it native",
                      "Stage 1e makes it native", "Stage 1f makes it native", "Stage 1g makes it native" })
         {
             Assert.Contains(stage, chain);
         }
-        // One per remaining pass: the seven steps above plus the merge, sky motion and the
-        // final composition, whose old routes stay reachable through the chain switch.
-        Assert.Equal(10, Count(chain, "LEGACY -"));
+        // One per remaining pass: the six steps above plus the merge, sky motion and the final
+        // composition, whose old routes stay reachable through the chain switch. The AO step is
+        // native as of stage 1c and its old route is the lib virtual itself, not a legacy helper.
+        Assert.Equal(9, Count(chain, "LEGACY -"));
     }
 
     private static string Platform() => ReadPatchedOrSource(
