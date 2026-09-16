@@ -1,3 +1,10 @@
+# Workflow policy - SUPERSEDED 2026-09-16
+
+The owner stopped workflow-based work: "The Workflow approach does not work for me. I cant see whats happening."
+Work happens directly in the session, sequentially (AGENTS.md rule 8). This file is kept only so old references resolve.
+
+---
+
 ---
 name: workflow-policy
 description: Model, effort and parallelism rules for Workflow (ultracode) runs in Optimum. Use before writing any workflow script or launching any subagent.
@@ -20,7 +27,7 @@ Shape:
    and returns the branch name and commit.
 3. `phase('Integrate')`: one opus agent merges every branch into the feature branch, resolves
    conflicts (Program.cs transplant list, ClientPlatformWindows, shader includes are the usual
-   ones), reruns extract/check-patches, build, both test suites, commits.
+   ones), reruns extract/check-patches, build, both test suites, `make patch-il` (Cecil patch, no deploy) and the fork-API drift check (AGENTS.md rule 19), commits.
 4. `phase('Review')`: one opus agent, then Fable verifies in game (run-optimum skill).
 
 Prompt rules for every stage: read CLAUDE.md and the plan section first; sources of truth table;
