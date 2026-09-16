@@ -888,4 +888,22 @@ public class NativeWorldSystemsCoverageTests
         string world = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs");
         Assert.Contains("if (IsTransparentTarget(target) && nativeTransparentSlots != 0) return nativeTransparentSlots;", world);
     }
+    /// <summary>
+    /// Every other draw under the vanilla gui program goes native from the platform's own
+    /// RenderMesh, under the client-stated state including cull and line width, and the route
+    /// switch still sends it back to the emulated draw.
+    /// </summary>
+    [Fact]
+    public void PlainGuiProgramDrawsGoNativeFromRenderMesh()
+    {
+        string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
+        Assert.Contains("if (TryRenderGuiMeshNative(modelRef))", meshes);
+        string gui = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs");
+        Assert.Contains("private bool TryRenderGuiMeshNative(MeshRef mesh)", gui);
+        Assert.Contains("if (!NativeGuiEnabled || device == null || mesh == null || program == null", gui);
+        Assert.Contains("statedLineWidth, statedBlendOn, statedBlendMode", gui);
+        string state = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.State.cs");
+        Assert.Contains("statedCull = true;", state);
+        Assert.Contains("statedLineWidth = width;", state);
+    }
 }

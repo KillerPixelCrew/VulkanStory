@@ -152,6 +152,9 @@ public partial class VulkanClientPlatform
     private bool statedDepthWrite = true;
     private int statedDepthFunc = 513; // GL_LESS
     private Rect2D statedScissor;
+    private bool statedCull;
+    private bool statedCullBack = true;
+    private float statedLineWidth = 1f;
 
     public override void GlScissorFlag(bool enable)
     {
@@ -218,16 +221,19 @@ public partial class VulkanClientPlatform
 
     public override void GlDisableCullFace()
     {
+        statedCull = false;
         device.SetCullFace(false);
     }
 
     public override void GlEnableCullFace()
     {
+        statedCull = true;
         device.SetCullFace(true);
     }
 
     public override void GLLineWidth(float width)
     {
+        statedLineWidth = width;
         device.SetLineWidth(width);
     }
 
@@ -257,11 +263,13 @@ public partial class VulkanClientPlatform
 
     public override void GlCullFaceBack()
     {
+        statedCullBack = true;
         device.SetCullFaceMode(true);
     }
 
     public override void GlCullFaceFront()
     {
+        statedCullBack = false;
         device.SetCullFaceMode(false);
     }
 

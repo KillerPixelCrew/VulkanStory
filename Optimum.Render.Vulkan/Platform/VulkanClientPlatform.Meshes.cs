@@ -63,6 +63,12 @@ public partial class VulkanClientPlatform
             }
             throw new ArgumentException("Fatal: Trying to render a disposed mesh");
         }
+        // Phase 3b stage 2: a draw under the vanilla gui program goes native (NativeGui.cs).
+        if (TryRenderGuiMeshNative(modelRef))
+        {
+            RuntimeStats.drawCallsCount--; // DrawNativeGuiMesh counted it already
+            return;
+        }
         device.DrawMesh(vAO.VaoId);
     }
 
