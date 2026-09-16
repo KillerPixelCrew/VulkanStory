@@ -83,6 +83,25 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
     }
 
     /// <summary>
+    /// Phase 3b decision 1: a mod renderer stays on the adapter. VSEssentials registers its own
+    /// entityanimated for the first-person hands, and that program drew the arm wrong through the
+    /// native route with TAA on; the route therefore takes only the registered vanilla programs.
+    /// </summary>
+    [SkippableFact]
+    public void AModRegisteredEntityProgramStaysOnTheNeutralBody()
+    {
+        using Session session = Open(gbuffer: false);
+        session.UnregisterVanillaProgram();
+
+        long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
+        byte[][] drawn = session.RunFrame(native: true, motionOpen: true);
+
+        Assert.Equal(0, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
+        Assert.NotEqual(session.ClearOf(0), Centre(drawn[0]));
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
     /// The motion attachment is the one the temporal contract pins: with the window open the two
     /// routes write the same vectors, and with it shut neither route touches it, so whatever was
     /// there survives. A native pipeline that forgot the write mask would fail the second half.
@@ -229,6 +248,10 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
 
         private MeshRef shape = null!;
         private ShaderProgram entity = null!;
+        private ShaderProgramEntityanimated? previousEntityProgram;
+
+        /// <summary>What a mod-registered entityanimated looks like to the route: not the registered vanilla program.</summary>
+        public void UnregisterVanillaProgram() => ShaderPrograms.Entityanimated = new ShaderProgramEntityanimated();
         private UBORef animation = null!;
         private UBORef animationPrev = null!;
         private readonly float[] bones = new float[16 * 4];
@@ -281,13 +304,18 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
             // Where SetupDefaultFrameBuffers put the motion attachment: after the shaded set.
             platform.SetOptimumMotionAttachmentIndex(session.Primary.ColorTextureIds.Length - 1);
 
-            var program = new ShaderProgram { PassName = "entityanimated" };
+            // The vanilla program type, registered where the client registers it: the native route
+            // takes vanilla entity programs only, and a mod program under the same pass name stays
+            // on the neutral body (AModRegisteredEntityProgramStaysOnTheNeutralBody).
+            var program = new ShaderProgramEntityanimated { PassName = "entityanimated" };
             Link(seam, program, "entityanimated", Variant(gbuffer), new[]
             {
                 "modelMatrix", "viewMatrix", "projectionMatrix",
                 "rgbaLightIn", "rgbaAmbientIn", "renderColor", "alphaTest",
             });
             session.entity = program;
+            session.previousEntityProgram = ShaderPrograms.Entityanimated;
+            ShaderPrograms.Entityanimated = program;
 
             session.atlas = Gradient(seam);
             // The two animation blocks ShaderProgramEntityanimated creates for the opaque
@@ -305,6 +333,7 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
         public void Dispose()
         {
             ShaderProgramBase.CurrentShaderProgram = null;
+            ShaderPrograms.Entityanimated = previousEntityProgram!;
             if (shape != null) Platform.DeleteMesh(shape);
             ScreenManager.Platform = previousPlatform!;
             Platform.ShutdownGraphics();
