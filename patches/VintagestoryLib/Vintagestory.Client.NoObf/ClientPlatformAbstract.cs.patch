@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..117e492 100644
+index d6eb844..81571e1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,524 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,591 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -127,31 +127,98 @@ index d6eb844..117e492 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the draw of one
-+	/// sub-mesh of a multi-texture mesh, as a seam of its own.
++	/// Optimum (Phase 3b decision 2, stage 2): the night sky box's draw, a seam of its own so a
++	/// native platform can record it as a declared pass.
 +	///
-+	/// What it draws: an entity's shape - the animated body through entityanimated in the Opaque
-+	/// stage, the same body through shadowmapentityanimated in the two shadow stages - and, for
-+	/// every other caller of <see cref="Vintagestory.Client.RenderAPIBase.RenderMultiTextureMesh" />,
-+	/// whatever that caller draws.
-+	/// The other side: the neutral body below is the OpenGL path - it is exactly the
-+	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, and ClientPlatformWindows does not
-+	/// override it, so "OFF is vanilla" holds - and VulkanClientPlatform.RenderEntityMesh is the
-+	/// native one, which takes the native route only for the entity programs it owns.
-+	/// Target and slots: whatever stage bound - Primary for the opaque draws, including the motion
-+	/// attachment while <see cref="BeginMotionWrite" />'s window is open, and the shadow map for
-+	/// the shadow draws, which has no colour attachment at all.
-+	/// State that is not obvious: the caller already set the state (cull off, blend on, depth test
-+	/// and depth write on) and every uniform, and the bone matrices are already in the program's
-+	/// "Animation" block; the seam changes nothing. <paramref name="samplerName" /> and
-+	/// <paramref name="textureId" /> are passed because a native pass resolves what it samples from
-+	/// handles rather than from the texture unit the caller's BindTexture2D put it on.
-+	/// What pins it: NativeEntityDrawTests (old route against native route, colour and motion) and
++	/// What it draws: the 75-unit cube SystemRenderNightSky renders the star cube map onto, once
++	/// per frame in the Opaque stage right after the sky dome.
++	/// The other side: the neutral body below is the OpenGL path - exactly the
++	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, so "OFF is vanilla" holds - and
++	/// VulkanClientPlatform.RenderNightSkyBox is the native one.
++	/// Target and slots: whatever the Opaque stage has bound, which is Primary; nightsky.frag
++	/// writes colour 0 and, with the SSAO G-buffer on, the two G-buffer slots. Never motion.
++	/// State that is not obvious: the caller has already turned the depth test and culling off,
++	/// so the seam changes no state of its own. The cube map is passed as a handle because a
++	/// native pass resolves what it samples from handles, not from the texture unit
++	/// <c>ShaderProgramNightsky.CtexCube</c> bound it to - and it is a samplerCube, so it
++	/// resolves into the cube array of the bindless table rather than the 2D one.
++	/// What pins it: NativeWorldSystemsTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
++	/// </summary>
++	public virtual void RenderNightSkyBox(MeshRef nightSkyBox, int cubeTextureId)
++	{
++		RenderMesh(nightSkyBox);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b decision 2, stage 2): the draw of one celestial body's quad.
++	///
++	/// What it draws: the moon - SystemRenderSunMoon's quad under the celestialobject program,
++	/// once per frame in the Opaque stage. The sun's draw of the same quad still goes through
++	/// <see cref="RenderMesh(MeshRef)" />, because it runs under the shared "standard" program
++	/// the entity stage owns.
++	/// The other side: the neutral body below is the OpenGL path - the RenderMesh call it
++	/// replaced - and VulkanClientPlatform.RenderCelestialQuad is the native one.
++	/// Target and slots: Primary; celestialobject.frag writes colour 0, the glow slot 1 and,
++	/// with the SSAO G-buffer on, the two G-buffer slots. Never motion.
++	/// State that is not obvious: the caller has blending on in the standard mode, culling off
++	/// and the depth test off, and the seam changes none of it. The body's texture is passed as
++	/// a handle for the same reason the sky's two are, and so are the sky gradient and glow
++	/// textures: celestialobject.fsh reads them through skycolor.fsh to shade the body against
++	/// the sky behind it, and a native pass cannot take them off the units the program's
++	/// Sky2D/Glow2D setters bound them to.
++	/// What pins it: NativeWorldSystemsTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
++	/// </summary>
++	public virtual void RenderCelestialQuad(MeshRef quad, int bodyTextureId, int skyTextureId, int glowTextureId)
++	{
++		RenderMesh(quad);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b decision 2, stage 2): one particle pool's instanced draw.
++	///
++	/// What it draws: every live particle of one pool in a single instanced draw of the pool's
++	/// cube or quad geometry - SystemRenderParticles.Render, twice per pool (main thread and
++	/// off thread).
++	/// The other side: the neutral body below is the OpenGL path - exactly the
++	/// <see cref="RenderMeshInstanced(MeshRef, int)" /> call it replaced - and
++	/// VulkanClientPlatform.RenderParticles is the native one.
++	/// Target and slots: cube particles draw into Primary inside the caller's motion window, so
++	/// the motion attachment is in the pass's colour slots exactly while that window is open and
++	/// the vector lands through the one writer include; quad particles draw into Transparent.
++	/// State that is not obvious: the caller has standard blending on for the cube pool; the
++	/// window's replace-blending on the motion attachment is state the native pass states per
++	/// attachment rather than inheriting from a tracked toggle.
++	/// What pins it: NativeWorldSystemsTests (including the motion attachment, bit for bit) and
 +	/// Optimum.Tests/native-world-systems-coverage-tests.cs.
 +	/// </summary>
-+	public virtual void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)
++	public virtual void RenderParticles(MeshRef model, int quantity, int particleTextureId)
 +	{
-+		RenderMesh(mesh);
++		RenderMeshInstanced(model, quantity);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b decision 2, stage 2): the decal pool's multi-draw.
++	///
++	/// What it draws: every visible decal in one indirect multi-draw of the decal pool, once per
++	/// frame in SystemRenderDecals.OnRenderFrame3D (the AfterOIT stage).
++	/// The other side: the neutral body below is the OpenGL path - exactly the
++	/// <see cref="RenderMesh(MeshRef, int[], int[], int)" /> call that the second half of
++	/// <c>MeshDataPool.Draw</c> makes, which is what the caller's <c>decalPool.Draw</c>
++	/// reached - and VulkanClientPlatform.RenderDecalPool is the native one. The caller runs
++	/// the pool's own public FrustumCull first, so both routes draw the same ranges and only
++	/// the draw command differs.
++	/// Target and slots: Primary, inside the caller's motion window - a decal nudges the depth
++	/// buffer in front of the block it sits on, so it has to write that surface's motion vector
++	/// itself.
++	/// State that is not obvious: the caller has standard blending on and culling off; the
++	/// motion attachment blends replace, which the native pass states per attachment. The two
++	/// atlas textures are passed as handles because a native pass resolves what it samples from
++	/// handles, not from the units ShaderProgramDecals' setters bound them to.
++	/// What pins it: NativeWorldSystemsTests and Optimum.Tests/native-world-systems-coverage-tests.cs.
++	/// </summary>
++	public virtual void RenderDecalPool(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount, int decalTextureId, int blockTextureId)
++	{
++		RenderMesh(decalMesh, indicesStarts, indicesSizes, groupCount);
 +	}
 +
 +	public virtual bool RenderOptimumTaaResolve()

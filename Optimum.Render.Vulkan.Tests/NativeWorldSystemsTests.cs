@@ -1,0 +1,640 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using Optimum.Render.Vulkan.Platform;
+using Optimum.Render.Vulkan.Shaders;
+using Vintagestory.API.Client;
+using Vintagestory.API.MathTools;
+using Vintagestory.Client;
+using Vintagestory.Client.NoObf;
+using Xunit;
+using Xunit.Abstractions;
+
+using LinkedProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
+using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+
+namespace Optimum.Render.Vulkan.Tests;
+
+/// <summary>
+/// The world systems Phase 3b stage 2 moved onto the native device API after the sky dome - the
+/// night sky box, the moon, the cube particle pool and the decal pool - each drawn twice on one
+/// Vulkan device: through its seam's neutral body (the OpenGL body's own draw, the route every
+/// system that has not moved still takes) and through the native pass the Vulkan platform
+/// records (docs/vulkan-native-render-systems.md, decision 5 stage 2).
+///
+/// Behavioural identity is the acceptance rule (decision 6): the same program, the same mesh and
+/// the same fixed state have to put the same pixels on every attachment of Primary - the motion
+/// attachment included, bit for bit, because a world pass that writes motion has to land exactly
+/// what the GL path lands there - and the native route must not touch the GL state tracker, a
+/// texture unit or a draw-buffer mask while its pass is open.
+///
+/// The sky dome itself is pinned by NativeSkyTests and the device's mesh-draw entry points by
+/// NativeMeshDrawTests; those files are not duplicated here.
+/// </summary>
+public class NativeWorldSystemsTests(ITestOutputHelper output)
+{
+    private const int Size = 16;
+
+    /// <summary>Primary's colour slots in this fixture: scene, glow, then the motion attachment.</summary>
+    private const int SceneSlot = 0;
+    private const int GlowSlot = 1;
+    private const int MotionSlot = 2;
+
+    /// <summary>The platform with no window: both routes take their size from this seam.</summary>
+    private sealed class WorldPlatform : VulkanClientPlatform
+    {
+        public WorldPlatform() : base(null!)
+        {
+        }
+
+        public override Size2i OptimumWindowClientSize() => new(Size, Size);
+    }
+
+    // ------------------------------------------------------------------------- night sky
+
+    /// <summary>
+    /// The star box's native pass draws what its seam's neutral body draws: one declared pass,
+    /// one native mesh draw of the cube through the samplerCube the program declares, no
+    /// emulation inside the pass, and the same pixels on every attachment.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeNightSkyPassMatchesTheSeamsNeutralBody()
+    {
+        using Session session = Open("nightsky");
+        int cube = session.CubeGradient();
+
+        byte[][] emulated = session.RunFrame(native: false, blending: false, depth: false, motion: false,
+            s => s.Platform.RenderNightSkyBox(s.Mesh, cube));
+
+        long passes = session.Seam.NativePassesForTests;
+        long meshes = session.Seam.NativeMeshDrawsForTests;
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[][] native = session.RunFrame(native: true, blending: false, depth: false, motion: false,
+            s => s.Platform.RenderNightSkyBox(s.Mesh, cube));
+
+        Assert.Equal(1, session.Seam.NativePassesForTests - passes);
+        Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        AssertSameAttachments(emulated, native, "nightsky");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    // -------------------------------------------------------------------------- celestial
+
+    /// <summary>
+    /// The moon's native pass matches its seam's neutral body, with the body texture resolved
+    /// from its handle and the sky and glow frame textures resolved from theirs rather than from
+    /// the units ShaderProgramCelestialobject's setters bound them to.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeCelestialPassMatchesTheSeamsNeutralBody()
+    {
+        using Session session = Open("celestialobject");
+        int body = session.Gradient(0);
+        int sky = session.Gradient(1);
+        int glow = session.Gradient(2);
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: false, motion: false,
+            s => s.Platform.RenderCelestialQuad(s.Mesh, body, sky, glow));
+
+        long meshes = session.Seam.NativeMeshDrawsForTests;
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: false, motion: false,
+            s => s.Platform.RenderCelestialQuad(s.Mesh, body, sky, glow));
+
+        Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        AssertSameAttachments(emulated, native, "celestialobject");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    // -------------------------------------------------------------------------- particles
+
+    /// <summary>
+    /// The cube pool's native pass matches its seam's neutral body, and the draw is recorded as
+    /// an instanced draw rather than as as many single draws.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeParticlePassMatchesTheSeamsNeutralBody()
+    {
+        using Session session = Open("particlescube");
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderParticles(s.Mesh, 4, 0));
+
+        long instanced = session.Seam.NativeInstancedDrawsForTests;
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderParticles(s.Mesh, 4, 0));
+
+        Assert.Equal(1, session.Seam.NativeInstancedDrawsForTests - instanced);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        AssertSameAttachments(emulated, native, "particlescube");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// Inside a motion window the cube pool's native pass takes the motion attachment into its
+    /// colour slots, and every attachment - the motion one bit for bit - comes out of the native
+    /// route exactly as it comes out of the neutral body's draw under the same window. This is
+    /// the temporal contract: a world pass that writes motion lands what the GL path lands.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeParticlePassLeavesTheMotionAttachmentIdentical()
+    {
+        using Session session = Open("particlescube");
+        session.OpenMotionWindow();
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
+            s => s.Platform.RenderParticles(s.Mesh, 4, 0));
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: true,
+            s => s.Platform.RenderParticles(s.Mesh, 4, 0));
+
+        Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
+        AssertSameAttachments(emulated, native, "particlescube (motion window)");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    // ----------------------------------------------------------------------------- decals
+
+    /// <summary>
+    /// The decal pool's native pass matches its seam's neutral body, and the draw is recorded as
+    /// one indirect multi-draw out of the per-slot indirect ring rather than one draw per group.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeDecalPassMatchesTheSeamsNeutralBody()
+    {
+        using Session session = Open("decals");
+        int decal = session.Gradient(0);
+        int block = session.Gradient(1);
+        int[] starts = { 0, 0, 3 * 4, 0 };
+        int[] sizes = { 3, 3 };
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+
+        long indirect = session.Seam.NativeIndirectDrawsForTests;
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+
+        Assert.Equal(1, session.Seam.NativeIndirectDrawsForTests - indirect);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        AssertSameAttachments(emulated, native, "decals");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// Inside a motion window the decal pass's motion attachment is identical between the two
+    /// routes, for the same reason the particle pass's is: a decal writes the motion vector of
+    /// the surface it sits on, with its own nudged depth.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeDecalPassLeavesTheMotionAttachmentIdentical()
+    {
+        using Session session = Open("decals");
+        session.OpenMotionWindow();
+        int decal = session.Gradient(0);
+        int block = session.Gradient(1);
+        int[] starts = { 0, 0, 3 * 4, 0 };
+        int[] sizes = { 3, 3 };
+
+        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
+            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+        byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: true,
+            s => s.Platform.RenderDecalPool(s.Mesh, starts, sizes, 2, decal, block));
+
+        Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
+        AssertSameAttachments(emulated, native, "decals (motion window)");
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    // ------------------------------------------------------------------- switch and slots
+
+    /// <summary>
+    /// The neutral body draws through the emulation layer and the native route does not: the
+    /// switch is real, and "OFF is vanilla" holds for the route the OpenGL path takes.
+    /// </summary>
+    [SkippableFact]
+    public void TheNeutralBodiesDrawThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    {
+        using Session session = Open("particlescube");
+
+        long nativeBefore = session.Seam.NativeDrawsForTests;
+        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        session.RunFrame(native: false, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderParticles(s.Mesh, 2, 0));
+        Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeBefore);
+        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+
+        long inside = session.Seam.EmulationCallsInNativePassesForTests;
+        session.RunFrame(native: true, blending: true, depth: true, motion: false,
+            s => s.Platform.RenderParticles(s.Mesh, 2, 0));
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The colour slots a native world pass declares are the set the emulated route's
+    /// draw-buffer mask holds at the same point in the frame, derived from the platform's own
+    /// motion-window state: Primary's default colour set, plus the motion attachment exactly
+    /// while a window is open, and every bound slot with TAA off.
+    /// </summary>
+    [SkippableFact]
+    public void TheDeclaredColourSlotsAreTheOnesTheEmulatedMaskWouldHold()
+    {
+        using Session session = Open("particlescube");
+        MethodInfo slots = typeof(VulkanClientPlatform).GetMethod("NativeWorldPassColorSlots",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        // TAA off: the attachment index is negative and the pass takes every bound slot.
+        session.Platform.SetOptimumMotionAttachmentIndex(-1);
+        Assert.Equal(0b111u, (uint)slots.Invoke(session.Platform, new object[] { session.Primary })!);
+
+        // TAA on, window closed: Primary's default colour set, the motion attachment out.
+        session.Platform.SetOptimumMotionAttachmentIndex(MotionSlot);
+        SetMotionWriteActive(session.Platform, false);
+        Assert.Equal(0b011u, (uint)slots.Invoke(session.Platform, new object[] { session.Primary })!);
+
+        // TAA on, window open: the motion attachment joins the set.
+        SetMotionWriteActive(session.Platform, true);
+        Assert.Equal(0b111u, (uint)slots.Invoke(session.Platform, new object[] { session.Primary })!);
+    }
+
+    // ---------------------------------------------------------------------------- helpers
+
+    private void AssertSameAttachments(byte[][] emulated, byte[][] native, string what)
+    {
+        for (int slot = 0; slot < emulated.Length; slot++)
+        {
+            output.WriteLine(what + " slot " + slot + " centre emulated " + Centre(emulated[slot]) +
+                " native " + Centre(native[slot]));
+            Assert.Equal(emulated[slot], native[slot]);
+        }
+    }
+
+    private static string Centre(byte[] pixels)
+    {
+        int i = (Size / 2 * Size + Size / 2) * 4;
+        return pixels[i] + "," + pixels[i + 1] + "," + pixels[i + 2] + "," + pixels[i + 3];
+    }
+
+    /// <summary>
+    /// The window flag ClientPlatformWindows keeps private. The tests set it directly rather
+    /// than through BeginMotionWrite, which also wants a temporal frame, a jitter window and the
+    /// TAA targets - none of which change what is under test here.
+    /// </summary>
+    private static void SetMotionWriteActive(VulkanClientPlatform platform, bool active) =>
+        typeof(ClientPlatformWindows)
+            .GetField("optimumMotionWriteActive", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(platform, active);
+
+    private Session Open(string program)
+    {
+        (string manifest, string reason) = NativeManifest.Value;
+        Skip.If(manifest.Length == 0, reason);
+
+        Session? session = Session.TryOpen(output, manifest, program);
+        Skip.If(session == null, "No usable Vulkan device.");
+        return session!;
+    }
+
+    // ---------------------------------------------------------------------------- driving
+
+    /// <summary>
+    /// The platform, its device, the Primary target its stage binds (scene, glow and the motion
+    /// attachment), one vanilla program and one mesh, installed the way the client installs them
+    /// and put back afterwards.
+    /// </summary>
+    private sealed class Session : IDisposable
+    {
+        private static readonly float[] Identity =
+            { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+
+        public WorldPlatform Platform { get; private init; } = null!;
+        public VulkanDevice Seam => Platform.GraphicsDevice!;
+        public FrameBufferRef Primary { get; private set; } = null!;
+        public MeshRef Mesh { get; private set; } = null!;
+
+        private ShaderProgram program = null!;
+        private ClientPlatformAbstract? previousPlatform;
+        private string dataPath = "";
+        private int gradients;
+
+        public static unsafe Session? TryOpen(ITestOutputHelper output, string manifestDirectory, string programName)
+        {
+            string dataPath = Path.Combine(Path.GetTempPath(), "optimum-native-world-" + Guid.NewGuid().ToString("N"));
+            var platform = new WorldPlatform
+            {
+                DeviceFactory = () =>
+                {
+                    VulkanDevice created = GpuTest.NewDevice();
+                    created.NativeShaderDirectory = manifestDirectory;
+                    created.NativeShadersEnabled = true;
+                    created.IgnoreModShaderScan = true;
+                    return created;
+                },
+                CrashMarkerDataPath = dataPath,
+            };
+
+            if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
+            {
+                output.WriteLine("Vulkan unavailable: " + reason);
+                platform.ShutdownGraphics();
+                return null;
+            }
+
+            var session = new Session
+            {
+                Platform = platform,
+                previousPlatform = ScreenManager.Platform,
+                dataPath = dataPath,
+            };
+            ScreenManager.Platform = platform;
+            platform.ShaderUniforms = new DefaultShaderUniforms();
+
+            VulkanDevice seam = platform.GraphicsDevice!;
+            session.Primary = CreatePrimary(seam);
+            InstallFrameBuffers(platform, session.Primary);
+            // TAA on with the motion attachment appended after Primary's default colour set, so
+            // the window-derived slot masks under test mean something.
+            platform.SetOptimumMotionAttachmentIndex(MotionSlot);
+
+            var linked = new ShaderProgram { PassName = programName };
+            Link(seam, linked, programName, new[] { "projectionMatrix" });
+            session.program = linked;
+            session.Mesh = platform.UploadMesh(BuildQuad());
+            return session;
+        }
+
+        public void Dispose()
+        {
+            ShaderProgramBase.CurrentShaderProgram = null;
+            // The mesh goes first: VAO's finalizer reaches for ScreenManager.Platform, which is
+            // about to be the client's again, and a live handle there would crash the test host.
+            if (Mesh != null) Platform.DeleteMesh(Mesh);
+            ScreenManager.Platform = previousPlatform!;
+            Platform.ShutdownGraphics();
+            try
+            {
+                Directory.Delete(dataPath, true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+        }
+
+        /// <summary>Opens the caller's motion window, the way BeginMotionWrite leaves the platform.</summary>
+        public void OpenMotionWindow() => SetMotionWriteActive(Platform, true);
+
+        /// <summary>
+        /// One frame at the point the system under test runs: Primary bound and cleared, the
+        /// draw-buffer mask the motion window would have left, the caller's blend, depth and
+        /// cull state, the program in use, then the seam.
+        /// </summary>
+        public unsafe byte[][] RunFrame(bool native, bool blending, bool depth, bool motion, Action<Session> draw)
+        {
+            VulkanDevice seam = Seam;
+            Platform.NativeWorldEnabled = native;
+            uint mask = motion ? 0b111u : 0b011u;
+
+            Platform.BeginFrame();
+            seam.BindFramebuffer(Primary.FboId);
+            seam.SetDrawBuffers(Primary.FboId, 0b111);
+            seam.ClearColor(SceneSlot, 0.125f, 0.25f, 0.5f, 1f);
+            seam.ClearColor(GlowSlot, 0.75f, 0.5f, 0.25f, 1f);
+            seam.ClearColor(MotionSlot, 0.375f, 0.625f, 0.875f, 1f);
+            seam.ClearDepth(1f);
+            seam.SetDrawBuffers(Primary.FboId, (int)mask);
+
+            Platform.CurrentFrameBuffer = Primary;
+            seam.SetViewport(0, 0, Size, Size);
+            seam.SetDepthTest(depth);
+            seam.SetDepthMask(depth);
+            seam.SetCullFace(false);
+            seam.SetBlend(blending, EnumBlendMode.Standard);
+            // The replace-blending the window forces on the motion attachment, which the native
+            // pass states per attachment instead.
+            if (motion) Platform.ApplyOptimumMotionBlendState();
+
+            seam.UseProgram(program.ProgramId);
+            ShaderProgramBase.CurrentShaderProgram = program;
+            seam.SetUniformMatrix(program.ProgramId, program.uniformLocations["projectionMatrix"], Identity);
+
+            draw(this);
+
+            var pixels = new byte[Primary.ColorTextureIds.Length][];
+            for (int slot = 0; slot < pixels.Length; slot++) pixels[slot] = Read(seam, Primary.ColorTextureIds[slot]);
+            Platform.EndFrame();
+            return pixels;
+        }
+
+        /// <summary>One attachment's pixels, read through a framebuffer that holds only it.</summary>
+        private unsafe byte[] Read(VulkanDevice seam, int texture)
+        {
+            int reader = seam.CreateFramebuffer(Size, Size);
+            seam.AttachTexture(reader, EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+            seam.SetDrawBuffers(reader, 1);
+            seam.BindFramebuffer(reader);
+
+            var pixels = new byte[Size * Size * 4];
+            fixed (byte* destination = pixels)
+            {
+                seam.ReadDefaultFramebuffer(0, 0, Size, Size, (IntPtr)destination);
+            }
+            seam.BindFramebuffer(Primary.FboId);
+            return pixels;
+        }
+
+        // ----------------------------------------------------------------- fixtures
+
+        /// <summary>A small 2D gradient, so a sampling difference between the routes would show.</summary>
+        public unsafe int Gradient(int phase)
+        {
+            gradients++;
+            var pixels = new byte[8 * 8 * 4];
+            for (int y = 0; y < 8; y++)
+            {
+                for (int x = 0; x < 8; x++)
+                {
+                    int i = (y * 8 + x) * 4;
+                    pixels[i] = (byte)(16 + x * 30 + phase * 7);
+                    pixels[i + 1] = (byte)(32 + y * 25);
+                    pixels[i + 2] = (byte)(((x + y) & 1) * 200 + 20);
+                    pixels[i + 3] = 255;
+                }
+            }
+            fixed (byte* first = pixels)
+            {
+                return Seam.CreateTexture2D(8, 8,
+                    EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, (IntPtr)first, false);
+            }
+        }
+
+        /// <summary>
+        /// The star cube map: six faces, one gradient each, uploaded the way
+        /// ClientPlatformWindows.Load3DTextureCube uploads SystemRenderNightSky's stars. The
+        /// native pass has to resolve it into the bindless table's cube array, not the 2D one.
+        /// </summary>
+        public unsafe int CubeGradient()
+        {
+            const int face = 8;
+            var faces = new byte[6][];
+            var pointers = new IntPtr[6];
+            var handles = new System.Runtime.InteropServices.GCHandle[6];
+            for (int f = 0; f < 6; f++)
+            {
+                faces[f] = new byte[face * face * 4];
+                for (int y = 0; y < face; y++)
+                {
+                    for (int x = 0; x < face; x++)
+                    {
+                        int i = (y * face + x) * 4;
+                        faces[f][i] = (byte)(f * 40);
+                        faces[f][i + 1] = (byte)(x * 30);
+                        faces[f][i + 2] = (byte)(y * 30);
+                        faces[f][i + 3] = 255;
+                    }
+                }
+                handles[f] = System.Runtime.InteropServices.GCHandle.Alloc(
+                    faces[f], System.Runtime.InteropServices.GCHandleType.Pinned);
+                pointers[f] = handles[f].AddrOfPinnedObject();
+            }
+
+            try
+            {
+                return Seam.CreateTextureCube(face, EnumTextureInternalFormat.Rgba8,
+                    EnumTexturePixelFormat.Rgba, pointers);
+            }
+            finally
+            {
+                for (int f = 0; f < 6; f++) handles[f].Free();
+            }
+        }
+
+        /// <summary>Links one vanilla program as ShaderRegistry does and fills the locations the test sets.</summary>
+        private static void Link(VulkanDevice seam, ShaderProgramBase program, string name, string[] uniforms)
+        {
+            List<ShaderStageSource> stages = ShaderCorpus.BuildProgram(
+                name, ShaderCorpus.LoadShaderFiles(), ShaderCorpus.LoadIncludes(), new ShaderCorpus.ShaderVariant());
+
+            var linked = new LinkedProgram { PassName = name };
+            foreach (ShaderStageSource stage in stages)
+            {
+                var shader = new LinkedShader
+                {
+                    Type = stage.Stage,
+                    Code = stage.Code,
+                    PrefixCode = stage.PrefixCode,
+                };
+                Assert.True(seam.CompileShader(shader));
+                if (stage.Stage == EnumShaderType.VertexShader) linked.VertexShader = shader;
+                else if (stage.Stage == EnumShaderType.FragmentShader) linked.FragmentShader = shader;
+            }
+
+            int id = seam.LinkProgram(linked);
+            Assert.True(id > 0, seam.GetError() ?? "link failed");
+            program.ProgramId = id;
+            foreach (string uniform in uniforms)
+            {
+                int location = seam.GetUniformLocation(id, uniform);
+                Assert.True(location != -1, name + " has no location for " + uniform);
+                program.uniformLocations[uniform] = location;
+            }
+        }
+
+        /// <summary>Primary as a world stage has it: scene at 0, glow at 1, motion at 2, plus depth.</summary>
+        private static FrameBufferRef CreatePrimary(VulkanDevice seam)
+        {
+            var primary = new FrameBufferRef
+            {
+                Width = Size,
+                Height = Size,
+                FboId = seam.CreateFramebuffer(Size, Size),
+                ColorTextureIds = new int[3],
+                DepthTextureId = seam.CreateTexture2D(Size, Size,
+                    EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent,
+                    IntPtr.Zero, false),
+            };
+            for (int slot = 0; slot < primary.ColorTextureIds.Length; slot++)
+            {
+                primary.ColorTextureIds[slot] = seam.CreateTexture2D(Size, Size,
+                    EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+                seam.AttachTexture(primary.FboId,
+                    (EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + slot),
+                    primary.ColorTextureIds[slot], 0);
+            }
+            seam.AttachTexture(primary.FboId, EnumFramebufferAttachment.DepthAttachment, primary.DepthTextureId, 0);
+            seam.SetDrawBuffers(primary.FboId, 0b111);
+            Assert.True(seam.CheckFramebufferComplete(primary.FboId, out string status), status);
+            return primary;
+        }
+
+        private static void InstallFrameBuffers(WorldPlatform platform, FrameBufferRef primary)
+        {
+            var list = new List<FrameBufferRef>();
+            for (int i = 0; i <= 24; i++) list.Add(null!);
+            list[0] = primary;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            typeof(ClientPlatformWindows).GetField("frameBuffers", flags)!.SetValue(platform, list);
+        }
+
+        /// <summary>
+        /// Two triangles covering the target, with positions, UVs, a colour and flags - enough
+        /// for every program under test, whose remaining vertex inputs the layout fills with the
+        /// constant defaults GL promises. Six indices, so a multi-draw can take them as two
+        /// groups of three.
+        /// </summary>
+        private static MeshData BuildQuad()
+        {
+            var mesh = new MeshData(4, 6, withNormals: false, withUv: true, withRgba: true, withFlags: true);
+            float[] positions =
+            {
+                -0.9f, -0.9f, 0.5f,
+                 0.9f, -0.9f, 0.5f,
+                 0.9f,  0.9f, 0.5f,
+                -0.9f,  0.9f, 0.5f,
+            };
+            float[] uvs = { 0f, 0f, 1f, 0f, 1f, 1f, 0f, 1f };
+            for (int i = 0; i < 4; i++)
+            {
+                mesh.AddVertex(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2],
+                    uvs[i * 2], uvs[i * 2 + 1], ColorUtil.WhiteArgb);
+            }
+            foreach (int index in new[] { 0, 1, 2, 0, 2, 3 }) mesh.AddIndex(index);
+            return mesh;
+        }
+    }
+
+    // ---------------------------------------------------------------- native shaders
+
+    /// <summary>The four programs' manifest, built once for the whole class.</summary>
+    private static readonly Lazy<(string Directory, string Reason)> NativeManifest = new(BuildNativeShaders);
+
+    private static (string, string) BuildNativeShaders()
+    {
+        if (!NativeShaderTree.TryCreateCompiler(out ShaderCompiler? compiler, out string reason)) return ("", reason);
+        using (compiler)
+        {
+            var builder = new NativeShaderBuilder(compiler!);
+            var merged = new NativeShaderBuildResult();
+            merged.Manifest.Toolchain = compiler!.Identity;
+            string source = Path.Combine(ShaderCorpus.RepositoryRoot, "sources", "shaders-vk");
+            foreach (string program in new[] { "nightsky", "celestialobject", "particlescube", "decals" })
+            {
+                NativeShaderBuildResult one = builder.Build(source, program);
+                merged.Errors.AddRange(one.Errors);
+                merged.Manifest.Programs.AddRange(one.Manifest.Programs);
+                foreach ((string file, byte[] bytes) in one.Files) merged.Files[file] = bytes;
+            }
+            if (!merged.Success) return ("", string.Join("\n", merged.Errors));
+
+            string root = Path.Combine(Path.GetTempPath(), "optimum-native-world-shaders-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            NativeShaderBuilder.Write(merged, root);
+            return (Path.Combine(root, NativeShaderManifest.DirectoryName), "");
+        }
+    }
+}

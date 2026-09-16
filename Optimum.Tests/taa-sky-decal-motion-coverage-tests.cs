@@ -341,7 +341,10 @@ public class TaaSkyDecalMotionCoverageTests
             "shaderProgramDecals.Use();",
             "shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;",
             "SetOptimumMotionUniforms(shaderProgramDecals);",
-            "decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);",
+            // Phase 3b stage 2: the pool's Draw was split into its cull and the platform's
+            // decal seam; both halves still run inside the window.
+            "decalPool.FrustumCull(game.frustumCuller, EnumFrustumCullMode.CullInstant);",
+            "game.Platform.RenderDecalPool(decalPool.ModelRef,",
         })
         {
             Assert.Contains(statement, guarded);

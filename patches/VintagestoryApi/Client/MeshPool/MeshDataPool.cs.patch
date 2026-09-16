@@ -1,8 +1,28 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..d81387f 100644
+index f9128b4..d25a06c 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-@@ -280,11 +280,15 @@ namespace Vintagestory.API.Client
+@@ -28,10 +28,19 @@ namespace Vintagestory.API.Client
+         public int IndicesPoolSize;
+ 
+         internal MeshRef modelRef;
+         internal int poolId;
+ 
++        /// <summary>
++        /// Optimum (Phase 3b): the pool's uploaded mesh, so a platform that records the pool's
++        /// multi-draw itself - VulkanClientPlatform.RenderDecalPool, the native decal pass - can
++        /// reach it alongside the public cull results (<see cref="indicesStartsByte" />,
++        /// <see cref="indicesSizes" />, <see cref="indicesGroupsCount" />). Read-only: the pool
++        /// still owns the handle and disposes it.
++        /// </summary>
++        public MeshRef ModelRef => modelRef;
++
+         // For defragmentation, sanity checks, frustum culling
+         internal List<ModelDataPoolLocation> poolLocations = new List<ModelDataPoolLocation>();
+ 
+         // For final rendering 
+ 
+@@ -280,11 +289,15 @@ namespace Vintagestory.API.Client
              {
                  modeldata.CustomInts.BaseOffset = vertexPosition * modeldata.CustomInts.InterleaveStride;
              }
@@ -18,7 +38,7 @@ index f9128b4..d81387f 100644
              // Assign a location to it
              ModelDataPoolLocation poolLocation = new ModelDataPoolLocation()
              {
-@@ -462,11 +466,15 @@ namespace Vintagestory.API.Client
+@@ -462,10 +475,11 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -33,8 +53,7 @@ index f9128b4..d81387f 100644
      }
  
  
-     /// <summary>
-@@ -513,10 +521,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +527,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -47,7 +66,7 @@ index f9128b4..d81387f 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +545,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +551,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);
