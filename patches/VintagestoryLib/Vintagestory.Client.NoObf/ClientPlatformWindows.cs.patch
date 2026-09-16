@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..68a67d2 100644
+index 6edf0c9..15c9aea 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -2202,7 +2202,7 @@ index 6edf0c9..68a67d2 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,110 +3250,343 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,50 +3250,439 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2385,6 +2385,34 @@ index 6edf0c9..68a67d2 100644
 +			invViewProj = Mat4f.Identity(new float[16]);
 +		}
 +
++		// Optimum (Vulkan-native render systems, Phase 3b): the draw is a seam of its
++		// own, so a platform that owns this pass natively replaces the draw and nothing
++		// else. Every decision above it - the guards, the two matrices, the reset - and
++		// every field below it - the resolved textures, the history validity and the
++		// parity flip - stay here, which is what keeps the temporal contract identical
++		// on both backends whatever the draw is made of.
++		OptimumTaaResolveDraw(write, read, invViewProj, prevViewProj, reset);
++
++		taaResolvedColorTexture = write.ColorTextureIds[0];
++		taaResolvedGlowTexture = write.ColorTextureIds[1];
++		_taaHistoryValid = true;
++		_taaFrameParity ^= 1;
++		optimumTaaResolvedThisFrame = true;
++		return true;
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b): the TAA resolve's draw - the history slot bound, the seven
++	/// inputs sampled, the nine uniforms written, the fullscreen triangle - and the
++	/// state restore the rest of the post chain relies on: blending back on, the depth
++	/// test back on and Primary bound. The body is the one
++	/// <see cref="RenderOptimumTaaResolve" /> held inline; it was lifted out, not
++	/// re-derived, so the OpenGL path draws exactly what it drew before.
++	/// </summary>
++	public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)
++	{
++		ShaderProgram resolve = ShaderPrograms.TaaResolve;
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
 +		GlToggleBlend(on: false);
 +		GlDisableDepthTest();
 +		// The history slot already owns all three of its attachments, so bind it
@@ -2404,7 +2432,7 @@ index 6edf0c9..68a67d2 100644
 +		resolve.BindTexture2D("historyDepth", read.ColorTextureIds[2], 6);
 +		resolve.Uniform("renderSize", (float)write.Width, (float)write.Height);
 +		resolve.Uniform("jitterPx", frame.JitterPx.X, frame.JitterPx.Y);
-+		resolve.UniformMatrix("invViewProjJittered", invViewProj);
++		resolve.UniformMatrix("invViewProjJittered", invViewProjJittered);
 +		resolve.UniformMatrix("prevViewProj", prevViewProj);
 +		resolve.UniformMatrix("viewMatrix", frame.CameraMatrixOrigin);
 +		resolve.Uniform("cameraDelta", frame.CameraPosDelta);
@@ -2414,11 +2442,6 @@ index 6edf0c9..68a67d2 100644
 +		RenderFullscreenTriangle(screenQuad);
 +		resolve.Stop();
 +
-+		taaResolvedColorTexture = write.ColorTextureIds[0];
-+		taaResolvedGlowTexture = write.ColorTextureIds[1];
-+		_taaHistoryValid = true;
-+		_taaFrameParity ^= 1;
-+		optimumTaaResolvedThisFrame = true;
 +		// Restore everything this pass changed, symmetrically: the rest of
 +		// RenderPostprocessingEffects runs with blend on, the depth test on and
 +		// Primary bound, and it is this pass's job to hand that back rather than
@@ -2426,7 +2449,6 @@ index 6edf0c9..68a67d2 100644
 +		GlToggleBlend(on: true);
 +		GlEnableDepthTest();
 +		LoadFrameBuffer(EnumFrameBuffer.Primary);
-+		return true;
 +	}
 +
 +	/// <summary>
@@ -2488,6 +2510,21 @@ index 6edf0c9..68a67d2 100644
 +			return resolvedScene;
 +		}
 +
++		// Optimum (Phase 3b): the draw is its own seam, as the resolve's is. The
++		// conditions and the texture this pass hands on stay here.
++		OptimumTaaSharpenDraw(target, resolvedScene);
++		return target.ColorTextureIds[0];
++	}
++
++	/// <summary>
++	/// Optimum (Phase 3b): the TAA sharpen's draw - the sharpen target bound, the
++	/// resolved colour sampled, the two uniforms written, the fullscreen triangle - and
++	/// the same state restore the resolve's draw performs. Lifted out of
++	/// <see cref="RenderOptimumTaaSharpen" /> unchanged.
++	/// </summary>
++	public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)
++	{
++		ShaderProgram sharpen = ShaderPrograms.TaaSharpen;
 +		GlToggleBlend(on: false);
 +		GlDisableDepthTest();
 +		// The target owns its single attachment already; the setter binds it and
@@ -2507,7 +2544,6 @@ index 6edf0c9..68a67d2 100644
 +		GlToggleBlend(on: true);
 +		GlEnableDepthTest();
 +		LoadFrameBuffer(EnumFrameBuffer.Primary);
-+		return target.ColorTextureIds[0];
 +	}
 +
 +	public override void RenderPostprocessingEffects(float[] projectMatrix)
@@ -2664,21 +2700,18 @@ index 6edf0c9..68a67d2 100644
 +			findbright.Use();
 +			findbright.ColorTex2D = postSceneTexture;
 +			findbright.GlowTex2D = postGlowTexture;
-+			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
-+			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
-+			RenderFullscreenTriangle(screenQuad);
-+			findbright.Stop();
-+			ShaderProgramBlur blur = ShaderPrograms.Blur;
-+			blur.Use();
-+			blur.Uniform("frameSize", (float)x * ssaaLevel, (float)y * ssaaLevel);
-+			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalMedRes);
-+			blur.IsVertical = 0;
-+			blur.InputTexture2D = frameBuffers[4].ColorTextureIds[0];
-+			RenderFullscreenTriangle(screenQuad);
-+			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
-+			blur.IsVertical = 1;
-+			blur.InputTexture2D = frameBuffers[2].ColorTextureIds[0];
-+			RenderFullscreenTriangle(screenQuad);
+ 			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+ 			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
+ 			RenderFullscreenTriangle(screenQuad);
+ 			findbright.Stop();
+ 			ShaderProgramBlur blur = ShaderPrograms.Blur;
+@@ -1848,102 +3694,151 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			RenderFullscreenTriangle(screenQuad);
+ 			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
+ 			blur.IsVertical = 1;
+ 			blur.InputTexture2D = frameBuffers[2].ColorTextureIds[0];
+ 			RenderFullscreenTriangle(screenQuad);
+-			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
 +			// Mono.Cecil transplant: GlViewport is the routed form of GL.Viewport
 +			// and its GL body is the identical call.
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
@@ -2874,7 +2907,7 @@ index 6edf0c9..68a67d2 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,25 +3862,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,25 +3848,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2919,7 +2952,7 @@ index 6edf0c9..68a67d2 100644
  			final.ExtraGamma = ClientSettings.ExtraGammaLevel;
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
-@@ -1987,24 +3910,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +3896,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2976,7 +3009,7 @@ index 6edf0c9..68a67d2 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3965,496 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3951,496 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3474,7 +3507,7 @@ index 6edf0c9..68a67d2 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4613,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4599,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3514,7 +3547,7 @@ index 6edf0c9..68a67d2 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +5011,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4997,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3567,7 +3600,7 @@ index 6edf0c9..68a67d2 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5106,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5092,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3612,7 +3645,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5143,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5129,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3633,7 +3666,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5162,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5148,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3654,7 +3687,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5181,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5167,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3675,7 +3708,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5200,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5186,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3696,7 +3729,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5223,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5209,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3717,7 +3750,7 @@ index 6edf0c9..68a67d2 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5785,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5771,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3741,7 +3774,7 @@ index 6edf0c9..68a67d2 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6144,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6130,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

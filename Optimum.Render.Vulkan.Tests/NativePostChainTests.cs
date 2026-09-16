@@ -32,13 +32,30 @@ namespace Optimum.Render.Vulkan.Tests;
 ///  3. neither native pass reaches the GL-emulation layer while its pass is open;
 ///  4. over several frames the chain runs its steps in the declared order and the TAA resolve
 ///     keeps accumulating - the history parity alternates and the motion attachment the resolve
-///     reads was written by the two passes that run before it.
+///     reads was written by the two passes that run before it;
+///  5. the TAA resolve and the TAA sharpen draw the same pixels natively as on the OpenGL body,
+///     from a cold history and from a warm one, and the sharpen is skipped on both routes when
+///     there is nothing to sharpen;
+///  6. several frames of the native resolve with no readback between them keep accumulating -
+///     the result after five frames is not the result after one, and it is the OpenGL body's.
 /// </summary>
 public class NativePostChainTests(ITestOutputHelper output)
 {
     private const int Size = 16;
 
-    private static readonly string[] Programs = { "transparentcompose", "taa-skymotion", "taa-resolve", "blit" };
+    private static readonly string[] Programs =
+        { "transparentcompose", "taa-skymotion", "taa-resolve", "taa-sharpen", "blit" };
+
+    /// <summary>
+    /// A jitter phase per loop step, pinned so two runs of the same length see the same sequence
+    /// whatever the global frame counter happens to be. The values are Halton-shaped: sub-pixel,
+    /// never zero, never repeating inside one run.
+    /// </summary>
+    private static readonly (float X, float Y)[] JitterPhases =
+    {
+        (0.25f, -0.375f), (-0.125f, 0.25f), (0.375f, 0.125f),
+        (-0.375f, -0.25f), (0.125f, 0.375f), (-0.25f, -0.125f),
+    };
 
     /// <summary>The Vulkan platform without a window: the size seam answers for one.</summary>
     private sealed class ChainPlatform : VulkanClientPlatform
@@ -245,9 +262,262 @@ public class NativePostChainTests(ITestOutputHelper output)
         GpuTest.AssertClean(seam);
     }
 
+    /// <summary>
+    /// The TAA resolve, natively: all three attachments of the history slot it writes - the
+    /// resolved colour, the resolved glow and the linear depth - have to be the OpenGL body's,
+    /// from a cold history (the reset frame, which copies the scene through) and from a warm one
+    /// (the frame that actually blends history in).
+    ///
+    /// CLAUDE.md rule 11 is the shader's, and both routes run the same taa-resolve.fsh: what is
+    /// asserted here is that the native route feeds it the same seven textures and the same nine
+    /// uniform values, so the 3x3 nearest-depth disocclusion and the luminance anti-flicker
+    /// weighting see identical inputs and produce identical pixels.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheTaaResolveMatchesTheOpenGlBody(bool warmHistory)
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+
+        Resolved emulated = RunResolve(session, native: false, warmHistory);
+
+        long passesBefore = session.Seam.NativePassesForTests;
+        long drawsBefore = session.Seam.NativeDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
+        Resolved nativeRoute = RunResolve(session, native: true, warmHistory);
+
+        Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
+        Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+
+        Assert.Equal(emulated.Color, nativeRoute.Color);
+        Assert.Equal(emulated.Glow, nativeRoute.Glow);
+        Assert.Equal(emulated.Depth, nativeRoute.Depth);
+
+        // The pass wrote a resolved image over the seed, or the comparison above would hold
+        // for two routes that both wrote nothing.
+        Assert.NotEqual(session.HistorySeedColor, nativeRoute.Color);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The TAA resolve with TAA off: the lib body returns before any draw, so the native route
+    /// declares no pass at all and the history is marked invalid on both routes.
+    /// </summary>
+    [SkippableFact]
+    public void TheTaaResolveDrawsNothingWithTaaOff()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        OptimumConfig.Taa = false;
+
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = true;
+        long passesBefore = session.Seam.NativePassesForTests;
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        platform.CurrentFrameBuffer = session.Primary;
+        Assert.False(platform.RenderOptimumTaaResolve());
+        platform.EndFrame();
+
+        Assert.Equal(0, session.Seam.NativePassesForTests - passesBefore);
+        Assert.False(platform.TaaResolvedThisFrame);
+        Assert.False(HistoryValid(platform));
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The TAA sharpen, natively: the sharpen target's single attachment has to be the OpenGL
+    /// body's at every strength the setting can take, and the texture the pass hands on to the
+    /// rest of the chain has to be the sharpen target either way.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1f)]
+    [InlineData(0.35f)]
+    public void TheTaaSharpenMatchesTheOpenGlBody(float sharpness)
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+        OptimumConfig.TaaSharpness = sharpness;
+
+        byte[] emulated = RunSharpen(session, native: false, out int emulatedTexture);
+
+        long passesBefore = session.Seam.NativePassesForTests;
+        long drawsBefore = session.Seam.NativeDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[] nativeRoute = RunSharpen(session, native: true, out int nativeTexture);
+
+        // One native pass for the resolve that has to run first, one for the sharpen.
+        Assert.Equal(2, session.Seam.NativePassesForTests - passesBefore);
+        Assert.Equal(2, session.Seam.NativeDrawsForTests - drawsBefore);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+
+        Assert.Equal(session.Sharpen.ColorTextureIds[0], emulatedTexture);
+        Assert.Equal(session.Sharpen.ColorTextureIds[0], nativeTexture);
+        Assert.Equal(emulated, nativeRoute);
+        Assert.NotEqual(session.SharpenSeed, nativeRoute);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The sharpen's conditions live in the lib body, so both routes skip it on exactly the same
+    /// frames: sharpness at zero hands the resolved texture straight on and draws nothing.
+    /// </summary>
+    [SkippableFact]
+    public void TheTaaSharpenIsSkippedOnBothRoutesWhenThereIsNothingToSharpen()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        OptimumConfig.TaaSharpness = 0f;
+
+        ChainPlatform platform = session.Platform;
+        foreach (bool native in new[] { false, true })
+        {
+            platform.NativePostChainEnabled = native;
+            long passesBefore = session.Seam.NativePassesForTests;
+
+            platform.BeginFrame();
+            session.SeedFrame();
+            platform.CurrentFrameBuffer = session.Primary;
+            Assert.True(platform.RenderOptimumTaaResolve());
+            int resolved = platform.OptimumPostSceneTexture();
+            Assert.Equal(resolved, platform.RenderOptimumTaaSharpen(resolved));
+            platform.EndFrame();
+
+            // The resolve's pass on the native route, and nothing for the sharpen.
+            Assert.Equal(native ? 1 : 0, session.Seam.NativePassesForTests - passesBefore);
+        }
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// Several frames of the native resolve with nothing read back between them: the history is
+    /// still being accumulated, not replaced. Five frames do not land where one frame lands -
+    /// each frame reprojects the previous slot at its own sub-pixel jitter and blends it in -
+    /// and where they land is the OpenGL body's answer to the identical sequence.
+    ///
+    /// A single-frame readback cannot see this: it passed while the R32F-history and
+    /// masked-clear bugs were live (P2, 2026-09-10), which is why the loop below reads nothing.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeResolveKeepsAccumulatingHistoryAcrossFrames()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+
+        // The same last frame - the same jitter phase, the same scene, the same slot - reached
+        // two ways: cold, and after four frames of history. Pinning the phase is what makes the
+        // difference between them history and nothing else.
+        byte[] lastFrameAlone = RunResolveFrames(session, native: true, frames: 1, startPhase: 4);
+        byte[] fiveFrames = RunResolveFrames(session, native: true, frames: 5, startPhase: 0);
+        Assert.NotEqual(lastFrameAlone, fiveFrames);
+
+        byte[] emulatedFive = RunResolveFrames(session, native: false, frames: 5, startPhase: 0);
+        Assert.Equal(emulatedFive, fiveFrames);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
     // ---------------------------------------------------------------------- driving
 
     private readonly record struct Frame(byte[] Scene, byte[] Glow, byte[] Motion);
+
+    /// <summary>The three attachments of the history slot a resolve wrote.</summary>
+    private readonly record struct Resolved(byte[] Color, byte[] Glow, byte[] Depth);
+
+    /// <summary>
+    /// One TAA resolve on the route under test, from an identically seeded frame: the history
+    /// parity pinned to slot A, both history slots seeded, and the jitter pinned to phase 0 so
+    /// the two routes see the same sub-pixel offset.
+    /// </summary>
+    private Resolved RunResolve(Session session, bool native, bool warmHistory)
+    {
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        session.AdvanceTemporalFrame(0);
+        SetParity(platform, 0);
+        SetHistoryValid(platform, warmHistory);
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        session.SeedHistory();
+        platform.CurrentFrameBuffer = session.Primary;
+
+        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
+        Assert.Equal(1, Parity(platform));
+
+        var resolved = new Resolved(session.ReadHistoryColor(0), session.ReadHistoryGlow(0),
+            session.ReadHistoryDepth(0));
+        platform.EndFrame();
+        return resolved;
+    }
+
+    /// <summary>One resolve and one sharpen on the route under test, from an identically seeded frame.</summary>
+    private byte[] RunSharpen(Session session, bool native, out int handedOn)
+    {
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        session.AdvanceTemporalFrame(0);
+        SetParity(platform, 0);
+        SetHistoryValid(platform, true);
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        session.SeedHistory();
+        session.SeedSharpen();
+        platform.CurrentFrameBuffer = session.Primary;
+
+        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
+        handedOn = platform.RenderOptimumTaaSharpen(platform.OptimumPostSceneTexture());
+
+        byte[] sharpened = session.ReadSharpen();
+        platform.EndFrame();
+        return sharpened;
+    }
+
+    /// <summary>
+    /// <paramref name="frames" /> resolves on the route under test, with no readback inside the
+    /// loop - only the frame boundary between them - and the history read once at the end. The
+    /// run starts cold, so the first frame is the reset frame and every frame after it blends.
+    /// An odd frame count always ends on slot A, so two runs of different length are comparable.
+    /// </summary>
+    private byte[] RunResolveFrames(Session session, bool native, int frames, int startPhase)
+    {
+        Assert.True(frames % 2 == 1, "an even frame count would end on the other history slot");
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        SetParity(platform, 0);
+        SetHistoryValid(platform, false);
+
+        platform.BeginFrame();
+        session.SeedHistory();
+        platform.EndFrame();
+
+        for (int frame = 0; frame < frames; frame++)
+        {
+            session.AdvanceTemporalFrame(startPhase + frame);
+            platform.BeginFrame();
+            session.SeedFrame();
+            platform.CurrentFrameBuffer = session.Primary;
+            Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run on frame " + frame);
+            platform.EndFrame();
+        }
+
+        platform.BeginFrame();
+        byte[] history = session.ReadHistoryColor(0);
+        platform.EndFrame();
+        return history;
+    }
 
     /// <summary>One OIT merge, on the route under test, from an identically seeded frame.</summary>
     private Frame RunMerge(Session session, bool native)
@@ -293,6 +563,21 @@ public class NativePostChainTests(ITestOutputHelper output)
             .GetField("taaResolvedColorTexture", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(platform)!;
 
+    private static int Parity(ClientPlatformWindows platform) =>
+        (int)ParityField.GetValue(platform)!;
+
+    private static void SetParity(ClientPlatformWindows platform, int parity) =>
+        ParityField.SetValue(platform, parity);
+
+    private static void SetHistoryValid(ClientPlatformWindows platform, bool valid) =>
+        HistoryValidField.SetValue(platform, valid);
+
+    private static readonly FieldInfo ParityField = typeof(ClientPlatformWindows)
+        .GetField("_taaFrameParity", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    private static readonly FieldInfo HistoryValidField = typeof(ClientPlatformWindows)
+        .GetField("_taaHistoryValid", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
     private static bool HistoryValid(ClientPlatformWindows platform) =>
         (bool)typeof(ClientPlatformWindows)
             .GetField("_taaHistoryValid", BindingFlags.Instance | BindingFlags.NonPublic)!
@@ -321,6 +606,19 @@ public class NativePostChainTests(ITestOutputHelper output)
         public VulkanDevice Seam => Platform.GraphicsDevice!;
         public FrameBufferRef Primary { get; private set; } = null!;
         public FrameBufferRef Transparent { get; private set; } = null!;
+        public FrameBufferRef Sharpen { get; private set; } = null!;
+
+        /// <summary>
+        /// True leaves Primary's colour 0 as the pattern it was created with instead of clearing
+        /// it flat: the TAA resolve's variance clip box collapses on a flat image, so a flat
+        /// scene would make every frame after the first return the current frame untouched and
+        /// hide whether history is being blended in at all.
+        /// </summary>
+        public bool PatternedScene { get; set; }
+
+        /// <summary>The history slots' seed and the sharpen target's, as the readbacks decode them.</summary>
+        public byte[] HistorySeedColor { get; private set; } = Array.Empty<byte>();
+        public byte[] SharpenSeed { get; private set; } = Array.Empty<byte>();
 
         /// <summary>The motion attachment's seed, decoded the way <see cref="ReadMotion" /> decodes it.</summary>
         public byte[] MotionSeed { get; private set; } = Array.Empty<byte>();
@@ -331,6 +629,7 @@ public class NativePostChainTests(ITestOutputHelper output)
         private readonly List<FrameBufferRef> buffers = new();
         private int oitReveal;
         private int oitAccumulation;
+        private int scenePattern;
         private int decodeProgram;
         private int decodeTarget;
         private int decodeFramebuffer;
@@ -339,6 +638,7 @@ public class NativePostChainTests(ITestOutputHelper output)
         private ShaderProgramTransparentcompose? composeBefore;
         private ShaderProgram? skyMotionBefore;
         private ShaderProgram? resolveBefore;
+        private ShaderProgram? sharpenBefore;
         private ShaderProgramBlit? blitBefore;
         private bool taaBefore;
         private float sharpnessBefore;
@@ -382,6 +682,7 @@ public class NativePostChainTests(ITestOutputHelper output)
                 composeBefore = ShaderPrograms.Transparentcompose,
                 skyMotionBefore = ShaderPrograms.TaaSkyMotion,
                 resolveBefore = ShaderPrograms.TaaResolve,
+                sharpenBefore = ShaderPrograms.TaaSharpen,
                 blitBefore = ShaderPrograms.Blit,
                 taaBefore = OptimumConfig.Taa,
                 sharpnessBefore = OptimumConfig.TaaSharpness,
@@ -402,6 +703,7 @@ public class NativePostChainTests(ITestOutputHelper output)
             ShaderPrograms.Transparentcompose = composeBefore!;
             ShaderPrograms.TaaSkyMotion = skyMotionBefore!;
             ShaderPrograms.TaaResolve = resolveBefore!;
+            ShaderPrograms.TaaSharpen = sharpenBefore!;
             ShaderPrograms.Blit = blitBefore!;
             OptimumConfig.Taa = taaBefore;
             OptimumConfig.TaaSharpness = sharpnessBefore;
@@ -439,10 +741,11 @@ public class NativePostChainTests(ITestOutputHelper output)
 
             seam.BindFramebuffer(Primary.FboId);
             seam.SetDrawBuffers(Primary.FboId, 0b111);
-            seam.ClearColor(0, 0.25f, 0.5f, 0.75f, 1f);
+            if (!PatternedScene) seam.ClearColor(0, 0.25f, 0.5f, 0.75f, 1f);
             seam.ClearColor(1, 0.125f, 0.25f, 0.375f, 1f);
             seam.ClearColor(2, 0f, 0f, 0.125f, 0.5f);
             seam.ClearDepth(1f);
+            if (PatternedScene) DrawScenePattern();
             // Primary's default colour set: two attachments without the SSAO G-buffer.
             seam.SetDrawBuffers(Primary.FboId, 0b011);
 
@@ -460,6 +763,57 @@ public class NativePostChainTests(ITestOutputHelper output)
             seam.BindTexture(7, oitAccumulation);
         }
 
+        /// <summary>
+        /// The scene pattern into Primary's colour 0, the same every frame: a clear can only
+        /// write a flat image, and a flat image collapses the resolve's variance clip box.
+        /// </summary>
+        private void DrawScenePattern()
+        {
+            VulkanDevice seam = Seam;
+            seam.SetDrawBuffers(Primary.FboId, 0b001);
+            seam.UseProgram(decodeProgram);
+            seam.SetSamplerUnit(decodeProgram, "source", 15);
+            seam.BindTexture(15, scenePattern);
+            SetInt(seam, decodeProgram, "motionMode", 0);
+            seam.SetViewport(0, 0, Size, Size);
+            seam.SetDepthTest(false);
+            seam.SetDepthMask(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.DrawFullscreenTriangle();
+        }
+
+        /// <summary>
+        /// Both history slots to a flat seed, so a resolve starts from known content on either
+        /// route. Inside a frame: a clear between frames is a no-op on this seam.
+        /// </summary>
+        public void SeedHistory()
+        {
+            VulkanDevice seam = Seam;
+            for (int parity = 0; parity < 2; parity++)
+            {
+                FrameBufferRef slot = History(parity);
+                seam.BindFramebuffer(slot.FboId);
+                seam.SetDrawBuffers(slot.FboId, 0b111);
+                seam.ClearColor(0, 0.9f, 0.1f, 0.4f, 1f);
+                seam.ClearColor(1, 0.4f, 0.9f, 0.1f, 1f);
+                seam.ClearColor(2, 12.5f, 0f, 0f, 1f);
+            }
+            seam.BindFramebuffer(Primary.FboId);
+            seam.SetDrawBuffers(Primary.FboId, 0b011);
+        }
+
+        /// <summary>The sharpen target to a flat seed, so "the pass wrote something" is checkable.</summary>
+        public void SeedSharpen()
+        {
+            VulkanDevice seam = Seam;
+            seam.BindFramebuffer(Sharpen.FboId);
+            seam.SetDrawBuffers(Sharpen.FboId, 0b1);
+            seam.ClearColor(0, 0.05f, 0.95f, 0.55f, 1f);
+            seam.BindFramebuffer(Primary.FboId);
+            seam.SetDrawBuffers(Primary.FboId, 0b011);
+        }
+
         /// <summary>TAA on, with the jitter window open or closed, and no sharpen pass.</summary>
         public void EnableTaa(bool jitterActive)
         {
@@ -472,6 +826,22 @@ public class NativePostChainTests(ITestOutputHelper output)
             AdvanceTemporalFrame();
             AdvanceTemporalFrame();
             frame.JitterActive = jitterActive;
+        }
+
+        /// <summary>
+        /// One frame of the temporal contract with the jitter pinned to <paramref name="phase" />
+        /// of <see cref="JitterPhases" />, so two runs of the same length are comparable whatever
+        /// the global frame counter is at.
+        /// </summary>
+        public void AdvanceTemporalFrame(int phase)
+        {
+            AdvanceTemporalFrame();
+            OptimumTemporalFrame frame = OptimumTemporal.Frame;
+            (float x, float y) = JitterPhases[phase % JitterPhases.Length];
+            frame.JitterSequencePx.X = x;
+            frame.JitterSequencePx.Y = y;
+            // The setter is what copies the sequence into the applied jitter.
+            frame.JitterActive = true;
         }
 
         /// <summary>
@@ -497,6 +867,18 @@ public class NativePostChainTests(ITestOutputHelper output)
         public byte[] ReadGlow() => Decode(Primary.ColorTextureIds[1], motion: false);
 
         public byte[] ReadMotion() => Decode(Primary.ColorTextureIds[2], motion: true);
+
+        public byte[] ReadHistoryColor(int parity) => Decode(History(parity).ColorTextureIds[0], motion: false);
+
+        public byte[] ReadHistoryGlow(int parity) => Decode(History(parity).ColorTextureIds[1], motion: false);
+
+        /// <summary>
+        /// The history's linear depth, through the motion decode: it is an R32F in view-space
+        /// metres, which the clamping colour decode would flatten to white everywhere.
+        /// </summary>
+        public byte[] ReadHistoryDepth(int parity) => Decode(History(parity).ColorTextureIds[2], motion: true);
+
+        public byte[] ReadSharpen() => Decode(Sharpen.ColorTextureIds[0], motion: false);
 
         private unsafe byte[] ReadAttachmentZero(int framebufferId)
         {
@@ -602,7 +984,10 @@ public class NativePostChainTests(ITestOutputHelper output)
             buffers[10] = SingleTarget(EnumTextureInternalFormat.Rgba8);
             buffers[19] = HistoryTarget();
             buffers[20] = HistoryTarget();
+            Sharpen = SingleTarget(EnumTextureInternalFormat.Rgba16f);
+            buffers[21] = Sharpen;
 
+            scenePattern = Seeded(0.45f);
             decodeTarget = Texture(EnumTextureInternalFormat.Rgba8);
             decodeFramebuffer = seam.CreateFramebuffer(Size, Size);
             seam.AttachTexture(decodeFramebuffer, EnumFramebufferAttachment.ColorAttachment0, decodeTarget, 0);
@@ -685,6 +1070,8 @@ public class NativePostChainTests(ITestOutputHelper output)
             {
                 "taaRenderSize", "taaJitterPx", "taaInvViewProjJittered", "taaPrevViewProj", "taaCloudReactive",
             });
+            var sharpen = new ShaderProgram { PassName = "taa-sharpen" };
+            Link(seam, sharpen, "taa-sharpen", variant, new[] { "inputTexelSize", "sharpness" });
             var resolve = new ShaderProgram { PassName = "taa-resolve" };
             Link(seam, resolve, "taa-resolve", variant, new[]
             {
@@ -697,6 +1084,7 @@ public class NativePostChainTests(ITestOutputHelper output)
             ShaderPrograms.Transparentcompose = compose;
             ShaderPrograms.TaaSkyMotion = skyMotion;
             ShaderPrograms.TaaResolve = resolve;
+            ShaderPrograms.TaaSharpen = sharpen;
             ShaderPrograms.Blit = blit;
 
             decodeProgram = LinkDecode(seam);
@@ -803,8 +1191,12 @@ void main(void)
             // The seeds the comparisons quote, read once through the same decode the tests use.
             Platform.BeginFrame();
             SeedFrame();
+            SeedHistory();
+            SeedSharpen();
             SceneSeed = ReadScene();
             MotionSeed = ReadMotion();
+            HistorySeedColor = ReadHistoryColor(0);
+            SharpenSeed = ReadSharpen();
             Platform.EndFrame();
         }
     }

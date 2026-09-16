@@ -139,6 +139,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
+        // Phase 3b stage 1: the two TAA passes' draw seams, which the native chain replaces.
+        new(true, "OptimumTaaResolveDraw",
+            new[] { "FrameBufferRef", "FrameBufferRef", "Single[]", "Single[]", "Boolean" }),
+        new(true, "OptimumTaaSharpenDraw", new[] { "FrameBufferRef", "Int32" }),
     };
 
     /// <summary>
