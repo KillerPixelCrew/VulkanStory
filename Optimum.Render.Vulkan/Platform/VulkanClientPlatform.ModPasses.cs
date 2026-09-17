@@ -88,7 +88,6 @@ public partial class VulkanClientPlatform
         }
         passContext = outer;
         passContextFlags = outerFlags;
-        // Rebinding re-declares the stage's pass on the target the renderers left bound.
         CurrentFrameBuffer = saved;
     }
 
@@ -106,13 +105,17 @@ public partial class VulkanClientPlatform
 
         passContext = "Mod/" + registration.ModId + "/" + decl.Name;
         passContextFlags = ModPassFlags;
-        // The platform setter binds and declares the context's pass on the target; the declaration
-        // below narrows it to the declared slots and reads under the same name.
+        // The declared slots are the draw buffers the mod's draws write, for this pass only; every
+        // draw inside it is recorded under the declaration (name, slots, reads, flags) on the
+        // plan's target by the generic stated route.
+        int targetId = plan.Target?.FboId ?? PassDeclaration.DefaultFramebuffer;
+        uint savedDrawBuffers = stated.DrawBuffers(targetId);
         CurrentFrameBuffer = plan.Target!;
-        device.DeclarePass(plan.Declaration);
+        stated.SetDrawBuffers(targetId, plan.Declaration.ColorSlots);
 
         bool motion = false;
         CurrentModPass = plan.Declaration.Name;
+        statedPass = plan.Declaration;
         try
         {
             if (decl.MotionWriter != null)
@@ -132,7 +135,8 @@ public partial class VulkanClientPlatform
         {
             if (motion) EndMotionWrite();
             CurrentModPass = null;
-            device.EndPass();
+            statedPass = null;
+            stated.SetDrawBuffers(targetId, savedDrawBuffers);
         }
     }
 

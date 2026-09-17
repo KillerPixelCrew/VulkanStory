@@ -29,7 +29,7 @@ namespace Optimum.Render.Vulkan.Tests;
 ///     window, into the shaded image, the glow attachment and the motion attachment;
 ///  2. sky motion writes the same motion attachment as the OpenGL body and leaves the shaded
 ///     image alone;
-///  3. neither native pass reaches the GL-emulation layer while its pass is open;
+///  3. each native pass records only its own draws (structural since the GL emulation went);
 ///  4. over several frames the chain runs its steps in the declared order and the TAA resolve
 ///     keeps accumulating - the history parity alternates and the motion attachment the resolve
 ///     reads was written by the two passes that run before it;
@@ -114,20 +114,18 @@ public class NativePostChainTests(ITestOutputHelper output)
         using Session session = Open();
         session.EnableTaa(jitterActive: true);
 
-        Frame emulated = RunMerge(session, native: false);
+        Frame stated = RunMerge(session, native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         Frame nativeRoute = RunMerge(session, native: true);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
-        Assert.Equal(emulated.Glow, nativeRoute.Glow);
-        Assert.Equal(emulated.Motion, nativeRoute.Motion);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Glow, nativeRoute.Glow);
+        Assert.Equal(stated.Motion, nativeRoute.Motion);
 
         // The merge really did add into the reactive channel, or the comparison above would
         // pass on two routes that both wrote nothing.
@@ -147,12 +145,12 @@ public class NativePostChainTests(ITestOutputHelper output)
         using Session session = Open();
         session.EnableTaa(jitterActive: false);
 
-        Frame emulated = RunMerge(session, native: false);
+        Frame stated = RunMerge(session, native: false);
         Frame nativeRoute = RunMerge(session, native: true);
 
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
-        Assert.Equal(emulated.Glow, nativeRoute.Glow);
-        Assert.Equal(emulated.Motion, nativeRoute.Motion);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Glow, nativeRoute.Glow);
+        Assert.Equal(stated.Motion, nativeRoute.Motion);
         Assert.Equal(session.MotionSeed, nativeRoute.Motion);
 
         GpuTest.AssertClean(session.Seam);
@@ -168,19 +166,17 @@ public class NativePostChainTests(ITestOutputHelper output)
         using Session session = Open();
         session.EnableTaa(jitterActive: true);
 
-        Frame emulated = RunSkyMotion(session, native: false);
+        Frame stated = RunSkyMotion(session, native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         Frame nativeRoute = RunSkyMotion(session, native: true);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(emulated.Motion, nativeRoute.Motion);
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Motion, nativeRoute.Motion);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
         Assert.Equal(session.SceneSeed, nativeRoute.Scene);
 
         // The pass covered the sky, or "the two routes agree" would be vacuous.
@@ -190,22 +186,20 @@ public class NativePostChainTests(ITestOutputHelper output)
         GpuTest.AssertClean(session.Seam);
     }
 
-    /// <summary>The OpenGL body on this device is the emulation layer; the native chain is not.</summary>
+    /// <summary>The OpenGL body on this device is the generic stated route; the native chain is not.</summary>
     [SkippableFact]
-    public void TheOpenGlRouteDrawsThroughTheEmulationLayerAndTheNativeChainDoesNot()
+    public void TheOpenGlRouteDrawsThroughTheStatedRouteAndTheNativeChainDoesNot()
     {
         using Session session = Open();
         session.EnableTaa(jitterActive: true);
 
         long nativeDrawsBefore = session.Seam.NativeDrawsForTests;
-        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        long statedBefore = session.Platform.StatedDrawsForTests;
         RunMerge(session, native: false);
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeDrawsBefore);
-        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+        Assert.True(session.Platform.StatedDrawsForTests - statedBefore > 0);
 
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         RunMerge(session, native: true);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -300,20 +294,18 @@ public class NativePostChainTests(ITestOutputHelper output)
         session.EnableTaa(jitterActive: true);
         session.PatternedScene = true;
 
-        Resolved emulated = RunResolve(session, native: false, warmHistory);
+        Resolved stated = RunResolve(session, native: false, warmHistory);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         Resolved nativeRoute = RunResolve(session, native: true, warmHistory);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(emulated.Color, nativeRoute.Color);
-        Assert.Equal(emulated.Glow, nativeRoute.Glow);
-        Assert.Equal(emulated.Depth, nativeRoute.Depth);
+        Assert.Equal(stated.Color, nativeRoute.Color);
+        Assert.Equal(stated.Glow, nativeRoute.Glow);
+        Assert.Equal(stated.Depth, nativeRoute.Depth);
 
         // The pass wrote a resolved image over the seed, or the comparison above would hold
         // for two routes that both wrote nothing.
@@ -365,21 +357,19 @@ public class NativePostChainTests(ITestOutputHelper output)
         session.PatternedScene = true;
         OptimumConfig.TaaSharpness = sharpness;
 
-        byte[] emulated = RunSharpen(session, native: false, out int emulatedTexture);
+        byte[] stated = RunSharpen(session, native: false, out int statedTexture);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] nativeRoute = RunSharpen(session, native: true, out int nativeTexture);
 
         // One native pass for the resolve that has to run first, one for the sharpen.
         Assert.Equal(2, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(2, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(session.Sharpen.ColorTextureIds[0], emulatedTexture);
+        Assert.Equal(session.Sharpen.ColorTextureIds[0], statedTexture);
         Assert.Equal(session.Sharpen.ColorTextureIds[0], nativeTexture);
-        Assert.Equal(emulated, nativeRoute);
+        Assert.Equal(stated, nativeRoute);
         Assert.NotEqual(session.SharpenSeed, nativeRoute);
 
         GpuTest.AssertClean(session.Seam);
@@ -440,8 +430,8 @@ public class NativePostChainTests(ITestOutputHelper output)
         byte[] fiveFrames = RunResolveFrames(session, native: true, frames: 5, startPhase: 0);
         Assert.NotEqual(lastFrameAlone, fiveFrames);
 
-        byte[] emulatedFive = RunResolveFrames(session, native: false, frames: 5, startPhase: 0);
-        Assert.Equal(emulatedFive, fiveFrames);
+        byte[] statedFive = RunResolveFrames(session, native: false, frames: 5, startPhase: 0);
+        Assert.Equal(statedFive, fiveFrames);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -493,27 +483,26 @@ public class NativePostChainTests(ITestOutputHelper output)
         session.ApplyPostSettings(bloom, godRays, fxaa, ssao, ssaa, clientSize);
 
         int aoTexture = gtao ? session.SsaoBlurTexture : 0;
-        TailFrame emulated = RunTail(session, native: false, aoInScene: gtao, aoTexture: aoTexture);
+        TailFrame stated = RunTail(session, native: false, aoInScene: gtao, aoTexture: aoTexture);
 
         long passesBefore = session.Seam.NativePassesForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         long copiesBefore = session.Seam.ReadSelfCopiesForTests.Created;
         TailFrame nativeRoute = RunTail(session, native: true, aoInScene: gtao, aoTexture: aoTexture);
 
-        // The Luma step and the final composition always draw; bloom adds five passes and god
-        // rays one. No native pass reached the emulation layer, and the composition's self-read
-        // took no feedback copy - the declared attachment subset is what makes it safe.
-        long expectedPasses = 2 + (bloom ? 5 : 0) + (godRays ? 1 : 0);
+        // The Luma step and the final composition always draw; bloom adds five passes, god rays
+        // one, and TAA one more for the resolve (the sharpen declares no pass of its own). No
+        // native pass reached the generic stated route, and the composition's self-read took no
+        // feedback copy - the declared attachment subset is what makes it safe.
+        long expectedPasses = 2 + (bloom ? 5 : 0) + (godRays ? 1 : 0) + (taa ? 1 : 0);
         Assert.Equal(expectedPasses, session.Seam.NativePassesForTests - passesBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
         Assert.Equal(copiesBefore, session.Seam.ReadSelfCopiesForTests.Created);
 
-        Assert.Equal(emulated.FindBright, nativeRoute.FindBright);
-        Assert.Equal(emulated.BloomLow, nativeRoute.BloomLow);
-        Assert.Equal(emulated.GodRays, nativeRoute.GodRays);
-        Assert.Equal(emulated.Luma, nativeRoute.Luma);
-        Assert.Equal(emulated.Final, nativeRoute.Final);
-        Assert.Equal(emulated.Motion, nativeRoute.Motion);
+        Assert.Equal(stated.FindBright, nativeRoute.FindBright);
+        Assert.Equal(stated.BloomLow, nativeRoute.BloomLow);
+        Assert.Equal(stated.GodRays, nativeRoute.GodRays);
+        Assert.Equal(stated.Luma, nativeRoute.Luma);
+        Assert.Equal(stated.Final, nativeRoute.Final);
+        Assert.Equal(stated.Motion, nativeRoute.Motion);
 
         // The composition really wrote something, or "the two routes agree" would be vacuous.
         Assert.NotEqual(session.SceneSeed, nativeRoute.Final);
@@ -543,7 +532,6 @@ public class NativePostChainTests(ITestOutputHelper output)
         long copiesBefore = session.Seam.ReadSelfCopiesForTests.Created;
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
 
         platform.BeginFrame();
         session.SeedFrame();
@@ -558,7 +546,6 @@ public class NativePostChainTests(ITestOutputHelper output)
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
         Assert.Equal(copiesBefore, session.Seam.ReadSelfCopiesForTests.Created);
         Assert.NotEqual(session.SceneSeed, scene);
         Assert.Equal(session.GlowSeed, glow);
@@ -762,16 +749,6 @@ public class NativePostChainTests(ITestOutputHelper output)
                 },
                 CrashMarkerDataPath = dataPath,
             };
-
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
 
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {

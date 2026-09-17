@@ -23,9 +23,9 @@ public class PlatformProgramUboVirtualsCoverageTests
     /// <summary>The member, its parameter list, the device call and the GL call its override must hold.</summary>
     private static readonly (string Name, string Parameters, string Device, string Gl)[] Members =
     {
-        ("UseShaderProgram", "int programId", "optimumDevice.UseProgram(programId);", "GL.UseProgram(programId);"),
+        ("UseShaderProgram", "int programId", "", "GL.UseProgram(programId);"),
         ("DisposeShaderProgram", "ShaderProgramBase program", "optimumDevice.DeleteProgram(program.ProgramId);", "GL.DeleteProgram(program.ProgramId);"),
-        ("BindSampler", "int unit, int samplerId", "optimumDevice.BindSampler(unit, samplerId);", "GL.BindSampler(unit, samplerId);"),
+        ("BindSampler", "int unit, int samplerId", "stated.BindSampler(unit, samplerId);", "GL.BindSampler(unit, samplerId);"),
         ("SetUniform", "int programId, int location, float value", "optimumDevice.SetUniform(programId, location, value);", "GL.Uniform1(location, value);"),
         ("SetUniform", "int programId, int location, int value", "optimumDevice.SetUniform(programId, location, value);", "GL.Uniform1(location, value);"),
         ("SetUniform", "int programId, int location, float x, float y", "optimumDevice.SetUniform(programId, location, x, y);", "GL.Uniform2(location, x, y);"),
@@ -40,8 +40,8 @@ public class PlatformProgramUboVirtualsCoverageTests
         ("SetUniformMatrix", "int programId, int location, ref Matrix4 matrix", "optimumDevice.SetUniformMatrix(programId, location, optimumMatrix);", "GL.UniformMatrix4(location, false, ref matrix);"),
         ("SetUniformMatrices", "int programId, int location, int count, float[] matrices", "optimumDevice.SetUniformMatrices(programId, location, count, matrices);", "GL.UniformMatrix4(location, count, false, matrices);"),
         ("SetUniformMatrices4x3", "int programId, int location, int count, float[] matrices", "optimumDevice.SetUniformMatrices4x3(programId, location, count, matrices);", "GL.UniformMatrix4x3(location, count, false, matrices);"),
-        ("BindProgramTexture2D", "ShaderProgramBase program, string samplerName, int textureId, int textureNumber", "optimumDevice.BindTexture(textureNumber, textureId);", "GL.BindTexture((TextureTarget)3553, textureId);"),
-        ("BindProgramTextureCube", "ShaderProgramBase program, string samplerName, int textureId, int textureNumber", "optimumDevice.BindTextureCube(textureNumber, textureId);", "GL.BindTexture((TextureTarget)34067, textureId);"),
+        ("BindProgramTexture2D", "ShaderProgramBase program, string samplerName, int textureId, int textureNumber", "stated.BindTexture(textureNumber, textureId);", "GL.BindTexture((TextureTarget)3553, textureId);"),
+        ("BindProgramTextureCube", "ShaderProgramBase program, string samplerName, int textureId, int textureNumber", "stated.BindTexture(textureNumber, textureId);", "GL.BindTexture((TextureTarget)34067, textureId);"),
         ("BindUBO", "UBO ubo", "optimumDevice.BindUniformBuffer(ubo.Handle);", "GL.BindBufferBase((BufferRangeTarget)35345, ubo.BindingPoint, ubo.Handle);"),
         ("UnbindUBO", "UBO ubo", "optimumDevice.UnbindUniformBuffer(ubo.Handle);", "GL.BindBuffer((BufferTarget)35345, 0);"),
         ("UpdateUBO", "UBO ubo, IntPtr data, int offset, int size, bool reallocate", "optimumDevice.UpdateUniformBuffer(ubo.Handle, data, offset, size);", "GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, data);"),
@@ -162,8 +162,10 @@ public class PlatformProgramUboVirtualsCoverageTests
         // The whole-buffer update keeps glBufferData on GL.
         Assert.Contains("GL.BufferData((BufferTarget)35345, size, data, (BufferUsageHint)35048);",
             Body(platform, "public override void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)"));
-        // A unit with no custom sampler has any override cleared on the device path.
-        Assert.Contains("device.BindSampler(textureNumber, 0);",
+        // The current program is the client's (ShaderProgramBase.CurrentShaderProgram): nothing to record.
+        Assert.DoesNotContain("device.", Body(vulkan, "public override void UseShaderProgram(int programId)"));
+        // A unit with no custom sampler has any override cleared in the stated state.
+        Assert.Contains("stated.BindSampler(textureNumber, 0);",
             Body(vulkan, "public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)"));
     }
 

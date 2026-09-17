@@ -55,8 +55,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
 
     /// <summary>
     /// The star box's native pass draws what its seam's neutral body draws: one declared pass,
-    /// one native mesh draw of the cube through the samplerCube the program declares, no
-    /// emulation inside the pass, and the same pixels on every attachment.
+    /// one native mesh draw of the cube through the samplerCube the program declares, and the same pixels on every attachment.
     /// </summary>
     [SkippableFact]
     public void TheNativeNightSkyPassMatchesTheSeamsNeutralBody()
@@ -64,19 +63,17 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         using Session session = Open("nightsky");
         int cube = session.CubeGradient();
 
-        byte[][] emulated = session.RunFrame(native: false, blending: false, depth: false, motion: false,
+        byte[][] stated = session.RunFrame(native: false, blending: false, depth: false, motion: false,
             s => s.Platform.RenderNightSkyBox(s.Mesh, cube));
 
         long passes = session.Seam.NativePassesForTests;
         long meshes = session.Seam.NativeMeshDrawsForTests;
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: false, depth: false, motion: false,
             s => s.Platform.RenderNightSkyBox(s.Mesh, cube));
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passes);
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "nightsky");
+        AssertSameAttachments(stated, native, "nightsky");
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -95,17 +92,15 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         int sky = session.Gradient(1);
         int glow = session.Gradient(2);
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: false, motion: false,
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: false, motion: false,
             s => s.Platform.RenderCelestialQuad(s.Mesh, body, sky, glow));
 
         long meshes = session.Seam.NativeMeshDrawsForTests;
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: true, depth: false, motion: false,
             s => s.Platform.RenderCelestialQuad(s.Mesh, body, sky, glow));
 
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "celestialobject");
+        AssertSameAttachments(stated, native, "celestialobject");
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -139,15 +134,13 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             s.Platform.RenderSunQuad(s.Mesh, sun);
         }
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: false, motion: false, Draw);
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: false, motion: false, Draw);
 
         long meshes = session.Seam.NativeMeshDrawsForTests;
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: true, depth: false, motion: false, Draw);
 
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshes);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "standard");
+        AssertSameAttachments(stated, native, "standard");
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -187,17 +180,15 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
     {
         using Session session = Open("particlescube");
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
             s => s.Platform.RenderParticles(s.Mesh, 4, 0));
 
         long instanced = session.Seam.NativeInstancedDrawsForTests;
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: false,
             s => s.Platform.RenderParticles(s.Mesh, 4, 0));
 
         Assert.Equal(1, session.Seam.NativeInstancedDrawsForTests - instanced);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "particlescube", mustDraw: false);
+        AssertSameAttachments(stated, native, "particlescube", mustDraw: false);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -213,13 +204,13 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         using Session session = Open("particlescube");
         session.OpenMotionWindow();
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
             s => s.Platform.RenderParticles(s.Mesh, 4, 0));
         byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: true,
             s => s.Platform.RenderParticles(s.Mesh, 4, 0));
 
-        Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
-        AssertSameAttachments(emulated, native, "particlescube (motion window)", mustDraw: false);
+        Assert.Equal(stated[MotionSlot], native[MotionSlot]);
+        AssertSameAttachments(stated, native, "particlescube (motion window)", mustDraw: false);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -238,7 +229,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         int[] starts = { 0, 0, 3 * 4, 0 };
         int[] sizes = { 3, 3 };
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: true, motion: false,
             s =>
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
@@ -258,7 +249,6 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             });
 
         long indirect = session.Seam.NativeIndirectDrawsForTests;
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, blending: true, depth: true, motion: false,
             s =>
             {
@@ -279,8 +269,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
             });
 
         Assert.Equal(1, session.Seam.NativeIndirectDrawsForTests - indirect);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
-        AssertSameAttachments(emulated, native, "decals");
+        AssertSameAttachments(stated, native, "decals");
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -299,7 +288,7 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
         int[] starts = { 0, 0, 3 * 4, 0 };
         int[] sizes = { 3, 3 };
 
-        byte[][] emulated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
+        byte[][] stated = session.RunFrame(native: false, blending: true, depth: true, motion: true,
             s =>
             {
                 // The lib's route: the scope opens, vanilla MeshDataPool.Draw's own RenderMesh
@@ -336,44 +325,42 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
                 }
             });
 
-        Assert.Equal(emulated[MotionSlot], native[MotionSlot]);
-        AssertSameAttachments(emulated, native, "decals (motion window)");
+        Assert.Equal(stated[MotionSlot], native[MotionSlot]);
+        AssertSameAttachments(stated, native, "decals (motion window)");
         GpuTest.AssertClean(session.Seam);
     }
 
     // ------------------------------------------------------------------- switch and slots
 
     /// <summary>
-    /// The neutral body draws through the emulation layer and the native route does not: the
+    /// The neutral body draws through the generic stated route and the native route does not: the
     /// switch is real, and "OFF is vanilla" holds for the route the OpenGL path takes.
     /// </summary>
     [SkippableFact]
-    public void TheNeutralBodiesDrawThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    public void TheNeutralBodiesDrawThroughTheStatedRouteAndTheNativeRouteDoesNot()
     {
         using Session session = Open("particlescube");
 
         long nativeBefore = session.Seam.NativeDrawsForTests;
-        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        long statedBefore = session.Platform.StatedDrawsForTests;
         session.RunFrame(native: false, blending: true, depth: true, motion: false,
             s => s.Platform.RenderParticles(s.Mesh, 2, 0));
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeBefore);
-        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+        Assert.True(session.Platform.StatedDrawsForTests - statedBefore > 0);
 
-        long inside = session.Seam.EmulationCallsInNativePassesForTests;
         session.RunFrame(native: true, blending: true, depth: true, motion: false,
             s => s.Platform.RenderParticles(s.Mesh, 2, 0));
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - inside);
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
-    /// The colour slots a native world pass declares are the set the emulated route's
+    /// The colour slots a native world pass declares are the set the stated route's
     /// draw-buffer mask holds at the same point in the frame, derived from the platform's own
     /// motion-window state: Primary's default colour set, plus the motion attachment exactly
     /// while a window is open, and every bound slot with TAA off.
     /// </summary>
     [SkippableFact]
-    public void TheDeclaredColourSlotsAreTheOnesTheEmulatedMaskWouldHold()
+    public void TheDeclaredColourSlotsAreTheOnesTheStatedMaskWouldHold()
     {
         using Session session = Open("particlescube");
         MethodInfo slots = typeof(VulkanClientPlatform).GetMethod("NativeWorldPassColorSlots",
@@ -398,13 +385,13 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
     /// <summary>The scene slot's centre as RunFrame clears it (0.125, 0.25, 0.5).</summary>
     private const string ClearedSceneCentre = "32,64,127,255";
 
-    private void AssertSameAttachments(byte[][] emulated, byte[][] native, string what, bool mustDraw = true)
+    private void AssertSameAttachments(byte[][] stated, byte[][] native, string what, bool mustDraw = true)
     {
-        for (int slot = 0; slot < emulated.Length; slot++)
+        for (int slot = 0; slot < stated.Length; slot++)
         {
-            output.WriteLine(what + " slot " + slot + " centre emulated " + Centre(emulated[slot]) +
+            output.WriteLine(what + " slot " + slot + " centre stated " + Centre(stated[slot]) +
                 " native " + Centre(native[slot]));
-            Assert.Equal(emulated[slot], native[slot]);
+            Assert.Equal(stated[slot], native[slot]);
         }
         // Two untouched attachments are equal too. Until the fixture seeded the frame block and
         // the transforms, every comparison in this file was exactly that.
@@ -479,16 +466,6 @@ public class NativeWorldSystemsTests(ITestOutputHelper output)
                 },
                 CrashMarkerDataPath = dataPath,
             };
-
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
 
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {

@@ -11,10 +11,10 @@ namespace Optimum.Render.Vulkan.Platform;
 /// reference only the API and the contracts, so this is how they reach the device until
 /// Phase 5 ports them.
 ///
-/// The state operations also record what the fork stated on the platform, as the platform's
-/// own state virtuals do (VulkanClientPlatform.State.cs), so a native route that draws the
-/// fork's RenderMesh (the cloud renderers, VulkanClientPlatform.NativeClouds.cs) runs with the
-/// state the fork set and the target it bound, never with the GL state tracker's.
+/// The state operations (binds, viewport, draw buffers, depth test, blend, texture units) are
+/// recorded on the platform only, as the platform's own state virtuals are
+/// (VulkanClientPlatform.State.cs): the native draws of the fork's RenderMesh read the state
+/// the fork set and the target it bound from there.
 /// </summary>
 internal sealed class VulkanForkGraphics : OptimumForkGraphics
 {
@@ -46,7 +46,6 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
     public override void BindTexture(int unit, int textureId)
     {
         platform.NoteForkTexture(unit, textureId);
-        device.BindTexture(unit, textureId);
     }
 
     public override void DeleteTexture(int textureId) => device.DeleteTexture(textureId);
@@ -59,39 +58,37 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
     public override void SetDrawBuffers(int framebufferId, int attachmentMask)
     {
         platform.NoteForkDrawBuffers(framebufferId, attachmentMask);
-        device.SetDrawBuffers(framebufferId, attachmentMask);
     }
 
     public override void BindFramebuffer(int framebufferId)
     {
         platform.NoteForkFramebuffer(framebufferId);
-        device.BindFramebuffer(framebufferId);
     }
 
     public override void BindDefaultFramebuffer()
     {
         platform.NoteForkFramebuffer(0);
-        device.BindDefaultFramebuffer();
     }
 
-    public override void DeleteFramebuffer(int framebufferId) => device.DeleteFramebuffer(framebufferId);
+    public override void DeleteFramebuffer(int framebufferId)
+    {
+        platform.stated.ForgetFramebuffer(framebufferId);
+        device.DeleteFramebuffer(framebufferId);
+    }
 
     public override void SetViewport(int x, int y, int width, int height)
     {
         platform.NoteForkViewport(x, y, width, height);
-        device.SetViewport(x, y, width, height);
     }
 
     public override void SetDepthTest(bool enabled)
     {
         platform.NoteForkDepthTest(enabled);
-        device.SetDepthTest(enabled);
     }
 
     public override void SetBlendEnabled(bool enabled)
     {
         platform.NoteForkBlend(enabled);
-        device.SetBlendEnabled(enabled);
     }
 
     public override int GetUniformLocation(int programId, string name) => device.GetUniformLocation(programId, name);

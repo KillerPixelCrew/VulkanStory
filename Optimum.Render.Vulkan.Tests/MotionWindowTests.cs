@@ -317,12 +317,10 @@ public class MotionWindowTests
 
     /// <summary>
     /// The final composition shape: draw buffers select Primary 0 only while the
-    /// program samples Primary 1. The sampled slot leaves the scope, colour receives
+    /// program samples Primary 1. The sampled slot leaves the draw's pass, colour receives
     /// glow's texels exactly, glow keeps them; selecting glow again lets it rejoin and
-    /// a write lands. Validation stays clean. With scope inference the clear opens the
-    /// scope with glow in it, so the sample splits it (one feedback split); on the
-    /// frame graph the clear is promoted into the scope the draw opens, which already
-    /// leaves glow out, so nothing splits.
+    /// a write lands. Validation stays clean. The stated draw declares its pass without the
+    /// sampled slot before any scope opens, so nothing splits on either path.
     /// </summary>
     [SkippableTheory]
     [MemberData(nameof(TiersWithFrameGraph))]
@@ -370,7 +368,7 @@ public class MotionWindowTests
             seam.Present();
 
             _output.WriteLine($"tier={tier} frameGraph={frameGraph} splits_after_compose={splitsAfterCompose} mask_restarts={maskRestarts}");
-            Assert.Equal(frameGraph ? 0 : 1, splitsAfterCompose);
+            Assert.Equal(0, splitsAfterCompose);
             Assert.Equal(0, maskRestarts);
             AssertEveryPixel(composed, 4, new byte[] { 51, 102, 153, 255 }, "colour = sampled glow");
             AssertEveryPixel(glowAfterCompose, 4, new byte[] { 51, 102, 153, 255 }, "glow untouched by composition");

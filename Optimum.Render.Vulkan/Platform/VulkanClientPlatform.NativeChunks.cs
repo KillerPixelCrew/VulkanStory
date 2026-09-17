@@ -59,9 +59,9 @@ namespace Optimum.Render.Vulkan.Platform;
 public partial class VulkanClientPlatform
 {
     /// <summary>
-    /// False runs the chunk groups through the emulated multi-draw on the Vulkan device -
-    /// the route the OpenGL body takes - instead of the native pass: the old route the
-    /// differential test compares against, in the pattern of <see cref="NativeSkyEnabled" />.
+    /// False runs the chunk groups through the generic stated multi-draw instead of the native
+    /// pass: the route the differential test compares against, in the pattern of
+    /// <see cref="NativeSkyEnabled" />.
     /// </summary>
     internal bool NativeChunksEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_CHUNKS") != "0";
 
@@ -150,10 +150,10 @@ public partial class VulkanClientPlatform
     internal void NoteNativeTransparentBlend(int slot, int glEquation, int srcColor, int dstColor,
         int srcAlpha, int dstAlpha)
     {
-        if ((uint)slot >= GlStateTracker.MaxColorAttachments) return;
+        if ((uint)slot >= RenderLimits.MaxColorAttachments) return;
         if (nativeTransparentBlend == null)
         {
-            nativeTransparentBlend = new AttachmentBlend[GlStateTracker.MaxColorAttachments];
+            nativeTransparentBlend = new AttachmentBlend[RenderLimits.MaxColorAttachments];
             for (int i = 0; i < nativeTransparentBlend.Length; i++)
             {
                 nativeTransparentBlend[i] = AttachmentBlend.Default;
@@ -213,10 +213,6 @@ public partial class VulkanClientPlatform
         {
             chunkScopePassOpen = false;
             device.EndNativePass();
-            // Every renderer after this group draws into the same target through the emulated
-            // path, so the stage's own pass context is declared again - the chunk pass replaced
-            // it, exactly as the sky pass does with the context it interrupts.
-            if (chunkScopeTarget != null) device.BindFramebuffer(chunkScopeTarget.FboId);
             SetPassContext(chunkScopeOuterContext, chunkScopeOuterFlags);
         }
         chunkScopeTarget = null;
@@ -224,10 +220,9 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// One chunk pool's multi-draw, recorded natively. False means the group is not in a native
-    /// scope, or the first draw of one could not be recorded, and the caller takes the emulated
-    /// route. Once the scope's pass is open the native route owns the group: a draw the device
-    /// skips (a pipeline still compiling) is the same skip the emulated path makes, and an
-    /// emulated draw inside an open native pass is not a thing this backend allows.
+    /// scope, or the first draw of one could not be recorded, and the caller takes the generic
+    /// stated route. Once the scope's pass is open the native route owns the group: a draw the
+    /// device skips (a pipeline still compiling) is skipped, not moved to another route.
     /// </summary>
     internal bool TryDrawChunkPoolNative(VAO vao, int[] indicesStarts, int[] indicesSizes, int groupCount)
     {
@@ -266,7 +261,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool OpenChunkPass(FrameBufferRef target, int textureCount)
     {
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         chunkScopeOuterContext = passContext;
         chunkScopeOuterFlags = passContextFlags;
 

@@ -67,8 +67,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -125,8 +125,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -205,8 +205,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -276,8 +276,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -353,8 +353,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -431,8 +431,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -475,7 +475,7 @@ public class TaaResolveTests
     /// <see cref="JitteredReconstructionMatchesTheUnjitteredStaticEdge" />.
     /// </summary>
     private static unsafe float ResolveEdgeCentroid(
-        VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
+        VulkanContext context, SetupQueue commands, TextureManager textures, PipelineKeyState state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
         SharedLayoutTestBinding descriptors, (float x, float y) jitterPx, Func<float, float> sceneAt)
     {
@@ -528,8 +528,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -598,8 +598,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -1057,8 +1057,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -1138,7 +1138,7 @@ public class TaaResolveTests
     // ------------------------------------------------------------------ setup
 
     private static ShaderProgramResources LoadProgram(
-        VulkanContext context, ShaderCompiler compiler, GlStateTracker state,
+        VulkanContext context, ShaderCompiler compiler, PipelineKeyState state,
         Func<string, string>? fragmentTransform = null)
     {
         Dictionary<string, string> files = ShaderCorpus.LoadShaderFiles();
@@ -1194,8 +1194,8 @@ public class TaaResolveTests
         using (var commands = new SetupQueue(context!))
         using (var textures = new TextureManager(context!, commands.Uploads))
         {
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new SharedLayoutTestBinding(context!, textures);
@@ -1337,7 +1337,6 @@ public class TaaResolveTests
         targets.Attach(set.Framebuffer, 0, set.Color);
         targets.Attach(set.Framebuffer, 1, set.Glow);
         targets.Attach(set.Framebuffer, 2, set.Depth);
-        targets.SetDrawBuffers(set.Framebuffer, 0b111);
         return set;
     }
 
@@ -1351,7 +1350,7 @@ public class TaaResolveTests
     /// draw path follows, scoped to a single named-uniform, named-sampler pass.
     /// </summary>
     private static unsafe void ResolveOnce(
-        VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
+        VulkanContext context, SetupQueue commands, TextureManager textures, PipelineKeyState state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
         SharedLayoutTestBinding descriptors, TaaInputSet inputs, TaaUniforms uniforms, TaaAttachmentSet output)
     {
@@ -1407,7 +1406,7 @@ public class TaaResolveTests
 
         VulkanFramebuffer bound = targets.Get(output.Framebuffer)!;
         int formatsId = targets.FormatsIdOf(bound);
-        RenderTargetFormats formats = state.TargetFormats(formatsId);
+        RenderTargetFormats formats = targets.FormatsOf(formatsId);
         int attachmentCount = targets.EnabledAttachmentCount(bound);
 
         var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
@@ -1448,7 +1447,7 @@ public class TaaResolveTests
             var scissor = new Rect2D(new Offset2D(0, 0), new Extent2D(Size, Size));
             api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
             api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-            api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+            api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
             api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
             api.CmdSetDepthTestEnable(commandBuffer, false);
             api.CmdSetDepthWriteEnable(commandBuffer, false);

@@ -127,24 +127,22 @@ public partial class VulkanClientPlatform
     public override void GLWireframes(bool toggle)
     {
         stated.Wireframe = toggle;
-        device.SetWireframe(toggle);
     }
 
     public override void GlViewport(int x, int y, int width, int height)
     {
         stated.Viewport = new Rect2D(new Offset2D(x, y), new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
-        device.SetViewport(x, y, width, height);
     }
 
     public override void GlScissor(int x, int y, int width, int height)
     {
-        // Clipped the way GlStateTracker.SetScissor clips, kept as client state for native passes.
+        // Clipped to the positive quadrant (Vulkan rejects a negative offset; GL keeps the visible
+        // remainder), kept as client state for native passes.
         int clippedX = Math.Max(0, x);
         int clippedY = Math.Max(0, y);
         statedScissor = new Rect2D(new Offset2D(clippedX, clippedY),
             new Extent2D((uint)Math.Max(0, width - (clippedX - x)), (uint)Math.Max(0, height - (clippedY - y))));
         stated.Scissor = statedScissor;
-        device.SetScissor(x, y, width, height);
     }
 
     // The fixed state the client last stated through this platform's own virtuals. A native pass
@@ -164,28 +162,24 @@ public partial class VulkanClientPlatform
     {
         scissorEnabled = enable;
         stated.ScissorEnabled = enable;
-        device.SetScissorEnabled(enable);
     }
 
     public override void GlEnableDepthTest()
     {
         statedDepthTest = true;
         stated.DepthTest = true;
-        device.SetDepthTest(true);
     }
 
     public override void GlDisableDepthTest()
     {
         statedDepthTest = false;
         stated.DepthTest = false;
-        device.SetDepthTest(false);
     }
 
     public override void BindTexture2d(int texture)
     {
         // The GL body activates unit 0 first, so this binds to unit 0 too.
         stated.BindTexture(0, texture);
-        device.BindTexture(0, texture);
         // Remembered for GlGenerateTex2DMipmaps, whose GL form acts on
         // whatever is bound and so has no argument to route.
         boundTexture2d = texture;
@@ -194,14 +188,12 @@ public partial class VulkanClientPlatform
     public override void BindTextureCubeMap(int texture)
     {
         stated.BindTexture(0, texture);
-        device.BindTextureCube(0, texture);
     }
 
     public override void UnBindTextureCubeMap()
     {
         // Mirrors BindTextureCubeMap above, which binds to unit 0.
         stated.BindTexture(0, 0);
-        device.BindTextureCube(0, 0);
     }
 
     public override void GlToggleBlend(bool on, EnumBlendMode blendMode = EnumBlendMode.Standard)
@@ -220,17 +212,6 @@ public partial class VulkanClientPlatform
                 stated.SetSlotBlend(3, 32774, 1, 0, 1, 0);
             }
         }
-        device.SetBlend(on, blendMode);
-        if (on && OptimumRenderSsao)
-        {
-            // SSAO writes its position and normal attachments unblended, and
-            // the GL path expresses that by overriding attachments 2 and 3
-            // after the global mode is set.
-            device.SetBlendEquation(2, 32774);
-            device.SetBlendFuncSeparate(2, 1, 0, 1, 0);
-            device.SetBlendEquation(3, 32774);
-            device.SetBlendFuncSeparate(3, 1, 0, 1, 0);
-        }
         // Optimum TAA (P3): the motion attachment never blends. A blended
         // motion vector averages two surfaces' displacements and belongs to
         // neither; the per-attachment override has to be re-applied after
@@ -245,21 +226,18 @@ public partial class VulkanClientPlatform
     {
         statedCull = false;
         stated.CullEnabled = false;
-        device.SetCullFace(false);
     }
 
     public override void GlEnableCullFace()
     {
         statedCull = true;
         stated.CullEnabled = true;
-        device.SetCullFace(true);
     }
 
     public override void GLLineWidth(float width)
     {
         statedLineWidth = width;
         stated.LineWidth = width;
-        device.SetLineWidth(width);
     }
 
     /// <summary>
@@ -275,7 +253,6 @@ public partial class VulkanClientPlatform
     {
         statedDepthWrite = flag;
         stated.DepthWrite = flag;
-        device.SetDepthMask(flag);
     }
 
     public override void GlDepthFunc(EnumDepthFunction depthFunc)
@@ -285,48 +262,40 @@ public partial class VulkanClientPlatform
         // VintagestoryLib and the contracts assembly does not depend on it.
         statedDepthFunc = (int)depthFunc;
         stated.DepthCompare = GlEnums.CompareOpFrom((int)depthFunc);
-        device.SetDepthFunc((int)depthFunc);
     }
 
     public override void GlCullFaceBack()
     {
         statedCullBack = true;
         stated.CullBack = true;
-        device.SetCullFaceMode(true);
     }
 
     public override void GlCullFaceFront()
     {
         statedCullBack = false;
         stated.CullBack = false;
-        device.SetCullFaceMode(false);
     }
 
     public override void GlEnableStencilTest()
     {
         stated.StencilTest = true;
-        device.SetStencilTest(true);
     }
 
     public override void GlDisableStencilTest()
     {
         stated.StencilTest = false;
-        device.SetStencilTest(false);
     }
 
     public override void GlStencilMask(int mask)
     {
-        device.SetStencilMask(mask);
     }
 
     public override void GlStencilFunc(int func, int refVal, int mask)
     {
-        device.SetStencilFunc(func, refVal, mask);
     }
 
     public override void GlStencilOp(int sfail, int dpfail, int dppass)
     {
-        device.SetStencilOp(sfail, dpfail, dppass);
     }
 
     /// <summary>
@@ -340,12 +309,10 @@ public partial class VulkanClientPlatform
         statedColorMaskOff = (r ? 0 : ColorComponentFlags.RBit) | (g ? 0 : ColorComponentFlags.GBit) |
                              (b ? 0 : ColorComponentFlags.BBit) | (a ? 0 : ColorComponentFlags.ABit);
         stated.SetColorMask(r, g, b, a);
-        device.SetColorMask(r, g, b, a);
     }
 
     public override void GlClearStencil()
     {
-        device.ClearStencil();
     }
 
     public override void GlGenerateTex2DMipmaps()

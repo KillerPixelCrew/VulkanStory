@@ -85,11 +85,11 @@ public class TaaPipelineCoverageTests
 
         // Device path (VulkanClientPlatform.ClearFrameBufferPass since Phase 1A step 4).
         string vulkan = VulkanPlatformSource.Read();
-        Assert.Contains("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", vulkan);
+        Assert.Contains("ClearTargetColor(target, MotionAttachmentIndex, 0f, 0f, 0f, 0f);", vulkan);
         // An excluded attachment is not cleared on either backend. Checking
         // only that ClearColor exists missed Vulkan's silent masked-out no-op.
         int enable = vulkan.IndexOf("StateDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
-        int clear = vulkan.IndexOf("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
+        int clear = vulkan.IndexOf("ClearTargetColor(target, MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
         int restore = vulkan.IndexOf("StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
         Assert.True(enable >= 0 && enable < clear && restore > clear);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", Read("Optimum.Patcher/Program.cs"));

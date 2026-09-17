@@ -231,7 +231,7 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         if (device.BeginNativePass(new NativePassDescription
         {
             Name = "Sky/" + target.FboId,
@@ -260,11 +260,6 @@ public partial class VulkanClientPlatform
         }
         device.EndNativePass();
 
-        // Every renderer after this one in the Opaque stage draws into the same target through
-        // the emulated path, so the stage's own pass context is declared again - the sky pass
-        // replaced it, exactly as the TAA resolve's native pass does with the context it
-        // interrupts.
-        device.BindFramebuffer(target.FboId);
         SetPassContext(outer, outerFlags);
     }
 }

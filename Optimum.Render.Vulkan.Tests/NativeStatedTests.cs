@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Platform;
 using Optimum.Render.Vulkan.Shaders;
+using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.MathTools;
 using Vintagestory.Client;
@@ -17,10 +19,11 @@ using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.Te
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The generic native draw (VulkanClientPlatform.NativeStated.cs) against the emulated draw it
-/// replaces, on one device: the same mesh, the same program, and fixed state set only through the
-/// platform's own virtuals - which record it for the generic route and still push it into the
-/// device for the emulated one. Identical pixels mean the record states what the device tracked.
+/// The generic native draw (VulkanClientPlatform.NativeStated.cs, Platform/StatedDraw.cs) against a
+/// native draw whose pipeline and pass are written out by hand, on one device: the same mesh, the
+/// same program. The generic route gets its fixed state only through the platform's own virtuals;
+/// the reference states what OpenGL would do with those calls. Identical pixels mean the record
+/// states what the client said.
 ///
 /// The program is a gui program that is not the registered ShaderPrograms.Gui, so no dedicated
 /// route takes the draw: it is exactly the shape of a mod renderer's draw.
@@ -42,8 +45,7 @@ public class NativeStatedTests(ITestOutputHelper output)
 
     /// <summary>
     /// Blend off, three blend modes, a colour mask and a scissor rectangle: the generic route
-    /// draws what the emulated route draws, records one native draw, and runs no emulated call
-    /// inside its pass.
+    /// draws what the hand-stated reference draws, and records one native draw.
     /// </summary>
     [SkippableTheory]
     [InlineData(false, EnumBlendMode.Standard, Mask.All, false)]
@@ -52,40 +54,61 @@ public class NativeStatedTests(ITestOutputHelper output)
     [InlineData(true, EnumBlendMode.Brighten, Mask.All, false)]
     [InlineData(true, EnumBlendMode.Standard, Mask.RedGreen, false)]
     [InlineData(true, EnumBlendMode.Standard, Mask.All, true)]
-    public unsafe void TheStatedRouteDrawsWhatTheEmulatedRouteDraws(bool blend, EnumBlendMode mode, Mask mask, bool scissor)
+    public unsafe void TheStatedRouteDrawsWhatTheHandStatedReferenceDraws(bool blend, EnumBlendMode mode, Mask mask, bool scissor)
     {
         using Session session = Open();
 
-        byte[] emulated = session.Run(stated: false, blend, mode, mask, scissor);
+        byte[] reference = session.Run(stated: false, blend, mode, mask, scissor);
 
         long statedBefore = session.Platform.StatedDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] native = session.Run(stated: true, blend, mode, mask, scissor);
 
         Assert.Equal(1, session.Platform.StatedDrawsForTests - statedBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
-        output.WriteLine("centre emulated " + Centre(emulated, 0) + " stated " + Centre(native, 0));
-        Assert.Equal(emulated, native);
+        output.WriteLine("centre reference " + Centre(reference, 0) + " stated " + Centre(native, 0));
+        Assert.Equal(reference, native);
+        Assert.NotEqual("0,51,102,153", Centre(native, 0));
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
     /// A target with two colour attachments and only the first selected as a draw buffer: the
-    /// second keeps its clear colour on both routes - the stated draw buffers are write masks.
+    /// second keeps its clear colour - the stated draw buffers are write masks - and the first
+    /// matches the reference, which writes the first slot only.
     /// </summary>
     [SkippableFact]
     public unsafe void AnUnselectedDrawBufferKeepsItsContentsOnBothRoutes()
     {
         using Session session = Open();
 
-        (byte[] firstEmulated, byte[] secondEmulated) = session.RunTwoTargets(stated: false);
+        (byte[] firstReference, byte[] secondReference) = session.RunTwoTargets(stated: false);
         (byte[] firstStated, byte[] secondStated) = session.RunTwoTargets(stated: true);
 
-        Assert.Equal(firstEmulated, firstStated);
-        Assert.Equal(secondEmulated, secondStated);
+        Assert.Equal(firstReference, firstStated);
+        Assert.Equal(secondReference, secondStated);
         // The second attachment is still the clear colour (0, 51, 102, 153).
         Assert.Equal("0,51,102,153", Centre(secondStated, 0));
         GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// A platform bind is the latest bind: a fork renderer's raw framebuffer bind before it no
+    /// longer addresses the generic draws and clears (GL has one binding point).
+    /// </summary>
+    [Fact]
+    public void APlatformBindReplacesAForkBind()
+    {
+        var platform = new StatedPlatform();
+        var target = new FrameBufferRef { FboId = 7, Width = Size, Height = Size, ColorTextureIds = new[] { 1 } };
+
+        platform.NoteForkFramebuffer(12);
+        Assert.Equal(12, platform.CurrentTargetId);
+
+        platform.CurrentFrameBuffer = target;
+        Assert.Equal(7, platform.CurrentTargetId);
+
+        platform.NoteForkFramebuffer(12);
+        platform.BindCurrentFrameBufferKeepViewport(target);
+        Assert.Equal(7, platform.CurrentTargetId);
     }
 
     private static string Centre(byte[] pixels, int offset)
@@ -177,21 +200,32 @@ public class NativeStatedTests(ITestOutputHelper output)
             }
         }
 
-        /// <summary>One frame: the target bound and cleared, the state set through the platform, one quad.</summary>
+        /// <summary>
+        /// One frame: the target bound and cleared, one quad - through the platform with the state
+        /// set through its virtuals, or (<paramref name="stated" /> false) the hand-stated reference.
+        /// </summary>
         public unsafe byte[] Run(bool stated, bool blend, EnumBlendMode mode, Mask mask, bool scissor)
         {
-            Platform.NativeStatedEnabled = stated;
             Platform.BeginFrame();
             Prepare(target);
-            Platform.GlToggleBlend(blend, mode);
-            if (mask == Mask.RedGreen) Platform.GlColorMask(true, true, false, false);
-            if (scissor)
+            if (stated)
             {
-                Platform.GlScissorFlag(true);
-                Platform.GlScissor(4, 4, 8, 8);
+                Platform.GlToggleBlend(blend, mode);
+                if (mask == Mask.RedGreen) Platform.GlColorMask(true, true, false, false);
+                if (scissor)
+                {
+                    Platform.GlScissorFlag(true);
+                    Platform.GlScissor(4, 4, 8, 8);
+                }
+                Platform.RenderMesh(quad);
             }
-
-            Platform.RenderMesh(quad);
+            else
+            {
+                AttachmentBlend attachment = AttachmentBlend.For(blend, mode);
+                if (mask == Mask.RedGreen) attachment.WriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit;
+                DrawReference(target, attachment,
+                    scissor ? new Rect2D(new Offset2D(4, 4), new Extent2D(8, 8)) : null);
+            }
 
             Platform.GlColorMask(true, true, true, true);
             Platform.GlScissorFlag(false);
@@ -202,11 +236,17 @@ public class NativeStatedTests(ITestOutputHelper output)
 
         public unsafe (byte[] First, byte[] Second) RunTwoTargets(bool stated)
         {
-            Platform.NativeStatedEnabled = stated;
             Platform.BeginFrame();
             Prepare(twoTargets);
-            Platform.GlToggleBlend(false);
-            Platform.RenderMesh(quad);
+            if (stated)
+            {
+                Platform.GlToggleBlend(false);
+                Platform.RenderMesh(quad);
+            }
+            else
+            {
+                DrawReference(twoTargets, AttachmentBlend.For(false, EnumBlendMode.Standard), null);
+            }
             byte[] first = Read(twoTargets.ColorTextureIds[0]);
             byte[] second = Read(twoTargets.ColorTextureIds[1]);
             Platform.EndFrame();
@@ -237,6 +277,42 @@ public class NativeStatedTests(ITestOutputHelper output)
             seam.SetUniform(gui.ProgramId, gui.uniformLocations["alphaTest"], 0f);
             Platform.BindProgramTexture2D(gui, "tex2d", texture, 0);
             Platform.BindProgramTexture2D(gui, "tex2dOverlay", 0, 1);
+        }
+
+        /// <summary>
+        /// The quad drawn with everything written out: depth and cull off, slot 0 only, the
+        /// full-target viewport, the program's two samplers on the gradient and on nothing.
+        /// </summary>
+        private void DrawReference(FrameBufferRef frameBuffer, AttachmentBlend attachment, Rect2D? scissor)
+        {
+            VulkanDevice seam = Seam;
+            int meshId = ((VAO)quad).VaoId;
+            NativePipeline? pipeline = seam.RequestNativePipeline(new NativePipelineDescription
+            {
+                ProgramId = gui.ProgramId,
+                Blend = new[] { attachment },
+                DepthTest = false,
+                DepthWrite = false,
+                Cull = CullModeFlags.None,
+                Topology = seam.NativeMeshTopology(meshId),
+                VertexLayoutId = seam.NativeMeshLayoutId(meshId),
+                Targets = seam.NativeTargetFormats(frameBuffer.FboId, 1u)!,
+            }, out string error);
+            Assert.True(pipeline != null, error);
+            Assert.True(seam.BeginNativePass(new NativePassDescription
+            {
+                Name = "Reference",
+                FramebufferId = frameBuffer.FboId,
+                ColorSlots = 1u,
+                Reads = new[] { texture },
+                Scissor = scissor,
+            }));
+            Assert.True(seam.DrawNativeMesh(pipeline!, meshId, new[]
+            {
+                new NativeTexture(pipeline!.Sampler("tex2d"), texture),
+                new NativeTexture(pipeline.Sampler("tex2dOverlay"), 0),
+            }));
+            seam.EndNativePass();
         }
 
         private unsafe byte[] Read(int textureId)

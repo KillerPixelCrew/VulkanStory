@@ -58,9 +58,14 @@ public partial class VulkanClientPlatform
         return device.GetUniformLocation(program.ProgramId, name);
     }
 
+    /// <summary>
+    /// glUseProgram, recorded: the generic stated draw draws this program. The dedicated native
+    /// routes read ShaderProgramBase.CurrentShaderProgram, which ShaderProgramBase.Use and Stop set
+    /// right after this call, so the two never disagree in the client.
+    /// </summary>
     public override void UseShaderProgram(int programId)
     {
-        device.UseProgram(programId);
+        statedProgram = programId;
     }
 
     /// <summary>
@@ -80,7 +85,6 @@ public partial class VulkanClientPlatform
     public override void BindSampler(int unit, int samplerId)
     {
         stated.BindSampler(unit, samplerId);
-        device.BindSampler(unit, samplerId);
     }
 
     public override void SetUniform(int programId, int location, float value)
@@ -175,25 +179,23 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
-        // The client's own declaration - "this program's sampler <name> is this texture" - kept
-        // by name so a native pass of that program can resolve every sampler it declares from a
-        // handle. It is not the texture-unit table: no unit is involved, and the native path
-        // never reads one (docs/vulkan-native-render-systems.md, decision 3).
-        NoteProgramTexture(program.ProgramId, samplerName, textureId);
+        // Phase 3b stage 2: this is where the client states which texture a sampler reads -
+        // "this program's sampler <name> is this texture" - so it is where a native pass takes
+        // the handle from (VulkanClientPlatform.NativeChunks.cs, .NativeEntities.cs). It is not
+        // the device's texture-unit table: the unit binding is recorded in the platform's stated
+        // state, which the generic native draw resolves samplers through.
+        NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         stated.BindTexture(textureNumber, textureId);
-        device.BindTexture(textureNumber, textureId);
         if (program.customSamplers.TryGetValue(samplerName, out var optimumSampler))
         {
             stated.BindSampler(textureNumber, optimumSampler);
-            device.BindSampler(textureNumber, optimumSampler);
         }
         else
         {
             // Clear any override left on this unit, or the texture's own
             // filtering would be silently ignored.
             stated.BindSampler(textureNumber, 0);
-            device.BindSampler(textureNumber, 0);
         }
         if (program.clampTToEdge)
         {
@@ -208,7 +210,6 @@ public partial class VulkanClientPlatform
         NoteProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         stated.BindTexture(textureNumber, textureId);
-        device.BindTextureCube(textureNumber, textureId);
         if (program.clampTToEdge)
         {
             device.SetTextureParameter(textureId,

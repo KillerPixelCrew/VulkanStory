@@ -319,6 +319,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            device.OwnerPlatform = this;
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
             RenderStageListener = new FrameGraphStageListener(this);
             // Phase 5: registered mod motion writers reach this platform's motion window.

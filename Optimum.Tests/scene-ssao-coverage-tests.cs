@@ -50,9 +50,9 @@ public class SceneSsaoCoverageTests
         Assert.Contains("RegisterOptimumShaderProgram(\"scene-ssao\"", registry);
         Assert.Contains("shaderProgram == ShaderPrograms.SceneSsao", registry);
 
-        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
-        Assert.Contains("Name = \"SceneSsao/0\"", graph);
-        Assert.Contains("ColorSlots = 1u", graph);
+        string ssaoPass = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+        Assert.Contains("BeginNativeAoPass(\"SceneSsao/\" + primary.FboId, primary.FboId,", ssaoPass);
+        Assert.Contains("NativePostPipeline(nativeSceneSsao, composite, primary.FboId, 1u,", ssaoPass);
     }
 
     [Fact]

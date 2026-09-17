@@ -34,8 +34,7 @@ internal enum NativeDrawKind : byte
 ///   storage-buffer vertex fetch and an entity's <c>Animation</c> block resolve per draw
 ///   instead of against the fullscreen path's hardcoded 0;
 /// - multi-draw through the existing per-slot indirect ring (<c>AllocateIndirect</c>), the same
-///   regions the emulated <see cref="DrawMeshMulti" /> allocates, so the two paths cannot
-///   disagree about the ring's bookkeeping.
+///   regions every multi-draw allocates, so the ring's bookkeeping has one owner.
 ///
 /// What pins it: NativeMeshDrawTests (the ring's use and the pipeline-key dimensions) and
 /// NativeSkyTests (the first ported system, old route against native route).
@@ -46,8 +45,7 @@ public sealed unsafe partial class VulkanDevice
     /// The topology a mesh was uploaded with, as the primitive a native pipeline rasterizes it
     /// as. A mesh carries its own <c>EnumDrawMode</c> from the tesselator (triangles for most
     /// geometry, lines for the aiming reticle, a line strip for the camera path), so a native
-    /// system states it from the mesh rather than from the tracker's topology, which the
-    /// emulated draw sets per draw in <see cref="PrepareDraw" />. Triangles for a mesh that
+    /// system states it from the mesh, as GL takes it from the VAO. Triangles for a mesh that
     /// does not exist, so a caller that has already been refused a pipeline sees no surprise.
     /// </summary>
     internal PrimitiveTopology NativeMeshTopology(int meshId) =>
@@ -56,8 +54,15 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Counts one native draw, once in the total and once in its own kind.</summary>
     private void NoteNativeDraw(NativeDrawKind kind)
     {
-        _nativeDraws++;
         VulkanStats.NoteNativeDraw();
+        // The generic stated route is counted apart, so the counters below say what the dedicated
+        // routes recorded (the differential tests compare the two).
+        if (_nativePass is { Generic: true })
+        {
+            _genericDraws++;
+            return;
+        }
+        _nativeDraws++;
         switch (kind)
         {
         case NativeDrawKind.Fullscreen:
@@ -80,9 +85,8 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>
-    /// One indexed draw of one mesh: the sky dome, an entity shape, a GUI quad. The emulated
-    /// twin is <see cref="DrawMesh" />, whose OpenGL body is
-    /// <c>ClientPlatformWindows.RenderMesh(MeshRef)</c>.
+    /// One indexed draw of one mesh: the sky dome, an entity shape, a GUI quad. The OpenGL body
+    /// is <c>ClientPlatformWindows.RenderMesh(MeshRef)</c>.
     /// </summary>
     internal bool DrawNativeMesh(NativePipeline pipeline, int meshId, ReadOnlySpan<NativeTexture> textures) =>
         DrawNativeMeshInstanced(pipeline, meshId, 1, textures);
@@ -90,8 +94,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>
     /// One indexed draw of one mesh with <paramref name="instanceCount" /> instances, the
     /// per-instance attributes coming from the mesh's own instanced bindings (the particle
-    /// pools). The emulated twin is <see cref="DrawMeshInstanced" />, whose OpenGL body is
-    /// <c>ClientPlatformWindows.RenderMeshInstanced</c>.
+    /// pools). The OpenGL body is <c>ClientPlatformWindows.RenderMeshInstanced</c>.
     /// </summary>
     internal bool DrawNativeMeshInstanced(NativePipeline pipeline, int meshId, int instanceCount,
         ReadOnlySpan<NativeTexture> textures)
@@ -150,9 +153,8 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>
     /// The multi-draw one mesh pool issues per pass - every surviving range of a chunk pool or
-    /// the decal pool in one command - through the existing per-slot indirect ring. The emulated
-    /// twin is <see cref="DrawMeshMulti" />, whose OpenGL body is
-    /// <c>ClientPlatformWindows.RenderMesh(MeshRef, int[], int[], int)</c> (glMultiDrawElements).
+    /// the decal pool in one command - through the existing per-slot indirect ring. The OpenGL
+    /// body is <c>ClientPlatformWindows.RenderMesh(MeshRef, int[], int[], int)</c> (glMultiDrawElements).
     ///
     /// <paramref name="indicesStarts" /> holds GL's 64-bit byte offsets as pairs of ints, as
     /// <c>MeshDataPool</c> passes them; <see cref="MeshManager.WriteIndirectCommands" /> is the

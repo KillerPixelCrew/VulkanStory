@@ -59,8 +59,8 @@ public class AttachmentSemanticsTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -74,7 +74,6 @@ public class AttachmentSemanticsTests
 
             int framebuffer = targets.Create(size, size);
             for (int i = 0; i < 5; i++) targets.Attach(framebuffer, i, attachment[i]);
-            targets.SetDrawBuffers(framebuffer, 0b10001); // 0 and 4 only
 
             TranslatedProgram translated = Translate(compiler, FullscreenVertex, """
                 #version 330 core
@@ -133,8 +132,8 @@ public class AttachmentSemanticsTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -148,7 +147,6 @@ public class AttachmentSemanticsTests
 
             int framebuffer = targets.Create(size, size);
             for (int i = 0; i < 5; i++) targets.Attach(framebuffer, i, attachment[i]);
-            targets.SetDrawBuffers(framebuffer, 0b11111); // all five enabled
 
             TranslatedProgram translated = Translate(compiler, FullscreenVertex, """
                 #version 330 core
@@ -216,8 +214,8 @@ public class AttachmentSemanticsTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -229,7 +227,6 @@ public class AttachmentSemanticsTests
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, colorTexture);
             targets.Attach(framebuffer, 4, motionTexture);
-            targets.SetDrawBuffers(framebuffer, 0b10001); // 0 and 4, 1-3 unattached
 
             // Attachment 0: ordinary alpha blending.
             state.SetBlend(true, EnumBlendMode.Standard);
@@ -289,8 +286,8 @@ public class AttachmentSemanticsTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -301,7 +298,6 @@ public class AttachmentSemanticsTests
             // way the shadow / opaque passes do.
             int depthPass = targets.Create(size, size);
             targets.Attach(depthPass, -1, depth);
-            targets.SetDrawBuffers(depthPass, 0);
 
             TranslatedProgram depthOnly = Translate(compiler, """
                 #version 330 core
@@ -338,7 +334,6 @@ public class AttachmentSemanticsTests
             int resolvePass = targets.Create(size, size);
             targets.Attach(resolvePass, -1, depth);
             targets.Attach(resolvePass, 0, color);
-            targets.SetDrawBuffers(resolvePass, 0b1);
 
             TranslatedProgram resolveTranslated = Translate(compiler, FullscreenVertex, """
                 #version 330 core
@@ -382,12 +377,12 @@ public class AttachmentSemanticsTests
 
     private static unsafe void RenderFullscreen(
         VulkanContext context, SetupQueue commands, RenderTargetManager targets,
-        GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
+        GraphicsPipelineCache pipelines, PipelineKeyState state, ShaderProgramResources program,
         int framebuffer, uint size, bool depthTest = false)
     {
         VulkanFramebuffer bound = targets.Get(framebuffer)!;
         int formatsId = targets.FormatsIdOf(bound);
-        RenderTargetFormats formats = state.TargetFormats(formatsId);
+        RenderTargetFormats formats = targets.FormatsOf(formatsId);
         int attachmentCount = targets.EnabledAttachmentCount(bound);
 
         var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
@@ -419,7 +414,7 @@ public class AttachmentSemanticsTests
             api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
 
             api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-            api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+            api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
             api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
             api.CmdSetDepthTestEnable(commandBuffer, depthTest);
             api.CmdSetDepthWriteEnable(commandBuffer, depthTest);
@@ -447,12 +442,12 @@ public class AttachmentSemanticsTests
     /// </summary>
     private static unsafe void RenderFullscreenSamplingDepth(
         VulkanContext context, SetupQueue commands, TextureManager textures, RenderTargetManager targets,
-        GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
+        GraphicsPipelineCache pipelines, PipelineKeyState state, ShaderProgramResources program,
         int framebuffer, int sampledDepthTextureId, uint size)
     {
         VulkanFramebuffer bound = targets.Get(framebuffer)!;
         int formatsId = targets.FormatsIdOf(bound);
-        RenderTargetFormats formats = state.TargetFormats(formatsId);
+        RenderTargetFormats formats = targets.FormatsOf(formatsId);
         int attachmentCount = targets.EnabledAttachmentCount(bound);
 
         var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
@@ -495,7 +490,7 @@ public class AttachmentSemanticsTests
             api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
 
             api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-            api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+            api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
             api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
             api.CmdSetDepthTestEnable(commandBuffer, false);
             api.CmdSetDepthWriteEnable(commandBuffer, false);

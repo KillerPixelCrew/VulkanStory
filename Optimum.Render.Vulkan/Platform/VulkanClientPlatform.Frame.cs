@@ -32,7 +32,6 @@ public partial class VulkanClientPlatform
     {
         // GL leaves the probed width set, so the stated line width is 1.5 from here on too.
         stated.LineWidth = 1.5f;
-        device.SetLineWidth(1.5f);
         return device.SupportsThickLines;
     }
 

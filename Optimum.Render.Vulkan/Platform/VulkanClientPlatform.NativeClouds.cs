@@ -26,7 +26,7 @@ namespace Optimum.Render.Vulkan.Platform;
 // Pinned by Optimum.Tests/native-world-systems-coverage-tests.cs.
 public partial class VulkanClientPlatform
 {
-    /// <summary>False keeps both cloud draws on the emulated route (<c>OPTIMUM_VK_NATIVE_CLOUDS=0</c>).</summary>
+    /// <summary>False sends both cloud draws to the generic stated route (<c>OPTIMUM_VK_NATIVE_CLOUDS=0</c>).</summary>
     internal bool NativeCloudsEnabled { get; set; } = Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_CLOUDS") != "0";
 
     private readonly NativeMeshPass nativeCloudMap =
@@ -60,7 +60,7 @@ public partial class VulkanClientPlatform
         stated.SetBlendEnabled(enabled);
     }
 
-    /// <summary>A cloud renderer's RenderMesh: the native pass, or false for the emulated draw.</summary>
+    /// <summary>A cloud renderer's RenderMesh: the native pass, or false for the generic stated draw.</summary>
     private bool TryRenderCloudsNative(MeshRef mesh)
     {
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
@@ -108,7 +108,7 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         bool drawn = false;
         if (device.BeginNativePass(new NativePassDescription
         {
@@ -126,8 +126,6 @@ public partial class VulkanClientPlatform
             drawn = device.DrawNativeMesh(pipeline, vao.VaoId, textures);
         }
         device.EndNativePass();
-        // The fork still considers its framebuffer bound until its own restore.
-        device.BindFramebuffer(framebufferId);
         SetPassContext(outer, outerFlags);
         return drawn;
     }

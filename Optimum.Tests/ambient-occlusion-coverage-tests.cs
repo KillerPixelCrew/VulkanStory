@@ -123,12 +123,12 @@ public class AmbientOcclusionCoverageTests
         Assert.Contains("optimumSsaoInScene = true;", apply);
 
         // Never on glow: the pass keeps colour 0 alone and reads the AO and attenuation inputs.
-        string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
-        string declaration = Between(graph, "private void DeclareFinalCompositionPass()", "private int FrameBufferIndexOf");
-        Assert.Contains("ColorSlots = 1u", declaration);
-        Assert.Contains("reads.Add(ambientOcclusionOutput);", declaration);
-        Assert.Contains("AddColour(reads, PrimaryIndex, 3);", declaration);
-        Assert.Contains("AddColour(reads, TransparentIndex, 1);", declaration);
+        string ssaoPass = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSsao.cs");
+        string declaration = Between(ssaoPass, "private void NativeSceneSsaoPass()", "reads.ToArray(), clearWhite: false))");
+        Assert.Contains("NativePostPipeline(nativeSceneSsao, composite, primary.FboId, 1u,", declaration);
+        Assert.Contains("var reads = new List<int> { aoTexture };", declaration);
+        Assert.Contains("int gPosition = gtao ? primary.ColorTextureIds[3] : 0;", declaration);
+        Assert.Contains("int revealage = gtao ? transparent.ColorTextureIds[1] : 0;", declaration);
 
         // The Vulkan platform runs GTAO only for shaders built with it, never a half-res min hack.
         string vulkan = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.AmbientOcclusion.cs");

@@ -17,10 +17,10 @@ namespace Optimum.Render.Vulkan.Tests;
 /// tesselated face.
 ///
 /// Stage 1 recorded fullscreen draws only. These pin the four facts a world system depends on:
-/// a native mesh draw puts the same pixels on the target as the emulated draw of the same mesh
+/// a native mesh draw puts the same pixels on the target as the stated draw of the same mesh
 /// with the same state; a mesh pipeline is never the fullscreen pipeline of the same program;
 /// a native multi-draw takes its own region of the per-slot indirect ring, the same ring the
-/// emulated multi-draw allocates from; and the stats count mesh, instanced and indirect draws
+/// stated multi-draw allocates from; and the stats count mesh, instanced and indirect draws
 /// apart from fullscreen ones.
 /// </summary>
 public class NativeMeshDrawTests(ITestOutputHelper output)
@@ -31,29 +31,27 @@ public class NativeMeshDrawTests(ITestOutputHelper output)
     // ------------------------------------------------------------------- the tests
 
     /// <summary>
-    /// The same face, drawn twice into the same target: once through the emulated
-    /// <see cref="VulkanDevice.DrawMesh" /> (the route every vanilla system still takes) and
-    /// once through <see cref="VulkanDevice.DrawNativeMesh" />. Both paths run the same shader
+    /// The same face, drawn twice into the same target: once through the tests' GL-shaped
+    /// <c>DrawMesh</c> (<see cref="GlShapedDevice" />: the platform's generic stated draw, the route
+    /// every draw without a dedicated one takes) and once through <see cref="VulkanDevice.DrawNativeMesh" />. Both paths run the same shader
     /// over the same vertices with the same fixed state, so the pixels are bitwise equal.
     /// </summary>
     [SkippableFact]
-    public unsafe void ANativeMeshDrawMatchesTheEmulatedDrawOfTheSameMesh()
+    public unsafe void ANativeMeshDrawMatchesTheStatedDrawOfTheSameMesh()
     {
         using Session session = Open();
 
-        byte[] emulated = session.RunEmulatedFrame();
+        byte[] stated = session.RunStatedFrame();
 
         long meshDrawsBefore = session.Device.NativeMeshDrawsForTests;
         long fullscreenBefore = session.Device.NativeFullscreenDrawsForTests;
-        long insideBefore = session.Device.EmulationCallsInNativePassesForTests;
         byte[] native = session.RunNativeFrame();
 
         Assert.Equal(1, session.Device.NativeMeshDrawsForTests - meshDrawsBefore);
         Assert.Equal(0, session.Device.NativeFullscreenDrawsForTests - fullscreenBefore);
-        Assert.Equal(0, session.Device.EmulationCallsInNativePassesForTests - insideBefore);
 
-        output.WriteLine("emulated centre: " + Centre(emulated) + "  native centre: " + Centre(native));
-        Assert.Equal(emulated, native);
+        output.WriteLine("stated centre: " + Centre(stated) + "  native centre: " + Centre(native));
+        Assert.Equal(stated, native);
         GpuTest.AssertClean(session.Device);
     }
 
@@ -138,7 +136,7 @@ public class NativeMeshDrawTests(ITestOutputHelper output)
 
     /// <summary>
     /// Two native multi-draws in one frame take two regions of the slot's indirect buffer, as
-    /// the emulated path does: writing both at offset zero was the Phase 1B bug where every
+    /// the stated route does: writing both at offset zero was the Phase 1B bug where every
     /// multi-draw in a frame executed with the ranges of whichever was recorded last.
     /// </summary>
     [SkippableFact]
@@ -382,8 +380,8 @@ public class NativeMeshDrawTests(ITestOutputHelper output)
             Device.Present();
         }
 
-        /// <summary>The emulated route: the GL-shaped state, then DrawMesh.</summary>
-        public unsafe byte[] RunEmulatedFrame()
+        /// <summary>The stated route: the GL-shaped state, then DrawMesh.</summary>
+        public unsafe byte[] RunStatedFrame()
         {
             byte[] pixels = new byte[Size * Size * 4];
             RunFrame(() =>

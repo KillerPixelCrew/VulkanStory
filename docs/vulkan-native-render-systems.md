@@ -350,6 +350,39 @@ Tests: `NativeGuiTests` (old route against native route for both systems, blendi
 line widths, the pipeline identity across line widths, and twenty fresh textures through one pipeline)
 and the GUI section of `Optimum.Tests/native-world-systems-coverage-tests.cs` for the lib seams.
 
+## 3e. Stage 3: the emulation layer is gone
+
+Every draw is native. The dedicated routes (chunks, entities, sky, clouds, particles, decals, GUI,
+the post and TAA chain) run first; everything else - mod renderers, the vanilla programs without a
+route, the seams' neutral bodies behind the route switches - takes the generic stated draw.
+
+- **State:** the platform records what the client states, with OpenGL's semantics, in
+  `Platform/StatedRenderState.cs`: blend (a disabled blend keeps its functions, `glBlendFunc` sets
+  every draw buffer), the global colour mask, draw buffers per framebuffer as write masks, one
+  texture and one sampler object per unit, depth, cull, scissor, viewport, line width, and the
+  program `glUseProgram` named. Nothing reaches the device as state.
+- **Draw:** `Platform/StatedDraw.cs` builds a native pipeline from that record and opens a pass on
+  the target the client addressed (a fork's raw bind, else `CurrentFrameBuffer`, else the default),
+  with every colour slot attached on the device. A slot the draw samples while its draw buffer is
+  off leaves the pass; with its draw buffer on the device samples a ReadSelf copy. The scope is
+  kept, so consecutive stated draws on one target coalesce into one pass. A mod pass hands its
+  declaration to the draws inside it.
+- **Clears:** a colour clear honours the stated draw buffers and colour mask, a depth clear the
+  depth mask, and both name their target.
+- **Device:** `VulkanDevice` has no GL state machine, no bound target, no texture-unit tables and
+  no draw that is not a native one. `RenderTargetManager` has no draw-buffer mask and no
+  sampled-slot exclusion; a declared pass's slots are the only exclusion, applied with the frame
+  graph on or off. The shared pipeline types live in `Core/PipelineState.cs`.
+- **Frame textures:** a program's set-0 texture that a draw does not name keeps the value the last
+  draw left (GL's "whatever the unit holds"); the draw puts it back into the read layout, or uses
+  the placeholder when it is gone or an attachment of the draw's own target.
+- **Tests:** the GPU tests keep their GL-shaped calls through `Optimum.Render.Vulkan.Tests/GlShapedDevice.cs`,
+  which records into a `StatedRenderState` and draws through `StatedDraw` - on a platform's device,
+  through the platform's own record and target. The component tests that drive the pipeline cache
+  directly build their keys with `PipelineKeyState.cs`. The differential tests compare each
+  dedicated route with the stated route; `NativeStatedTests` compares the stated route with a
+  hand-written native draw.
+
 ## 4. Documentation that makes a map of the tree unnecessary
 
 Every piece of work on this backend has started by rediscovering where things are, and the result was

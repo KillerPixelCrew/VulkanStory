@@ -33,8 +33,6 @@ public class ColorWriteTierCoverageTests
         Assert.Contains("CmdSetColorWriteEnable(commandBuffer,", device);
         Assert.Contains("CmdSetColorWriteMask(commandBuffer, 0,", device);
         Assert.Contains("CmdSetColorBlendEquation(commandBuffer, 0,", device);
-        Assert.Contains("_state.BuildKey(layoutId, formatsId, attachmentCount, drawBuffers)", device);
-        Assert.Contains("_targets.ExcludeSampledAttachment(commandBuffer, _boundTextures[unit]);", device);
 
         string cache = Read("Optimum.Render.Vulkan/Core/PipelineCache.cs");
         Assert.Contains("DynamicState.ColorWriteEnableExt", cache);
@@ -46,18 +44,22 @@ public class ColorWriteTierCoverageTests
     [Fact]
     public void DrawBufferChangesNeverRestartTheScope()
     {
+        // Draw buffers are the stated route's per-attachment write masks; the render-target
+        // manager has no draw-buffer state at all, so a change cannot restart a scope there.
         string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
-        int start = targets.IndexOf("public void SetDrawBuffers(int framebufferId, uint mask)", StringComparison.Ordinal);
-        int end = targets.IndexOf("public void ExcludeSampledAttachment(", start, StringComparison.Ordinal);
-        Assert.True(start >= 0 && end > start);
-        string setDrawBuffers = targets.Substring(start, end - start);
-        // The only restart is a sample-excluded slot rejoining.
-        Assert.Contains("uint rejoining = framebuffer.SampledExclusion & mask;", setDrawBuffers);
-        Assert.Contains("if (rejoining == 0) return;", setDrawBuffers);
-
+        Assert.DoesNotContain("DrawBufferMask", targets);
+        Assert.DoesNotContain("SampledExclusion", targets);
         Assert.Contains("VulkanStats.NoteMaskRestart();", targets);
-        Assert.Contains("if ((_bound.DrawBufferMask & (1u << attachment)) == 0) return;", targets);
-        Assert.Contains("if (_state.ColorMask == 0) return;", targets);
+
+        string state = Read("Optimum.Render.Vulkan/Platform/StatedRenderState.cs");
+        Assert.Contains("blend.WriteMask = ((DrawBuffers(framebufferId) >> slot) & 1) != 0 ? ColorMask : 0;", state);
+        // A stated draw on the same target and slots coalesces into the open pass.
+        Assert.Contains("device.EndNativePass(keepScope: true);", Read("Optimum.Render.Vulkan/Platform/StatedDraw.cs"));
+
+        // A clear on a draw buffer that is off, or through an all-false colour mask, is dropped by
+        // the platform before it reaches the device (GL's rule on the stated draw buffers).
+        string stated = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs");
+        Assert.Contains("if (((stated.DrawBuffers(framebufferId) >> slot) & 1) == 0 || stated.ColorMask == 0) return;", stated);
 
         string stats = Read("Optimum.Render.Vulkan/Core/VulkanStats.cs");
         Assert.Contains("mask_restarts={8} feedback_splits={9}", stats);

@@ -18,7 +18,7 @@ using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.Te
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The terrain, drawn twice on one Vulkan device: through the emulated multi-draw the OpenGL
+/// The terrain, drawn twice on one Vulkan device: through the stated multi-draw the OpenGL
 /// body takes (NativeChunksEnabled false) and through the native pass
 /// VulkanClientPlatform.NativeChunks.cs records inside a BeginChunkPass / EndChunkPass scope
 /// (docs/vulkan-native-render-systems.md, decision 5 stage 2).
@@ -52,7 +52,7 @@ public class NativeChunkTests(ITestOutputHelper output)
     // ------------------------------------------------------------------------- the tests
 
     /// <summary>
-    /// The opaque terrain group: the native route draws what the emulated route draws, on every
+    /// The opaque terrain group: the native route draws what the stated route draws, on every
     /// attachment, under each of the blend and cull combinations ChunkRenderer's five Opaque
     /// groups run with.
     /// </summary>
@@ -61,22 +61,22 @@ public class NativeChunkTests(ITestOutputHelper output)
     [InlineData("chunk-vegetation", true, false)]
     [InlineData("chunk-blendnocull", false, false)]
     [InlineData("chunk-decorative", true, true)]
-    public void ANativeChunkGroupDrawsWhatTheEmulatedGroupDraws(string pass, bool blend, bool cull)
+    public void ANativeChunkGroupDrawsWhatTheStatedGroupDraws(string pass, bool blend, bool cull)
     {
         using Session session = Open(motion: false);
 
-        byte[][] emulated = session.RunGroup(pass, native: false, blend: blend, cull: cull);
+        byte[][] stated = session.RunGroup(pass, native: false, blend: blend, cull: cull);
         byte[][] native = session.RunGroup(pass, native: true, blend: blend, cull: cull);
 
-        output.WriteLine("scene centre emulated " + Centre(emulated[0]) + " native " + Centre(native[0]));
-        Assert.Equal(emulated[0], native[0]);
-        Assert.Equal(emulated[1], native[1]);
+        output.WriteLine("scene centre stated " + Centre(stated[0]) + " native " + Centre(native[0]));
+        Assert.Equal(stated[0], native[0]);
+        Assert.Equal(stated[1], native[1]);
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
     /// The native route records the group as one declared pass and one indirect multi-draw -
-    /// the shape the chunk path has to keep - and the emulated route records neither.
+    /// the shape the chunk path has to keep - and the stated route records neither.
     /// </summary>
     [SkippableFact]
     public void TheNativeGroupIsOneDeclaredPassAndOneIndirectMultiDraw()
@@ -106,13 +106,13 @@ public class NativeChunkTests(ITestOutputHelper output)
     {
         using Session session = Open(motion: true);
 
-        byte[][] emulated = session.RunGroup("chunk-opaque", native: false, blend: true, cull: false, motion: true);
+        byte[][] stated = session.RunGroup("chunk-opaque", native: false, blend: true, cull: false, motion: true);
         byte[][] native = session.RunGroup("chunk-opaque", native: true, blend: true, cull: false, motion: true);
 
-        output.WriteLine("motion centre emulated " + Centre(emulated[2]) + " native " + Centre(native[2]));
-        Assert.Equal(emulated[0], native[0]);
-        Assert.Equal(emulated[1], native[1]);
-        Assert.Equal(emulated[2], native[2]);
+        output.WriteLine("motion centre stated " + Centre(stated[2]) + " native " + Centre(native[2]));
+        Assert.Equal(stated[0], native[0]);
+        Assert.Equal(stated[1], native[1]);
+        Assert.Equal(stated[2], native[2]);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -126,14 +126,14 @@ public class NativeChunkTests(ITestOutputHelper output)
     {
         using Session session = Open(motion: true);
 
-        byte[][] emulated = session.RunGroup("chunk-liquid-motion", native: false, blend: false, cull: false,
+        byte[][] stated = session.RunGroup("chunk-liquid-motion", native: false, blend: false, cull: false,
             motion: true, motionOnly: true);
         byte[][] native = session.RunGroup("chunk-liquid-motion", native: true, blend: false, cull: false,
             motion: true, motionOnly: true);
 
-        Assert.Equal(emulated[0], native[0]);
-        Assert.Equal(emulated[1], native[1]);
-        Assert.Equal(emulated[2], native[2]);
+        Assert.Equal(stated[0], native[0]);
+        Assert.Equal(stated[1], native[1]);
+        Assert.Equal(stated[2], native[2]);
 
         // And the mask really is a mask: the shaded slots still hold the clear.
         Assert.True(IsClear(native[0], Session.SceneClear), "the motion-only group wrote the scene attachment");
@@ -151,16 +151,16 @@ public class NativeChunkTests(ITestOutputHelper output)
     {
         using Session session = Open(motion: false);
 
-        byte[] emulated = session.RunShadowGroup(native: false);
+        byte[] stated = session.RunShadowGroup(native: false);
         byte[] native = session.RunShadowGroup(native: true);
 
-        Assert.Equal(emulated, native);
+        Assert.Equal(stated, native);
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
     /// The group's pipelines are built once and kept: a frame of terrain does not rebuild a
-    /// pipeline per pool, which is what the emulated per-draw key resolve used to do.
+    /// pipeline per pool, which is what the stated per-draw key resolve used to do.
     /// </summary>
     [SkippableFact]
     public void TheGroupBuildsItsPipelinesOnceAndKeepsThem()
@@ -244,16 +244,6 @@ public class NativeChunkTests(ITestOutputHelper output)
                 CrashMarkerDataPath = dataPath,
             };
 
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
-
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {
                 output.WriteLine("Vulkan unavailable: " + reason);
@@ -331,7 +321,7 @@ public class NativeChunkTests(ITestOutputHelper output)
             SetProgramUniforms(seam, opaque.ProgramId);
 
             // What BeginMotionWrite / BeginMotionOnlyWrite do once their guards pass: the window
-            // flag, the draw-buffer set the emulated route needs, and replace blending on the
+            // flag, the draw-buffer set the stated route needs, and replace blending on the
             // motion attachment. The native pass reads the flag and states the rest itself.
             SetMotionWriteActive(motion);
             if (motion)
@@ -434,7 +424,7 @@ public class NativeChunkTests(ITestOutputHelper output)
         /// The uniforms a chunk program needs to draw anything (ChunkTerrainRenderTests: without
         /// the view distances every fragment fades out and the pass draws nothing), plus the
         /// textures - bound through the platform, because that is the seam the native route
-        /// takes its handles from and the emulated route its units.
+        /// takes its handles from and the stated route its units.
         /// </summary>
         private void SetProgramUniforms(VulkanDevice seam, int programId)
         {

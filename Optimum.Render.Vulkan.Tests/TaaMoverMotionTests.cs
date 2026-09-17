@@ -335,6 +335,8 @@ public class TaaMoverMotionTests
         seam.ClearColor(0, 0f, 0f, 0f, 1f);
         seam.ClearColor(1, 0f, 0f, 0f, 1f);
         seam.ClearColor(2, 0f, 0f, 0f, 0f);
+        // The previous call's decode pass left depth writes off, and a depth clear honours that.
+        seam.SetDepthMask(true);
         seam.ClearDepth(1f);
 
         seam.UseProgram(program);

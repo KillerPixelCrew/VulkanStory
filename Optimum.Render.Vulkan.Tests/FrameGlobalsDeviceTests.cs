@@ -94,6 +94,85 @@ public class FrameGlobalsDeviceTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// A set-0 texture a draw does not name keeps the value the last draw that named it left
+    /// (liquidDepth, which the sky dome's route never names). When that texture has been a depth
+    /// attachment since, the draw moves it back into the read layout before it binds set 0: the
+    /// frame stays validation-clean (2026-09-17: the headless run reported
+    /// VUID-vkCmdDrawIndexed-imageLayout-00344 for the sky after the liquid depth pass).
+    /// </summary>
+    [SkippableFact]
+    public void AFrameTextureADrawDoesNotNameIsReadableAfterBeingAnAttachment()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            VulkanDevice seam = device!;
+            int reader = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+                #version 330 core
+                uniform sampler2D liquidDepth;
+                in vec2 texCoord;
+                out vec4 outColor;
+                void main() { outColor = vec4(texture(liquidDepth, texCoord).r, 0.0, 0.0, 1.0); }
+                """, "frame-texture-reader");
+            int depthWriter = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+                #version 330 core
+                out vec4 outColor;
+                void main() { outColor = vec4(1.0); }
+                """, "frame-texture-depth-writer");
+            Assert.Contains("liquidDepth", seam.SamplerNamesOf(reader));
+
+            int colourTarget = Target(seam, out int colour);
+            int depth = seam.CreateTexture2D(Size, Size, EnumTextureInternalFormat.DepthComponent32,
+                EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+            int depthTarget = seam.CreateFramebuffer(Size, Size);
+            seam.AttachTexture(depthTarget, EnumFramebufferAttachment.DepthAttachment, depth, 0);
+
+            seam.BeginFrame();
+            seam.SetViewport(0, 0, Size, Size);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+
+            // The draw that names it: set 0 now holds the depth texture.
+            seam.BindFramebuffer(colourTarget);
+            seam.SetDepthTest(false);
+            seam.SetDepthMask(false);
+            seam.UseProgram(reader);
+            seam.BindTexture(0, depth);
+            seam.DrawFullscreenTriangle();
+            seam.BindTexture(0, 0);
+
+            // The texture is written as a depth attachment.
+            seam.BindFramebuffer(depthTarget);
+            seam.SetDepthTest(true);
+            seam.SetDepthMask(true);
+            seam.SetDepthFunc(0x0207); // GL_ALWAYS
+            seam.UseProgram(depthWriter);
+            seam.DrawFullscreenTriangle();
+
+            // A native draw of the reader that names nothing: the value left in set 0 is read.
+            long drawsBefore = seam.NativeFullscreenDrawsForTests;
+            NativePipeline? pipeline = seam.RequestNativePipeline(new NativePipelineDescription
+            {
+                ProgramId = reader,
+                Blend = new[] { AttachmentBlend.For(false, EnumBlendMode.Standard) },
+                Targets = seam.NativeTargetFormats(colourTarget, 1u)!,
+            }, out string error);
+            Assert.True(pipeline != null, error);
+            Assert.True(seam.BeginNativePass(new NativePassDescription { Name = "Unnamed", FramebufferId = colourTarget }));
+            Assert.True(seam.DrawNativeFullscreen(pipeline!, ReadOnlySpan<NativeTexture>.Empty));
+            seam.EndNativePass();
+            Assert.Equal(1, seam.NativeFullscreenDrawsForTests - drawsBefore);
+            seam.Present();
+
+            GpuTest.AssertClean(seam);
+            seam.DeleteFramebuffer(depthTarget);
+            seam.DeleteFramebuffer(colourTarget);
+            seam.DeleteTexture(depth);
+            seam.DeleteTexture(colour);
+        }
+    }
+
     private static int Link(VulkanDevice seam, string name, bool includeFog)
     {
         var vertex = new Shader(EnumShaderType.VertexShader, FullscreenVertex, name + ".vsh");

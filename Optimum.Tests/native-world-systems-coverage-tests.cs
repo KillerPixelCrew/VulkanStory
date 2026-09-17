@@ -166,7 +166,7 @@ public class NativeWorldSystemsCoverageTests
 
         foreach (string field in new[]
                  {
-                     "public FrontFace FrontFace = GlStateTracker.FrontFace;",
+                     "public FrontFace FrontFace = RenderLimits.FrontFace;",
                      "public PolygonMode PolygonMode = PolygonMode.Fill;",
                      "public float LineWidth = 1.0f;",
                      "public int VertexLayoutId = MeshManager.EmptyLayoutId;",
@@ -303,7 +303,7 @@ public class NativeWorldSystemsCoverageTests
         // The route in: the pool's multi-draw seam takes the native path only inside a scope.
         string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
         Assert.Contains("if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;", meshes);
-        Assert.Contains("device.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);", meshes);
+        Assert.Contains("TryDrawStated(vAO, 1, indices, indicesSizes, groupCount);", meshes);
     }
 
     /// <summary>
@@ -774,17 +774,18 @@ public class NativeWorldSystemsCoverageTests
     }
 
     /// <summary>
-    /// The named blend modes have exactly one factor table, which the tracker and every native
+    /// The named blend modes have exactly one factor table, which the stated state and every native
     /// system that states "blend on, standard" both read - so the two can never drift.
     /// </summary>
     [Fact]
     public void TheNamedBlendModesHaveOneFactorTable()
     {
-        string tracker = Read("Optimum.Render.Vulkan/Core/GlStateTracker.cs");
+        string tracker = Read("Optimum.Render.Vulkan/Core/PipelineState.cs");
 
         Assert.Contains("public static AttachmentBlend For(bool enabled, EnumBlendMode mode)", tracker);
         Assert.Contains("FactorsFor(EnumBlendMode mode) => mode switch", tracker);
-        Assert.Contains("AttachmentBlend.FactorsFor(mode);", tracker);
+        Assert.Contains("= FactorsFor(mode);", tracker);
+        Assert.Contains("AttachmentBlend.FactorsFor(mode);", Read("Optimum.Render.Vulkan/Platform/StatedRenderState.cs"));
 
         // One table only: the premultiplied-alpha pair appears once in the file.
         int first = tracker.IndexOf("EnumBlendMode.PremultipliedAlpha =>", StringComparison.Ordinal);
@@ -956,30 +957,44 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("OPTIMUM_VK_NATIVE_CLOUDS", clouds);
     }
     /// <summary>
-    /// The generic native draw (removal of the emulation layer, step 1): every mesh, instanced,
-    /// multi-draw and fullscreen draw the dedicated routes do not take is recorded natively from
-    /// the state the client stated, before the emulated draw is reached. The state is recorded with
-    /// OpenGL's semantics at the platform's own virtuals, the fork bridge's included, and the pass
-    /// declares every colour slot attached on the device - the OIT accumulation slots included.
+    /// The generic native draw (removal of the emulation layer): every mesh, instanced, multi-draw
+    /// and fullscreen draw the dedicated routes do not take is recorded natively from the state
+    /// the client stated - there is no other route left. The state is recorded with OpenGL's
+    /// semantics at the platform's own virtuals, the fork bridge's included, and the pass declares
+    /// every colour slot attached on the device - the OIT accumulation slots included.
     /// </summary>
     [Fact]
-    public void EveryRemainingDrawTakesTheGenericStatedRouteFirst()
+    public void EveryRemainingDrawTakesTheGenericStatedRoute()
     {
         string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
-        Assert.Contains("if (TryDrawStated(vAO, 1, null, null, 0))", meshes);
-        Assert.Contains("if (TryDrawStated(null, 1, null, null, 0))", meshes);
-        Assert.Contains("if (TryDrawStated(vAO, 1, indices, indicesSizes, groupCount))", meshes);
+        Assert.Contains("TryDrawStated(vAO, 1, null, null, 0);", meshes);
+        Assert.Contains("TryDrawStated(null, 1, null, null, 0);", meshes);
+        Assert.Contains("TryDrawStated(vAO, 1, indices, indicesSizes, groupCount);", meshes);
         Assert.Contains("TryDrawStated(vAO, quantity, null, null, 0)", meshes);
-        // Each stated route sits before its emulated draw.
-        Assert.True(meshes.IndexOf("if (TryDrawStated(vAO, 1, null, null, 0))", StringComparison.Ordinal) <
-                    meshes.IndexOf("device.DrawMesh(vAO.VaoId);", StringComparison.Ordinal));
 
-        string route = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs");
+        string route = Read("Optimum.Render.Vulkan/Platform/StatedDraw.cs");
         Assert.Contains("RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue);", route);
-        Assert.Contains("units[i] = device.NativeSamplerUnit(program.ProgramId, names[i]);", route);
+        Assert.Contains("units[i] = device.NativeSamplerUnit(programId, names[i]);", route);
         Assert.Contains("reads[i] = stated.TextureAt(units[i]);", route);
-        Assert.Contains("OPTIMUM_VK_NATIVE_STATED", route);
-        Assert.Contains("OPTIMUM_VK_STATED_CHECK", route);
+        Assert.Contains("StatedDraw.Record(device, stated, programId, framebufferId,",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs"));
+
+        // The GL state machine is gone from the device: no tracker, no state setters, no bound
+        // target, no unit tables, no draw that is not a native one.
+        Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(PatchReader.FindRepositoryFile("VintageStory.slnx"))!,
+            "Optimum.Render.Vulkan", "Core", "GlStateTracker.cs")));
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        foreach (string removed in new[]
+                 {
+                     "public void UseProgram(", "public void SetBlend(", "public void SetDepthTest(", "public void SetViewport(",
+                     "public void BindTexture(", "public void BindSampler(", "public void SetDrawBuffers(",
+                     "public void BindFramebuffer(", "public void ClearColor(", "public void ClearDepth(",
+                     "public void DrawMesh(", "public void DrawMeshMulti(", "public void DrawFullscreenTriangle(",
+                     "private bool PrepareDraw(", "_boundTextures", "_unitSamplerOverrides", "GlStateTracker",
+                 })
+        {
+            Assert.DoesNotContain(removed, device);
+        }
 
         string state = Read("Optimum.Render.Vulkan/Platform/StatedRenderState.cs");
         Assert.Contains("public void SetBlendEnabled(bool enabled) => BlendEnabled = enabled;", state);

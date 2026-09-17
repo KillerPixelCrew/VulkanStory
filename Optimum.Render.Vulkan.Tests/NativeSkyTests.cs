@@ -45,48 +45,44 @@ public class NativeSkyTests(ITestOutputHelper output)
 
     /// <summary>
     /// The native sky pass draws what the seam's neutral body draws: one declared pass, one
-    /// native mesh draw, no emulation inside it, and the same scene and glow pixels.
+    /// native mesh draw, and the same scene and glow pixels.
     /// </summary>
     [SkippableFact]
     public unsafe void TheNativeSkyPassMatchesTheSeamsNeutralBody()
     {
         using Session session = Open();
 
-        (byte[] emulatedScene, byte[] emulatedGlow) = session.RunFrame(native: false);
+        (byte[] statedScene, byte[] statedGlow) = session.RunFrame(native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         (byte[] nativeScene, byte[] nativeGlow) = session.RunFrame(native: true);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        output.WriteLine("scene centre emulated " + Centre(emulatedScene) + " native " + Centre(nativeScene));
-        Assert.Equal(emulatedScene, nativeScene);
-        Assert.Equal(emulatedGlow, nativeGlow);
+        output.WriteLine("scene centre stated " + Centre(statedScene) + " native " + Centre(nativeScene));
+        Assert.Equal(statedScene, nativeScene);
+        Assert.Equal(statedGlow, nativeGlow);
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
-    /// The seam's neutral body draws through the emulation layer and the native route does not:
+    /// The seam's neutral body draws through the generic stated route and the native route does not:
     /// the switch is real, and "OFF is vanilla" holds for the route the OpenGL path takes.
     /// </summary>
     [SkippableFact]
-    public unsafe void TheNeutralBodyDrawsThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    public unsafe void TheNeutralBodyDrawsThroughTheStatedRouteAndTheNativeRouteDoesNot()
     {
         using Session session = Open();
 
         long nativeDrawsBefore = session.Seam.NativeDrawsForTests;
-        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        long statedBefore = session.Platform.StatedDrawsForTests;
         session.RunFrame(native: false);
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeDrawsBefore);
-        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+        Assert.True(session.Platform.StatedDrawsForTests - statedBefore > 0);
 
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         session.RunFrame(native: true);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -164,16 +160,6 @@ public class NativeSkyTests(ITestOutputHelper output)
                 CrashMarkerDataPath = dataPath,
             };
 
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
-
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {
                 output.WriteLine("Vulkan unavailable: " + reason);
@@ -202,7 +188,7 @@ public class NativeSkyTests(ITestOutputHelper output)
             session.GlowTexture = Gradient(seam, 1);
             foreach (string name in seam.SamplerNamesOf(program.ProgramId))
             {
-                // The units the client's ShaderProgramSky setters bind: what the emulated route
+                // The units the client's ShaderProgramSky setters bind: what the stated route
                 // resolves its samplers through. The native route passes the handles instead.
                 int unit = program.uniformLocations.Count + seam.SamplerNamesOf(program.ProgramId).IndexOf(name);
                 seam.SetSamplerUnit(program.ProgramId, name, unit);

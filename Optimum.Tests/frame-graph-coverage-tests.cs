@@ -38,13 +38,14 @@ public class FrameGraphCoverageTests
         Assert.Contains("_graph.PromoteColorClear(texture, target.Color[attachment].Layer, r, g, b, a);", targets);
         Assert.Contains("_graph.PromoteDepthClear(texture, depth);", targets);
         Assert.Contains("_graph.NoteInPassClear();", targets);
-        // The masked-out clear stays a no-op before either path.
-        Assert.Contains("if (_state.ColorMask == 0) return;", targets);
+        // The masked-out clear stays a no-op before either path, dropped where the mask is stated.
+        Assert.Contains("stated.ColorMask == 0) return;",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs"));
 
         string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
         Assert.Contains("_targets.FlushAllPendingClears(_frames.Current.CommandBuffer);", device);
         Assert.Contains("if (_graph.Enabled) _graph.EndFrame();", device);
-        Assert.Contains("_targets.FlushPendingClears(commandBuffer, texture);", device);
+        Assert.Contains("_targets.FlushPendingClears(commandBuffer, texture);", Read("Optimum.Render.Vulkan/VulkanDevice.Native.cs"));
         Assert.Contains("_targets.FlushPendingClears(Commands, texture);", device);
     }
 
@@ -55,7 +56,7 @@ public class FrameGraphCoverageTests
         // and a clear on it (draw buffer on) is promoted instead of dropped.
         // GPU proof: Optimum.Render.Vulkan.Tests/PassExclusionTests.cs.
         string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
-        Assert.Contains("uint newlyExcluded = slots & ~(framebuffer.SampledExclusion | framebuffer.PassExclusion);", targets);
+        Assert.Contains("private void ApplyPassExclusion(CommandBuffer commandBuffer, VulkanFramebuffer target, uint colorSlots)", targets);
         Assert.Contains("if (((_bound.PassExclusion >> i) & 1) != 0) continue;", targets);
         Assert.Contains("if (((target.PassExclusion >> attachment) & 1) != 0)", targets);
     }
@@ -77,13 +78,13 @@ public class FrameGraphCoverageTests
         {
             Assert.Contains(member, graph);
         }
-        Assert.Contains("ColorSlots = ~(1u << 1),", graph);
         Assert.Contains("PassFlags.OpenSampling | PassFlags.AllowSplit", graph);
-
-        string buffers = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
-        Assert.Contains("DeclareBoundPass();", buffers);
-        Assert.Contains("DeclareFinalCompositionPass();", buffers);
-        Assert.Contains("device.EndPass();", buffers);
+        // Every pass is declared by the native route that records it; the stage bracket ends
+        // whatever pass a stage left open.
+        Assert.Contains("platform.GraphDevice?.EndStagePass();", graph);
+        Assert.Contains("const uint slots = ~(1u << 1);",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostFinal.cs"));
+        Assert.Contains("Name = declared?.Name ?? \"Stated/\" + framebufferId,", Read("Optimum.Render.Vulkan/Platform/StatedDraw.cs"));
 
         string main = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
         Assert.Contains("RenderStageListener = new FrameGraphStageListener(this);", main);
