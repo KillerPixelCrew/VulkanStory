@@ -169,22 +169,36 @@ public partial class VulkanClientPlatform
         // that; if one ever did, the neutral body keeps it correct instead of silently losing it.
         if (program.customSamplers.Count != 0 || program.clampTToEdge) return false;
 
-        // Vanilla programs only (Phase 3b decision 1: mod renderers stay on the adapter). A mod can
-        // register its own program under the same pass name - VSEssentials' first-person hands
-        // (ModSystemFpHands.fpModeHandShader) is an entityanimated of its own with its own Animation
-        // and, under TAA, AnimationPrev blocks - and that program drew the arm wrong through this
-        // route with TAA on (2026-09-16, headless both-backends run). Every bound input traced equal
-        // to the neutral body's for that draw - record, both blocks, push block, textures, mesh,
-        // layout, blend, dynamic state - so the cause is still open; see the branch handoff.
-        // OPTIMUM_VK_NATIVE_ENTITIES=all admits mod programs again, for that investigation.
+        // The vanilla programs, and the program the shader registry holds under the same pass
+        // name: VSEssentials' first-person hands (ModSystemFpHands.fpModeHandShader) registers its
+        // own entityanimated (ALLOWDEPTHOFFSET, its own Animation and, under TAA, AnimationPrev
+        // blocks), which replaces the registry entry. On 2026-09-16 that program drew the arm
+        // several times too large through this route with TAA on, with every bound input traced
+        // equal; on 2026-09-17 the same repro (OPTIMUM_VK_NATIVE_ENTITIES=all,
+        // OPTIMUM_VK_NATIVE_SHADERS=force, TAA on, headless) no longer showed it - the parity dump
+        // of the hand region matched the neutral body (depth identical, motion within 0.0023) -
+        // after the native routes that ran around it had changed. The cause was never named.
+        // Anything else registered under these names stays on the neutral body (decision 1);
+        // OPTIMUM_VK_NATIVE_ENTITIES=all admits every program with the pass name.
         if (!AllEntityPrograms &&
             !ReferenceEquals(program, ShaderPrograms.Entityanimated) &&
-            !ReferenceEquals(program, ShaderPrograms.Shadowmapentityanimated))
+            !ReferenceEquals(program, ShaderPrograms.Shadowmapentityanimated) &&
+            !IsRegistryProgram(program))
         {
             return false;
         }
         return true;
     }
+
+    /// <summary>
+    /// Whether the shader registry holds this program under its pass name. Only a program the
+    /// registry registered (PassId set, from 1) is looked up: ShaderRegistry's type initializer
+    /// publishes uncompiled programs into ShaderPrograms.*, so a program the registry never saw
+    /// must not be the first thing to touch it (AGENTS.md, testing notes).
+    /// </summary>
+    internal static bool IsRegistryProgram(ShaderProgramBase program) =>
+        program.PassId > 0 && program.PassName != null &&
+        ReferenceEquals(program, ShaderRegistry.getProgramByName(program.PassName));
 
     private static readonly bool AllEntityPrograms =
         Environment.GetEnvironmentVariable("OPTIMUM_VK_NATIVE_ENTITIES") == "all";

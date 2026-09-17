@@ -390,6 +390,10 @@ public class NativeWorldSystemsCoverageTests
         // On by default; OPTIMUM_VK_NATIVE_ENTITIES=0 turns the route off in the real client.
         // Vanilla entity programs only (decision 1): a mod program under the same pass name stays on the adapter.
         Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Entityanimated)", entities);
+        // The registry's own program under the pass name (the first-person hands), looked up only
+        // for a program the registry registered.
+        Assert.Contains("!IsRegistryProgram(program)", entities);
+        Assert.Contains("program.PassId > 0 && program.PassName != null", entities);
         Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Shadowmapentityanimated)", entities);
         Assert.Contains("internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable(\"OPTIMUM_VK_NATIVE_ENTITIES\") != \"0\";", entities);
         Assert.Contains("public override void RenderEntityMesh(", entities);
@@ -960,7 +964,7 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("if (TryRenderCloudsNative(modelRef))",
             Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
         string clouds = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeClouds.cs");
-        Assert.Contains("ReferenceEquals(program, ShaderRegistry.getProgramByName(name))", clouds);
+        Assert.Contains("if (!IsRegistryProgram(program)) return false;", clouds);
         Assert.Contains("depthWrite: false, samplesBoundDepth: true", clouds);
         Assert.Contains("FrameBuffers[(int)EnumFrameBuffer.LiquidDepth]", clouds);
         Assert.Contains("OPTIMUM_VK_NATIVE_CLOUDS", clouds);
