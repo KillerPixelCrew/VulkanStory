@@ -25,7 +25,8 @@
 #   --dump-wait <s>             seconds to wait for the dump line after it (default 120)
 #
 # Exit: 0 dump written on the requested renderer, 1 failure, 2 usage.
-# This script never pattern-kills anything (CLAUDE.md rule 5): closing goes
+# This script never pattern-kills anything (a pkill -f from a shell whose command line
+# names the process kills that shell): closing goes
 # through scripts/dev/kill-client.sh, which is the only place that owns that pattern.
 set -euo pipefail
 

@@ -1,7 +1,7 @@
 # Vulkan-native shaders: the interface contract
 
 Every native program family is written against this document. It turns plan section C ("Shaders",
-`docs/vulkan-native-plan.md`) and decision 9 into rules precise enough that seven families can be rewritten in
+the Vulkan-native plan) and decision 9 into rules precise enough that seven families can be rewritten in
 parallel and still link against one pipeline layout, one manifest and one runtime.
 
 Inputs:

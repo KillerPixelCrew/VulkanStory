@@ -356,7 +356,7 @@ public partial class VulkanClientPlatform
     /// the pass writes all three colour slots with no blending, no depth test and no depth
     /// attachment, at the slot's own size. The seven inputs are the pass's declared reads and
     /// resolve straight to bindless slots; the nine uniform values are the OpenGL body's, at
-    /// their placements. CLAUDE.md rule 11 lives in taa-resolve.fsh, which both routes run
+    /// their placements. The resolve's temporal invariants live in taa-resolve.fsh, which both routes run
     /// unchanged - the 3x3 nearest-depth disocclusion and the luminance anti-flicker weighting
     /// are the shader's, and nothing here touches them.
     /// </summary>

@@ -1,4 +1,4 @@
-# TAA for Optimum: plan (revised after Codex review, 2026-09-10)
+# TAA for Optimum: plan (revised after review, 2026-09-10)
 
 ## Context
 
@@ -15,10 +15,8 @@ requirements, resolutions and colour stages differ, so this plan builds one engi
 replaceable stage. The in-house GLSL resolve is the first implementation and the permanent fallback
 on OpenGL.
 
-The plan was reviewed by Codex (gpt-6-astra, high effort) against `build/`, `_ref/`, the mod forks
-and the Vulkan backend; its review is at
-`/tmp/claude-1000/-home-n1ght-Projekte-Optimum/73ffc57c-d773-4311-8bb2-b42cbc432943/scratchpad/codex-taa-review.md`.
-Its major corrections were verified against the code and are folded in below.
+The plan was reviewed against `build/`, `_ref/`, the mod forks and the Vulkan backend; the
+review's major corrections were verified against the code and are folded in below.
 
 ## Decisions (agreed with the user)
 
@@ -269,7 +267,7 @@ Commits 1257117..9c32acb on `feat/taa`. Findings to carry: (a) Vulkan `GlEnums` 
 history depth target silently became RGBA8 (b4d58a2); (b) `ClearColor` on a masked-out attachment is a
 no-op on Vulkan, so the motion clear must enable the attachment first (8e4a970); (c) the history lookup
 must be anchored at the pixel centre plus mv, not at the unjittered current position (7e1b9bd);
-(d) matched-camera luminance-diff measurements (Codex) are the acceptance tool for "jitter" reports.
+(d) matched-camera luminance-diff measurements are the acceptance tool for "jitter" reports.
 
 **P3. Opaque coverage.**
 - `sources/shaderincludes/vertexwarp.vsh` with `WarpState`; `chunkopaque`, `chunktopsoil` writers;
@@ -737,7 +735,7 @@ the log - all of it is `docs/taa-acceptance.md`:
 matrix has not been run. The decision belongs to the user, with the evidence paths recorded
 here; until then `OptimumConfig.Taa` stays `false` and TAA is opt-in from the settings tab.
 
-P5 in-game verification (2026-09-11, Fable): deployed c9758ce+5b952da; both backends start, log their
+P5 in-game verification (2026-09-11): deployed c9758ce+5b952da; both backends start, log their
 renderer, load `taa-sharpen`, no exceptions; Vulkan under synchronization + best-practices validation
 shows no backend hazards (only MangoHud's external overlay hazard). Frame times via
 `scripts/dev/perf-capture.sh` (30 s at spawn in "serene cave world", ssaa 0.5, 2755x1727 window):

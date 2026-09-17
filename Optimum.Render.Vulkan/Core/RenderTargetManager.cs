@@ -646,7 +646,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         // is simply not cleared - the game clears attachments 2 and 3 of the
         // primary target while only 0 and 1 are selected. Nor does GL clear
         // through an all-false glColorMask. A clear on an attachment whose
-        // effective write mask is zero is a no-op on every path (CLAUDE.md rule 9).
+        // effective write mask is zero is a no-op on every path: GL keeps an attachment the
+        // shader never writes, and Vulkan would write garbage into it.
         if ((uint)attachment >= (uint)_bound.Color.Length) return;
         if (!_bound.Color[attachment].IsBound) return;
         if ((_bound.DrawBufferMask & (1u << attachment)) == 0) return;

@@ -297,7 +297,7 @@ public class NativePostChainTests(ITestOutputHelper output)
     /// from a cold history (the reset frame, which copies the scene through) and from a warm one
     /// (the frame that actually blends history in).
     ///
-    /// CLAUDE.md rule 11 is the shader's, and both routes run the same taa-resolve.fsh: what is
+    /// The temporal invariants are the shader's, and both routes run the same taa-resolve.fsh: what is
     /// asserted here is that the native route feeds it the same seven textures and the same nine
     /// uniform values, so the 3x3 nearest-depth disocclusion and the luminance anti-flicker
     /// weighting see identical inputs and produce identical pixels.
