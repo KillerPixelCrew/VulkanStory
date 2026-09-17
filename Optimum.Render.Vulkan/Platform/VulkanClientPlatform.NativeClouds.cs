@@ -64,7 +64,7 @@ public partial class VulkanClientPlatform
         string? name = program.PassName;
         if (name != "cloudmap" && name != "cloudvolumetric") return false;
         // The program the registry holds under that name, which is the fork's own registration.
-        if (!ReferenceEquals(program, ShaderRegistry.getProgramByName(name))) return false;
+        if (!IsRegistryProgram(program)) return false;
 
         return name == "cloudmap" ? DrawCloudMapNative(program, mesh) : DrawCloudVolumetricNative(program, mesh);
     }

@@ -134,7 +134,16 @@ Two shipped-client crashes came out of the merge and are fixed: a transplant tup
 invisible to build and tests, now AGENTS.md rule 19 (`make patch-il` + fork diff after every lib/fork change).
 Route switches: `OPTIMUM_VK_NATIVE_{CHUNKS,ENTITIES,WORLD,SKY,GUI}=0` send a route to the neutral body;
 `OPTIMUM_VK_NATIVE_ENTITIES=all` also admits mod-registered entity programs.
-**Open question:** with TAA on, VSEssentials' first-person hand program (`ModSystemFpHands.fpModeHandShader`, its own
+**2026-09-17: every draw is native under default settings** (headless Vulkan, native shaders forced: 0 emulated
+draws, validation 0 errors / 0 SYNC-). Added since: the generic `standard` route (world, default framebuffer, sun
+probe), 2D menu particles, the loading screen's minimal GUI, the temporal gear, atlas self-blits through a pooled
+ReadSelf copy, both fork cloud renderers (`VulkanForkGraphics` now records the state it forwards; `liquidDepth`
+resolves to the LiquidDepth target) and the first-person hands (below). Route switch added:
+`OPTIMUM_VK_NATIVE_CLOUDS=0`.
+**First-person hands, 2026-09-17:** the fault below no longer reproduces with the same repro - the parity dump of the
+hand region matched the neutral body (depth identical, motion within 0.0023) - so the entity route now admits the
+program the shader registry holds under the pass name. The cause of the 2026-09-16 fault was never named.
+**Open question (2026-09-16, see above):** with TAA on, VSEssentials' first-person hand program (`ModSystemFpHands.fpModeHandShader`, its own
 `entityanimated` with its own `Animation` and, under TAA, `AnimationPrev` blocks) drew the arm several times too large
 through the native route; the vanilla programs are correct. Bisected in the real client (hand on the neutral body,
 world entities native: 0.9825/0.9835/0.9810 vs OpenGL). For that draw the render trace (new `sets` line in
