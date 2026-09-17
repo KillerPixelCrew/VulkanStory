@@ -42,7 +42,7 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumParityReadTextureGl", "OptimumParitySlotName", "OptimumRenderSsao", "OptimumRunParityDump",
         "OptimumRunPendingTaaShaderReload", "OptimumSpinIterations", "OptimumSpinTailMinProcessorCount",
         "OptimumSsaoKernel", "OptimumTaaHistoryIndexA", "OptimumTaaHistoryIndexB", "OptimumTaaRequested",
-        "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
+        "OptimumTaaSharpenIndex", "OptimumSceneNoHudIndex", "OptimumUiTargetIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumWindowClientSize", "OptimumYieldThresholdMs",
         "ProbeThickLineSupport",
         // Phase 3b: the post chain as one virtual per pass, and the keep-the-viewport bind.

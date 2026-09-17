@@ -107,6 +107,10 @@ public partial class VulkanClientPlatform
     /// <summary>Recycles the frame slot and opens a command buffer.</summary>
     public override void BeginFrame()
     {
+        // World/UI separation: a GUI renderer that threw out of the AfterBlit or Ortho stage
+        // unwound past both compose call sites; the new frame starts with the scope closed, so the
+        // world pass draws to the targets it names under the factors it states.
+        CloseUiScope();
         device.BeginFrame();
         // Until a stage or a post method says otherwise, passes are named after the frame.
         passContext = "Frame";

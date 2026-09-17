@@ -313,9 +313,14 @@ public partial class VulkanClientPlatform
         if (UseNativePostChain)
         {
             NativeFinalComposition();
-            return;
         }
-        LegacyFinalComposition();
+        else
+        {
+            LegacyFinalComposition();
+        }
+        // World/UI separation: the composited image holds the scene alone for exactly this long -
+        // RenderAfterFinalComposition draws the world-space overlays onto it next.
+        CaptureSceneNoHud();
     }
 
     /// <summary>
@@ -330,10 +335,16 @@ public partial class VulkanClientPlatform
         if (NativeBlitEnabled && UseNativePostChain)
         {
             RenderNativeBlit();
-            return;
         }
-        SetPassContext("Blit", PassFlags.None);
-        base.BlitPrimaryToDefault();
-        SetPassContext("Frame", PassFlags.AllowSplit);
+        else
+        {
+            SetPassContext("Blit", PassFlags.None);
+            base.BlitPrimaryToDefault();
+            SetPassContext("Frame", PassFlags.AllowSplit);
+        }
+        // World/UI separation: the boundary. Everything ScreenManager draws after this call - the
+        // AfterBlit stage, the menu background, the Ortho stage - goes into the UI image, on every
+        // route out of the blit (debug view, FSR, plain, no offscreen buffer).
+        OpenUiScope();
     }
 }

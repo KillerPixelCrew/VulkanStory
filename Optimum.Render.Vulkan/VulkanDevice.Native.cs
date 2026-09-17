@@ -373,7 +373,24 @@ public sealed unsafe partial class VulkanDevice
         _standaloneSamplers.TryGetValue(samplerId, out state);
 
     private int ResolveNativeFramebuffer(int framebufferId) =>
-        framebufferId == PassDeclaration.DefaultFramebuffer ? _defaultFramebuffer : framebufferId;
+        framebufferId == PassDeclaration.DefaultFramebuffer
+            ? (_defaultRedirect > 0 ? _defaultRedirect : _defaultFramebuffer)
+            : framebufferId;
+
+    /// <summary>
+    /// World/UI separation: the target <see cref="PassDeclaration.DefaultFramebuffer" /> stands for
+    /// while the platform's UI scope is open - its UI image - or 0 for the window image itself. Every
+    /// draw, clear, format query and readback that names Default resolves through
+    /// <see cref="ResolveNativeFramebuffer" />, so each render system that has always drawn "onto the
+    /// window" draws into the UI image instead without knowing it, and only the compose, which closes
+    /// the scope first, writes the window image (VulkanClientPlatform.UiSeparation.cs).
+    /// </summary>
+    internal void RedirectDefaultFramebuffer(int framebufferId) => _defaultRedirect = framebufferId;
+
+    /// <summary>The target Default currently resolves to instead of the window image; 0 for none.</summary>
+    internal int DefaultFramebufferRedirect => _defaultRedirect;
+
+    private int _defaultRedirect;
 
     /// <summary>
     /// The pipeline for a program and a piece of fixed state, created through the pipeline

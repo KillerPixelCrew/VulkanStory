@@ -54,6 +54,33 @@ internal struct AttachmentBlend : IEquatable<AttachmentBlend>
         return blend;
     }
 
+    /// <summary>
+    /// World/UI separation: the blend a draw into the UI image uses in place of this one.
+    ///
+    /// gui.fsh writes straight alpha and the GUI draws under <see cref="EnumBlendMode.Standard" />,
+    /// whose factors are not separate - (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) on the alpha channel too.
+    /// Onto the opaque window that is correct, which is why it always was; accumulated into an image
+    /// that starts transparent it gives out_a = src_a * src_a + dst_a * (1 - src_a), roughly alpha
+    /// squared per layer, instead of the over-operator's out_a = src_a + dst_a * (1 - src_a), and the
+    /// compose then shows the world through every translucent panel. So Standard's exact factor set
+    /// takes ONE for the source alpha factor here, and nothing else changes: the RGB factors already
+    /// accumulate the premultiplied colour the compose blends back with (ONE, ONE_MINUS_SRC_ALPHA).
+    ///
+    /// Only Standard, deliberately. PremultipliedAlpha already has (ONE, ONE_MINUS_SRC_ALPHA) on both
+    /// channels, and the destination-reading modes (Brighten, Multiply, Glow, Overlay) belong to world
+    /// systems that draw before the blit, never into the UI image. Pinned by UiSeparationTests.
+    /// </summary>
+    public AttachmentBlend ForUiImage()
+    {
+        AttachmentBlend blend = this;
+        if (blend.SrcColor == BlendFactor.SrcAlpha && blend.DstColor == BlendFactor.OneMinusSrcAlpha &&
+            blend.SrcAlpha == BlendFactor.SrcAlpha && blend.DstAlpha == BlendFactor.OneMinusSrcAlpha)
+        {
+            blend.SrcAlpha = BlendFactor.One;
+        }
+        return blend;
+    }
+
     /// <summary>The one table of factor pairs, shared by the stated state and by native systems.</summary>
     internal static (BlendFactor SrcColor, BlendFactor DstColor, BlendFactor SrcAlpha, BlendFactor DstAlpha)
         FactorsFor(EnumBlendMode mode) => mode switch

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index 8667d95..6baa3a4 100644
+index 8667d95..89597a7 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,781 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,791 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -780,6 +780,16 @@ index 8667d95..6baa3a4 100644
 +	// to the same number the client's own limiter would have used. Neutral body; the OpenGL
 +	// path does not override it.
 +	public virtual void SetLatencyFrameCap(int maxFps)
++	{
++	}
++
++	// Optimum (Vulkan foundation, world/UI separation): composes the UI image back over the
++	// display image, called by ClientMain.RenderToDefaultFramebuffer between the Ortho stage and
++	// TriggerRenderStage(Done), and again by ScreenManager.Render for the menu screens, which
++	// never reach ClientMain. Neutral here and on OpenGL, which draws its GUI straight onto the
++	// window as it always has; the Vulkan platform renders the GUI into its own target and
++	// composes it in this override. A second call in the same frame finds nothing to compose.
++	public virtual void OptimumComposeUiTarget()
 +	{
 +	}
 +
