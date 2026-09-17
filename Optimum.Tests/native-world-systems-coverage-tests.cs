@@ -912,4 +912,19 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("_targets.ScopeClosing = _queryRing.OnScopeClosing;",
             Read("Optimum.Render.Vulkan/VulkanDevice.cs"));
     }
+    /// <summary>
+    /// The early loading screen's quads under the platform's hardcoded ShaderProgramMinimalGui
+    /// (no pass name) and the menu's 2D particles go native from RenderMesh / RenderMeshInstanced.
+    /// </summary>
+    [Fact]
+    public void LoadingScreenAndMenuParticleDrawsGoNative()
+    {
+        string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
+        Assert.Contains("if (TryRenderMinimalGuiNative(modelRef))", meshes);
+        Assert.Contains("if (TryRenderParticles2dNative(modelRef, quantity))", meshes);
+        string gui = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs");
+        Assert.Contains("!ReferenceEquals(program, MinimalGuiShader)", gui);
+        Assert.Contains("string.Equals(program.PassName ?? \"\", pass.PassName, StringComparison.Ordinal)", gui);
+        Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Particlesquad2d)", gui);
+    }
 }

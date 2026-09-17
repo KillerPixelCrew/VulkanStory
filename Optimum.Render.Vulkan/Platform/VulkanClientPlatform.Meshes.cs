@@ -69,6 +69,11 @@ public partial class VulkanClientPlatform
             RuntimeStats.drawCallsCount--; // DrawNativeGuiMesh counted it already
             return;
         }
+        if (TryRenderMinimalGuiNative(modelRef))
+        {
+            RuntimeStats.drawCallsCount--; // DrawNativeGuiMesh counted it already
+            return;
+        }
         if (TryRenderStandardMeshNative(modelRef)) return;
         device.DrawMesh(vAO.VaoId);
     }
