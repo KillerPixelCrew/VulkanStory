@@ -286,7 +286,7 @@ public partial class VulkanClientPlatform
         NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, framebufferId, slots, layoutId,
             new NativePipelineDescription
             {
-                Blend = GuiSlots(formats, blend, blendMode),
+                Blend = GuiSlots(formats, blend, framebufferId, blendMode),
                 DepthTest = depthTest,
                 DepthWrite = depthWrite,
                 DepthCompare = depthCompare,
@@ -336,11 +336,13 @@ public partial class VulkanClientPlatform
     /// the tracker's own factor table, and every other slot masked off so an attachment the
     /// fragment shader never writes keeps its contents as it does on GL (rule 9).
     /// </summary>
-    private static AttachmentBlend[] GuiSlots(RenderTargetFormats formats, bool blend,
+    private AttachmentBlend[] GuiSlots(RenderTargetFormats formats, bool blend, int framebufferId,
         EnumBlendMode mode = EnumBlendMode.Standard)
     {
         var slots = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
         slots[0] = AttachmentBlend.For(blend, mode);
+        // World/UI separation: straight-alpha GUI accumulates coverage in the UI image.
+        if (stated.IsUiImage(framebufferId)) slots[0] = slots[0].ForUiImage();
         for (int i = 1; i < slots.Length; i++)
         {
             slots[i] = AttachmentBlend.Default;

@@ -206,6 +206,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "LatencySleep",
         "LatencyOwnsFrameCap",
         "SetLatencyFrameCap",
+        // World/UI separation: the compose ClientMain.RenderToDefaultFramebuffer and
+        // ScreenManager.Render call; neutral here, the Vulkan platform overrides it.
+        "OptimumComposeUiTarget",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -433,6 +436,9 @@ var membersToInject = new Dictionary<string, List<string>>
         // BlitPrimaryToDefault both ask so the two never sharpen the same
         // pixels twice.
         "OptimumTaaSharpenIndex",
+        // World/UI separation: the snapshot and UI slots the parity dump names.
+        "OptimumSceneNoHudIndex",
+        "OptimumUiTargetIndex",
         "OptimumFsrBlitActive",
         "RenderOptimumTaaSharpen",
         // TAA: the jittered AO multiplied into the scene before the resolve, and
@@ -516,6 +522,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.
         "TaaSkyMotion",
+        // World/UI separation: the UI compose pass program.
+        "UiCompose",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
@@ -881,6 +889,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientMain", "OnFowChanged", 1),
     new("Vintagestory.Client.NoObf.ClientMain", "OnResize", 0),
     new("Vintagestory.Client.NoObf.ClientMain", "RenderAfterPostProcessing", 1),
+    // World/UI separation: the UI image is composed over the display image after the Ortho
+    // stage and before TriggerRenderStage(Done), where the with-HUD screenshot and the AVI
+    // writer are registered.
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderToDefaultFramebuffer", 1),
     new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerReloadShaders", 0),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),

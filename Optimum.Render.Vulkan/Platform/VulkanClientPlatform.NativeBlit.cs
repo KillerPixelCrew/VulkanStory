@@ -87,9 +87,11 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// The pipeline for one fullscreen program against one target, rebuilt only when the
-    /// program was relinked or the target's formats changed.
+    /// program was relinked or the target's formats changed. Opaque unless the pass states a
+    /// blend; a pass object always states the same one, so the blend is not part of the check.
     /// </summary>
-    private NativePipeline? NativePipelineFor(NativeFullscreenPass pass, ShaderProgramBase program, int framebufferId)
+    private NativePipeline? NativePipelineFor(NativeFullscreenPass pass, ShaderProgramBase program, int framebufferId,
+        AttachmentBlend[]? blend = null)
     {
         RenderTargetFormats? formats = device.NativeTargetFormats(framebufferId, 1u);
         if (formats == null) return null;
@@ -104,7 +106,7 @@ public partial class VulkanClientPlatform
         {
             ProgramId = program.ProgramId,
             PassName = pass.PassName,
-            Blend = OpaqueColorZero(),
+            Blend = blend ?? OpaqueColorZero(),
             DepthTest = false,
             DepthWrite = false,
             Cull = CullModeFlags.None,

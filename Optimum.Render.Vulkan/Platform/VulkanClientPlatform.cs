@@ -139,6 +139,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
         new(true, "SetLatencyFrameCap", new[] { "Int32" }),
+        // World/UI separation: the compose ClientMain and ScreenManager call.
+        new(true, "OptimumComposeUiTarget", Array.Empty<string>()),
         // Phase 2 step 2: the TAA post methods declare their frame-graph passes.
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.

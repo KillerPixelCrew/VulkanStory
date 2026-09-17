@@ -486,6 +486,12 @@ public partial class VulkanClientPlatform
             else
             {
                 blend[i] = AttachmentBlend.For(statedBlendOn, statedBlendMode);
+                // World/UI separation: a world-program draw into the UI image (held items in
+                // a dialog, the reticle's disc) accumulates coverage like the GUI does.
+                if (stated.IsUiImage(target?.FboId ?? PassDeclaration.DefaultFramebuffer))
+                {
+                    blend[i] = blend[i].ForUiImage();
+                }
             }
             if (i == motion) blend[i] = ReplaceBlend(statedBlendOn);
             blend[i].WriteMask &= ~statedColorMaskOff;
@@ -559,7 +565,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private AttachmentBlend[] StatedGuiSlots(RenderTargetFormats formats)
     {
-        AttachmentBlend[] slots = GuiSlots(formats, statedBlendOn, statedBlendMode);
+        AttachmentBlend[] slots = GuiSlots(formats, statedBlendOn, PassDeclaration.DefaultFramebuffer, statedBlendMode);
         slots[0].WriteMask &= ~statedColorMaskOff;
         return slots;
     }

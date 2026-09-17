@@ -664,6 +664,14 @@ USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `insta
   `chunkliquidmotion.vert` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
   convention, which the motion arithmetic expects.
 
+### ui-compose (world/UI separation, 2026-09-17)
+
+`ui-compose` joins the Optimum programs: a fullscreen pass-through of the UI image (`uiTex`), push block with the
+one sampler slot and no record. The Vulkan platform draws it twice per frame: opaque into the HUD-less snapshot
+(slot 23) and under premultiplied-alpha blending into the window image (the compose). Its fragment must never force
+alpha (`blit.frag`'s `outColor.a = 1` would cover the world with the UI image); `ui-separation-coverage-tests.cs`
+pins that for both twins.
+
 ## 10. Family decisions
 
 ### Family post (`ssao`, `godrays`, `findbright`, `blur`, `bilateralblur`, `colorgrade`, `transparentcompose`, `debugdepthbuffer`, `woittest`), 2026-09-15

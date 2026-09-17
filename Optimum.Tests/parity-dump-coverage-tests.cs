@@ -60,7 +60,20 @@ public class ParityDumpCoverageTests
         var aoSlots = new HashSet<int>(new[] { "OptimumAoWorkingSlot", "OptimumAoEdgesSlot", "OptimumAoDepthSlot", "OptimumAoOutputSlot" }.Select(c => constants[c]));
         Assert.Equal(4, aoSlots.Count(named.ContainsKey));
         Assert.DoesNotContain(glSlots, aoSlots.Contains);
-        Assert.Equal(glSlots, new SortedSet<int>(named.Keys.Where(slot => !aoSlots.Contains(slot))));
+        // World/UI separation: the HUD-less snapshot and the UI image are named for the dump and
+        // allocated by the Vulkan setup alone, through its separation partial; OpenGL has neither.
+        var separationSlots = new HashSet<int>(new[] { "OptimumSceneNoHudIndex", "OptimumUiTargetIndex" }.Select(c => constants[c]));
+        Assert.Equal(2, separationSlots.Count(named.ContainsKey));
+        Assert.DoesNotContain(glSlots, separationSlots.Contains);
+        Assert.Contains("AllocateUiSeparationTargets(list, width, height);", deviceBody);
+        string separation = File.ReadAllText(PatchReader.FindRepositoryFile(
+            "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.UiSeparation.cs"));
+        foreach (string slotConstant in new[] { "OptimumSceneNoHudIndex", "OptimumUiTargetIndex" })
+        {
+            Assert.Contains("list[" + slotConstant + "] = ", separation);
+            Assert.Contains("internal const int " + slotConstant + " = " + constants[slotConstant] + ";", separation);
+        }
+        Assert.Equal(glSlots, new SortedSet<int>(named.Keys.Where(slot => !aoSlots.Contains(slot) && !separationSlots.Contains(slot))));
 
         // Vanilla slots are named exactly as EnumFrameBuffer names them.
         Dictionary<string, int> enumValues = EnumValues();

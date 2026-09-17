@@ -291,6 +291,9 @@ public partial class VulkanClientPlatform
             device.OptInTransient(transientTarget.ColorTextureIds[0], transientSlot);
         }
 
+        // World/UI separation: the HUD-less scene snapshot and the UI image (UiSeparation.cs).
+        AllocateUiSeparationTargets(list, width, height);
+
         OptimumFinishDeviceFrameBufferSetup(list);
         return list;
     }
@@ -492,6 +495,8 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void DisposeFrameBuffers(List<FrameBufferRef> buffers)
     {
+        // The UI image may be what Default resolves to; it is about to go.
+        CloseUiScope();
         // The AO targets are sized to Primary and go with it.
         ReleaseAmbientOcclusionTargets();
         HashSet<int> deletedTextures = new HashSet<int>();

@@ -126,8 +126,20 @@ internal sealed class StatedRenderState
         AttachmentBlend blend = _blend[slot];
         blend.Enabled = BlendEnabled;
         blend.WriteMask = ((DrawBuffers(framebufferId) >> slot) & 1) != 0 ? ColorMask : 0;
+        if (IsUiImage(framebufferId)) blend = blend.ForUiImage();
         return blend;
     }
+
+    /// <summary>
+    /// World/UI separation: the UI image's target while the platform's UI scope is open, 0 otherwise
+    /// (VulkanClientPlatform.UiSeparation.cs). While it is set, Default means that image.
+    /// </summary>
+    public int UiImageFramebuffer;
+
+    /// <summary>Whether a draw into <paramref name="framebufferId" /> lands in the UI image.</summary>
+    public bool IsUiImage(int framebufferId) =>
+        UiImageFramebuffer > 0 &&
+        (framebufferId == Graph.PassDeclaration.DefaultFramebuffer || framebufferId == UiImageFramebuffer);
 
     public void SetDrawBuffers(int framebufferId, uint mask) => _drawBuffers[framebufferId] = mask;
 
