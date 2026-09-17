@@ -750,10 +750,8 @@ try {
         throw "Vanilla client files are corrupt ($($corrupt.Count) empty/truncated file(s)):`n  $names`nIf $winVanillaDir is Optimum's own cache, delete it and retry; if it points at your Vintage Story install, repair or reinstall Vintage Story $Version first."
     }
 
-    if ($freshExtract -or ($skipDownload -and -not (Test-Path (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256')))) {
+    if ($freshExtract -or -not (Test-Path (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256'))) {
         New-RuntimeDonorSnapshot $winVanillaDir $runtimeDonorDir
-    } elseif (-not (Test-Path (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256'))) {
-        Write-Warning 'Protected runtime-donor snapshot is missing. Run bootstrap.ps1 -Refresh before check-patches.ps1.'
     }
 
     # --- 2. Decompile closed-source DLLs ---
