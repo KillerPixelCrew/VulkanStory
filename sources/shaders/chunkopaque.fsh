@@ -149,9 +149,11 @@ void main()
 		outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 		outGNormal = gnormal;
 #if OPTIMUMAO > 0
-		// Optimum AO class channel (docs/research/ambient-occlusion.md C.5): plants, grass and
-		// cross-quad blocks draw in the no-cull opaque pass (haxyFade), and are thin like leaves.
-		if (haxyFade > 0) outGNormal.w = 1.0;
+		// Optimum AO class channel (docs/research/ambient-occlusion.md C.5): the thin class is the
+		// vertex stage's wind flag, which vanilla already writes into gnormal.w (grass, plants and
+		// leaves wave; blocks and snow layers do not). It used to be forced to 1 for the whole
+		// blend-no-cull pool as well, but that pool holds solid blocks too - snow layers - so in a
+		// snow-covered world 59 % of the visible pixels were 0.05-block occluders (2026-09-17).
 #endif
 #endif
 
@@ -218,7 +220,6 @@ void main()
 	outGNormal = gnormal;
 #if OPTIMUMAO > 0
 	// Optimum AO class channel (C.5): the no-cull opaque pass (plants, grass, cross-quads) is thin.
-	if (haxyFade > 0) outGNormal.w = 1.0;
 #endif
 #endif
 
