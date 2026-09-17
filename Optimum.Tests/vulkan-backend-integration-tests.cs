@@ -406,7 +406,7 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("bool setupSsao = ClientSettings.SSAOQuality > 0;", added);
         Assert.Contains("int primaryAttachments = (setupSsao ? 4 : 2);", added);
-        Assert.Contains("device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", added);
+        Assert.Contains("StateDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", added);
     }
 
     /// <summary>

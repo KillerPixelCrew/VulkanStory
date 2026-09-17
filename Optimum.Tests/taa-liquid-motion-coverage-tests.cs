@@ -147,7 +147,7 @@ public class TaaLiquidMotionCoverageTests
         // Device path (VulkanClientPlatform since Phase 1A step 4): the mask is the single
         // motion bit, not the prefix mask.
         string vulkan = VulkanPlatformSource.Read();
-        Assert.Contains("device.SetDrawBuffers(FrameBuffers[0].FboId, 1 << MotionAttachmentIndex);",
+        Assert.Contains("StateDrawBuffers(FrameBuffers[0].FboId, 1 << MotionAttachmentIndex);",
             vulkan.Substring(vulkan.IndexOf("public override void EnableMotionOnlyDrawBuffers()", StringComparison.Ordinal)));
 
         // GL path: GL_NONE in every slot below the motion attachment, and a

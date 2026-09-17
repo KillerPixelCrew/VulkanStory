@@ -71,9 +71,9 @@ public class TaaPipelineCoverageTests
         // primaryAttachments (2 or 4 colour targets), never including the new
         // motion attachment - it is enabled per-pass by writers, not by
         // default.
-        Assert.Contains("device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", platform);
+        Assert.Contains("StateDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", platform);
         // Transparent (OIT) keeps its untouched six/three-output mask.
-        Assert.Contains("device.SetDrawBuffers(transparent.FboId, 7);", platform);
+        Assert.Contains("StateDrawBuffers(transparent.FboId, 7);", platform);
     }
 
     [Fact]
@@ -88,9 +88,9 @@ public class TaaPipelineCoverageTests
         Assert.Contains("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", vulkan);
         // An excluded attachment is not cleared on either backend. Checking
         // only that ClearColor exists missed Vulkan's silent masked-out no-op.
-        int enable = vulkan.IndexOf("device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
+        int enable = vulkan.IndexOf("StateDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
         int clear = vulkan.IndexOf("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
-        int restore = vulkan.IndexOf("device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
+        int restore = vulkan.IndexOf("StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
         Assert.True(enable >= 0 && enable < clear && restore > clear);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", Read("Optimum.Patcher/Program.cs"));
         // GL path.

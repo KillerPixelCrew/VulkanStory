@@ -955,4 +955,53 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("FrameBuffers[(int)EnumFrameBuffer.LiquidDepth]", clouds);
         Assert.Contains("OPTIMUM_VK_NATIVE_CLOUDS", clouds);
     }
+    /// <summary>
+    /// The generic native draw (removal of the emulation layer, step 1): every mesh, instanced,
+    /// multi-draw and fullscreen draw the dedicated routes do not take is recorded natively from
+    /// the state the client stated, before the emulated draw is reached. The state is recorded with
+    /// OpenGL's semantics at the platform's own virtuals, the fork bridge's included, and the pass
+    /// declares every colour slot attached on the device - the OIT accumulation slots included.
+    /// </summary>
+    [Fact]
+    public void EveryRemainingDrawTakesTheGenericStatedRouteFirst()
+    {
+        string meshes = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs");
+        Assert.Contains("if (TryDrawStated(vAO, 1, null, null, 0))", meshes);
+        Assert.Contains("if (TryDrawStated(null, 1, null, null, 0))", meshes);
+        Assert.Contains("if (TryDrawStated(vAO, 1, indices, indicesSizes, groupCount))", meshes);
+        Assert.Contains("TryDrawStated(vAO, quantity, null, null, 0)", meshes);
+        // Each stated route sits before its emulated draw.
+        Assert.True(meshes.IndexOf("if (TryDrawStated(vAO, 1, null, null, 0))", StringComparison.Ordinal) <
+                    meshes.IndexOf("device.DrawMesh(vAO.VaoId);", StringComparison.Ordinal));
+
+        string route = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs");
+        Assert.Contains("RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue);", route);
+        Assert.Contains("units[i] = device.NativeSamplerUnit(program.ProgramId, names[i]);", route);
+        Assert.Contains("reads[i] = stated.TextureAt(units[i]);", route);
+        Assert.Contains("OPTIMUM_VK_NATIVE_STATED", route);
+        Assert.Contains("OPTIMUM_VK_STATED_CHECK", route);
+
+        string state = Read("Optimum.Render.Vulkan/Platform/StatedRenderState.cs");
+        Assert.Contains("public void SetBlendEnabled(bool enabled) => BlendEnabled = enabled;", state);
+        Assert.Contains("_drawBuffers.TryGetValue(framebufferId, out uint mask) ? mask : 1u;", state);
+
+        // Recorded where the client states it: no draw-buffer or per-slot blend call bypasses the record.
+        foreach (string file in new[] { "FrameBuffers", "Taa", "Leaf" })
+        {
+            string source = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform." + file + ".cs");
+            Assert.DoesNotContain("device.SetDrawBuffers(", source);
+            Assert.DoesNotContain("device.SetBlendFuncSeparate(", source);
+        }
+        string platformState = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.State.cs");
+        Assert.Contains("stated.SetBlendEnabled(on);", platformState);
+        Assert.Contains("stated.LineWidth = width;", platformState);
+        Assert.Contains("stated.LineWidth = 1.5f;", Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Frame.cs"));
+        string fork = Read("Optimum.Render.Vulkan/Platform/VulkanForkGraphics.cs");
+        Assert.Contains("platform.NoteForkTexture(unit, textureId);", fork);
+        Assert.Contains("platform.NoteForkDrawBuffers(framebufferId, attachmentMask);", fork);
+        Assert.Contains("platform.NoteForkViewport(x, y, width, height);", fork);
+        string clouds = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeClouds.cs");
+        Assert.Contains("stated.DepthTest = enabled;", clouds);
+        Assert.Contains("stated.SetBlendEnabled(enabled);", clouds);
+    }
 }

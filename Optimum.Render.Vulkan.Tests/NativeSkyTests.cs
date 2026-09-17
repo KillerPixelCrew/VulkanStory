@@ -164,6 +164,16 @@ public class NativeSkyTests(ITestOutputHelper output)
                 CrashMarkerDataPath = dataPath,
             };
 
+            // These tests pin a dedicated native route against the emulated route its seam's neutral
+
+            // body used to take; the fixture sets state on the device directly, so the generic stated
+
+            // route (which reads the platform's record) stays out of the comparison until the emulated
+
+            // route is removed. NativeStatedTests covers the generic route itself.
+
+            platform.NativeStatedEnabled = false;
+
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {
                 output.WriteLine("Vulkan unavailable: " + reason);

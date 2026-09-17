@@ -79,6 +79,7 @@ public partial class VulkanClientPlatform
 
     public override void BindSampler(int unit, int samplerId)
     {
+        stated.BindSampler(unit, samplerId);
         device.BindSampler(unit, samplerId);
     }
 
@@ -180,15 +181,18 @@ public partial class VulkanClientPlatform
         // never reads one (docs/vulkan-native-render-systems.md, decision 3).
         NoteProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
+        stated.BindTexture(textureNumber, textureId);
         device.BindTexture(textureNumber, textureId);
         if (program.customSamplers.TryGetValue(samplerName, out var optimumSampler))
         {
+            stated.BindSampler(textureNumber, optimumSampler);
             device.BindSampler(textureNumber, optimumSampler);
         }
         else
         {
             // Clear any override left on this unit, or the texture's own
             // filtering would be silently ignored.
+            stated.BindSampler(textureNumber, 0);
             device.BindSampler(textureNumber, 0);
         }
         if (program.clampTToEdge)
@@ -203,6 +207,7 @@ public partial class VulkanClientPlatform
     {
         NoteProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
+        stated.BindTexture(textureNumber, textureId);
         device.BindTextureCube(textureNumber, textureId);
         if (program.clampTToEdge)
         {

@@ -43,7 +43,11 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
     public override void SetTextureParameter(int textureId, int parameterName, int value) =>
         device.SetTextureParameter(textureId, parameterName, value);
 
-    public override void BindTexture(int unit, int textureId) => device.BindTexture(unit, textureId);
+    public override void BindTexture(int unit, int textureId)
+    {
+        platform.NoteForkTexture(unit, textureId);
+        device.BindTexture(unit, textureId);
+    }
 
     public override void DeleteTexture(int textureId) => device.DeleteTexture(textureId);
 
@@ -52,8 +56,11 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
     public override void AttachTexture(int framebufferId, EnumFramebufferAttachment attachment, int textureId, int layer) =>
         device.AttachTexture(framebufferId, attachment, textureId, layer);
 
-    public override void SetDrawBuffers(int framebufferId, int attachmentMask) =>
+    public override void SetDrawBuffers(int framebufferId, int attachmentMask)
+    {
+        platform.NoteForkDrawBuffers(framebufferId, attachmentMask);
         device.SetDrawBuffers(framebufferId, attachmentMask);
+    }
 
     public override void BindFramebuffer(int framebufferId)
     {
@@ -69,7 +76,11 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
 
     public override void DeleteFramebuffer(int framebufferId) => device.DeleteFramebuffer(framebufferId);
 
-    public override void SetViewport(int x, int y, int width, int height) => device.SetViewport(x, y, width, height);
+    public override void SetViewport(int x, int y, int width, int height)
+    {
+        platform.NoteForkViewport(x, y, width, height);
+        device.SetViewport(x, y, width, height);
+    }
 
     public override void SetDepthTest(bool enabled)
     {

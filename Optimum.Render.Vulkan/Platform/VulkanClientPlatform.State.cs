@@ -1,3 +1,4 @@
+using Optimum.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
 using System;
 using System.Runtime.InteropServices;
@@ -125,11 +126,13 @@ public partial class VulkanClientPlatform
 
     public override void GLWireframes(bool toggle)
     {
+        stated.Wireframe = toggle;
         device.SetWireframe(toggle);
     }
 
     public override void GlViewport(int x, int y, int width, int height)
     {
+        stated.Viewport = new Rect2D(new Offset2D(x, y), new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
         device.SetViewport(x, y, width, height);
     }
 
@@ -140,6 +143,7 @@ public partial class VulkanClientPlatform
         int clippedY = Math.Max(0, y);
         statedScissor = new Rect2D(new Offset2D(clippedX, clippedY),
             new Extent2D((uint)Math.Max(0, width - (clippedX - x)), (uint)Math.Max(0, height - (clippedY - y))));
+        stated.Scissor = statedScissor;
         device.SetScissor(x, y, width, height);
     }
 
@@ -159,24 +163,28 @@ public partial class VulkanClientPlatform
     public override void GlScissorFlag(bool enable)
     {
         scissorEnabled = enable;
+        stated.ScissorEnabled = enable;
         device.SetScissorEnabled(enable);
     }
 
     public override void GlEnableDepthTest()
     {
         statedDepthTest = true;
+        stated.DepthTest = true;
         device.SetDepthTest(true);
     }
 
     public override void GlDisableDepthTest()
     {
         statedDepthTest = false;
+        stated.DepthTest = false;
         device.SetDepthTest(false);
     }
 
     public override void BindTexture2d(int texture)
     {
         // The GL body activates unit 0 first, so this binds to unit 0 too.
+        stated.BindTexture(0, texture);
         device.BindTexture(0, texture);
         // Remembered for GlGenerateTex2DMipmaps, whose GL form acts on
         // whatever is bound and so has no argument to route.
@@ -185,12 +193,14 @@ public partial class VulkanClientPlatform
 
     public override void BindTextureCubeMap(int texture)
     {
+        stated.BindTexture(0, texture);
         device.BindTextureCube(0, texture);
     }
 
     public override void UnBindTextureCubeMap()
     {
         // Mirrors BindTextureCubeMap above, which binds to unit 0.
+        stated.BindTexture(0, 0);
         device.BindTextureCube(0, 0);
     }
 
@@ -198,6 +208,18 @@ public partial class VulkanClientPlatform
     {
         statedBlendOn = on;
         statedBlendMode = blendMode;
+        // GL: glEnable(GL_BLEND) and the mode's functions on every draw buffer when on,
+        // glDisable alone - the functions stay - when off (ClientPlatformWindows.GlToggleBlend).
+        stated.SetBlendEnabled(on);
+        if (on)
+        {
+            stated.SetBlendMode(blendMode);
+            if (blendMode == EnumBlendMode.Standard && OptimumRenderSsao)
+            {
+                stated.SetSlotBlend(2, 32774, 1, 0, 1, 0);
+                stated.SetSlotBlend(3, 32774, 1, 0, 1, 0);
+            }
+        }
         device.SetBlend(on, blendMode);
         if (on && OptimumRenderSsao)
         {
@@ -222,18 +244,21 @@ public partial class VulkanClientPlatform
     public override void GlDisableCullFace()
     {
         statedCull = false;
+        stated.CullEnabled = false;
         device.SetCullFace(false);
     }
 
     public override void GlEnableCullFace()
     {
         statedCull = true;
+        stated.CullEnabled = true;
         device.SetCullFace(true);
     }
 
     public override void GLLineWidth(float width)
     {
         statedLineWidth = width;
+        stated.LineWidth = width;
         device.SetLineWidth(width);
     }
 
@@ -249,6 +274,7 @@ public partial class VulkanClientPlatform
     public override void GlDepthMask(bool flag)
     {
         statedDepthWrite = flag;
+        stated.DepthWrite = flag;
         device.SetDepthMask(flag);
     }
 
@@ -258,28 +284,33 @@ public partial class VulkanClientPlatform
         // the seam takes: it cannot reference this enum, since it lives in
         // VintagestoryLib and the contracts assembly does not depend on it.
         statedDepthFunc = (int)depthFunc;
+        stated.DepthCompare = GlEnums.CompareOpFrom((int)depthFunc);
         device.SetDepthFunc((int)depthFunc);
     }
 
     public override void GlCullFaceBack()
     {
         statedCullBack = true;
+        stated.CullBack = true;
         device.SetCullFaceMode(true);
     }
 
     public override void GlCullFaceFront()
     {
         statedCullBack = false;
+        stated.CullBack = false;
         device.SetCullFaceMode(false);
     }
 
     public override void GlEnableStencilTest()
     {
+        stated.StencilTest = true;
         device.SetStencilTest(true);
     }
 
     public override void GlDisableStencilTest()
     {
+        stated.StencilTest = false;
         device.SetStencilTest(false);
     }
 
@@ -308,6 +339,7 @@ public partial class VulkanClientPlatform
     {
         statedColorMaskOff = (r ? 0 : ColorComponentFlags.RBit) | (g ? 0 : ColorComponentFlags.GBit) |
                              (b ? 0 : ColorComponentFlags.BBit) | (a ? 0 : ColorComponentFlags.ABit);
+        stated.SetColorMask(r, g, b, a);
         device.SetColorMask(r, g, b, a);
     }
 

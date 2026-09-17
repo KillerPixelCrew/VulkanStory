@@ -228,10 +228,10 @@ public class TaaTerrainMotionCoverageTests
         Assert.Contains("EnableMotionDrawBuffers();", platform);
         Assert.Contains("RestorePrimaryDrawBuffers();", platform);
         Assert.Contains(
-            "device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);",
+            "StateDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);",
             vulkan);
         Assert.Contains(
-            "device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);",
+            "StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);",
             vulkan);
 
         // GL path: the same two sets, as DrawBuffers arrays - built once and
@@ -304,7 +304,7 @@ public class TaaTerrainMotionCoverageTests
         // VulkanClientPlatform, whose GlToggleBlend re-applies it the same way.
         string vulkan = VulkanPlatformSource.Read();
         Assert.Contains("public override void ApplyOptimumMotionBlendState()", platform);
-        Assert.Contains("device.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 0, 1, 0);", vulkan);
+        Assert.Contains("StateSlotBlend(MotionAttachmentIndex, 32774, 1, 0, 1, 0);", vulkan);
         Assert.Contains("GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)0);", platform);
         int deviceToggle = vulkan.IndexOf("public override void GlToggleBlend(bool on, EnumBlendMode blendMode", StringComparison.Ordinal);
         Assert.True(deviceToggle >= 0);
