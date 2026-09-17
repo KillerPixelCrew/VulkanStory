@@ -48,9 +48,17 @@ public partial class VulkanClientPlatform
         forkFramebuffer = current != null && current.FboId == framebufferId ? 0 : framebufferId;
     }
 
-    internal void NoteForkDepthTest(bool enabled) => statedDepthTest = enabled;
+    internal void NoteForkDepthTest(bool enabled)
+    {
+        statedDepthTest = enabled;
+        stated.DepthTest = enabled;
+    }
 
-    internal void NoteForkBlend(bool enabled) => statedBlendOn = enabled;
+    internal void NoteForkBlend(bool enabled)
+    {
+        statedBlendOn = enabled;
+        stated.SetBlendEnabled(enabled);
+    }
 
     /// <summary>A cloud renderer's RenderMesh: the native pass, or false for the emulated draw.</summary>
     private bool TryRenderCloudsNative(MeshRef mesh)

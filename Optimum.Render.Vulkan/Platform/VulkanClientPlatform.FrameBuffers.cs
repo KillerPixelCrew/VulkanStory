@@ -123,7 +123,7 @@ public partial class VulkanClientPlatform
                 (EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
                 primary.ColorTextureIds[attachment], 0);
         }
-        device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);
+        StateDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);
         list[0] = primary;
         SetOptimumMotionAttachmentIndex(motionAttachmentIndex);
 
@@ -147,7 +147,7 @@ public partial class VulkanClientPlatform
                 transparent.ColorTextureIds[attachment], 0);
         }
         device.AttachTexture(transparent.FboId, EnumFramebufferAttachment.DepthAttachment, primary.DepthTextureId, 0);
-        device.SetDrawBuffers(transparent.FboId, 7);
+        StateDrawBuffers(transparent.FboId, 7);
         transparent.DepthTextureId = primary.DepthTextureId;
         list[1] = transparent;
 
@@ -166,7 +166,7 @@ public partial class VulkanClientPlatform
             // A post-chain transient (Transient pool class); see TransientAllocator.PostChainSlots.
             ssao.ColorTextureIds[0] = device.CreateTransientTexture2DRaw(ssaoWidth, ssaoHeight, 6407, 13);
             device.AttachTexture(ssao.FboId, EnumFramebufferAttachment.ColorAttachment0, ssao.ColorTextureIds[0], 0);
-            device.SetDrawBuffers(ssao.FboId, 1);
+            StateDrawBuffers(ssao.FboId, 1);
 
             // Rotation noise, and the sample kernel that goes with it. Same seed
             // and draw order as the GL path, so the pattern matches exactly.
@@ -345,7 +345,7 @@ public partial class VulkanClientPlatform
         }
 
         target.ColorTextureIds = colorTextureIds.ToArray();
-        device.SetDrawBuffers(target.FboId, drawBufferMask);
+        StateDrawBuffers(target.FboId, drawBufferMask);
 
         string status;
         if (!device.CheckFramebufferComplete(target.FboId, out status))
@@ -381,7 +381,7 @@ public partial class VulkanClientPlatform
         // the reduced-resolution blur passes require fractional texel samples.
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
         device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
-        device.SetDrawBuffers(target.FboId, 1);
+        StateDrawBuffers(target.FboId, 1);
         return target;
     }
 
@@ -397,7 +397,7 @@ public partial class VulkanClientPlatform
             EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
         SetupOptimumTextureSampler(target.DepthTextureId, 9729, 33071);
         device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
-        device.SetDrawBuffers(target.FboId, 0);
+        StateDrawBuffers(target.FboId, 0);
         return target;
     }
 
@@ -436,7 +436,7 @@ public partial class VulkanClientPlatform
                 (EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
                 target.ColorTextureIds[attachment], 0);
         }
-        device.SetDrawBuffers(target.FboId, 7);
+        StateDrawBuffers(target.FboId, 7);
         if (!device.CheckFramebufferComplete(target.FboId, out string status))
         {
             throw new Exception("Optimum TAA history FBO: " + status);
@@ -550,6 +550,7 @@ public partial class VulkanClientPlatform
             return;
         }
         device.BindFramebuffer(value.FboId);
+        NoteForkViewport(0, 0, value.Width, value.Height);
         device.SetViewport(0, 0, value.Width, value.Height);
         DeclareBoundPass();
     }
@@ -608,9 +609,9 @@ public partial class VulkanClientPlatform
                 // Motion is excluded until a writer opts in, so temporarily
                 // enable it just as the GL branch does. Otherwise stale
                 // motion/reactivity survives and can reject all TAA history.
-                device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
+                StateDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
                 device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);
-                device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
+                StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
             }
             device.ClearDepth(1f);
             break;
@@ -619,6 +620,7 @@ public partial class VulkanClientPlatform
         case EnumFrameBuffer.ShadowmapNear:
         {
             FrameBufferRef optimumTarget = FrameBuffers[(int)framebuffer];
+            NoteForkViewport(0, 0, optimumTarget.Width, optimumTarget.Height);
             device.SetViewport(0, 0, optimumTarget.Width, optimumTarget.Height);
             device.ClearDepth(1f);
             break;
@@ -639,14 +641,11 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void ApplyTransparentPassBlendState()
     {
-        device.SetDrawBuffers(FrameBuffers[1].FboId, 7);
-        device.SetBlend(true, EnumBlendMode.Standard);
-        device.SetBlendEquation(0, 32774);
-        device.SetBlendFuncSeparate(0, 1, 1, 1, 1);
-        device.SetBlendEquation(1, 32774);
-        device.SetBlendFuncSeparate(1, 0, 769, 0, 769);
-        device.SetBlendEquation(2, 32774);
-        device.SetBlendFuncSeparate(2, 770, 771, 770, 771);
+        StateDrawBuffers(FrameBuffers[1].FboId, 7);
+        StateBlend(true, EnumBlendMode.Standard);
+        StateSlotBlend(0, 32774, 1, 1, 1, 1);
+        StateSlotBlend(1, 32774, 0, 769, 0, 769);
+        StateSlotBlend(2, 32774, 770, 771, 770, 771);
         // Phase 3b stage 2: the same contract, recorded for the native chunk passes that draw
         // into this target (VulkanClientPlatform.NativeChunks.cs).
         NoteNativeTransparentBlend(0, 32774, 1, 1, 1, 1);
@@ -676,8 +675,8 @@ public partial class VulkanClientPlatform
     public override void ApplyTransparentMergeBlendState()
     {
         device.SetDepthTest(false);
-        device.SetBlend(true, EnumBlendMode.Standard);
-        device.SetBlendFuncSeparate(0, 770, 771, 770, 771);
+        StateBlend(true, EnumBlendMode.Standard);
+        StateSlotBlendFunc(0, 770, 771, 770, 771);
     }
 
     /// <summary>
@@ -717,7 +716,7 @@ public partial class VulkanClientPlatform
     public override void BeginFinalCompositionDrawBuffers()
     {
         DeclareFinalCompositionPass();
-        device.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 1);
+        StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 1);
         device.SetDepthTest(false);
     }
 
@@ -727,11 +726,11 @@ public partial class VulkanClientPlatform
         device.EndPass();
         if (ssaoAttachments)
         {
-            device.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);
+            StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);
         }
         else
         {
-            device.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 3);
+            StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 3);
         }
     }
 }

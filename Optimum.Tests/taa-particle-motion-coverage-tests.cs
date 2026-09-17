@@ -276,8 +276,7 @@ public class TaaParticleMotionCoverageTests
         Assert.Contains("GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)1);", state);
         string deviceState = MethodBodyAfter(VulkanPlatformSource.Read(), "public override void ApplyOptimumMotionAccumulateBlendState()");
         Assert.Contains("if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;", deviceState);
-        Assert.Contains("device.SetBlendEquation(MotionAttachmentIndex, 32774);", deviceState);
-        Assert.Contains("device.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 1, 1, 1);", deviceState);
+        Assert.Contains("StateSlotBlend(MotionAttachmentIndex, 32774, 1, 1, 1, 1);", deviceState);
 
         string? patch = TryFind("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
         Assert.True(patch != null, "ClientPlatformWindows has no patch, so the change never ships");

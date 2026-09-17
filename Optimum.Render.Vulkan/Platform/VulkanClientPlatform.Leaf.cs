@@ -146,12 +146,12 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BeginOitAccumulation(FrameBufferRef transparent)
     {
-        device.SetDrawBuffers(transparent.FboId, 0x3F);
-        device.SetBlendFuncSeparate(0, 774, 0, 774, 0);
-        device.SetBlendFuncSeparate(1, 774, 0, 774, 0);
-        device.SetBlendFuncSeparate(3, 1, 1, 1, 1);
-        device.SetBlendFuncSeparate(4, 1, 1, 1, 1);
-        device.SetBlendFuncSeparate(5, 1, 1, 1, 1);
+        StateDrawBuffers(transparent.FboId, 0x3F);
+        StateSlotBlendFunc(0, 774, 0, 774, 0);
+        StateSlotBlendFunc(1, 774, 0, 774, 0);
+        StateSlotBlendFunc(3, 1, 1, 1, 1);
+        StateSlotBlendFunc(4, 1, 1, 1, 1);
+        StateSlotBlendFunc(5, 1, 1, 1, 1);
         // Phase 3b stage 2: the same contract, recorded for the native chunk passes that draw
         // into this target - a native pipeline states its blend rather than reading the
         // tracker's back (VulkanClientPlatform.NativeChunks.cs). Slot 2 keeps whatever the
@@ -172,6 +172,8 @@ public partial class VulkanClientPlatform
     /// <summary>Units 6 and 7; the device binds by unit whatever the texture's dimensionality.</summary>
     public override void BindOitTextures(int revealTexture, int accumTexture)
     {
+        stated.BindTexture(6, revealTexture);
+        stated.BindTexture(7, accumTexture);
         device.BindTexture(6, revealTexture);
         device.BindTexture(7, accumTexture);
     }

@@ -333,6 +333,97 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal Rect2D NativeCurrentViewport => _state.Viewport;
 
+    /// <summary>
+    /// The unit a program's sampler reads: the client's SetSamplerUnit mapping, else the sampler's
+    /// declaration order - the resolution the emulated draw makes. -1 for an unknown program or name.
+    /// </summary>
+    internal int NativeSamplerUnit(int programId, string samplerName)
+    {
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program)) return -1;
+        if (program.SamplerUnits.TryGetValue(samplerName, out int mapped)) return mapped;
+        foreach (SamplerBinding declared in program.Interface.Samplers)
+        {
+            if (string.Equals(declared.Name, samplerName, StringComparison.Ordinal)) return declared.Order;
+        }
+        return -1;
+    }
+
+    /// <summary>The sampling state of a standalone sampler object (GenSampler), or null.</summary>
+    internal SamplerState? NativeStandaloneSampler(int samplerId) =>
+        _standaloneSamplers.TryGetValue(samplerId, out SamplerState state) ? state : null;
+
+    /// <summary>The depth texture attached to a framebuffer, 0 without one.</summary>
+    internal int NativeFramebufferDepthTexture(int framebufferId) =>
+        _targets.Get(ResolveNativeFramebuffer(framebufferId))?.DepthTextureId ?? 0;
+
+    /// <summary>
+    /// Temporary (removal of the emulation layer, step 1): every difference between what the platform
+    /// stated for a generic native draw and what the device's tracked GL state holds at that moment.
+    /// Deleted with the tracker.
+    /// </summary>
+    internal List<string> DebugStatedMismatches(int programId, int framebufferId, AttachmentBlend[] blend,
+        NativePipelineDescription description, Rect2D viewport, bool scissorEnabled, Rect2D scissor,
+        NativeTexture[] textures)
+    {
+        var result = new List<string>();
+        if (_state.CurrentProgram != programId) result.Add("program: device " + _state.CurrentProgram + ", stated " + programId);
+        int resolved = ResolveNativeFramebuffer(framebufferId);
+        VulkanFramebuffer? bound = _targets.Bound;
+        if (bound == null || bound.Id != resolved) result.Add("target: device " + (bound?.Id ?? 0) + ", stated " + resolved);
+        uint drawBuffers = bound?.DrawBufferMask ?? 0;
+        for (int i = 0; i < blend.Length; i++)
+        {
+            AttachmentBlend device = _state.BlendFor(i);
+            ColorComponentFlags deviceMask = ((drawBuffers >> i) & 1) != 0 ? _state.ColorMask : 0;
+            if (deviceMask != blend[i].WriteMask) result.Add("slot " + i + " write mask: device " + deviceMask + ", stated " + blend[i].WriteMask);
+            if (device.Enabled != blend[i].Enabled) result.Add("slot " + i + " blend enable: device " + device.Enabled + ", stated " + blend[i].Enabled);
+            else if (device.Enabled && (device.SrcColor != blend[i].SrcColor || device.DstColor != blend[i].DstColor ||
+                     device.SrcAlpha != blend[i].SrcAlpha || device.DstAlpha != blend[i].DstAlpha ||
+                     device.ColorOp != blend[i].ColorOp || device.AlphaOp != blend[i].AlphaOp))
+            {
+                result.Add("slot " + i + " blend: device " + device.SrcColor + "/" + device.DstColor + " " + device.ColorOp +
+                    ", stated " + blend[i].SrcColor + "/" + blend[i].DstColor + " " + blend[i].ColorOp);
+            }
+        }
+        if (_state.DepthTest != description.DepthTest) result.Add("depth test: device " + _state.DepthTest + ", stated " + description.DepthTest);
+        if (_state.DepthWrite != description.DepthWrite && !description.SamplesBoundDepth) result.Add("depth write: device " + _state.DepthWrite + ", stated " + description.DepthWrite);
+        if (_state.DepthCompare != description.DepthCompare) result.Add("depth compare: device " + _state.DepthCompare + ", stated " + description.DepthCompare);
+        CullModeFlags deviceCull = _state.CullEnabled ? _state.CullMode : CullModeFlags.None;
+        if (deviceCull != description.Cull) result.Add("cull: device " + deviceCull + ", stated " + description.Cull);
+        if (!_state.LineWidth.Equals(description.LineWidth)) result.Add("line width: device " + _state.LineWidth + ", stated " + description.LineWidth);
+        if (_state.PolygonMode != description.PolygonMode) result.Add("polygon mode: device " + _state.PolygonMode + ", stated " + description.PolygonMode);
+        Rect2D deviceViewport = _state.Viewport;
+        if (deviceViewport.Offset.X != viewport.Offset.X || deviceViewport.Offset.Y != viewport.Offset.Y ||
+            deviceViewport.Extent.Width != viewport.Extent.Width || deviceViewport.Extent.Height != viewport.Extent.Height)
+        {
+            result.Add("viewport: device " + deviceViewport.Offset.X + "," + deviceViewport.Offset.Y + " " + deviceViewport.Extent.Width + "x" + deviceViewport.Extent.Height +
+                ", stated " + viewport.Offset.X + "," + viewport.Offset.Y + " " + viewport.Extent.Width + "x" + viewport.Extent.Height);
+        }
+        if (_state.ScissorEnabled != scissorEnabled) result.Add("scissor enable: device " + _state.ScissorEnabled + ", stated " + scissorEnabled);
+        else if (scissorEnabled && (_state.Scissor.Offset.X != scissor.Offset.X || _state.Scissor.Offset.Y != scissor.Offset.Y ||
+                 _state.Scissor.Extent.Width != scissor.Extent.Width || _state.Scissor.Extent.Height != scissor.Extent.Height))
+        {
+            result.Add("scissor rect differs");
+        }
+        if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
+        {
+            foreach (SamplerBinding declared in program.Interface.Samplers)
+            {
+                int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped) ? mapped : declared.Order;
+                int deviceTexture = (uint)unit < GlStateTracker.MaxTextureUnits ? _boundTextures[unit] : 0;
+                foreach (NativeTexture texture in textures)
+                {
+                    if (texture.Sampler.IsPresent && texture.Sampler.Index == program.Interface.Samplers.IndexOf(declared) &&
+                        texture.TextureId != deviceTexture)
+                    {
+                        result.Add("sampler " + declared.Name + " (unit " + unit + "): device " + deviceTexture + ", stated " + texture.TextureId);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     /// <summary>The manifest variant a program was linked for; "" for a program the rewriter linked.</summary>
     internal string NativeVariantOf(int programId) =>
         _programVariants.TryGetValue(programId, out string? key) ? key : "";

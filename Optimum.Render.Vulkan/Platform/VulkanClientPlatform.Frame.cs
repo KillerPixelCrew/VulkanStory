@@ -30,6 +30,8 @@ public partial class VulkanClientPlatform
     /// <summary>GL probes by setting a width; the device answers it as a capability.</summary>
     public override bool ProbeThickLineSupport()
     {
+        // GL leaves the probed width set, so the stated line width is 1.5 from here on too.
+        stated.LineWidth = 1.5f;
         device.SetLineWidth(1.5f);
         return device.SupportsThickLines;
     }

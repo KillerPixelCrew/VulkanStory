@@ -80,6 +80,11 @@ public partial class VulkanClientPlatform
             return;
         }
         if (TryRenderStandardMeshNative(modelRef)) return;
+        if (TryDrawStated(vAO, 1, null, null, 0))
+        {
+            RuntimeStats.drawCallsCount--; // the stated route counted it already
+            return;
+        }
         device.DrawMesh(vAO.VaoId);
     }
 
@@ -88,6 +93,11 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         // The post passes generate their three vertices in the shader, so the
         // mesh carries no buffers and none are bound.
+        if (TryDrawStated(null, 1, null, null, 0))
+        {
+            RuntimeStats.drawCallsCount--;
+            return;
+        }
         device.DrawFullscreenTriangle();
     }
 
@@ -109,6 +119,11 @@ public partial class VulkanClientPlatform
         // The chunk renderer's one multidraw per pool. GL takes byte offsets
         // into the index buffer; the device converts them to index counts and
         // issues a single indirect draw.
+        if (TryDrawStated(vAO, 1, indices, indicesSizes, groupCount))
+        {
+            RuntimeStats.drawCallsCount--;
+            return;
+        }
         device.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);
     }
 
@@ -117,6 +132,7 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         VAO vAO = (VAO)modelRef;
         if (TryRenderParticles2dNative(modelRef, quantity)) { RuntimeStats.drawCallsCount--; return; }
+        if (quantity > 0 && TryDrawStated(vAO, quantity, null, null, 0)) { RuntimeStats.drawCallsCount--; return; }
         device.DrawMeshInstanced(vAO.VaoId, quantity);
     }
 
