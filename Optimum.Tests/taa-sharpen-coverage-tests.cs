@@ -495,4 +495,23 @@ public class TaaSharpenCoverageTests
             return null;
         }
     }
+
+    /// <summary>
+    /// Both sharpen shaders carry RCAS's noise limiter (FSR_RCAS_DENOISE, shipped enabled in
+    /// FSR 3): the lobe is scaled by 1 - 0.5 * (the centre's deviation from the mean of its four
+    /// neighbours over the ring's range). Without it the sharpen multiplied the TAA-converged
+    /// residual of the GTAO term 2.7x on flat faces and drew it as grain (2026-09-17).
+    /// </summary>
+    [Fact]
+    public void SharpenLimitsItsLobeOnLonePixelNoise()
+    {
+        foreach (string path in new[] { "sources/shaders/taa-sharpen.fsh", "sources/shaders-vk/taa-sharpen.frag" })
+        {
+            string shader = File.ReadAllText(PatchReader.FindRepositoryFile(path));
+            Assert.Contains("float nz = 0.25 * (bL + dL + fL + hL) - eL;", shader);
+            Assert.Contains("nz = clamp(abs(nz) / max(maxL - minL, 1.0 / 65536.0), 0.0, 1.0);", shader);
+            Assert.Contains("nz = -0.5 * nz + 1.0;", shader);
+            Assert.Contains("lobe *= nz * strength * exp2(-2.0 * (1.0 - strength));", shader);
+        }
+    }
 }

@@ -959,6 +959,80 @@ public class TaaResolveTests
         return (history, glow);
     }
 
+    /// <summary>
+    /// A converged surface under per-frame stochastic noise (the GTAO term's residual after its
+    /// spatial denoise: XeGTAO relies on TAA for the temporal part). A static camera, zero motion,
+    /// a mid-grey surface and +-noiseAmplitude white noise that changes every frame. After 24
+    /// resolves the history must carry far less of that noise than one frame does: with alpha
+    /// 0.1 and the anti-flicker weighting the expected residual is about a seventh of the input.
+    ///
+    /// The textured rows report, without asserting, how much a static +-textureAmplitude per-texel
+    /// pattern is distorted by the neighbourhood clip (a texel further than varianceGamma sigma
+    /// from its 3x3 mean is clamped toward that mean every frame): measured 2026-09-17 at ~3 % for
+    /// a +-5 % texture, independent of the temporal noise. That is the known cost of variance
+    /// clipping on fine detail, not a convergence failure.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(0.03f, 0f)]
+    [InlineData(0.10f, 0f)]
+    [InlineData(0.03f, 0.05f)]
+    [InlineData(0.10f, 0.05f)]
+    public unsafe void PerFrameNoiseOnAStaticSurfaceAveragesOut(float noiseAmplitude, float textureAmplitude)
+    {
+        const float baseValue = 0.35f;
+        var random = new Random(12345);
+        float[] texture = new float[Size * Size];
+        for (int i = 0; i < texture.Length; i++) texture[i] = baseValue + (float)((random.NextDouble() - 0.5) * 2.0 * textureAmplitude);
+        var frames = new List<float[]>();
+        for (int f = 0; f < 24; f++)
+        {
+            float[] frame = new float[Size * Size];
+            for (int i = 0; i < frame.Length; i++)
+                frame[i] = texture[i] * (1f + noiseAmplitude * (float)((random.NextDouble() - 0.5) * 2.0));
+            frames.Add(frame);
+        }
+
+        var uniforms = new TaaUniforms { ResetHistory = 0, BlendAlpha = 0.1f };
+        TemporalRun? run = RunTemporal(24, uniforms,
+            (textures, history) =>
+            {
+                UploadFlatRgba16F(textures, history.Color, baseValue, baseValue, baseValue, 1f);
+                UploadFlatRgba8(textures, history.Glow, 0, 0, 0, 255);
+                UploadFlatR32F(textures, history.Depth, 0.5f);
+            },
+            (frame, textures, inputs) =>
+            {
+                float[] values = frames[frame];
+                Func<int, int, float> value = (x, y) => values[y * Size + x];
+                UploadRgba16F(textures, inputs.SceneTex, value, value, value, (x, y) => 1f);
+                UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+                UploadFlatR32F(textures, inputs.DepthTex, 0.5f);
+                UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0.5f);
+            });
+        Skip.If(run == null, "No usable Vulkan device.");
+
+        // Residual: history minus the noise-free texture, over the interior.
+        double sum = 0, sum2 = 0; int count = 0;
+        double inSum2 = 0;
+        for (int y = 2; y < Size - 2; y++)
+        for (int x = 2; x < Size - 2; x++)
+        {
+            float t = texture[y * Size + x];
+            float h = ReadHalf(run!.Color, x, y, 0, 8);
+            double e = (h - t) / t;
+            sum += e; sum2 += e * e; count++;
+            double n = (frames[23][y * Size + x] - t) / t;
+            inSum2 += n * n;
+        }
+        double residual = Math.Sqrt(sum2 / count - (sum / count) * (sum / count));
+        double input = Math.Sqrt(inSum2 / count);
+        _output.WriteLine($"noise {noiseAmplitude} texture {textureAmplitude}: one-frame relative noise {input:F4}, history residual {residual:F4}, ratio {residual / input:F3}, bias {sum / count:F4}");
+        if (textureAmplitude == 0f)
+        {
+            Assert.True(residual / input < 0.34, $"the resolve kept {residual / input:F2} of the per-frame noise");
+        }
+    }
+
     private sealed class TemporalRun
     {
         public byte[] Color = Array.Empty<byte>();

@@ -56,8 +56,24 @@ void main(void)
 	vec3 hitMaximum = (vec3(1.0) - max(maximumRing, e)) / hitMaximumDenominator;
 	vec3 lobeChannels = max(-hitMinimum, hitMaximum);
 	float lobe = max(-0.1875, min(max(max(lobeChannels.r, lobeChannels.g), lobeChannels.b), 0.0));
+	// Noise limiting (AMD FidelityFX RCAS, FSR_RCAS_DENOISE, which FSR 3 ships enabled):
+	// the centre's deviation from the mean of its four neighbours, over the ring's range,
+	// says how much of the local contrast is a lone pixel rather than an edge. A lone
+	// deviation gets half the lobe, an edge keeps all of it. Without it the sharpen
+	// multiplied the TAA-converged residual of the GTAO term 2.7x on flat faces (2026-09-17:
+	// per-pixel temporal std 0.24 -> 0.64 of 255) and drew it as grain.
+	float bL = b.b * 0.5 + (b.r * 0.5 + b.g);
+	float dL = d.b * 0.5 + (d.r * 0.5 + d.g);
+	float eL = e.b * 0.5 + (e.r * 0.5 + e.g);
+	float fL = f.b * 0.5 + (f.r * 0.5 + f.g);
+	float hL = h.b * 0.5 + (h.r * 0.5 + h.g);
+	float maxL = max(max(max(bL, dL), max(eL, fL)), hL);
+	float minL = min(min(min(bL, dL), min(eL, fL)), hL);
+	float nz = 0.25 * (bL + dL + fL + hL) - eL;
+	nz = clamp(abs(nz) / max(maxL - minL, 1.0 / 65536.0), 0.0, 1.0);
+	nz = -0.5 * nz + 1.0;
 	float strength = clamp(sharpness, 0.0, 1.0);
-	lobe *= strength * exp2(-2.0 * (1.0 - strength));
+	lobe *= nz * strength * exp2(-2.0 * (1.0 - strength));
 
 	vec3 sharpened = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
 	outColor = vec4(max(sharpened, vec3(0.0)), center.a);
