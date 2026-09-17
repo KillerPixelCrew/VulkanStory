@@ -465,7 +465,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             "; bindless sampled images per stage " +
             _context.Capabilities.DescriptorIndexing.MaxPerStageDescriptorUpdateAfterBindSampledImages +
             " (needs " + DescriptorIndexingFloor.RequiredSampledImages + ")" +
-            "; push constants " + _context.Capabilities.DescriptorIndexing.MaxPushConstantsSize + " B");
+            "; push constants " + _context.Capabilities.DescriptorIndexing.MaxPushConstantsSize + " B" +
+            "; " + _context.Capabilities.LatencySummary);
+        // Seams S1-S5: the backend is installed before the frame ring and the first
+        // swapchain exist, so nothing in the frame ever sees a different instance.
+        InstallSelectedLatencyBackend();
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
@@ -474,6 +478,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         // any thread into the ring's upload batch (or inline into the frame when
         // it already used the destination; see UploadManager).
         _frames = new FrameRing(_context);
+        // Seam S4: the installed backend tags this ring's submits.
+        _frames.Latency.Backend = Latency;
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
         _meshes = new MeshManager(_context, _uploads);
@@ -565,13 +571,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             }
 
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError))
+                    out Swapchain? swapchain, out string? swapchainError, Latency))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
             }
 
             _swapchain = swapchain;
+            // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id and its
+            // feature were actually enabled; chaining it otherwise is a validation error.
+            _swapchain!.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
             _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
         }
 
@@ -800,6 +809,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         VulkanStats.NoteTransientFrame(_transients.PhysicalBytes + _transients.OptedInBytes,
             _transients.AliasedBytes, _transients.Leases.Count, _transients.AliasedLeaseCount, _readSelfCopies.Live);
         _transients.BeginFrame();
+
+        // Seam S2: the frame's latency identity, before the ring hands out the slot.
+        BeginLatencyFrameIdentity();
 
         FrameSlot slot = _frames.BeginFrame();
         // After the ring's wait and collection, before anything is recorded: freed
@@ -1214,6 +1226,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         _bindless?.Flush();
         ulong renderValue = _frames.EndFrame();
         _frameActive = false;
+        // Seam S4: the frame's work is queued (Submit A). Stamped before the acquire,
+        // which is where the CPU may block, so the render-submit interval is recording
+        // time and nothing else.
+        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
         // Headless: nothing to present; the frame is submitted all the same.
@@ -1238,7 +1254,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         _swapchain.NotePresentSubmitted(target, presentValue);
         long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        _swapchain.Present(target);
+        // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself, and the
+        // present id the call was given closes the frame's report.
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
+        ulong presentId = _swapchain.Present(target, _latencyFrameId);
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
+        Latency.OnPresent(_latencyFrameId, presentId);
+        LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
 
@@ -3428,6 +3450,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         {
             VulkanStats.MemorySource = null;
         }
+        DisposeLatency();
         _context?.Dispose();
     }
 }

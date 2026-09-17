@@ -135,6 +135,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // Phase 2: render-stage bracket from ClientMain.TriggerRenderStage (contract C3).
         new(true, "BeginRenderStage", new[] { "EnumRenderStage" }),
         new(true, "EndRenderStage", new[] { "EnumRenderStage" }),
+        // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
+        new(true, "LatencySleep", Array.Empty<string>()),
+        new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
+        new(true, "SetLatencyFrameCap", new[] { "Int32" }),
         // Phase 2 step 2: the TAA post methods declare their frame-graph passes.
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         // Phase 3b stage 2: the sky dome's draw seam, the first world system on the native API.
