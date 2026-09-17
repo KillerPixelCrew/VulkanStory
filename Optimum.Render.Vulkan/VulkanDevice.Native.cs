@@ -710,11 +710,14 @@ public sealed unsafe partial class VulkanDevice
         ReleaseReadSelfCopies();
         EnsureBindlessPlaceholdersReadable(commandBuffer);
 
-        // The pass's reads, put into the layout a shader read needs. A pass never samples a
-        // colour attachment of its own target: that would be feedback, which a native system
-        // resolves by declaring two passes instead. The one exception the API allows is the
-        // bound depth attachment with depth writes off, which the pipeline declares
-        // (NativePipelineDescription.SamplesBoundDepth) and the scope then holds read-only.
+        // The pass's reads, put into the layout a shader read needs. A colour attachment of
+        // its own target is sampled through a pooled ReadSelf copy taken before the scope
+        // opens - the atlas compositions (BlendedTextureManager, RenderTextureIntoFrameBuffer)
+        // copy one region of an atlas into another region of the same atlas, and the copy is
+        // what the emulated path samples for the same draw (SnapshotColorAttachment). The bound
+        // depth attachment with depth writes off is sampled in place, which the pipeline
+        // declares (NativePipelineDescription.SamplesBoundDepth) and the scope then holds
+        // read-only.
         bool depthReadOnly = false;
         for (int i = 0; i < textures.Length; i++)
         {
@@ -733,9 +736,14 @@ public sealed unsafe partial class VulkanDevice
             }
             if (_targets.IsAttachmentOfBound(textures[i].TextureId))
             {
-                AddDiagnostic("native pass '" + pass.Name + "' samples texture " + textures[i].TextureId +
-                    ", an attachment of its own target");
-                return false;
+                if (texture.Aspect != ImageAspectFlags.ColorBit)
+                {
+                    AddDiagnostic("native pass '" + pass.Name + "' samples texture " + textures[i].TextureId +
+                        ", a non-colour attachment of its own target");
+                    return false;
+                }
+                SnapshotColorAttachment(commandBuffer, textures[i].TextureId, texture);
+                continue;
             }
             _targets.FlushPendingClears(commandBuffer, texture);
             if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal)
@@ -793,7 +801,11 @@ public sealed unsafe partial class VulkanDevice
             NativeSamplerSlot sampler = sampled.Sampler;
             if (!sampler.IsPresent) continue;
 
-            VulkanTexture? texture = _textures.Get(sampled.TextureId);
+            // A ReadSelf copy taken above stands in for the attachment it copies.
+            VulkanTexture? texture = _textures.Get(
+                _sampledTextureOverrides.TryGetValue(sampled.TextureId, out int readSelfCopy)
+                    ? readSelfCopy
+                    : sampled.TextureId);
             if (texture != null && !BindlessKinds.Suits(TextureShape.Of(texture), sampler.Kind))
             {
                 if (RenderTrace.Enabled)

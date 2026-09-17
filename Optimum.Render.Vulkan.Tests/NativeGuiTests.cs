@@ -176,6 +176,35 @@ public class NativeGuiTests(ITestOutputHelper output)
         GpuTest.AssertClean(session.Seam);
     }
 
+    /// <summary>
+    /// An atlas composition samples the texture it writes (BlendedTextureManager copies one atlas
+    /// region into another region of the same atlas). The native pass takes the same pooled
+    /// ReadSelf copy the emulated route takes, instead of refusing the draw: two native mesh
+    /// draws, no emulation, the same pixels, validation clean.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void TheNativeTextureBlitReadsItsOwnTargetThroughACopy()
+    {
+        using Session session = Open();
+
+        byte[] emulated = session.RunSelfBlit(native: false);
+
+        long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[] native = session.RunSelfBlit(native: true);
+
+        Assert.Equal(2, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+
+        output.WriteLine("self blit row emulated " + Row(emulated) + " native " + Row(native));
+        Assert.Equal(emulated, native);
+        // The right half is the copied left half, not the clear colour.
+        int left = (Size / 2 * Size + 1) * 4;
+        int right = (Size / 2 * Size + Size / 2 + 1) * 4;
+        Assert.Equal(emulated[left + 1], emulated[right + 1]);
+        GpuTest.AssertClean(session.Seam);
+    }
+
     // ---------------------------------------------------------------------- driving
 
     private static string Centre(byte[] pixels)
@@ -356,6 +385,50 @@ public class NativeGuiTests(ITestOutputHelper output)
             byte[] pixels = Read(seam);
             Platform.EndFrame();
             return pixels;
+        }
+
+        /// <summary>
+        /// One frame of an atlas composition: the gradient blitted over the whole target, then
+        /// the target's left half blitted into its right half with the target's own texture as
+        /// the source, blending off (BlendedTextureManager's base copy).
+        /// </summary>
+        public unsafe byte[] RunSelfBlit(bool native)
+        {
+            VulkanDevice seam = Seam;
+            Platform.NativeGuiEnabled = native;
+
+            Platform.BeginFrame();
+            BeginTarget(seam);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.UseProgram(blit.ProgramId);
+            ShaderProgramBase.CurrentShaderProgram = blit;
+
+            SetRects(seam, 0f, 1f, 0f, 1f);
+            seam.BindTexture(blit.uniformLocations.Count, SourceTexture);
+            Platform.RenderTextureQuad(Quad, SourceTexture, false);
+
+            int own = Target.ColorTextureIds[0];
+            SetRects(seam, 0.5f, 0.5f, 0f, 0.5f);
+            seam.BindTexture(blit.uniformLocations.Count, own);
+            Platform.RenderTextureQuad(Quad, own, false);
+            seam.BindTexture(blit.uniformLocations.Count, SourceTexture);
+
+            byte[] pixels = Read(seam);
+            Platform.EndFrame();
+            return pixels;
+        }
+
+        private void SetRects(VulkanDevice seam, float xs, float width, float texu, float texw)
+        {
+            Set(seam, blit, "xs", xs);
+            Set(seam, blit, "ys", 0f);
+            Set(seam, blit, "width", width);
+            Set(seam, blit, "height", 1f);
+            Set(seam, blit, "texu", texu);
+            Set(seam, blit, "texv", 0f);
+            Set(seam, blit, "texw", texw);
+            Set(seam, blit, "texh", 1f);
+            Set(seam, blit, "alphaTest", -1f);
         }
 
         /// <summary>
