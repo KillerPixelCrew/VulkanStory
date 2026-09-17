@@ -172,7 +172,7 @@ public class PlatformSeamDeletionCoverageTests
     public static IEnumerable<object?[]> LeafVirtuals()
     {
         yield return new object?[] { "SetDepthRange", "public override void SetDepthRange(float near, float far)", "GL.DepthRange(near, far);", null };
-        yield return new object?[] { "ClearDefaultDepth", "public override void ClearDefaultDepth(float depth)", "GL.ClearBuffer((ClearBuffer)6145, 0, ref depth);", "device.ClearDepth(Math.Clamp(depth, 0f, 1f));" };
+        yield return new object?[] { "ClearDefaultDepth", "public override void ClearDefaultDepth(float depth)", "GL.ClearBuffer((ClearBuffer)6145, 0, ref depth);", "ClearTargetDepth(CurrentTargetId, Math.Clamp(depth, 0f, 1f));" };
         yield return new object?[] { "DeleteMeshHandle", "public override void DeleteMeshHandle(int bufferId)", "GL.DeleteBuffer(bufferId);", "device.DeleteMesh(bufferId);" };
         yield return new object?[] { "DeleteVertexArrayHandles", "public override void DeleteVertexArrayHandles(VAO vao)", "GL.DeleteVertexArray(vao.VaoId);", "device.DeleteMesh(vao.VaoId);" };
         yield return new object?[] { "SetTextureLodBias", "public override void SetTextureLodBias(int[] textureIds, float bias)", "GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", "device.SetTextureParameter(textureIds[k], OptimumGlConstants.TextureLodBias, bias);" };
@@ -183,13 +183,13 @@ public class PlatformSeamDeletionCoverageTests
         yield return new object?[] { "SetProgramSamplerUnit", "public override void SetProgramSamplerUnit(int programId, string samplerName, int unit)", "GL.Uniform1(GL.GetUniformLocation(programId, samplerName), unit);", "device.SetSamplerUnit(programId, samplerName, unit);" };
         yield return new object?[] { "CreateOitTargets", "public override void CreateOitTargets(FrameBufferRef transparent, int layers, out int revealTexture, out int accumTexture)", "GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36069, accumTexture, 0, 2);", "device.AttachTexture(transparent.FboId, (EnumFramebufferAttachment)36069, accumTexture, 2);" };
         yield return new object?[] { "BeginOitAccumulation", "public override void BeginOitAccumulation(FrameBufferRef transparent)", "GL.ClearBuffer((ClearBuffer)6144, 5, array3);", "StateDrawBuffers(transparent.FboId, 0x3F);" };
-        yield return new object?[] { "BindOitTextures", "public override void BindOitTextures(int revealTexture, int accumTexture)", "GL.BindTexture((TextureTarget)35866, accumTexture);", "device.BindTexture(7, accumTexture);" };
+        yield return new object?[] { "BindOitTextures", "public override void BindOitTextures(int revealTexture, int accumTexture)", "GL.BindTexture((TextureTarget)35866, accumTexture);", "stated.BindTexture(7, accumTexture);" };
         yield return new object?[] { "GenOcclusionQuery", "public override int GenOcclusionQuery()", "GL.GenQueries(1, out queryId);", "return device.CreateOcclusionQuery();" };
         yield return new object?[] { "BeginOcclusionQuery", "public override void BeginOcclusionQuery(int queryId)", "GL.BeginQuery((QueryTarget)35092, queryId);", "device.BeginOcclusionQuery(queryId);" };
         yield return new object?[] { "EndOcclusionQuery", "public override void EndOcclusionQuery(int queryId)", "GL.EndQuery((QueryTarget)35092);", "device.EndOcclusionQuery(queryId);" };
         yield return new object?[] { "TryGetOcclusionQueryResult", "public override bool TryGetOcclusionQueryResult(int queryId, out int samples)", "GL.GetQueryObject(queryId, (GetQueryObjectParam)34918, out samples);", "samples = device.GetQueryResult(queryId);" };
         yield return new object?[] { "DeleteOcclusionQuery", "public override void DeleteOcclusionQuery(int queryId)", "GL.DeleteQuery(queryId);", "device.DeleteQuery(queryId);" };
-        yield return new object?[] { "ReadDefaultFramebuffer", "public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)", "GL.ReadPixels(x, y, width, height, (PixelFormat)32993, (PixelType)5121, destination);", "device.ReadDefaultFramebuffer(x, y, width, height, destination);" };
+        yield return new object?[] { "ReadDefaultFramebuffer", "public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)", "GL.ReadPixels(x, y, width, height, (PixelFormat)32993, (PixelType)5121, destination);", "device.ReadFramebufferColor(CurrentTargetId, x, y, width, height, destination);" };
         yield return new object?[] { "GraphicsBackendName", "public override string GraphicsBackendName", "return \"OpenGL\";", "public override string GraphicsBackendName => device.BackendName;" };
     }
 

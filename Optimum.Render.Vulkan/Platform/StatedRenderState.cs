@@ -26,8 +26,8 @@ namespace Optimum.Render.Vulkan.Platform;
 /// </summary>
 internal sealed class StatedRenderState
 {
-    public const int MaxColorAttachments = GlStateTracker.MaxColorAttachments;
-    public const int MaxTextureUnits = GlStateTracker.MaxTextureUnits;
+    public const int MaxColorAttachments = RenderLimits.MaxColorAttachments;
+    public const int MaxTextureUnits = RenderLimits.MaxTextureUnits;
 
     private readonly AttachmentBlend[] _blend = new AttachmentBlend[MaxColorAttachments];
     private readonly Dictionary<int, uint> _drawBuffers = new();
@@ -88,6 +88,15 @@ internal sealed class StatedRenderState
         _blend[slot].DstColor = GlEnums.BlendFactorFrom(dstColor);
         _blend[slot].SrcAlpha = GlEnums.BlendFactorFrom(srcAlpha);
         _blend[slot].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
+    }
+
+    /// <summary><c>glBlendEquationi</c>: one attachment's equation, its factors kept.</summary>
+    public void SetSlotEquation(int slot, int glEquation)
+    {
+        if ((uint)slot >= MaxColorAttachments) return;
+        BlendOp op = GlEnums.BlendOpFrom(glEquation);
+        _blend[slot].ColorOp = op;
+        _blend[slot].AlphaOp = op;
     }
 
     /// <summary><c>glBlendFuncSeparatei</c>: one attachment's factors, its equation kept.</summary>

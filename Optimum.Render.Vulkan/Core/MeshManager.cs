@@ -78,7 +78,6 @@ internal sealed unsafe class MeshManager : IDisposable
     private const int GlInt2101010Rev = 0x8D9F;
 
     private readonly VulkanContext _context;
-    private readonly GlStateTracker _state;
     private readonly UploadManager? _uploads;
     private readonly Interner<VertexLayoutDescription> _layouts = new();
     private readonly List<VulkanMesh?> _meshes = new();
@@ -102,10 +101,9 @@ internal sealed unsafe class MeshManager : IDisposable
     /// </summary>
     internal bool DeviceLocalStaticBuffers { get; set; } = true;
 
-    public MeshManager(VulkanContext context, GlStateTracker state, UploadManager? uploads = null)
+    public MeshManager(VulkanContext context, UploadManager? uploads = null)
     {
         _context = context;
-        _state = state;
         _uploads = uploads;
         _meshes.Add(null);   // 0 is never a real mesh
 

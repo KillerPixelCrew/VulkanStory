@@ -13,7 +13,7 @@ namespace Optimum.Render.Vulkan.Platform;
 //
 // Two of the systems in that group draw through the native device API here. The rest of the
 // group - Render2DTexture's gui quads, guigear, the block highlights, the wireframe cube and
-// the camera path - stay on the emulated route for now, and the reason is written down in
+// the camera path - take the generic stated route (NativeStated.cs), and the reason is written down in
 // docs/vulkan-native-render-systems.md section 3c: their blend and depth state is not the
 // caller's, it is whatever the frame left on the tracker, and the same Render2DTexture call is
 // reached both with standard alpha and with premultiplied alpha (RenderAPIGame's
@@ -194,7 +194,7 @@ public partial class VulkanClientPlatform
     /// <summary>
     /// A plain RenderMesh under the vanilla gui program, recorded natively under the state the
     /// client stated: blend, depth, depth function, scissor, cull, line width. The sampled
-    /// textures are the program's declared ones. False: the caller runs the emulated draw.
+    /// textures are the program's declared ones. False: the caller runs the generic stated draw.
     /// Called from VulkanClientPlatform.RenderMesh; the seams' neutral bodies reach it too, which
     /// is why it honours <see cref="NativeGuiEnabled" /> itself.
     /// </summary>
@@ -299,7 +299,7 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         bool recorded = false;
         if (device.BeginNativePass(new NativePassDescription
         {
@@ -325,9 +325,8 @@ public partial class VulkanClientPlatform
         device.EndNativePass();
 
         // Whatever the stage was drawing into before this pass keeps drawing into it through
-        // the emulated route, so its own pass context is declared again - the same restore the
+        // the generic stated route, so its own pass context is restored - the same restore the
         // sky pass and the TAA resolve do.
-        if (target != null) device.BindFramebuffer(target.FboId);
         SetPassContext(outer, outerFlags);
         return recorded;
     }

@@ -161,149 +161,28 @@ public class VulkanBackendIntegrationTests
     /// untouched vanilla and an OpenGL session pays nothing at all.
     ///
     /// Checked for a representative spread of the routed methods: the vanilla GL call is
-    /// in ClientPlatformWindows, the device call in VulkanClientPlatform.
+    /// in ClientPlatformWindows, the Vulkan body in VulkanClientPlatform - a device call, or for
+    /// fixed-function state the statement it records (StatedRenderState); glStencilMask records
+    /// nothing, since no target of this client has a stencil attachment.
     /// </summary>
     [Theory]
-    [InlineData("SetViewport", "GL.Viewport(x, y, width, height);")]
-    [InlineData("SetScissor", "GL.Scissor(x, y, width, height);")]
-    [InlineData("SetDepthMask", "GL.DepthMask(flag);")]
-    [InlineData("SetStencilMask", "GL.StencilMask(mask);")]
-    [InlineData("SetColorMask", "GL.ColorMask(r, g, b, a);")]
-    [InlineData("SetCullFaceMode", "GL.CullFace((TriangleFace)1029);")]
-    [InlineData("DeleteTexture", "GL.DeleteTexture(id);")]
-    public void RoutedMethodsKeepTheirVanillaOpenGlBody(string deviceCall, string vanillaCall)
+    [InlineData("stated.Viewport = new Rect2D(", "GL.Viewport(x, y, width, height);")]
+    [InlineData("stated.Scissor = statedScissor;", "GL.Scissor(x, y, width, height);")]
+    [InlineData("stated.DepthWrite = flag;", "GL.DepthMask(flag);")]
+    [InlineData("public override void GlStencilMask(int mask)", "GL.StencilMask(mask);")]
+    [InlineData("stated.SetColorMask(r, g, b, a);", "GL.ColorMask(r, g, b, a);")]
+    [InlineData("stated.CullBack = true;", "GL.CullFace((TriangleFace)1029);")]
+    [InlineData("device.DeleteTexture(id);", "GL.DeleteTexture(id);")]
+    public void RoutedMethodsKeepTheirVanillaOpenGlBody(string vulkanCall, string vanillaCall)
     {
-        Assert.Contains("device." + deviceCall + "(", VulkanPlatformSource.Read());
+        Assert.Contains(vulkanCall, VulkanPlatformSource.Read());
         Assert.Contains(vanillaCall, VulkanPlatformSource.ReadClientPlatformWindows());
     }
 
     /// <summary>
-    /// Phase 1A step 4: the fixed-function methods VulkanClientPlatform overrides have
-    /// vanilla bodies again, so they are no longer transplant targets - only GlToggleBlend
-    /// (TAA's motion-attachment blend override) still is. Each must be overridden, or a
-    /// Vulkan session would reach a GL call with no context.
-    /// </summary>
-    [Fact]
-    public void EveryRoutedPlatformMethodIsOverriddenByTheVulkanPlatform()
-    {
-        string patcher = Read("Optimum.Patcher/Program.cs");
-        string vulkan = VulkanPlatformSource.Read();
-
-        string[] routed =
-        {
-            "GlViewport", "GlScissor", "GlScissorFlag",
-            "GlEnableDepthTest", "GlDisableDepthTest", "GlDepthMask", "GlDepthFunc",
-            "GlEnableCullFace", "GlDisableCullFace", "GlCullFaceBack", "GlCullFaceFront",
-            "GlToggleBlend", "GlColorMask", "GLWireframes", "GLLineWidth",
-            "GlEnableStencilTest", "GlDisableStencilTest", "GlStencilMask",
-            "GlStencilFunc", "GlStencilOp", "GlClearStencil",
-            "GetGLShaderVersionString", "GenSampler", "BindTexture2d", "BindTextureCubeMap",
-            "GLDeleteTexture", "GlGetMaxTextureSize", "GetGraphicsCardRenderer",
-        };
-
-        foreach (string method in routed)
-        {
-            Assert.True(
-                System.Text.RegularExpressions.Regex.IsMatch(vulkan, @"public override \w+ " + method + @"\("),
-                $"{method} is not overridden by VulkanClientPlatform");
-            bool target = patcher.Contains($"new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"{method}\"", StringComparison.Ordinal);
-            Assert.True(target == (method == "GlToggleBlend") || method == "GetGraphicsCardRenderer",
-                $"{method}: only GlToggleBlend keeps a non-vanilla body and a transplant target");
-        }
-        // GetGraphicsCardRenderer is virtualized in place, not transplanted.
-        Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2)", patcher);
-    }
-
-    /// <summary>
-    /// The frame is bracketed by the platform, and the OpenGL path still reaches
-    /// SwapBuffers. Losing either end would either never present or present twice.
-    /// </summary>
-    [Fact]
-    public void TheDeviceBracketsTheFrameAndOpenGlStillSwaps()
-    {
-        string platform = VulkanPlatformSource.ReadClientPlatformWindows();
-        int frame = platform.IndexOf("private void window_RenderFrame(FrameEventArgs e)", StringComparison.Ordinal);
-        Assert.True(frame >= 0);
-        int begin = platform.IndexOf("BeginFrame();", frame, StringComparison.Ordinal);
-        int onNewFrame = platform.IndexOf("frameHandler.OnNewFrame(dt);", frame, StringComparison.Ordinal);
-        int end = platform.IndexOf("EndFrame();", frame, StringComparison.Ordinal);
-        Assert.True(begin > frame && onNewFrame > begin && end > onNewFrame,
-            "the frame must be opened before the frame handler runs and ended after it");
-
-        // The vanilla swap survives for the OpenGL path, as the EndFrame override.
-        int swapOverride = platform.IndexOf("public override void EndFrame()", StringComparison.Ordinal);
-        Assert.True(swapOverride >= 0);
-        Assert.Contains("((GameWindow)window).SwapBuffers();", platform.Substring(swapOverride, 200));
-
-        string vulkan = VulkanPlatformSource.Read();
-        Assert.Contains("device.BeginFrame();", vulkan);
-        Assert.Contains("device.Present();", vulkan);
-    }
-
-    /// <summary>
-    /// ClientPlatformWindows bodies are transplant targets too, so the branches
-    /// added to them must stay lambda-free for the same reason ClientProgram's do.
-    /// </summary>
-    [Fact]
-    public void ThePlatformBranchesStayLambdaFree()
-    {
-        string added = AddedLines(Read(PlatformPatch));
-
-        foreach (string line in added.Split('\n'))
-        {
-            if (!line.Contains("optimumDevice", StringComparison.Ordinal)) continue;
-            Assert.DoesNotContain("=>", line);
-        }
-    }
-
-    private const string ShaderProgramBasePatch =
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs.patch";
-
-    /// <summary>
-    /// A uniform location on the device path is a byte offset into the generated
-    /// block, not a GL location. That works only because the setters read the
-    /// same <c>uniformLocations</c> dictionary the routed GetUniformLocation
-    /// filled, so the two must stay in agreement.
-    /// </summary>
-    [Fact]
-    public void UniformSettersUseTheLocationTheDeviceHandedOut()
-    {
-        // Phase 1A step 3: the program passes the location it looked up to the
-        // platform, whose override hands it to the device unchanged.
-        string added = AddedLines(Read(ShaderProgramBasePatch));
-
-        Assert.Contains("ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("ScreenManager.Platform.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
-
-        // Phase 1A step 4: the device calls are VulkanClientPlatform's overrides.
-        string platform = VulkanPlatformSource.Read();
-        Assert.Contains("device.SetUniform(programId, location, value)", platform);
-        Assert.Contains("device.SetUniformArray1(programId, location, count, values)", platform);
-        Assert.Contains("device.SetUniformMatrix(programId, location, matrix)", platform);
-        Assert.Contains("device.GetUniformLocation(program.ProgramId, name)", platform);
-    }
-
-    /// <summary>
-    /// The Vec2i overload casts to float in the GL body, so the shader sees a
-    /// vec2; the Vec3i overload does not, so it sees an ivec3. Scalar layout
-    /// stores that as three consecutive ints, which is why the components are
-    /// written at separate offsets rather than through the float path.
-    /// </summary>
-    [Fact]
-    public void IntegerVectorUniformsKeepTheirIntegerRepresentation()
-    {
-        string added = AddedLines(Read(ShaderProgramBasePatch));
-
-        // The device lays the three components out itself; the location is opaque here.
-        Assert.Contains("value.X, value.Y, value.Z)", added);
-        // The Vec2i overload keeps the cast the GL body performs.
-        Assert.Contains("(float)value.X, (float)value.Y", added);
-    }
-
-    /// <summary>
     /// Binding a texture is three separate operations in GL - aim the sampler at
-    /// a unit, activate it, bind the texture - and the device keeps that split.
+    /// a unit, activate it, bind the texture - and the platform keeps that split: the device
+    /// holds the program's sampler-to-unit map, the stated state the unit's texture and sampler.
     /// A unit with a stale sampler override would silently ignore the texture's
     /// own filtering, so the override is cleared when there is no custom sampler.
     /// </summary>
@@ -314,8 +193,8 @@ public class VulkanBackendIntegrationTests
         string added = VulkanPlatformSource.Read();
 
         Assert.Contains("device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber)", added);
-        Assert.Contains("device.BindTexture(textureNumber, textureId)", added);
-        Assert.Contains("device.BindSampler(textureNumber, 0)", added);
+        Assert.Contains("stated.BindTexture(textureNumber, textureId)", added);
+        Assert.Contains("stated.BindSampler(textureNumber, 0)", added);
     }
 
     /// <summary>
@@ -665,8 +544,8 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("ColorWriteMask = writeMask,", cache);
         string layout = Read("Optimum.Render.Vulkan/Shaders/ProgramInterfaceLayout.cs");
         Assert.Contains("internal static bool FragmentOutputIsAssigned(string source, string name)", layout);
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
-        Assert.Contains("if (instanceCount <= 0) return;", device);
+        string mesh = Read("Optimum.Render.Vulkan/VulkanDevice.NativeMesh.cs");
+        Assert.Contains("if (instanceCount <= 0) return false;", mesh);
     }
 
     /// <summary>

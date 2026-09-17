@@ -24,26 +24,11 @@ internal sealed class VulkanFramebuffer
     public uint Width;
     public uint Height;
 
-    public AttachmentSlot[] Color = new AttachmentSlot[GlStateTracker.MaxColorAttachments];
+    public AttachmentSlot[] Color = new AttachmentSlot[RenderLimits.MaxColorAttachments];
     public int DepthTextureId;
-
-    /// <summary>
-    /// Bit i set means fragment output i is written. GL's glDrawBuffers selects
-    /// a subset of attachments rather than merely masking writes, so a cleared
-    /// bit means the attachment is not part of the rendering scope at all.
-    /// </summary>
-    public uint DrawBufferMask = 1;
 
     /// <summary>Cached interned id of the attachment formats, or -1 when stale.</summary>
     public int FormatsId = -1;
-
-    /// <summary>
-    /// Bound colour slots left out of the rendering scope because a draw samples
-    /// them while their draw buffer is off (the composition pass writes Primary 0
-    /// and reads Primary 1). Only ever a subset of the cleared draw-buffer bits;
-    /// reset when the framebuffer is bound again.
-    /// </summary>
-    public uint SampledExclusion;
 
     /// <summary>
     /// Bound colour slots the declared frame-graph pass leaves out of its scope (the
@@ -73,7 +58,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 {
     private readonly VulkanContext _context;
     private readonly TextureManager _textures;
-    private readonly GlStateTracker _state;
+    private readonly Interner<RenderTargetFormats> _formats = new();
 
     /// <summary>Every attachment of a scope moves in one barrier command before vkCmdBeginRendering.</summary>
     private readonly BarrierBatcher _barriers;
@@ -98,7 +83,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public long FeedbackSplits { get; private set; }
 
     // What the open scope was begun with, to recognise a restart that changed nothing.
-    private readonly ImageView[] _openViews = new ImageView[GlStateTracker.MaxColorAttachments];
+    private readonly ImageView[] _openViews = new ImageView[RenderLimits.MaxColorAttachments];
     private int _openCount = -1;
     private ImageView _openDepthView;
     private ImageLayout _openDepthLayout;
@@ -122,12 +107,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// <summary>Opens the one scope of each pass on the frame-graph path.</summary>
     private readonly PassRecorder _recorder;
 
-    public RenderTargetManager(VulkanContext context, TextureManager textures, GlStateTracker state,
-        FrameGraph? graph = null)
+    public RenderTargetManager(VulkanContext context, TextureManager textures, FrameGraph? graph = null)
     {
         _context = context;
         _textures = textures;
-        _state = state;
         _barriers = textures.CreateBatcher();
         _graph = graph ?? new FrameGraph { Enabled = false };
         _recorder = new PassRecorder(context, textures, _barriers, _graph);
@@ -173,12 +156,11 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         {
             framebuffer.DepthTextureId = textureId;
         }
-        else if (attachmentIndex < GlStateTracker.MaxColorAttachments)
+        else if (attachmentIndex < RenderLimits.MaxColorAttachments)
         {
             AttachmentSlot previous = framebuffer.Color[attachmentIndex];
             if (previous.TextureId == textureId && previous.Layer == layer) return;
             framebuffer.Color[attachmentIndex] = new AttachmentSlot { TextureId = textureId, Layer = layer };
-            framebuffer.SampledExclusion &= ~(1u << attachmentIndex);
         }
 
         framebuffer.FormatsId = -1;
@@ -186,64 +168,6 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         // GL attaches to the bound framebuffer, so an open scope no longer
         // describes the target: the next draw must reopen on the new views.
         if (_bound == framebuffer) _needsRestart = true;
-    }
-
-    /// <summary>
-    /// Records glDrawBuffers. The scope keeps its attachments: only the effective
-    /// write masks change, which the next draw emits (C4). The one restart is a
-    /// slot a sampling draw left out whose draw buffer is selected again: it has
-    /// to rejoin the scope before anything can be written into it.
-    /// </summary>
-    public void SetDrawBuffers(int framebufferId, uint mask)
-    {
-        VulkanFramebuffer? framebuffer = Get(framebufferId);
-        if (framebuffer == null || framebuffer.DrawBufferMask == mask) return;
-
-        framebuffer.DrawBufferMask = mask;
-
-        uint rejoining = framebuffer.SampledExclusion & mask;
-        if (rejoining == 0) return;
-
-        framebuffer.SampledExclusion &= ~rejoining;
-        framebuffer.FormatsId = -1;
-        if (_bound == framebuffer && _renderingActive)
-        {
-            _needsRestart = true;
-            NoteFeedbackSplit();
-        }
-    }
-
-    /// <summary>
-    /// A draw is about to sample <paramref name="textureId" />. If that texture is a
-    /// bound colour slot of the bound framebuffer whose draw buffer is off, the slot
-    /// leaves the scope (closing an open one that holds it) so the caller can move
-    /// it to a shader-readable layout. Slots whose draw buffer is on are feedback
-    /// the caller resolves with a snapshot instead (<see cref="IsAttachmentOfBound" />).
-    /// </summary>
-    public void ExcludeSampledAttachment(CommandBuffer commandBuffer, int textureId)
-    {
-        VulkanFramebuffer? framebuffer = _bound;
-        if (framebuffer == null || textureId <= 0) return;
-
-        uint slots = 0;
-        for (int i = 0; i < framebuffer.Color.Length; i++)
-        {
-            if (framebuffer.Color[i].TextureId != textureId) continue;
-            if (((framebuffer.DrawBufferMask >> i) & 1) != 0) continue;
-            slots |= 1u << i;
-        }
-
-        // A slot the declared pass already leaves out is not in the scope: nothing to exclude, no split.
-        uint newlyExcluded = slots & ~(framebuffer.SampledExclusion | framebuffer.PassExclusion);
-        if (newlyExcluded == 0) return;
-
-        framebuffer.SampledExclusion |= newlyExcluded;
-        framebuffer.FormatsId = -1;
-        if (_renderingActive)
-        {
-            EndRendering(commandBuffer);
-            NoteFeedbackSplit();
-        }
     }
 
     private void NoteFeedbackSplit()
@@ -254,8 +178,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
     /// <summary>Whether colour slot <paramref name="index" /> is part of the scope the framebuffer opens.</summary>
     private static bool InScope(VulkanFramebuffer framebuffer, int index) =>
-        framebuffer.Color[index].IsBound &&
-        (((framebuffer.SampledExclusion | framebuffer.PassExclusion) >> index) & 1) == 0;
+        framebuffer.Color[index].IsBound && ((framebuffer.PassExclusion >> index) & 1) == 0;
 
     private bool _needsRestart;
 
@@ -301,7 +224,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             if (_bound.Color[i].TextureId != textureId) continue;
             // Left out of the declared pass's scope: sampled directly, not feedback.
             if (((_bound.PassExclusion >> i) & 1) != 0) continue;
-            if ((_bound.DrawBufferMask & (1u << i)) != 0) return true;
+            return true;
         }
         return false;
     }
@@ -321,13 +244,6 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (_recorder.Declared != null) ClearPassDeclaration();
         _bound = framebuffer;
         _needsRestart = false;
-
-        // A new bind starts a new use of the target: every bound slot is back in.
-        if (framebuffer != null && framebuffer.SampledExclusion != 0)
-        {
-            framebuffer.SampledExclusion = 0;
-            framebuffer.FormatsId = -1;
-        }
     }
 
     public void Delete(int framebufferId)
@@ -354,7 +270,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     {
         if (!_graph.Enabled)
         {
-            if (framebufferId > 0) Bind(commandBuffer, framebufferId);
+            // No pass bookkeeping, but the scope still holds only the declared slots.
+            if (framebufferId <= 0) return;
+            Bind(commandBuffer, framebufferId);
+            ApplyPassExclusion(commandBuffer, _bound!, declaration.ColorSlots);
             return;
         }
 
@@ -375,20 +294,25 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         EndPass(commandBuffer);
         Bind(commandBuffer, target.Id);
 
-        // A new pass is a new use of the target: every bound slot is back in, except
-        // the slots the pass leaves out so they can be sampled.
+        ApplyPassExclusion(commandBuffer, target, declaration.ColorSlots);
+        _recorder.Declare(declaration, target);
+    }
+
+    /// <summary>
+    /// A new pass is a new use of the target: every bound slot is in its scope except the slots
+    /// the pass leaves out, which can then be sampled. A change reopens an open scope.
+    /// </summary>
+    private void ApplyPassExclusion(CommandBuffer commandBuffer, VulkanFramebuffer target, uint colorSlots)
+    {
         uint exclusion = 0;
         for (int i = 0; i < target.Color.Length; i++)
         {
-            if (target.Color[i].IsBound && ((declaration.ColorSlots >> i) & 1) == 0) exclusion |= 1u << i;
+            if (target.Color[i].IsBound && ((colorSlots >> i) & 1) == 0) exclusion |= 1u << i;
         }
-        if (target.SampledExclusion != 0 || target.PassExclusion != exclusion)
-        {
-            target.SampledExclusion = 0;
-            target.PassExclusion = exclusion;
-            target.FormatsId = -1;
-        }
-        _recorder.Declare(declaration, target);
+        if (target.PassExclusion == exclusion) return;
+        target.PassExclusion = exclusion;
+        target.FormatsId = -1;
+        if (ReferenceEquals(target, _bound) && _renderingActive) EndRendering(commandBuffer);
     }
 
     /// <summary>Ends the current pass, declared or not: closes its scope. No-op with the frame graph off.</summary>
@@ -439,9 +363,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// <summary>
     /// Opens a rendering scope if one is not already open, transitioning every
     /// participating attachment into its attachment layout. Every bound colour
-    /// slot participates, whatever its draw buffer, unless a sampling draw left
-    /// it out (<see cref="ExcludeSampledAttachment" />); that caller moves it to
-    /// a shader-readable layout itself.
+    /// slot participates unless the declared pass leaves it out; a pass that samples
+    /// such a slot moves it to a shader-readable layout itself.
     /// </summary>
     public void EnsureRendering(CommandBuffer commandBuffer)
     {
@@ -468,7 +391,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             if (!InScope(framebuffer, i))
             {
                 // A null view keeps fragment output i pointed at slot i: an
-                // unbound slot, or one a draw samples while its draw buffer is off.
+                // unbound slot, or one the declared pass leaves out.
                 attachments[i] = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
@@ -638,6 +561,11 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _context.Api.CmdClearAttachments(commandBuffer, 1, &clear, 1, &rect);
     }
 
+    /// <summary>
+    /// A colour clear of the bound target. The caller has applied the draw buffers and colour mask
+    /// the client stated (VulkanClientPlatform.ClearTargetColor): glClearBuffer on a draw buffer
+    /// glDrawBuffers left out, or through an all-false glColorMask, never reaches here.
+    /// </summary>
     public void ClearColor(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
     {
         if (_bound == null) return;
@@ -647,13 +575,18 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         // primary target while only 0 and 1 are selected. Nor does GL clear
         // through an all-false glColorMask. A clear on an attachment whose
         // effective write mask is zero is a no-op on every path: GL keeps an attachment the
-        // shader never writes, and Vulkan would write garbage into it.
+        // shader never writes, and Vulkan would write garbage into it. Both rules are the
+        // platform's now, applied to the draw buffers and mask it stated before calling here.
         if ((uint)attachment >= (uint)_bound.Color.Length) return;
         if (!_bound.Color[attachment].IsBound) return;
-        if ((_bound.DrawBufferMask & (1u << attachment)) == 0) return;
-        if (_state.ColorMask == 0) return;
 
         if (_graph.Enabled && !ClearColorOnGraph(commandBuffer, attachment, r, g, b, a)) return;
+        if (!_graph.Enabled && !InScope(_bound, attachment))
+        {
+            // Left out of the declared pass: GL still clears the texture, outside any scope.
+            ClearImage(commandBuffer, _bound.Color[attachment], r, g, b, a);
+            return;
+        }
         if (!_graph.Enabled) EnsureRendering(commandBuffer);
         if (!_renderingActive) return;
 
@@ -670,6 +603,18 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             LayerCount = 1,
         };
         _context.Api.CmdClearAttachments(commandBuffer, 1, &clear, 1, &rect);
+    }
+
+    private void ClearImage(CommandBuffer commandBuffer, AttachmentSlot slot, float r, float g, float b, float a)
+    {
+        VulkanTexture? texture = _textures.Get(slot.TextureId);
+        if (texture == null) return;
+        EndRendering(commandBuffer);
+        _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.TransferDst);
+        _barriers.Flush(commandBuffer);
+        var value = new ClearColorValue(r, g, b, a);
+        var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, slot.Layer, 1);
+        _context.Api.CmdClearColorImage(commandBuffer, texture.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
     }
 
     /// <summary>
@@ -700,18 +645,11 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         if (!_renderingActive || _needsRestart)
         {
-            const ColorComponentFlags all = ColorComponentFlags.RBit | ColorComponentFlags.GBit |
-                                            ColorComponentFlags.BBit | ColorComponentFlags.ABit;
-            if (_state.ColorMask == all)
-            {
-                VulkanTexture? texture = _textures.Get(target.Color[attachment].TextureId);
-                if (texture == null) return false;
-                EndRendering(commandBuffer);
-                _graph.PromoteColorClear(texture, target.Color[attachment].Layer, r, g, b, a);
-                return false;
-            }
-            EnsureRendering(commandBuffer);
-            if (!_renderingActive) return false;
+            VulkanTexture? texture = _textures.Get(target.Color[attachment].TextureId);
+            if (texture == null) return false;
+            EndRendering(commandBuffer);
+            _graph.PromoteColorClear(texture, target.Color[attachment].Layer, r, g, b, a);
+            return false;
         }
 
         _graph.NoteInPassClear();
@@ -784,29 +722,37 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             depthFormat = _textures.Get(framebuffer.DepthTextureId)?.Format ?? Format.Undefined;
         }
 
-        framebuffer.FormatsId = _state.InternTargetFormats(new RenderTargetFormats(colorFormats, depthFormat));
+        framebuffer.FormatsId = _formats.Intern(new RenderTargetFormats(colorFormats, depthFormat));
         return framebuffer.FormatsId;
     }
 
+    /// <summary>The formats behind an id <see cref="FormatsIdOf" /> handed out.</summary>
+    public RenderTargetFormats FormatsOf(int formatsId) => _formats.Get(formatsId);
+
     /// <summary>
-    /// The attachment formats of the scope <paramref name="framebuffer" /> opens, without
-    /// interning them: what a native pipeline has to be built for, and what a native draw
-    /// checks its pipeline against. <paramref name="exclusion" /> is the slot mask a pass
-    /// would leave out (bit i: slot i is not an attachment of the pass), so the formats can
-    /// be asked for before the pass is declared.
+    /// The attachment formats of the scope <paramref name="framebuffer" /> opens now, without
+    /// interning them: what a native draw checks its pipeline against.
     /// </summary>
-    public RenderTargetFormats ScopeFormats(VulkanFramebuffer framebuffer, uint exclusion = 0)
+    public RenderTargetFormats ScopeFormats(VulkanFramebuffer framebuffer) =>
+        DeclaredFormats(framebuffer, ~framebuffer.PassExclusion);
+
+    /// <summary>
+    /// The attachment formats of the scope a pass declared with <paramref name="colorSlots" /> opens
+    /// on <paramref name="framebuffer" />: every bound slot among them, whatever pass the target
+    /// is in now (a native system builds its pipeline before its pass is declared).
+    /// </summary>
+    public RenderTargetFormats DeclaredFormats(VulkanFramebuffer framebuffer, uint colorSlots)
     {
         int count = 0;
-        for (int i = 0; i < GlStateTracker.MaxColorAttachments; i++)
+        for (int i = 0; i < RenderLimits.MaxColorAttachments; i++)
         {
-            if (InScope(framebuffer, i) && ((exclusion >> i) & 1) == 0) count = i + 1;
+            if (framebuffer.Color[i].IsBound && ((colorSlots >> i) & 1) != 0) count = i + 1;
         }
 
         var colorFormats = new Format[count];
         for (int i = 0; i < count; i++)
         {
-            bool inScope = InScope(framebuffer, i) && ((exclusion >> i) & 1) == 0;
+            bool inScope = framebuffer.Color[i].IsBound && ((colorSlots >> i) & 1) != 0;
             VulkanTexture? texture = inScope ? _textures.Get(framebuffer.Color[i].TextureId) : null;
             colorFormats[i] = texture?.Format ?? Format.Undefined;
         }
@@ -824,7 +770,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private static int HighestScopeAttachment(VulkanFramebuffer framebuffer)
     {
         int highest = -1;
-        for (int i = 0; i < GlStateTracker.MaxColorAttachments; i++)
+        for (int i = 0; i < RenderLimits.MaxColorAttachments; i++)
         {
             if (InScope(framebuffer, i)) highest = i;
         }

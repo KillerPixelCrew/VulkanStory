@@ -480,6 +480,7 @@ public partial class VulkanClientPlatform
             }
         }
         // GLDeleteTexture above already routes, so only the target itself is left.
+        stated.ForgetFramebuffer(frameBuffer.FboId);
         device.DeleteFramebuffer(frameBuffer.FboId);
     }
 
@@ -498,6 +499,7 @@ public partial class VulkanClientPlatform
         {
             if (buffers[k] != null)
             {
+                stated.ForgetFramebuffer(buffers[k].FboId);
                 device.DeleteFramebuffer(buffers[k].FboId);
                 if (deletedTextures.Add(buffers[k].DepthTextureId))
                 {
@@ -543,28 +545,16 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BindCurrentFrameBuffer(FrameBufferRef value)
     {
-        if (value == null)
-        {
-            device.BindDefaultFramebuffer();
-            DeclareBoundPass();
-            return;
-        }
-        device.BindFramebuffer(value.FboId);
-        NoteForkViewport(0, 0, value.Width, value.Height);
-        device.SetViewport(0, 0, value.Width, value.Height);
-        DeclareBoundPass();
+        // No device bind: every draw and clear names its target (CurrentFrameBuffer). The GL body
+        // also sets the viewport to the whole target, which is stated here. The latest bind wins,
+        // so a raw fork bind before it no longer addresses the draws.
+        forkFramebuffer = 0;
+        if (value != null) NoteForkViewport(0, 0, value.Width, value.Height);
     }
 
     public override void BindCurrentFrameBufferKeepViewport(FrameBufferRef value)
     {
-        if (value == null)
-        {
-            device.BindDefaultFramebuffer();
-            DeclareBoundPass();
-            return;
-        }
-        device.BindFramebuffer(value.FboId);
-        DeclareBoundPass();
+        forkFramebuffer = 0;
     }
 
     public override void ClearBoundFrameBuffer(FrameBufferRef framebuffer, float[] clearColor, bool clearDepthBuffer, bool clearColorBuffers)
@@ -573,12 +563,12 @@ public partial class VulkanClientPlatform
         {
             for (int k = 0; k < framebuffer.ColorTextureIds.Length; k++)
             {
-                device.ClearColor(k, clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+                ClearTargetColor(framebuffer.FboId, k, clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
             }
         }
         if (clearDepthBuffer)
         {
-            device.ClearDepth(1f);
+            ClearTargetDepth(framebuffer.FboId, 1f);
         }
     }
 
@@ -589,31 +579,32 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void ClearFrameBufferPass(EnumFrameBuffer framebuffer)
     {
+        int target = CurrentTargetId;
         switch (framebuffer)
         {
         case EnumFrameBuffer.Default:
-            device.ClearColor(0, clearR, clearG, clearB, clearA);
-            device.ClearDepth(1f);
+            ClearTargetColor(target, 0, clearR, clearG, clearB, clearA);
+            ClearTargetDepth(target, 1f);
             break;
         case EnumFrameBuffer.Primary:
-            device.ClearColor(0, 0f, 0f, 0f, 1f);
-            device.ClearColor(1, 0f, 0f, 0f, 1f);
+            ClearTargetColor(target, 0, 0f, 0f, 0f, 1f);
+            ClearTargetColor(target, 1, 0f, 0f, 0f, 1f);
             if (OptimumRenderSsao)
             {
-                device.ClearColor(2, 0f, 0f, 0f, 1f);
-                device.ClearColor(3, 0f, 0f, 0f, 1f);
+                ClearTargetColor(target, 2, 0f, 0f, 0f, 1f);
+                ClearTargetColor(target, 3, 0f, 0f, 0f, 1f);
             }
             if (MotionAttachmentIndex >= 0)
             {
-                // ClearColor honours the draw-buffer mask on the device too.
+                // A clear honours the draw buffers, as on GL.
                 // Motion is excluded until a writer opts in, so temporarily
                 // enable it just as the GL branch does. Otherwise stale
                 // motion/reactivity survives and can reject all TAA history.
                 StateDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
-                device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);
+                ClearTargetColor(target, MotionAttachmentIndex, 0f, 0f, 0f, 0f);
                 StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
             }
-            device.ClearDepth(1f);
+            ClearTargetDepth(target, 1f);
             break;
         case EnumFrameBuffer.LiquidDepth:
         case EnumFrameBuffer.ShadowmapFar:
@@ -621,16 +612,15 @@ public partial class VulkanClientPlatform
         {
             FrameBufferRef optimumTarget = FrameBuffers[(int)framebuffer];
             NoteForkViewport(0, 0, optimumTarget.Width, optimumTarget.Height);
-            device.SetViewport(0, 0, optimumTarget.Width, optimumTarget.Height);
-            device.ClearDepth(1f);
+            ClearTargetDepth(target, 1f);
             break;
         }
         case EnumFrameBuffer.Transparent:
             // Weighted-blended OIT: accumulation starts at zero, revealage at
             // one, and the third attachment is the opaque-depth copy.
-            device.ClearColor(0, 0f, 0f, 0f, 0f);
-            device.ClearColor(1, 1f, 0f, 0f, 0f);
-            device.ClearColor(2, 0f, 0f, 0f, 0f);
+            ClearTargetColor(target, 0, 0f, 0f, 0f, 0f);
+            ClearTargetColor(target, 1, 1f, 0f, 0f, 0f);
+            ClearTargetColor(target, 2, 0f, 0f, 0f, 0f);
             break;
         }
     }
@@ -664,7 +654,8 @@ public partial class VulkanClientPlatform
 
     public override void SetBlendEnabled(bool enabled)
     {
-        device.SetBlendEnabled(enabled);
+        stated.SetBlendEnabled(enabled);
+        statedBlendOn = enabled;
     }
 
     /// <summary>
@@ -674,7 +665,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void ApplyTransparentMergeBlendState()
     {
-        device.SetDepthTest(false);
+        GlDisableDepthTest();
         StateBlend(true, EnumBlendMode.Standard);
         StateSlotBlendFunc(0, 770, 771, 770, 771);
     }
@@ -706,7 +697,7 @@ public partial class VulkanClientPlatform
 
     public override void ClearSsaoTarget()
     {
-        device.ClearColor(0, 1f, 1f, 1f, 1f);
+        ClearTargetColor(CurrentTargetId, 0, 1f, 1f, 1f, 1f);
     }
 
     /// <summary>
@@ -715,15 +706,12 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BeginFinalCompositionDrawBuffers()
     {
-        DeclareFinalCompositionPass();
         StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 1);
-        device.SetDepthTest(false);
+        GlDisableDepthTest();
     }
 
     public override void RestoreWorldDrawBuffers(bool ssaoAttachments)
     {
-        // The attachment-subset pass ends before Primary 1 rejoins the draw buffers.
-        device.EndPass();
         if (ssaoAttachments)
         {
             StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);

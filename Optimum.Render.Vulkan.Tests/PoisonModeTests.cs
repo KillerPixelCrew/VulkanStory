@@ -80,8 +80,8 @@ public class PoisonModeTests
             const uint size = 8;
             using var commands = new SetupQueue(context);
             using var textures = new TextureManager(context, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context, textures);
 
             int unorm = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int srgb = textures.Create(size, size, Format.R8G8B8A8Srgb);
@@ -97,7 +97,6 @@ public class PoisonModeTests
             targets.Attach(framebuffer, 3, single);
             targets.Attach(framebuffer, 4, integer);
             targets.Attach(framebuffer, -1, depth);
-            targets.SetDrawBuffers(framebuffer, 0b11111);
 
             commands.SubmitAndWait(commandBuffer =>
             {
@@ -155,8 +154,8 @@ public class PoisonModeTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
 
             int color = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int depth = textures.Create(size, size, Format.D32Sfloat);

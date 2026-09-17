@@ -181,7 +181,8 @@ Shipped so far:
 | Instance, device selection, feature negotiation | `Optimum.Render.Vulkan/Core/VulkanContext.cs` |
 | Buffers, images, memory, commands, barriers | `Optimum.Render.Vulkan/Core/VulkanResources.cs` |
 | GL constant translation | `Optimum.Render.Vulkan/Core/GlEnums.cs` |
-| Emulated GL state machine, pipeline key, interning | `Optimum.Render.Vulkan/Core/GlStateTracker.cs` |
+| Pipeline key, blend and format sets, interning, render limits | `Optimum.Render.Vulkan/Core/PipelineState.cs` |
+| Client-stated fixed-function state and the generic native draw | `Optimum.Render.Vulkan/Platform/StatedRenderState.cs`, `Platform/StatedDraw.cs` |
 | Vertex layouts and attribute format mapping | `Optimum.Render.Vulkan/Core/VertexLayout.cs` |
 | Per-program modules, descriptor layouts, uniform shadow | `Optimum.Render.Vulkan/Core/ShaderProgramResources.cs` |
 | Pipeline cache with on-disk driver blob | `Optimum.Render.Vulkan/Core/PipelineCache.cs` |

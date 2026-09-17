@@ -199,7 +199,7 @@ public class HeadlessHarnessCoverageTests
             StringComparison.Ordinal);
         Assert.True(at > 0, "VulkanClientPlatform.ReadDefaultFramebuffer is gone");
         string body = leaf[at..leaf.IndexOf("\n    }", at, StringComparison.Ordinal)];
-        Assert.Contains("device.ReadDefaultFramebuffer(x, y, width, height, destination);", body);
+        Assert.Contains("device.ReadFramebufferColor(CurrentTargetId, x, y, width, height, destination);", body);
         Assert.Contains("PixelOrder.SwapRedAndBlue(destination, (long)width * height);", body);
         // A target that is already BGRA is left alone, so the format is asked.
         Assert.Contains("device.DefaultColorFormat is Format.B8G8R8A8Unorm", body);
@@ -209,13 +209,13 @@ public class HeadlessHarnessCoverageTests
         Assert.Contains("texel[0] = texel[2];", pixelOrder);
         Assert.Contains("texel[2] = first;", pixelOrder);
 
-        // The device stays untouched: it is the general "read the bound target"
+        // The device stays untouched: it is the general "read a target's colour 0"
         // operation the GPU tests inspect attachments with, in their stored order.
         string deviceFile = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
         int deviceAt = deviceFile.IndexOf(
-            "public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)",
+            "private void ReadFramebufferColor(VulkanFramebuffer? target, int x, int y, int width, int height, IntPtr destination)",
             StringComparison.Ordinal);
-        Assert.True(deviceAt > 0, "VulkanDevice.ReadDefaultFramebuffer is gone");
+        Assert.True(deviceAt > 0, "VulkanDevice.ReadFramebufferColor is gone");
         Assert.DoesNotContain("SwapRedAndBlue",
             deviceFile[deviceAt..deviceFile.IndexOf("\n    }", deviceAt, StringComparison.Ordinal)]);
     }

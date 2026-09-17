@@ -6,14 +6,12 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native plan, Phase 2 step 2: the platform declares the frame's passes in frame order.
-// A pass is (context, bound target): the context is the render stage (from the C3 bracket) or
-// the post method running (OIT merge, TAA resolve and sharpen, post-processing, final
-// composition, blit, sky motion, liquid motion); every bind through the CurrentFrameBuffer
-// setters declares the pass for the new target. Reads are the textures the base's pass body
-// binds, so the pass opens with them already shader-readable. Mod-hosted stages sample
-// anything and use OpenSampling and AllowSplit. With OPTIMUM_VULKAN_FRAMEGRAPH=0 the device
-// ignores declarations and the old scope inference runs.
+// Vulkan-native plan, Phase 2 step 2, as it stands after the emulation layer went: every pass is
+// declared by the native route that records it (BeginNativePass), in frame order. The pass
+// context below is only the naming prefix and flag set of the stage or post method running -
+// the render stage (from the C3 bracket), or the OIT merge, TAA resolve and sharpen,
+// post-processing, final composition, blit, sky motion and liquid motion - which the entity
+// route names its coalesced pass after. Binds declare nothing.
 public partial class VulkanClientPlatform
 {
     // ClientPlatformWindows' EnumFrameBuffer slots the post chain indexes.
@@ -50,7 +48,7 @@ public partial class VulkanClientPlatform
 
         public void OnEndRenderStage(EnumRenderStage stage)
         {
-            platform.GraphDevice?.EndPass();
+            platform.GraphDevice?.EndStagePass();
             // The liquid motion pass runs right after the AfterOIT renderers (ClientMain.MainRenderLoop).
             platform.SetPassContext(stage == EnumRenderStage.AfterOIT ? "LiquidMotion" : "Frame", PassFlags.AllowSplit);
         }
@@ -67,90 +65,28 @@ public partial class VulkanClientPlatform
         _ => PassFlags.OpenSampling | PassFlags.AllowSplit,
     };
 
-    /// <summary>Starts a context and declares its pass on the bound target.</summary>
+    /// <summary>Starts a context: the prefix and flags of the passes recorded under it.</summary>
     private void SetPassContext(string context, PassFlags flags)
     {
         passContext = context;
         passContextFlags = flags;
-        DeclareBoundPass();
     }
 
     /// <summary>
-    /// The name <see cref="DeclareBoundPass" /> gives the (context, bound target) pass. A native
-    /// pass that wants to be recorded inside the stage's own pass rather than one of its own -
-    /// the entity draws - names this, so RenderTargetManager.DeclarePass coalesces instead of
-    /// ending the rendering scope and starting another.
+    /// The (context, current target) pass name. The entity route records every entity of a stage
+    /// under it with the scope kept open, so RenderTargetManager.DeclarePass coalesces instead of
+    /// ending the rendering scope and starting another per entity.
     /// </summary>
     private string BoundPassName()
     {
-        int index = FrameBufferIndexOf(device!.BoundFramebufferId);
+        int id = CurrentTargetId;
+        int index = FrameBufferIndexOf(id);
         string target = index >= 0
             ? index.ToString(CultureInfo.InvariantCulture)
-            : device.BoundFramebufferId == device.DefaultFramebufferId
+            : id == PassDeclaration.DefaultFramebuffer
                 ? "Default"
-                : "fbo" + device.BoundFramebufferId.ToString(CultureInfo.InvariantCulture);
+                : "fbo" + id.ToString(CultureInfo.InvariantCulture);
         return passContext + "/" + target;
-    }
-
-    /// <summary>Declares the (context, bound target) pass; a repeat of the current one changes nothing.</summary>
-    private void DeclareBoundPass()
-    {
-        if (device == null || !device.FrameGraphEnabled) return;
-        int index = FrameBufferIndexOf(device.BoundFramebufferId);
-        device.DeclarePass(new PassDeclaration
-        {
-            Name = BoundPassName(),
-            FramebufferId = PassDeclaration.BoundFramebuffer,
-            Reads = PassReads(passContext, index),
-            TransientSlots = PassTransientSlots(passContext, index),
-            Flags = passContextFlags,
-        });
-    }
-
-    /// <summary>
-    /// The final composition writes Primary 0 while sampling Primary 1: an attachment-subset
-    /// pass, Primary 1 out of the scope for the whole pass (one barrier each way per frame).
-    /// </summary>
-    private void DeclareFinalCompositionPass()
-    {
-        if (device == null || !device.FrameGraphEnabled) return;
-        if (passContext == "Post")
-        {
-            // The AO multiply before the TAA resolve shares the colour-0 mask, but
-            // samples only the blurred AO and preserves every other Primary attachment.
-            var reads = new List<int>();
-            if (ambientOcclusionOutput != 0)
-            {
-                // GTAO: the visibility texture, and the attenuation inputs the OPTIMUMAO compose reads.
-                reads.Add(ambientOcclusionOutput);
-            }
-            else
-            {
-                AddColour(reads, SsaoBlurVerticalIndex, 0);
-            }
-            if (Vintagestory.API.Config.OptimumConfig.AmbientOcclusionShadersUseGtao)
-            {
-                AddColour(reads, PrimaryIndex, 3);
-                AddColour(reads, TransparentIndex, 1);
-            }
-            device.DeclarePass(new PassDeclaration
-            {
-                Name = "SceneSsao/0",
-                FramebufferId = PassDeclaration.BoundFramebuffer,
-                ColorSlots = 1u,
-                Reads = reads.ToArray(),
-                Flags = PassFlags.None,
-            });
-            return;
-        }
-        device.DeclarePass(new PassDeclaration
-        {
-            Name = "FinalComposition/0",
-            FramebufferId = PassDeclaration.BoundFramebuffer,
-            ColorSlots = ~(1u << 1),
-            Reads = PassReads("FinalComposition", PrimaryIndex),
-            Flags = PassFlags.None,
-        });
     }
 
     private int FrameBufferIndexOf(int framebufferId)

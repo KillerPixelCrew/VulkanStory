@@ -40,7 +40,7 @@ public class MeshManagerTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var meshes = new MeshManager(context!, new GlStateTracker());
+            using var meshes = new MeshManager(context!);
             var uv2 = new CustomMeshDataPartShort(8)
             {
                 InterleaveSizes = new[] { 2 },
@@ -70,7 +70,7 @@ public class MeshManagerTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var meshes = new MeshManager(context!, new GlStateTracker());
+            using var meshes = new MeshManager(context!);
             var shorts = new CustomMeshDataPartShort(8)
             {
                 InterleaveSizes = new[] { 2 },
@@ -96,8 +96,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             // Positions and colours only: no normals, no UVs, no flags.
             int mesh = meshes.CreateEmpty(
@@ -130,8 +130,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             // Count stays 0 until values are added, and AllocationSize reports
             // Count - so this is exactly the "declared but not yet filled" case
@@ -185,8 +185,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             // The pool passes its configured sizes whichever path it is on, so
             // normals, UVs and flags all arrive non-zero here.
@@ -229,8 +229,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             CustomMeshDataPartInt TwoPerVertex() => new(8)
             {
@@ -278,8 +278,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             var customInts = new CustomMeshDataPartInt(4)
             {
@@ -308,8 +308,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             int first = meshes.CreateEmpty(48, 0, 0, 16, 0, 24, null, null, null, null,
                 EnumDrawMode.Triangles, true, false);
@@ -339,8 +339,8 @@ public class MeshManagerTests
 
         using (context)
         {
-            var state = new GlStateTracker();
-            using var meshes = new MeshManager(context!, state);
+            var state = new PipelineKeyState();
+            using var meshes = new MeshManager(context!);
 
             int a = meshes.CreateEmpty(48, 0, 0, 16, 0, 24, null, null, null, null,
                 EnumDrawMode.Triangles, true, false);
@@ -371,16 +371,15 @@ public class MeshManagerTests
             const uint size = 16;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
-            using var meshes = new MeshManager(context!, state);
+            using var meshes = new MeshManager(context!);
             using var compiler = new ShaderCompiler();
 
             int target = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, target);
-            targets.SetDrawBuffers(framebuffer, 0b1);
 
             // A full-target quad: positions plus colours, no normals or UVs, so
             // colours land at location 1.
@@ -446,7 +445,7 @@ public class MeshManagerTests
 
             VulkanFramebuffer bound = targets.Get(framebuffer)!;
             int formatsId = targets.FormatsIdOf(bound);
-            RenderTargetFormats formats = state.TargetFormats(formatsId);
+            RenderTargetFormats formats = targets.FormatsOf(formatsId);
 
             Pipeline pipeline = pipelines.Get(
                 state.BuildKey(meshes.LayoutIdOf(mesh), formatsId, 1),
@@ -495,7 +494,7 @@ public class MeshManagerTests
     private static void SetDynamicDefaults(Vk api, CommandBuffer commandBuffer)
     {
         api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-        api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+        api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
         api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
         api.CmdSetDepthTestEnable(commandBuffer, false);
         api.CmdSetDepthWriteEnable(commandBuffer, false);

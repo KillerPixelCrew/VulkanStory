@@ -144,7 +144,7 @@ public partial class VulkanClientPlatform
         });
 
     /// <summary>
-    /// Leaves the GL-emulation state where the OpenGL body leaves it, so everything the
+    /// Leaves the stated state where the OpenGL body leaves it, so everything the
     /// client draws after the blit (the ortho GUI pass) sees what it always saw: the Default
     /// target bound, the viewport on the window, and blending back on where the body turned
     /// it off. Outside every native pass.

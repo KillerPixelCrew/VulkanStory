@@ -29,7 +29,7 @@ public partial class VulkanClientPlatform
     /// <summary>glClearBuffer clamps a depth clear value to [0, 1]; the device takes the clamped value.</summary>
     public override void ClearDefaultDepth(float depth)
     {
-        device.ClearDepth(Math.Clamp(depth, 0f, 1f));
+        ClearTargetDepth(CurrentTargetId, Math.Clamp(depth, 0f, 1f));
     }
 
     /// <summary>The shared index buffer is a device mesh handle on this path.</summary>
@@ -162,11 +162,11 @@ public partial class VulkanClientPlatform
         NoteNativeTransparentBlend(4, 32774, 1, 1, 1, 1);
         NoteNativeTransparentBlend(5, 32774, 1, 1, 1, 1);
         nativeTransparentSlots = 0x3F;
-        device.ClearColor(0, 1f, 1f, 1f, 1f);
-        device.ClearColor(1, 1f, 1f, 1f, 1f);
-        device.ClearColor(3, 0f, 0f, 0f, 0f);
-        device.ClearColor(4, 0f, 0f, 0f, 0f);
-        device.ClearColor(5, 0f, 0f, 0f, 0f);
+        ClearTargetColor(transparent.FboId, 0, 1f, 1f, 1f, 1f);
+        ClearTargetColor(transparent.FboId, 1, 1f, 1f, 1f, 1f);
+        ClearTargetColor(transparent.FboId, 3, 0f, 0f, 0f, 0f);
+        ClearTargetColor(transparent.FboId, 4, 0f, 0f, 0f, 0f);
+        ClearTargetColor(transparent.FboId, 5, 0f, 0f, 0f, 0f);
     }
 
     /// <summary>Units 6 and 7; the device binds by unit whatever the texture's dimensionality.</summary>
@@ -174,8 +174,6 @@ public partial class VulkanClientPlatform
     {
         stated.BindTexture(6, revealTexture);
         stated.BindTexture(7, accumTexture);
-        device.BindTexture(6, revealTexture);
-        device.BindTexture(7, accumTexture);
     }
 
     public override int GenOcclusionQuery()
@@ -214,9 +212,9 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// The device reads back the colour target it has bound, which is the same image GL
-    /// would read from the bound framebuffer and in the same orientation - the one flip
-    /// happens at present, after this.
+    /// The device reads back colour attachment 0 of the target the client has current, which is
+    /// the same image GL would read from the bound framebuffer and in the same orientation - the
+    /// one flip happens at present, after this.
     ///
     /// <para>Channel order is converted here. The OpenGL body of this virtual is
     /// <c>glReadPixels(..., GL_BGRA, ...)</c>, and its callers depend on that:
@@ -235,7 +233,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
-        device.ReadDefaultFramebuffer(x, y, width, height, destination);
+        device.ReadFramebufferColor(CurrentTargetId, x, y, width, height, destination);
         if (destination == IntPtr.Zero || width <= 0 || height <= 0) return;
         if (device.DefaultColorFormat is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb) return;
         PixelOrder.SwapRedAndBlue(destination, (long)width * height);

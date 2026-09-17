@@ -60,8 +60,8 @@ public class WorldRenderPathTests
             const uint layers = 3;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -71,7 +71,6 @@ public class WorldRenderPathTests
             targets.Attach(framebuffer, 0, accumulation, 0);
             targets.Attach(framebuffer, 1, accumulation, 1);
             targets.Attach(framebuffer, 2, accumulation, 2);
-            targets.SetDrawBuffers(framebuffer, 0b111);
 
             TranslatedProgram translated = Translate(compiler, FullscreenVertex, """
                 #version 330 core
@@ -120,8 +119,8 @@ public class WorldRenderPathTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -135,7 +134,6 @@ public class WorldRenderPathTests
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, reveal);
             targets.Attach(framebuffer, 1, accum);
-            targets.SetDrawBuffers(framebuffer, 0b11);
 
             // Attachment 0: dst * src (GL_ZERO, GL_SRC_COLOR reversed as the OIT
             // pass writes it - factor pair 774/0 is DST_COLOR, ZERO).
@@ -193,8 +191,8 @@ public class WorldRenderPathTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
@@ -202,7 +200,6 @@ public class WorldRenderPathTests
 
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, -1, depth);
-            targets.SetDrawBuffers(framebuffer, 0);
 
             // Draws at a fixed clip depth; after the Vulkan remap that is 0.75.
             TranslatedProgram translated = Translate(compiler, """
@@ -267,15 +264,14 @@ public class WorldRenderPathTests
             const uint size = 8;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
 
             int color = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, color);
-            targets.SetDrawBuffers(framebuffer, 0b1);
 
             TranslatedProgram translated = Translate(compiler, FullscreenVertex, """
                 #version 330 core
@@ -331,12 +327,12 @@ public class WorldRenderPathTests
 
     private static unsafe void RenderFullscreen(
         VulkanContext context, SetupQueue commands, RenderTargetManager targets,
-        GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
+        GraphicsPipelineCache pipelines, PipelineKeyState state, ShaderProgramResources program,
         int framebuffer, uint size, bool depthTest = false, QueryPool queryPool = default)
     {
         VulkanFramebuffer bound = targets.Get(framebuffer)!;
         int formatsId = targets.FormatsIdOf(bound);
-        RenderTargetFormats formats = state.TargetFormats(formatsId);
+        RenderTargetFormats formats = targets.FormatsOf(formatsId);
         int attachmentCount = targets.EnabledAttachmentCount(bound);
 
         var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
@@ -373,7 +369,7 @@ public class WorldRenderPathTests
             api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
 
             api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-            api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+            api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
             api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
             api.CmdSetDepthTestEnable(commandBuffer, depthTest);
             api.CmdSetDepthWriteEnable(commandBuffer, depthTest);

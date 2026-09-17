@@ -49,8 +49,7 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
 
     /// <summary>
     /// Primary as it is without the SSAO G-buffer (scene, glow, motion): the native entity draw
-    /// puts the same pixels on all three attachments as the seam's neutral body, and records no
-    /// emulation inside its pass.
+    /// puts the same pixels on all three attachments as the seam's neutral body, and records nothing else.
     /// </summary>
     [SkippableTheory]
     [InlineData(false, true)]
@@ -61,20 +60,18 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
     {
         using Session session = Open(gbuffer);
 
-        byte[][] emulated = session.RunFrame(native: false, motionOpen);
+        byte[][] stated = session.RunFrame(native: false, motionOpen);
 
         long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[][] native = session.RunFrame(native: true, motionOpen);
 
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        for (int slot = 0; slot < emulated.Length; slot++)
+        for (int slot = 0; slot < stated.Length; slot++)
         {
-            output.WriteLine("slot " + slot + " emulated " + Centre(emulated[slot]) +
+            output.WriteLine("slot " + slot + " stated " + Centre(stated[slot]) +
                 " native " + Centre(native[slot]));
-            Assert.Equal(emulated[slot], native[slot]);
+            Assert.Equal(stated[slot], native[slot]);
         }
         // An identity comparison of two blank attachments proves nothing: the shape has to have
         // reached the scene slot.
@@ -111,27 +108,27 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
     {
         using Session session = Open(gbuffer: false);
 
-        byte[] emulatedOpen = session.RunFrame(native: false, motionOpen: true)[Session.MotionSlot];
+        byte[] statedOpen = session.RunFrame(native: false, motionOpen: true)[Session.MotionSlot];
         byte[] nativeOpen = session.RunFrame(native: true, motionOpen: true)[Session.MotionSlot];
-        Assert.Equal(emulatedOpen, nativeOpen);
+        Assert.Equal(statedOpen, nativeOpen);
 
         // With the window shut the attachment is out of the draw-buffer set on the old route and
         // masked out of the pipeline on the native one, so both leave the frame's clear standing.
         // That is rule 9 in its narrowest form: an attachment nothing writes must not pick up
         // whatever Vulkan would otherwise leave in it.
-        byte[] emulatedShut = session.RunFrame(native: false, motionOpen: false)[Session.MotionSlot];
+        byte[] statedShut = session.RunFrame(native: false, motionOpen: false)[Session.MotionSlot];
         byte[] nativeShut = session.RunFrame(native: true, motionOpen: false)[Session.MotionSlot];
-        Assert.Equal(emulatedShut, nativeShut);
+        Assert.Equal(statedShut, nativeShut);
         Assert.Equal(session.ClearOf(Session.MotionSlot), Centre(nativeShut));
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
-    /// The seam's neutral body draws through the emulation layer and the native route does not:
+    /// The seam's neutral body draws through the generic stated route and the native route does not:
     /// the switch is real, and "OFF is vanilla" holds for the route the OpenGL path takes.
     /// </summary>
     [SkippableFact]
-    public unsafe void TheNeutralBodyDrawsThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    public unsafe void TheNeutralBodyDrawsThroughTheStatedRouteAndTheNativeRouteDoesNot()
     {
         using Session session = Open(gbuffer: false);
 
@@ -139,9 +136,7 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
         session.RunFrame(native: false, motionOpen: true);
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeDrawsBefore);
 
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         session.RunFrame(native: true, motionOpen: true);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -188,13 +183,13 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
         session.PoseJoint(shiftX: 0.5f);
 
         // Warm-up: the native pipeline compiles in the background and its first draws are skipped
-        // until it is published, exactly as on the emulated path.
+        // until it is published, exactly as on the stated route.
         session.RunFrame(native: true, motionOpen: true);
         byte[] posed = session.RunFrame(native: true, motionOpen: true)[0];
-        byte[] posedEmulated = session.RunFrame(native: false, motionOpen: true)[0];
+        byte[] posedStated = session.RunFrame(native: false, motionOpen: true)[0];
 
         Assert.NotEqual(session.ClearOf(0), Centre(posed));
-        Assert.Equal(posed, posedEmulated);
+        Assert.Equal(posed, posedStated);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -280,16 +275,6 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
                 },
                 CrashMarkerDataPath = dataPath,
             };
-
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
 
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {
@@ -426,7 +411,7 @@ public class NativeEntityDrawTests(ITestOutputHelper output)
             entity.Uniform("renderColor", 1f, 1f, 1f, 1f);
             entity.Uniform("alphaTest", 0.001f);
             // The client's own sampler declaration: both routes see the same texture, the
-            // emulated one through the unit and the native one through the declared name.
+            // stated one through the unit and the native one through the declared name.
             Platform.BindProgramTexture2D(entity, "entityTex", atlas, 0);
 
             MotionWriteActive.SetValue(Platform, motionOpen);

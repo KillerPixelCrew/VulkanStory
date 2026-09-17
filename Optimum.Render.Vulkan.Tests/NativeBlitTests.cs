@@ -57,25 +57,22 @@ public class NativeBlitTests(ITestOutputHelper output)
     // ------------------------------------------------------------------ the tests
 
     /// <summary>
-    /// The plain blit: same pixels, one declared pass, one native draw, and nothing reaching
-    /// the emulation layer while the pass is open.
+    /// The plain blit: same pixels, one declared pass, one native draw.
     /// </summary>
     [SkippableFact]
-    public unsafe void ThePlainBlitMatchesTheOpenGlBodyAndUsesNoEmulation()
+    public unsafe void ThePlainBlitMatchesTheOpenGlBodyAsOneNativeDraw()
     {
         using Session session = Open();
 
-        byte[] emulated = RunFrame(session, native: false, debugView: 0, fsr: false);
+        byte[] stated = RunFrame(session, native: false, debugView: 0, fsr: false);
 
         long drawsBefore = session.Seam.NativeDrawsForTests;
         long passesBefore = session.Seam.NativePassesForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] nativeRoute = RunFrame(session, native: true, debugView: 0, fsr: false);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
-        Assert.Equal(emulated, nativeRoute);
+        Assert.Equal(stated, nativeRoute);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -90,15 +87,13 @@ public class NativeBlitTests(ITestOutputHelper output)
     {
         using Session session = Open();
 
-        byte[] emulated = RunFrame(session, native: false, debugView: mode, fsr: false);
+        byte[] stated = RunFrame(session, native: false, debugView: mode, fsr: false);
 
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] nativeRoute = RunFrame(session, native: true, debugView: mode, fsr: false);
 
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
-        Assert.Equal(emulated, nativeRoute);
+        Assert.Equal(stated, nativeRoute);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -113,39 +108,35 @@ public class NativeBlitTests(ITestOutputHelper output)
     {
         using Session session = Open();
 
-        byte[] emulated = RunFrame(session, native: false, debugView: 0, fsr: true);
+        byte[] stated = RunFrame(session, native: false, debugView: 0, fsr: true);
 
         long drawsBefore = session.Seam.NativeDrawsForTests;
         long passesBefore = session.Seam.NativePassesForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] nativeRoute = RunFrame(session, native: true, debugView: 0, fsr: true);
 
         Assert.Equal(2, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(2, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        int worst = WorstChannelDifference(emulated, nativeRoute);
+        int worst = WorstChannelDifference(stated, nativeRoute);
         output.WriteLine("FSR worst channel difference: " + worst);
         Assert.True(worst <= 1, "FSR differs from the OpenGL body by " + worst + "/255");
 
         GpuTest.AssertClean(session.Seam);
     }
 
-    /// <summary>The OpenGL body on this device is the emulation layer, and the native route is not.</summary>
+    /// <summary>The OpenGL body on this device is the generic stated route, and the native route is not.</summary>
     [SkippableFact]
-    public unsafe void TheOpenGlBodyDrawsThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    public unsafe void TheOpenGlBodyDrawsThroughTheStatedRouteAndTheNativeRouteDoesNot()
     {
         using Session session = Open();
 
         long nativeDrawsBefore = session.Seam.NativeDrawsForTests;
-        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        long statedBefore = session.Platform.StatedDrawsForTests;
         RunFrame(session, native: false, debugView: 0, fsr: false);
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeDrawsBefore);
-        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+        Assert.True(session.Platform.StatedDrawsForTests - statedBefore > 0);
 
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         RunFrame(session, native: true, debugView: 0, fsr: false);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -243,16 +234,6 @@ public class NativeBlitTests(ITestOutputHelper output)
                 },
                 CrashMarkerDataPath = dataPath,
             };
-
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
 
             if (!platform.InitializeGraphics(IntPtr.Zero, WindowSize, WindowSize, out string reason))
             {

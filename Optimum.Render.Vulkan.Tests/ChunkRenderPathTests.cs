@@ -52,10 +52,10 @@ public class ChunkRenderPathTests
         {
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
-            using var meshes = new MeshManager(context!, state);
+            using var meshes = new MeshManager(context!);
             using var compiler = new ShaderCompiler();
 
             var files = ShaderCorpus.LoadShaderFiles();
@@ -114,11 +114,10 @@ public class ChunkRenderPathTests
                 int target = textures.Create(8, 8, Format.R8G8B8A8Unorm);
                 int framebuffer = targets.Create(8, 8);
                 targets.Attach(framebuffer, 0, target);
-                targets.SetDrawBuffers(framebuffer, 0b1);
 
                 VulkanFramebuffer bound = targets.Get(framebuffer)!;
                 int formatsId = targets.FormatsIdOf(bound);
-                RenderTargetFormats formats = state.TargetFormats(formatsId);
+                RenderTargetFormats formats = targets.FormatsOf(formatsId);
 
                 var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
                 for (int i = 0; i < blend.Length; i++) blend[i] = state.BlendFor(i);
@@ -181,10 +180,10 @@ public class ChunkRenderPathTests
         {
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
-            using var meshes = new MeshManager(context!, state);
+            using var meshes = new MeshManager(context!);
             using var compiler = new ShaderCompiler();
 
             var files = ShaderCorpus.LoadShaderFiles();
@@ -224,11 +223,10 @@ public class ChunkRenderPathTests
             targets.Attach(framebuffer, 0, target);
             targets.Attach(framebuffer, -1, depth);
             // Enough attachments for the multi-output world passes.
-            targets.SetDrawBuffers(framebuffer, 0b1);
 
             VulkanFramebuffer bound = targets.Get(framebuffer)!;
             int formatsId = targets.FormatsIdOf(bound);
-            RenderTargetFormats formats = state.TargetFormats(formatsId);
+            RenderTargetFormats formats = targets.FormatsOf(formatsId);
 
             var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
             for (int i = 0; i < blend.Length; i++) blend[i] = state.BlendFor(i);
@@ -271,16 +269,15 @@ public class ChunkRenderPathTests
             const uint size = 16;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
-            using var meshes = new MeshManager(context!, state);
+            using var meshes = new MeshManager(context!);
             using var compiler = new ShaderCompiler();
 
             int target = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, target);
-            targets.SetDrawBuffers(framebuffer, 0b1);
 
             // One face: four vertices packed into sixteen bytes, plus the six
             // indices that expand it into two triangles.
@@ -347,7 +344,7 @@ public class ChunkRenderPathTests
 
             VulkanFramebuffer bound = targets.Get(framebuffer)!;
             int formatsId = targets.FormatsIdOf(bound);
-            RenderTargetFormats formats = state.TargetFormats(formatsId);
+            RenderTargetFormats formats = targets.FormatsOf(formatsId);
 
             Pipeline pipeline = pipelines.Get(
                 state.BuildKey(meshes.LayoutIdOf(mesh), formatsId, 1),
@@ -424,16 +421,15 @@ public class ChunkRenderPathTests
             const uint size = 16;
             using var commands = new SetupQueue(context!);
             using var textures = new TextureManager(context!, commands.Uploads);
-            var state = new GlStateTracker();
-            using var targets = new RenderTargetManager(context!, textures, state);
+            var state = new PipelineKeyState();
+            using var targets = new RenderTargetManager(context!, textures);
             using var pipelines = new GraphicsPipelineCache(context!);
-            using var meshes = new MeshManager(context!, state);
+            using var meshes = new MeshManager(context!);
             using var compiler = new ShaderCompiler();
 
             int target = textures.Create(size, size, Format.R8G8B8A8Unorm);
             int framebuffer = targets.Create(size, size);
             targets.Attach(framebuffer, 0, target);
-            targets.SetDrawBuffers(framebuffer, 0b1);
 
             int mesh = meshes.CreateEmpty(
                 xyzSize: 4 * 3 * sizeof(float), normalsSize: 0, uvSize: 0,
@@ -494,7 +490,7 @@ public class ChunkRenderPathTests
 
             VulkanFramebuffer bound = targets.Get(framebuffer)!;
             int formatsId = targets.FormatsIdOf(bound);
-            RenderTargetFormats formats = state.TargetFormats(formatsId);
+            RenderTargetFormats formats = targets.FormatsOf(formatsId);
 
             Pipeline pipeline = pipelines.Get(
                 state.BuildKey(meshes.LayoutIdOf(mesh), formatsId, 1),
@@ -549,7 +545,7 @@ public class ChunkRenderPathTests
     private static void SetDynamicDefaults(Vk api, CommandBuffer commandBuffer)
     {
         api.CmdSetCullMode(commandBuffer, CullModeFlags.None);
-        api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
+        api.CmdSetFrontFace(commandBuffer, PipelineKeyState.FrontFace);
         api.CmdSetPrimitiveTopology(commandBuffer, PrimitiveTopology.TriangleList);
         api.CmdSetDepthTestEnable(commandBuffer, false);
         api.CmdSetDepthWriteEnable(commandBuffer, false);

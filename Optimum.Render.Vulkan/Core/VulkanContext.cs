@@ -76,8 +76,8 @@ internal sealed class VulkanCapabilities
 
     /// <summary>
     /// The width a line draw may actually rasterize with: the caller's, clamped to the device's
-    /// range, or exactly 1 on a device without wideLines. Used by the emulated draw path and by
-    /// a native pipeline's dynamic state, so the two routes can never disagree about it.
+    /// range, or exactly 1 on a device without wideLines. Applied to a native pipeline's dynamic
+    /// state, so every draw clamps the same way.
     /// </summary>
     public float ClampLineWidth(float width)
     {

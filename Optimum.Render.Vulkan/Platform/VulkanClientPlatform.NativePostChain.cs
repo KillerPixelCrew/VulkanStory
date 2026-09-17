@@ -578,7 +578,7 @@ public partial class VulkanClientPlatform
     private static int NativeSlotCount(uint slots)
     {
         int count = 0;
-        for (int i = 0; i < GlStateTracker.MaxColorAttachments; i++)
+        for (int i = 0; i < RenderLimits.MaxColorAttachments; i++)
         {
             if (((slots >> i) & 1) != 0) count = i + 1;
         }
@@ -591,7 +591,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool BeginNativeKeepViewportPass(string name, int framebufferId, uint colorSlots, int[] reads)
     {
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         return device.BeginNativePass(new NativePassDescription
         {
             Name = name,

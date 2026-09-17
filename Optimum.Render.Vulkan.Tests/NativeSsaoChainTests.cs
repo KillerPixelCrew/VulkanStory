@@ -55,11 +55,10 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         using Session session = Open(quality == 1 ? "ssao-only" : "taa-with-ssao", taa: quality != 1);
         session.SsaoQuality = quality;
 
-        Frame emulated = session.Run(native: false);
+        Frame stated = session.Run(native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         Frame nativeRoute = session.Run(native: true);
 
         // The raw pass, one blur half-iteration per pass, and the composite when TAA runs.
@@ -67,12 +66,11 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         int expected = 1 + blurPasses + (quality != 1 ? 1 : 0);
         Assert.Equal(expected, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(expected, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(emulated.Raw, nativeRoute.Raw);
-        Assert.Equal(emulated.Blurred, nativeRoute.Blurred);
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
-        Assert.Equal(emulated.SsaoInScene, nativeRoute.SsaoInScene);
+        Assert.Equal(stated.Raw, nativeRoute.Raw);
+        Assert.Equal(stated.Blurred, nativeRoute.Blurred);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.SsaoInScene, nativeRoute.SsaoInScene);
 
         // The step really did something, or the comparison above would pass on two routes that
         // both wrote nothing.
@@ -92,15 +90,15 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
     {
         using Session session = Open("ssao-only", taa: false);
 
-        Frame emulated = session.Run(native: false);
+        Frame stated = session.Run(native: false);
         Frame nativeRoute = session.Run(native: true);
 
-        Assert.Equal(emulated.Raw, nativeRoute.Raw);
-        Assert.Equal(emulated.Blurred, nativeRoute.Blurred);
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Raw, nativeRoute.Raw);
+        Assert.Equal(stated.Blurred, nativeRoute.Blurred);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
         Assert.Equal(session.SceneSeed, nativeRoute.Scene);
         Assert.False(nativeRoute.SsaoInScene);
-        Assert.False(emulated.SsaoInScene);
+        Assert.False(stated.SsaoInScene);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -119,21 +117,21 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         using Session session = Open("taa-with-ssao", taa: true);
 
         session.SsaaLevel = 0.5f;
-        Frame emulatedHalf = session.Run(native: false);
+        Frame statedHalf = session.Run(native: false);
         Frame nativeHalf = session.Run(native: true);
-        Assert.Equal(emulatedHalf.Raw, nativeHalf.Raw);
-        Assert.Equal(emulatedHalf.Blurred, nativeHalf.Blurred);
-        Assert.Equal(emulatedHalf.Scene, nativeHalf.Scene);
+        Assert.Equal(statedHalf.Raw, nativeHalf.Raw);
+        Assert.Equal(statedHalf.Blurred, nativeHalf.Blurred);
+        Assert.Equal(statedHalf.Scene, nativeHalf.Scene);
 
         session.SsaaLevel = 0.75f;
-        Frame emulated = session.Run(native: false);
+        Frame stated = session.Run(native: false);
         Frame nativeRoute = session.Run(native: true);
-        Assert.Equal(emulated.Raw, nativeRoute.Raw);
-        Assert.Equal(emulated.Blurred, nativeRoute.Blurred);
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Raw, nativeRoute.Raw);
+        Assert.Equal(stated.Blurred, nativeRoute.Blurred);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
 
         Assert.NotEqual(nativeHalf.Raw, nativeRoute.Raw);
-        Assert.NotEqual(emulatedHalf.Raw, emulated.Raw);
+        Assert.NotEqual(statedHalf.Raw, stated.Raw);
 
         GpuTest.AssertClean(session.Seam);
     }
@@ -149,13 +147,13 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         using Session session = Open("ssao-only", taa: true);
         session.RenderSsao = false;
 
-        Frame emulated = session.Run(native: false);
+        Frame stated = session.Run(native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         Frame nativeRoute = session.Run(native: true);
 
         Assert.Equal(0, session.Seam.NativePassesForTests - passesBefore);
-        Assert.Equal(emulated.Raw, nativeRoute.Raw);
+        Assert.Equal(stated.Raw, nativeRoute.Raw);
         Assert.Equal(session.RawSeed, nativeRoute.Raw);
         Assert.Equal(session.BlurredSeed, nativeRoute.Blurred);
         Assert.Equal(session.SceneSeed, nativeRoute.Scene);
@@ -177,19 +175,17 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         using Session session = Open("taa-with-gtao", taa: true, gtao: true);
         session.AmbientOcclusionTexture = session.GtaoVisibility;
 
-        Frame emulated = session.Run(native: false);
+        Frame stated = session.Run(native: false);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long drawsBefore = session.Seam.NativeDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         Frame nativeRoute = session.Run(native: true);
 
         // The composite alone: vanilla SSAO and its blur stood down.
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        Assert.Equal(emulated.Scene, nativeRoute.Scene);
+        Assert.Equal(stated.Scene, nativeRoute.Scene);
         Assert.True(nativeRoute.SsaoInScene);
         Assert.Equal(session.RawSeed, nativeRoute.Raw);
         Assert.Equal(session.BlurredSeed, nativeRoute.Blurred);
@@ -210,10 +206,10 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         using Session session = Open("taa-with-ssao", taa: true);
 
         session.Run(native: false);
-        (int Width, int Height) emulated = session.Viewport;
+        (int Width, int Height) stated = session.Viewport;
         session.Run(native: true);
 
-        Assert.Equal(emulated, session.Viewport);
+        Assert.Equal(stated, session.Viewport);
         Assert.Equal((Size, Size), session.Viewport);
 
         GpuTest.AssertClean(session.Seam);
@@ -402,7 +398,7 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
             Platform.BeginFrame();
             SeedFrame();
             Platform.RunPostStepAmbientOcclusionForTests(projection);
-            Viewport = ((int)Seam.NativeCurrentViewport.Extent.Width, (int)Seam.NativeCurrentViewport.Extent.Height);
+            Viewport = ((int)Platform.stated.Viewport.Extent.Width, (int)Platform.stated.Viewport.Extent.Height);
             var frame = new Frame(
                 Decode(ssao.ColorTextureIds[0]),
                 Decode(blurVertical.ColorTextureIds[0]),

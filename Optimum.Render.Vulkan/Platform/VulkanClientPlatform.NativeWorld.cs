@@ -233,7 +233,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool NativeWorldBeginPass(string name, FrameBufferRef target, uint slots, int[] reads)
     {
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         return device.BeginNativePass(new NativePassDescription
         {
             Name = name + "/" + target.FboId,
@@ -250,13 +250,12 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// Closes the native pass and declares the stage's own pass context again, because every
-    /// renderer after this one draws into the same target through the emulated path - the same
+    /// renderer after this one draws into the same target through the generic stated route - the same
     /// restoration the sky dome's pass and the TAA resolve's do.
     /// </summary>
     private void NativeWorldEndPass(FrameBufferRef target, string outer, PassFlags outerFlags)
     {
         device.EndNativePass();
-        device.BindFramebuffer(target.FboId);
         SetPassContext(outer, outerFlags);
     }
 
@@ -599,7 +598,7 @@ public partial class VulkanClientPlatform
 
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
-        Rect2D viewport = device.NativeCurrentViewport;
+        Rect2D viewport = StatedViewport();
         bool drawn = false;
         if (device.BeginNativePass(new NativePassDescription
         {
@@ -680,7 +679,7 @@ public partial class VulkanClientPlatform
     /// The decal pool's multi-draw, recorded natively, when it arrives through
     /// <see cref="RenderMesh(MeshRef, int[], int[], int, bool)" /> inside an open decal scope.
     /// False means the scope is closed, the native route is off, or the pass could not be
-    /// prepared, and the caller takes the emulated multi-draw the OpenGL body takes.
+    /// prepared, and the caller takes the generic stated multi-draw.
     /// </summary>
     internal bool TryDrawDecalPoolNative(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount)
     {

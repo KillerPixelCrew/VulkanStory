@@ -13,8 +13,8 @@ namespace Optimum.Render.Vulkan.Core;
 /// Creates graphics pipelines on demand and remembers them.
 ///
 /// Vulkan wants pipeline state baked ahead of time; GL lets it change one call
-/// before a draw. Bridging that is the job here: state changes are recorded by
-/// <see cref="GlStateTracker" />, and the first draw that needs a given
+/// before a draw. Bridging that is the job here: a draw states its fixed state
+/// (NativePipelineDescription), and the first draw that needs a given
 /// combination compiles a pipeline for it. Because Vulkan 1.3 makes viewport,
 /// scissor, cull, front face, depth and stencil dynamic, the combinations that
 /// remain are few - roughly a few hundred across the whole game - and after the
@@ -230,6 +230,25 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     ///
     /// With <see cref="AsyncCompiles" /> off this never returns false.
     /// </summary>
+    /// <summary>
+    /// <see cref="TryGet" /> ahead of any draw: the compile starts (or the driver cache serves it)
+    /// when a native system asks for its pipeline, and no draw is counted as skipped for it.
+    /// </summary>
+    public void Prepare(PipelineKey key, PipelineRequest request)
+    {
+        _preparing = true;
+        try
+        {
+            TryGet(key, request, out _);
+        }
+        finally
+        {
+            _preparing = false;
+        }
+    }
+
+    private bool _preparing;
+
     public bool TryGet(PipelineKey key, PipelineRequest request, out Pipeline pipeline)
     {
         if (_pipelines.TryGetValue(key, out pipeline))
@@ -361,6 +380,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     private void NoteSkipped()
     {
+        if (_preparing) return;
         Interlocked.Increment(ref _drawsSkipped);
         VulkanStats.NotePipelineDrawSkipped();
     }
@@ -949,7 +969,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                     PolygonMode = request.PolygonMode,
                     // Cull mode and front face are dynamic; these are placeholders.
                     CullMode = CullModeFlags.None,
-                    FrontFace = GlStateTracker.FrontFace,
+                    FrontFace = RenderLimits.FrontFace,
                     LineWidth = 1.0f,
                 };
 

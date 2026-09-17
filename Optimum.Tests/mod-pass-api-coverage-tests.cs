@@ -232,7 +232,10 @@ public class ModPassApiCoverageTests
         Assert.Contains("Flags = ModPassFlags,", host);
         Assert.Contains("BeginMotionOnlyWrite() : BeginMotionWrite()", host);
         Assert.Contains("if (motion) EndMotionWrite();", host);
-        Assert.Contains("device.EndPass();", host);
+        Assert.Contains("statedPass = plan.Declaration;", host);
+        Assert.Contains("statedPass = null;", host);
+        Assert.Contains("out string? refusal, declared);",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeStated.cs"));
 
         string platform = VulkanPlatformSource.Read();
         Assert.Contains("InstallModPassHooks();", platform);

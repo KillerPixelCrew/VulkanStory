@@ -51,7 +51,7 @@ public class NativeGuiTests(ITestOutputHelper output)
     /// <summary>
     /// The native texture-blit pass draws what the seam's neutral body draws, with blending on
     /// (the alphaTest >= 0 case, which is every Cairo bake) and with it off: one declared pass,
-    /// one native mesh draw, no emulation inside it, and the same pixels.
+    /// one native mesh draw, and the same pixels.
     /// </summary>
     [SkippableTheory]
     [InlineData(true)]
@@ -60,19 +60,17 @@ public class NativeGuiTests(ITestOutputHelper output)
     {
         using Session session = Open();
 
-        byte[] emulated = session.RunTextureQuad(native: false, blend);
+        byte[] stated = session.RunTextureQuad(native: false, blend);
 
         long passesBefore = session.Seam.NativePassesForTests;
         long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] native = session.RunTextureQuad(native: true, blend);
 
         Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        output.WriteLine("blit centre emulated " + Centre(emulated) + " native " + Centre(native));
-        Assert.Equal(emulated, native);
+        output.WriteLine("blit centre stated " + Centre(stated) + " native " + Centre(native));
+        Assert.Equal(stated, native);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -89,40 +87,36 @@ public class NativeGuiTests(ITestOutputHelper output)
     {
         using Session session = Open();
 
-        byte[] emulated = session.RunOverlayLines(native: false, lineWidth);
+        byte[] stated = session.RunOverlayLines(native: false, lineWidth);
 
         long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] native = session.RunOverlayLines(native: true, lineWidth);
 
         Assert.Equal(1, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        output.WriteLine("line row emulated " + Row(emulated) + " native " + Row(native));
-        Assert.Equal(emulated, native);
+        output.WriteLine("line row stated " + Row(stated) + " native " + Row(native));
+        Assert.Equal(stated, native);
         GpuTest.AssertClean(session.Seam);
     }
 
     /// <summary>
-    /// The seams' neutral bodies draw through the emulation layer and the native route does
+    /// The seams' neutral bodies draw through the generic stated route and the native route does
     /// not: the switch is real, and "OFF is vanilla" holds for the route the OpenGL path takes.
     /// </summary>
     [SkippableFact]
-    public unsafe void TheNeutralBodiesDrawThroughTheEmulationLayerAndTheNativeRouteDoesNot()
+    public unsafe void TheNeutralBodiesDrawThroughTheStatedRouteAndTheNativeRouteDoesNot()
     {
         using Session session = Open();
 
         long nativeDrawsBefore = session.Seam.NativeDrawsForTests;
-        long emulatedBefore = session.Seam.EmulationCallsForTests;
+        long statedBefore = session.Platform.StatedDrawsForTests;
         session.RunTextureQuad(native: false, blend: true);
         session.RunOverlayLines(native: false, 1.0f);
         Assert.Equal(0, session.Seam.NativeDrawsForTests - nativeDrawsBefore);
-        Assert.True(session.Seam.EmulationCallsForTests - emulatedBefore > 0);
+        Assert.True(session.Platform.StatedDrawsForTests - statedBefore > 0);
 
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         session.RunTextureQuad(native: true, blend: true);
         session.RunOverlayLines(native: true, 1.0f);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -179,29 +173,27 @@ public class NativeGuiTests(ITestOutputHelper output)
     /// <summary>
     /// An atlas composition samples the texture it writes (BlendedTextureManager copies one atlas
     /// region into another region of the same atlas). The native pass takes the same pooled
-    /// ReadSelf copy the emulated route takes, instead of refusing the draw: two native mesh
-    /// draws, no emulation, the same pixels, validation clean.
+    /// ReadSelf copy the stated route takes, instead of refusing the draw: two native mesh
+    /// draws, the same pixels, validation clean.
     /// </summary>
     [SkippableFact]
     public unsafe void TheNativeTextureBlitReadsItsOwnTargetThroughACopy()
     {
         using Session session = Open();
 
-        byte[] emulated = session.RunSelfBlit(native: false);
+        byte[] stated = session.RunSelfBlit(native: false);
 
         long meshDrawsBefore = session.Seam.NativeMeshDrawsForTests;
-        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
         byte[] native = session.RunSelfBlit(native: true);
 
         Assert.Equal(2, session.Seam.NativeMeshDrawsForTests - meshDrawsBefore);
-        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
 
-        output.WriteLine("self blit row emulated " + Row(emulated) + " native " + Row(native));
-        Assert.Equal(emulated, native);
+        output.WriteLine("self blit row stated " + Row(stated) + " native " + Row(native));
+        Assert.Equal(stated, native);
         // The right half is the copied left half, not the clear colour.
         int left = (Size / 2 * Size + 1) * 4;
         int right = (Size / 2 * Size + Size / 2 + 1) * 4;
-        Assert.Equal(emulated[left + 1], emulated[right + 1]);
+        Assert.Equal(stated[left + 1], stated[right + 1]);
         GpuTest.AssertClean(session.Seam);
     }
 
@@ -272,16 +264,6 @@ public class NativeGuiTests(ITestOutputHelper output)
                 CrashMarkerDataPath = dataPath,
             };
 
-            // These tests pin a dedicated native route against the emulated route its seam's neutral
-
-            // body used to take; the fixture sets state on the device directly, so the generic stated
-
-            // route (which reads the platform's record) stays out of the comparison until the emulated
-
-            // route is removed. NativeStatedTests covers the generic route itself.
-
-            platform.NativeStatedEnabled = false;
-
             if (!platform.InitializeGraphics(IntPtr.Zero, Size, Size, out string reason))
             {
                 output.WriteLine("Vulkan unavailable: " + reason);
@@ -322,7 +304,7 @@ public class NativeGuiTests(ITestOutputHelper output)
         }
 
         /// <summary>
-        /// The units the client's program setters bind: what the emulated route resolves its
+        /// The units the client's program setters bind: what the stated route resolves its
         /// samplers through. The native route passes the handles instead.
         /// </summary>
         private static void BindSamplerUnits(VulkanDevice seam, ShaderProgramBase program, int texture)

@@ -138,7 +138,7 @@ public class PipelineCacheTests
             using var program = new ShaderProgramResources(context!, programId: 3, translated);
             using var cache = new GraphicsPipelineCache(context!);
 
-            var tracker = new GlStateTracker();
+            var tracker = new PipelineKeyState();
             tracker.SetProgram(3);
 
             var targets = new RenderTargetFormats(new[] { Format.R8G8B8A8Unorm }, Format.Undefined);
@@ -199,7 +199,7 @@ public class PipelineCacheTests
         {
             using var compiler = new ShaderCompiler();
             using var cache = new GraphicsPipelineCache(context!);
-            var tracker = new GlStateTracker();
+            var tracker = new PipelineKeyState();
 
             var targets = new RenderTargetFormats(new[] { Format.R8G8B8A8Unorm }, Format.Undefined);
             int targetId = tracker.InternTargetFormats(targets);
@@ -271,7 +271,7 @@ public class PipelineCacheTests
                 Assert.True(translated.Success, string.Join("; ", translated.Errors));
                 using var program = new ShaderProgramResources(context!, programId: 7, translated);
 
-                var tracker = new GlStateTracker();
+                var tracker = new PipelineKeyState();
                 tracker.SetProgram(7);
                 var targets = new RenderTargetFormats(new[] { Format.R8G8B8A8Unorm }, Format.Undefined);
                 int targetId = tracker.InternTargetFormats(targets);
@@ -398,7 +398,7 @@ public class PipelineCacheTests
                 Assert.True(translated.Success, string.Join("; ", translated.Errors));
                 using var program = new ShaderProgramResources(context!, programId: 9, translated);
 
-                var tracker = new GlStateTracker();
+                var tracker = new PipelineKeyState();
                 tracker.SetProgram(9);
                 var targets = new RenderTargetFormats(new[] { Format.R8G8B8A8Unorm }, Format.Undefined);
                 int targetId = tracker.InternTargetFormats(targets);

@@ -80,25 +80,15 @@ public partial class VulkanClientPlatform
             return;
         }
         if (TryRenderStandardMeshNative(modelRef)) return;
-        if (TryDrawStated(vAO, 1, null, null, 0))
-        {
-            RuntimeStats.drawCallsCount--; // the stated route counted it already
-            return;
-        }
-        device.DrawMesh(vAO.VaoId);
+        RuntimeStats.drawCallsCount--; // the stated route counts what it records
+        TryDrawStated(vAO, 1, null, null, 0);
     }
 
     public override void RenderFullscreenTriangle(MeshRef modelRef)
     {
-        RuntimeStats.drawCallsCount++;
         // The post passes generate their three vertices in the shader, so the
         // mesh carries no buffers and none are bound.
-        if (TryDrawStated(null, 1, null, null, 0))
-        {
-            RuntimeStats.drawCallsCount--;
-            return;
-        }
-        device.DrawFullscreenTriangle();
+        TryDrawStated(null, 1, null, null, 0);
     }
 
     public override void RenderMesh(MeshRef modelRef, int[] indices, int[] indicesSizes, int groupCount, bool useSSBOs)
@@ -107,8 +97,7 @@ public partial class VulkanClientPlatform
         VAO vAO = (VAO)modelRef;
         // Phase 3b stage 2: inside a ChunkRenderer draw group this is a native multi-draw of
         // the pool, recorded by VulkanClientPlatform.NativeChunks.cs. Outside one - the decal
-        // pool, a mod's pool, or with NativeChunksEnabled off - it is the emulated route the
-        // OpenGL body takes.
+        // pool, a mod's pool, or with NativeChunksEnabled off - it is the generic stated draw.
         if (TryDrawChunkPoolNative(vAO, indices, indicesSizes, groupCount)) return;
 
         // Phase 3b stage 2: inside SystemRenderDecals' BeginDecalPass/EndDecalPass scope this is
@@ -116,15 +105,10 @@ public partial class VulkanClientPlatform
         // VulkanClientPlatform.NativeWorld.cs records it as a native pass.
         if (TryDrawDecalPoolNative(modelRef, indices, indicesSizes, groupCount)) return;
 
-        // The chunk renderer's one multidraw per pool. GL takes byte offsets
-        // into the index buffer; the device converts them to index counts and
-        // issues a single indirect draw.
-        if (TryDrawStated(vAO, 1, indices, indicesSizes, groupCount))
-        {
-            RuntimeStats.drawCallsCount--;
-            return;
-        }
-        device.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);
+        // Any other pool: one indirect multi-draw from the stated state. GL takes byte offsets
+        // into the index buffer; the device converts them to index counts.
+        RuntimeStats.drawCallsCount--;
+        TryDrawStated(vAO, 1, indices, indicesSizes, groupCount);
     }
 
     public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
@@ -132,8 +116,8 @@ public partial class VulkanClientPlatform
         RuntimeStats.drawCallsCount++;
         VAO vAO = (VAO)modelRef;
         if (TryRenderParticles2dNative(modelRef, quantity)) { RuntimeStats.drawCallsCount--; return; }
-        if (quantity > 0 && TryDrawStated(vAO, quantity, null, null, 0)) { RuntimeStats.drawCallsCount--; return; }
-        device.DrawMeshInstanced(vAO.VaoId, quantity);
+        RuntimeStats.drawCallsCount--;
+        if (quantity > 0) TryDrawStated(vAO, quantity, null, null, 0);
     }
 
     public override void UpdateMesh(MeshRef modelRef, MeshData data)
