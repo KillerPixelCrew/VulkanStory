@@ -146,6 +146,30 @@ public partial class VulkanClientPlatform
             CullModeFlags.None, quantity);
     }
 
+    private readonly NativeMeshPass nativeMinimalGui =
+        new("", Array.Empty<string>(), new[] { "tex2d" });
+
+    /// <summary>
+    /// The early loading screen's quads: MainMenuRenderAPI.Render2DTexture draws through the
+    /// platform's hardcoded ShaderProgramMinimalGui (no pass name, no asset) until the shader
+    /// registry is up, and that RenderMesh lands here. The OpenGL side is
+    /// ClientPlatformWindows.RenderMesh. One sampler (tex2d), the state the client stated.
+    /// </summary>
+    private bool TryRenderMinimalGuiNative(MeshRef mesh)
+    {
+        ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        if (!NativeGuiEnabled || device == null || mesh == null || program == null ||
+            !ReferenceEquals(program, MinimalGuiShader))
+        {
+            return false;
+        }
+
+        return DrawNativeGuiMesh(nativeMinimalGui, mesh,
+            DeclaredProgramTexture(program.ProgramId, "tex2d"), 0,
+            statedLineWidth, statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite,
+            GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, "MinimalGui");
+    }
+
     private readonly NativeMeshPass nativeGuiMesh =
         new("gui", Array.Empty<string>(), new[] { "tex2d", "tex2dOverlay" });
 
@@ -226,7 +250,8 @@ public partial class VulkanClientPlatform
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         var vao = mesh as VAO;
         if (program == null || vao == null || vao.VaoId == 0 || vao.Disposed) return false;
-        if (!string.Equals(program.PassName, pass.PassName, StringComparison.Ordinal)) return false;
+        // ShaderProgramMinimalGui has no pass name; its pass is named "".
+        if (!string.Equals(program.PassName ?? "", pass.PassName, StringComparison.Ordinal)) return false;
 
         // The Ortho stage draws into the default framebuffer, which has no FrameBufferRef of
         // its own (ClientPlatformWindows.LoadFrameBuffer sets CurrentFrameBuffer null for it);
