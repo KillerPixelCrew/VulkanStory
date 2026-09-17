@@ -324,7 +324,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             // Phase 5: registered mod motion writers reach this platform's motion window.
             InstallModPassHooks();
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
-            OptimumForkGraphics.Active = new VulkanForkGraphics(device);
+            OptimumForkGraphics.Active = new VulkanForkGraphics(this, device);
             return true;
         }
         catch (Exception error)
