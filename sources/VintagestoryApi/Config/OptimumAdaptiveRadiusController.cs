@@ -87,7 +87,7 @@ public sealed class OptimumAdaptiveRadiusController
 
         // Hysteresis decision
         int current = Volatile.Read(ref _effectiveRadius);
-        int floor = OptimumConfig.AdaptiveRadiusFloor;
+        int floor = Math.Min(OptimumConfig.AdaptiveRadiusFloor, _configuredMax);
         int highThreshold = OptimumConfig.AdaptiveRadiusHighThreshold;
         int lowThreshold = OptimumConfig.AdaptiveRadiusLowThreshold;
 

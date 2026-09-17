@@ -134,7 +134,10 @@ function Resolve-WindowsVanilla {
         Write-Host "Using cached $InstallerPath"
     }
 
-    $innoextract = (Get-Command innoextract -ErrorAction Stop).Path
+    $innoextract = Get-InnoextractPath
+    if (-not $innoextract) {
+        throw "innoextract not found. Install a current release from https://github.com/crazy-max/innoextract/releases."
+    }
     $info = @(Invoke-NativeStep { & $innoextract --info $InstallerPath 2>&1 })
     $infoExitCode = $LASTEXITCODE
     if ($infoExitCode -ne 0 -or (($info -join "`n") -notmatch '(?i)setup data version')) {
@@ -258,7 +261,13 @@ try {
     # Fresh copy of the vanilla install. Leaves .vanilla untouched.
     Write-Host "Copying vanilla install to $stageDir..."
     if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
-    Copy-Item -Recurse -Force $vanillaDir $stageDir
+    if (Test-WindowsHost -and (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
+        & robocopy.exe "$vanillaDir" "$stageDir" /E /NFL /NDL /NJH /NJS /NP /R:3 /W:1 *>&1 | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit code $LASTEXITCODE)." }
+        $global:LASTEXITCODE = 0
+    } else {
+        Copy-Item -Recurse -Force $vanillaDir $stageDir
+    }
     Copy-Item -Force (Join-Path $repoRoot 'scripts/uninstall.ps1') (Join-Path $stageDir 'uninstall.ps1')
 
     # Keep the engine and built-in mods vanilla. The launcher patches copies at startup.

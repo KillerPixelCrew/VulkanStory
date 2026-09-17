@@ -173,8 +173,8 @@ function Get-IlspycmdVersionRange {
     $manifest = Join-Path $repoRoot '.config/ilspycmd-compat.json'
     if (-not (Test-Path $manifest)) {
         return [pscustomobject]@{
-            Minimum = [Version]'10.1.0.8386'
-            Maximum = [Version]'10.1.1.8388'
+            Minimum = [Version]'11.0.0.9375'
+            Maximum = [Version]'11.0.0.9375'
         }
     }
 
@@ -235,7 +235,7 @@ function Install-IlspycmdIfMissing {
 function Repair-BaseCtorCalls {
     param([string[]]$Roots)
 
-    $callRe = [regex]'[ \t]*(base|this)\._002Ector\(((?:[^()]|\([^()]*\))*)\);\n'
+    $callRe = [regex]'[ \t]*(?:(base|this)|\(\([\w.]+\)this\))\._002Ector\(((?:[^()]|\([^()]*\))*)\);\n'
     $sigRe = [regex]'((?:public|private|protected|internal|static)[ \w]*\s\w+\(([^()]*)\)\s*\n)(\t*\{\n)'
 
     function local:Invoke-FixOnce([string]$text) {
@@ -252,6 +252,9 @@ function Repair-BaseCtorCalls {
             $callM = $callRe.Match($body)
             if (-not $callM.Success) { continue }
             $kind = $callM.Groups[1].Value
+            # The cast form ((BaseType)this)._002Ector(...) leaves group 1 empty;
+            # it is always a base constructor chain.
+            if (-not $kind) { $kind = 'base' }
             $ctorArgs = $callM.Groups[2].Value
             $newBody = $body.Substring(0, $callM.Index) + $body.Substring($callM.Index + $callM.Length)
             $header = $sigM.Groups[1].Value
@@ -526,7 +529,7 @@ try {
     #   a) .vanilla/win-x64/vintagestory already has Vintagestory.exe -> skip
     #   b) -ClientArchive '__skip__' -> the caller (install-windows.ps1) already
     #      placed .vanilla via junction; verify it exists and move on
-    #   c) Normal: download the installer and extract with innounp
+    #   c) Normal: download the installer and extract with innoextract
     $skipDownload = ($ClientArchive -eq '__skip__')
     $freshExtract = $false
 
@@ -566,7 +569,7 @@ try {
             # succeeded, so an interrupted download leaves nothing rather than a short file
             # at the cache path. Without this, stopping the bootstrap during the ~570 MB
             # download poisons the cache: the next run finds the file, reports "Using
-            # cached", and fails in innounp instead.
+            # cached", and fails in innoextract instead.
             $partial = "$ClientArchive.partial"
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
 
@@ -581,68 +584,147 @@ try {
             Write-Host "Using cached $ClientArchive"
         }
 
-        # Extract using innounp (download if missing). Supports InnoSetup 6.x.
+        # Extract using innoextract >= 1.11 (download crazy-max fork if missing).
+        # Supports Inno Setup 6.4.3 through 7.1.0.
         $toolsDir = Join-Path $repoRoot '.tools'
-        $innounp = Join-Path $toolsDir 'innounp.exe'
-        if (-not (Test-Path $innounp)) {
-            New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
-            $innounpZip = Join-Path $toolsDir 'innounp-2.zip'
-            Write-Host "Downloading innounp"
+        New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+        $isWin = ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
+        $isMac = ($null -ne $IsMacOS) -and $IsMacOS
+        $exeSuffix = if ($isWin) { '.exe' } else { '' }
+        $localInno = Join-Path $toolsDir "innoextract$exeSuffix"
 
-            # Same reasoning as the client archive above: small enough that the window is
-            # narrow, and a short zip here fails in Expand-Archive on every later run.
-            $innounpPartial = "$innounpZip.partial"
-            Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
+        # Check if local .tools/innoextract exists, or if system innoextract is >= 1.11
+        $innoextract = $null
+        if (Test-Path $localInno) {
+            $innoextract = $localInno
+        } else {
+            $sysCmd = Get-Command innoextract -ErrorAction SilentlyContinue
+            if ($sysCmd) {
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    $verOut = @(& $sysCmd.Path --version 2>&1) -join [Environment]::NewLine
+                    if ($verOut -match '(?im)^\s*innoextract\s+(\d+)\.(\d+)') {
+                        $verMajor = [int]$Matches[1]
+                        $verMinor = [int]$Matches[2]
+                        if ($verMajor -gt 1 -or ($verMajor -eq 1 -and $verMinor -ge 11)) {
+                            $innoextract = $sysCmd.Path
+                        }
+                    }
+                } catch { } finally {
+                    $ErrorActionPreference = $prevEap
+                }
+            }
+        }
 
-            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpPartial "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
+        if (-not $innoextract) {
+            Write-Host "Downloading innoextract 1.13.0 (crazy-max fork)"
+            $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64) {
+                'arm64'
+            } else {
+                'amd64'
+            }
+
+            $assetName = if ($isWin) {
+                'innoextract-windows-amd64.exe'
+            } elseif ($isMac) {
+                "innoextract-darwin-$arch"
+            } else {
+                "innoextract-linux-$arch"
+            }
+
+            $expectedHashes = @{
+                'innoextract-windows-amd64.exe' = '5700fb1e82e6812bb341b964470537161e07a127d29eecfe176f5198cf215a59'
+                'innoextract-linux-amd64'       = 'c898db2ecc282ff8d943e9868d03dd6f1fc6069ddd40430341b211f93826b360'
+                'innoextract-linux-arm64'       = 'e3852c6225f1b6043025fbfb459d6f8c38c5418f6c3a18720f525a0161d37969'
+                'innoextract-darwin-amd64'      = '55a384d8f077508b04c888a9f68a40c5fb4345565586632124d80b6efec7629d'
+                'innoextract-darwin-arm64'      = '6b8f11062e4feb153141e85d2f2cd70fc8f1d6fc4354d59e81933308536d3164'
+            }
+
+            $innoUrl = "https://github.com/crazy-max/innoextract/releases/download/v1.13.0/$assetName"
+            $innoPartial = "$localInno.partial"
+            Remove-Item -Force -ErrorAction SilentlyContinue $innoPartial
+
+            if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+                Invoke-NativeStep { curl.exe -L --fail --silent -o $innoPartial $innoUrl }
+            } elseif (Get-Command curl -ErrorAction SilentlyContinue) {
+                Invoke-NativeStep { curl -L --fail --silent -o $innoPartial $innoUrl }
+            } else {
+                Invoke-WebRequest -Uri $innoUrl -OutFile $innoPartial
+            }
+
+            if (-not (Test-Path $innoPartial) -or (Get-Item $innoPartial).Length -eq 0) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $innoPartial
+                throw "Failed to download innoextract from $innoUrl"
+            }
+
+            $expected = $expectedHashes[$assetName]
+            if ($expected) {
+                $actual = (Get-FileHash -Path $innoPartial -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -ne $expected) {
+                    Remove-Item -Force -ErrorAction SilentlyContinue $innoPartial
+                    throw "SHA-256 verification failed for ${assetName}: expected $expected, got $actual"
+                }
+            }
+
+            Move-Item -Force $innoPartial $localInno
+            if (-not $isWin) {
+                Invoke-NativeStep { chmod +x $localInno }
+            }
+            $innoextract = $localInno
+        }
+
+        # Inspect installer with innoextract
+        $info = @(Invoke-NativeStep { & $innoextract --info $ClientArchive 2>&1 })
+        $infoExitCode = $LASTEXITCODE
+        if ($infoExitCode -ne 0 -or (($info -join "`n") -notmatch '(?i)setup data version')) {
+            throw "innoextract could not inspect the installer '$ClientArchive'. The installer uses an unsupported Inno Setup format."
+        }
+
+        # Extract into a clean staging folder beside the target
+        $stageParent = Split-Path -Parent $winVanillaDir
+        New-Item -ItemType Directory -Force -Path $stageParent | Out-Null
+        $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+
+        try {
+            Write-Host "Extracting with innoextract to $winVanillaDir"
+            Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
             if ($LASTEXITCODE -ne 0) {
-                Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
-                throw "Download failed: innounp-2.zip"
+                throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive"
             }
 
-            Move-Item -Force $innounpPartial $innounpZip
-            # Module-qualified: another module's Expand-Archive earlier on PSModulePath
-            # (Pscx ships one) shadows the built-in cmdlet and has no -DestinationPath.
-            Microsoft.PowerShell.Archive\Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
-            $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
-            if ($found -and $found.FullName -ne $innounp) {
-                Copy-Item -Force $found.FullName $innounp
+            $sourceRoot = Join-Path $extractRoot 'app'
+            if (-not (Test-Path (Join-Path $sourceRoot 'Vintagestory.exe'))) {
+                $sourceRoot = $extractRoot
             }
-            Remove-Item -Force $innounpZip -ErrorAction SilentlyContinue
+            if (-not (Test-Path (Join-Path $sourceRoot 'Vintagestory.exe'))) {
+                throw "Extraction failed: Vintagestory.exe not found in $ClientArchive payload"
+            }
+
+            if (Test-Path $winVanillaDir) {
+                Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Force -Path $winVanillaDir | Out-Null
+            if ($isWin -and (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
+                & robocopy.exe "$sourceRoot" "$winVanillaDir" /E /MOVE /NFL /NDL /NJH /NJS /NP /R:3 /W:1 *>&1 | Out-Null
+                if ($LASTEXITCODE -ge 8) { throw "robocopy failed (exit code $LASTEXITCODE) moving extracted files to $winVanillaDir." }
+                $global:LASTEXITCODE = 0
+            } else {
+                Get-ChildItem -Path $sourceRoot -Force | ForEach-Object {
+                    Move-Item -Path $_.FullName -Destination $winVanillaDir -Force
+                }
+            }
+        } finally {
+            if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
         }
 
-        $extractTarget = $winVanillaDir
-        New-Item -ItemType Directory -Force -Path $extractTarget | Out-Null
-        Write-Host "Extracting with innounp to $extractTarget"
-        Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        $innounpProc = Start-Process -FilePath $innounp -ArgumentList "-x -d`"$extractTarget`" -c`"{app}`" `"$ClientArchive`"" -NoNewWindow -PassThru
-        $exited = $innounpProc.WaitForExit(300000)
-        if (-not $exited) {
-            $innounpProc.Kill()
-            Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            throw "innounp timed out after 5 minutes. Kill any innounp.exe in Task Manager and retry."
-        }
-        $innounpExitCode = $innounpProc.ExitCode
-        $appDir = Join-Path $extractTarget '{app}'
-        if (Test-Path $appDir) {
-            Get-ChildItem -Path $appDir | Move-Item -Destination $extractTarget -Force
-            Remove-Item -Force $appDir
-        }
-        if ($innounpExitCode -ne 0 -and -not (Test-Path (Join-Path $extractTarget 'Vintagestory.exe'))) {
-            throw "innounp failed (exit $innounpExitCode)."
-        }
-        if ($innounpExitCode -ne 0) {
-            Write-Warning "innounp exited with code $innounpExitCode after extracting Vintagestory.exe; continuing."
-        }
-        if (-not (Test-Path (Join-Path $extractTarget 'Vintagestory.exe'))) {
-            throw "Extraction failed: Vintagestory.exe not found"
-        }
         $freshExtract = $true
         Write-Host "Extraction complete."
     }
 
     # Validate the vanilla tree before building against it. A tolerated
-    # partial innounp extraction (nonzero exit above) or a stale .vanilla
+    # partial innoextract extraction (nonzero exit above) or a stale .vanilla
     # cache left by an older failed run carries zero-byte or truncated
     # assets that only surface later, in-game, as opaque GL crashes
     # ("blur.vsh ... unexpected $end at <EOF>"). Catch them here instead.
@@ -663,7 +745,7 @@ try {
             # Wipe the poisoned extraction so the next run re-extracts
             # instead of reusing it via the "Using existing" fast path.
             Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
-            throw "innounp produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run to retry.`n  $names"
+            throw "innoextract produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run to retry.`n  $names"
         }
         throw "Vanilla client files are corrupt ($($corrupt.Count) empty/truncated file(s)):`n  $names`nIf $winVanillaDir is Optimum's own cache, delete it and retry; if it points at your Vintage Story install, repair or reinstall Vintage Story $Version first."
     }

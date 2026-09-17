@@ -16,6 +16,13 @@ fi
 
 cd "$repo_root"
 
+# Portable null-delimited sort (GNU sort -z / BSD fallback).
+if printf '\0' | sort -z >/dev/null 2>&1; then
+  sort_null() { sort -z; }
+else
+  sort_null() { perl -0 -e 'print sort <STDIN>'; }
+fi
+
 failed=0
 total=0
 
@@ -43,7 +50,7 @@ while IFS= read -r -d '' patch; do
     printf '  %s\n' "$output" >&2
     failed=1
   fi
-done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort -z)
+done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort_null)
 
 if [[ "$failed" == "1" ]]; then
   exit 1

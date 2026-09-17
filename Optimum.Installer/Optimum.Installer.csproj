@@ -12,6 +12,7 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <Description>Avalonia GUI for the Optimum installer. Links Optimum.Bootstrap.Core in-process.</Description>
     <Version>$(OptimumVersion)</Version>
+    <ApplicationIcon>..\Optimum.Launcher\optimum.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <!-- Bundled OFL 1.1 fonts: Lexend (all UI text), JetBrains Mono (log and
@@ -25,13 +26,11 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
-    <!-- SukiUI supplies the theme and controls (SukiWindow, VerticalStepper,
-         GlassCard, InfoBar, WaveProgress). It replaces Avalonia.Themes.Fluent
-         and pulls Avalonia.Themes.Simple + Skia + DataGrid + ColorPicker. -->
-    <PackageReference Include="SukiUI" Version="7.0.1" />
-    <!-- Avalonia.Diagnostics is not published for 12.x (nuget tops out at
-         11.3.20), so a Debug restore of this project fails with NU1102. The
-         dev-tools overlay is optional; drop it until a 12.x build ships. -->
+    <!-- FluentAvalonia brings the real WinUI 3 / Windows 11 look: the
+         FluentAvaloniaTheme, WinUI controls (NavigationView, ProgressRing,
+         FAComboBox), and the full WinUI resource brush set. 3.1.0 targets
+         Avalonia >= 12.1.0. -->
+    <PackageReference Include="FluentAvaloniaUI" Version="3.1.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>

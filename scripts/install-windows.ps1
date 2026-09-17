@@ -119,6 +119,9 @@ function Get-ExistingDirectory {
     $candidate = $Path
     while ($candidate -and -not (Test-Path -LiteralPath $candidate -PathType Container)) {
         $parent = Split-Path -Parent $candidate
+        if ($parent -match '^[A-Za-z]:$') {
+            $parent = "$parent\"
+        }
         if (-not $parent -or $parent -eq $candidate) { return $null }
         $candidate = $parent
     }
@@ -586,8 +589,8 @@ function Get-Accepted-ILSpyVersionRange {
     $manifest = Join-Path $Root '.config\ilspycmd-compat.json'
     if (-not (Test-Path $manifest)) {
         return [pscustomobject]@{
-            Minimum = [Version]'10.1.0.8386'
-            Maximum = [Version]'10.1.1.8388'
+            Minimum = [Version]'11.0.0.9375'
+            Maximum = [Version]'11.0.0.9375'
         }
     }
 
@@ -2143,10 +2146,9 @@ By checking the box below and proceeding, you acknowledge that you have read, un
         }
     }
 
-    $q = [char]34
-    $argLine = "-NoProfile -ExecutionPolicy Bypass -File $q$Self$q -Silent -InstallDir $q$dir$q"
-    $argLine += " -VsPath $q$vsP$q"
-    $argLine += " -Version $q$buildVersion$q"
+    $argLine = "-NoProfile -ExecutionPolicy Bypass -File $(ConvertTo-WindowsProcessArgument -Value $Self) -Silent -InstallDir $(ConvertTo-WindowsProcessArgument -Value $dir)"
+    $argLine += " -VsPath $(ConvertTo-WindowsProcessArgument -Value $vsP)"
+    $argLine += " -Version $(ConvertTo-WindowsProcessArgument -Value $buildVersion)"
     if ($script:chkSep.Checked) {
         try {
             $data = Normalize-WindowsDirectoryPath -Path $script:txtData.Text -Name 'DataPath'
@@ -2162,7 +2164,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             [System.Windows.Forms.MessageBox]::Show('The data folder cannot be inside the install folder. Choose a separate directory.', 'Optimum', 'OK', 'Warning') | Out-Null
             return
         }
-        $argLine += " -DataPath $q$data$q"
+        $argLine += " -DataPath $(ConvertTo-WindowsProcessArgument -Value $data)"
     }
     if ($script:chkShortcut.Checked) { $argLine += ' -Shortcut' }
     if ($script:chkStartMenu.Checked) { $argLine += ' -StartMenu' }

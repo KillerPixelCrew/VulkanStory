@@ -230,4 +230,32 @@ public class AdaptiveRadiusControllerTests
         Assert.True(recoveredRadius > contractedRadius,
             $"Expected radius to recover above {contractedRadius}, got {recoveredRadius}");
     }
+
+    [Fact]
+    public void FloorExceedingConfiguredMax_DoesNotThrowAndClampsToMax()
+    {
+        // When user configures floor = 48 (engine max) but plays at lower view distance (e.g. 12)
+        SetAdaptiveRadiusConfig(high: 60, low: 20, floor: 48);
+        var ctrl = new OptimumAdaptiveRadiusController(12);
+
+        // Tick under spike should not throw ArgumentException from Math.Clamp
+        ctrl.Tick(120, 12);
+        Assert.Equal(12, ctrl.EffectiveRadius);
+    }
+
+    [Fact]
+    public void SupportsEngineMaxRadiusOf48()
+    {
+        SetAdaptiveRadiusConfig(high: 60, low: 20, floor: 32);
+        var ctrl = new OptimumAdaptiveRadiusController(48);
+        Assert.Equal(48, ctrl.EffectiveRadius);
+
+        for (int i = 0; i < 20; i++)
+        {
+            ctrl.Tick(120, 48);
+        }
+
+        Assert.True(ctrl.EffectiveRadius >= 32);
+        Assert.True(ctrl.EffectiveRadius < 48);
+    }
 }

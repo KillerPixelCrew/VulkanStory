@@ -94,6 +94,10 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "Mouse_WheelChanged", "RebuildFrameBuffers", "RenderFinalComposition", "RenderFullscreenTriangle",
         "RenderPostprocessingEffects", "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
         "UpdateMesh", "UpdateSSBOMesh", "Window_Resize", "updateIndices", "updateVAO", "window_RenderFrame",
+        // Upstream's GPU indirect draw submission (issue #75: RenderMesh's multi-draw form and its
+        // injected indirect-buffer fields) and its texture upload changes, merged 2026-09-17.
+        "RenderMesh", "_optimumSharedIndirectCommands", "_optimumSingleIndirectBufferId",
+        "_optimumSingleIndirectBufferCapacity", "LoadIntoTexture", "LoadTexture",
 
         // Compile fix-ups only: decompiler artefacts the donor tree rewrites to build
         // (((T)(ref e)).X becomes e.X, explicit OpenTK qualification, int casts). Not

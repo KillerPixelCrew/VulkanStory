@@ -12,8 +12,8 @@ public sealed class ShortcutWriterTests : IDisposable
 
     private FakeSystemProbe LinuxProbe()
     {
-        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = _home };
-        probe.Environment["XDG_DATA_HOME"] = Path.Combine(_home, ".local", "share");
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = _home.Replace('\\', '/') };
+        probe.Environment["XDG_DATA_HOME"] = _home.Replace('\\', '/') + "/.local/share";
         return probe;
     }
 
@@ -21,15 +21,20 @@ public sealed class ShortcutWriterTests : IDisposable
     public void WritesAndRemovesTheLinuxMenuAndDesktopEntries()
     {
         FakeSystemProbe probe = LinuxProbe();
-        string installDir = Path.Combine(_home, "games", "optimum");
-        string launcher = Path.Combine(installDir, "optimum-launch.sh");
+        // A Linux install uses '/' paths. Build them with '/' so the generated
+        // .desktop Exec matches regardless of the host running the test (on
+        // Windows Path.Combine would inject '\', which the Desktop Entry writer
+        // then backslash-escapes, diverging from this assertion).
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
         Directory.CreateDirectory(installDir);
 
         var writer = new ShortcutWriter(probe);
         IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.Desktop);
 
-        string menuEntry = Path.Combine(_home, ".local", "share", "applications", "optimum.desktop");
-        string desktopEntry = Path.Combine(_home, "Desktop", "Optimum.desktop");
+        string menuEntry = $"{home}/.local/share/applications/optimum.desktop";
+        string desktopEntry = $"{home}/Desktop/Optimum.desktop";
         Assert.Contains(menuEntry, created);
         Assert.Contains(desktopEntry, created);
         Assert.True(File.Exists(menuEntry));

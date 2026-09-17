@@ -1,9 +1,10 @@
 name: Release installer
 
-# Packages the Avalonia installer with Velopack for Windows and Linux and
-# publishes the feed. macOS binaries are built for archival but not published:
-# there is no Apple Developer Program account yet (INSTALLER-PLAN.md section 2).
+# Packages the Avalonia installer for Windows, Linux (AppImage, deb, rpm), and macOS,
+# publishing feeds and installer packages to GitHub releases upon a release or manual dispatch.
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -11,9 +12,9 @@ on:
         required: false
         type: string
       publish:
-        description: 'Upload the Velopack feed to GitHub releases'
+        description: 'Upload the Velopack feed and installer packages to GitHub releases'
         required: true
-        default: false
+        default: true
         type: boolean
 
 concurrency:
@@ -26,7 +27,7 @@ permissions:
 jobs:
   pack:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           # `label` is only the artifact name; vpk picks the Velopack channel
@@ -34,16 +35,16 @@ jobs:
           - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
           - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
           - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
-          - { os: macos-13, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
+          - { os: macos-14, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
       WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -51,7 +52,14 @@ jobs:
         id: v
         shell: bash
         run: |
+          set -euo pipefail
           version="${{ inputs.version }}"
+          if [ -z "$version" ] && [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+            tag_clean="${tag#installer-v}"
+            tag_clean="${tag_clean#v}"
+            version="$tag_clean"
+          fi
           [ -n "$version" ] || version="$(cat VERSION)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
@@ -68,20 +76,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # Bundle the Optimum logo into every generated installer so the Setup
+          # window, the AppImage/desktop entry, and the app shortcut all show the
+          # Optimum icon instead of the Velopack default. Velopack wants a
+          # platform-native icon: an .ico on Windows, an .icns on macOS, and a
+          # .png on Linux (where --icon is required for the AppImage).
+          rid="${{ matrix.rid }}"
+          case "$rid" in
+            win-x64) icon="Optimum.Launcher/optimum.ico" ;;
+            osx-*)   icon="logo.icns" ;;
+            *)       icon="Optimum.Installer/Assets/optimum-logo.png" ;;
+          esac
+          if [ ! -f "$icon" ]; then
+            echo "icon asset not found: $icon" >&2
+            exit 1
+          fi
+
+          extra_args=()
+          if [ "$rid" = "win-x64" ] && [ -f Optimum.Installer/Assets/optimum-logo.png ]; then
+            # Splash shown while the Windows installer runs.
+            extra_args+=(--splashImage Optimum.Installer/Assets/optimum-logo.png)
+          fi
+
+          # macOS runners ship bash 3.2, where "${arr[@]}" on an empty array is an
+          # unbound-variable error under set -u. Expand with the +alternate form so
+          # an empty extra_args disappears instead of aborting the pack.
           dotnet vpk pack \
             --packId Optimum.Installer \
+            --packTitle Optimum \
             --packVersion "${{ steps.v.outputs.version }}" \
             --packDir publish/${{ matrix.rid }} \
             --mainExe ${{ matrix.exe }} \
+            --icon "$icon" \
+            ${extra_args[@]+"${extra_args[@]}"} \
             --outputDir releases
 
       # vpk has no name-override flag. Rename the user-facing artifacts (setup,
-      # portable, AppImage) to Optimum-v<version>-<rid>-Installer.<ext> and fix
+      # portable, AppImage, pkg) to Optimum-v<version>-<rid>-Installer.<ext> and fix
       # the reference in assets.<channel>.json so `vpk upload` still finds them.
-      # The .nupkg / releases.<channel>.json / RELEASES-<channel> feed files keep
-      # their Velopack names - the updater fetches those by name and users never
-      # see them. "Installer" in the name keeps these distinct from the
-      # ready-to-run game packages (Optimum-v<version>-<rid>.{zip,AppImage,dmg}).
       - name: Rename artifacts to the Optimum scheme
         shell: bash
         run: |
@@ -101,17 +134,19 @@ jobs:
             local old="$1" new="$2" tmp
             [ -f "$old" ] || { echo "skip (absent): $old"; return 0; }
             mv "$old" "$new"
-            tmp="$(mktemp)"
-            jq --arg o "$old" --arg n "$new" \
-              'map(if .RelativeFileName == $o then .RelativeFileName = $n else . end)' \
-              "$assets" > "$tmp"
-            mv "$tmp" "$assets"
+            if [ -f "$assets" ]; then
+              tmp="$(mktemp)"
+              jq --arg o "$old" --arg n "$new" \
+                'map(if .RelativeFileName == $o then .RelativeFileName = $n else . end)' \
+                "$assets" > "$tmp"
+              mv "$tmp" "$assets"
+            fi
             echo "renamed: $old -> $new"
           }
 
           case "$channel" in
             win)
-              rename "Optimum.Installer-win-Setup.exe"   "Optimum-v$v-$rid-Setup.exe"
+              rename "Optimum.Installer-win-Setup.exe"     "Optimum-v$v-$rid-Setup.exe"
               rename "Optimum.Installer-win-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
               ;;
             linux)
@@ -124,65 +159,164 @@ jobs:
           esac
 
           echo "--- releases/ ---"; ls -la
-          echo "--- $assets ---"; cat "$assets"
+          [ -f "$assets" ] && { echo "--- $assets ---"; cat "$assets"; } || true
+
+      - name: Package deb and rpm (Linux)
+        if: matrix.rid == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.version }}"
+
+          # 1. Build .deb
+          deb_stage="deb-pkg"
+          mkdir -p "$deb_stage/DEBIAN"
+          mkdir -p "$deb_stage/usr/bin"
+          mkdir -p "$deb_stage/usr/lib/optimum-installer"
+          mkdir -p "$deb_stage/usr/share/applications"
+          mkdir -p "$deb_stage/usr/share/icons/hicolor/256x256/apps"
+
+          cp -r publish/linux-x64/* "$deb_stage/usr/lib/optimum-installer/"
+          chmod +x "$deb_stage/usr/lib/optimum-installer/Optimum.Installer"
+          ln -sf /usr/lib/optimum-installer/Optimum.Installer "$deb_stage/usr/bin/optimum-installer"
+
+          printf '[Desktop Entry]\nType=Application\nName=Optimum Installer\nComment=Installer and setup tool for Optimum client\nExec=optimum-installer\nIcon=optimum-installer\nTerminal=false\nCategories=Game;Utility;\n' > "$deb_stage/usr/share/applications/optimum-installer.desktop"
+
+          if [ -f Optimum.Installer/Assets/optimum-logo.png ]; then
+            cp Optimum.Installer/Assets/optimum-logo.png "$deb_stage/usr/share/icons/hicolor/256x256/apps/optimum-installer.png"
+          fi
+
+          printf 'Package: optimum-installer\nVersion: %s\nSection: games\nPriority: optional\nArchitecture: amd64\nMaintainer: StratumServer <support@stratumserver.com>\nDescription: High-performance client installer for Vintage Story\n Optimum is an optimized, high-performance client fork for Vintage Story.\n' "$v" > "$deb_stage/DEBIAN/control"
+
+          dpkg-deb --build --root-owner-group "$deb_stage" "releases/Optimum-v$v-linux-x64-Installer.deb"
+          rm -rf "$deb_stage"
+          echo "Created deb package: releases/Optimum-v$v-linux-x64-Installer.deb"
+
+          # 2. Build .rpm
+          sudo apt-get update -y && sudo apt-get install -y rpm
+          rpm_root="$HOME/rpmbuild"
+          mkdir -p "$rpm_root"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          rpm_ver="${v//-/_}"
+
+          {
+            echo "Name:           optimum-installer"
+            echo "Version:        $rpm_ver"
+            echo "Release:        1%{?dist}"
+            echo "Summary:        High-performance client installer for Vintage Story"
+            echo "License:        MIT"
+            echo "AutoReqProv:    no"
+            echo ""
+            echo "%description"
+            echo "Optimum is an optimized, high-performance client fork for Vintage Story."
+            echo ""
+            echo "%install"
+            echo "mkdir -p %{buildroot}/usr/bin"
+            echo "mkdir -p %{buildroot}/usr/lib/optimum-installer"
+            echo "mkdir -p %{buildroot}/usr/share/applications"
+            echo "mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps"
+            echo "cp -r \$GITHUB_WORKSPACE/publish/linux-x64/* %{buildroot}/usr/lib/optimum-installer/"
+            echo "chmod +x %{buildroot}/usr/lib/optimum-installer/Optimum.Installer"
+            echo "ln -sf /usr/lib/optimum-installer/Optimum.Installer %{buildroot}/usr/bin/optimum-installer"
+            echo "printf '[Desktop Entry]\\\nType=Application\\\nName=Optimum Installer\\\nComment=Installer and setup tool for Optimum client\\\nExec=optimum-installer\\\nIcon=optimum-installer\\\nTerminal=false\\\nCategories=Game;Utility;\\\n' > %{buildroot}/usr/share/applications/optimum-installer.desktop"
+            echo "if [ -f \$GITHUB_WORKSPACE/Optimum.Installer/Assets/optimum-logo.png ]; then"
+            echo "  cp \$GITHUB_WORKSPACE/Optimum.Installer/Assets/optimum-logo.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/optimum-installer.png"
+            echo "fi"
+            echo ""
+            echo "%files"
+            echo "/usr/bin/optimum-installer"
+            echo "/usr/lib/optimum-installer"
+            echo "/usr/share/applications/optimum-installer.desktop"
+            echo "%ghost /usr/share/icons/hicolor/256x256/apps/optimum-installer.png"
+          } > "$rpm_root/SPECS/optimum-installer.spec"
+
+          rpmbuild -bb --define "_topdir $rpm_root" "$rpm_root/SPECS/optimum-installer.spec"
+          find "$rpm_root/RPMS" -name "*.rpm" -exec cp {} "releases/Optimum-v$v-linux-x64-Installer.rpm" \;
+          rm -rf "$rpm_root"
+          echo "Created rpm package: releases/Optimum-v$v-linux-x64-Installer.rpm"
 
       - name: Sign (Windows)
         if: matrix.rid == 'win-x64' && env.WINDOWS_CERT_BASE64 != ''
         run: echo "signtool step goes here once a certificate secret exists"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installer-${{ matrix.label }}
           path: releases/
           retention-days: 14
 
   publish:
-    if: ${{ inputs.publish }}
+    if: ${{ github.event_name == 'release' || inputs.publish }}
     needs: pack
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
       - name: Restore local tools
         run: dotnet tool restore
 
-      - name: Resolve version
+      - name: Resolve version and tag
         id: v
         shell: bash
         run: |
+          set -euo pipefail
           version="${{ inputs.version }}"
-          [ -n "$version" ] || version="$(cat VERSION)"
+          if [ -z "$version" ] && [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+            tag_clean="${tag#installer-v}"
+            tag_clean="${tag_clean#v}"
+            version="$tag_clean"
+          else
+            version="${version:-$(cat VERSION)}"
+            tag="v$version"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download the feeds
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: installer-*
           path: feeds
 
-      # One upload per channel, in sequence, into the same tag. macOS is not
-      # published (INSTALLER-PLAN.md section 2).
-      - name: Publish to GitHub releases
+      - name: Publish Velopack feeds
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           version="${{ steps.v.outputs.version }}"
-          tag="installer-v$version"
+          tag="${{ steps.v.outputs.tag }}"
           for channel in win linux; do
-            dotnet vpk upload github \
-              --repoUrl "https://github.com/${{ github.repository }}" \
-              --outputDir "feeds/installer-$channel" \
-              --channel "$channel" \
-              --tag "$tag" \
-              --releaseName "Optimum installer v$version" \
-              --publish
+            if [ -d "feeds/installer-$channel" ]; then
+              dotnet vpk upload github \
+                --repoUrl "https://github.com/${{ github.repository }}" \
+                --token "$GITHUB_TOKEN" \
+                --outputDir "feeds/installer-$channel" \
+                --channel "$channel" \
+                --tag "$tag" \
+                --releaseName "$tag" \
+                --merge \
+                --publish
+            fi
           done
+
+      - name: Upload all installer packages to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ steps.v.outputs.tag }}"
+          mapfile -t files < <(find feeds -type f \( -name "Optimum-*" \) | sort -u)
+          if [ ${#files[@]} -gt 0 ]; then
+            echo "Uploading installer packages to release $tag:"
+            printf '%s\n' "${files[@]}"
+            gh release upload "$tag" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          fi

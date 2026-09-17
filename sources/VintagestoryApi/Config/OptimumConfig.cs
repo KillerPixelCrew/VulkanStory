@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -22,7 +23,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.14";
+    public const string Version = "0.3.17";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -138,6 +139,34 @@ public static class OptimumConfig
     public static bool OcclusionCullingScaleEnabled = true;
 
     /// <summary>
+    /// Issue #72: replace ChunkCuller's per-shell raycast visibility walk with a
+    /// breadth-first flood fill over the same per-chunk face-connectivity graph
+    /// (the technique Minecraft "cave culling" and Sodium use). The raycast marches
+    /// up to 3 rays per shell position and, at high view distance, runs against
+    /// thousands of chunks per recompute; the BFS is linear in loaded chunks and
+    /// visits them front-to-back. Falls back to the vanilla raycast when false.
+    ///
+    /// Correctness: the face-connectivity flood is the CONSERVATIVE model - a chunk
+    /// is culled only when EVERY path of mutually-open faces from the camera is
+    /// blocked, in which case no straight sightline can reach it either, so it can
+    /// never hide a chunk the player can see (Durand et al. SIGGRAPH 2000 PVS
+    /// criterion). The vanilla raycast is the approximation: it over-marks (marks a
+    /// chunk visible before testing it, plus a 2-chunk march overshoot) and samples
+    /// sightlines with only 3 sub-rays per shell endpoint. The one flood failure mode
+    /// that can hide a chunk (MC-70850) comes from testing only a single biased
+    /// incoming "flow" face; this implementation avoids it by testing reachability
+    /// through ALL incoming faces (bfsReachable), plus a first-ring exemption that
+    /// mirrors the raycast's `num2 > 1` pass-through and the same camera-neighbourhood
+    /// seeding vanilla does.
+    ///
+    /// Measured in-client (same fixed world, seed 72720): raycast ~12-13 ms/walk
+    /// marking ~1000-1090 chunks visible; BFS ~1.9 ms/walk marking ~1026-1030 - about
+    /// 6.5x faster with a comparable-or-slightly-tighter visible set (no deficit vs
+    /// the raycast). Default true.
+    /// </summary>
+    public static bool BfsChunkVisibilityEnabled = true;
+
+    /// <summary>
     /// Reuse the dynamic-light entity scan from the previous frame while the
     /// player is roughly stationary, instead of rescanning every frame.
     /// Refreshes on player movement past a small threshold or every 15
@@ -148,6 +177,51 @@ public static class OptimumConfig
 
     public static bool EntityLightBatchEnabled = true;
     public static bool EntityShaderStateCacheEnabled = true;
+
+    /// <summary>
+    /// Issue #75: Enables GPU indirect draw submission (glMultiDrawElementsIndirect)
+    /// for chunk mesh pools when supported by the hardware and driver (OpenGL 4.3+ / ARB_multi_draw_indirect).
+    /// Defaults to false during evaluation.
+    /// </summary>
+    public static bool IndirectDrawEnabled = false;
+
+    /// <summary>
+    /// Set at startup after OpenGL capability probe. False on macOS (OpenGL 4.1) and legacy drivers.
+    /// </summary>
+    public static bool IndirectDrawSupported = false;
+
+    /// <summary>
+    /// Issue #85: Tracks whether performance ecosystem mods are loaded in the client.
+    /// Set dynamically by OptimumCompatibilityGuard during ModLoader startup or assembly scan.
+    /// Not persisted to optimum.json.
+    /// </summary>
+    public static bool KometDetected;
+    public static bool OptiTimeDetected;
+    public static bool TungstenDetected;
+    public static bool SynergyDetected;
+
+    /// <summary>
+    /// Issue #85: When true (default), Optimum detects Komet and safely yields conflicting
+    /// host subsystems (e.g. MDI indirect rendering and SIMD frustum culling) to prevent
+    /// graphics pipeline crashes or corrupted state from Komet's cancelling Harmony prefixes.
+    /// Persisted to ModConfig/optimum.json.
+    /// </summary>
+    public static bool KometGuardEnabled = true;
+
+    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported && (!KometDetected || !KometGuardEnabled);
+
+    /// <summary>
+    /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
+    /// for bounding volumes in chunk mesh pools and model locations.
+    /// </summary>
+    public static bool SimdCullingEnabled = true;
+
+    /// <summary>
+    /// True when the CPU supports 128-bit or 256-bit vector operations.
+    /// </summary>
+    public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
+
+    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported && (!KometDetected || !KometGuardEnabled);
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
@@ -206,6 +280,39 @@ public static class OptimumConfig
 
     [ThreadStatic]
     public static bool RouteChiselLodMeshes;
+
+    /// <summary>
+    /// Issue #73: pool the per-clone CustomMeshDataPart buffers that chunk mesh
+    /// finalization (MeshData.CloneUsingRecycler) allocates. Profiling attributed
+    /// ~45 KB/chunk (99% of finalize allocation) to these clones. Default on; the
+    /// pool is bypassed (fresh clone) whenever the caller is not the single
+    /// tessellation worker, so it is safe with the current 1-worker setup and
+    /// degrades to vanilla behavior if that ever changes. Set false to disable.
+    /// </summary>
+    public static bool MeshPartPoolEnabled = true;
+
+    /// <summary>
+    /// Issue #73: true when the CustomMeshDataPart pool may be used. Requires the
+    /// feature flag AND at most one tessellation worker, so the pool's
+    /// single-thread-owned free lists are never touched by concurrent pulls. If a
+    /// second worker ever registers this returns false and clones fall back to
+    /// fresh allocation (vanilla behavior), which is always correct.
+    /// </summary>
+    public static bool MeshPartPoolActive => MeshPartPoolEnabled && OptimumDiagnostics.TessWorkerCount <= 1;
+
+    /// <summary>
+    /// Issue #74: reuse a per-render-thread scratch ItemRenderInfo in the GUI item
+    /// render path (InventoryItemRenderer.RenderItemstackToGui) instead of allocating
+    /// a fresh one per visible slot per frame. Profiling measured ~104 B/slot/frame
+    /// (up to 135 slots => ~14 KB/frame with an inventory open). The public
+    /// IRenderAPI.GetItemStackRenderInfo API still returns a fresh instance, so mods
+    /// that call it and retain the result are unaffected; only the internal per-slot
+    /// path reuses, and the reused instance never escapes the synchronous
+    /// RenderItemstackToGui call (the ItemRenderDelegate contract is per-call transient).
+    /// All collectible render hooks still run every frame with identical inputs, so
+    /// output is behaviour-identical. Set false to fall back to the vanilla allocation.
+    /// </summary>
+    public static bool ItemRenderInfoReuseEnabled = true;
 
     // Settings that live in VintagestoryLib (read per-frame from ClientSettings).
     // Mirrored here for persistence only.
@@ -686,10 +793,18 @@ public static class OptimumConfig
         SetGreedyMeshShaderAbi(false, false);
     }
 
+    public static void ResetShaderCompatibilityForTests()
+    {
+        _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityScanFailed = false;
+        _shaderCompatibilityFingerprint = null;
+        ResetShaderCompatibilityAfterReload();
+    }
+
     private static void LoadShaderCompatibilityReport()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
-        _shaderCompatibilityScanFailed = true;
+        _shaderCompatibilityScanFailed = false;
         _shaderCompatibilityFingerprint = null;
         SetRewriterProgramsToAll();
         ResetShaderCompatibilityAfterReload();
@@ -706,7 +821,11 @@ public static class OptimumConfig
             {
                 PropertyNameCaseInsensitive = true
             });
-            if (report == null) return;
+            if (report == null)
+            {
+                _shaderCompatibilityScanFailed = true;
+                return;
+            }
 
             if (report.DisabledFeatures != null)
             {
@@ -788,6 +907,11 @@ public static class OptimumConfig
     {
         _shaderCompatibilityRewriterPrograms.Clear();
         _shaderCompatibilityRewriterPrograms.Add(AllShaderPrograms);
+    }
+
+    public static void ReloadShaderCompatibilityReport()
+    {
+        LoadShaderCompatibilityReport();
     }
 
     private static string? _configPath;
@@ -899,6 +1023,9 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChiselLod), ChiselLodEnabled.ToString()),
         (nameof(OptimumConfigData.ChiselLodDistance), ChiselLodDistance.ToString()),
         (nameof(OptimumConfigData.OcclusionCullingScale), OcclusionCullingScaleEnabled.ToString()),
+        (nameof(OptimumConfigData.BfsChunkVisibility), BfsChunkVisibilityEnabled.ToString()),
+        (nameof(OptimumConfigData.MeshPartPool), MeshPartPoolEnabled.ToString()),
+        (nameof(OptimumConfigData.ItemRenderInfoReuse), ItemRenderInfoReuseEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -941,6 +1068,9 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChunkDeserializeParallel), ChunkDeserializeParallel.ToString()),
         (nameof(OptimumConfigData.ChunkDeserializeParallelMinY), ChunkDeserializeParallelMinY.ToString()),
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
+        (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
+        (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
+        (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
     };
 
     /// <summary>
@@ -948,6 +1078,13 @@ public static class OptimumConfig
     /// </summary>
     public static void SetDataPath(string dataPath)
     {
+        if (dataPath == null)
+        {
+            _dataPath = null;
+            _configPath = null;
+            ResetShaderCompatibilityForTests();
+            return;
+        }
         string dir = Path.Combine(dataPath, "ModConfig");
         Directory.CreateDirectory(dir);
         _configPath = Path.Combine(dir, "optimum.json");
@@ -996,6 +1133,9 @@ public static class OptimumConfig
             ChiselLodDistance = data.ChiselLodDistance;
             ChiselLodDistanceSq = (double)data.ChiselLodDistance * data.ChiselLodDistance;
             OcclusionCullingScaleEnabled = data.OcclusionCullingScale;
+            BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
+            MeshPartPoolEnabled = data.MeshPartPool;
+            ItemRenderInfoReuseEnabled = data.ItemRenderInfoReuse;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -1045,12 +1185,15 @@ public static class OptimumConfig
             ChunkDeserializeParallelMinY = Math.Clamp(data.ChunkDeserializeParallelMinY, 2, 64);
             ShaderPreprocessParallel = data.ShaderPreprocessParallel;
             AdaptiveRadiusEnabled = data.AdaptiveRadius;
-            AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 12);
+            AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 48);
             AdaptiveRadiusHighThreshold = Math.Max(1, data.AdaptiveRadiusHighThreshold);
             AdaptiveRadiusLowThreshold = Math.Max(1, data.AdaptiveRadiusLowThreshold);
             LaunchTaskBudgetEnabled = data.LaunchTaskBudgetEnabled;
             LaunchTaskBudgetMs = Math.Clamp(data.LaunchTaskBudgetMs, 1, 500);
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
+            IndirectDrawEnabled = data.IndirectDraw;
+            SimdCullingEnabled = data.SimdCulling;
+            KometGuardEnabled = data.KometGuard;
         }
         catch (Exception)
         {
@@ -1087,6 +1230,9 @@ public static class OptimumConfig
             ChiselLod = ChiselLodEnabled,
             ChiselLodDistance = ChiselLodDistance,
             OcclusionCullingScale = OcclusionCullingScaleEnabled,
+            BfsChunkVisibility = BfsChunkVisibilityEnabled,
+            MeshPartPool = MeshPartPoolEnabled,
+            ItemRenderInfoReuse = ItemRenderInfoReuseEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -1129,6 +1275,9 @@ public static class OptimumConfig
             LaunchTaskBudgetEnabled = LaunchTaskBudgetEnabled,
             LaunchTaskBudgetMs = LaunchTaskBudgetMs,
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
+            IndirectDraw = IndirectDrawEnabled,
+            SimdCulling = SimdCullingEnabled,
+            KometGuard = KometGuardEnabled,
         };
 
         try
@@ -1175,6 +1324,9 @@ internal sealed class OptimumConfigData
     public bool ChiselLod { get; set; } = true;
     public int ChiselLodDistance { get; set; } = 48;
     public bool OcclusionCullingScale { get; set; } = true;
+    public bool BfsChunkVisibility { get; set; } = true;
+    public bool MeshPartPool { get; set; } = true;
+    public bool ItemRenderInfoReuse { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
@@ -1217,6 +1369,9 @@ internal sealed class OptimumConfigData
     public bool LaunchTaskBudgetEnabled { get; set; } = false;
     public int LaunchTaskBudgetMs { get; set; } = 100;
     public string WorldgenWorkerPolicy { get; set; } = "auto";
+    public bool IndirectDraw { get; set; } = false;
+    public bool SimdCulling { get; set; } = true;
+    public bool KometGuard { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -1397,6 +1552,139 @@ public static class OptimumDiagnostics
         double poolMBSaved = quadsSaved * 88.0 / (1024.0 * 1024.0);
 
         return $"Optimum greedy mesh: enabled={OptimumConfig.GreedyMeshEnabled}, maxMergeWidth={OptimumConfig.GreedyMeshMaxMergeWidth}, maxMergeHeight={OptimumConfig.GreedyMeshMaxMergeHeight}, lightTolerance={OptimumConfig.GreedyMeshLightTolerance}, farDistance={OptimumConfig.GreedyMeshFarDistance}, chunks={chunks}, quads={quads}, blocksConsumed={blocksConsumed}, blocksPerQuad={blocksPerQuad:0.00}, quadsSaved={quadsSaved}, estPoolMBSaved={poolMBSaved:0.00}";
+    }
+
+    // --- Issue #73 mesh-construction profiler (diagnostic only) ---
+    // Per NowProcessChunk call: wall-clock ticks and thread-allocated bytes,
+    // split into the tessellation phase (BuildBlockPolygons: the per-block
+    // loop) and the finalize phase (populateTesselatedChunkPart +
+    // MergeTesselatedChunkParts: the part-object + clone allocations). Runs on
+    // the tesselation thread. Enabled by OPTIMUM_MESH_PROFILE=1 via
+    // OptimumConfig.MeshProfileEnabled.
+    private static long _meshChunks;
+    private static long _meshTessTicks;
+    private static long _meshFinalizeTicks;
+    private static long _meshTotalTicks;
+    private static long _meshTessAllocBytes;
+    private static long _meshFinalizeAllocBytes;
+    private static long _meshPartsCreated;
+    private static long _meshCloneAllocBytes;
+    private static long _meshCloneSmallVerts;
+    private static long _meshCloneLargeVerts;
+    private static long _meshSinceLog;
+
+    public static void RecordMeshClone(long bytes, int smallVerts, int largeVerts)
+    {
+        Interlocked.Add(ref _meshCloneAllocBytes, bytes);
+        Interlocked.Add(ref _meshCloneSmallVerts, smallVerts);
+        Interlocked.Add(ref _meshCloneLargeVerts, largeVerts);
+    }
+    public static volatile bool MeshProfileEnabled;
+    public const int MeshProfileLogEvery = 200;
+
+    public static void RecordMeshTess(long tessTicks, long tessAllocBytes)
+    {
+        Interlocked.Add(ref _meshTessTicks, tessTicks);
+        Interlocked.Add(ref _meshTessAllocBytes, tessAllocBytes);
+    }
+
+    /// <summary>Returns true when a mesh-profile summary should be logged now.</summary>
+    public static bool RecordMeshFinalize(long finalizeTicks, long finalizeAllocBytes, int partsCreated, long totalTicks)
+    {
+        Interlocked.Increment(ref _meshChunks);
+        Interlocked.Add(ref _meshFinalizeTicks, finalizeTicks);
+        Interlocked.Add(ref _meshFinalizeAllocBytes, finalizeAllocBytes);
+        Interlocked.Add(ref _meshPartsCreated, partsCreated);
+        Interlocked.Add(ref _meshTotalTicks, totalTicks);
+        if (!MeshProfileEnabled) return false;
+        return Interlocked.Increment(ref _meshSinceLog) % MeshProfileLogEvery == 0;
+    }
+
+    public static void ResetMeshProfile()
+    {
+        Interlocked.Exchange(ref _meshChunks, 0);
+        Interlocked.Exchange(ref _meshTessTicks, 0);
+        Interlocked.Exchange(ref _meshFinalizeTicks, 0);
+        Interlocked.Exchange(ref _meshTotalTicks, 0);
+        Interlocked.Exchange(ref _meshTessAllocBytes, 0);
+        Interlocked.Exchange(ref _meshFinalizeAllocBytes, 0);
+        Interlocked.Exchange(ref _meshCloneAllocBytes, 0);
+        Interlocked.Exchange(ref _meshCloneSmallVerts, 0);
+        Interlocked.Exchange(ref _meshCloneLargeVerts, 0);
+        Interlocked.Exchange(ref _meshPartsCreated, 0);
+    }
+
+    public static string GetMeshProfileSummary()
+    {
+        long chunks = Interlocked.Read(ref _meshChunks);
+        if (chunks == 0) return "Optimum mesh profile: no chunks tesselated";
+        double f = System.Diagnostics.Stopwatch.Frequency / 1000.0;
+        long tessTicks = Interlocked.Read(ref _meshTessTicks);
+        long finTicks = Interlocked.Read(ref _meshFinalizeTicks);
+        long totalTicks = tessTicks + finTicks;
+        long tessAlloc = Interlocked.Read(ref _meshTessAllocBytes);
+        long finAlloc = Interlocked.Read(ref _meshFinalizeAllocBytes);
+        long cloneAlloc = Interlocked.Read(ref _meshCloneAllocBytes);
+        long smallV = Interlocked.Read(ref _meshCloneSmallVerts);
+        long largeV = Interlocked.Read(ref _meshCloneLargeVerts);
+        long parts = Interlocked.Read(ref _meshPartsCreated);
+        double totalAllocMB = (tessAlloc + finAlloc) / (1024.0 * 1024.0);
+        return $"Optimum mesh profile: chunks={chunks}"
+            + $", total meanMs={totalTicks / f / chunks:0.000}"
+            + $", tess meanMs={tessTicks / f / chunks:0.000}"
+            + $", finalize meanMs={finTicks / f / chunks:0.000}"
+            + $", allocPerChunk={(tessAlloc + finAlloc) / (double)chunks:0} B"
+            + $" (tess={tessAlloc / (double)chunks:0} B, finalize={finAlloc / (double)chunks:0} B, ofWhichClone={cloneAlloc / (double)chunks:0} B)"
+            + $", cloneVertsPerChunk small={smallV / (double)chunks:0}/large={largeV / (double)chunks:0}"
+            + $", partsPerChunk={parts / (double)chunks:0.0}"
+            + $", totalAllocMB={totalAllocMB:0.0}";
+    }
+
+    // --- Issue #74 item-render profiler (diagnostic only) ---
+    // Counts GetItemStackRenderInfo calls (one per visible item slot per frame) and
+    // the thread-allocated bytes they cost, logged every ItemRenderProfileLogEvery
+    // frames. Runs on the render thread. Enabled by OPTIMUM_ITEM_PROFILE=1. This
+    // measures whether per-slot item render info is a real per-frame CPU/GC hotspot
+    // (e.g. inventory or chest open) before optimizing it.
+    public static volatile bool ItemRenderProfileEnabled;
+    public const int ItemRenderProfileLogEvery = 120;
+    private static long _itemRenderCalls;
+    private static long _itemRenderAllocBytes;
+    private static long _itemRenderFrames;
+    private static long _itemRenderSinceLog;
+    private static long _itemRenderCallsThisFrame;
+    private static long _itemRenderMaxCallsPerFrame;
+
+    /// <summary>Record one GetItemStackRenderInfo call and the bytes it allocated.</summary>
+    public static void RecordItemRender(long allocBytes)
+    {
+        _itemRenderCalls++;
+        _itemRenderCallsThisFrame++;
+        _itemRenderAllocBytes += allocBytes;
+    }
+
+    /// <summary>Call once per rendered frame; returns true when a summary is due.</summary>
+    public static bool ItemRenderEndFrame()
+    {
+        _itemRenderFrames++;
+        if (_itemRenderCallsThisFrame > _itemRenderMaxCallsPerFrame)
+            _itemRenderMaxCallsPerFrame = _itemRenderCallsThisFrame;
+        _itemRenderCallsThisFrame = 0;
+        if (!ItemRenderProfileEnabled) return false;
+        _itemRenderSinceLog++;
+        return _itemRenderSinceLog % ItemRenderProfileLogEvery == 0;
+    }
+
+    public static string GetItemRenderProfileSummary()
+    {
+        long frames = _itemRenderFrames;
+        if (frames == 0) return "Optimum item-render profile: no frames";
+        return $"Optimum item-render profile: frames={frames}"
+            + $", callsPerFrame={_itemRenderCalls / (double)frames:0.0}"
+            + $", maxCallsPerFrame={_itemRenderMaxCallsPerFrame}"
+            + $", allocPerFrame={_itemRenderAllocBytes / (double)frames:0} B"
+            + $", allocPerCall={(_itemRenderCalls == 0 ? 0 : _itemRenderAllocBytes / (double)_itemRenderCalls):0} B"
+            + $", totalCalls={_itemRenderCalls}";
     }
 
     public static void RecordChiselLod(int fullTriangles, int proxyTriangles, bool fallback, long elapsedTicks)
@@ -1730,6 +2018,7 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter AnimBlockLodDeferred = new();
     public static readonly HitSkipCounter ParticleDistanceGate = new();
     public static readonly HitSkipCounter OcclusionCullingScale = new();
+    public static readonly HitSkipCounter BfsChunkVisibility = new();
     public static readonly HitSkipCounter DynamicLightCache = new();
     public static readonly HitSkipCounter ChunkUploadSort = new();
     public static readonly HitSkipCounter EntityLightBatch = new();
@@ -1737,6 +2026,9 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter EntityTesselationBudget = new();
     public static readonly HitSkipCounter EntityOutfitShapeCache = new();
     public static readonly HitSkipCounter EntityOutfitAnimatorCache = new();
+    // Issue #73: hit = a CustomMeshDataPart clone served from the pool, skip = a
+    // fresh allocation (cold pool, non-poolable part, or pool inactive).
+    public static readonly HitSkipCounter MeshPartPool = new();
 
     /// <summary>
     /// Every hit/skip counter above, keyed by name, for .optimum status and
@@ -1760,6 +2052,7 @@ public static class OptimumDiagnostics
         [nameof(AnimBlockLodDeferred)] = AnimBlockLodDeferred,
         [nameof(ParticleDistanceGate)] = ParticleDistanceGate,
         [nameof(OcclusionCullingScale)] = OcclusionCullingScale,
+        [nameof(BfsChunkVisibility)] = BfsChunkVisibility,
         [nameof(DynamicLightCache)] = DynamicLightCache,
         [nameof(ChunkUploadSort)] = ChunkUploadSort,
         [nameof(EntityLightBatch)] = EntityLightBatch,
@@ -1767,6 +2060,7 @@ public static class OptimumDiagnostics
         [nameof(EntityTesselationBudget)] = EntityTesselationBudget,
         [nameof(EntityOutfitShapeCache)] = EntityOutfitShapeCache,
         [nameof(EntityOutfitAnimatorCache)] = EntityOutfitAnimatorCache,
+        [nameof(MeshPartPool)] = MeshPartPool,
     };
 
     public static void ResetAllCounters()
@@ -1856,6 +2150,70 @@ public static class OptimumDiagnostics
     private static long _chunkPoolsCulled;
     private static long _chunkVisibleGroups;
     private static long _chunkFrustumCullTicks;
+
+    // Issue #75: GPU indirect vs conventional draw submission timing & counters
+    private static long _chunkIndirectDrawCalls;
+    private static long _chunkConventionalDrawCalls;
+    private static long _chunkIndirectSubmissionTicks;
+    private static long _chunkConventionalSubmissionTicks;
+    private static long _chunkIndirectGroups;
+    private static long _chunkConventionalGroups;
+
+    public static long ChunkIndirectDrawCalls => Interlocked.Read(ref _chunkIndirectDrawCalls);
+    public static long ChunkConventionalDrawCalls => Interlocked.Read(ref _chunkConventionalDrawCalls);
+    public static long ChunkIndirectSubmissionTicks => Interlocked.Read(ref _chunkIndirectSubmissionTicks);
+    public static long ChunkConventionalSubmissionTicks => Interlocked.Read(ref _chunkConventionalSubmissionTicks);
+    public static long ChunkIndirectGroups => Interlocked.Read(ref _chunkIndirectGroups);
+    public static long ChunkConventionalGroups => Interlocked.Read(ref _chunkConventionalGroups);
+
+    public static void RecordChunkDrawSubmission(int groupCount, bool isIndirect, long elapsedTicks)
+    {
+        if (isIndirect)
+        {
+            Interlocked.Increment(ref _chunkIndirectDrawCalls);
+            Interlocked.Add(ref _chunkIndirectGroups, groupCount);
+            Interlocked.Add(ref _chunkIndirectSubmissionTicks, elapsedTicks);
+        }
+        else
+        {
+            Interlocked.Increment(ref _chunkConventionalDrawCalls);
+            Interlocked.Add(ref _chunkConventionalGroups, groupCount);
+            Interlocked.Add(ref _chunkConventionalSubmissionTicks, elapsedTicks);
+        }
+    }
+
+    public static void ResetChunkDrawSubmissionCounters()
+    {
+        Interlocked.Exchange(ref _chunkIndirectDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkConventionalDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkIndirectSubmissionTicks, 0);
+        Interlocked.Exchange(ref _chunkConventionalSubmissionTicks, 0);
+        Interlocked.Exchange(ref _chunkIndirectGroups, 0);
+        Interlocked.Exchange(ref _chunkConventionalGroups, 0);
+    }
+
+    // Issue #75 Tier 2: SIMD frustum culling counters
+    private static long _simdFrustumTests;
+    private static long _simdFrustumCulled;
+
+    public static long SimdFrustumTests => Interlocked.Read(ref _simdFrustumTests);
+    public static long SimdFrustumCulled => Interlocked.Read(ref _simdFrustumCulled);
+
+    public static void RecordSimdFrustumTest(bool culled)
+    {
+        Interlocked.Increment(ref _simdFrustumTests);
+        if (culled)
+        {
+            Interlocked.Increment(ref _simdFrustumCulled);
+        }
+    }
+
+    public static void ResetSimdFrustumCounters()
+    {
+        Interlocked.Exchange(ref _simdFrustumTests, 0);
+        Interlocked.Exchange(ref _simdFrustumCulled, 0);
+    }
+
     private const int ChunkRenderWindowSize = 120;
     private static readonly long[] _chunkWindowDrawCalls = new long[ChunkRenderWindowSize];
     private static readonly long[] _chunkWindowPoolsRendered = new long[ChunkRenderWindowSize];
@@ -1987,6 +2345,8 @@ public static class OptimumDiagnostics
         Array.Clear(_chunkWindowPoolsCulled);
         Array.Clear(_chunkWindowVisibleGroups);
         Array.Clear(_chunkWindowFrustumCullTicks);
+        ResetChunkDrawSubmissionCounters();
+        ResetSimdFrustumCounters();
     }
 
     public static void ResetChunkRenderFrame()
@@ -2086,7 +2446,23 @@ public static class OptimumDiagnostics
         double windowGroupsPerFrame = windowFrames == 0 ? 0 : (double)windowGroups / windowFrames;
         double windowCullMsPerFrame = windowFrames == 0 ? 0 : windowCullMs / windowFrames;
 
-        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
+        long indDraws = Interlocked.Read(ref _chunkIndirectDrawCalls);
+        long convDraws = Interlocked.Read(ref _chunkConventionalDrawCalls);
+        long indTicks = Interlocked.Read(ref _chunkIndirectSubmissionTicks);
+        long convTicks = Interlocked.Read(ref _chunkConventionalSubmissionTicks);
+        double indMs = indTicks * 1000.0 / Stopwatch.Frequency;
+        double convMs = convTicks * 1000.0 / Stopwatch.Frequency;
+        double totalSubMs = indMs + convMs;
+        double subMsPerFrame = frames == 0 ? 0 : totalSubMs / frames;
+        double indDrawsPerFrame = frames == 0 ? 0 : (double)indDraws / frames;
+
+        long simdTests = Interlocked.Read(ref _simdFrustumTests);
+        long simdCulled = Interlocked.Read(ref _simdFrustumCulled);
+        double simdTestsPerFrame = frames == 0 ? 0 : (double)simdTests / frames;
+        double simdCulledPerFrame = frames == 0 ? 0 : (double)simdCulled / frames;
+
+        string kometNote = OptimumConfig.KometDetected ? ", kometOverride=true" : "";
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, simdTests/frame={simdTestsPerFrame:0.0}, simdCulled/frame={simdCulledPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}{kometNote}";
     }
 
     public static string GetCountersSummary()
@@ -2196,6 +2572,12 @@ public static class OptimumDiagnostics
         }
     }
 
+    /// <summary>Number of distinct registered tessellation worker threads.</summary>
+    public static int TessWorkerCount
+    {
+        get { lock (_tessWorkerGate) { return _tessWorkerIds.Count; } }
+    }
+
     /// <summary>Check if a chunk has exceeded the retry threshold (50) and should log a warning.</summary>
     public static bool ShouldWarnTessRetry(int perChunkRetryCount) => perChunkRetryCount == 50;
 
@@ -2285,6 +2667,121 @@ public static class OptimumDiagnostics
         return sb.ToString();
     }
 
+    // Chunk visibility culler walk timing (issue #72): compares the raycast vs
+    // BFS visibility walk in the running client. Records elapsed ticks per full
+    // CullInvisibleChunks recompute (the walk only re-runs when the camera changes
+    // chunk), tagged by which algorithm ran. Logs a summary every LogEvery walks so
+    // a headless timed run captures the number without in-game chat input.
+    private static long _cullWalkRaycastCount;
+    private static long _cullWalkRaycastTicks;
+    private static long _cullWalkRaycastVisible;
+    private static long _cullWalkBfsCount;
+    private static long _cullWalkBfsTicks;
+    private static long _cullWalkBfsVisible;
+    private static long _cullWalkSinceLog;
+    public static volatile bool CullWalkLogEnabled;
+    public const int CullWalkLogEvery = 20;
+
+    /// <summary>
+    /// Records one full visibility-walk recompute. bfs=true when runBfsVisibility
+    /// ran, false for the vanilla raycast. visibleMarked is the number of chunks the
+    /// walk left visible this pass (only counted when CullWalkLogEnabled, for the
+    /// raycast-vs-BFS superset A/B). Returns true when a summary should be logged now.
+    /// </summary>
+    public static bool RecordChunkCullerWalk(bool bfs, long elapsedTicks, int visibleMarked)
+    {
+        if (bfs)
+        {
+            Interlocked.Increment(ref _cullWalkBfsCount);
+            Interlocked.Add(ref _cullWalkBfsTicks, elapsedTicks);
+            Interlocked.Add(ref _cullWalkBfsVisible, visibleMarked);
+        }
+        else
+        {
+            Interlocked.Increment(ref _cullWalkRaycastCount);
+            Interlocked.Add(ref _cullWalkRaycastTicks, elapsedTicks);
+            Interlocked.Add(ref _cullWalkRaycastVisible, visibleMarked);
+        }
+        if (!CullWalkLogEnabled) return false;
+        return Interlocked.Increment(ref _cullWalkSinceLog) % CullWalkLogEvery == 0;
+    }
+
+    public static string GetChunkCullerWalkSummary()
+    {
+        long rc = Interlocked.Read(ref _cullWalkRaycastCount);
+        long rt = Interlocked.Read(ref _cullWalkRaycastTicks);
+        long rv = Interlocked.Read(ref _cullWalkRaycastVisible);
+        long bc = Interlocked.Read(ref _cullWalkBfsCount);
+        long bt = Interlocked.Read(ref _cullWalkBfsTicks);
+        long bv = Interlocked.Read(ref _cullWalkBfsVisible);
+        double rMs = rc == 0 ? 0 : rt * 1000.0 / Stopwatch.Frequency / rc;
+        double bMs = bc == 0 ? 0 : bt * 1000.0 / Stopwatch.Frequency / bc;
+        double rVis = rc == 0 ? 0 : (double)rv / rc;
+        double bVis = bc == 0 ? 0 : (double)bv / bc;
+        return $"Optimum chunk culler walk: raycast walks={rc}, meanMs={rMs:0.####}, meanVisible={rVis:0.0}; bfs walks={bc}, meanMs={bMs:0.####}, meanVisible={bVis:0.0}";
+    }
+
+    public static void ResetChunkCullerWalk()
+    {
+        Interlocked.Exchange(ref _cullWalkRaycastCount, 0);
+        Interlocked.Exchange(ref _cullWalkRaycastTicks, 0);
+        Interlocked.Exchange(ref _cullWalkRaycastVisible, 0);
+        Interlocked.Exchange(ref _cullWalkBfsCount, 0);
+        Interlocked.Exchange(ref _cullWalkBfsTicks, 0);
+        Interlocked.Exchange(ref _cullWalkBfsVisible, 0);
+        Interlocked.Exchange(ref _cullWalkSinceLog, 0);
+    }
+
+    // In-client frame-time sampler for the issue #72 FPS A/B. Gated by
+    // CullWalkLogEnabled so it costs nothing on a normal frame. Collects raw
+    // frame-time samples (ms) in a fixed ring; every FpsLogEvery frames it logs
+    // mean/P50/P95/P99 and the derived FPS, then keeps sampling. Runs entirely on
+    // the render thread (window_RenderFrame), so no locking is needed.
+    private const int FpsRingSize = 4096;
+    private static readonly double[] _fpsRing = new double[FpsRingSize];
+    private static int _fpsCount;
+    private static long _fpsTotalFrames;
+    public const int FpsLogEvery = 600; // ~ every 600 frames
+
+    /// <summary>
+    /// Records one client frame's time in milliseconds. Returns true when an FPS
+    /// summary should be logged now (caller logs GetFrameTimeSummary()).
+    /// </summary>
+    public static bool RecordFrameTime(double frameMs)
+    {
+        if (!CullWalkLogEnabled) return false;
+        int idx = _fpsCount % FpsRingSize;
+        _fpsRing[idx] = frameMs;
+        _fpsCount++;
+        _fpsTotalFrames++;
+        return _fpsCount % FpsLogEvery == 0;
+    }
+
+    public static string GetFrameTimeSummary()
+    {
+        int n = System.Math.Min(_fpsCount, FpsRingSize);
+        if (n == 0) return "Optimum frame time: no samples";
+        var copy = new double[n];
+        System.Array.Copy(_fpsRing, copy, n);
+        System.Array.Sort(copy);
+        double sum = 0;
+        for (int i = 0; i < n; i++) sum += copy[i];
+        double mean = sum / n;
+        double p50 = copy[(int)(n * 0.50)];
+        double p95 = copy[System.Math.Min(n - 1, (int)(n * 0.95))];
+        double p99 = copy[System.Math.Min(n - 1, (int)(n * 0.99))];
+        double meanFps = mean > 0 ? 1000.0 / mean : 0;
+        double p95Fps = p95 > 0 ? 1000.0 / p95 : 0;
+        return $"Optimum frame time: frames={_fpsTotalFrames}, samples={n}, meanMs={mean:0.###} ({meanFps:0.0} fps), p50Ms={p50:0.###}, p95Ms={p95:0.###} ({p95Fps:0.0} fps), p99Ms={p99:0.###}";
+    }
+
+    public static void ResetFrameTime()
+    {
+        _fpsCount = 0;
+        _fpsTotalFrames = 0;
+        System.Array.Clear(_fpsRing);
+    }
+
     // Chunk deserialization parallelism diagnostics
     private static long _chunkDeserializeParallelColumns;
     private static long _chunkDeserializeParallelChunks;
@@ -2306,5 +2803,84 @@ public static class OptimumDiagnostics
         long columns = Interlocked.Read(ref _chunkDeserializeParallelColumns);
         long chunks = Interlocked.Read(ref _chunkDeserializeParallelChunks);
         return $"Optimum chunk deserialize parallel: columns={columns}, chunks={chunks}";
+    }
+
+    /// <summary>
+    /// Issue #85: Returns diagnostic summary of detected conflicting guest mods (e.g. Komet).
+    /// </summary>
+    public static string GetConflictingModsSummary()
+    {
+        return OptimumConfig.KometDetected
+            ? $"Optimum conflicting mods: {OptimumCompatibilityGuard.GetKometStatusLine()}"
+            : "Optimum conflicting mods: none detected";
+    }
+
+    /// <summary>
+    /// Issue #85: Returns diagnostic summary of detected performance ecosystem mods.
+    /// </summary>
+    public static string GetPerformanceModsSummary()
+    {
+        return OptimumCompatibilityGuard.GetPerformanceModsSummary();
+    }
+}
+
+/// <summary>
+/// Issue #75: Memory layout for an OpenGL 4.3 DrawElementsIndirectCommand struct (20 bytes).
+/// Used by glMultiDrawElementsIndirect to dispatch chunk mesh batches.
+/// </summary>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 1)]
+public struct DrawElementsIndirectCommand
+{
+    public uint Count;
+    public uint InstanceCount;
+    public uint FirstIndex;
+    public int BaseVertex;
+    public uint BaseInstance;
+
+    public const int SizeInBytes = 20;
+
+    public DrawElementsIndirectCommand(uint count, uint instanceCount, uint firstIndex, int baseVertex, uint baseInstance)
+    {
+        Count = count;
+        InstanceCount = instanceCount;
+        FirstIndex = firstIndex;
+        BaseVertex = baseVertex;
+        BaseInstance = baseInstance;
+    }
+}
+
+/// <summary>
+/// Issue #75: Helper routines for GPU indirect rendering capability detection,
+/// command translation, and safe fallback.
+/// </summary>
+public static class OptimumIndirectRendering
+{
+    public static int BuildCommands(
+        int[] indicesStartsByte,
+        int[] indicesSizes,
+        int groupCount,
+        DrawElementsIndirectCommand[] targetArray)
+    {
+        if (indicesStartsByte == null || indicesSizes == null || targetArray == null)
+        {
+            return 0;
+        }
+
+        int count = Math.Min(groupCount, Math.Min(indicesSizes.Length, targetArray.Length));
+        for (int i = 0; i < count; i++)
+        {
+            uint firstIndex = (uint)(indicesStartsByte[i * 2] / 4);
+            uint indexCount = (uint)Math.Max(0, indicesSizes[i]);
+            targetArray[i] = new DrawElementsIndirectCommand(indexCount, 1u, firstIndex, 0, 0u);
+        }
+
+        return count;
+    }
+
+    public static bool ValidateCommand(in DrawElementsIndirectCommand cmd, int maxIndicesCount)
+    {
+        if (cmd.InstanceCount == 0 || cmd.Count == 0) return false;
+        if (cmd.FirstIndex + cmd.Count > (uint)maxIndicesCount) return false;
+        return true;
     }
 }

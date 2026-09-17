@@ -21,6 +21,28 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 # script only ever talks to repositories it names explicitly.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
+# macOS ships Bash 3.2 (2007) and BSD coreutils; this script needs features
+# present only in Bash 4+ (associative arrays are unused, but `read -d ''`
+# edge-case behavior and `[[ =~ ]]` quoting rules differ) and GNU-style
+# null-delimited sort. The CI installs Bash 5 via Homebrew on macOS runners;
+# warn local users who forgot that step so the error points at the real cause
+# instead of at cryptic patch-application failures dozens of minutes later.
+if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  echo "WARNING: Bash ${BASH_VERSION} detected. This script is tested with" >&2
+  echo "  Bash 4+. On macOS, install a modern Bash and ensure it comes first" >&2
+  echo "  in PATH:  brew install bash" >&2
+  echo "  Then re-run:  \$(brew --prefix)/bin/bash scripts/bootstrap.sh ..." >&2
+fi
+
+# Portable null-delimited sort. GNU sort supports -z; BSD sort (macOS default)
+# does not. Detect once at startup and define a function the patch loops use.
+if printf '\0' | sort -z >/dev/null 2>&1; then
+  sort_null() { sort -z; }
+else
+  # Perl's diamond operator with $/ = undef (-0) reads null-delimited records.
+  sort_null() { perl -0 -e 'print sort <STDIN>'; }
+fi
+
 # The clone loop also uses explicit repository paths. This matters on hosts
 # where Git's implicit discovery still selects the wrong repository after a
 # successful clone.
@@ -72,7 +94,7 @@ ilspycmd_version_bounds() {
     grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' "$manifest" | tr -d '"'
     return
   fi
-  printf '%s\n' '10.1.0.8386' '10.1.1.8388'
+  printf '%s\n' '11.0.0.9375' '11.0.0.9375'
 }
 
 ilspycmd_version_at_least() {
@@ -168,6 +190,48 @@ extract_archive() {
       else
         python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$archive" "$dest"
       fi
+      ;;
+    *.exe)
+      local innoextract_bin=""
+      if [[ -x "$repo_root/.tools/innoextract" ]]; then
+        innoextract_bin="$repo_root/.tools/innoextract"
+      elif command -v innoextract >/dev/null 2>&1; then
+        local ver
+        ver="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"
+        if [[ -n "$ver" ]] && awk -v v="$ver" 'BEGIN { exit (v >= 1.11 ? 0 : 1) }'; then
+          innoextract_bin="$(command -v innoextract)"
+        fi
+      fi
+      if [[ -z "$innoextract_bin" ]]; then
+        echo "Downloading innoextract 1.13.0 (crazy-max fork)..." >&2
+        mkdir -p "$repo_root/.tools"
+        local os_type="$(uname -s)"
+        local machine="$(uname -m)"
+        local arch="linux-amd64"
+        if [[ "$os_type" == "Darwin" ]]; then
+          if [[ "$machine" == "arm64" ]]; then arch="darwin-arm64"; else arch="darwin-amd64"; fi
+        elif [[ "$machine" == "aarch64" || "$machine" == "arm64" ]]; then
+          arch="linux-arm64"
+        fi
+        local inno_url="https://github.com/crazy-max/innoextract/releases/download/v1.13.0/innoextract-$arch"
+        curl -sSL -o "$repo_root/.tools/innoextract" "$inno_url" || {
+          echo "Failed to download innoextract from $inno_url" >&2
+          exit 1
+        }
+        chmod +x "$repo_root/.tools/innoextract"
+        innoextract_bin="$repo_root/.tools/innoextract"
+      fi
+      local stage_dir="$dest/.innoextract-stage-$RANDOM"
+      rm -rf "$stage_dir"
+      mkdir -p "$stage_dir"
+      "$innoextract_bin" --silent --extract --output-dir "$stage_dir" "$archive"
+      local app_dir="$stage_dir/app"
+      if [[ ! -d "$app_dir" ]]; then
+        app_dir="$stage_dir"
+      fi
+      mkdir -p "$dest/vintagestory"
+      cp -a "$app_dir"/* "$dest/vintagestory/"
+      rm -rf "$stage_dir"
       ;;
     *) echo "Unsupported archive: $archive" >&2; exit 1 ;;
   esac
@@ -374,7 +438,7 @@ snapshot_runtime_donors() {
   cp "$source/Mods/VSSurvivalMod.dll" "$runtime_donor_dir/Mods/"
   cp "$source/Mods/VSSurvivalMod.pdb" "$runtime_donor_dir/Mods/"
   local version_marker
-  version_marker="$(find "$source/assets" -maxdepth 1 -name 'version-*.txt' -print -quit)"
+  version_marker="$(find "$source/assets" -maxdepth 1 -name 'version-*.txt' -print 2>/dev/null | head -n 1)"
   if [[ -z "$version_marker" ]]; then
     echo "Vanilla runtime donor snapshot has no version marker." >&2
     exit 1
@@ -438,7 +502,7 @@ decompile_targets=("VintagestoryLib:build/VintagestoryLib" "Vintagestory:build/V
 
 for entry in "${decompile_targets[@]}"; do
   IFS=':' read -r dll_base work_dir <<< "$entry"
-  dll_path="$(find "$vanilla_dir" -type f -name "${dll_base}.dll" -print -quit)"
+  dll_path="$(find "$vanilla_dir" -type f -name "${dll_base}.dll" -print 2>/dev/null | head -n 1)"
   if [[ -z "$dll_path" ]]; then
     echo "Skipping $dll_base.dll (not found)" >&2
     continue
@@ -1405,7 +1469,7 @@ if [[ "${#ownership_conflicts[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit | grep -q .; then
+if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.patch' -print 2>/dev/null | head -n 1 | grep -q .); then
 
   # ZIP downloads (non-clone) lack a .git/ directory. git add and git apply
   # both exit 128 without one. Create a temporary repo so patches can apply.
@@ -1460,7 +1524,7 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
           [[ -n "$output" ]] && echo "  $output"
           ((bridge_applied++)) || true
         fi
-      done < <(find "$bridge_dir" -type f -name '*.patch' -print0 | sort -z)
+      done < <(find "$bridge_dir" -type f -name '*.patch' -print0 | sort_null)
       git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true
       echo "Bridge patches: $bridge_applied applied, ${#bridge_failed[@]} failed"
       if [[ "${#bridge_failed[@]}" -gt 0 ]]; then
@@ -1522,7 +1586,7 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
       fi
       ((applied++)) || true
     fi
-  done < <(find "$patches_dir" -type f -name '*.patch' -not -path '*/runtime/*' -print0 | sort -z)
+  done < <(find "$patches_dir" -type f -name '*.patch' -not -path '*/runtime/*' -print0 | sort_null)
 
   # Unstage: the index staging was temporary.
   git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true

@@ -1,8 +1,32 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
-index 5e61808..a7b3f2f 100644
+index 11a0fd0..7b21a9a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
-@@ -483,10 +483,15 @@ public class ClientEventManager : EventManager
+@@ -181,15 +181,21 @@ public class ClientEventManager : EventManager
+ 				ScreenManager.FrameProfiler.Mark(list[i].ProfilingName);
+ 			}
+ 		}
+ 		else
+ 		{
+-			for (int j = 0; j < list.Count; j++)
++			for (int i = 0; i < list.Count; i++)
+ 			{
+-				list[j].Renderer.OnRenderFrame(dt, stage);
++				list[i].Renderer.OnRenderFrame(dt, stage);
+ 			}
+ 		}
++		// Issue #74: log the item-render profiler summary at the final render stage
++		// (diagnostic only, gated by OPTIMUM_ITEM_PROFILE).
++		if (stage == EnumRenderStage.Done && Vintagestory.API.Config.OptimumDiagnostics.ItemRenderEndFrame())
++		{
++			Logger.Notification("[Optimum] " + Vintagestory.API.Config.OptimumDiagnostics.GetItemRenderProfileSummary());
++		}
+ 	}
+ 
+ 	public void TriggerLightingUpdate(int oldBlockId, int newBlockId, BlockPos pos, Dictionary<BlockPos, BlockUpdate> blockUpdatesBulk = null)
+ 	{
+ 		Trigger(OnUpdateLighting?.GetInvocationList(), "OnUpdateLighting", delegate(UpdateLightingDelegate dele)
+@@ -483,10 +489,15 @@ public class ClientEventManager : EventManager
  	{
  		if (ShaderRegistry.SupressShaderAndBufferReloads)
  		{

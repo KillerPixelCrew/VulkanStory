@@ -11,6 +11,45 @@ vanilla_parent="$(cd -- "$vanilla_dir/.." && pwd)"
 runtime_donor_dir="${RUNTIME_DONOR_DIR:-$vanilla_parent/runtime-donors}"
 configuration="${CONFIGURATION:-Release}"
 runtime_root="$repo_root/.build/runtime-donors"
+
+# Resolve dotnet the same way the PowerShell mirror does: prefer one on PATH,
+# then fall back to the user-profile install at ~/.dotnet. The installer and
+# bootstrap can place the SDK under $HOME/.dotnet without adding it to PATH, so
+# a bare "dotnet" call from here found no SDK and the donor build died with
+# "No .NET SDKs were found" (issue #90). When the resolved dotnet lives in the
+# profile install, DOTNET_ROOT has to point at it so the host discovers the SDK
+# there.
+#
+# Issue #105: a PATH dotnet that exists but has no SDK installed causes the
+# script to accept it immediately without checking whether any SDK is visible.
+# The user-profile dotnet at $HOME/.dotnet, which has the SDK, is never tried.
+# The fix verifies that the PATH candidate can list at least one SDK; if it
+# cannot, the script falls through to the user-profile location.
+dotnet_has_sdk() {
+    local exe="$1"
+    local sdks
+    sdks="$("$exe" --list-sdks 2>/dev/null)" || true
+    [[ -n "$sdks" ]]
+}
+
+dotnet_cmd=""
+if command -v dotnet >/dev/null 2>&1 && dotnet_has_sdk "$(command -v dotnet)"; then
+    dotnet_cmd="$(command -v dotnet)"
+elif [[ -x "$HOME/.dotnet/dotnet" ]] && dotnet_has_sdk "$HOME/.dotnet/dotnet"; then
+    dotnet_cmd="$HOME/.dotnet/dotnet"
+elif command -v dotnet >/dev/null 2>&1; then
+    # PATH dotnet exists but has no SDK - let it run and surface the dotnet
+    # error directly rather than replacing it with a generic message.
+    dotnet_cmd="$(command -v dotnet)"
+else
+    echo "dotnet is required. Install the .NET SDK or run scripts/bootstrap.sh first." >&2
+    exit 1
+fi
+dotnet_dir="$(cd -- "$(dirname -- "$dotnet_cmd")" && pwd)"
+if [[ "$dotnet_dir" == "$HOME/.dotnet" ]]; then
+    export DOTNET_ROOT="$dotnet_dir"
+fi
+
 contracts_dll="$repo_root/bin/$configuration/net10.0/Optimum.Api.Contracts.dll"
 game_content_dll="$repo_root/bin/$configuration/net10.0/Optimum.GameContent.dll"
 api_dll="$repo_root/bin/$configuration/net10.0/VintagestoryAPI.dll"
@@ -95,7 +134,7 @@ if ! (
     actual_paths="$(find . -type f -not -name 'runtime-donor-manifest.sha256' -print | sort)"
     [[ "$manifest_paths" == "$actual_paths" ]]
     check_manifest
-    live_version_file="$(find "$vanilla_dir/assets" -maxdepth 1 -name 'version-*.txt' -print -quit 2>/dev/null || true)"
+    live_version_file="$(find "$vanilla_dir/assets" -maxdepth 1 -name 'version-*.txt' -print 2>/dev/null | head -n 1 || true)"
     live_version="${live_version_file##*/}"
     snapshot_version="$(tr -d '\r\n' < runtime-donor-version.txt)"
     [[ -n "$live_version" && "$live_version" == "$snapshot_version" ]]
@@ -140,7 +179,7 @@ decompile_mod() {
             "${reference_args[@]}" \
             --outputdir "$output" \
             "$assembly" >/dev/null
-        project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print -quit)"
+        project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print 2>/dev/null | head -n 1)"
         if [[ -n "$project_file" ]]; then
             break
         fi
@@ -225,8 +264,8 @@ exclude_compile_items() {
     ' "$project_file"
 }
 
-essentials_project="$(find "$runtime_root/VSEssentials" -maxdepth 1 -name '*.csproj' -print -quit)"
-survival_project="$(find "$runtime_root/VSSurvivalMod" -maxdepth 1 -name '*.csproj' -print -quit)"
+essentials_project="$(find "$runtime_root/VSEssentials" -maxdepth 1 -name '*.csproj' -print 2>/dev/null | head -n 1)"
+survival_project="$(find "$runtime_root/VSSurvivalMod" -maxdepth 1 -name '*.csproj' -print 2>/dev/null | head -n 1)"
 
 # On Windows (Git Bash), HintPaths must use native Windows paths for MSBuild.
 native_contracts_dll="$(native_path "$contracts_dll")"
@@ -350,13 +389,13 @@ unset Platform
 build_errors=""
 if [[ " ${eligible_projects[*]} " == *" VSEssentials "* ]]; then
     echo "  Building VSEssentials..."
-    if ! dotnet build "$essentials_project" -c "$configuration" --nologo; then
+    if ! "$dotnet_cmd" build "$essentials_project" -c "$configuration" --nologo; then
         build_errors="${build_errors}VSEssentials "
     fi
 fi
 if [[ " ${eligible_projects[*]} " == *" VSSurvivalMod "* ]]; then
     echo "  Building VSSurvivalMod..."
-    if ! dotnet build "$survival_project" -c "$configuration" --nologo; then
+    if ! "$dotnet_cmd" build "$survival_project" -c "$configuration" --nologo; then
         build_errors="${build_errors}VSSurvivalMod "
     fi
 fi

@@ -8,7 +8,8 @@ public sealed record InstallSession(
     string InstallDirectory,
     string? DataPath,
     string? Version,
-    ShortcutKinds Shortcuts);
+    ShortcutKinds Shortcuts,
+    bool CleanDestination = false);
 
 public sealed record InstallOutcome(
     bool Succeeded,

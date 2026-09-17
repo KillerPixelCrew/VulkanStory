@@ -263,6 +263,20 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "OptimumReadLightBatch",
     },
+    // Issue #72: BFS visibility walk state reused per pass by CullInvisibleChunks.
+    ["Vintagestory.Client.NoObf.ChunkCuller"] = new()
+    {
+        "bfsQueue",
+        "bfsVisited",
+    },
+    // Issue #74: reusable ItemRenderInfo scratch + fill/reset helpers so the GUI
+    // item render path avoids a per-slot allocation without touching the public API.
+    ["Vintagestory.Client.NoObf.InventoryItemRenderer"] = new()
+    {
+        "optimumGuiRenderInfoScratch",
+        "FillItemStackRenderInfo",
+        "ResetItemRenderInfo",
+    },
     ["Vintagestory.Client.NoObf.ClientPlatformWindows"] = new()
     {
         "_optimumSettingsInitialized",
@@ -275,6 +289,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
+        "_optimumSingleIndirectBufferId",
+        "_optimumSingleIndirectBufferCapacity",
+        "_optimumSharedIndirectCommands",
         // Phase 3b: the window's client size as a seam, so the native blit and the OpenGL body
         // read the same value (docs/vulkan-native-render-systems.md, decision 3).
         "OptimumWindowClientSize",
@@ -623,6 +640,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "edgeOptimumChiselModeldataByRenderPassByLodLevel",
         "MergeTesselatedChunkParts",
         "populateTesselatedChunkPart",
+        "OptimumCloneChunkMesh",
     },
     // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
@@ -1037,6 +1055,16 @@ var targets = new List<MethodTarget>
     // TAA P4: the decal motion window.
     new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
+    // Issue #75 Tier 1: GPU indirect draw submission (glMultiDrawElementsIndirect)
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5,
+        new[] { "Vintagestory.API.Client.MeshRef", "System.Int32[]", "System.Int32[]", "System.Int32", "System.Boolean" }),
+    // Issue #74: item-render profiler summary hook at the final render stage, and
+    // the reused-scratch per-slot item render path.
+    new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerRenderStage", 2,
+        new[] { "Vintagestory.API.Client.EnumRenderStage", "System.Single" }),
+    // Issue #74 item-render profiler: measure per-slot GetItemStackRenderInfo cost.
+    new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemstackToGui", 10,
+        new[] { "Vintagestory.API.Common.ItemSlot", "System.Double", "System.Double", "System.Double", "System.Single", "System.Int32", "System.Single", "System.Boolean", "System.Boolean", "System.Boolean" }),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop
@@ -1058,6 +1086,18 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseMove", 1),
     // R3: scale the occlusion-culling engagement threshold by view distance
     new("Vintagestory.Client.NoObf.ChunkCuller", "CullInvisibleChunks", 0),
+    // Issue #72: BFS visibility flood fill + its helpers, transplanted alongside
+    // CullInvisibleChunks (which calls runBfsVisibility when the toggle is on).
+    new("Vintagestory.Client.NoObf.ChunkCuller", "runBfsVisibility", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsReachable", 5),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsOppositeOf", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsChunkKey", 3),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsPack", 3),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsEncodeNode", 4),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackX", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackY", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackZ", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "countVisibleMarked", 0),
     // AmbientManager: reusable scratch buffers instead of per-frame array/BlockPos allocations.
     // All four run every frame from the UpdateAmbient renderer registration.
     new("Vintagestory.Client.NoObf.AmbientManager", "UpdateAmbient", 1),

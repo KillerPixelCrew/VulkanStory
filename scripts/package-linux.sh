@@ -498,7 +498,9 @@ APPRUN
 [Desktop Entry]
 Type=Application
 Name=Optimum
+GenericName=Vintage Story optimized client
 Comment=High-performance client for Vintage Story
+Keywords=vintage;story;vs;optimum;client;
 Exec=Optimum
 Icon=optimum
 Terminal=false

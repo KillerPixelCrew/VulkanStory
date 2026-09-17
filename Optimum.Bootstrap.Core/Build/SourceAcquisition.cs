@@ -51,17 +51,29 @@ public static class SourceCache
     public static string Directory(ISystemProbe probe, string version, string? overrideRoot = null)
     {
         string root = overrideRoot ?? DefaultRoot(probe);
-        return Path.Combine(root, "optimum", "src-" + SanitizeVersion(version));
+        return Join(probe, root, "optimum", "src-" + SanitizeVersion(version));
     }
 
     private static string DefaultRoot(ISystemProbe probe) => probe.Os switch
     {
         OsKind.Windows => probe.GetEnvironmentVariable("LOCALAPPDATA")
-            ?? Path.Combine(probe.HomeDirectory, "AppData", "Local"),
-        OsKind.MacOs => Path.Combine(probe.HomeDirectory, "Library", "Caches"),
+            ?? Join(probe, probe.HomeDirectory, "AppData", "Local"),
+        OsKind.MacOs => Join(probe, probe.HomeDirectory, "Library", "Caches"),
         _ => probe.GetEnvironmentVariable("XDG_CACHE_HOME")
-            ?? Path.Combine(probe.HomeDirectory, ".cache"),
+            ?? Join(probe, probe.HomeDirectory, ".cache"),
     };
+
+    /// <summary>
+    /// Joins path parts with the separator of the <em>probed</em> platform. In
+    /// production probe.Os matches the host, so a Windows install gets native
+    /// backslash paths and a Linux/macOS install gets '/'. The FakeSystemProbe
+    /// normalises separators, so cross-platform tests match either form.
+    /// </summary>
+    private static string Join(ISystemProbe probe, string root, params string[] parts)
+    {
+        char sep = probe.Os == OsKind.Windows ? '\\' : '/';
+        return root.TrimEnd('/', '\\') + sep + string.Join(sep, parts);
+    }
 
     /// <summary>
     /// A filesystem-safe token for the version, prefixed <c>v</c> when it starts
@@ -87,10 +99,20 @@ public static class SourceCache
         return v.Length > 1 && v[0] == 'v' && char.IsDigit(v[1]) ? v : null;
     }
 
-    /// <summary>True when a directory holds the two files the pipeline needs.</summary>
-    public static bool IsUsableCheckout(ISystemProbe probe, string directory) =>
-        probe.FileExists(Path.Combine(directory, "forks.json"))
-        && probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.sh"));
+    /// <summary>
+    /// True when a directory holds the manifest and the scripts required by the
+    /// platform's build and packaging pipeline.
+    /// </summary>
+    public static bool IsUsableCheckout(ISystemProbe probe, string directory)
+    {
+        if (!probe.FileExists(Path.Combine(directory, "forks.json")))
+            return false;
+
+        return probe.Os == OsKind.Windows
+            ? probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.ps1"))
+                && probe.FileExists(Path.Combine(directory, "scripts", "package.ps1"))
+            : probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.sh"));
+    }
 
     internal static IReadOnlyList<string> CloneArguments(string? tagRef, string targetDirectory)
     {

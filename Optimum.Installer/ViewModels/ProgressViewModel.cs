@@ -143,7 +143,7 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
 
         Phase(ProgressPhase.Verify, 96, "installing");
         DeployResult deploy = _services.Installer.Deploy(
-            new DeployRequest(build.RuntimePath!, _session.InstallDirectory, _session.DataPath, _session.Shortcuts),
+            new DeployRequest(build.RuntimePath!, _session.InstallDirectory, _session.DataPath, _session.Shortcuts, _session.CleanDestination),
             this);
 
         if (!deploy.Ok)

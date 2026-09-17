@@ -184,7 +184,7 @@ activate_user_dotnet() {
 
 pinned_ilspycmd_version() {
     local manifest="$REPO_ROOT/.config/dotnet-tools.json"
-    local fallback="10.1.1.8388"
+    local fallback="11.0.0.9375"
     [[ -f "$manifest" ]] || { printf '%s\n' "$fallback"; return; }
     local parsed
     parsed=$(grep -A 4 '"ilspycmd"' "$manifest" | grep -m 1 '"version"' | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)
@@ -197,7 +197,7 @@ ilspycmd_version_bounds() {
         grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' "$manifest" | tr -d '"'
         return
     fi
-    printf '%s\n' '10.1.0.8386' '10.1.1.8388'
+    printf '%s\n' '11.0.0.9375' '11.0.0.9375'
 }
 
 ilspycmd_version_at_least() {
@@ -789,7 +789,9 @@ write_desktop_entry() {
 [Desktop Entry]
 Type=Application
 Name=Optimum
+GenericName=Vintage Story optimized client
 Comment=High-performance client for Vintage Story
+Keywords=vintage;story;vs;optimum;client;
 Exec="$launcher"
 Path=$INSTALL_DIR
 Icon=optimum

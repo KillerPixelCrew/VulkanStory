@@ -57,8 +57,8 @@ public class AcquisitionTests
     {
         // scripts/tests/install-linux-prerequisites.sh asserts exactly this line.
         Assert.Equal(
-            "tool update -g ilspycmd --version 10.1.1.8388 --allow-downgrade",
-            string.Join(' ', IlspycmdAcquisition.ToolArguments("10.1.1.8388")));
+            "tool update -g ilspycmd --version 11.0.0.9375 --allow-downgrade",
+            string.Join(' ', IlspycmdAcquisition.ToolArguments("11.0.0.9375")));
     }
 
     [Fact]

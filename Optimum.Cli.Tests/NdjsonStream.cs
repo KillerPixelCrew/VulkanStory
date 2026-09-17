@@ -52,7 +52,7 @@ public sealed class NdjsonStream
             switch (type)
             {
                 case "progress":
-                    Assert.True(KnownPhases.Contains(line.GetProperty("phase").GetString()!));
+                    Assert.Contains(line.GetProperty("phase").GetString()!, KnownPhases);
                     int progress = line.GetProperty("progress").GetInt32();
                     Assert.InRange(progress, lastProgress, 99);
                     lastProgress = progress;
@@ -67,7 +67,7 @@ public sealed class NdjsonStream
                     Assert.Equal(Lines.Count - 1, i);
                     if (!line.GetProperty("ok").GetBoolean())
                     {
-                        Assert.True(KnownReasons.Contains(line.GetProperty("reason").GetString()!));
+                        Assert.Contains(line.GetProperty("reason").GetString()!, KnownReasons);
                         Assert.False(string.IsNullOrWhiteSpace(line.GetProperty("message").GetString()));
                     }
                     else
