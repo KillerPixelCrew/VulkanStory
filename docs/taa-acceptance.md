@@ -266,14 +266,15 @@ before it lack the field and still parse, but cannot be compared against a basel
 [Optimum] fps window=<s> frames=<n> mean=<ms> min=<ms> max=<ms> p99=<ms> stddev=<ms>
 ```
 
-`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of seven lines. The first line is
-unchanged from earlier builds; the other six carry stable `key=value` tokens:
+`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of nine lines. The first line is
+unchanged from earlier builds; the other eight carry stable `key=value` tokens:
 
 ```
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
-stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
+stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms> latency_sleep_n=<n> latency_sleep_ms=<ms>
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n> push_constants=<n> storage_set_binds=<n> bindless_slots=<n> bindless_placeholders=<n> compute_passes=<n> dispatches=<n> native_passes=<n> native_draws=<n> native_fullscreen_draws=<n> native_mesh_draws=<n> native_instanced_draws=<n> native_indirect_draws=<n>
+stats.latency backend=<off|native|nv|amd> mode=<off|on|boost> rev=<n> sleep_n=<n> sleep_ms=<ms> frames=<n> input_mean_ms=<ms> input_p99_ms=<ms> sim_mean_ms=<ms> sim_p99_ms=<ms> render_submit_mean_ms=<ms> render_submit_p99_ms=<ms> present_mean_ms=<ms> present_p99_ms=<ms> driver_mean_ms=<ms> driver_p99_ms=<ms> os_queue_mean_ms=<ms> os_queue_p99_ms=<ms> gpu_mean_ms=<ms> gpu_p99_ms=<ms> total_mean_ms=<ms> total_p99_ms=<ms>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> leases=<n> aliased_leases=<n> readself_copies=<n> readself_pool=<n>
 stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draws_skipped=<n> pending=<n> cache_bytes=<bytes> saves=<n>
@@ -290,7 +291,20 @@ stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draw
   (readback setup fence), `occlusion_query` (polling a query result), `swapchain_acquire`,
   `present` (vkQueuePresentKHR including the queue lock), `queue_submit` (vkQueueSubmit of a
   frame including the queue lock, which a worker's synchronous upload holds through its fence
-  wait).
+  wait) and `latency_sleep` (the latency backend's sleep before input is sampled; always 0 with
+  the None backend, the only one on this branch).
+- `stats.latency` (latency seams, S7), always emitted so "off" is as visible as "on":
+  `backend` (off here; native, nv and amd are the pacing backends of `feat/latency`) and `mode`
+  (off, on or boost) of the active backend, `rev` (the vendor extension revision behind it, 0
+  for off), `sleep_n` and `sleep_ms` (the interval's `latency_sleep` waits, repeated so the line
+  stands alone), `frames` (frame reports closed in the interval) and each of the eight report
+  intervals as a mean and a p99 in milliseconds, reduced exactly as `stats.pacing` reduces
+  frame intervals: `input` (input sample to simulation start), `sim` (simulation start to the
+  frame's first render stage), `render_submit` (first render stage to Submit A), `present`
+  (the vkQueuePresentKHR call), `driver`, `os_queue` and `gpu` (0 unless the backend has a
+  driver report, which none on this branch has) and `total` (input sample to present end: the
+  frame as the player feels it). A frame that was not presented (acquire failed, headless)
+  closes no report.
 - `stats.counters`, per interval: `scopes` (vkCmdBeginRendering), `barriers` (image barriers
   recorded), `rebar_fallbacks` (per-frame dynamic buffers - uniform ring, indirect ring - that
   asked for the ReBAR pool class and fell through to host staging memory because no ReBAR type
