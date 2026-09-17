@@ -181,7 +181,7 @@ public partial class VulkanClientPlatform
     private bool NativeWorldPrepare(NativeMeshPass pass, MeshRef mesh, bool blending, bool depth,
         out FrameBufferRef target, out VAO vao, out uint slots, out NativePipeline pipeline,
         Func<int, AttachmentBlend[]>? blendFor = null, bool? depthWrite = null,
-        CompareOp? depthCompare = null, CullModeFlags? cull = null)
+        CompareOp? depthCompare = null, CullModeFlags? cull = null, bool samplesBoundDepth = false)
     {
         target = null!;
         vao = null!;
@@ -216,6 +216,7 @@ public partial class VulkanClientPlatform
                 DepthCompare = depthCompare ?? CompareOp.Less,
                 Cull = cull ?? CullModeFlags.None,
                 Topology = PrimitiveTopology.TriangleList,
+                SamplesBoundDepth = samplesBoundDepth,
             });
         if (built == null) return false;
 

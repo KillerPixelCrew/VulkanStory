@@ -10,13 +10,20 @@ namespace Optimum.Render.Vulkan.Platform;
 /// need beyond IRenderAPI, forwarded unchanged to the platform's device. The forks
 /// reference only the API and the contracts, so this is how they reach the device until
 /// Phase 5 ports them.
+///
+/// The state operations also record what the fork stated on the platform, as the platform's
+/// own state virtuals do (VulkanClientPlatform.State.cs), so a native route that draws the
+/// fork's RenderMesh (the cloud renderers, VulkanClientPlatform.NativeClouds.cs) runs with the
+/// state the fork set and the target it bound, never with the GL state tracker's.
 /// </summary>
 internal sealed class VulkanForkGraphics : OptimumForkGraphics
 {
     private readonly VulkanDevice device;
+    private readonly VulkanClientPlatform platform;
 
-    public VulkanForkGraphics(VulkanDevice device)
+    public VulkanForkGraphics(VulkanClientPlatform platform, VulkanDevice device)
     {
+        this.platform = platform;
         this.device = device;
     }
 
@@ -48,17 +55,33 @@ internal sealed class VulkanForkGraphics : OptimumForkGraphics
     public override void SetDrawBuffers(int framebufferId, int attachmentMask) =>
         device.SetDrawBuffers(framebufferId, attachmentMask);
 
-    public override void BindFramebuffer(int framebufferId) => device.BindFramebuffer(framebufferId);
+    public override void BindFramebuffer(int framebufferId)
+    {
+        platform.NoteForkFramebuffer(framebufferId);
+        device.BindFramebuffer(framebufferId);
+    }
 
-    public override void BindDefaultFramebuffer() => device.BindDefaultFramebuffer();
+    public override void BindDefaultFramebuffer()
+    {
+        platform.NoteForkFramebuffer(0);
+        device.BindDefaultFramebuffer();
+    }
 
     public override void DeleteFramebuffer(int framebufferId) => device.DeleteFramebuffer(framebufferId);
 
     public override void SetViewport(int x, int y, int width, int height) => device.SetViewport(x, y, width, height);
 
-    public override void SetDepthTest(bool enabled) => device.SetDepthTest(enabled);
+    public override void SetDepthTest(bool enabled)
+    {
+        platform.NoteForkDepthTest(enabled);
+        device.SetDepthTest(enabled);
+    }
 
-    public override void SetBlendEnabled(bool enabled) => device.SetBlendEnabled(enabled);
+    public override void SetBlendEnabled(bool enabled)
+    {
+        platform.NoteForkBlend(enabled);
+        device.SetBlendEnabled(enabled);
+    }
 
     public override int GetUniformLocation(int programId, string name) => device.GetUniformLocation(programId, name);
 

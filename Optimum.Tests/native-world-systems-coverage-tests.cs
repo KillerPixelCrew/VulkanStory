@@ -942,4 +942,27 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("string.Equals(program.PassName ?? \"\", pass.PassName, StringComparison.Ordinal)", gui);
         Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Particlesquad2d)", gui);
     }
+    /// <summary>
+    /// The forked cloud renderers draw natively: their OptimumForkGraphics state is recorded on
+    /// the platform, cloudmap draws into the framebuffer the fork bound, and cloudvolumetric
+    /// samples Primary's depth as its bound depth and resolves liquidDepth to the LiquidDepth
+    /// target instead of a placeholder.
+    /// </summary>
+    [Fact]
+    public void TheForkCloudRenderersDrawNativelyUnderTheStateTheForkStated()
+    {
+        string fork = Read("Optimum.Render.Vulkan/Platform/VulkanForkGraphics.cs");
+        Assert.Contains("platform.NoteForkFramebuffer(framebufferId);", fork);
+        Assert.Contains("platform.NoteForkDepthTest(enabled);", fork);
+        Assert.Contains("platform.NoteForkBlend(enabled);", fork);
+        Assert.Contains("new VulkanForkGraphics(this, device)",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs"));
+        Assert.Contains("if (TryRenderCloudsNative(modelRef))",
+            Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Meshes.cs"));
+        string clouds = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeClouds.cs");
+        Assert.Contains("ReferenceEquals(program, ShaderRegistry.getProgramByName(name))", clouds);
+        Assert.Contains("depthWrite: false, samplesBoundDepth: true", clouds);
+        Assert.Contains("FrameBuffers[(int)EnumFrameBuffer.LiquidDepth]", clouds);
+        Assert.Contains("OPTIMUM_VK_NATIVE_CLOUDS", clouds);
+    }
 }
