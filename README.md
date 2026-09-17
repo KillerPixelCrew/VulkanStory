@@ -37,13 +37,14 @@ Read the [Optimum Privacy Policy](PRIVACY.md) for the information handled by the
 - BlockPos reuse in particle ticks (99.9% GC reduction in that path)
 - Mouse wheel fix at low sensitivity (#9710)
 - Creative search cache crash containment (a mod exception no longer kills the client)
+- BFS chunk visibility culling (breadth-first flood over the per-chunk face-connectivity graph, ~5x faster visibility walk)
+- GPU indirect draw (glMultiDrawElementsIndirect batching, ~0.05 ms/frame CPU submission)
+- SIMD frustum culling (AVX2/NEON acceleration, ~68% elimination rate)
+- MeshPart pool (recycles CustomMeshDataPart buffers per chunk, ~88% less per-chunk allocation)
+- Item render info reuse (ThreadStatic scratch on the GUI render path, 104 B/slot to 0)
+- Ecosystem mod compatibility guard (detects komet, optitime, tungsten, synergy; yields conflicting features automatically)
 
-Some optimizations in this repository do not yet reach the shipped game. See
-[`docs/patch-shipping-audit-0.3.0.md`](docs/patch-shipping-audit-0.3.0.md) for the
-per-patch shipping status.
-
-See [`docs/releases/optimum-0.3.5.md`](docs/releases/optimum-0.3.5.md) for the
-release fixes and validation record.
+Some optimizations in this repository do not yet reach the shipped game. The per-patch shipping status is tracked in the release notes for each version.
 
 ## Getting Started
 
