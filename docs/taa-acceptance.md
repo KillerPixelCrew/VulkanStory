@@ -2,7 +2,8 @@
 
 The P5 acceptance matrix as a runnable checklist. Every row is run **twice, once per
 backend**, with the renderer confirmed from the log, and **TAA on vs off**. Nothing here
-is passed on a launch alone: rule 1 of `CLAUDE.md` says a launch is not a verification.
+is passed on a launch alone: the bootstrap falls back to OpenGL silently, so a launch is not a
+verification until the renderer line in the log says which backend started.
 
 Tooling used by this document:
 
@@ -41,7 +42,7 @@ jq '.Renderer, .Taa, .TaaSharpness, .TaaMipBias' ~/.config/OptimumVintagestoryDa
 
 ## 1. The measurement to record
 
-**Still-frame luminance diff** (`.claude/skills/vulkan-parity-debug/SKILL.md` section 2c).
+**Still-frame luminance diff** (`scripts/dev/luma-diff.py`).
 Still camera, screenshot pairs one second apart, mean absolute luminance difference over the
 centre 60% crop, **seven pairs per backend**, compare the **medians** - never a single pair.
 

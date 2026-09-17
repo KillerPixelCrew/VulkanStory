@@ -3,7 +3,7 @@
 The acceptance checklist for the native Vulkan backend programme (Phase 0 foundations through
 Milestone 1, stable frame delivery with TAA), in the same shape as `docs/taa-acceptance.md`. Every
 row is run **once per backend** unless it says otherwise, with the renderer confirmed from the log.
-Nothing here passes on a launch alone (`CLAUDE.md` rule 1), and temporal or pacing claims pass on
+Nothing here passes on a launch alone (the bootstrap falls back to OpenGL silently), and temporal or pacing claims pass on
 numbers and logs only, never on screenshot pairs (section 4).
 
 Tooling used by this document:
@@ -138,7 +138,7 @@ history colour 0.968/0.969). Vulkan-vs-GL (V0.2) attachments clearly below their
 
 | attachment | GL-vs-GL | VK-vs-GL | note |
 |---|---|---|---|
-| 13-SSAO color1 alpha | 1.0000 | 0.0001 | GL 1.0 everywhere, Vulkan 0.0: an attachment channel the shader never writes (`CLAUDE.md` rule 9) |
+| 13-SSAO color1 alpha | 1.0000 | 0.0001 | GL 1.0 everywhere, Vulkan 0.0: an attachment channel the shader never writes |
 | 0-Primary color2 (rgba16f) | 0.958 | 0.866 | |
 | 0-Primary color0 | 0.968 | 0.886 | |
 | 10-Luma, 19/20 TAA history colour | 0.974 / 0.968 | 0.903 | follows Primary colour |
@@ -326,7 +326,7 @@ pacing seen in Phase 0 and Phase 1 was the moving world, not the build. Evidence
   device-up line of the log names the layer version and the settings actually applied. Run one area per
   session (`docs/research/vulkan-validation.md` §1). Read it before
   instrumenting anything: a bug that flickers between frames is invisible to screenshots and to
-  per-frame probes (`CLAUDE.md` rule 9).
+  per-frame probes.
 
 ### Luminance-diff medians
 - `docs/taa-acceptance.md` section 1: still camera, seven pairs one second apart per backend,

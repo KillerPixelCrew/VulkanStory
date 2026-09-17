@@ -1,6 +1,6 @@
 # Bindless texture descriptors on desktop Vulkan 1.3
 
-Research notes for implementing decision 9 of `docs/vulkan-native-plan.md` (one pipeline layout, bindless
+Research notes for implementing decision 9 of the Vulkan-native plan (one pipeline layout, bindless
 textures). Collected 2026-09-15. Every claim carries a URL. **[Inference]** marks reasoning not taken from a
 source; **[Uncertain]** marks something that could not be verified from a primary source. Device limits come
 from the Vulkan Hardware Database (gpuinfo, default "recent (1y)" filter) and the Mesa `main` tree at commit

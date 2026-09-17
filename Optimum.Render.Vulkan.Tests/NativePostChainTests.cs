@@ -280,6 +280,172 @@ public class NativePostChainTests(ITestOutputHelper output)
         GpuTest.AssertClean(seam);
     }
 
+    /// <summary>
+    /// The TAA resolve, natively: all three attachments of the history slot it writes - the
+    /// resolved colour, the resolved glow and the linear depth - have to be the OpenGL body's,
+    /// from a cold history (the reset frame, which copies the scene through) and from a warm one
+    /// (the frame that actually blends history in).
+    ///
+    /// The temporal invariants are the shader's, and both routes run the same taa-resolve.fsh: what is
+    /// asserted here is that the native route feeds it the same seven textures and the same nine
+    /// uniform values, so the 3x3 nearest-depth disocclusion and the luminance anti-flicker
+    /// weighting see identical inputs and produce identical pixels.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheTaaResolveMatchesTheOpenGlBody(bool warmHistory)
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+
+        Resolved emulated = RunResolve(session, native: false, warmHistory);
+
+        long passesBefore = session.Seam.NativePassesForTests;
+        long drawsBefore = session.Seam.NativeDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
+        Resolved nativeRoute = RunResolve(session, native: true, warmHistory);
+
+        Assert.Equal(1, session.Seam.NativePassesForTests - passesBefore);
+        Assert.Equal(1, session.Seam.NativeDrawsForTests - drawsBefore);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+
+        Assert.Equal(emulated.Color, nativeRoute.Color);
+        Assert.Equal(emulated.Glow, nativeRoute.Glow);
+        Assert.Equal(emulated.Depth, nativeRoute.Depth);
+
+        // The pass wrote a resolved image over the seed, or the comparison above would hold
+        // for two routes that both wrote nothing.
+        Assert.NotEqual(session.HistorySeedColor, nativeRoute.Color);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The TAA resolve with TAA off: the lib body returns before any draw, so the native route
+    /// declares no pass at all and the history is marked invalid on both routes.
+    /// </summary>
+    [SkippableFact]
+    public void TheTaaResolveDrawsNothingWithTaaOff()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        OptimumConfig.Taa = false;
+
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = true;
+        long passesBefore = session.Seam.NativePassesForTests;
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        platform.CurrentFrameBuffer = session.Primary;
+        Assert.False(platform.RenderOptimumTaaResolve());
+        platform.EndFrame();
+
+        Assert.Equal(0, session.Seam.NativePassesForTests - passesBefore);
+        Assert.False(platform.TaaResolvedThisFrame);
+        Assert.False(HistoryValid(platform));
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The TAA sharpen, natively: the sharpen target's single attachment has to be the OpenGL
+    /// body's at every strength the setting can take, and the texture the pass hands on to the
+    /// rest of the chain has to be the sharpen target either way.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1f)]
+    [InlineData(0.35f)]
+    public void TheTaaSharpenMatchesTheOpenGlBody(float sharpness)
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+        OptimumConfig.TaaSharpness = sharpness;
+
+        byte[] emulated = RunSharpen(session, native: false, out int emulatedTexture);
+
+        long passesBefore = session.Seam.NativePassesForTests;
+        long drawsBefore = session.Seam.NativeDrawsForTests;
+        long insideBefore = session.Seam.EmulationCallsInNativePassesForTests;
+        byte[] nativeRoute = RunSharpen(session, native: true, out int nativeTexture);
+
+        // One native pass for the resolve that has to run first, one for the sharpen.
+        Assert.Equal(2, session.Seam.NativePassesForTests - passesBefore);
+        Assert.Equal(2, session.Seam.NativeDrawsForTests - drawsBefore);
+        Assert.Equal(0, session.Seam.EmulationCallsInNativePassesForTests - insideBefore);
+
+        Assert.Equal(session.Sharpen.ColorTextureIds[0], emulatedTexture);
+        Assert.Equal(session.Sharpen.ColorTextureIds[0], nativeTexture);
+        Assert.Equal(emulated, nativeRoute);
+        Assert.NotEqual(session.SharpenSeed, nativeRoute);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// The sharpen's conditions live in the lib body, so both routes skip it on exactly the same
+    /// frames: sharpness at zero hands the resolved texture straight on and draws nothing.
+    /// </summary>
+    [SkippableFact]
+    public void TheTaaSharpenIsSkippedOnBothRoutesWhenThereIsNothingToSharpen()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        OptimumConfig.TaaSharpness = 0f;
+
+        ChainPlatform platform = session.Platform;
+        foreach (bool native in new[] { false, true })
+        {
+            platform.NativePostChainEnabled = native;
+            long passesBefore = session.Seam.NativePassesForTests;
+
+            platform.BeginFrame();
+            session.SeedFrame();
+            platform.CurrentFrameBuffer = session.Primary;
+            Assert.True(platform.RenderOptimumTaaResolve());
+            int resolved = platform.OptimumPostSceneTexture();
+            Assert.Equal(resolved, platform.RenderOptimumTaaSharpen(resolved));
+            platform.EndFrame();
+
+            // The resolve's pass on the native route, and nothing for the sharpen.
+            Assert.Equal(native ? 1 : 0, session.Seam.NativePassesForTests - passesBefore);
+        }
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
+    /// <summary>
+    /// Several frames of the native resolve with nothing read back between them: the history is
+    /// still being accumulated, not replaced. Five frames do not land where one frame lands -
+    /// each frame reprojects the previous slot at its own sub-pixel jitter and blends it in -
+    /// and where they land is the OpenGL body's answer to the identical sequence.
+    ///
+    /// A single-frame readback cannot see this: it passed while the R32F-history and
+    /// masked-clear bugs were live (P2, 2026-09-10), which is why the loop below reads nothing.
+    /// </summary>
+    [SkippableFact]
+    public void TheNativeResolveKeepsAccumulatingHistoryAcrossFrames()
+    {
+        using Session session = Open();
+        session.EnableTaa(jitterActive: true);
+        session.PatternedScene = true;
+
+        // The same last frame - the same jitter phase, the same scene, the same slot - reached
+        // two ways: cold, and after four frames of history. Pinning the phase is what makes the
+        // difference between them history and nothing else.
+        byte[] lastFrameAlone = RunResolveFrames(session, native: true, frames: 1, startPhase: 4);
+        byte[] fiveFrames = RunResolveFrames(session, native: true, frames: 5, startPhase: 0);
+        Assert.NotEqual(lastFrameAlone, fiveFrames);
+
+        byte[] emulatedFive = RunResolveFrames(session, native: false, frames: 5, startPhase: 0);
+        Assert.Equal(emulatedFive, fiveFrames);
+
+        GpuTest.AssertClean(session.Seam);
+    }
+
     // ------------------------------------------------- the chain's tail, both routes
 
     /// <summary>

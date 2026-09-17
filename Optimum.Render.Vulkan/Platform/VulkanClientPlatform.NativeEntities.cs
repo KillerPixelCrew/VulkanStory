@@ -206,7 +206,8 @@ public partial class VulkanClientPlatform
     /// Whether the shader registry holds this program under its pass name. Only a program the
     /// registry registered (PassId set, from 1) is looked up: ShaderRegistry's type initializer
     /// publishes uncompiled programs into ShaderPrograms.*, so a program the registry never saw
-    /// must not be the first thing to touch it (AGENTS.md, testing notes).
+    /// must not be the first thing to touch it - that is what crashed the OpenGL loading screen
+    /// when the upscaler stand-down called into it during startup.
     /// </summary>
     internal static bool IsRegistryProgram(ShaderProgramBase program) =>
         program.PassId > 0 && program.PassName != null &&

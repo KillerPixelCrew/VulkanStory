@@ -5,7 +5,7 @@ pipelines, its descriptor use on the set convention and its per-draw data, inste
 the GL-shaped platform virtuals. OpenGL keeps `ClientPlatformWindows` unchanged ("OFF is vanilla").
 
 Inputs:
-- plan decision 7 and Phase 3b (`docs/vulkan-native-plan.md`);
+- plan decision 7 and Phase 3b of the Vulkan-native plan;
 - `docs/research/vulkan-descriptor-model.md`, "Native architecture for this renderer";
 - the shader contract (`docs/vulkan-native-shaders.md`): all 49 vanilla programs are native, and the runtime seam
   links them from the manifest;
@@ -350,12 +350,12 @@ Tests: `NativeGuiTests` (old route against native route for both systems, blendi
 line widths, the pipeline identity across line widths, and twenty fresh textures through one pipeline)
 and the GUI section of `Optimum.Tests/native-world-systems-coverage-tests.cs` for the lib seams.
 
-## 4. Documentation that makes map stages unnecessary
+## 4. Documentation that makes a map of the tree unnecessary
 
-Every workflow so far has opened with a read-only map stage that rediscovers where things are, at five
-figures of tokens each, and thrown the result away when the run ended. The fix is not a map document -
-that is a second source of truth and it rots. The fix is that the code answers the question at the
-declaration, so an implementer greps and reads instead of mapping.
+Every piece of work on this backend has started by rediscovering where things are, and the result was
+thrown away when the work ended. The fix is not a map document - that is a second source of truth and
+it rots. The fix is that the code answers the question at the declaration, so an implementer greps and
+reads instead of mapping.
 
 **The convention.** Every render seam - a platform virtual a system draws through, a native pass, a
 device API entry point - carries a doc comment that answers, in this order:
@@ -376,11 +376,10 @@ device API entry point - carries a doc comment that answers, in this order:
 system moves to a native pass, its old body keeps its comment and gains the pointer to the new one.
 
 **Applies to:** `Optimum.Render.Vulkan/Platform/VulkanClientPlatform.*.cs`, `VulkanDevice.Native.cs` and
-the transplanted seams in `build/VintagestoryLib/**`. An implementation stage documents the seams it
-touches as part of the change, not afterwards; a stage that adds a seam without this comment is
-incomplete, and review should send it back.
+the transplanted seams in `build/VintagestoryLib/**`. A change documents the seams it touches as part of
+the change, not afterwards; a change that adds a seam without this comment is incomplete, and review
+should send it back.
 
-**Map stages** are then only for questions the code genuinely cannot answer - measured behaviour, vendor
-documentation, or a tree the repository does not contain. `scripts/dev/harvest-maps.py` recovers the map
-output of past runs from the workflow journals when one of those is needed again.
+A survey of the tree is then only for questions the code genuinely cannot answer - measured behaviour,
+vendor documentation, or a tree the repository does not contain.
 

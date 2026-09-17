@@ -9,7 +9,7 @@ is marked [Uncertain] and taken from the issue text, the Bluesky thread and the 
 Conventions: [Inference] = my conclusion, not a source claim. [Uncertain] = could not verify against a primary
 source. Repository facts are cited as `file:line` at the current branch.
 
-**Owner decisions taken as given** (`docs/research/xegtao-integration.md` section 0 and `docs/vulkan-branch-progress.md`
+**Owner decisions taken as given** (`docs/research/xegtao-integration.md` section 0 and the branch status notes
 section 4): the chosen AO is the default on Vulkan whenever TAA is active; vanilla SSAO otherwise and always on
 OpenGL; AO is composed into the scene before the TAA resolve and never onto the glow attachment; jitter is
 `P[8] -= 2*jx/W` (`docs/temporal-frame-contract.md` section 2); the TAA resolve invariants stay (3x3 nearest-depth disocclusion with motion from the nearest-depth tap, luminance anti-flicker 0.3x..1.2x; pinned by `TaaResolveTests` and `Optimum.Tests/taa-antiflicker-coverage-tests.cs`).
@@ -533,7 +533,7 @@ the CDF mapping fails that comparison.
   hands, echo chamber" in contract section 6, which already reproject through `GetPrevProjection(Hand)`) are patched
   to write the hand class into `gNormal.w` (C.5); the AO pass writes visibility 1 on hand-class pixels and, as a
   sample, treats them as solid with the world reconstruction (a hand in front of a wall still occludes the wall
-  approximately [Inference]). The lib/shader patch follows `patch-workflow` (Cecil member lists, extract, check).
+  approximately [Inference]). The lib/shader patch follows the patch procedure (Cecil member lists, extract, check).
   openmw's near-depth fade (`depth < 40` smoothstep) is the fallback only if the patch proves impossible.
 - **Water/fog/OIT:** keep vanilla's modulation `AO_final = 1 - (1 - AO) * (1 - attenuate)` with
   `attenuate = gPosition.w + 0.75 * (1 - revealage)` (`ssao.fsh:76-82`, `:152`), applied in the **compose** pass, not
@@ -625,7 +625,7 @@ ReShade port did this, note section 2) - the maths is identical, so nothing meas
 
 ## D. Measurement plan
 
-All runs with the implicit Vulkan layers off (`docs/vulkan-branch-progress.md`, Linux test state), renderer confirmed from the log, through
+All runs with the implicit Vulkan layers off (MangoHud and the Lossless Scaling layer hook every Vulkan process on the test machine), renderer confirmed from the log, through
 `scripts/dev/headless-capture.sh` (frames to disk, static camera or `.cam play`, `OPTIMUM_HEADLESS_FIXED_DT`).
 **Inputs to every item (decided):** the AO working term, the packed edges and working-depth mip 0 are opt-in
 outputs of `OPTIMUM_PARITY_DUMP` and of the headless frame writer (C.13), next to the existing attachments, so the
@@ -723,6 +723,6 @@ bias against this game's reference.
 - Unreal GTAO state: https://artiliada.github.io/2024/12/27/GTAO.html
 - Noise: https://github.com/electronicarts/fastnoise (BSD-3) ; https://github.com/NVIDIAGameWorks/SpatiotemporalBlueNoiseSDK (`License.txt`: non-commercial)
 - Arc 140V: https://chipsandcheese.com/p/lunar-lakes-igpu-debut-of-intels ; https://cputronic.com/gpu/intel-arc-140v
-- Repository: `docs/research/xegtao-integration.md`, `docs/vulkan-branch-progress.md` sections 4-5, `docs/temporal-frame-contract.md`,
+- Repository: `docs/research/xegtao-integration.md`, `docs/temporal-frame-contract.md`,
   `sources/shaders/ssao.fsh`, `scene-ssao.fsh`, `final.fsh`, `taa-resolve.fsh`, `.vanilla/.../shaders/{ssao,chunkopaque,bilateralblur}.{vsh,fsh}`,
   `build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs`, `Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs`.

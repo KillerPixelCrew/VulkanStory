@@ -3,7 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 // Native port of taa-resolve.fsh (the Optimum program in sources/shaders, docs/vulkan-native-shaders.md).
 // The body is the GLSL 330 body token for token; the only differences are the bindless sampler reads
-// (texture(optimumTextures2D[name], ...)). The CLAUDE.md rule-11 invariants - 3x3 nearest-depth
+// (texture(optimumTextures2D[name], ...)). The resolve's temporal invariants - 3x3 nearest-depth
 // disocclusion with motion from the nearest-depth tap, the closest-tap writer-depth tolerance and the
 // luminance anti-flicker 0.3x..1.2x blendAlpha - are reproduced verbatim, with their DO NOT REVERT notes.
 //
