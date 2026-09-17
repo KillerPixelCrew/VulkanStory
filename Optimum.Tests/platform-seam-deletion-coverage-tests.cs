@@ -86,7 +86,7 @@ public class PlatformSeamDeletionCoverageTests
             Assert.DoesNotContain("OptimumForkGraphics", File.ReadAllText(file));
         }
         string vulkan = VulkanPlatformSource.Read();
-        Assert.Contains("OptimumForkGraphics.Active = new VulkanForkGraphics(device);", vulkan);
+        Assert.Contains("OptimumForkGraphics.Active = new VulkanForkGraphics(this, device);", vulkan);
         string shutdown = Body(vulkan, "public override void ShutdownGraphics()");
         Assert.True(shutdown.IndexOf("OptimumForkGraphics.Active = null;", StringComparison.Ordinal)
             < shutdown.IndexOf("device?.Dispose();", StringComparison.Ordinal));
