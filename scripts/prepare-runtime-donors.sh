@@ -19,10 +19,28 @@ runtime_root="$repo_root/.build/runtime-donors"
 # "No .NET SDKs were found" (issue #90). When the resolved dotnet lives in the
 # profile install, DOTNET_ROOT has to point at it so the host discovers the SDK
 # there.
-if command -v dotnet >/dev/null 2>&1; then
+#
+# Issue #105: a PATH dotnet that exists but has no SDK installed causes the
+# script to accept it immediately without checking whether any SDK is visible.
+# The user-profile dotnet at $HOME/.dotnet, which has the SDK, is never tried.
+# The fix verifies that the PATH candidate can list at least one SDK; if it
+# cannot, the script falls through to the user-profile location.
+dotnet_has_sdk() {
+    local exe="$1"
+    local sdks
+    sdks="$("$exe" --list-sdks 2>/dev/null)" || true
+    [[ -n "$sdks" ]]
+}
+
+dotnet_cmd=""
+if command -v dotnet >/dev/null 2>&1 && dotnet_has_sdk "$(command -v dotnet)"; then
     dotnet_cmd="$(command -v dotnet)"
-elif [[ -x "$HOME/.dotnet/dotnet" ]]; then
+elif [[ -x "$HOME/.dotnet/dotnet" ]] && dotnet_has_sdk "$HOME/.dotnet/dotnet"; then
     dotnet_cmd="$HOME/.dotnet/dotnet"
+elif command -v dotnet >/dev/null 2>&1; then
+    # PATH dotnet exists but has no SDK - let it run and surface the dotnet
+    # error directly rather than replacing it with a generic message.
+    dotnet_cmd="$(command -v dotnet)"
 else
     echo "dotnet is required. Install the .NET SDK or run scripts/bootstrap.sh first." >&2
     exit 1

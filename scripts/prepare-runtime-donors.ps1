@@ -18,22 +18,42 @@ $repoRoot = Split-Path -Parent $scriptDir
 # with "No .NET SDKs were found" (issue #90). When the resolved dotnet lives in
 # the profile install, DOTNET_ROOT has to point at it so the host discovers the
 # SDK there, matching what IlspycmdInstaller.cs does for the tool it spawns.
+#
+# Issue #105: a PATH dotnet.exe that exists but has no SDK installed (e.g. a
+# system-wide dotnet stub left by a removed installation) caused the script to
+# accept it immediately without checking whether the required SDK is visible.
+# The user-profile dotnet at %USERPROFILE%\.dotnet, which did have the SDK, was
+# never tried. The fix verifies that the PATH candidate can list at least one
+# SDK before accepting it; if it cannot, the script falls through to the
+# user-profile location.
+function script:Test-DotNetHasSdk([string]$DotnetExe) {
+    $sdks = & $DotnetExe --list-sdks 2>$null
+    return ($sdks -and ($sdks | Where-Object { $_ -match '^\d' }))
+}
+
+$profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
 $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
-if ($dotnetCmd) {
+if ($dotnetCmd -and (Test-DotNetHasSdk $dotnetCmd.Source)) {
     $dotnetPath = $dotnetCmd.Source
 } else {
-    $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
-    $dotnetPath = Join-Path $profileRoot '.dotnet/dotnet.exe'
-    if (-not (Test-Path $dotnetPath)) {
-        $dotnetPath = Join-Path $profileRoot '.dotnet/dotnet'
+    # PATH dotnet either does not exist or has no SDK. Try the user-profile
+    # install, which the installer may have placed there without updating PATH.
+    $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet.exe'
+    if (-not (Test-Path $profileDotnetExe)) {
+        $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet'
     }
-    if (-not (Test-Path $dotnetPath)) {
+    if ((Test-Path $profileDotnetExe) -and (Test-DotNetHasSdk $profileDotnetExe)) {
+        $dotnetPath = $profileDotnetExe
+    } elseif ($dotnetCmd) {
+        # PATH dotnet exists but has no SDK - surface the original error from
+        # dotnet itself rather than masking it with a generic message.
+        $dotnetPath = $dotnetCmd.Source
+    } else {
         throw 'dotnet is required. Install the .NET SDK or run scripts/bootstrap.ps1 first.'
     }
 }
 $dotnetDir = Split-Path -Parent $dotnetPath
-$profileRootForCheck = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
-$profileDotnet = [IO.Path]::GetFullPath((Join-Path $profileRootForCheck '.dotnet'))
+$profileDotnet = [IO.Path]::GetFullPath((Join-Path $profileRoot '.dotnet'))
 if ($dotnetDir -ieq $profileDotnet) {
     $env:DOTNET_ROOT = $dotnetDir
 }
