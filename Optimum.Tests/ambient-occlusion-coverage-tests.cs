@@ -154,7 +154,6 @@ public class AmbientOcclusionCoverageTests
     // ------------------------------------------------------------------ the class channel
 
     [Theory]
-    [InlineData("sources/shaders/chunkopaque.fsh", "outGNormal.w = 1.0;", 2, new[] { "SSAOLEVEL > 0", "OPTIMUMAO > 0" })]
     [InlineData("sources/shaders/standard.fsh", "outGNormal.w = -1.0;", 1, new[] { "ALLOWDEPTHOFFSET > 0", "SSAOLEVEL > 0", "OPTIMUMAO > 0" })]
     [InlineData("sources/shaders/entityanimated.fsh", "outGNormal.w = -1.0;", 1, new[] { "ALLOWDEPTHOFFSET > 0", "USEOIT==0 && SSAOLEVEL > 0", "OPTIMUMAO > 0" })]
     public void ClassChannelWritesCompileInOnlyUnderTheirGuards(string path, string write, int expected, string[] guards)
@@ -184,20 +183,29 @@ public class AmbientOcclusionCoverageTests
         Assert.DoesNotContain("#else", Regex.Matches(shader, @"#if OPTIMUMAO > 0[\s\S]*?#endif").Select(m => m.Value).FirstOrDefault() ?? "");
     }
 
+    /// <summary>
+    /// The thin class (C.5) is the vertex stage's wind flag, which vanilla writes into gnormal.w
+    /// (grass, plants and leaves wave; blocks and snow layers do not). The fragment stage no longer
+    /// forces it for a whole pool: the blend-no-cull pool holds solid blocks too - snow layers - so
+    /// keying the class off haxyFade made 59 % of the visible pixels in a snow-covered world, 158 of
+    /// 168 flat faces, 0.05-block occluders (2026-09-17).
+    /// </summary>
     [Fact]
-    public void ThePlantFlagIsTheNoCullOpaquePassAndTheComposeDropsTheRowMin()
+    public void TheThinClassIsTheVertexWindFlagAndTheComposeDropsTheRowMin()
     {
-        string chunk = Read("sources/shaders/chunkopaque.fsh");
-        Assert.Equal(2, Regex.Matches(chunk, @"if \(haxyFade > 0\) outGNormal\.w = 1\.0;").Count);
-        // ChunkRenderer sets HaxyFade = 1 exactly for the OpaqueNoCull pool (plants, grass, cross-quads).
-        string renderer = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
-        string opaque = Between(renderer, "public void RenderOpaque(float dt)", "ScreenManager.FrameProfiler.Mark(\"rend3D-ret-opnc\");");
-        // The native chunk-pass scope (Phase 3b stage 2) brackets the loop, so the flag and the
-        // pool are still adjacent with the scope's Begin/try between them.
-        Assert.Matches(new Regex(
-                @"chunkopaque\.HaxyFade = 1;.{0,400}?for \(int l = 0; l < textureIds\.Length; l\+\+\).{0,300}?poolsByRenderPass\[1\]",
-                RegexOptions.Singleline),
-            opaque);
+        string vertex = Read("sources/shaders/chunkopaque.vsh");
+        Assert.Contains("bool isLeaves = ((renderFlags & WindModeBitMask) > 0);", vertex);
+        Assert.Contains("gnormal.w = isLeaves ? 1 : 0;", vertex);
+        foreach (string path in new[] { "sources/shaders/chunkopaque.fsh", "sources/shaders-vk/chunkopaque.frag" })
+        {
+            string chunk = Read(path);
+            Assert.DoesNotContain("outGNormal.w = 1.0;", chunk);
+            Assert.DoesNotContain("optimumThinClass", chunk);
+            Assert.Contains("the thin class is the", chunk);
+            Assert.Contains("vertex stage's wind flag", chunk);
+        }
+        Assert.DoesNotContain("optimumThinClass", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs"));
+        Assert.DoesNotContain("optimumThinClass", Read("sources/shaders-vk/chunkopaque.interface.glsl"));
 
         string compose = Read("sources/shaders/scene-ssao.fsh").Replace("\r\n", "\n");
         Assert.Contains("#if OPTIMUMAO > 0\n    if (optimumAoMode == 1)", compose);
