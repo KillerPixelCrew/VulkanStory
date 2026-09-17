@@ -149,7 +149,12 @@ public partial class VulkanClientPlatform
     private readonly NativeMeshPass nativeMinimalGui =
         new("", Array.Empty<string>(), new[] { "tex2d" });
 
+    private readonly NativeMeshPass nativeGuiGear =
+        new("guigear", Array.Empty<string>(), new[] { "tex2d" });
+
     /// <summary>
+    /// Single-sampler GUI quads drawn through plain RenderMesh. The temporal stability gear:
+    /// HudHotbar draws capi.Gui.QuadMeshRef under the vanilla guigear program in the Ortho stage.
     /// The early loading screen's quads: MainMenuRenderAPI.Render2DTexture draws through the
     /// platform's hardcoded ShaderProgramMinimalGui (no pass name, no asset) until the shader
     /// registry is up, and that RenderMesh lands here. The OpenGL side is
@@ -158,16 +163,29 @@ public partial class VulkanClientPlatform
     private bool TryRenderMinimalGuiNative(MeshRef mesh)
     {
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
-        if (!NativeGuiEnabled || device == null || mesh == null || program == null ||
-            !ReferenceEquals(program, MinimalGuiShader))
+        if (!NativeGuiEnabled || device == null || mesh == null || program == null) return false;
+
+        NativeMeshPass pass;
+        string label;
+        if (ReferenceEquals(program, MinimalGuiShader))
+        {
+            pass = nativeMinimalGui;
+            label = "MinimalGui";
+        }
+        else if (ReferenceEquals(program, ShaderPrograms.Guigear))
+        {
+            pass = nativeGuiGear;
+            label = "GuiGear";
+        }
+        else
         {
             return false;
         }
 
-        return DrawNativeGuiMesh(nativeMinimalGui, mesh,
+        return DrawNativeGuiMesh(pass, mesh,
             DeclaredProgramTexture(program.ProgramId, "tex2d"), 0,
             statedLineWidth, statedBlendOn, statedBlendMode, statedDepthTest, statedDepthWrite,
-            GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, "MinimalGui");
+            GlEnums.CompareOpFrom(statedDepthFunc), scissorEnabled ? statedScissor : null, label);
     }
 
     private readonly NativeMeshPass nativeGuiMesh =

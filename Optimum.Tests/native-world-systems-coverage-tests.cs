@@ -923,7 +923,8 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("if (TryRenderMinimalGuiNative(modelRef))", meshes);
         Assert.Contains("if (TryRenderParticles2dNative(modelRef, quantity))", meshes);
         string gui = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs");
-        Assert.Contains("!ReferenceEquals(program, MinimalGuiShader)", gui);
+        Assert.Contains("ReferenceEquals(program, MinimalGuiShader)", gui);
+        Assert.Contains("ReferenceEquals(program, ShaderPrograms.Guigear)", gui);
         Assert.Contains("string.Equals(program.PassName ?? \"\", pass.PassName, StringComparison.Ordinal)", gui);
         Assert.Contains("!ReferenceEquals(program, ShaderPrograms.Particlesquad2d)", gui);
     }
