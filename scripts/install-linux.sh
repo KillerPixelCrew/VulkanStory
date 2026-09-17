@@ -789,7 +789,9 @@ write_desktop_entry() {
 [Desktop Entry]
 Type=Application
 Name=Optimum
+GenericName=Vintage Story optimized client
 Comment=High-performance client for Vintage Story
+Keywords=vintage;story;vs;optimum;client;
 Exec="$launcher"
 Path=$INSTALL_DIR
 Icon=optimum
