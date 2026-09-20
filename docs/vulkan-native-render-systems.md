@@ -23,7 +23,8 @@ Inputs:
   - draw-buffer masks select attachments.
 
   The graph declarations around those calls take the union of every texture a pass might read (both TAA history
-  parities, raw, resolved and sharpened scene), because the platform cannot see which one the OpenGL body picked.
+  parities and resolved scene), because the platform cannot see which one the OpenGL body picked. The sharpen
+  target is a post-composition output consumed only by the final blit.
 - **What already has the target shape:**
   - the frame graph (`FrameGraph`, `PassRecorder`, `BarrierBatcher`, plans, promoted clears);
   - handle-based textures, meshes and targets;
@@ -116,12 +117,15 @@ Inputs:
   1. OIT merge.
   2. Sky motion.
   3. SSAO and blur, then the AO composite into the scene.
-  4. TAA resolve and sharpen.
+  4. TAA resolve.
   5. The bloom chain.
   6. God rays.
   7. FXAA luma or blit.
   8. Final composition.
-  9. Debug view, FSR (EASU and RCAS) or blit.
+  9. AfterFinalComposition overlays complete on Primary.
+  10. TAA sharpen into its dedicated target (slot 21), unless FSR owns sharpening.
+  11. Debug view, FSR (EASU and RCAS) or plain blit. FSR consumes Primary after late overlays and
+       owns the only RCAS pass; a plain blit consumes slot 21 when TAA sharpen ran.
 
   Each pass reads the one physical texture the chain chose. The motion-writer hosting for mod passes and the AO
   compute pass keep working at their slots.

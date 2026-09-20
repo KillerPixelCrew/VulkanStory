@@ -17,8 +17,9 @@ namespace Optimum.Render.Vulkan.Platform;
 // pass with a stable signature.
 //
 // The order is section 3's and the OpenGL body's: OIT merge, sky motion, SSAO and blur then the
-// AO composite, TAA resolve and sharpen, bloom, god rays, FXAA luma or blit, final composition,
-// and last the blit/FSR/debug step that is already native (VulkanClientPlatform.NativeBlit.cs).
+// AO composite, TAA resolve, bloom, god rays, FXAA luma or blit, final composition, late overlays,
+// TAA sharpen at the blit boundary, and last the blit/FSR/debug step that is already native
+// (VulkanClientPlatform.NativeBlit.cs).
 // RenderPostprocessingEffects' override runs the steps that live inside it and never calls base.
 //
 // Two helpers draw natively in this file - the OIT merge and sky motion - through RequestNativePipeline,
@@ -57,11 +58,11 @@ public partial class VulkanClientPlatform
         NativePostStep.SkyMotion,
         NativePostStep.SsaoAndAmbientOcclusion,
         NativePostStep.TaaResolve,
-        NativePostStep.TaaSharpen,
         NativePostStep.Bloom,
         NativePostStep.GodRays,
         NativePostStep.FxaaOrBlit,
         NativePostStep.FinalComposition,
+        NativePostStep.TaaSharpen,
         NativePostStep.Blit,
     };
 
@@ -90,7 +91,8 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// The chain's own steps, in order, with no call to the base body: the AO step, the TAA
-    /// resolve and sharpen, bloom, god rays, the Luma step and the epilogue. The order and the
+    /// resolve, bloom, god rays, the Luma step and the epilogue. TAA sharpen runs after the
+    /// separate final-composition call, so those effects consume the unsharpened resolve. The order and the
     /// per-step conditions are the OpenGL body's
     /// (ClientPlatformWindows.RenderPostprocessingEffects).
     /// </summary>
@@ -107,8 +109,6 @@ public partial class VulkanClientPlatform
 
         int scene = OptimumPostSceneTexture();
         int glow = OptimumPostGlowTexture();
-        NotePostStep(NativePostStep.TaaSharpen);
-        scene = PostStepTaaSharpen(scene);
 
         NotePostStep(NativePostStep.Bloom);
         PostStepBloom(scene, glow);
@@ -427,8 +427,9 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// The TAA sharpen's draw, drawn natively: one colour slot at the sharpen target's own
-    /// size, unblended, no depth. The conditions, the input texture and the texture the pass
-    /// hands on stay in the lib body (ClientPlatformWindows.RenderOptimumTaaSharpen).
+    /// size, unblended, no depth. The conditions, the input texture (the final-composited Primary
+    /// colour) and the texture the pass hands on stay in the lib body
+    /// (ClientPlatformWindows.RenderOptimumTaaSharpen).
     /// </summary>
     private void NativeTaaSharpen(FrameBufferRef target, int resolvedScene)
     {
@@ -518,7 +519,11 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool PostStepTaaResolve() => RenderOptimumTaaResolve();
 
-    /// <summary>Pass 5, the TAA sharpen; its draw seam is <see cref="NativeTaaSharpen" />.</summary>
+    /// <summary>
+    /// The TAA sharpen runs at the blit boundary, after AfterFinalComposition overlays; its draw seam is
+    /// <see cref="NativeTaaSharpen" />. The method remains a small route helper so the lib body
+    /// owns the skip conditions and the FSR no-double-sharpening rule.
+    /// </summary>
     private int PostStepTaaSharpen(int resolvedScene) => RenderOptimumTaaSharpen(resolvedScene);
 
     /// <summary>Pass 6, the bloom chain, drawn natively (VulkanClientPlatform.NativePostFinal.cs).</summary>

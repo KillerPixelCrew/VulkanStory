@@ -77,9 +77,8 @@ public class NativePostChainCoverageTests
                  {
                      "OptimumPostAmbientOcclusion(projectMatrix);",
                      "RenderOptimumTaaResolve();",
-                     "int postSceneTexture = OptimumPostSceneTexture();",
-                     "postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);",
-                     "OptimumPostBloom(postSceneTexture, postGlowTexture);",
+                      "int postSceneTexture = OptimumPostSceneTexture();",
+                      "OptimumPostBloom(postSceneTexture, postGlowTexture);",
                      "OptimumPostGodRays(postSceneTexture, postGlowTexture);",
                      "OptimumPostLuma(postSceneTexture);",
                      "OptimumPostFinish();",
@@ -105,9 +104,10 @@ public class NativePostChainCoverageTests
         foreach (string step in new[]
                  {
                      "NativePostStep.OitMerge,", "NativePostStep.SkyMotion,",
-                     "NativePostStep.SsaoAndAmbientOcclusion,", "NativePostStep.TaaResolve,",
-                     "NativePostStep.TaaSharpen,", "NativePostStep.Bloom,", "NativePostStep.GodRays,",
-                     "NativePostStep.FxaaOrBlit,", "NativePostStep.FinalComposition,", "NativePostStep.Blit,",
+                      "NativePostStep.SsaoAndAmbientOcclusion,", "NativePostStep.TaaResolve,",
+                      "NativePostStep.Bloom,", "NativePostStep.GodRays,",
+                      "NativePostStep.FxaaOrBlit,", "NativePostStep.FinalComposition,",
+                      "NativePostStep.TaaSharpen,", "NativePostStep.Blit,",
                  })
         {
             int at = chain.IndexOf(step, previous, StringComparison.Ordinal);
@@ -120,9 +120,9 @@ public class NativePostChainCoverageTests
         Assert.True(previous >= 0);
         foreach (string step in new[]
                  {
-                     "PostStepAmbientOcclusion(projectMatrix);", "PostStepTaaResolve();",
-                     "scene = PostStepTaaSharpen(scene);", "PostStepBloom(scene, glow);",
-                     "PostStepGodRays(scene, glow);", "PostStepFxaaOrBlit(scene);", "PostStepFinish();",
+                      "PostStepAmbientOcclusion(projectMatrix);", "PostStepTaaResolve();",
+                      "PostStepBloom(scene, glow);",
+                      "PostStepGodRays(scene, glow);", "PostStepFxaaOrBlit(scene);", "PostStepFinish();",
                  })
         {
             int at = chain.IndexOf(step, previous, StringComparison.Ordinal);
@@ -135,6 +135,12 @@ public class NativePostChainCoverageTests
         Assert.Contains("NativeOitMerge();", graph);
         Assert.Contains("return UseNativePostChain ? NativeSkyMotion() : LegacySkyMotion();", graph);
         Assert.Contains("LegacyFinalComposition();", graph);
+        string tail = Read(TailFile);
+        Assert.NotEmpty(MethodBody(tail, "private void NativeFinalComposition()"));
+        string nativeBlit = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
+        string blitBody = MethodBody(nativeBlit, "private void RenderNativeBlit()");
+        AssertOrdered(blitBody, "bool useFsr = OptimumFsrBlitActive();", "if (!useFsr)",
+            "scene2D = RenderOptimumTaaSharpen(scene2D);", "int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);");
 
         // The test switch that puts the whole chain back on the OpenGL body.
         Assert.Contains("internal bool NativePostChainEnabled { get; set; } = true;", chain);
@@ -279,6 +285,10 @@ public class NativePostChainCoverageTests
 
         string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
         Assert.Contains("NativeFinalComposition();", graph);
+        string nativeBlit = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
+        string blitBody = MethodBody(nativeBlit, "private void RenderNativeBlit()");
+        AssertOrdered(blitBody, "scene2D = RenderOptimumTaaSharpen(scene2D);",
+            "int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);");
     }
 
     /// <summary>
@@ -324,11 +334,7 @@ public class NativePostChainCoverageTests
                      "public override void RenderFinalComposition()",
                  })
         {
-            int start = platform.IndexOf(body, StringComparison.Ordinal);
-            Assert.True(start >= 0, body + " is missing");
-            int end = platform.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
-            Assert.True(end > start);
-            string source = platform.Substring(start, end - start);
+            string source = MethodBody(platform, body);
             Assert.Contains("Size2i optimumClientSize = OptimumWindowClientSize();", source);
             Assert.DoesNotContain("((NativeWindow)window).ClientSize", source);
         }
@@ -351,16 +357,69 @@ public class NativePostChainCoverageTests
     }
 
     /// <summary>
-    /// The text from a method's signature to the start of the next member declaration at the
-    /// same indentation ("\n\t}" followed by a newline).
+    /// The text from a method's signature through its matching closing brace. This deliberately
+    /// ignores indentation: donor sources and generated patches use both tabs and spaces.
     /// </summary>
     private static string MethodBody(string source, string signature)
     {
         int start = source.IndexOf(signature, StringComparison.Ordinal);
         Assert.True(start >= 0, "method not found: " + signature);
-        int end = source.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
-        Assert.True(end > start, "method end not found: " + signature);
-        return source.Substring(start, end - start);
+        int open = source.IndexOf('{', start + signature.Length);
+        Assert.True(open > start, "method block not found: " + signature);
+        int depth = 0;
+        bool lineComment = false;
+        bool blockComment = false;
+        bool quoted = false;
+        bool character = false;
+        bool escaped = false;
+        for (int i = open; i < source.Length; i++)
+        {
+            char current = source[i];
+            char next = i + 1 < source.Length ? source[i + 1] : '\0';
+            if (lineComment)
+            {
+                if (current == '\n') lineComment = false;
+                continue;
+            }
+            if (blockComment)
+            {
+                if (current == '*' && next == '/') { blockComment = false; i++; }
+                continue;
+            }
+            if (quoted)
+            {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') quoted = false;
+                continue;
+            }
+            if (character)
+            {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '\'') character = false;
+                continue;
+            }
+            if (current == '/' && next == '/') { lineComment = true; i++; continue; }
+            if (current == '/' && next == '*') { blockComment = true; i++; continue; }
+            if (current == '"') { quoted = true; continue; }
+            if (current == '\'') { character = true; continue; }
+            if (current == '{') depth++;
+            else if (current == '}' && --depth == 0) return source.Substring(start, i - start);
+        }
+        Assert.Fail("unbalanced method block: " + signature);
+        return string.Empty;
+    }
+
+    private static void AssertOrdered(string source, params string[] terms)
+    {
+        int previous = -1;
+        foreach (string term in terms)
+        {
+            int at = source.IndexOf(term, previous + 1, StringComparison.Ordinal);
+            Assert.True(at > previous, "missing or out-of-order term: " + term);
+            previous = at;
+        }
     }
 
     private static string ReadPatchedOrSource(string patchPath, string sourcePath)

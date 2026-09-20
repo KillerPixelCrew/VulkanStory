@@ -2289,7 +2289,7 @@ index b1b2eea..dbf069b 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,110 +3381,379 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,110 +3381,378 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2561,9 +2561,9 @@ index b1b2eea..dbf069b 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum TAA (P5): sharpens the resolved colour into the dedicated
-+	/// RGBA16F sharpen target and returns the texture the rest of the post chain
-+	/// should read; returns <paramref name="resolvedScene" /> unchanged whenever
++	/// Optimum TAA (P5): sharpens the supplied scene into the dedicated
++	/// RGBA16F sharpen target and returns the texture the final blit should read;
++	/// returns <paramref name="resolvedScene" /> unchanged whenever
 +	/// the pass does not run.
 +	///
 +	/// The pass is skipped when:
@@ -2592,7 +2592,8 @@ index b1b2eea..dbf069b 100644
 +		}
 +		ShaderProgram sharpen = ShaderPrograms.TaaSharpen;
 +		FrameBufferRef target = frameBuffers[OptimumTaaSharpenIndex];
-+		if (sharpen == null || sharpen.LoadError || target == null)
++		if (sharpen == null || sharpen.LoadError || target == null || target.Disposed ||
++			target.ColorTextureIds == null || target.ColorTextureIds.Length == 0)
 +		{
 +			return resolvedScene;
 +		}
@@ -2666,10 +2667,8 @@ index b1b2eea..dbf069b 100644
 +		RenderOptimumTaaResolve();
 +		int postSceneTexture = OptimumPostSceneTexture();
 +		int postGlowTexture = OptimumPostGlowTexture();
-+		// Optimum TAA (P5): sharpen the resolved colour once, before anything
-+		// reads it, so bloom, god rays and the final composition all see the
-+		// same image. Returns its input unchanged when the pass does not run.
-+		postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);
++		// TAA sharpen intentionally runs after final composition below. Bloom and god rays consume
++		// the unsharpened resolved scene, while the final blit consumes the sharpen target.
 +		OptimumPostBloom(postSceneTexture, postGlowTexture);
 +		OptimumPostGodRays(postSceneTexture, postGlowTexture);
 +		OptimumPostLuma(postSceneTexture);
@@ -2738,7 +2737,7 @@ index b1b2eea..dbf069b 100644
  			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
  			bilateralblur.Use();
  			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
-@@ -1915,35 +3772,270 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,35 +3771,269 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -2928,9 +2927,8 @@ index b1b2eea..dbf069b 100644
  		}
  		else
  		{
-+			// With TAA the FXAA define is off and Final reads the resolved image
-+			// through the Luma target - the resolved image, or the sharpened
-+			// copy of it when RenderOptimumTaaSharpen ran.
++			// With TAA the FXAA define is off and Final reads the unsharpened
++			// resolved image through the Luma target. Sharpen runs after Final.
  			LoadFrameBuffer(EnumFrameBuffer.Luma);
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
@@ -3023,7 +3021,7 @@ index b1b2eea..dbf069b 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,26 +4045,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,26 +4043,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -3075,7 +3073,7 @@ index b1b2eea..dbf069b 100644
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
  			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
-@@ -1987,24 +4098,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +4096,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -3132,7 +3130,7 @@ index b1b2eea..dbf069b 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +4153,496 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +4151,505 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3573,6 +3571,15 @@ index b1b2eea..dbf069b 100644
 +			// Optimum TAA (P5): one shared condition with RenderOptimumTaaSharpen,
 +			// which skips its own RCAS pass whenever this one is going to run.
 +			bool useFsr = OptimumFsrBlitActive();
++			// AfterFinalComposition renderers draw onto Primary before this boundary. Sharpen only
++			// now, after the late overlays have completed; FSR owns RCAS instead.
++			int primaryScene = scene2D;
++			if (!useFsr)
++			{
++				scene2D = RenderOptimumTaaSharpen(scene2D);
++			}
++			scene2D = OptimumApiBridge.SelectTaaPresentationTexture(primaryScene, scene2D, useFsr,
++				TaaResolvedThisFrame, OptimumConfig.TaaSharpness, scene2D != primaryScene);
 +			if (useFsr)
 +			{
 +				try
@@ -3630,7 +3637,7 @@ index b1b2eea..dbf069b 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4801,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4808,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3670,7 +3677,7 @@ index b1b2eea..dbf069b 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +5199,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5206,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3723,7 +3730,7 @@ index b1b2eea..dbf069b 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5294,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5301,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3768,7 +3775,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5331,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5338,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3789,7 +3796,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5350,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5357,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3810,7 +3817,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5369,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5376,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3831,7 +3838,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5388,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5395,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3852,7 +3859,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5411,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5418,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3873,7 +3880,7 @@ index b1b2eea..dbf069b 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5973,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5980,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3897,7 +3904,7 @@ index b1b2eea..dbf069b 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6332,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6339,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

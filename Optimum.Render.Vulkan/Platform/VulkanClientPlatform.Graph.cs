@@ -102,7 +102,7 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// The textures the base's pass body samples for (context, target). Where the base picks
-    /// one of several (the resolved or sharpened scene, either history parity) all candidates
+    /// one of several (the resolved scene, either history parity) all candidates
     /// are listed: the set stays the same from frame to frame, which the plan needs.
     /// </summary>
     internal int[] PassReads(string context, int target)
@@ -131,8 +131,9 @@ public partial class VulkanClientPlatform
             }
             break;
         case "TaaSharpen":
-            AddColour(reads, OptimumTaaHistoryIndexA, 0);
-            AddColour(reads, OptimumTaaHistoryIndexB, 0);
+            // Sharpen runs after FinalComposition and samples the composited Primary colour,
+            // not either history slot that fed the resolve.
+            AddColour(reads, PrimaryIndex, 0);
             break;
         case "Post":
             switch (target)
@@ -182,6 +183,7 @@ public partial class VulkanClientPlatform
         case "Blit":
             AddColour(reads, PrimaryIndex, 0);
             AddColour(reads, OptimumFsrFramebufferIndex, 0);
+            AddColour(reads, OptimumTaaSharpenIndex, 0);
             break;
         case "Before":
         case "ShadowFar":
@@ -211,7 +213,11 @@ public partial class VulkanClientPlatform
         };
     }
 
-    /// <summary>Every texture the post chain may read as the scene: Primary, the TAA histories, the sharpen output.</summary>
+    /// <summary>
+    /// Every texture the post chain may read as the scene: Primary and the TAA histories. The
+    /// sharpen output is produced after final composition and its late overlays, then consumed only
+    /// by the final blit.
+    /// </summary>
     private void AddPostScene(List<int> reads)
     {
         AddColour(reads, PrimaryIndex, 0);
@@ -220,7 +226,6 @@ public partial class VulkanClientPlatform
         AddColour(reads, OptimumTaaHistoryIndexA, 1);
         AddColour(reads, OptimumTaaHistoryIndexB, 0);
         AddColour(reads, OptimumTaaHistoryIndexB, 1);
-        AddColour(reads, OptimumTaaSharpenIndex, 0);
     }
 
     private void AddColour(List<int> reads, int index, int slot)
@@ -268,8 +273,8 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// Phase 3b stage 1: Optimum owns the post chain's order. The native route runs the steps
-    /// this method holds - AO, TAA resolve and sharpen, bloom, god rays, the Luma step and the
-    /// epilogue - and never calls base.
+    /// this method holds - AO, TAA resolve, bloom, god rays, the Luma step and the epilogue -
+    /// and never calls base. Sharpen is deliberately at the blit boundary, after late overlays.
     /// </summary>
     public override void RenderPostprocessingEffects(float[] projectMatrix)
     {
@@ -295,6 +300,7 @@ public partial class VulkanClientPlatform
 
     public override int RenderOptimumTaaSharpen(int resolvedScene)
     {
+        if (UseNativePostChain) NotePostStep(NativePostStep.TaaSharpen);
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
         SetPassContext("TaaSharpen", PassFlags.None);
@@ -331,13 +337,13 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BlitPrimaryToDefault()
     {
-        NotePostStep(NativePostStep.Blit);
         if (NativeBlitEnabled && UseNativePostChain)
         {
             RenderNativeBlit();
         }
         else
         {
+            NotePostStep(NativePostStep.Blit);
             SetPassContext("Blit", PassFlags.None);
             base.BlitPrimaryToDefault();
             SetPassContext("Frame", PassFlags.AllowSplit);

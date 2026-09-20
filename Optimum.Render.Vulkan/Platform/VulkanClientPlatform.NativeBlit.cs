@@ -13,8 +13,9 @@ namespace Optimum.Render.Vulkan.Platform;
 // Vulkan-native render systems (docs/vulkan-native-render-systems.md), stage 1: the blit to
 // the swapchain-equivalent Default target runs natively. The three branches are the GL body's
 // (ClientPlatformWindows.BlitPrimaryToDefault): the TAA debug view, FSR (EASU into the FSR
-// target, RCAS into Default) and the plain blit, with the same conditions, the same uniform
-// values and the same inputs - EASU reads Primary colour 0 (decision 7). Each written target
+// target, RCAS into Default) and the plain blit, with the same conditions and uniform values.
+// EASU reads Primary colour 0 after late overlays (decision 7); the plain blit reads slot 21 when
+// the post-composition TAA sharpen ran. Each written target
 // is one declared pass, and no draw between BeginNativePass and EndNativePass touches the GL
 // state tracker, a texture unit or a draw-buffer mask.
 public partial class VulkanClientPlatform
@@ -192,14 +193,21 @@ public partial class VulkanClientPlatform
                     });
                 }
                 device.EndNativePass();
+                NotePostStep(NativePostStep.Blit);
                 FinishNativeBlit(restoreBlend: false);
                 return;
             }
         }
 
-        // FSR: one shared condition with RenderOptimumTaaSharpen, which skips its own RCAS
-        // pass whenever this one runs.
-        if (OptimumFsrBlitActive())
+        // AfterFinalComposition renderers draw onto Primary between FinalComposition and this
+        // method. Sharpen only now, after those overlays are complete; FSR owns RCAS instead.
+        bool useFsr = OptimumFsrBlitActive();
+        if (!useFsr)
+        {
+            scene2D = RenderOptimumTaaSharpen(scene2D);
+        }
+        NotePostStep(NativePostStep.Blit);
+        if (useFsr)
         {
             FrameBufferRef fsrTarget = buffers[OptimumFsrFramebufferIndex];
             try
@@ -245,17 +253,42 @@ public partial class VulkanClientPlatform
             }
         }
 
+        // The TAA sharpen is deliberately after final composition and its late overlays. A plain
+        // blit therefore reads its dedicated target, while FSR above keeps Primary as input and
+        // supplies the one RCAS pass at native resolution.
+        int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);
         ShaderProgramBlit blit = ShaderPrograms.Blit;
         NativePipeline? plain = NativePipelineFor(nativeBlit, blit, NativeDefaultTarget);
         if (plain != null &&
-            BeginNativeBlitPass("Blit/Default", NativeDefaultTarget, client.Width, client.Height, new[] { scene2D }))
+            BeginNativeBlitPass("Blit/Default", NativeDefaultTarget, client.Width, client.Height, new[] { finalScene }))
         {
             device.DrawNativeFullscreen(plain, new[]
             {
-                new NativeTexture(nativeBlit.Samplers[0], scene2D),
+                new NativeTexture(nativeBlit.Samplers[0], finalScene),
             });
         }
         device.EndNativePass();
         FinishNativeBlit(restoreBlend: false);
+    }
+
+    /// <summary>
+    /// Returns the post-composition TAA sharpen target for the plain blit, when the same guards
+    /// that ran <see cref="RenderOptimumTaaSharpen" /> prove that this frame produced it. FSR is
+    /// checked first: its EASU/RCAS branch owns the final sharpening and must consume Primary's
+    /// unsharpened composition.
+    /// </summary>
+    private int NativeFinalBlitSceneTexture(int fallback, bool fsrActive)
+    {
+        ShaderProgram sharpen = ShaderPrograms.TaaSharpen;
+        List<FrameBufferRef> buffers = FrameBuffers;
+        FrameBufferRef target = buffers != null && buffers.Count > OptimumTaaSharpenIndex
+            ? buffers[OptimumTaaSharpenIndex]
+            : null!;
+        bool targetAvailable = sharpen != null && !sharpen.LoadError && target != null &&
+            !target.Disposed && target.ColorTextureIds != null && target.ColorTextureIds.Length > 0;
+        int sharpened = targetAvailable ? target.ColorTextureIds[0] : fallback;
+        return OptimumApiBridge.SelectTaaPresentationTexture(
+            fallback, sharpened, fsrActive, TaaResolvedThisFrame, OptimumConfig.TaaSharpness,
+            targetAvailable);
     }
 }

@@ -57,14 +57,17 @@ ClientMain.MainRenderLoop (ClientMain.cs:1154)
     depth write off) so the water surface's motion and depth win where water is in front
 RenderPostprocessingEffects (jittered projection for SSAO, as today)
   SSAO (unchanged) -> ssao texture
-  [P2] taa-resolve: colour*1, glow, ssao, motion, depth, prev-depth, history -> MRT
+  [P2] taa-resolve: Primary input RGBA8, glow, ssao, motion, depth, prev-depth, history -> MRT
        history colour RGBA16F | aux RGBA8 (glow.rg, ssao.b) | linear depth R32F
        camera-motion fallback computed inside the resolve for pixels whose motion is invalid
-  [P5] optional RCAS (new uniform-driven variant) -> Luma; else Luma aliases the resolved colour
+  Luma aliases the resolved colour
   bloom (Findbright) reads resolved colour + resolved glow; god rays read resolved glow
 RenderFinalComposition: unchanged maths; primaryScene/glow/ssao inputs rebound to resolved textures
-BlitPrimaryToDefault: unchanged (FSR1 EASU/RCAS or blit; RCAS not doubled when TAA sharpen is on)
-AfterFinalComposition (work-item guides), Ortho HUD, AfterBlit (rifts): outside the temporal window,
+AfterFinalComposition (work-item guides): late overlays complete on Primary
+[P5] optional RCAS (new uniform-driven variant) reads the composited Primary input (RGBA8) and
+     writes RGBA16F into frame-buffer slot 21
+BlitPrimaryToDefault: unchanged (FSR1 EASU/RCAS or sharpened/plain blit; RCAS not doubled when TAA sharpen is on)
+Ortho HUD, AfterBlit (rifts): outside the temporal window,
   never jittered, never in history
 ```
 
@@ -610,12 +613,19 @@ been run** - no phase of P5 ran `make deploy` or the client, so by rule 3 P5 is 
 the default-on decision is not takeable yet. Everything below is what the code now does and
 what the tests prove about it, which is a different claim from "it looks right".
 
+Checkpoint (2026-09-20): sharpen relocation is staged on `feat/vulkan-taa`. Patch syntax and
+diff whitespace checks pass, but this checkpoint is not a completion claim: the donor/API tree
+is absent here, so focused tests cannot build, and the new regression coverage still needs its
+final review. The PR's sharpen checkbox remains open; this does not change the acceptance or
+default-on gates above.
+
 What P5 built:
 
 - **Sharpen**. `taa-sharpen.vsh/.fsh`, an RCAS variant with the lobe strength as a uniform
-  instead of the baked `exp2(-0.2)`, running on the resolved RGBA16F colour into its own
-  render-resolution target (frame buffer slot 21), placed immediately after the resolve so
-  bloom, god rays and the Luma copy Final reads all see the same image.
+  instead of the baked `exp2(-0.2)`, reading the final-composited Primary input (RGBA8) and
+  writing RGBA16F into its own render-resolution target (frame buffer slot 21). It is deliberately
+  after Final composition and its late overlays: bloom, god rays and the Luma copy Final reads all
+  consume the unsharpened resolved image, and only the final blit consumes the sharpened result.
   `TaaSharpness <= 0` is a true bypass - the shader returns the centre texel before the first
   ring tap, and the pass does not run at all - and the HDR upper clamp is dropped (RCAS's own
   lobe already passes anything above 1 through unsharpened). A target that fails to allocate

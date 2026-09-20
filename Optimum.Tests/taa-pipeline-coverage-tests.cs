@@ -155,7 +155,7 @@ public class TaaPipelineCoverageTests
     }
 
     [Fact]
-    public void RenderPostprocessingEffectsResolvesTaaBeforeBloomAndReadsTheResolvedTextures()
+    public void RenderPostprocessingEffectsResolvesTaaBeforeBloomAndSharpensOnlyAfterFinalComposition()
     {
         string platform = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
@@ -169,7 +169,9 @@ public class TaaPipelineCoverageTests
         Assert.True(resolveCall > postEffectsStart);
 
         // postSceneTexture/postGlowTexture are derived from the resolve result
-        // right after the call, before the bloom block reads them.
+        // right after the call, before the bloom block reads them. Sharpen is
+        // deliberately absent here: bloom and god rays must consume the
+        // unsharpened resolved scene.
         // Phase 3b: the choice moved into its own virtual, which the chain calls right after
         // the resolve and before the bloom step reads it.
         Assert.Contains(
@@ -184,6 +186,10 @@ public class TaaPipelineCoverageTests
             "int postGlowTexture = OptimumPostGlowTexture();", resolveCall, StringComparison.Ordinal);
         Assert.True(postSceneDecl > resolveCall);
         Assert.True(postGlowDecl > postSceneDecl);
+
+        int sharpenBeforeBloom = platform.IndexOf(
+            "postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);", resolveCall, StringComparison.Ordinal);
+        Assert.True(sharpenBeforeBloom < 0);
 
         int bloomStep = platform.IndexOf(
             "OptimumPostBloom(postSceneTexture, postGlowTexture);", postGlowDecl, StringComparison.Ordinal);
@@ -211,6 +217,16 @@ public class TaaPipelineCoverageTests
         // colour attachment, since FXAA and TAA are mutually exclusive).
         Assert.Contains("if (RenderFXAA && !TaaResolvedThisFrame)", platform);
         Assert.Contains("blit.Scene2D = postSceneTexture;", platform);
+
+        int finalComposition = platform.IndexOf("public override void RenderFinalComposition()", bloomStep,
+            StringComparison.Ordinal);
+        Assert.True(finalComposition > bloomStep);
+        string compositionBody = MethodBody(platform, "public override void RenderFinalComposition()");
+        Assert.DoesNotContain("RenderOptimumTaaSharpen", compositionBody);
+        string blitBody = MethodBody(platform, "public override void BlitPrimaryToDefault()");
+        Assert.Contains("scene2D = RenderOptimumTaaSharpen(scene2D);", blitBody);
+        Assert.True(blitBody.IndexOf("RenderOptimumTaaSharpen(scene2D);", StringComparison.Ordinal) <
+            blitBody.IndexOf("ShaderProgramBlit blit = ShaderPrograms.Blit;", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -469,5 +485,21 @@ public class TaaPipelineCoverageTests
         // Far point minus near point: the far point alone carries the eye offset
         // of CameraMatrixOrigin (see TaaSkyDecalMotionCoverageTests).
         Assert.Contains("prevViewProj * vec4(skyDirection, 0.0)", resolve);
+    }
+
+    private static string MethodBody(string source, string signature)
+    {
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, "method not found: " + signature);
+        int open = source.IndexOf('{', start + signature.Length);
+        Assert.True(open >= 0);
+        int depth = 0;
+        for (int i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source.Substring(start, i - start + 1);
+        }
+        Assert.Fail("unbalanced method: " + signature);
+        return string.Empty;
     }
 }

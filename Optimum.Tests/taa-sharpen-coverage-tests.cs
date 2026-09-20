@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using Vintagestory.API.Config;
 using Xunit;
 
@@ -132,23 +134,123 @@ public class TaaSharpenCoverageTests
     // --- the pass -----------------------------------------------------------
 
     [Fact]
-    public void SharpenRunsRightAfterTheResolveAndBeforeEveryConsumer()
+    public void SharpenRunsAfterLateOverlaysAndBeforeThePlainBlit()
     {
         string platform = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        int resolve = platform.IndexOf("\t\tRenderOptimumTaaResolve();", StringComparison.Ordinal);
-        int sharpen = platform.IndexOf("postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);", StringComparison.Ordinal);
+        int resolve = IndexOfCode(platform, "RenderOptimumTaaResolve();");
         Assert.True(resolve >= 0);
         int bloom = platform.IndexOf("if (RenderBloom)", resolve, StringComparison.Ordinal);
-        Assert.True(sharpen > resolve && bloom > sharpen);
-        // Reassigning postSceneTexture once is what gets the sharpened image to
-        // bloom (Findbright), god rays and the Luma copy the final composition
-        // reads, with no further call sites to keep in step.
+        Assert.True(bloom > resolve);
+        Assert.DoesNotContain("postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);", platform);
+        // Bloom and god rays consume the resolved scene. Final composition leaves its composited
+        // Primary output for AfterFinalComposition overlays; the blit boundary sharpens that
+        // complete image into slot 21. FSR uses Primary instead.
+        int finalComposition = platform.IndexOf("public override void RenderFinalComposition()", bloom,
+            StringComparison.Ordinal);
+        Assert.True(finalComposition > bloom);
+        string glBlit = MethodBody(platform, "public override void BlitPrimaryToDefault()");
+        Assert.DoesNotContain("RenderOptimumTaaSharpen(frameBuffers[0].ColorTextureIds[0]);",
+            MethodBody(platform, "public override void RenderFinalComposition()"));
+        Assert.Contains("scene2D = RenderOptimumTaaSharpen(scene2D);", glBlit);
+        Assert.True(glBlit.IndexOf("RenderOptimumTaaSharpen(scene2D);", StringComparison.Ordinal) <
+            glBlit.IndexOf("ShaderProgramBlit blit = ShaderPrograms.Blit;", StringComparison.Ordinal));
         Assert.Contains("findbright.ColorTex2D = postSceneTexture;", platform);
         Assert.Contains("godrays.InputTexture2D = postSceneTexture;", platform);
-        Assert.Contains("blit.Scene2D = postSceneTexture;", platform);
+    }
+
+    [Fact]
+    public void DistinguishableLateOverlayReachesPresentationOnGlAndNativeVulkan()
+    {
+        // The scheduler patch contains only its own hunk, not the complete Render method. Use the
+        // existing platform presentation seam instead: both routes begin from the current Primary
+        // image at BlitPrimaryToDefault, after the client's late-composition callback.
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string glBlit = MethodBody(platform, "public override void BlitPrimaryToDefault()");
+        Assert.Contains("scene2D = RenderOptimumTaaSharpen(scene2D);", glBlit);
+        Assert.Contains("blit.Scene2D = scene2D;", glBlit);
+        Assert.Contains("if (!useFsr)", glBlit);
+        Assert.Contains("bool useFsr = OptimumFsrBlitActive();", glBlit);
+        Assert.Contains("int primaryScene = scene2D;", glBlit);
+        Assert.Contains("OptimumApiBridge.SelectTaaPresentationTexture", glBlit);
+
+        string nativeBlit = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
+        string nativeFinal = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativePostFinal.cs");
+        string nativePresentation = MethodBody(nativeBlit, "private void RenderNativeBlit()");
+        Assert.DoesNotContain("PostStepTaaSharpen", nativeFinal);
+        Assert.Contains("scene2D = RenderOptimumTaaSharpen(scene2D);", nativePresentation);
+        Assert.Contains("int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);", nativePresentation);
+        Assert.Contains("new[] { finalScene }", nativePresentation);
+        Assert.Contains("OptimumApiBridge.SelectTaaPresentationTexture", nativeBlit);
+        // Slot 21 remains the sharpen output, while bypass and FSR retain Primary as input.
+        Assert.Contains("return target.ColorTextureIds[0];", platform);
+        Assert.Contains("SelectTaaPresentationTexture", nativeBlit);
+    }
+
+    [Fact]
+    public void LatePrimaryOverlaySurvivesPresentationDataflowOnBothRoutes()
+    {
+        // This drives the production presentation decision with distinct texture identities. A
+        // late overlay changes Primary, so a sharpen must be generated from that newer value;
+        // FSR and every bypass must keep it, and a stale slot 21 must not be selected.
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string gl = MethodBody(platform, "public override void BlitPrimaryToDefault()");
+        string nativeFile = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
+        string native = MethodBody(nativeFile, "private void RenderNativeBlit()");
+        string nativeSelector = MethodBody(nativeFile, "private int NativeFinalBlitSceneTexture(int fallback, bool fsrActive)");
+        string glSharpen = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
+
+        string presentationHelper = Read("optimum-api-contracts/optimum-api-bridge.cs");
+
+        // Tie the executable decision to both implementations' boundaries. If either route stops
+        // feeding the post-overlay Primary image into the decision, this test fails structurally.
+        AssertOrdered(gl, "bool useFsr = OptimumFsrBlitActive();", "if (!useFsr)",
+            "int primaryScene = scene2D;", "scene2D = RenderOptimumTaaSharpen(scene2D);",
+            "OptimumApiBridge.SelectTaaPresentationTexture", "blit.Scene2D = scene2D;");
+        AssertOrdered(native, "bool useFsr = OptimumFsrBlitActive();", "if (!useFsr)",
+            "scene2D = RenderOptimumTaaSharpen(scene2D);", "int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);");
+        Assert.Contains("OptimumApiBridge.SelectTaaPresentationTexture", nativeSelector);
+        Assert.Contains("SelectTaaPresentationTexture", presentationHelper);
+        Assert.Contains("frameBuffers[OptimumTaaSharpenIndex]", glSharpen);
+        Assert.Contains("buffers[OptimumTaaSharpenIndex]", nativeSelector);
+        Assert.Contains("fsrEasu.BindTexture2D(\"inputScene\", scene2D", gl);
+        Assert.Contains("new NativeTexture(nativeFsrEasu.Samplers[0], scene2D)", native);
+
+        const int preOverlayPrimary = 101;
+        const int postOverlayPrimary = 202;
+        const int staleSlot21 = 21;
+        const int sharpenedPostOverlayPrimary = 303;
+        Assert.NotEqual(preOverlayPrimary, postOverlayPrimary);
+        Assert.Equal(preOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                preOverlayPrimary, staleSlot21, fsrActive: false,
+                taaResolvedThisFrame: false, sharpness: 1f, sharpenTargetAvailable: true));
+        Assert.Equal(sharpenedPostOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                postOverlayPrimary, sharpenedPostOverlayPrimary, fsrActive: false,
+                taaResolvedThisFrame: true, sharpness: 1f, sharpenTargetAvailable: true));
+        Assert.Equal(postOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                postOverlayPrimary, sharpenedPostOverlayPrimary, fsrActive: true,
+                taaResolvedThisFrame: true, sharpness: 1f, sharpenTargetAvailable: true));
+        Assert.Equal(postOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                postOverlayPrimary, sharpenedPostOverlayPrimary, fsrActive: false,
+                taaResolvedThisFrame: false, sharpness: 1f, sharpenTargetAvailable: true));
+        Assert.Equal(postOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                postOverlayPrimary, sharpenedPostOverlayPrimary, fsrActive: false,
+                taaResolvedThisFrame: true, sharpness: 0f, sharpenTargetAvailable: true));
+        Assert.Equal(postOverlayPrimary,
+            OptimumApiBridge.SelectTaaPresentationTexture(
+                postOverlayPrimary, staleSlot21, fsrActive: false,
+                taaResolvedThisFrame: false, sharpness: 1f, sharpenTargetAvailable: true));
     }
 
     [Fact]
@@ -161,7 +263,8 @@ public class TaaSharpenCoverageTests
         string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
 
         Assert.Contains("if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)", body);
-        Assert.Contains("if (sharpen == null || sharpen.LoadError || target == null)", body);
+        Assert.Contains("if (sharpen == null || sharpen.LoadError || target == null || target.Disposed", body);
+        Assert.Contains("target.ColorTextureIds == null || target.ColorTextureIds.Length == 0", body);
         // The conditions stay in the pass; the draw is a seam of its own, so a platform that
         // owns the pass natively replaces the draw and inherits every condition above it
         // (docs/vulkan-native-render-systems.md, Phase 3b stage 1).
@@ -408,16 +511,69 @@ public class TaaSharpenCoverageTests
     // --- helpers ------------------------------------------------------------
 
     /// <summary>
-    /// The text from a method's signature to the start of the next member
-    /// declaration at the same indentation ("\n\t}" followed by a blank line).
+    /// The text from a method's signature through its matching closing brace. This deliberately
+    /// ignores indentation: donor sources and generated patches use both tabs and spaces.
     /// </summary>
     private static string MethodBody(string source, string signature)
     {
         int start = source.IndexOf(signature, StringComparison.Ordinal);
         Assert.True(start >= 0, "method not found: " + signature);
-        int end = source.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
-        Assert.True(end > start, "method end not found: " + signature);
-        return source.Substring(start, end - start);
+        int open = source.IndexOf('{', start + signature.Length);
+        Assert.True(open > start, "method block not found: " + signature);
+        int depth = 0;
+        bool lineComment = false;
+        bool blockComment = false;
+        bool quoted = false;
+        bool character = false;
+        bool escaped = false;
+        for (int i = open; i < source.Length; i++)
+        {
+            char current = source[i];
+            char next = i + 1 < source.Length ? source[i + 1] : '\0';
+            if (lineComment)
+            {
+                if (current == '\n') lineComment = false;
+                continue;
+            }
+            if (blockComment)
+            {
+                if (current == '*' && next == '/') { blockComment = false; i++; }
+                continue;
+            }
+            if (quoted)
+            {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') quoted = false;
+                continue;
+            }
+            if (character)
+            {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '\'') character = false;
+                continue;
+            }
+            if (current == '/' && next == '/') { lineComment = true; i++; continue; }
+            if (current == '/' && next == '*') { blockComment = true; i++; continue; }
+            if (current == '"') { quoted = true; continue; }
+            if (current == '\'') { character = true; continue; }
+            if (current == '{') depth++;
+            else if (current == '}' && --depth == 0) return source.Substring(start, i - start);
+        }
+        Assert.Fail("unbalanced method block: " + signature);
+        return string.Empty;
+    }
+
+    private static void AssertOrdered(string source, params string[] terms)
+    {
+        int previous = -1;
+        foreach (string term in terms)
+        {
+            int at = source.IndexOf(term, previous + 1, StringComparison.Ordinal);
+            Assert.True(at > previous, "missing or out-of-order term: " + term);
+            previous = at;
+        }
     }
 
     /// <summary>
@@ -467,6 +623,15 @@ public class TaaSharpenCoverageTests
             offset += value.Length;
         }
         return count;
+    }
+
+    private static int IndexOfCode(string source, string code)
+    {
+        string pattern = string.Join(@"\s*", code
+            .Where(character => !char.IsWhiteSpace(character))
+            .Select(character => Regex.Escape(character.ToString())));
+        Match match = Regex.Match(source, pattern, RegexOptions.CultureInvariant);
+        return match.Success ? match.Index : -1;
     }
 
     private static string ReadPatchedOrSource(string patchPath, string sourcePath)
