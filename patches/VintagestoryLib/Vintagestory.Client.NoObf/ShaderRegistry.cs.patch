@@ -280,7 +280,7 @@ index d3edef9..f57d2d6 100644
 +		OptimumEntityMotion.Enabled = taaMotion;
 +		int taaMotionLocation = ((ClientSettings.SSAOQuality > 0) ? 4 : 2);
 +		string taaDefines = "#define TAAMOTION " + (taaMotion ? 1 : 0) + "\r\n#define TAAMOTIONLOCATION " + taaMotionLocation + "\r\n";
-+		// Optimum AO (docs/research/ambient-occlusion.md): the class channel writes (the hand view,
++		// Optimum AO (docs/vulkan.md#ambient-occlusion): the class channel writes (the hand view,
 +		// the no-cull plants) and scene-ssao's GTAO compose branch compile in only while the Vulkan
 +		// platform runs GTAO, so OpenGL and every other configuration preprocess exactly as before.
 +		// SSAOQuality > 0 is the G-buffer's own condition, the one SSAOLEVEL is stamped from. The

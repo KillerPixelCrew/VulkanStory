@@ -64,7 +64,7 @@ public static class OptimumParityDump
 
     /// <summary>
     /// True when <c>OPTIMUM_AO_OUTPUTS</c> opts in to the ambient occlusion debug outputs
-    /// (docs/research/ambient-occlusion.md C.13, section D): the pre-denoise working term, the
+    /// (docs/vulkan.md#ambient-occlusion C.13, section D): the pre-denoise working term, the
     /// packed edges, working-depth level 0 and the denoised output are written by this dump
     /// (slots 40-43) and beside every frame the headless harness captures. Compute-only
     /// textures, so no framebuffer slot holds them and the dump asks the platform for them.

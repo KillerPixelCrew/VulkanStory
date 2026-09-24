@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunktopsoil.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunktopsoil.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: USESSBO (attribute layout and FaceData), GBUFFER (fragPosition, gnormal), TAAMOTION (taaPrevClip).
 //
 // Optimum override of the vanilla chunktopsoil.vsh: adds the TAA motion-vector
@@ -17,7 +17,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunktopsoil.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunktopsoil.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GBUFFER (G-buffer outputs; the motion output moves from 2 to 4 with it), TAAMOTION (motion output,
 // written through include/motion.glsl). SHADOWQUALITY, NORMALVIEW and SHINYEFFECT are
 // specialization-constant branches.
@@ -36,7 +36,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunktopsoil (docs/vulkan-native-shaders.md section 4). One draw per mesh pool: the
+// Program interface of chunktopsoil (docs/vulkan.md section 4). One draw per mesh pool: the
 // push block holds the two sampler slots in chunktopsoil.fsh's declaration order, then origin and
 // modelViewMatrix (84 B). The record holds every other uniform, chunktopsoil.vsh's first (the previous-frame
 // warp state vertexwarp.glsl reads comes with its include), then chunktopsoil.fsh's and underwatereffects'

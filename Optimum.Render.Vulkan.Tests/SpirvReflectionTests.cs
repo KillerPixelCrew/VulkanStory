@@ -7,7 +7,7 @@ using Xunit;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The SPIR-V reader the native shader manifest is built from (docs/vulkan-native-shaders.md
+/// The SPIR-V reader the native shader manifest is built from (docs/vulkan.md
 /// section 6). Each fixture is compiled by the runtime's own shaderc, then every reflected field is
 /// compared with what the GLSL says, so a wrong offset, type or binding shows up here rather than as
 /// a uniform written into the wrong bytes in game.

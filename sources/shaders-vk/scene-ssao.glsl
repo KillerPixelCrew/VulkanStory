@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of scene-ssao.vsh (docs/vulkan-native-shaders.md).
+// Native port of scene-ssao.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of scene-ssao.fsh (docs/vulkan-native-shaders.md). The SSAOLEVEL > 1 and OPTIMUMAO > 0 preprocessor
+// Native port of scene-ssao.fsh (docs/vulkan.md). The SSAOLEVEL > 1 and OPTIMUMAO > 0 preprocessor
 // branches are specialization-constant branches with the same expressions; they gate no output, so no variant
 // axes. OPTIMUMAO_MULTIBOUNCE is never stamped by ShaderRegistry: it is a native constant fixed to 0 here, so the
 // multibounce code compiles out while aoAlbedo stays declared as the oracle sees it (section 5).
@@ -20,7 +20,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of scene-ssao (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of scene-ssao (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots (GLSL 330 declaration order) and every other uniform is
 // a record member.
 layout(push_constant, scalar) uniform OptimumDraw

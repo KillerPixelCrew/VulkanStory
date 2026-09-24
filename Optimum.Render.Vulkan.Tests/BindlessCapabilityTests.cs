@@ -80,7 +80,7 @@ public class BindlessCapabilityTests
 
     /// <summary>
     /// The per-stage update-after-bind sampled-image limits recorded for every target
-    /// family in docs/research/vulkan-bindless.md (NVIDIA, AMD Windows, Intel Windows,
+    /// family in docs/vulkan.md#bindless-descriptors (NVIDIA, AMD Windows, Intel Windows,
     /// RADV, ANV 12.5+, ANV pre-12.5, llvmpipe, SwiftShader): the floor excludes none.
     /// </summary>
     [Theory]

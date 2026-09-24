@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of fsr-easu.vsh (docs/vulkan-native-shaders.md).
+// Native port of fsr-easu.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of fsr-easu.fsh (docs/vulkan-native-shaders.md).
+// Native port of fsr-easu.fsh (docs/vulkan.md).
 // AMD FidelityFX Super Resolution 1 EASU, adapted for the Vintage Story final blit.
 // FidelityFX FSR 1 source carries the MIT license, AMD 2021.
 #include "bindings.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of fsr-easu (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of fsr-easu (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slot and every other uniform is a record member.
 layout(push_constant, scalar) uniform OptimumDraw
 {

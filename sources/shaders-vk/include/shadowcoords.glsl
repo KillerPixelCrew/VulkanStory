@@ -1,4 +1,4 @@
-// Native port of the game include shadowcoords.vsh (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include shadowcoords.vsh (docs/vulkan.md section 1).
 // optimum-port-of: shadowcoords.vsh
 // optimum-port: transformed
 // optimum-frame-owner: shadowcoords.vsh

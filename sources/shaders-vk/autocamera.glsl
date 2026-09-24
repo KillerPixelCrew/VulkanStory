@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of autocamera.vsh (docs/vulkan-native-shaders.md).
+// Native port of autocamera.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of autocamera.fsh (docs/vulkan-native-shaders.md).
+// Native port of autocamera.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of autocamera (docs/vulkan-native-shaders.md section 4). No samplers and no scalars: the two
+// Program interface of autocamera (docs/vulkan.md section 4). No samplers and no scalars: the two
 // matrices are the whole record, and there is no push block. The includes' uniforms are frame members
 // (autocamera includes shadowcoords.vsh and fogandlight.vsh, their owners).
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram

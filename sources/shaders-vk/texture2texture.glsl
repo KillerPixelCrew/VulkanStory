@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of texture2texture.vsh (docs/vulkan-native-shaders.md).
+// Native port of texture2texture.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of texture2texture.fsh (docs/vulkan-native-shaders.md).
+// Native port of texture2texture.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of texture2texture (docs/vulkan-native-shaders.md section 4). One draw per Use(), so the push
+// Program interface of texture2texture (docs/vulkan.md section 4). One draw per Use(), so the push
 // block holds only the sampler slot and every other uniform is a record member: texture2texture.vsh's, then
 // texture2texture.fsh's, each in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

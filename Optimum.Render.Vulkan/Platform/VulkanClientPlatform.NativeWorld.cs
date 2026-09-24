@@ -9,7 +9,7 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), Phase 3b decision 5
+// Vulkan-native render systems (docs/vulkan.md), Phase 3b decision 5
 // stage 2: the sky systems that are not the dome, the particle pools and the decal pool, all
 // on the native device API the sky dome proved.
 //

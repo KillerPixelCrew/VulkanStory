@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of instanced.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of instanced.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: TAAMOTION (the previous-transform instance attributes and varyings) and GBUFFER (SSAOLEVEL > 0).
 // The per-instance attributes keep their GLSL 330 locations 4-13.
 #include "bindings.glsl"
@@ -12,7 +12,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of instanced.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of instanced.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GBUFFER (SSAOLEVEL > 0) and TAAMOTION. NORMALVIEW gates no declaration and is a
 // specialization-constant branch.
 //
@@ -28,7 +28,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of instanced (docs/vulkan-native-shaders.md section 4). Every per-object value travels as
+// Program interface of instanced (docs/vulkan.md section 4). Every per-object value travels as
 // an instance attribute (locations 4-13), and the uniforms are set once per Use(), so the push block holds only
 // the sampler slot and every uniform is a record member: instanced.vsh's, then instanced.fsh's, then
 // fogandlight.frag.glsl's windWaveCounter (no vertexwarp owner in this program), each in declaration order.

@@ -20,7 +20,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// The two GUI and text systems that draw through the native device API, each drawn twice on
 /// one Vulkan device: through the seam's neutral body (the OpenGL body's RenderMesh, the route
 /// every system that has not moved still takes) and through the native pass
-/// VulkanClientPlatform records (docs/vulkan-native-render-systems.md, decision 5 stage 2).
+/// VulkanClientPlatform records (docs/vulkan.md, decision 5 stage 2).
 ///
 /// - the texture-into-texture blit, which bakes every Cairo-drawn GUI and text surface into a
 ///   texture (ClientMain.RenderTextureIntoFrameBuffer, the texture2texture program);

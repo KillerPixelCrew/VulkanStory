@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquidmotion.vsh (docs/vulkan-native-shaders.md). Variant axis: TAAMOTION (the
+// Native port of chunkliquidmotion.vsh (docs/vulkan.md). Variant axis: TAAMOTION (the
 // taaPrevClip varying and the previous-position replay).
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -10,7 +10,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquidmotion.fsh (docs/vulkan-native-shaders.md).
+// Native port of chunkliquidmotion.fsh (docs/vulkan.md).
 //
 // Variant axes: TAAMOTION (the output set and the taaPrevClip varying) and GBUFFER (TAAMOTIONLOCATION: 4 with
 // the G-buffer, else 2). The TAA-off variant keeps the GLSL 330 dummy output: one vec4 at location 0 holding
@@ -54,7 +54,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquidmotion (docs/vulkan-native-shaders.md section 4). A chunk-family program: one
+// Program interface of chunkliquidmotion (docs/vulkan.md section 4). A chunk-family program: one
 // draw per mesh pool per Use(), so the DRAW uniforms origin and modelViewMatrix sit in the push block (76 B, no
 // samplers). The record holds the rest: chunkliquidmotion.vsh's uniforms in declaration order, then the
 // vertexwarp.glsl optimum-program-uniform names (vertexwarp.vsh owns only the current-frame members; the prev*

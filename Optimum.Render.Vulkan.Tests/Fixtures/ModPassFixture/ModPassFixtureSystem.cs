@@ -6,7 +6,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 
 /// <summary>
-/// A fixture mod that follows docs/vulkan-mod-support.md step by step: one declared pass and one
+/// A fixture mod that follows docs/vulkan.md step by step: one declared pass and one
 /// motion writer, registered in StartClientSide through the client-API extensions and removed in
 /// Dispose. The pass tints Primary's colour from its glow after the AfterOIT renderers and writes
 /// motion for its draw, so it reads one attachment of its own target (which therefore leaves the

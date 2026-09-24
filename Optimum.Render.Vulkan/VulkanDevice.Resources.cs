@@ -599,7 +599,7 @@ internal enum NativeDrawKind : byte
 }
 
 /// <summary>
-/// Mesh draws on the native device API (docs/vulkan-native-render-systems.md, decision 4:
+/// Mesh draws on the native device API (docs/vulkan.md, decision 4:
 /// "fullscreen triangle, mesh, multi-draw or instanced").
 ///
 /// Stage 1 recorded fullscreen draws only. World systems are mesh draws, so these four entry

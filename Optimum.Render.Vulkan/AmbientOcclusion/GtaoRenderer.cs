@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 namespace Optimum.Render.Vulkan.AmbientOcclusion;
 
 /// <summary>
-/// The AO pipeline on the device (docs/research/ambient-occlusion.md section C): prefilter
+/// The AO pipeline on the device (docs/vulkan.md#ambient-occlusion section C): prefilter
 /// (Primary depth to five R32F levels), main (visibility term and packed edges) and the
 /// edge-aware denoise, as frame-graph compute passes. Owns its targets, sized to the depth
 /// it is given, and its programs, compiled for the storage formats the device chose.
@@ -244,7 +244,7 @@ internal sealed class GtaoRenderer : IDisposable
 
 /// <summary>
 /// The reconstruction constants of the AO passes from a GL projection
-/// (docs/research/xegtao-integration.md, integration plan step 1): view depth from the
+/// (docs/vulkan.md#ambient-occlusion, integration plan step 1): view depth from the
 /// [0, 1] depth buffer and view XY from the texel's UV, in the working frame x right,
 /// y up, z forward (GL view space mirrored in z). The texel rows run bottom-up (GL order;
 /// the device never flips), so unlike XeGTAO's D3D constants the Y terms keep their sign.
@@ -344,7 +344,7 @@ internal static class GtaoShaderSources
 }
 
 /// <summary>
-/// The 64x64 Hilbert index table the AO noise starts from (docs/research/ambient-occlusion.md
+/// The 64x64 Hilbert index table the AO noise starts from (docs/vulkan.md#ambient-occlusion
 /// C.7): generated at startup, never shipped. Neighbouring texels get neighbouring indices,
 /// so the R2 sequence the index drives is low-discrepancy across the 3x3 denoise
 /// footprint. XeGTAO's <c>HilbertIndex</c> (vaGTAO.hlsl, MIT, Intel), level 6.

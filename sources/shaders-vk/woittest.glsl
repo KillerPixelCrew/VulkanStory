@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of woittest.vsh (docs/vulkan-native-shaders.md).
+// Native port of woittest.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of woittest.fsh (docs/vulkan-native-shaders.md).
+// Native port of woittest.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of woittest (docs/vulkan-native-shaders.md section 4). No samplers, so no push block;
+// Program interface of woittest (docs/vulkan.md section 4). No samplers, so no push block;
 // woittest.vsh's two matrices are the record.
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
 {

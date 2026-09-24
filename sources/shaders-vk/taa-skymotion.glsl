@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of taa-skymotion.vsh (docs/vulkan-native-shaders.md).
+// Native port of taa-skymotion.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of taa-skymotion.fsh (docs/vulkan-native-shaders.md).
+// Native port of taa-skymotion.fsh (docs/vulkan.md).
 //
 // Variant axes: TAAMOTION (the output set) and GBUFFER (TAAMOTIONLOCATION: 4 with the G-buffer, else 2).
 // The TAA-off variant keeps the GLSL 330 dummy output: one vec4 at location 0 holding zero. The motion
@@ -70,12 +70,12 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of taa-skymotion (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw
+// Program interface of taa-skymotion (docs/vulkan.md section 4). A fullscreen pass: one draw
 // per Use(), so the push block holds only the sampler slot and every other uniform is a record member.
 //
 // The GLSL 330 source declares all of these inside #if TAAMOTION > 0; the oracle reads the unpreprocessed
 // text, so they are names of every variant and are declared unconditionally here. taaCloudReactive's GLSL 330
-// initializer (1.0) is seeded by the runtime (docs/vulkan-native-shaders.md section 8).
+// initializer (1.0) is seeded by the runtime (docs/vulkan.md section 8).
 layout(push_constant, scalar) uniform OptimumDraw
 {
     OPTIMUM_SAMPLER_SLOT(sampler2D, transparentRevealTex);

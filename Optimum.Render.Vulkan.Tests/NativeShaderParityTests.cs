@@ -13,7 +13,7 @@ namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
 /// Static parity between every native program in <c>sources/shaders-vk</c> and the GLSL 330 program it
-/// replaces (docs/vulkan-native-shaders.md section 2). Data-driven over the tree: a family stage adds
+/// replaces (docs/vulkan.md section 2). Data-driven over the tree: a family stage adds
 /// shaders, never test code.
 ///
 /// The native side is the manifest the offline compiler's library entry point

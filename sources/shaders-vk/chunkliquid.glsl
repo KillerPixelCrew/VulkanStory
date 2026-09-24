@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquid.vsh (vanilla, docs/vulkan-native-shaders.md). No variant axes in this stage.
+// Native port of chunkliquid.vsh (vanilla, docs/vulkan.md). No variant axes in this stage.
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquid.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunkliquid.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axis: USEOIT, through include/oit.glsl, which declares the six OIT outputs and OIT() only when it is 1.
 // The client registers chunkliquid with Oit = true (ShaderProgramBase's default), so USEOIT=0 is never
 // linked; the GLSL 330 program has no outputs and no OIT() there either, so the 0 variant skips the call and
@@ -27,7 +27,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquid (docs/vulkan-native-shaders.md section 4). One draw per mesh pool: the
+// Program interface of chunkliquid (docs/vulkan.md section 4). One draw per mesh pool: the
 // push block holds the two sampler slots in chunkliquid.fsh's declaration order, then origin and
 // modelViewMatrix (84 B). The record holds every other uniform, chunkliquid.vsh's first (the previous-frame
 // warp state vertexwarp.glsl reads comes with its include), then chunkliquid.fsh's and underwatereffects'

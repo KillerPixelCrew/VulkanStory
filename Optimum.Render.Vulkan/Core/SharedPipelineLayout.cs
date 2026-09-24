@@ -131,7 +131,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
 
     /// <summary>
     /// Set 2: the storage buffers, the program record (a dynamic uniform buffer,
-    /// docs/vulkan-native-shaders.md section 3) and the named-block range, where a
+    /// docs/vulkan.md section 3) and the named-block range, where a
     /// rewritten program's other named blocks sit as std140 storage buffers. Set 2 is
     /// a normal set, so the dynamic buffer is legal beside the update-after-bind set 1;
     /// the device floor counts it (<see cref="DescriptorIndexingFloor.RequiredDynamicUniformBuffers" />).

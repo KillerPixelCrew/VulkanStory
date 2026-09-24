@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Still-frame luminance diff, the acceptance measurement for "does it still jitter"
-(docs/taa-acceptance.md, still-frame luminance diff).
+(docs/vulkan.md, still-frame luminance diff).
 
 Two screenshots of a STILL camera one second apart, mean absolute luminance
 difference over the centre 60% crop. Repeat for ~7 pairs per backend and compare

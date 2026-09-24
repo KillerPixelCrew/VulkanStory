@@ -27,7 +27,7 @@ namespace Optimum.Render.Vulkan.Shaders;
 /// Anything that fails the check is a miss, never an error: a truncated file from an
 /// interrupted write, a zero-filled block, a file another tool dropped in the
 /// directory. The miss recompiles and overwrites it. Design and sources:
-/// docs/research/vulkan-caching.md §5 and "Design for this renderer" item 1.
+/// docs/vulkan.md#caches §5 and "Design for this renderer" item 1.
 /// </summary>
 internal sealed class ShaderBinaryCache
 {

@@ -13,7 +13,7 @@ using Xunit.Abstractions;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The GTAO visibility-bitmask pass (docs/research/ambient-occlusion.md section C) on a device,
+/// The GTAO visibility-bitmask pass (docs/vulkan.md#ambient-occlusion section C) on a device,
 /// validation with sync and best practices on, against synthetic G-buffers drawn analytically:
 /// a camera with a 90-degree square frustum looking down -z over a floor at y = -1, an optional
 /// back wall, a one-texel slab and a hand-view rectangle. Depth goes through the real D32

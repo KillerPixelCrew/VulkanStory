@@ -23,7 +23,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// bilateral blur ping-pong and the AO composite that multiplies the visibility into Primary
 /// colour 0 before the TAA resolve reads it.
 ///
-/// Acceptance is behavioural identity (docs/vulkan-native-render-systems.md, decision 6): every
+/// Acceptance is behavioural identity (docs/vulkan.md, decision 6): every
 /// test here runs the same inputs through the OpenGL body - the lib virtual the chain switch falls
 /// back to - and through the native route, and compares the pixels of all three written targets.
 /// The settings that change this step are covered: SSAO quality 1 and 2 (one blur iteration or

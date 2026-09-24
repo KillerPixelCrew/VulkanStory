@@ -198,7 +198,7 @@ internal static class FrameGlobals
 
     // ------------------------------------------------------------ native include
 
-    /// <summary>The generated native include (docs/vulkan-native-shaders.md sections 1 and 3).</summary>
+    /// <summary>The generated native include (docs/vulkan.md sections 1 and 3).</summary>
     public const string IncludePath = "sources/shaders-vk/include/frame.glsl";
 
     /// <summary>The block's instance name in native shaders.</summary>
@@ -242,7 +242,7 @@ internal static class FrameGlobals
             // Generated from Optimum.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
             // Do not edit: FrameGlobalsTests regenerates this file and fails on any difference.
             //
-            // The FrameGlobals block (docs/vulkan-native-shaders.md section 3): set 0, binding 0, scalar
+            // The FrameGlobals block (docs/vulkan.md section 3): set 0, binding 0, scalar
             // layout, bound with a dynamic offset. Members sit at the offsets the renderer writes.
             //
             // No member is a global name here. A member is the shared frame value only in a program that

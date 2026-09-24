@@ -33,7 +33,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     /// Serialises every host access to <see cref="_driverCache" />: creations against it,
     /// merges into it and reads of its data. Merges require it (the destination is externally
     /// synchronised), and serialising the reads and merges is the workaround for the AMD
-    /// reports of parallel creation corrupting cache data (docs/research/vulkan-caching.md §1,
+    /// reports of parallel creation corrupting cache data (docs/vulkan.md#caches §1,
     /// "Design for this renderer" item 4). The background compiles themselves run against a
     /// cache of their own, outside this lock.
     /// </summary>
@@ -152,7 +152,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
         // A rejected blob is not an error: the driver starts cold instead. Some
         // drivers return an error rather than an empty cache for data they do not
-        // accept, so that case retries without it (docs/research/vulkan-caching.md §1).
+        // accept, so that case retries without it (docs/vulkan.md#caches §1).
         if (initialData is { Length: > 0 } && TryCreateDriverCache(context, initialData, out _driverCache))
         {
             SeedAccepted = true;
@@ -225,7 +225,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     /// The pipeline for <paramref name="key" /> if it can be had without compiling on this
     /// thread; otherwise false, with the compile queued on the background worker, and the
     /// caller skips its draw (Unreal's default for a PSO that is not ready,
-    /// docs/research/vulkan-caching.md §2). A key already compiling is not queued again.
+    /// docs/vulkan.md#caches §2). A key already compiling is not queued again.
     /// Finished compiles become visible at <see cref="PublishCompleted" />.
     ///
     /// With <see cref="AsyncCompiles" /> off this never returns false.
@@ -836,7 +836,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         Vk api = _context.Api;
         byte* entryPoint = (byte*)SilkMarshal.StringToPtr("main");
 
-        // A native program's settings are specialization constants (docs/vulkan-native-shaders.md
+        // A native program's settings are specialization constants (docs/vulkan.md
         // section 5); every stage gets the same map, and an id a module does not declare is ignored.
         NativeSpecialization? specialization = request.Program.Specialization;
         SpecializationInfo* specializationInfo = null;

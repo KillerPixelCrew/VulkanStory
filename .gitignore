@@ -71,22 +71,22 @@ __pycache__/
 docs/*
 # ...except the TAA acceptance checklist: it is a deliverable the P5 coverage test
 # (Optimum.Tests/Temporal/AcceptanceTests.cs) reads, so it has to be tracked.
-!docs/taa-acceptance.md
+!docs/vulkan.md
 # ...and the frozen temporal frame contract, for the same reason: the P6 stability
 # test (Optimum.Tests/Temporal/ContractTests.cs) reads it.
-!docs/temporal-frame-contract.md
+!docs/vulkan.md
 # ...and the Vulkan acceptance checklist and the parity allowlist: ssim.py reads the
 # allowlist, and Optimum.Tests/parity-dump-coverage-tests.cs reads both.
-!docs/vulkan-acceptance.md
-!docs/parity-allowlist.md
+!docs/vulkan.md
+!docs/vulkan.md
 # ...and the research notes the plan and its designs cite.
 !docs/research/
 # ...and the native shader interface contract every program family is written against.
-!docs/vulkan-native-shaders.md
+!docs/vulkan.md
 # ...and the native render systems design (Phase 3b) the system stages follow.
-!docs/vulkan-native-render-systems.md
+!docs/vulkan.md
 # ...and the modder documentation for Vulkan-native mod support (passes, motion writers, shaders).
-!docs/vulkan-mod-support.md
+!docs/vulkan.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1

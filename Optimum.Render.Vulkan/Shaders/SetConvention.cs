@@ -14,7 +14,7 @@ namespace Optimum.Render.Vulkan.Shaders;
 /// | 2 storage | per draw | FaceData, the animation buffers, the program record and named blocks |
 /// | push | per draw | texture slot indices and per-draw scalars, at most <see cref="PushConstantBytes" /> |
 ///
-/// Array sizes are docs/research/vulkan-bindless.md's starting sizes; the device
+/// Array sizes are docs/vulkan.md#bindless-descriptors's starting sizes; the device
 /// floor (<see cref="Core.DescriptorIndexingFloor" />) is their sum.
 /// </summary>
 internal static class SetConvention
@@ -79,7 +79,7 @@ internal static class SetConvention
 
     /// <summary>
     /// Set 2's program record: every non-frame uniform that is not in the push block
-    /// (docs/vulkan-native-shaders.md section 4), a dynamic uniform buffer whose offset
+    /// (docs/vulkan.md section 4), a dynamic uniform buffer whose offset
     /// moves when the record changed. Kept out of <see cref="StorageBuffers" /> because it
     /// is a uniform buffer, not a storage buffer.
     /// </summary>
@@ -115,7 +115,7 @@ internal static class SetConvention
 }
 
 /// <summary>
-/// The specialization constants of the native shaders (docs/vulkan-native-shaders.md section 5).
+/// The specialization constants of the native shaders (docs/vulkan.md section 5).
 /// Mirrors <c>sources/shaders-vk/include/specialization.glsl</c>, the source of truth for native
 /// shaders; SpecializationConventionTests keeps the two in agreement and checks every constant
 /// against the <c>#define</c> <c>ShaderRegistry.registerDefaultShaderCodePrefixes</c> stamps.
@@ -156,7 +156,7 @@ internal static class SpecializationConvention
         // value still selects fogandlight.vsh's no-point-light path, which also skips the night
         // vision, MINBRIGHT and contrast terms. Keeping that path needs the value.
         new(11, "OPTIMUM_DYNLIGHTS", "int", "0", "DYNLIGHTS"),
-        // Optimum AO (docs/research/ambient-occlusion.md C.5, C.11): gates the class-channel writes and
+        // Optimum AO (docs/vulkan.md#ambient-occlusion C.5, C.11): gates the class-channel writes and
         // scene-ssao's GTAO compose branch, never an output or a varying.
         new(12, "OPTIMUM_OPTIMUMAO", "int", "0", "OPTIMUMAO"),
     };

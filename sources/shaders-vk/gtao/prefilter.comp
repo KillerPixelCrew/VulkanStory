@@ -1,5 +1,5 @@
 #version 450
-// Optimum ambient occlusion, pass 1 of 3: the working depth (docs/research/ambient-occlusion.md C.1).
+// Optimum ambient occlusion, pass 1 of 3: the working depth (docs/vulkan.md#ambient-occlusion C.1).
 //
 // Linearises the D32 depth of Primary into view-space depth (R32F; an fp16 position
 // has 0.125-0.5 block steps at 200-500 blocks, fp32 does not) and builds five levels

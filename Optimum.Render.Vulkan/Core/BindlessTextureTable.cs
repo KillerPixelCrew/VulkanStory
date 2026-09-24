@@ -26,7 +26,7 @@ namespace Optimum.Render.Vulkan.Core;
 /// writes placeholders back into slots whose retirement completed) and before
 /// every submission of the frame, so a slot first resolved while recording is
 /// written before the command buffer naming it is submitted. Update-after-bind
-/// makes both legal while the set is bound (docs/research/vulkan-bindless.md,
+/// makes both legal while the set is bound (docs/vulkan.md#bindless-descriptors,
 /// sections 2 and 3). Render thread, except <see cref="Release" />.
 /// </summary>
 internal sealed unsafe class BindlessTextureTable : IDisposable
@@ -471,7 +471,7 @@ internal readonly record struct TextureShape(Format Format, uint Layers, bool Cu
 /// The validation layers check none of them for a partially bound array: a view
 /// type that does not match the declaration, a Dref sample through a sampler with
 /// compareEnable off (or the reverse), or an integer format behind a float sampler
-/// all give undefined or poison texels with no message (docs/research/vulkan-bindless.md,
+/// all give undefined or poison texels with no message (docs/vulkan.md#bindless-descriptors,
 /// section 1, "Hard rules"). They are enforced here, when a slot is created.
 /// </summary>
 internal static class BindlessKinds

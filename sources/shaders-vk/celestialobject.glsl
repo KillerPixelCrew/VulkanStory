@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of celestialobject.vsh (docs/vulkan-native-shaders.md). Axis: GBUFFER (fragPosition and
+// Native port of celestialobject.vsh (docs/vulkan.md). Axis: GBUFFER (fragPosition and
 // gnormal, which GLSL 330 declares under SSAOLEVEL and never writes).
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -10,7 +10,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of celestialobject.fsh (docs/vulkan-native-shaders.md). Axis: GBUFFER (the G-buffer outputs).
+// Native port of celestialobject.fsh (docs/vulkan.md). Axis: GBUFFER (the G-buffer outputs).
 // The vertex stage includes fogandlight.vsh (contract section 3, cross-stage owners).
 #define OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH
 #include "bindings.glsl"
@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of celestialobject (docs/vulkan-native-shaders.md section 4). SystemRenderSunMoon draws
+// Program interface of celestialobject (docs/vulkan.md section 4). SystemRenderSunMoon draws
 // once per Use(), so the push block holds only the sampler slot; every other uniform is a record member:
 // celestialobject.vsh's, celestialobject.fsh's, then fogandlight.fsh's windWaveCounter (its owner
 // vertexwarp.vsh is not included) and underwatereffects.fsh's frameSize.

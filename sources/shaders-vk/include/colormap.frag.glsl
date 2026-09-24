@@ -1,4 +1,4 @@
-// Native port of the game include colormap.fsh (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include colormap.fsh (docs/vulkan.md section 1).
 // optimum-port-of: colormap.fsh
 // optimum-port: verbatim
 //

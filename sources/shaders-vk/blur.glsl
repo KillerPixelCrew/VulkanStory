@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of blur.vsh (docs/vulkan-native-shaders.md).
+// Native port of blur.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of blur.fsh (docs/vulkan-native-shaders.md).
+// Native port of blur.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,12 +17,12 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of blur (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of blur (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slot and blur.vsh's two uniforms are the record.
 //
 // blur.fsh also declares an input named frameSize that no vertex stage writes and nothing reads. The
 // record's frameSize is a global name in both stages, so that input would redeclare it: the fragment stage
-// drops it (docs/vulkan-native-shaders.md, "Family post"). texCoords[21] spans locations 0-20; the program
+// drops it (docs/vulkan.md, "Family post"). texCoords[21] spans locations 0-20; the program
 // includes none of the includes varyings.glsl places at 16 and above.
 layout(push_constant, scalar) uniform OptimumDraw
 {

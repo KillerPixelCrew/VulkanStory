@@ -410,7 +410,7 @@ consumers.** `taa-skymotion` reprojects the view direction, not the cloud: a clo
 a still camera has mv 0 and is carried entirely by the reactive value. That is correct for the
 resolve (`taaCloudReactive` discards the history there) but it is wrong data for the later
 consumers the plan is built for - FSR/XeSS reactive+mv, and frame generation especially. Contract
-term, recorded in `docs/temporal-frame-contract.md` section 6.1: **downstream consumers must reject
+term, recorded in `docs/vulkan.md` section 6.1: **downstream consumers must reject
 cloud pixels through the reactive mask (`motion.b`) and must not treat their `rg` as motion.** A
 real cloud vector needs `cloudOffset`'s previous value and the ray-marched hit position, i.e. a
 motion output from `cloudvolumetric.fsh` itself, which cannot reach Primary's attachment without a
@@ -435,7 +435,7 @@ type cache threw a `NullReferenceException` on the first entity frame and was fi
 on Vulkan and OpenGL (2830577), and the P5 run (7b0168d, deployed c9758ce+5b952da) in which both
 backends start, log their renderer, load the temporal stages and produce clean frames with no
 exceptions and no Vulkan synchronization/best-practices hazards. That is a smoke pass over the
-pipeline, not the acceptance matrix: the 18 rows of `docs/taa-acceptance.md` have not been run.
+pipeline, not the acceptance matrix: the 18 rows of `docs/vulkan.md` have not been run.
 Every standard-shader user in the mod forks now either writes motion or is on an explicit
 exemption list with a reason, enumerated by scan in
 `Optimum.Tests/taa-mover-motion-coverage-tests.cs` rather than listed by hand.
@@ -482,7 +482,7 @@ all eight movers now live under `patches/runtime/VSSurvivalMod/Vintagestory/Game
 P4 status, whole phase, after the adversarial review (2026-09-10): landed on `feat/taa`
 (8f64e11 liquid, 13d9eb3 particles, 957f4e0 sky/clouds/decals/late overlays, 8d09ef1 movers,
 b1c293f review fixes). **P4 itself ran neither `make deploy` nor the client**, so by rule 3 none
-of its per-class visual claims is done; the 18-row acceptance matrix in `docs/taa-acceptance.md`
+of its per-class visual claims is done; the 18-row acceptance matrix in `docs/vulkan.md`
 is still unrun. Verified in game since, on later builds carrying this code: the entity
 motion-writer gate on both backends (2830577) and the P5 smoke run (7b0168d, deployed
 c9758ce+5b952da) - both backends start, log their renderer, render the temporal stages without
@@ -659,7 +659,7 @@ What P5 built:
   instrumented fork patch is mapped") and `ModPatcherManifestConsistencyTests.
   EveryTransplantedMethodHasARuntimeDonor` (every `Methods` entry's declaring type has a donor
   or an Optimum-authored overlay, with the two FluffyClouds gaps listed explicitly).
-- **Harness**. `docs/taa-acceptance.md` is the runnable matrix (18 rows plus performance and
+- **Harness**. `docs/vulkan.md` is the runnable matrix (18 rows plus performance and
   memory, tooling, preconditions, and the decision gate); `scripts/dev/perf-capture.sh` drives
   a launch-warmup-measure-close cycle; `scripts/dev/luma-diff.py` is the still-frame luminance
   measurement; `ClientMain.OptimumLogFrameTime` writes a per-second frame-time line, inert
@@ -719,7 +719,7 @@ allocate five small arrays each per frame; P4 said "fold both into fields when P
 and P5 did not measure.
 
 Still owed for P5 (rule 3), in the game, on both backends, with the renderer confirmed from
-the log - all of it is `docs/taa-acceptance.md`:
+the log - all of it is `docs/vulkan.md`:
 - the 18 acceptance rows (A1-A18), each twice per backend, TAA on and off, with the
   seven-pair luminance medians recorded; A18 is the TAA-off byte-identity check, which so far
   exists only as a code argument and a coverage test, never as a measured frame;
@@ -761,7 +761,7 @@ Caveat: the Wayland compositor caps presentation at the 165 Hz refresh even with
 (`--vsync off` added to the script), so every row except Vulkan+TAA sits on the cap; the only
 cost visible is Vulkan TAA >= 0.8 ms at half render resolution. A real cost number needs GPU
 timestamps or an uncapped surface; the Arc 140V run in the plan's P5 matrix remains the target
-measurement. The 18-row acceptance matrix (docs/taa-acceptance.md) and the default-on decision are
+measurement. The 18-row acceptance matrix (docs/vulkan.md) and the default-on decision are
 the user's; TAA stays default-off until then.
 
 **P6. Freeze the contract.**
@@ -769,7 +769,7 @@ the user's; TAA stays default-off until then.
   and the adapter tests; reserve backend-native execution, presentation lifetime and extra ray
   signals for the vendor plan.
 
-**Contract** (2026-09-11): frozen as **v1** in **`docs/temporal-frame-contract.md`**. That document,
+**Contract** (2026-09-11): frozen as **v1** in **`docs/vulkan.md`**. That document,
 not this plan, is what every temporal consumer is written against - the in-house resolve today,
 FSR 3.1 / XeSS 2 / DLSS next, frame generation and ray reconstruction after that. It specifies the
 per-frame input record member by member (type, units, coordinate convention, the point in the frame
@@ -837,7 +837,7 @@ and this section, in that order.
   nearest finite history depth in a 3x3 around `historyUv`, tolerance `0.5 + 0.08 * closestLinearDepth`;
   kept pixels take `mix(1.2, 0.3, w * w) * blendAlpha` of the current frame with
   `w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2))` (Playdead INSIDE TAA), then reactive.
-  Contract unchanged (v1); note under section 4 of `docs/temporal-frame-contract.md`.
+  Contract unchanged (v1); note under section 4 of `docs/vulkan.md`.
 - **Numbers:** leaf-far rejection **3.7% -> 1.1%** per frame. The user confirmed on Vulkan that the
   distant-foliage flicker is gone.
 - **Tests:** `TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference` (0.3 x / 1.2 x
@@ -849,7 +849,7 @@ and this section, in that order.
 - **Script:** `python3 scripts/dev/taa-rejection.py <parity dump dir> [--max-leaf-far 1.5]` prints
   single-sample and 3x3 rejection rates per region (near/mid/far by linear-depth p50/p90, leaf-mid,
   leaf-far) and fails when the 3x3 leaf-far rate is above 1.5 percent. Required by
-  `docs/taa-acceptance.md` row A19 and `docs/vulkan-acceptance.md` M1.7.
+  `docs/vulkan.md` row A19 and `docs/vulkan.md` M1.7.
 - **Do not revert** to a single-sample depth test or a fixed blend weight.
 
 ## Follow-up (not part of this plan): shader patch system

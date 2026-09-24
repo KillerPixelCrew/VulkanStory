@@ -305,7 +305,7 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         // Extra layer checks (sync validation, best practices with the vendor sets,
         // GPU-assisted validation) go through VK_EXT_layer_settings, which replaces
-        // the deprecated VK_EXT_validation_features (docs/research/vulkan-validation.md
+        // the deprecated VK_EXT_validation_features (docs/vulkan.md#validation-and-acceptance
         // §1); a layer too old for it still gets the deprecated struct. Both are
         // decided before the extension list is marshalled, because an extension has
         // to be enabled under exactly the condition its struct is chained - a chained
@@ -466,7 +466,7 @@ internal sealed unsafe class VulkanContext : IDisposable
 
     /// <summary>
     /// Maps the comma list from OPTIMUM_VULKAN_VALIDATION_FEATURES onto the layer's settings
-    /// (VkLayer_khronos_validation.json; docs/research/vulkan-validation.md §1 and §2):
+    /// (VkLayer_khronos_validation.json; docs/vulkan.md#validation-and-acceptance §1 and §2):
     /// "sync" synchronization validation with structured message properties to filter on;
     /// "best" best practices with the NVIDIA and AMD sets, whose messages are warnings and
     /// performance reports; "mobile" the Arm and IMG sets, advisory on desktop GPUs;
@@ -977,7 +977,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         };
 
         // Optional: FAIL_ON_PIPELINE_COMPILE_REQUIRED for the background compile path
-        // (docs/research/vulkan-caching.md §2). Without it every pipeline compiles blocking.
+        // (docs/vulkan.md#caches §2). Without it every pipeline compiles blocking.
         var vulkan13Query = new PhysicalDeviceVulkan13Features { SType = StructureType.PhysicalDeviceVulkan13Features };
         var vulkan13QueryRoot = new PhysicalDeviceFeatures2
         {

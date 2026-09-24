@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of cloudmap.vsh (docs/vulkan-native-shaders.md).
+// Native port of cloudmap.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of cloudmap.fsh (docs/vulkan-native-shaders.md).
+// Native port of cloudmap.fsh (docs/vulkan.md).
 //
 // The dither stub: cloudmap.fsh defines NoiseFromPixelPosition(a, b, c) as vec4(0.0) before including
 // skycolor.fsh, so the sky glow it samples carries no dither. skycolor.glsl includes dither.glsl, whose
@@ -26,7 +26,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of cloudmap (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of cloudmap (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in cloudmap.fsh's declaration order, and every
 // other uniform is a record member: cloudmap.fsh's own, then the program uniforms of fogandlight.fsh and
 // fogspheres.ash, whose frame owners (fogandlight.vsh, vertexwarp.vsh) this program does not include.

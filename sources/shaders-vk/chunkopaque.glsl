@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkopaque.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunkopaque.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: USESSBO (attribute layout and FaceData), GREEDYMESH (tile varyings), GBUFFER (gnormal), TAAMOTION
 // (taaPrevClip). SHADOWQUALITY is a specialization-constant branch.
 //
@@ -15,7 +15,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkopaque.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunkopaque.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GREEDYMESH (tile varyings), GBUFFER (G-buffer outputs; the motion output moves from 2 to 4 with it),
 // TAAMOTION (motion output, written through include/motion.glsl). GREEDYMESH_GRAD, NORMALVIEW and
 // SHINYEFFECT are specialization-constant branches.
@@ -31,7 +31,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkopaque (docs/vulkan-native-shaders.md section 4). One draw per mesh pool: the
+// Program interface of chunkopaque (docs/vulkan.md section 4). One draw per mesh pool: the
 // push block holds the two sampler slots in chunkopaque.fsh's declaration order, then origin and
 // modelViewMatrix (84 B). The record holds every other uniform, chunkopaque.vsh's first (the previous-frame
 // warp state vertexwarp.glsl reads comes with its include), then chunkopaque.fsh's and underwatereffects'
@@ -448,7 +448,7 @@ void main()
 		outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 		outGNormal = gnormal;
 		if (OPTIMUM_OPTIMUMAO > 0) {
-		// Optimum AO class channel (docs/research/ambient-occlusion.md C.5): the
+		// Optimum AO class channel (docs/vulkan.md#ambient-occlusion C.5): the
 		// vertex stage's wind flag or explicit per-block class marks thin geometry.
 		// Snow layers stay solid even when drawn alongside cross quads.
 		}

@@ -546,7 +546,7 @@ public static class OptimumConfig
 
     /// <summary>
     /// Which ambient occlusion runs: "auto", "vanilla" or "gtao"
-    /// (docs/research/ambient-occlusion.md, section E).
+    /// (docs/vulkan.md#ambient-occlusion, section E).
     ///
     /// "auto" (the default) is the GTAO visibility-bitmask pass on the Vulkan backend
     /// whenever TAA is active, and vanilla SSAO otherwise. "gtao" asks for it on Vulkan
@@ -772,7 +772,7 @@ public static class OptimumConfig
     /// <summary>
     /// Whether the launcher's scan found a mod replacing <paramref name="passName" />'s GLSL, so the Vulkan
     /// renderer must build it through the rewriter from that source instead of linking the native SPIR-V
-    /// (docs/vulkan-native-shaders.md section 8). True when <c>rewriterPrograms</c> names the program
+    /// (docs/vulkan.md section 8). True when <c>rewriterPrograms</c> names the program
     /// (case-insensitive, the scanner lowercases base names) or holds <see cref="AllShaderPrograms" />.
     /// A missing, unreadable, failed or pre-schema-2 report counts as <see cref="AllShaderPrograms" />,
     /// the scanner's own conservative rule. Asking for <see cref="AllShaderPrograms" /> itself answers

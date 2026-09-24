@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of decals.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of decals.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: USESSBO (attribute layout and the FaceData buffer), TAAMOTION (the previous clip position).
 // sources/shaders/decals.fsh explains why decals write the motion attachment themselves.
 #include "bindings.glsl"
@@ -11,7 +11,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of decals.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of decals.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // The motion writer goes through include/motion.glsl with reactive 0 and writer depth gl_FragCoord.z; its
 // behind-camera result vec4(0, 0, 0, 0) is the GLSL 330 vec4(0.0). GBUFFER is an axis only because it moves
 // the motion attachment (TAAMOTIONLOCATION 4 with the G-buffer, 2 without).
@@ -22,7 +22,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of decals (docs/vulkan-native-shaders.md section 4). Decals are pooled like chunks:
+// Program interface of decals (docs/vulkan.md section 4). Decals are pooled like chunks:
 // the push block holds the two sampler slots (decals.fsh order) and the DRAW uniforms origin and
 // modelViewMatrix (84 B). The record holds the rest: decals.vsh's, vertexwarp.vsh's previous-frame
 // mirrors, then decals.fsh's, each in declaration order. The TAA uniforms are declared in every variant.

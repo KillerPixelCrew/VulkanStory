@@ -12,7 +12,7 @@ using Optimum.Render.Vulkan.AmbientOcclusion;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), Phase 3b stage 1c: the
+// Vulkan-native render systems (docs/vulkan.md), Phase 3b stage 1c: the
 // post chain's ambient-occlusion step drawn natively - the vanilla SSAO pass, its bilateral blur
 // ping-pong and the AO composite that multiplies the visibility into the scene before the TAA
 // resolve reads it.
@@ -341,7 +341,7 @@ public partial class VulkanClientPlatform
 
 }
 
-// Optimum AO (docs/research/ambient-occlusion.md section C): the GTAO visibility-bitmask pass
+// Optimum AO (docs/vulkan.md#ambient-occlusion section C): the GTAO visibility-bitmask pass
 // on the device. The base's RenderPostprocessingEffects asks for it where vanilla SSAO would run
 // and composes the returned texture through ApplyOptimumSceneSsao before the TAA resolve.
 public partial class VulkanClientPlatform

@@ -149,7 +149,7 @@ void main()
 		outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 		outGNormal = gnormal;
 #if OPTIMUMAO > 0
-		// Optimum AO class channel (docs/research/ambient-occlusion.md C.5): the
+		// Optimum AO class channel (docs/vulkan.md#ambient-occlusion C.5): the
 		// vertex stage's wind flag or explicit per-block class marks thin geometry.
 		// Snow layers stay solid even when drawn alongside cross quads.
 #endif

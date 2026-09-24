@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of ssao.vsh (docs/vulkan-native-shaders.md).
+// Native port of ssao.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of ssao.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of ssao.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // SSAOLEVEL == 2 is a specialization-constant branch with the same values. TAAMOTION stays a variant axis
 // (section 5). The loop local `sample` is `samplePos`: `sample` is a reserved word in GLSL 450.
 #include "bindings.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of ssao (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of ssao (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in ssao.fsh's declaration order, and every other
 // uniform is a record member in declaration order.
 //

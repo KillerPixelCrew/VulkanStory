@@ -25,7 +25,7 @@
 #   --self-test     run the gate over embedded sample lines: one pass case and one per fail rule
 #
 # Exit codes: 0 all rules pass, 1 a rule failed, 2 usage or unreadable input.
-# Log formats: docs/taa-acceptance.md, section 3. perf-capture.sh writes both files
+# Log formats: docs/vulkan.md, section 3. perf-capture.sh writes both files
 # to /tmp/optimum-perf/<label>/. The fps line parser below must stay equal to the one
 # in perf-capture.sh (Optimum.Tests/pacing-log-format-coverage-tests.cs).
 set -euo pipefail

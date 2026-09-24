@@ -10,7 +10,7 @@ namespace Optimum.Render.Vulkan.Shaders;
 /// <summary>
 /// <c>shaders.manifest.json</c>: what the offline compiler (<c>tools/shader-compiler</c>) produced
 /// from <c>sources/shaders-vk</c> and what the runtime links against
-/// (docs/vulkan-native-shaders.md section 6).
+/// (docs/vulkan.md section 6).
 ///
 /// Written and read with <see cref="Utf8JsonWriter" /> and <see cref="JsonDocument" /> directly:
 /// the output is byte-for-byte deterministic (the <c>--verify</c> gate compares it as bytes), and

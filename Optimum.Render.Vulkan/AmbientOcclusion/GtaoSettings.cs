@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace Optimum.Render.Vulkan.AmbientOcclusion;
 
-/// <summary>The per-slice integration (docs/research/ambient-occlusion.md C.3, C.13).</summary>
+/// <summary>The per-slice integration (docs/vulkan.md#ambient-occlusion C.3, C.13).</summary>
 internal enum GtaoIntegration : uint
 {
     /// <summary>32-sector bitmask with cosine-CDF sector boundaries (C.4); the default.</summary>

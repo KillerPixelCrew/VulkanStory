@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of cloudvolumetric.vsh (docs/vulkan-native-shaders.md).
+// Native port of cloudvolumetric.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of the Optimum override sources/shaders/cloudvolumetric.fsh (docs/vulkan-native-shaders.md).
+// Native port of the Optimum override sources/shaders/cloudvolumetric.fsh (docs/vulkan.md).
 // liquidDepth is the set 0 frame texture from bindings.glsl and is sampled directly (section 2, "Oracle
 // decisions"). USEOIT is an axis because oit.glsl gates its outputs and functions on it; the program is
 // registered with Oit = true, so only USEOIT=1 is ever selected. Every statement that names an oit.glsl symbol
@@ -22,7 +22,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of cloudvolumetric (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw
+// Program interface of cloudvolumetric (docs/vulkan.md section 4). A fullscreen pass: one draw
 // per Use(), so the push block holds only the sampler slots, in cloudvolumetric.fsh's declaration order, and
 // every other uniform is a record member in declaration order.
 //

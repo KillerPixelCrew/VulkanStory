@@ -49,7 +49,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
     private FrameRing _frames = null!;
     private ShaderCompiler _shaderCompiler = null!;
 
-    /// <summary>The native shaders loaded at device start; null when they are off (docs/vulkan-native-shaders.md section 8).</summary>
+    /// <summary>The native shaders loaded at device start; null when they are off (docs/vulkan.md section 8).</summary>
     private NativeShaderLibrary? _nativeShaders;
     private int _nativeLinks, _rewrittenLinks, _failedNativeLinks;
     private int _nativeLinksReported, _rewrittenLinksReported, _failedNativeLinksReported;
@@ -505,7 +505,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         }
         _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
             _context.Capabilities.DynamicColorBlend, pipelineSeed);
-        // Background compiles (docs/research/vulkan-caching.md, design item 4): a draw whose
+        // Background compiles (docs/vulkan.md#caches, design item 4): a draw whose
         // pipeline is not in the driver cache is skipped while a worker compiles it.
         bool synchronousPipelines = ResolveSynchronousPipelines(SynchronousPipelines,
             Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SYNC_PIPELINES"),

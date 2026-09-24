@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of nightsky.vsh (docs/vulkan-native-shaders.md).
+// Native port of nightsky.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of nightsky.fsh (docs/vulkan-native-shaders.md). Axis: GBUFFER (the G-buffer outputs).
+// Native port of nightsky.fsh (docs/vulkan.md). Axis: GBUFFER (the G-buffer outputs).
 // outColor has no location in GLSL 330; it is location 0, the one GL and ProgramInterfaceLayout assign.
 // worldPosY is read by nothing and written by no vertex stage, as in GLSL 330.
 // The vertex stage includes fogandlight.vsh (contract section 3, cross-stage owners).
@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of nightsky (docs/vulkan-native-shaders.md section 4). One draw per Use(): the push
+// Program interface of nightsky (docs/vulkan.md section 4). One draw per Use(): the push
 // block holds only the cube map's slot; every other uniform is a record member: nightsky.vsh's,
 // nightsky.fsh's (ditherSeed, horizontalResolution and playerToSealevelOffset are its own here, because
 // skycolor.fsh, their frame owner, is not included), then fogandlight.fsh's windWaveCounter and

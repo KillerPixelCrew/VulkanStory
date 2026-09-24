@@ -65,7 +65,7 @@ public sealed unsafe partial class VulkanDevice
             return 0;
         }
 
-        // The seam (docs/vulkan-native-shaders.md section 8): a program the manifest has links from its
+        // The seam (docs/vulkan.md section 8): a program the manifest has links from its
         // SPIR-V; one it has not links through the rewriter; one it has but cannot serve (a bad hash, an
         // unreadable define, a module the driver refuses) links through the rewriter and counts as failed.
         string passName = program.PassName ?? "";

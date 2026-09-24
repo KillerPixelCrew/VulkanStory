@@ -743,7 +743,7 @@ internal sealed partial class ProgramInterfaceLayout
 }
 
 /// <summary>
-/// The layout of a program linked from the native manifest (docs/vulkan-native-shaders.md section 8).
+/// The layout of a program linked from the native manifest (docs/vulkan.md section 8).
 ///
 /// The draw path reads the same <see cref="ProgramInterfaceLayout" /> whichever way a program was
 /// linked, so a native program is described in the rewriter's terms: frame members through the owner

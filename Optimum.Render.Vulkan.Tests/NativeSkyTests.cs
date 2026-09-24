@@ -19,7 +19,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>
 /// The sky dome, drawn twice on one Vulkan device: through the seam's neutral body (the OpenGL
 /// body's RenderMesh, the route every vanilla system still takes) and through the native pass
-/// VulkanClientPlatform.RenderSkyDome records (docs/vulkan-native-render-systems.md, decision 5
+/// VulkanClientPlatform.RenderSkyDome records (docs/vulkan.md, decision 5
 /// stage 2 - the first world system on the native device API).
 ///
 /// Behavioural identity is the acceptance rule (decision 6): the same shader, the same mesh and

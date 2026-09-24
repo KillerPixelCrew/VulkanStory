@@ -514,7 +514,7 @@ using System.Text;
 /// <summary>
 /// The few SPIR-V facts the native-shader tests check - names, decorations, struct members,
 /// variables and specialization constants - read straight from the word stream. No reflection
-/// library exists in the tree (docs/vulkan-native-shaders.md section 6 plans
+/// library exists in the tree (docs/vulkan.md section 6 plans
 /// <c>Shaders/SpirvReflection.cs</c>); until it does, this is deliberately minimal.
 /// </summary>
 internal sealed class SpirvReader

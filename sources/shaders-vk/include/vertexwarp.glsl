@@ -1,4 +1,4 @@
-// Native port of the game include vertexwarp.vsh (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include vertexwarp.vsh (docs/vulkan.md section 1).
 // optimum-port-of: vertexwarp.vsh
 // optimum-port: transformed
 // optimum-frame-owner: vertexwarp.vsh

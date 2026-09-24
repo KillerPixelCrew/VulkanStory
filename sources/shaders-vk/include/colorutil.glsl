@@ -1,4 +1,4 @@
-// Native port of the game include colorutil.ash (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include colorutil.ash (docs/vulkan.md section 1).
 // optimum-port-of: colorutil.ash
 // optimum-port: verbatim
 //

@@ -100,7 +100,7 @@ namespace Vintagestory.API.Client
 
     /// <summary>
     /// A mod renderer's declaration that it writes motion for its draws, so its geometry does not
-    /// ghost under TAA. The writer rules are those of <c>docs/temporal-frame-contract.md</c> 3.2:
+    /// ghost under TAA. The writer rules are those of <c>docs/vulkan.md</c> 3.2:
     /// <list type="bullet">
     /// <item>the shader writes <c>vec4(mv, reactive, writerDepth)</c> at
     /// <c>layout(location = TAAMOTIONLOCATION)</c> under <c>#if TAAMOTION &gt; 0</c> (both defines

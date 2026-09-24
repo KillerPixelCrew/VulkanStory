@@ -586,7 +586,7 @@ public class SpecializationConventionTests
     private static readonly Regex Declaration = new(
         @"^layout\(constant_id = (\d+)\) const (\w+) (\w+) = ([^;]+);\s*$", RegexOptions.Multiline);
 
-    /// <summary>The defines that stay variant axes or are fixed (docs/vulkan-native-shaders.md section 5).</summary>
+    /// <summary>The defines that stay variant axes or are fixed (docs/vulkan.md section 5).</summary>
     private static readonly string[] NotConstants =
         { "TAAMOTION", "TAAMOTIONLOCATION", "USEOIT", "USESSBO", "GREEDYMESH", "MAXANIMATEDELEMENTS" };
 

@@ -21,7 +21,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// night sky box, the moon, the cube particle pool and the decal pool - each drawn twice on one
 /// Vulkan device: through its seam's neutral body (the OpenGL body's own draw, the route every
 /// system that has not moved still takes) and through the native pass the Vulkan platform
-/// records (docs/vulkan-native-render-systems.md, decision 5 stage 2).
+/// records (docs/vulkan.md, decision 5 stage 2).
 ///
 /// Behavioural identity is the acceptance rule (decision 6): the same program, the same mesh and
 /// the same fixed state have to put the same pixels on every attachment of Primary - the motion

@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of guitopsoil.vsh (docs/vulkan-native-shaders.md).
+// Native port of guitopsoil.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of guitopsoil.fsh (docs/vulkan-native-shaders.md).
+// Native port of guitopsoil.fsh (docs/vulkan.md).
 // color and glowLevel are declared by the GLSL 330 stage but written by no vertex stage and read by nothing;
 // they keep their declarations (glowLevel at its shared varying location), and the optimised module drops them.
 #include "bindings.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of guitopsoil (docs/vulkan-native-shaders.md section 4, GUI row): the sampler slot, then
+// Program interface of guitopsoil (docs/vulkan.md section 4, GUI row): the sampler slot, then
 // the per-element GUI uniforms (rgbaIn, extraGlow, applyColor, noTexture) in the push block; the matrices,
 // blockTextureSize and alphaTest in the record, each stage in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

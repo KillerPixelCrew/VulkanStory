@@ -2,7 +2,7 @@
 uniform sampler2D ssaoScene;
 uniform float invRenderHeight;
 #if OPTIMUMAO > 0
-// Optimum AO (docs/research/ambient-occlusion.md C.9, C.11): with GTAO the AO texture is the
+// Optimum AO (docs/vulkan.md#ambient-occlusion C.9, C.11): with GTAO the AO texture is the
 // pure visibility at render resolution, so the water, fog and OIT attenuation vanilla SSAO
 // applies inside its own pass is applied here instead.
 uniform sampler2D gPositionScene;

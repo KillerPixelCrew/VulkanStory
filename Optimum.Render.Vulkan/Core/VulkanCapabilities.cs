@@ -93,7 +93,7 @@ internal readonly record struct DescriptorIndexingSupport(
 /// <summary>
 /// The device floor for decision 9: one pipeline layout whose set 1 holds
 /// combined-image-sampler arrays with PARTIALLY_BOUND | UPDATE_AFTER_BIND, indexed
-/// per draw from push constants (docs/research/vulkan-bindless.md, "Limits check at
+/// per draw from push constants (docs/vulkan.md#bindless-descriptors, "Limits check at
 /// startup" and "Features to enable"). A device below it is not used for Vulkan at
 /// all - the session stays on OpenGL - rather than running a second, per-program
 /// layout path.
@@ -102,7 +102,7 @@ internal static class DescriptorIndexingFloor
 {
     /// <summary>
     /// Sum of the set-1 array capacities (<see cref="Shaders.SetConvention" />, the
-    /// starting sizes in docs/research/vulkan-bindless.md "Implementation for this
+    /// starting sizes in docs/vulkan.md#bindless-descriptors "Implementation for this
     /// renderer").
     /// </summary>
     public const uint BindlessSampledImages = Shaders.SetConvention.TextureArrayCapacityTotal;

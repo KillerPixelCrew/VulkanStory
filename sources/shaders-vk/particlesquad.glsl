@@ -2,17 +2,17 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlesquad.vsh (docs/vulkan-native-shaders.md).
+// Native port of particlesquad.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlesquad.fsh (docs/vulkan-native-shaders.md).
+// Native port of particlesquad.fsh (docs/vulkan.md).
 // USEOIT is an axis because oit.fsh gates its outputs on it. The program is registered with Oit = true, so
 // only USEOIT=1 is ever selected; the USEOIT=0 variant exists because the builder compiles every axis value,
-// and there the OIT call (which has nothing to write to) is compiled out (docs/vulkan-native-shaders.md
+// and there the OIT call (which has nothing to write to) is compiled out (docs/vulkan.md
 // section 9.1).
 // The vertex stage includes fogandlight.vsh and vertexwarp.vsh (contract section 3, cross-stage owners).
 #define OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH
@@ -25,7 +25,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlesquad (docs/vulkan-native-shaders.md section 4). Particles have no DRAW
+// Program interface of particlesquad (docs/vulkan.md section 4). Particles have no DRAW
 // uniforms, so the push block holds only the sampler slot; everything else is a record member:
 // particlesquad.vsh's, vertexwarp.vsh's previous-frame mirrors, then underwatereffects.fsh's frameSize.
 // The prev* initializers are seeded by the runtime (section 8).

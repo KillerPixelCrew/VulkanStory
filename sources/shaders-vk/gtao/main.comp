@@ -1,6 +1,6 @@
 #version 450
 // Optimum ambient occlusion, pass 2 of 3: the visibility term and the packed edges
-// (docs/research/ambient-occlusion.md C.2-C.10).
+// (docs/vulkan.md#ambient-occlusion C.2-C.10).
 //
 // The slice and step scaffold (R1 steps, s^2 + minS, pixel snapping, the working depth
 // levels, the edges and the noise) and the HORIZON_GTAO integration are ported from

@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of blockhighlights.vsh (docs/vulkan-native-shaders.md).
+// Native port of blockhighlights.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of blockhighlights.fsh (docs/vulkan-native-shaders.md).
+// Native port of blockhighlights.fsh (docs/vulkan.md).
 // fogandlight.fsh reads flatFogDensity, flatFogStart, viewDistance and viewDistanceLod0, owned by fogandlight.vsh,
 // which the vertex stage includes, so this stage activates that owner group itself (section 3).
 //
@@ -25,7 +25,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of blockhighlights (docs/vulkan-native-shaders.md section 4). The push block holds the
+// Program interface of blockhighlights (docs/vulkan.md section 4). The push block holds the
 // sampler slot. The record holds the matrices and fogandlight.fsh's windWaveCounter, whose owner
 // (vertexwarp.vsh) the program does not include; fogandlight.fsh's other program uniforms are frame members
 // through fogandlight.vsh in the vertex stage.

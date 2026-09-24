@@ -107,7 +107,7 @@ public class SceneSsaoTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The OPTIMUMAO variant (docs/research/ambient-occlusion.md C.9, C.11): the GTAO visibility is
+    /// The OPTIMUMAO variant (docs/vulkan.md#ambient-occlusion C.9, C.11): the GTAO visibility is
     /// fetched at render resolution with no min-of-two-rows, attenuated by vanilla's water, fog and
     /// OIT term (gPosition.w + 0.75 * (1 - revealage)), and still multiplies only colour 0.
     /// </summary>

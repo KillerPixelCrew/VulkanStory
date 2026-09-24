@@ -45,7 +45,7 @@ internal readonly record struct NativeSamplerSlot(int Index, int PushOffset, int
 internal readonly record struct NativeTexture(NativeSamplerSlot Sampler, int TextureId, SamplerState? Sampling = null);
 
 /// <summary>
-/// The fixed state a native pipeline is built for (docs/vulkan-native-render-systems.md,
+/// The fixed state a native pipeline is built for (docs/vulkan.md,
 /// decision 4). It is <see cref="PipelineKey" />'s shape stated outright: per-attachment blend and colour write mask,
 /// depth test/write/compare, cull, topology and the target's formats.
 /// </summary>
@@ -236,7 +236,7 @@ internal sealed class NativePassDescription
 }
 
 /// <summary>
-/// The device API native render systems draw through (docs/vulkan-native-render-systems.md,
+/// The device API native render systems draw through (docs/vulkan.md,
 /// section 2 decision 4 and section 3).
 ///
 /// A native system asks for a pipeline by program and fixed state, declares a pass with its

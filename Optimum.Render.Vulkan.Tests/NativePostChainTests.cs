@@ -19,7 +19,7 @@ using LinkedShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The post and TAA chain on the Vulkan platform (docs/vulkan-native-render-systems.md, stage 1).
+/// The post and TAA chain on the Vulkan platform (docs/vulkan.md, stage 1).
 /// Optimum owns the chain's order; its first two passes - the OIT merge and sky motion - draw
 /// through the native device API, and the rest run the OpenGL body until their own stage moves
 /// them.

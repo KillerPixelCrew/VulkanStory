@@ -307,7 +307,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumFsrDisabled",
         "DisableOptimumFsr",
         // Phase 3b: the window's client size as a seam, so the native blit and the OpenGL body
-        // read the same value (docs/vulkan-native-render-systems.md, decision 3).
+        // read the same value (docs/vulkan.md, decision 3).
         "OptimumWindowClientSize",
         // Phase 3b: the post chain split into one virtual per pass, so a native chain
         // (VulkanClientPlatform.NativePostChain) owns the order and replaces one step at a

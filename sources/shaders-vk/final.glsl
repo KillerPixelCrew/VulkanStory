@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of final.vsh (docs/vulkan-native-shaders.md).
+// Native port of final.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of final.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of final.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // The FXAA, BLOOM, SSAOLEVEL and GODRAYS preprocessor branches are specialization-constant branches
 // with the same expressions; nothing they gate is a declaration, so the program has no variant axes.
 #include "bindings.glsl"
@@ -19,13 +19,13 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of final (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of final (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in final.fsh's declaration order, and every other
 // uniform is a record member: final.vsh's four, then final.fsh's, each in declaration order.
 //
 // A block member cannot carry the GLSL 330 initializers (extraGamma = 1.0, minlight = 0.0, maxlight = 1,
 // minsat = 0, maxsat = 1). The client never sets minlight, maxlight, minsat or maxsat, so the runtime seeds
-// the record from the GLSL 330 declarations' initializers (docs/vulkan-native-shaders.md section 8).
+// the record from the GLSL 330 declarations' initializers (docs/vulkan.md section 8).
 layout(push_constant, scalar) uniform OptimumDraw
 {
     OPTIMUM_SAMPLER_SLOT(sampler2D, primaryScene);

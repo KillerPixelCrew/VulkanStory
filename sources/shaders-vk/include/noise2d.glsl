@@ -1,4 +1,4 @@
-// Native port of the game include noise2d.ash (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include noise2d.ash (docs/vulkan.md section 1).
 // optimum-port-of: noise2d.ash
 // optimum-port: verbatim
 //

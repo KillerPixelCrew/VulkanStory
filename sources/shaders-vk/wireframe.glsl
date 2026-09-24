@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of wireframe.vsh (docs/vulkan-native-shaders.md).
+// Native port of wireframe.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of wireframe.fsh (docs/vulkan-native-shaders.md).
+// Native port of wireframe.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of wireframe (docs/vulkan-native-shaders.md section 4). No samplers, so there is no push block:
+// Program interface of wireframe (docs/vulkan.md section 4). No samplers, so there is no push block:
 // the record holds wireframe.vsh's uniforms in declaration order, then vertexwarp.vsh's prev* uniforms in its
 // header's order (their owner rule: they are program uniforms, not frame members). The prev* GLSL 330
 // initializers (some are 1) are seeded by the runtime (section 8).

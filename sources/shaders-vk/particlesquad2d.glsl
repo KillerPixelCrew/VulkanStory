@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlesquad2d.vsh (docs/vulkan-native-shaders.md).
+// Native port of particlesquad2d.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlesquad2d.fsh (docs/vulkan-native-shaders.md).
+// Native port of particlesquad2d.fsh (docs/vulkan.md).
 // USEOIT is an axis because oit.fsh gates its outputs on it; the program is registered with Oit = true, and
 // in the never-selected USEOIT=0 variant the writes to oit.fsh's outputs are compiled out (family 5 decision).
 #include "bindings.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlesquad2d (docs/vulkan-native-shaders.md section 4). Particles have no DRAW
+// Program interface of particlesquad2d (docs/vulkan.md section 4). Particles have no DRAW
 // uniforms, so the push block holds only the sampler slot; everything else is a record member,
 // particlesquad2d.vsh's then particlesquad2d.fsh's, each in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

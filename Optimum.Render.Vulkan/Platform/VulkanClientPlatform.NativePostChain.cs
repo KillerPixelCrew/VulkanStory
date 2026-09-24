@@ -12,7 +12,7 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), stage 1: Optimum owns
+// Vulkan-native render systems (docs/vulkan.md), stage 1: Optimum owns
 // the post and TAA chain end to end. This file holds the chain - its ORDER, and one helper per
 // pass with a stable signature.
 //

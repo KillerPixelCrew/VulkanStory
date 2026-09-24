@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of ui-compose.vsh (docs/vulkan-native-shaders.md).
+// Native port of ui-compose.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of ui-compose.fsh (docs/vulkan-native-shaders.md): the UI image passed through
+// Native port of ui-compose.fsh (docs/vulkan.md): the UI image passed through
 // untouched, so the premultiplied blend stage composes it over the display image.
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of ui-compose (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one draw per
+// Program interface of ui-compose (docs/vulkan.md section 4). A fullscreen pass: one draw per
 // frame, so the push block holds only the sampler slot and there is no program record.
 layout(push_constant, scalar) uniform OptimumDraw
 {

@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of standard.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of standard.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GLOWSUB (the glowSub vertex input; `#if defined(GLOWSUB)` becomes `#if GLOWSUB == 1`), GBUFFER
 // (SSAOLEVEL > 0) and TAAMOTION.
 #include "bindings.glsl"
@@ -12,7 +12,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of standard.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of standard.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GBUFFER (SSAOLEVEL > 0), TAAMOTION and ALLOWDEPTHOFFSET (`#if defined(ALLOWDEPTHOFFSET)` with
 // `ALLOWDEPTHOFFSET > 0` inside becomes `#if ALLOWDEPTHOFFSET == 1`). BLOOM, NORMALVIEW and SHINYEFFECT gate
 // no declaration and are specialization-constant branches with the same expressions; the G-buffer write the
@@ -31,7 +31,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of standard (docs/vulkan-native-shaders.md section 4). Held items, dropped items and
+// Program interface of standard (docs/vulkan.md section 4). Held items, dropped items and
 // block-entity models: at most a few draws per Use(), so the push block holds the two sampler slots (tex, then
 // tex2dOverlay, the GLSL 330 unit order) and the integer flags plus taaReactive, in declaration order (vertex
 // stage first). The record holds everything else: standard.vsh's uniforms, vertexwarp.glsl's prev* uniforms,

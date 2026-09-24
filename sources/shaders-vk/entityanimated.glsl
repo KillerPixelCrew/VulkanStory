@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of entityanimated.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of entityanimated.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 //
 // Axes: TAAMOTION (the previous-position varying and the AnimationPrev buffer), GBUFFER (SSAOLEVEL > 0: the
 // G-buffer varyings) and USEOIT. The GLSL 330 vertex stage does not test USEOIT, but the client creates the
@@ -19,7 +19,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of entityanimated.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of entityanimated.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 //
 // Axes: USEOIT (oit.glsl's six outputs instead of the opaque set), GBUFFER (SSAOLEVEL > 0), TAAMOTION and
 // ALLOWDEPTHOFFSET (the first-person hands' gl_FragDepth write). SHADOWQUALITY, NORMALVIEW and SHINYEFFECT gate
@@ -38,7 +38,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of entityanimated (docs/vulkan-native-shaders.md section 4), shared by the opaque
+// Program interface of entityanimated (docs/vulkan.md section 4), shared by the opaque
 // program, Entityanimated_Oit (USEOIT axis) and the first-person hands (ALLOWDEPTHOFFSET axis).
 //
 // Entity placement (section 4, about 280 B of DRAW data per entity): the push block holds the sampler slot,

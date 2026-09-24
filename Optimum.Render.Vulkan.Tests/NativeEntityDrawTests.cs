@@ -21,7 +21,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// An entity's animated shape, drawn twice on one Vulkan device: through the seam's neutral body
 /// (ClientPlatformAbstract.RenderEntityMesh's RenderMesh, the route the OpenGL path takes) and
 /// through the native pass VulkanClientPlatform.RenderEntityMesh records
-/// (docs/vulkan-native-render-systems.md, decision 5 stage 2).
+/// (docs/vulkan.md, decision 5 stage 2).
 ///
 /// Behavioural identity is the acceptance rule (decision 6): the same program, mesh, bone
 /// matrices and fixed state have to put the same pixels on Primary's scene and glow attachments

@@ -19,7 +19,7 @@ namespace Optimum.Render.Vulkan.Core;
 /// program's defines resolved), the vertex layout, the attachment formats, the blend
 /// state per attachment, polygon mode and topology, plus the settings hash of the
 /// device-wide state that shapes every pipeline (<see cref="PipelineKeyLog.SettingsHashFor" />).
-/// Design: docs/research/vulkan-caching.md "Design for this renderer" item 5.
+/// Design: docs/vulkan.md#caches "Design for this renderer" item 5.
 /// </summary>
 internal sealed class PipelineKeyLogEntry
 {
@@ -203,7 +203,7 @@ internal sealed class PipelineKeyLogEntry
 /// <summary>
 /// Every pipeline the renderer has used, kept next to the driver's pipeline cache so the
 /// next launch can build them on a background worker before the first draw asks
-/// (docs/research/vulkan-caching.md §6 and "Design for this renderer" item 5).
+/// (docs/vulkan.md#caches §6 and "Design for this renderer" item 5).
 ///
 /// Settings combinations make such a log grow without bound (§7), so it is capped by
 /// entry count and evicts the entries whose last use is oldest. The file is versioned

@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of guigear.vsh (docs/vulkan-native-shaders.md).
+// Native port of guigear.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of guigear.fsh (docs/vulkan-native-shaders.md).
+// Native port of guigear.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of guigear (docs/vulkan-native-shaders.md section 4, GUI row): the sampler slot in the
+// Program interface of guigear (docs/vulkan.md section 4, GUI row): the sampler slot in the
 // push block; the matrices and guigear.fsh's scalars in the record, each stage in declaration order.
 // stabilityLevel's GLSL 330 initializer (0.5) is seeded by the runtime (section 8).
 layout(push_constant, scalar) uniform OptimumDraw

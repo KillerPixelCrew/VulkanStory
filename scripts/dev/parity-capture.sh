@@ -1,5 +1,5 @@
 #!/bin/bash
-# Per-attachment parity capture (docs/vulkan-acceptance.md, section 3).
+# Per-attachment parity capture (docs/vulkan.md, section 3).
 #
 # Launches the deployed client on one renderer with OPTIMUM_PARITY_DUMP=<out>
 # and OPTIMUM_PARITY_FRAME=<n>, waits for the world ("[Client Chat] Welcome"),
@@ -11,7 +11,7 @@
 # frame <n> (0 = the first frame rendered with the player in the world), after
 # the post chain and the final blit and before presentation. Compare two
 # captures with:
-#   scripts/dev/ssim.py <outA> <outB> --allowlist docs/parity-allowlist.md
+#   scripts/dev/ssim.py <outA> <outB> --allowlist docs/vulkan.md
 #
 # Usage:
 #   scripts/dev/parity-capture.sh --renderer vulkan|opengl --world <name> --frame <n> --out <dir>
@@ -186,4 +186,4 @@ if (( FILES == 0 )); then
   echo "the dump line appeared but no files were written" >&2
   exit 1
 fi
-echo "compare    scripts/dev/ssim.py <other capture> $OUT_DIR --allowlist docs/parity-allowlist.md"
+echo "compare    scripts/dev/ssim.py <other capture> $OUT_DIR --allowlist docs/vulkan.md"

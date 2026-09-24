@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlescube.vsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of particlescube.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: VEC3SCALE (the scale attribute's type), TAAMOTION (the previous clip position), GBUFFER (the
 // G-buffer varyings). sources/shaders/particlescube.vsh explains the camera-only previous position.
 #include "bindings.glsl"
@@ -11,7 +11,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of particlescube.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of particlescube.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // SHADOWQUALITY is a specialization-constant branch. The motion writer is the section 7 exception: behind the
 // previous camera it keeps reactive 1 (optimumWriteReactiveOnly(1.0) is the GLSL 330 vec4(0, 0, 1, 0)), and
 // otherwise it keeps its writer depth, calling optimumMotionVector directly.
@@ -27,14 +27,14 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlescube (docs/vulkan-native-shaders.md section 4). Particles have no DRAW
+// Program interface of particlescube (docs/vulkan.md section 4). Particles have no DRAW
 // uniforms and this program samples nothing, so there is no push block; every uniform is a record member:
 // particlescube.vsh's, vertexwarp.vsh's previous-frame mirrors, then particlescube.fsh's and
 // underwatereffects.fsh's, each in declaration order. The TAA uniforms are declared in every variant
 // because collectUniformNames sees them whatever TAAMOTION is.
 //
 // The prev* warp uniforms carry GLSL 330 initializers (prevWindWaveIntensity = 1, ...); the runtime seeds
-// them from the GLSL 330 declarations (docs/vulkan-native-shaders.md section 8).
+// them from the GLSL 330 declarations (docs/vulkan.md section 8).
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
 {
     vec4 rgbaFogIn;

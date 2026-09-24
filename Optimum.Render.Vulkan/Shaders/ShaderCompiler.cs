@@ -101,7 +101,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
     /// <summary>
     /// Everything besides the source that decides the SPIR-V: the options and the
     /// shaderc build. The C API exposes no compiler version, so the build is the
-    /// loaded library's own hash (docs/research/vulkan-caching.md §5).
+    /// loaded library's own hash (docs/vulkan.md#caches §5).
     /// </summary>
     public string Identity => OptionsIdentity + ";" + (_nativeIdentity ??= NativeLibraryIdentity());
 
@@ -163,7 +163,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
     /// Compiles with optimisation off and never through the cache. The optimiser strips every
     /// <c>OpName</c> and drops declarations nothing uses, so the offline shader compiler reflects
     /// names and declared interfaces from this twin of the shipped module
-    /// (docs/vulkan-native-shaders.md section 6). Never shipped.
+    /// (docs/vulkan.md section 6). Never shipped.
     /// </summary>
     public ShaderCompileResult CompileForReflection(string code, string filename, EnumShaderType stage) =>
         CompileUncached(code, filename, stage, optimize: false);
@@ -389,7 +389,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
 }
 
 /// <summary>
-/// Native shader sources (<c>sources/shaders-vk</c>, docs/vulkan-native-shaders.md section 1)
+/// Native shader sources (<c>sources/shaders-vk</c>, docs/vulkan.md section 1)
 /// resolve their own <c>#include "file.glsl"</c> through shaderc, unlike the game's GLSL 330
 /// programs, whose includes <c>ShaderRegistry</c> expands before the rewriter sees them. The
 /// options are the same as <see cref="Compile" />'s plus an include resolver, and the result is

@@ -10,7 +10,7 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), stage 1: the tail of the
+// Vulkan-native render systems (docs/vulkan.md), stage 1: the tail of the
 // post chain - the bloom chain, god rays, the FXAA luma step and final composition - drawn
 // through the native device API instead of the GL-shaped platform calls.
 //

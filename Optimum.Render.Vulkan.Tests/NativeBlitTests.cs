@@ -24,7 +24,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>
 /// The blit to the Default target, drawn twice on one Vulkan device: through the OpenGL body
 /// (the route every other vanilla system still takes) and through the native device API
-/// (docs/vulkan-native-render-systems.md, decision 4). The three branches - TAA debug view,
+/// (docs/vulkan.md, decision 4). The three branches - TAA debug view,
 /// FSR (EASU into the FSR target, RCAS into Default) and the plain blit - have to produce the
 /// same pixels, and the native one must not touch the GL state tracker, a texture unit or a
 /// draw-buffer mask while its passes are open.

@@ -13,7 +13,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 /// <summary>
-/// The native device API's mesh draws (docs/vulkan-native-render-systems.md, decision 4:
+/// The native device API's mesh draws (docs/vulkan.md, decision 4:
 /// "fullscreen triangle, mesh, multi-draw or instanced"), on the real chunk program and a real
 /// tesselated face.
 ///

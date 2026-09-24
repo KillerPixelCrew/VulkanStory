@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of helditem.vsh (docs/vulkan-native-shaders.md).
+// Native port of helditem.vsh (docs/vulkan.md).
 // SSAOLEVEL > 0 gates the G-buffer varyings, so it is the GBUFFER axis (section 5).
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -10,7 +10,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of helditem.fsh (docs/vulkan-native-shaders.md).
+// Native port of helditem.fsh (docs/vulkan.md).
 // SSAOLEVEL > 0 gates the G-buffer inputs and outputs, so it is the GBUFFER axis; BLOOM and NORMALVIEW are
 // specialization-constant branches with the same expressions. n is declared by the GLSL 330 stage but written
 // by no vertex stage and read by nothing; the optimised module drops it.
@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of helditem (docs/vulkan-native-shaders.md section 4). At most a couple of draws per Use(),
+// Program interface of helditem (docs/vulkan.md section 4). At most a couple of draws per Use(),
 // so the push block holds only the sampler slots, in helditem.fsh's declaration order. The record holds
 // helditem.vsh's uniforms, then helditem.fsh's, then normalshading.fsh's lightPosition (its owner
 // fogandlight.fsh is not included), each in declaration order.

@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkshadowmap.vsh (vanilla, docs/vulkan-native-shaders.md). USESSBO is the variant axis:
+// Native port of chunkshadowmap.vsh (vanilla, docs/vulkan.md). USESSBO is the variant axis:
 // 1 reads FaceData from set 2, 0 is the Chunkshadowmap_NoSSBOs registration with the per-vertex layout.
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -10,7 +10,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkshadowmap.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of chunkshadowmap.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkshadowmap (docs/vulkan-native-shaders.md section 4). One draw per mesh pool
+// Program interface of chunkshadowmap (docs/vulkan.md section 4). One draw per mesh pool
 // per cascade: the push block holds the sampler slot, then origin and mvpMatrix (80 B). The record holds
 // the subpixel padding and the previous-frame warp state vertexwarp.glsl reads.
 layout(push_constant, scalar) uniform OptimumDraw

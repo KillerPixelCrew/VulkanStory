@@ -37,7 +37,7 @@ internal struct AttachmentBlend : IEquatable<AttachmentBlend>
     /// the platform's stated state (StatedRenderState) applies to every attachment.
     ///
     /// A native render system states its blend outright rather than reading the tracker's
-    /// (docs/vulkan-native-render-systems.md, decision 3), and its call site says "blend on,
+    /// (docs/vulkan.md, decision 3), and its call site says "blend on,
     /// standard" the same way the OpenGL body does, so it builds the attachment through here
     /// instead of restating the factors and risking a pair that drifts from the table.
     /// </summary>

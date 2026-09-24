@@ -1,4 +1,4 @@
-// Native port of the game include normalshading.fsh (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include normalshading.fsh (docs/vulkan.md section 1).
 // optimum-port-of: normalshading.fsh
 // optimum-port: verbatim
 // optimum-program-uniform: vec3 lightPosition

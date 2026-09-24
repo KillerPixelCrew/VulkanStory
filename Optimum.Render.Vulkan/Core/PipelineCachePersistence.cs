@@ -13,7 +13,7 @@ namespace Optimum.Render.Vulkan.Core;
 ///
 /// A session that crashes, or is killed, loses everything a shutdown-only save would
 /// have written. Godot saves from a worker when the cache has grown by some megabytes
-/// rather than on a timer (docs/research/vulkan-caching.md §1, godot#76348); this is that
+/// rather than on a timer (docs/vulkan.md#caches §1, godot#76348); this is that
 /// rule, with the size sampled at most once per interval because the size query goes
 /// through the driver.
 /// </summary>
@@ -192,7 +192,7 @@ internal readonly record struct PipelineCacheIdentity(uint VendorId, uint Device
 /// the vendor, device, driver version, pointer size and UUID alongside a SHA-256 of
 /// the blob. Every field and the blob's own Vulkan header are checked before loading,
 /// and anything that fails is treated as no cache at all.
-/// Design and sources: docs/research/vulkan-caching.md §1 and "Design for this renderer" item 2.
+/// Design and sources: docs/vulkan.md#caches §1 and "Design for this renderer" item 2.
 /// </summary>
 internal static class PipelineCacheFile
 {
@@ -286,7 +286,7 @@ internal static class PipelineCacheFile
 /// moved over the destination. Two game instances saving at once lose one of the
 /// two writes, never corrupt the file. On Windows a virus scanner briefly holds
 /// newly written files open, which makes the move fail; the move is retried with
-/// a short backoff before the write is given up (docs/research/vulkan-caching.md §7).
+/// a short backoff before the write is given up (docs/vulkan.md#caches §7).
 /// </summary>
 internal static class CacheFileWriter
 {

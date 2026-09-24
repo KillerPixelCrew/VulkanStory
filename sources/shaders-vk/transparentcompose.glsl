@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of transparentcompose.vsh (docs/vulkan-native-shaders.md).
+// Native port of transparentcompose.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of transparentcompose.fsh (the Optimum override in sources/shaders, docs/vulkan-native-shaders.md).
+// Native port of transparentcompose.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // GBUFFER and TAAMOTION are variant axes: they gate outputs. The motion attachment is written through
 // optimumWriteReactiveOnly under the merge's additive (ONE, ONE) blend, so rg and a add zero and only b
 // accumulates, exactly as the GLSL 330 override does.
@@ -20,12 +20,12 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of transparentcompose (docs/vulkan-native-shaders.md section 4). A fullscreen pass: one
+// Program interface of transparentcompose (docs/vulkan.md section 4). A fullscreen pass: one
 // draw per Use(), so the push block holds only the sampler slots, in transparentcompose.fsh's declaration
 // order, and there is no program record.
 //
 // OITaccumulation is the fifth slot, the unit collectUniformNames assigns to the name `Array` it misreads
-// from `uniform sampler2DArray OITaccumulation` (docs/vulkan-native-shaders.md, "Family post").
+// from `uniform sampler2DArray OITaccumulation` (docs/vulkan.md, "Family post").
 layout(push_constant, scalar) uniform OptimumDraw
 {
     OPTIMUM_SAMPLER_SLOT(sampler2D, accumulation);

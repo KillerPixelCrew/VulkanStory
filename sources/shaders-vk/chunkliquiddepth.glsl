@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquiddepth.vsh (vanilla, docs/vulkan-native-shaders.md).
+// Native port of chunkliquiddepth.vsh (vanilla, docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunkliquiddepth.fsh (vanilla, docs/vulkan-native-shaders.md). The GLSL 330 output has no
+// Native port of chunkliquiddepth.fsh (vanilla, docs/vulkan.md). The GLSL 330 output has no
 // location; it is the only one, so it takes location 0.
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquiddepth (docs/vulkan-native-shaders.md section 4). One draw per mesh pool:
+// Program interface of chunkliquiddepth (docs/vulkan.md section 4). One draw per mesh pool:
 // the push block holds origin and modelViewMatrix (76 B). The program includes no owner of viewDistance
 // (fogandlight.vsh), so it is a record member here, with projectionMatrix and the previous-frame warp state
 // vertexwarp.glsl reads.

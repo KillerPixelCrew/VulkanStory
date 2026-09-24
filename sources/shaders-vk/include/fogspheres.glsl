@@ -1,4 +1,4 @@
-// Native port of the game include fogspheres.ash (docs/vulkan-native-shaders.md section 1).
+// Native port of the game include fogspheres.ash (docs/vulkan.md section 1).
 // optimum-port-of: fogspheres.ash
 // optimum-port: verbatim
 // optimum-program-uniform: float fogSpheres[3 * 8]

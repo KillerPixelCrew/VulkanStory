@@ -22,7 +22,7 @@ window). Mean absolute difference is in native units: 0-255 for PPM/PGM, raw
 values for PFM. A difference in the pattern of non-finite values (NaN/Inf) is a
 failure on its own. numpy only.
 
-Allowlist (docs/parity-allowlist.md): a markdown table whose first column is
+Allowlist (docs/vulkan.md): a markdown table whose first column is
 the attachment file name or an fnmatch glob (backticks are stripped) and whose
 third column bounds the accepted deviation with one or more of
   ssim>=<x>   mad<=<x>   missing   any
@@ -30,7 +30,7 @@ separated by commas. "missing" accepts a file that exists on one side only;
 "any" accepts everything. An allowlisted attachment outside its bounds fails.
 
 Usage:
-  scripts/dev/ssim.py <dirA> <dirB> [--allowlist docs/parity-allowlist.md]
+  scripts/dev/ssim.py <dirA> <dirB> [--allowlist docs/vulkan.md]
                       [--threshold 0.98] [--csv out.csv]
   scripts/dev/ssim.py --self-test
 Exit: 0 all attachments pass, 1 a failure, 2 usage or allowlist error.

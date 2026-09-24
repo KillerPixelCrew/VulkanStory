@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of lines.vsh (docs/vulkan-native-shaders.md).
+// Native port of lines.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of lines.fsh (docs/vulkan-native-shaders.md).
+// Native port of lines.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of lines (docs/vulkan-native-shaders.md section 4). No samplers, and the two matrices alone
+// Program interface of lines (docs/vulkan.md section 4). No samplers, and the two matrices alone
 // exceed the push budget, so there is no push block: every uniform is a record member, lines.vsh's then
 // lines.fsh's, each in declaration order. glowLevel's GLSL 330 initializer (1.0) is seeded by the runtime.
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram

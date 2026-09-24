@@ -9,7 +9,7 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), Phase 3b decision 5
+// Vulkan-native render systems (docs/vulkan.md), Phase 3b decision 5
 // stage 2: the entity system on the native device API.
 //
 // What it draws: every entity's animated shape - the body through entityanimated in the Opaque

@@ -21,7 +21,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// The terrain, drawn twice on one Vulkan device: through the stated multi-draw the OpenGL
 /// body takes (NativeChunksEnabled false) and through the native pass
 /// VulkanClientPlatform.NativeChunks.cs records inside a BeginChunkPass / EndChunkPass scope
-/// (docs/vulkan-native-render-systems.md, decision 5 stage 2).
+/// (docs/vulkan.md, decision 5 stage 2).
 ///
 /// Behavioural identity is the acceptance rule (decision 6). The same chunkopaque program, the
 /// same pooled mesh and the same fixed state have to put the same pixels on every attachment of

@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of shadowmapentityanimated.vsh (vanilla asset, docs/vulkan-native-shaders.md). No variant axes.
+// Native port of shadowmapentityanimated.vsh (vanilla asset, docs/vulkan.md). No variant axes.
 // The Animation block is a storage buffer at set 2 (section 3) with the same member; the bone array is a
 // runtime array because MAXANIMATEDELEMENTS is no longer a define.
 #include "bindings.glsl"
@@ -11,7 +11,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of shadowmapentityanimated.fsh (vanilla asset, docs/vulkan-native-shaders.md). No variant axes.
+// Native port of shadowmapentityanimated.fsh (vanilla asset, docs/vulkan.md). No variant axes.
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of shadowmapentityanimated (docs/vulkan-native-shaders.md section 4). The shadow pass
+// Program interface of shadowmapentityanimated (docs/vulkan.md section 4). The shadow pass
 // sets modelViewMatrix per entity (EntityShapeRenderer's isShadowPass branch) and addRenderFlags; with the
 // sampler slot they fit the push block (72 B). projectionMatrix is set once per shadow map and goes to the
 // record.

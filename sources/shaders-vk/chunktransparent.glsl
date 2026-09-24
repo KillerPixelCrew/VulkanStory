@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunktransparent.vsh (vanilla, docs/vulkan-native-shaders.md). Axis: USESSBO (attribute
+// Native port of chunktransparent.vsh (vanilla, docs/vulkan.md). Axis: USESSBO (attribute
 // layout and FaceData).
 #include "bindings.glsl"
 #include "frame.glsl"
@@ -10,7 +10,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of chunktransparent.fsh (vanilla, docs/vulkan-native-shaders.md). Axis: USEOIT, through
+// Native port of chunktransparent.fsh (vanilla, docs/vulkan.md). Axis: USEOIT, through
 // include/oit.glsl, which declares the six OIT outputs and OIT() only when it is 1. The client registers
 // chunktransparent with Oit = true (ShaderProgramBase's default), so USEOIT=0 is never linked; the GLSL 330
 // program has no outputs and no OIT() there either, so the 0 variant skips the call and writes nothing.
@@ -27,7 +27,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunktransparent (docs/vulkan-native-shaders.md section 4). One draw per mesh pool:
+// Program interface of chunktransparent (docs/vulkan.md section 4). One draw per mesh pool:
 // the push block holds the sampler slot, then origin, modelViewMatrix and forcedTransparency (84 B). The
 // record holds every other uniform, chunktransparent.vsh's first (the previous-frame warp state
 // vertexwarp.glsl reads comes with its include), then underwatereffects' frameSize.

@@ -1,6 +1,6 @@
 #version 450
 // Optimum ambient occlusion, pass 3 of 3: the edge-aware 3x3 denoise
-// (docs/research/ambient-occlusion.md C.8).
+// (docs/vulkan.md#ambient-occlusion C.8).
 //
 // One pass with TAA; the final pass scales the term back from the 1.5 packing.
 // Ported from XeGTAO's XeGTAO_Denoise (centre weight DenoiseBlurBeta on the final pass

@@ -525,7 +525,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     // ------------------------------------------------------------------- clears
 
     /// <summary>
-    /// Clears one colour slot of a declared native pass (docs/vulkan-native-render-systems.md,
+    /// Clears one colour slot of a declared native pass (docs/vulkan.md,
     /// decision 4). Unlike <see cref="ClearColor" /> this consults no draw-buffer mask and no
     /// tracked colour mask - a native pass states the slots it writes, and a slot it states is a
     /// slot it may clear. With the frame graph on and no scope open yet the clear is promoted, so

@@ -42,7 +42,7 @@ index 8667d95..89597a7 100644
 +	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the
 +	// renderers call, declared here so callers need no cast to a concrete platform. The
 +	// bodies are neutral (TAA off, no motion window, nothing resolved); the OpenGL bodies
-+	// live in ClientPlatformWindows as overrides. Semantics: docs/temporal-frame-contract.md v1.
++	// live in ClientPlatformWindows as overrides. Semantics: docs/vulkan.md v1.
 +	public virtual int MotionAttachmentIndex
 +	{
 +		get
@@ -422,7 +422,7 @@ index 8667d95..89597a7 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum AO (docs/research/ambient-occlusion.md): records the platform's own ambient
++	/// Optimum AO (docs/vulkan.md#ambient-occlusion): records the platform's own ambient
 +	/// occlusion for this frame and returns the visibility texture the scene composes; 0 means
 +	/// vanilla SSAO runs. The neutral body, and so the OpenGL path, always returns 0.
 +	/// </summary>

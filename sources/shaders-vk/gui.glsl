@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of gui.vsh (docs/vulkan-native-shaders.md).
+// Native port of gui.vsh (docs/vulkan.md).
 // The Animation UBO is the set 2 animation storage buffer. MAXANIMATEDELEMENTS is a client setting the
 // offline build cannot know, so the array is unsized; jointId indexes it exactly as before.
 #include "bindings.glsl"
@@ -11,7 +11,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of gui.fsh (docs/vulkan-native-shaders.md).
+// Native port of gui.fsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of gui (docs/vulkan-native-shaders.md section 4, GUI row). The push block holds the two
+// Program interface of gui (docs/vulkan.md section 4, GUI row). The push block holds the two
 // sampler slots in gui.fsh's declaration order, then the per-element uniforms RenderAPIGame.RenderRectangle
 // sets on every rectangle (rgbaIn, extraGlow, applyColor, noTexture, overlayOpacity). The record holds
 // projectionMatrix, modelViewMatrix, modelMatrix and every other uniform: gui.vsh's in declaration order,

@@ -219,7 +219,7 @@ rays and final composition. FSR 1's RCAS takes its place when FSR is active.
 GPU pass timings can be logged with `OPTIMUM_VULKAN_PASS_TIMES=1`; Vulkan
 validation can be enabled with `OPTIMUM_VULKAN_VALIDATION=1` and
 `OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best` when the validation layer is
-installed. See [Vulkan acceptance](docs/vulkan-acceptance.md) for the renderer
+installed. See [Vulkan acceptance](docs/vulkan.md) for the renderer
 confirmation, parity and pacing procedures.
 
 ## Build

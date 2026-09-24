@@ -10,7 +10,7 @@ using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
-// Vulkan-native render systems (docs/vulkan-native-render-systems.md), stage 1: the blit to
+// Vulkan-native render systems (docs/vulkan.md), stage 1: the blit to
 // the swapchain-equivalent Default target runs natively. The three branches are the GL body's
 // (ClientPlatformWindows.BlitPrimaryToDefault): the TAA debug view, FSR (EASU into the FSR
 // target, RCAS into Default) and the plain blit, with the same conditions and uniform values.

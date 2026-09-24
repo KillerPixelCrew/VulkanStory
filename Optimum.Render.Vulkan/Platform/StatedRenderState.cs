@@ -9,7 +9,7 @@ namespace Optimum.Render.Vulkan.Platform;
 
 /// <summary>
 /// The fixed-function state the client stated through the platform's virtuals, with OpenGL's
-/// semantics, owned by the platform (docs/vulkan-native-render-systems.md, decision 3: a native
+/// semantics, owned by the platform (docs/vulkan.md, decision 3: a native
 /// system reads client state, never the device's). The generic native draw
 /// (VulkanClientPlatform.NativeStated.cs) builds its pipeline, pass and textures from this alone.
 ///

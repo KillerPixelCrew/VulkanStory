@@ -11,7 +11,7 @@ namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
 /// <c>sources/shaders-vk/include/motion.glsl</c>, the only motion writer of the native shaders
-/// (docs/vulkan-native-shaders.md section 7), rendered on the device and read back.
+/// (docs/vulkan.md section 7), rendered on the device and read back.
 ///
 /// The include is written in the common subset of GLSL 330 and 450, so a fixture fragment shader
 /// that inlines its text links through the device the way today's programs do; native linking

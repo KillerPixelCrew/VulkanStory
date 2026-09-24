@@ -2,7 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of aurora.vsh (docs/vulkan-native-shaders.md).
+// Native port of aurora.vsh (docs/vulkan.md).
 // aurora.vsh declares shadowCoordsFar/Near itself under SHADOWQUALITY (it does not include shadowcoords.vsh)
 // and never writes them. SHADOWQUALITY is a specialization constant, so they are declared unconditionally at
 // the locations fogandlight.fsh reads, and stay unwritten as in GLSL 330.
@@ -13,7 +13,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of aurora.fsh (docs/vulkan-native-shaders.md).
+// Native port of aurora.fsh (docs/vulkan.md).
 // USEOIT is an axis because oit.fsh gates its outputs on it; the program is registered with Oit = true, and
 // in the never-selected USEOIT=0 variant the writes to oit.fsh's outputs are compiled out (family 5 decision).
 // The vertex stage includes fogandlight.vsh (contract section 3, cross-stage owners).
@@ -26,7 +26,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of aurora (docs/vulkan-native-shaders.md section 4). One draw per Use(): the push block
+// Program interface of aurora (docs/vulkan.md section 4). One draw per Use(): the push block
 // holds only the sampler slot; every other uniform is a record member: aurora.vsh's, aurora.fsh's (its second
 // auroraCounter is the same name), then fogandlight.fsh's windWaveCounter (its owner vertexwarp.vsh is not
 // included).

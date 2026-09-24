@@ -2,14 +2,14 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of sky.vsh (docs/vulkan-native-shaders.md).
+// Native port of sky.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of sky.fsh (docs/vulkan-native-shaders.md). Axis: GBUFFER (the G-buffer outputs).
+// Native port of sky.fsh (docs/vulkan.md). Axis: GBUFFER (the G-buffer outputs).
 // The vertex stage includes fogandlight.vsh, which owns the flatFogDensity and fogSpheres that
 // fogandlight.fsh and skycolor.fsh read here (contract section 3, cross-stage owners).
 #define OPTIMUM_FRAME_OWNER_FOGANDLIGHT_VSH
@@ -20,7 +20,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of sky (docs/vulkan-native-shaders.md section 4). One draw per Use() and no sampler of
+// Program interface of sky (docs/vulkan.md section 4). One draw per Use() and no sampler of
 // its own (sky and glow are set 0 frame textures), so there is no push block; every uniform is a record
 // member: sky.vsh's, sky.fsh's, then fogandlight.fsh's windWaveCounter (vertexwarp.vsh, its owner, is not
 // included) and underwatereffects.fsh's frameSize.

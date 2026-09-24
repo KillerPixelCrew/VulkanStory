@@ -22,7 +22,7 @@ internal sealed class NativeShaderBuildResult
 
 /// <summary>
 /// The offline native shader compiler behind <c>tools/shader-compiler</c>
-/// (docs/vulkan-native-shaders.md sections 5 and 6).
+/// (docs/vulkan.md sections 5 and 6).
 ///
 /// For every <c>&lt;program&gt;.glsl</c> in the source directory it resolves
 /// <c>#include</c>s (the including file's directory first, then <c>include/</c>), finds the variant

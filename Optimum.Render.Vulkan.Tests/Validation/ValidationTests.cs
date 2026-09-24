@@ -336,7 +336,7 @@ public class ValidationFeaturesTests
     }
 
     /// <summary>
-    /// The layer's own setting names (docs/research/vulkan-validation.md §1): best practices report as
+    /// The layer's own setting names (docs/vulkan.md#validation-and-acceptance §1): best practices report as
     /// warnings and performance messages, so "best" also widens report_flags; the desktop vendor
     /// sets come with it, the mobile ones only on request.
     /// </summary>

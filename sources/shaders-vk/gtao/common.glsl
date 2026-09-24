@@ -1,5 +1,5 @@
 // Shared declarations of Optimum's ambient occlusion compute passes
-// (docs/research/ambient-occlusion.md, section C): the push constant block, the
+// (docs/vulkan.md#ambient-occlusion, section C): the push constant block, the
 // specialization constant ids, depth and position reconstruction, the edge
 // packing and the Hilbert + R2 noise.
 //
