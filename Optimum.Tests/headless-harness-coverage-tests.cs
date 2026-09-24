@@ -135,7 +135,7 @@ public class HeadlessHarnessCoverageTests
     [Fact]
     public void EveryNewLibMemberIsListedForTheCecilTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string[] platformMembers =
         {
@@ -413,7 +413,7 @@ public class HeadlessHarnessCoverageTests
     [Fact]
     public void ThePatcherCarriesBothBodies()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"StartAudio\", 0", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"set_MasterSoundLevel\", 1", patcher);
     }
@@ -459,7 +459,7 @@ public class HeadlessHarnessCoverageTests
         Assert.Contains("ExitWhenDone = ResolveFlag(\"OPTIMUM_HEADLESS_EXIT_WHEN_DONE\")", api);
 
         // The patcher carries the new members, or the transplant drops them silently.
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"optimumHeadlessExitRequested\"", patcher);
         Assert.Contains("\"OptimumHeadlessExitIfDone\"", patcher);
 

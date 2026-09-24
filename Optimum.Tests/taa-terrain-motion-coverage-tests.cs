@@ -245,7 +245,7 @@ public class TaaTerrainMotionCoverageTests
 
         // Both cached fields have to be transplanted, or the Cecil'd build has
         // BeginMotionWrite referring to members the shipped type does not carry.
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"optimumMotionDrawBuffersOn\"", patcher);
         Assert.Contains("\"optimumMotionDrawBuffersOff\"", patcher);
 
@@ -322,7 +322,7 @@ public class TaaTerrainMotionCoverageTests
         string body = source.Substring(toggle, toggleEnd - toggle);
         Assert.True(Count(body, "ApplyOptimumMotionBlendState();") >= 6,
             "every blend-mode branch has to re-apply the motion attachment's replace blending");
-        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2", PatcherSource.Read());
     }
 
     // ------------------------------------------------------------- the caller
@@ -513,7 +513,7 @@ public class TaaTerrainMotionCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryTerrainMotionMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"BeginMotionWrite\"", patcher);
         Assert.Contains("\"EndMotionWrite\"", patcher);

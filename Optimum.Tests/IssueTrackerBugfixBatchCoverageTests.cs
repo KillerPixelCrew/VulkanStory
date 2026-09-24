@@ -48,7 +48,7 @@ public class IssueTrackerBugfixBatchCoverageTests
     [Fact]
     public void RenderMultiTextureMeshIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.RenderAPIBase\", \"RenderMultiTextureMesh\", 3", programSource);
     }
 

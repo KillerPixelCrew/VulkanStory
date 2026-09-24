@@ -203,7 +203,7 @@ public class AmbientOcclusionCoverageTests
         Assert.Contains("block.Attributes?[\"optimumAoThin\"]?.AsBool(false) == true", classSource);
         Assert.Contains("colorMapData & ~ThinBit", classSource);
         Assert.Contains("internal static int PackCross", classSource);
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.OptimumAoClass\"", patcher);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.CrossTesselator\", \"DrawCross\", 2)", patcher);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.JsonTesselator\", \"AddJsonModelDataToMesh\", 7)", patcher);
@@ -261,7 +261,7 @@ public class AmbientOcclusionCoverageTests
     [Fact]
     public void EveryChangedMemberIsListedForTheCecilTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         foreach (string member in new[]
         {
             "RenderOptimumAmbientOcclusion", "OptimumAmbientOcclusionDebugTexture", "optimumAmbientOcclusionTexture",
@@ -356,9 +356,15 @@ public class AmbientOcclusionCoverageTests
     public void TheMasterSwitchHasItsLangEntriesAndItsPatcherListing()
     {
         string lang = Read("sources/lang/en.json");
-        Assert.Contains("\"optimum-ao\":", lang);
-        Assert.Contains("\"optimum-ao-tooltip\":", lang);
-        Assert.Contains("\"onOptimumAmbientOcclusionChanged\"", Read("Optimum.Patcher/Program.cs"));
+        foreach (string key in new[]
+        {
+            "optimum-ao", "optimum-ao-tooltip",
+            "optimum-ao-off", "optimum-ao-auto", "optimum-ao-vanilla", "optimum-ao-gtao",
+        })
+        {
+            Assert.Contains("\"" + key + "\":", lang);
+        }
+        Assert.Contains("\"onOptimumAmbientOcclusionChanged\"", PatcherSource.Read());
     }
 
     // ------------------------------------------------------------------ the debug view
@@ -429,7 +435,7 @@ public class AmbientOcclusionCoverageTests
         string lang = Read("sources/lang/en.json");
         Assert.Contains("\"optimum-aodebug\":", lang);
         Assert.Contains("\"optimum-aodebug-tooltip\":", lang);
-        Assert.Contains("\"onOptimumAmbientOcclusionDebugChanged\"", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"onOptimumAmbientOcclusionDebugChanged\"", PatcherSource.Read());
     }
 
     // ------------------------------------- the AO step drawn natively (Phase 3b stage 1c)
@@ -543,7 +549,7 @@ public class AmbientOcclusionCoverageTests
         Assert.Contains("optimumSsaoInScene = false;", platform);
         Assert.Contains("optimumAmbientOcclusionTexture = 0;", platform);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
         foreach (string member in new[]
                  {
@@ -661,7 +667,7 @@ public class SceneSsaoCoverageTests
         Assert.Contains("if (optimumSsaoInScene == 0)", Read("sources/shaders/final.fsh"));
         Assert.Contains("uniform int optimumSsaoInScene;", Read("sources/shaders/final.fsh"));
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"optimumSsaoInScene\"", patcher);
         Assert.Contains("\"ApplyOptimumSceneSsao\"", patcher);
         Assert.Contains("\"SceneSsao\"", patcher);
@@ -825,7 +831,7 @@ public class SsaoTemporalDitherCoverageTests
         // The method is a Cecil transplant; an edited body only ships if it is listed.
         Assert.Contains(
             "new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"RenderPostprocessingEffects\", 1)",
-            Read("Optimum.Patcher/Program.cs"));
+            PatcherSource.Read());
     }
 
     /// <summary>

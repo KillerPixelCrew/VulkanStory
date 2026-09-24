@@ -72,7 +72,7 @@ public class NativeWorldSystemsCoverageTests
     [Fact]
     public void TheSeamAndItsCallerAreListedForTheTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"RenderSkyDome\"", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemRenderSkyColor\", \"OnRenderFrame3D\", 1", patcher);
     }
@@ -257,7 +257,7 @@ public class NativeWorldSystemsCoverageTests
     [Fact]
     public void TheChunkSeamAndItsCallersAreListedForTheTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"BeginChunkPass\"", patcher);
         Assert.Contains("\"EndChunkPass\"", patcher);
         foreach (string method in new[] { "RenderShadow", "RenderOpaque", "RenderOIT", "RenderAfterOIT" })
@@ -370,7 +370,7 @@ public class NativeWorldSystemsCoverageTests
     [Fact]
     public void TheEntitySeamAndItsCallerAreListedForTheTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"RenderEntityMesh\"", patcher);
         Assert.Contains("\"Vintagestory.Client.RenderAPIBase\", \"RenderMultiTextureMesh\", 3", patcher);
     }
@@ -564,7 +564,7 @@ public class NativeWorldSystemsCoverageTests
     [Fact]
     public void TheWorldSeamsAndTheirCallersAreListedForTheTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         foreach (string seam in new[]
                  {
                      "RenderNightSkyBox", "RenderCelestialQuad", "RenderSunQuad", "RenderParticles",
@@ -726,7 +726,7 @@ public class NativeWorldSystemsCoverageTests
     [Fact]
     public void TheGuiSeamsAndTheirCallersAreListedForTheTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"RenderTextureQuad\"", patcher);
         Assert.Contains("\"RenderOverlayLines\"", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"RenderTextureIntoFrameBuffer\", 10", patcher);
@@ -851,7 +851,7 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("Platform.RenderGuiQuad(quadModel, textureid);", main);
         Assert.Contains("Platform.RenderGuiQuad(vao, meshRef.textureids[i]);", main);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"RenderGuiQuad\"", patcher);
         Assert.Contains("\"Render2DTextureFlipped\", 7", patcher);
 

@@ -188,7 +188,7 @@ public class TaaSettingsCoverageTests
     [Fact]
     public void TheHandlersAreListedForTheCecilTransplant()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"onOptimumTaaChanged\"", patcher);
         Assert.Contains("\"onOptimumTaaSharpnessChanged\"", patcher);
         Assert.Contains("\"onOptimumTaaMipBiasChanged\"", patcher);

@@ -117,7 +117,7 @@ public class FsrPipelineCoverageTests
         // The FSR sharpen pass takes its viewport from LoadFrameBuffer(Default), so that site
         // reads the seam too.
         Assert.Contains("Size2i optimumDefaultSize = OptimumWindowClientSize();", platform);
-        Assert.Contains("\"OptimumWindowClientSize\"", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"OptimumWindowClientSize\"", PatcherSource.Read());
     }
 
     [Fact]
@@ -199,7 +199,7 @@ public class FsrPipelineCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryFsrMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"SetupDefaultFrameBuffers\", 0", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"BlitPrimaryToDefault\", 0", patcher);
@@ -362,7 +362,7 @@ public class GodRaysSampleCapTests
     {
         string patch = PatchReader.ReadPatch(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("godrays.Uniform(\"maxGodRaySamples\", OptimumConfig.GodRaysSampleLimit);", patch);
         Assert.Contains(

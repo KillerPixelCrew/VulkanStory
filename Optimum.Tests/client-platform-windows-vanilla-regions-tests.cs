@@ -304,7 +304,7 @@ public class PlatformDeviceBranchMoveCoverageTests
         string vulkan = StripComments(VulkanPlatformSource.Read());
         string abstractPlatform = StripComments(Read(AbstractSource));
         string windows = StripComments(VulkanPlatformSource.ReadClientPlatformWindows());
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string injectedAbstract = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()", "},");
         string virtualized = Block(patcher, "var methodsToVirtualize = new List<MethodTarget>", "};");
         string selfCheck = Block(Read(VulkanPlatformSource.MainFile), "internal static readonly ExpectedVirtual[] ExpectedVirtuals", "};");
@@ -347,7 +347,7 @@ public class PlatformDeviceBranchMoveCoverageTests
     public void TheThreeBaseEditsAreInPlace()
     {
         string windows = VulkanPlatformSource.ReadClientPlatformWindows();
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string frame = Body(windows, "private void window_RenderFrame(FrameEventArgs e)");
         int begin = frame.IndexOf("BeginFrame();", StringComparison.Ordinal);
@@ -377,7 +377,7 @@ public class PlatformDeviceBranchMoveCoverageTests
     [Fact]
     public void TheInjectedPlatformStateAccessorsAreShippedAndSelfChecked()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string injectedWindows = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformWindows\"] = new()", "},");
         string selfCheck = Block(Read(VulkanPlatformSource.MainFile), "internal static readonly string[] ExpectedWindowsMembers", "};");
         string windows = VulkanPlatformSource.ReadClientPlatformWindows();
@@ -639,7 +639,7 @@ public class PlatformSeamDeletionCoverageTests
             Assert.Equal("{ }", Regex.Replace(Body(vulkan, signature), @"\s+", " ").Trim());
         }
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"" + name + "\",", Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()", "},"));
         Assert.Contains("\"" + name + "\",", Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformWindows\"] = new()", "},"));
 
@@ -651,7 +651,7 @@ public class PlatformSeamDeletionCoverageTests
     [Fact]
     public void TheRemovedInjectedHelpersAreNoLongerShipped()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.DoesNotContain("\"SetOptimumDepthCompare\"", patcher);
         Assert.DoesNotContain("\"SetOptimumOitSampling\"", patcher);
     }

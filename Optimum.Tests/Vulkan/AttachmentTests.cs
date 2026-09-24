@@ -254,7 +254,7 @@ public class UiSeparationCoverageTests
             "the compose must sit between the Ortho stage and the Done stage:\n" + body);
         Assert.Single(Regex.Matches(body, @"OptimumComposeUiTarget\(\)"));
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientMain\", \"RenderToDefaultFramebuffer\", 1),", patcher);
     }
 
@@ -267,7 +267,7 @@ public class UiSeparationCoverageTests
         int compose = body.IndexOf("Platform.OptimumComposeUiTarget();", StringComparison.Ordinal);
         Assert.True(blit >= 0 && screen > blit && compose > screen,
             "the menu compose must follow the screen's own drawing:\n" + body);
-        Assert.Contains("new(\"Vintagestory.Client.ScreenManager\", \"Render\", 1),", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Client.ScreenManager\", \"Render\", 1),", PatcherSource.Read());
     }
 
     [Fact]
@@ -277,7 +277,7 @@ public class UiSeparationCoverageTests
         Assert.Equal("{ }", Regex.Replace(Body(platform, "public virtual void OptimumComposeUiTarget()"), @"\s+", " ").Trim());
         Assert.DoesNotContain("OptimumComposeUiTarget", ReadLib("Vintagestory.Client.NoObf/ClientPlatformWindows.cs"));
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"OptimumComposeUiTarget\",", patcher);
         Assert.Contains("new(true, \"OptimumComposeUiTarget\", Array.Empty<string>()),",
             Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs"));
@@ -291,7 +291,7 @@ public class UiSeparationCoverageTests
         string registry = ReadLib("Vintagestory.Client.NoObf/ShaderRegistry.cs");
         Assert.Contains("RegisterOptimumShaderProgram(\"ui-compose\", ShaderPrograms.UiCompose = new ShaderProgram());", registry);
         Assert.Contains("shaderProgram == ShaderPrograms.UiCompose)", registry);
-        Assert.Contains("\"UiCompose\",", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"UiCompose\",", PatcherSource.Read());
 
         // A pass-through: blit.fsh's forced alpha of 1 would cover the world with the UI image.
         foreach (string file in new[] { "sources/shaders/ui-compose.fsh", "sources/shaders-vk/ui-compose.frag" })

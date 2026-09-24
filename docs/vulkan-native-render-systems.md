@@ -261,7 +261,7 @@ The sky dome proved the mesh-draw API; this wave takes the systems whose shape i
 motion attachment.
 
 - **Seams** (`ClientPlatformAbstract`, each with the neutral body of the draw it replaced, each
-  listed in `Optimum.Patcher/Program.cs` and in `VulkanClientPlatform.ExpectedVirtuals`):
+  listed in `Optimum.Patcher/PatchManifest.cs` and in `VulkanClientPlatform.ExpectedVirtuals`):
   - `RenderNightSkyBox(MeshRef, int cubeTextureId)` - `SystemRenderNightSky`'s star cube;
   - `RenderCelestialQuad(MeshRef, int bodyTextureId, int skyTextureId, int glowTextureId)` - the
     moon, under `celestialobject`;

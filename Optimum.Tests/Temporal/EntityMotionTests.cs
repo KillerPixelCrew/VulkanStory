@@ -311,7 +311,7 @@ public class TaaEntityMotionCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryEntityMotionMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"BlockName\",", patcher);
         Assert.Contains("\"BindingPoint\",", patcher);

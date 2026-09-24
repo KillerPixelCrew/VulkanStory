@@ -330,7 +330,7 @@ public class TaaLiquidMotionCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryLiquidMotionMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"BeginMotionOnlyWrite\"", patcher);
         Assert.Contains("\"EndMotionOnlyWrite\"", patcher);

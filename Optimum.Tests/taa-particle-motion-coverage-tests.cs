@@ -290,7 +290,7 @@ public class TaaParticleMotionCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryParticleMotionMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemRenderParticles\", \"OnRenderFrame3D\", 1", patcher);
         Assert.Contains("\"SetOptimumMotionUniforms\"", patcher);

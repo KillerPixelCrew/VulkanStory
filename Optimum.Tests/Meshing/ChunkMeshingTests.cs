@@ -88,7 +88,7 @@ public class ChiselLodCoverageTests
     [Fact]
     public void ChiselLodClosedSourceRouteIsRegisteredAsCecilTargets()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         string cecilList = File.ReadAllText(FindRepositoryFile("patches/cecil-owned.list"));
 
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"UpdateForAtlasses\", 1", programSource);
@@ -345,7 +345,7 @@ public class ChunkMeshingQuickWinsCoverageTests
     [Fact]
     public void OnBeforeFrameIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselatorManager\", \"OnBeforeFrame\", 1", programSource);
     }
 
@@ -367,7 +367,7 @@ public class ChunkMeshingQuickWinsCoverageTests
     [Fact]
     public void AddTesselatedChunkIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkRenderer\", \"AddTesselatedChunk\", 2", programSource);
     }
 
@@ -393,7 +393,7 @@ public class ChunkMeshingQuickWinsCoverageTests
     [Fact]
     public void AddCenterAndEdgeToPoolsAreRegisteredAsCecilTransplantTargets()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
 
         Assert.Contains("\"Vintagestory.Client.NoObf.TesselatedChunk\", \"AddCenterToPools\", 5", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.TesselatedChunk\", \"AddEdgeToPools\", 5", programSource);

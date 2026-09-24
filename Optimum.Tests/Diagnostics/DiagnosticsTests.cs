@@ -259,8 +259,7 @@ public class OptimumStatusTests
         Assert.Contains("GetGameLaunchTaskSummary()", diagnosticsSource);
         Assert.Contains("ResetGameLaunchTasks();", diagnosticsSource);
 
-        string patcherSource = File.ReadAllText(PatchReader.FindRepositoryFile(
-            "Optimum.Patcher/Program.cs"));
+        string patcherSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"ExecuteMainThreadTasks\", 1", patcherSource);
     }
 }

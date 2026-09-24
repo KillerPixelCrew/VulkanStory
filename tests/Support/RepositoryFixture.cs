@@ -146,6 +146,19 @@ internal static class VulkanDeviceSource
 
 namespace Optimum.Tests
 {
+using System.IO;
+
+/// <summary>The patch selection and CLI source, kept separate at runtime.</summary>
+internal static class PatcherSource
+{
+    public static string Read() =>
+        File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/PatchManifest.cs")) + "\n" +
+        File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+}
+}
+
+namespace Optimum.Tests
+{
 using System;
 using System.IO;
 

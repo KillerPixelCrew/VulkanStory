@@ -5,10 +5,21 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Optimum.Patcher;
 using Xunit;
 
 public class CecilPatchOwnershipTests
 {
+    [Fact]
+    public void CecilOwnershipListMatchesTheTypedManifest()
+    {
+        string root = FindRepositoryRoot();
+        string[] checkedIn = File.ReadAllLines(Path.Combine(root, "patches", "cecil-owned.list"))
+            .Where(line => line.StartsWith("patches/", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(PatchManifest.Create().CecilOwnedPatchPaths(root), checkedIn);
+    }
+
     private static readonly HashSet<string> KnownUnownedLibPatches = new(StringComparer.Ordinal)
     {
         "patches/VintagestoryLib/Vintagestory.API.Common/EventHelper.cs.patch",
@@ -72,7 +83,7 @@ public class CecilPatchOwnershipTests
     /// GameDatabase.cs.patch), deliberately left unallowlisted rather than
     /// papered over: they're real Optimum dependencies of already-cecil-owned
     /// server patches (ServerSystemSupplyChunks, ServerSystemLoadAndSaveGame),
-    /// but Optimum.Patcher/Program.cs had zero Vintagestory.Server.* targets at
+    /// but patch selection had zero Vintagestory.Server.* targets at
     /// all - the entire "Server-side worldgen scheduler and chunk read pool"
     /// section of cecil-owned.list had never actually been wired up, despite
     /// claiming to ship since 2026-07-28. Fixed 2026-08-11: the server-side
@@ -110,8 +121,7 @@ public class CecilPatchOwnershipTests
         // The patcher handles client patches only; server features compile in.
         // This test validates that if TickSlice ever moves to Cecil, the naming
         // convention (PascalCase) is used. For now, just verify the patcher loads.
-        string source = File.ReadAllText(
-            Path.Combine(FindRepositoryRoot(), "Optimum.Patcher", "Program.cs"));
+        string source = PatcherSource.Read();
 
         Assert.DoesNotContain("\"optimumTickSliceCount\"", source);
     }
@@ -145,7 +155,7 @@ using Vintagestory.Client.NoObf;
 using Xunit;
 
 // The release DLL is the vanilla assembly with selected method bodies
-// cecil-transplanted from this compiled donor (Optimum.Patcher/Program.cs).
+// cecil-transplanted from this compiled donor (Optimum.Patcher/PatchManifest.cs).
 // A transplanted body's member references resolve at JIT time against the
 // vanilla definitions by name AND signature, so any member a transplanted
 // method touches must keep its vanilla type in the donor. Optimum 0.2.1

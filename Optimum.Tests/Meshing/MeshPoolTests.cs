@@ -127,7 +127,7 @@ public class MeshPartPoolTests
     [Fact]
     public void PatcherRegistersOptimumCloneChunkMeshTransplant()
     {
-        string program = File.ReadAllText(Path.Combine(RepoRoot(), "Optimum.Patcher/Program.cs"));
+        string program = PatcherSource.Read();
         Assert.Contains("\"OptimumCloneChunkMesh\"", program);
     }
 }

@@ -336,7 +336,7 @@ public sealed class ChunkReadPoolLifecycleTests
     {
         string patch = PatchReader.ReadPatch(
             "patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch");
-        string program = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string program = PatcherSource.Read();
         string ilHook = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/ILHook.cs"));
 
         Assert.Contains("DisposeOptimumChunkReadPool();", patch);

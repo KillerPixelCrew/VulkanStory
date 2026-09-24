@@ -147,7 +147,7 @@ public class VulkanBackendIntegrationTests
         string owned = Read("patches/cecil-owned.list");
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch", owned);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("new(\"Vintagestory.Client.ClientProgram\", \"Start\", 2)", patcher);
     }
 
@@ -323,7 +323,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TheFramebufferHelpersLiveInTheVulkanPlatformAndTheirStateAccessorsAreInjected()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string vulkan = VulkanPlatformSource.Read();
 
         foreach (string helper in new[] { "SetupOptimumFrameBuffers", "CreateOptimumColorTarget", "SetupOptimumTextureSampler", "CreateOptimumDepthTarget", "CreateOptimumFramebuffer" })

@@ -50,7 +50,7 @@ using Xunit;
 /// across calls is safe).
 /// ClientMain.tesselationWorkers (readonly OptimumTesselationWorkerRegistry) is
 /// the seventh, and is the same class of bug hitting the *other* patcher
-/// entry point: Optimum.Patcher/Program.cs's membersToInject, consumed by
+/// entry point: Optimum.Patcher/PatchManifest.cs's membersToInject, consumed by
 /// MemberInjector.InjectStaticMembers via ILPatcher.PatchWithInjection - the
 /// main VintagestoryLib donor transplant, not the runtime mod-patcher.cs path
 /// the six instances above went through, but the same InjectStaticMembers

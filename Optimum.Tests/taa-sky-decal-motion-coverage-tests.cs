@@ -446,7 +446,7 @@ public class TaaSkyDecalMotionCoverageTests
     [Fact]
     public void CecilPatcherShipsEverySkyAndDecalMotionMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemRenderDecals\", \"OnRenderFrame3D\", 1", patcher);
         Assert.Contains("\"RenderOptimumSkyMotion\"", patcher);

@@ -44,7 +44,7 @@ public sealed class CrashRecoveryCoverageTests
     {
         string source = PatchReader.ReadPatch(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch");
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("program.Disposed", source);
         Assert.Contains("programByName.Disposed", source);
@@ -121,7 +121,7 @@ public sealed class CrashRecoveryCoverageTests
         Assert.Contains("failed output validation", patcher);
         Assert.Contains("requireAllTargets: true", patcher);
         Assert.Contains("Optional: true", patcher);
-        Assert.Contains("TargetDeclaringType", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("TargetDeclaringType", PatcherSource.Read());
         Assert.Contains("targetParameterTypes", Read("Optimum.Patcher/ILHook.cs"));
         Assert.Contains("TargetReturnType", Read("Optimum.Patcher/ILPatcher.cs"));
         Assert.Contains("TargetCallingConvention", Read("Optimum.Patcher/ILPatcher.cs"));

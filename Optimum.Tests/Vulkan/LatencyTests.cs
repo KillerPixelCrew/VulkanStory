@@ -115,7 +115,7 @@ public class LatencyHooksCoverageTests
     [Fact]
     public void ThePatcherShipsBothMembers()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string injected = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()", "},");
         Assert.Contains("\"LatencySleep\",", injected);
@@ -513,7 +513,7 @@ public class PacingLogFormatCoverageTests
         Assert.Contains("object[] fields = new object[7];", clientMain);
         Assert.Contains("fields[6] = stddev;", clientMain);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"OptimumLogFrameTime\"", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"MainRenderLoop\", 1", patcher);
     }

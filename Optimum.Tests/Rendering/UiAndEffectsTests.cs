@@ -22,7 +22,7 @@ public class GuiManagerCoverageTests
     [InlineData("OnMouseMove")]
     public void MethodIsRegisteredAsACecilTransplantTarget(string methodName)
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains($"\"Vintagestory.Client.NoObf.GuiManager\", \"{methodName}\"", programSource);
     }
 
@@ -59,7 +59,7 @@ public class GuiManagerCoverageTests
         // lambdas persist regardless of this fix, so the LINQ removal here
         // wouldn't unlock transplant capability. Confirms nobody registered
         // it as a transplant target without also handling those lambdas.
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.DoesNotContain("\"RequestFocus\"", programSource);
     }
 
@@ -132,7 +132,7 @@ public class ParticleDistanceGateCoverageTests
     [Fact]
     public void SpawnParticlesIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ParticlePoolQuads\", \"SpawnParticles\"", programSource);
     }
 

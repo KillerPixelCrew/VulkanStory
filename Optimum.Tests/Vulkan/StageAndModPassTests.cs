@@ -310,7 +310,7 @@ public class RenderStageHooksCoverageTests
     [Fact]
     public void ThePatcherShipsTheMethodAndTheVirtuals()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientMain\", \"TriggerRenderStage\", 2),", patcher);
 
         string injected = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()", "},");

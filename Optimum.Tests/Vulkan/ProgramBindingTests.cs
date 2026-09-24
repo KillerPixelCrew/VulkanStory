@@ -224,7 +224,7 @@ public class PlatformClientProgramCoverageTests
     [Fact]
     public void ThePatcherListsEveryNewMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string abstractMembers = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()");
         Assert.Contains("\"InitializeGraphics\",", abstractMembers);
@@ -498,7 +498,7 @@ public class PlatformProgramUboVirtualsCoverageTests
     [Fact]
     public void ThePatcherInjectsTheVirtualsAndTheOverridesAndKeepsTheBodyTargets()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string abstractMembers = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()");
         string windowsMembers = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformWindows\"] = new()");

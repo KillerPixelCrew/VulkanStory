@@ -695,7 +695,7 @@ public class TaaSharpenCoverageTests
             < setter.IndexOf("game.Platform.SetTextureLodBias(textureIds, bias);", StringComparison.Ordinal));
 
         // And the Cecil transplant carries both new members.
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"ApplyOptimumTerrainSamplerLodBias\"", patcher);
         Assert.Contains("\"ApplyOptimumSamplerLodBias\"", patcher);
     }
@@ -722,7 +722,7 @@ public class TaaSharpenCoverageTests
     [Fact]
     public void CecilPatcherShipsTheSharpenMembers()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"OptimumTaaSharpenIndex\"", patcher);
         Assert.Contains("\"OptimumFsrBlitActive\"", patcher);
         Assert.Contains("\"RenderOptimumTaaSharpen\"", patcher);

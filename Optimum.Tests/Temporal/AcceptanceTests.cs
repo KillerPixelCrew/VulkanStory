@@ -145,7 +145,7 @@ public class TaaAcceptanceHarnessCoverageTests
     [Fact]
     public void CecilPatcherShipsTheFrameTimeLogMembers()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"optimumFpsLogPath\"", patcher);
         Assert.Contains("\"optimumFpsLogResolved\"", patcher);

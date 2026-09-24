@@ -85,7 +85,7 @@ public class EcoMachinaIlCompatTests
     [Fact]
     public void CalculateVisibleFacesShipsThroughCecil()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         string cecilList = File.ReadAllText(FindRepositoryFile("patches/cecil-owned.list"));
 
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"CalculateVisibleFaces\", 4", programSource);

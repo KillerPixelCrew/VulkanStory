@@ -250,7 +250,7 @@ public class ItemRenderInfoReuseTests
     [Fact]
     public void PatcherRegistersItemRenderMembersAndTransplant()
     {
-        string program = File.ReadAllText(Path.Combine(RepoRoot(), "Optimum.Patcher/Program.cs"));
+        string program = PatcherSource.Read();
         Assert.Contains("optimumGuiRenderInfoScratch", program);
         Assert.Contains("FillItemStackRenderInfo", program);
         Assert.Contains("ResetItemRenderInfo", program);
@@ -496,7 +496,7 @@ public class EntityRenderP0Tests
         string system = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch");
         string clientChunk = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch");
         string renderer = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs.patch");
-        string patcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("OptimumConfig.EffectiveEntityLightBatch && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0", system);
         Assert.Contains("OptimumConfig.EffectiveEntityShaderStateCache", system);

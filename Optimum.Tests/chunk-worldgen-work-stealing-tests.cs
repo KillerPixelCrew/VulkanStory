@@ -279,7 +279,7 @@ public class ChunkWorldgenWorkStealingTests
     {
         string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
         string chunkThread = PatchReader.ReadPatch(ChunkThreadPatch);
-        string patcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string patcher = PatcherSource.Read();
 
         // Server worldgen patches are Cecil-owned (transplanted at launcher startup)
         Assert.Contains(SupplyChunksPatch, cecilList);

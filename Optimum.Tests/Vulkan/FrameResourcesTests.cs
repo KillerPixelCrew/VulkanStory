@@ -129,7 +129,7 @@ public class PersistentUploadCoverageTests
     [Fact]
     public void PersistentUploadMethodsAreRegisteredWithExactSignatures()
     {
-        string source = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string source = PatcherSource.Read();
 
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"updateVAO\", 6", source);
         Assert.Contains("\"System.Single[]\", \"System.Int32\", \"System.Int32\", \"System.Int32\", \"System.IntPtr\", \"System.Boolean\"", source);

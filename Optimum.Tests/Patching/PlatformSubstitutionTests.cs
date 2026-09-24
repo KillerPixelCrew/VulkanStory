@@ -26,7 +26,7 @@ public class PlatformSubstitutionCoverageTests
     [Fact]
     public void PatcherUnsealsThePlatformClass()
     {
-        string unseal = ListBody(Read("Optimum.Patcher/Program.cs"), "var typesToUnseal = new List<string>");
+        string unseal = ListBody(PatcherSource.Read(), "var typesToUnseal = new List<string>");
 
         Assert.Contains(PlatformType + ",", unseal);
     }
@@ -34,14 +34,14 @@ public class PlatformSubstitutionCoverageTests
     [Fact]
     public void PatcherVirtualizesEveryOverriddenPlatformMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string virtualize = ListBody(patcher, "var methodsToVirtualize = new List<MethodTarget>");
 
         foreach (var member in VirtualizedMembers)
             Assert.Contains($"new({PlatformType}, \"{member.Name}\", {member.ParamCount})", virtualize);
 
-        Assert.Contains("typesToUnseal: typesToUnseal", patcher);
-        Assert.Contains("methodsToVirtualize: methodsToVirtualize", patcher);
+        Assert.Contains("typesToUnseal: manifest.TypesToUnseal", patcher);
+        Assert.Contains("methodsToVirtualize: manifest.MethodsToVirtualize", patcher);
     }
 
     [Fact]

@@ -47,7 +47,7 @@ public class NativePostChainCoverageTests
         Assert.Contains("return TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];", platform);
 
         // Every new lib member is a patcher target and an owned region.
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
         foreach (string member in new[]
                  {
@@ -225,7 +225,56 @@ public class NativePostChainCoverageTests
 
         foreach (string stage in new[] { "Stage 1c makes it native", "Stage 1d makes it native" })
         {
-            Assert.Contains(stage, chain);
+            Assert.Contains(state, resolve);
+        }
+        // And nothing of it leaked into the draw.
+        string draw = MethodBody(platform,
+            "public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)");
+        Assert.DoesNotContain("_taaFrameParity", draw);
+        Assert.DoesNotContain("_taaHistoryValid", draw);
+        Assert.DoesNotContain("optimumTaaResolvedThisFrame", draw);
+
+        // The native route: a pipeline with stated fixed state, a pass with stated reads and
+        // colour slots, uniforms by placement, textures straight to bindless slots.
+        string chain = Read(ChainFile);
+        Assert.Contains("private void NativeTaaResolve(FrameBufferRef write, FrameBufferRef read,", chain);
+        Assert.Contains("private void NativeTaaSharpen(FrameBufferRef target, int resolvedScene)", chain);
+        Assert.Contains("nativeTaaResolve = new(\"taa-resolve\"", chain);
+        Assert.Contains("nativeTaaSharpen = new(\"taa-sharpen\"", chain);
+        // All three history attachments are the pass's colour slots.
+        Assert.Contains("const uint slots = 0b111u;", chain);
+        // The nine resolve uniforms and the seven textures the OpenGL body writes and binds.
+        foreach (string uniform in new[]
+                 {
+                     "renderSize", "jitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix",
+                     "cameraDelta", "resetHistory", "blendAlpha", "varianceGamma",
+                 })
+        {
+            Assert.Contains("\"" + uniform + "\"", chain);
+        }
+        foreach (string sampler in new[]
+                 {
+                     "sceneTex", "glowTex", "motionTex", "depthTex",
+                     "historyColor", "historyGlow", "historyDepth", "inputScene",
+                 })
+        {
+            Assert.Contains("\"" + sampler + "\"", chain);
+        }
+        // The two literals the OpenGL body passes, unchanged.
+        Assert.Contains("nativeTaaResolve.Uniforms[7], 0.1f", chain);
+        Assert.Contains("nativeTaaResolve.Uniforms[8], 1.25f", chain);
+        // And the strength, clamped exactly as the OpenGL body clamps it.
+        Assert.Contains("GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f)", chain);
+
+        // Registered everywhere a new lib member has to be.
+        string patcher = PatcherSource.Read();
+        string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
+        string selfCheck = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
+        foreach (string member in new[] { "OptimumTaaResolveDraw", "OptimumTaaSharpenDraw" })
+        {
+            Assert.Contains("\"" + member + "\"", patcher);
+            Assert.Contains("\"" + member + "\"", regions);
+            Assert.Contains("new(true, \"" + member + "\"", selfCheck);
         }
         // One old route per pass that is not native yet, plus one per native pass that keeps its
         // OpenGL body reachable for the differential tests: the merge, sky motion, the AO step,
@@ -300,7 +349,7 @@ public class NativePostChainCoverageTests
     public void TheNativeTailReadsClientStateThroughListedLibSeams()
     {
         string platform = Platform().Replace("\r\n", "\n");
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         string regions = Read("Optimum.Tests/client-platform-windows-vanilla-regions-tests.cs");
 
         foreach (string member in new[]

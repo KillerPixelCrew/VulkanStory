@@ -288,7 +288,7 @@ public class OcclusionCullingCoverageTests
     [Fact]
     public void CullInvisibleChunksIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string programSource = PatcherSource.Read();
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkCuller\", \"CullInvisibleChunks\"", programSource);
     }
 

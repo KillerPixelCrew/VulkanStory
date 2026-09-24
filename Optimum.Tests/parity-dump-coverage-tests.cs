@@ -220,7 +220,7 @@ public class ParityDumpCoverageTests
         }
         Assert.DoesNotContain("optimumParityWorldFrames =", platform.Substring(0, platform.IndexOf("private void OptimumRunParityDump()", StringComparison.Ordinal)));
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         foreach (string member in new[]
                  {
                      "optimumParityWorldFrames", "optimumParityDumpDone", "OptimumRunParityDump",

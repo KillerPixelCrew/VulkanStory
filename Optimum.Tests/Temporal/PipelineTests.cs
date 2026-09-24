@@ -126,7 +126,7 @@ public class PlatformTaaVirtualsCoverageTests
     [Fact]
     public void ThePatcherInjectsTheVirtualsAndTheOverrideFields()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         string abstractMembers = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()");
         foreach (string name in new[]
@@ -181,7 +181,7 @@ public class PlatformTaaVirtualsCoverageTests
 
     private static string RepositoryRoot()
     {
-        string patcher = PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs");
+        string patcher = PatchReader.FindRepositoryFile("Optimum.Patcher/PatchManifest.cs");
         return Path.GetDirectoryName(Path.GetDirectoryName(patcher)!)!;
     }
 
@@ -238,7 +238,7 @@ public class TaaPipelineCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryTaaMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         // Transplant targets.
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"MainRenderLoop\", 1", patcher);
@@ -321,7 +321,7 @@ public class TaaPipelineCoverageTests
         int clear = vulkan.IndexOf("ClearTargetColor(target, MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
         int restore = vulkan.IndexOf("StateDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
         Assert.True(enable >= 0 && enable < clear && restore > clear);
-        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", Read("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", PatcherSource.Read());
         // GL path.
         Assert.Contains("GL.ClearBuffer((ClearBuffer)6144, MotionAttachmentIndex, new float[4]);", platform);
         // Both are guarded so a failed/absent motion attachment leaves the
@@ -508,7 +508,7 @@ public class TaaPipelineCoverageTests
     [Fact]
     public void CecilPatcherShipsEveryTaaResolveMethodAndMember()
     {
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
 
         Assert.Contains("\"TaaResolve\"", patcher);
         Assert.Contains("\"RenderOptimumTaaResolve\"", patcher);
@@ -680,7 +680,7 @@ public class TaaPipelineCoverageTests
         string registry = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
         Assert.Contains("!OptimumConfig.EffectiveTaa ? 1 : 0", registry);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"optimumTaaShaderReloadPending\"", patcher);
         Assert.Contains("\"OptimumRunPendingTaaShaderReload\"", patcher);
     }
@@ -694,7 +694,7 @@ public class TaaPipelineCoverageTests
         // No whole-loop window any more.
         Assert.DoesNotContain("optimumPlatform != null && optimumPlatform.BeginMotionWrite();", entities);
 
-        string patcher = Read("Optimum.Patcher/Program.cs");
+        string patcher = PatcherSource.Read();
         Assert.Contains("\"OptimumIsMotionWriter\"", patcher);
         Assert.Contains("\"optimumMotionWriterTypes\"", patcher);
         // Injected static fields get no initializer (vanilla's static ctor

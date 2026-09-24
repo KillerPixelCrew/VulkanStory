@@ -264,7 +264,7 @@ public sealed class WorldgenR1WorkspacePatchContractTests
     {
         string unload = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch");
         string thread = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch");
-        string patcher = System.IO.File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string patcher = PatcherSource.Read();
 
         int acquire = unload.IndexOf("TryAcquireOptimumWorldgenFootprint", System.StringComparison.Ordinal);
         int readLock = unload.IndexOf("item2.generatingLock.AcquireReadLock()", acquire, System.StringComparison.Ordinal);
