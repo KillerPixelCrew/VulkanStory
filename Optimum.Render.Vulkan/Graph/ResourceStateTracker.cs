@@ -8,9 +8,9 @@ namespace Optimum.Render.Vulkan.Graph;
 /// The synchronization state of one subresource (mip level, array layer).
 /// </summary>
 /// <param name="Layout">The layout the subresource is in.</param>
-/// <param name="WriteStage">The stage of the last write since the last barrier, or none.</param>
+/// <param name="WriteStage">The stage of the last write, or none.</param>
 /// <param name="WriteAccess">The access of that write.</param>
-/// <param name="VisibleStages">The stages the current contents were made visible to by a barrier or a write.</param>
+/// <param name="VisibleStages">The stages the current contents were made visible to by a barrier.</param>
 /// <param name="ReadStages">The stages that read since the last barrier or write.</param>
 /// <param name="ReadAccess">The accesses of those reads.</param>
 internal readonly record struct SubresourceState(
@@ -48,9 +48,8 @@ internal readonly record struct ImageTransition(uint BaseMip, uint MipCount, uin
 /// <item>read after write (RAW) in the same layout needs one only when the
 /// reader's stage is not among the stages the write is visible to;</item>
 /// <item>write after read (WAR) and write after write (WAW) in the same layout
-/// need one only when an earlier read or write ran at a stage the new write
-/// does not;</item>
-/// <item>read after read, and any use repeating the previous one, needs none.</item>
+/// need ordering even when the stages match;</item>
+/// <item>read after read needs no barrier while layout and visibility agree.</item>
 /// </list>
 /// One entry covers the whole image while every subresource agrees; a use of a
 /// sub-range splits it into per-subresource entries, and a use that makes them
@@ -228,9 +227,9 @@ internal sealed class ResourceStateTracker
         }
         else if (writes)
         {
-            // WAR / WAW: an earlier read or write at a stage this write does not run at.
-            needed = (state.ReadStages & ~target.Stage) != PipelineStageFlags2.None ||
-                     (state.WriteStage & ~writeStage) != PipelineStageFlags2.None;
+            // Separate uses can overlap even when they execute at the same stage.
+            needed = state.ReadStages != PipelineStageFlags2.None ||
+                     state.WriteStage != PipelineStageFlags2.None;
         }
         else
         {
@@ -254,14 +253,18 @@ internal sealed class ResourceStateTracker
             ImageLayout oldLayout = state.Layout;
             if (discard && state.Layout != target.Layout) oldLayout = ImageLayout.Undefined;
             sides = new BarrierSides(oldLayout, target.Layout, srcStage, srcAccess, target.Stage, target.Access);
-            state = new SubresourceState(target.Layout, PipelineStageFlags2.None, AccessFlags2.None,
-                target.Stage, PipelineStageFlags2.None, AccessFlags2.None);
+            // Retain the last producer until another write replaces it: a later
+            // reader at a different stage still needs that write made visible.
+            PipelineStageFlags2 visible = state.Layout == target.Layout
+                ? state.VisibleStages | target.Stage : target.Stage;
+            state = new SubresourceState(target.Layout, state.WriteStage, state.WriteAccess,
+                visible, PipelineStageFlags2.None, AccessFlags2.None);
         }
 
         if (writes)
         {
             state = new SubresourceState(target.Layout, writeStage, writeAccess,
-                target.Stage, readStage, readAccess);
+                PipelineStageFlags2.None, readStage, readAccess);
         }
         else
         {
