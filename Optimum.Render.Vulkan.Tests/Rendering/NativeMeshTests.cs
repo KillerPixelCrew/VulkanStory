@@ -221,6 +221,113 @@ public class NativeMeshDrawTests(ITestOutputHelper output)
     }
 
 
+    [SkippableFact]
+    public unsafe void IndexedLineStripKeepsItsInteriorEmptyAndDoesNotChangeTheNextMeshTopology()
+    {
+        using var device = GpuTest.CreateDevice(output);
+        int program = GpuTest.LinkProgram(device, """
+            #version 330 core
+            layout(location = 0) in vec3 position;
+            void main() { gl_Position = vec4(position, 1); }
+            """, """
+            #version 330 core
+            out vec4 color;
+            void main() { color = vec4(1); }
+            """, "indexed-line-strip");
+        var rectangle = new MeshData(4, 5)
+        {
+            xyz = new[] { -.75f, -.75f, 0f, .75f, .75f, 0f,
+                .75f, -.75f, 0f, -.75f, .75f, 0f },
+            VerticesCount = 4,
+            Indices = new[] { 0, 2, 1, 3, 0 },
+            IndicesCount = 5,
+            mode = EnumDrawMode.LineStrip,
+        };
+        int lines = device.CreateMesh(rectangle, true);
+        int image = device.CreateTexture2D(32, 32, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int target = device.CreateFramebuffer(32, 32);
+        device.AttachTexture(target, EnumFramebufferAttachment.ColorAttachment0, image, 0);
+        device.SetDrawBuffers(target, 1);
+
+        void Begin()
+        {
+            device.BeginFrame(); device.BindFramebuffer(target); device.UseProgram(program);
+            device.SetViewport(0, 0, 32, 32); device.SetDepthTest(false);
+            device.SetCullFace(false); device.SetBlend(false, EnumBlendMode.Standard);
+            device.ClearColor(0, 0, 0, 0, 1);
+        }
+        byte[] pixels = new byte[32 * 32 * 4];
+        void Read()
+        {
+            fixed (byte* pointer = pixels)
+                device.ReadDefaultFramebuffer(0, 0, 32, 32, (IntPtr)pointer);
+        }
+
+        Begin(); device.DrawMesh(lines); Read();
+        Assert.Equal(0, pixels[(16 * 32 + 16) * 4]);
+        int lit = Enumerable.Range(0, 32 * 32).Count(pixel => pixels[pixel * 4] == 255);
+        Assert.InRange(lit, 80, 112);
+        device.Present();
+
+        rectangle.mode = EnumDrawMode.Triangles;
+        rectangle.Indices = new[] { 0, 2, 1, 0, 1, 3 };
+        rectangle.IndicesCount = 6;
+        int triangles = device.CreateMesh(rectangle, true);
+        Begin(); device.DrawMesh(triangles); Read();
+        Assert.Equal(255, pixels[(16 * 32 + 16) * 4]);
+        device.Present();
+        GpuTest.AssertClean(device);
+    }
+
+    [SkippableFact]
+    public unsafe void EveryRequestedInstanceProducesItsOwnPixels()
+    {
+        using var device = GpuTest.CreateDevice(output);
+        int program = GpuTest.LinkProgram(device, """
+            #version 330 core
+            layout(location = 0) in vec3 position;
+            void main() {
+                vec2 offset = vec2(gl_InstanceID) * 0.75;
+                gl_Position = vec4(position.xy + offset, position.z, 1);
+            }
+            """, """
+            #version 330 core
+            out vec4 color;
+            void main() { color = vec4(1, 0, 1, 1); }
+            """, "instance-pixels");
+        var quad = new MeshData(4, 6)
+        {
+            xyz = new[] { -1f, -1f, 0f, -.5f, -1f, 0f,
+                -.5f, -.5f, 0f, -1f, -.5f, 0f },
+            VerticesCount = 4,
+            Indices = new[] { 0, 1, 2, 0, 2, 3 },
+            IndicesCount = 6,
+            mode = EnumDrawMode.Triangles,
+        };
+        int mesh = device.CreateMesh(quad, true);
+        int image = device.CreateTexture2D(16, 16, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int target = device.CreateFramebuffer(16, 16);
+        device.AttachTexture(target, EnumFramebufferAttachment.ColorAttachment0, image, 0);
+        device.SetDrawBuffers(target, 1);
+        device.BeginFrame(); device.BindFramebuffer(target); device.UseProgram(program);
+        device.SetViewport(0, 0, 16, 16); device.SetDepthTest(false);
+        device.SetCullFace(false); device.SetBlend(false, EnumBlendMode.Standard);
+        device.ClearColor(0, 0, 0, 0, 1);
+        device.DrawMeshInstanced(mesh, 2);
+        byte[] pixels = new byte[16 * 16 * 4];
+        fixed (byte* pointer = pixels)
+            device.ReadDefaultFramebuffer(0, 0, 16, 16, (IntPtr)pointer);
+        foreach ((int x, int y) in new[] { (2, 2), (8, 8) })
+        {
+            int pixel = (y * 16 + x) * 4;
+            Assert.Equal(new byte[] { 255, 0, 255, 255 }, pixels[pixel..(pixel + 4)]);
+        }
+        device.Present();
+        GpuTest.AssertClean(device);
+    }
+
     /// <summary>The client's IShader, as much of it as CompileShader reads.</summary>
     private sealed class CorpusShader : IShader
     {

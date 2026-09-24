@@ -190,6 +190,23 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
         Assert.Contains(first, destroyed);
         Assert.Contains(second, destroyed);
     }
+
+    [SkippableFact]
+    public void DeletingASharedAttachmentTwiceRetiresItOnce()
+    {
+        using var device = Open();
+        int image = device.CreateTexture2D(4, 4, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int before = device.TexturesForTests.Count;
+        device.DeleteTexture(image);
+        Assert.Equal(before - 1, device.TexturesForTests.Count);
+        device.DeleteTexture(image);
+        Assert.Equal(before - 1, device.TexturesForTests.Count);
+        Assert.Null(device.TexturesForTests.Get(image));
+        device.BeginFrame();
+        device.Present();
+        GpuTest.AssertClean(device);
+    }
     private sealed class Retirement(Action dispose) : IDisposable
     {
         public void Dispose() => dispose();

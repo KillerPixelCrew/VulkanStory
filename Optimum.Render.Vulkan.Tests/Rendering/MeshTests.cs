@@ -59,6 +59,7 @@ using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Shaders;
 using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -557,6 +558,33 @@ public class MeshManagerTests
         api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, 0xFF);
         api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, 0);
         api.CmdSetLineWidth(commandBuffer, 1.0f);
+    }
+
+    [SkippableFact]
+    public void UpdatingSeparateMeshSlicesPreservesEveryDestinationOffset()
+    {
+        using var device = GpuTest.CreateDevice(_output);
+        const int slices = 3, floatsPerSlice = 9;
+        int mesh = device.CreateEmptyMesh(slices * floatsPerSlice * sizeof(float), 0, 0, 0, 0, 0,
+            null, null, null, null, EnumDrawMode.Triangles, staticDraw: false, ssbo: false);
+        for (int slice = slices - 1; slice >= 0; slice--)
+        {
+            float[] values = Enumerable.Range(0, floatsPerSlice)
+                .Select(index => slice * 100f + index).ToArray();
+            device.UpdateMesh(mesh, new MeshData(3, 0)
+            {
+                xyz = values,
+                XyzOffset = slice * floatsPerSlice * sizeof(float),
+                VerticesCount = 3,
+            });
+        }
+        var actual = new float[slices * floatsPerSlice];
+        Marshal.Copy(device.GetMappedPointer(mesh, EnumMeshBufferPart.Xyz), actual, 0, actual.Length);
+        for (int slice = 0; slice < slices; slice++)
+            for (int index = 0; index < floatsPerSlice; index++)
+                Assert.Equal(slice * 100f + index, actual[slice * floatsPerSlice + index]);
+        device.DeleteMesh(mesh);
+        GpuTest.AssertClean(device);
     }
 
     private static unsafe byte[] ReadTexture(

@@ -62,10 +62,12 @@ public class TextureTransferTests(ITestOutputHelper output)
         {
             byte[] rgba = { 11, 22, 33, 44 };
             float[] floats = Enumerable.Range(0, 16).Select(i => i * 0.25f - 1.5f).ToArray();
-            int small, wide;
+            float[] historyDepths = { 12f, 128f };
+            int small, wide, historyDepth;
             fixed (byte* pointer = rgba) small = device.CreateTexture2D(1, 1, EnumTextureInternalFormat.Rgba8,
                 EnumTexturePixelFormat.Rgba, (IntPtr)pointer, false);
             fixed (float* pointer = floats) wide = device.CreateTexture2DRaw(2, 2, 0x8814, (IntPtr)pointer, 16); // RGBA32F
+            fixed (float* pointer = historyDepths) historyDepth = device.CreateTexture2DRaw(2, 1, 0x822E, (IntPtr)pointer, 4); // R32F
             int normalized = device.CreateTexture2DRaw(2, 1, 0x805B, IntPtr.Zero, 8); // RGBA16
             device.UploadTexture2DNormalizedShorts(normalized, 0, 0, 0, 2, 1,
                 new short[] { short.MinValue, -1, 0, 1, 16384, short.MaxValue, 8192, 0 });
@@ -73,6 +75,7 @@ public class TextureTransferTests(ITestOutputHelper output)
             // A four-byte result followed by sixteen-byte texels exercises arena alignment.
             Assert.Equal(rgba, device.ReadBackLevel0ForTests(small));
             Assert.Equal(MemoryMarshal.AsBytes(floats.AsSpan()).ToArray(), device.ReadBackLevel0ForTests(wide));
+            Assert.Equal(MemoryMarshal.AsBytes(historyDepths.AsSpan()).ToArray(), device.ReadBackLevel0ForTests(historyDepth));
             ushort[] expected = { 0, 0, 0, 2, 32769, 65535, 16384, 0 };
             Assert.Equal(MemoryMarshal.AsBytes(expected.AsSpan()).ToArray(), device.ReadBackLevel0ForTests(normalized));
             Assert.Equal(rgba, device.ReadBackLevel0ForTests(small));
@@ -86,6 +89,52 @@ public class TextureTransferTests(ITestOutputHelper output)
             Assert.Null(device.TexturesForTests.Get(0));
         }
         finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
+    [SkippableFact]
+    public unsafe void ChangingAnAlreadyBoundSamplerBiasChangesTheNextDraw()
+    {
+        using var device = Open();
+        int source = device.CreateTexture2D(4, 4, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, true);
+        for (int level = 0; level < 3; level++)
+        {
+            int side = 4 >> level;
+            byte[] pixels = new byte[side * side * 4];
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                pixels[i + level] = 255;
+                pixels[i + 3] = 255;
+            }
+            fixed (byte* pointer = pixels)
+                device.UploadTexture2D(source, level, 0, 0, side, side,
+                    EnumTexturePixelFormat.Rgba, (IntPtr)pointer);
+        }
+
+        int target = Target(device, 4, 4, Texture(device, 4, 4));
+        int program = GpuTest.LinkProgram(device, Triangle, """
+            #version 330 core
+            uniform sampler2D source;
+            out vec4 color;
+            void main() { color = texture(source, gl_FragCoord.xy / 4.0); }
+            """, "live-sampler-bias");
+        device.SetSamplerUnit(program, "source", 0);
+        device.BindTexture(0, source);
+        int sampler = device.CreateSampler(false);
+        device.BindSampler(0, sampler);
+
+        foreach (int level in new[] { 0, 1, 2, 0 })
+        {
+            device.SetSamplerParameter(sampler, GlEnums.TextureLodBias, (float)level);
+            device.BeginFrame();
+            Draw(device, target, program, 4);
+            byte[] pixels = Read(device, target, 4);
+            Color(pixels, level == 0 ? (byte)255 : (byte)0,
+                level == 1 ? (byte)255 : (byte)0,
+                level == 2 ? (byte)255 : (byte)0);
+            device.Present();
+        }
         GpuTest.AssertClean(device);
     }
 
@@ -270,6 +319,54 @@ public class TextureTransferTests(ITestOutputHelper output)
             device.Present();
         }
         finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
+    [SkippableFact]
+    public unsafe void ThreeOitOutputsReachThreeDifferentArrayLayers()
+    {
+        using var device = Open();
+        int layers = device.CreateTexture2DArray(4, 4, 3,
+            EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba);
+        int accumulation = device.CreateFramebuffer(4, 4);
+        for (int layer = 0; layer < 3; layer++)
+            device.AttachTexture(accumulation,
+                (EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + 3 + layer),
+                layers, layer);
+        device.SetDrawBuffers(accumulation, 0x38);
+        int write = GpuTest.LinkProgram(device, Triangle, """
+            #version 330 core
+            layout(location = 3) out vec4 red;
+            layout(location = 4) out vec4 green;
+            layout(location = 5) out vec4 blue;
+            void main() {
+                red = vec4(1, 0, 0, 1);
+                green = vec4(0, 1, 0, 1);
+                blue = vec4(0, 0, 1, 1);
+            }
+            """, "oit-array-write");
+        int inspect = GpuTest.LinkProgram(device, Triangle, """
+            #version 330 core
+            uniform sampler2DArray source;
+            out vec4 color;
+            void main() {
+                int layer = gl_FragCoord.x < 1.0 ? 0 : (gl_FragCoord.x < 2.0 ? 1 : 2);
+                color = texelFetch(source, ivec3(0, 0, layer), 0);
+            }
+            """, "oit-array-inspect");
+        int result = Target(device, 3, 1, Texture(device, 3, 1));
+        device.SetSamplerUnit(inspect, "source", 0);
+        device.BeginFrame();
+        Draw(device, accumulation, write, 4);
+        device.BindTexture(0, layers);
+        device.BindFramebuffer(result); device.SetViewport(0, 0, 3, 1);
+        device.SetDepthTest(false); device.SetCullFace(false);
+        device.SetBlend(false, EnumBlendMode.Standard); device.UseProgram(inspect);
+        device.DrawFullscreenTriangle();
+        var pixels = new byte[12];
+        fixed (byte* pointer = pixels) device.ReadDefaultFramebuffer(0, 0, 3, 1, (IntPtr)pointer);
+        Assert.Equal(new byte[] { 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255 }, pixels);
+        device.Present();
         GpuTest.AssertClean(device);
     }
 
