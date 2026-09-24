@@ -516,8 +516,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
         _compute = new ComputePipelineCache(_context, () => _pipelines.DriverCache);
-        // One layout for the shared frame block, named by every program's pipeline layout.
-        _frameSetLayout = ShaderProgramResources.CreateFrameSetLayout(_context);
         // Decision 9: the bindless table retires a texture's slots on the timeline
         // values of its deletion, and the shared layout names the table's set layout.
         _bindless = new BindlessTextureTable(_context, _textures, _frames.Timeline);
@@ -1355,12 +1353,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
         _compute?.Dispose();
-        // After every pipeline layout that named it.
-        if (_context != null && _frameSetLayout.Handle != 0)
-        {
-            _context.Api.DestroyDescriptorSetLayout(_context.Device, _frameSetLayout, null);
-            _frameSetLayout = default;
-        }
         // The shared pipeline layout before the table's set layout it names; the
         // table's placeholders are textures and go with the texture manager.
         _sharedLayout?.Dispose();

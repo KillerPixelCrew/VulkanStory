@@ -196,11 +196,11 @@ public class NativePostChainCoverageTests
     }
 
     /// <summary>
-    /// Every step that is not native yet has a legacy helper naming the stage that replaces it,
-    /// so the chain is complete at every commit and a later stage moves exactly one helper.
+    /// Every pass of the chain draws natively, and each pass whose OpenGL body is a legacy helper
+    /// keeps that helper as the old route the differential tests compare against.
     /// </summary>
     [Fact]
-    public void EveryRemainingStepHasALegacyHelperNamingItsStage()
+    public void EveryChainStepIsNativeAndKeepsItsOldRouteReachable()
     {
         string chain = Read(ChainFile);
 
@@ -223,7 +223,49 @@ public class NativePostChainCoverageTests
             Assert.Contains(helper, chain);
         }
 
-        foreach (string stage in new[] { "Stage 1c makes it native", "Stage 1d makes it native" })
+        // Every pass of the chain is native now: no step carries a "Stage 1x makes it native"
+        // marker any more.
+        Assert.DoesNotContain("makes it native", chain);
+        // One LEGACY helper per native pass whose OpenGL body stays reachable for the
+        // differential tests: the merge, sky motion, bloom, god rays, the Luma step and the
+        // final composition. The AO step and the two TAA passes keep their old route in the lib
+        // virtual itself, not in a legacy helper.
+        Assert.Equal(6, Count(chain, "LEGACY -"));
+    }
+
+    /// <summary>
+    /// Stage 1d: the TAA resolve and the TAA sharpen draw natively, through a draw seam that
+    /// leaves every temporal decision in the lib body. The contract is what this pins - the
+    /// reset test, the resolved textures, the history validity and the parity flip have to stay
+    /// where both backends run the same code, or the two routes can drift a frame apart.
+    /// </summary>
+    [Fact]
+    public void TheTwoTaaPassesDrawNativelyAndKeepTheirContractInTheLibBody()
+    {
+        string platform = Platform();
+        string abstractPlatform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
+
+        // The seams exist on the abstract platform, so a platform can override them, and the
+        // Windows body is the OpenGL draw.
+        Assert.Contains("public virtual void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", abstractPlatform);
+        Assert.Contains("public virtual void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", abstractPlatform);
+        Assert.Contains("public override void OptimumTaaResolveDraw(FrameBufferRef write, FrameBufferRef read, float[] invViewProjJittered, float[] prevViewProj, bool reset)", platform);
+        Assert.Contains("public override void OptimumTaaSharpenDraw(FrameBufferRef target, int resolvedScene)", platform);
+
+        // The temporal contract stays in the pass, on the far side of the seam.
+        string resolve = MethodBody(platform, "public override bool RenderOptimumTaaResolve()");
+        Assert.Contains("bool reset = frame.Reset || !_taaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || invViewProj == null;", resolve);
+        Assert.Contains("OptimumTaaResolveDraw(write, read, invViewProj, prevViewProj, reset);", resolve);
+        foreach (string state in new[]
+                 {
+                     "taaResolvedColorTexture = write.ColorTextureIds[0];",
+                     "taaResolvedGlowTexture = write.ColorTextureIds[1];",
+                     "_taaHistoryValid = true;",
+                     "_taaFrameParity ^= 1;",
+                     "optimumTaaResolvedThisFrame = true;",
+                 })
         {
             Assert.Contains(state, resolve);
         }
@@ -276,10 +318,6 @@ public class NativePostChainCoverageTests
             Assert.Contains("\"" + member + "\"", regions);
             Assert.Contains("new(true, \"" + member + "\"", selfCheck);
         }
-        // One old route per pass that is not native yet, plus one per native pass that keeps its
-        // OpenGL body reachable for the differential tests: the merge, sky motion, the AO step,
-        // the resolve, the sharpen, bloom, god rays, the Luma step and the final composition.
-        Assert.Equal(9, Count(chain, "LEGACY -"));
     }
 
     /// <summary>

@@ -311,7 +311,10 @@ stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draw
   asked for the ReBAR pool class and fell through to host staging memory because no ReBAR type
   exists, the cap was reached or `OPTIMUM_VULKAN_NO_REBAR=1`; each is also logged),
   `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
-  slot used), `uniform_ring_capacity` (bytes per slot), `mask_restarts` (scope restarts that
+  slot used), `uniform_ring_capacity` (bytes per slot), `barrier_commands`
+  (vkCmdPipelineBarrier2 calls carrying image barriers: one per `BarrierBatcher` flush, so
+  `barriers` / `barrier_commands` is the batching factor), `barriers_per_frame` (`barriers`
+  divided by the interval's frames), `mask_restarts` (scope restarts that
   reopened an identical attachment set; draw buffers and motion windows are write masks since
   Phase 2 contract C4, so this must be 0) and `feedback_splits` (restarts that took a sampled,
   draw-buffer-excluded slot out of the scope, as the final composition does with Primary 1, or
@@ -322,7 +325,13 @@ stats.pipelines compiled_sync=<n> compiled_async=<n> prewarmed=<n> warm=<n> draw
   frame), `in_pass_clears` (clears recorded as vkCmdClearAttachments inside an open pass),
   `promoted_clears` (clears issued with no pass open that became LOAD_OP_CLEAR) and
   `standalone_clears` (promoted clears whose image was used before a pass attached it, recorded
-  as a clear-image command). Compute pass kind: `compute_passes` (compute passes recorded, their barriers
+  as a clear-image command). Shared pipeline layout (plan decision 9): `push_constants`
+  (vkCmdPushConstants calls: draws whose slot indices differed from what the recording last
+  received), `storage_set_binds` (set 2 binds: the draw's set or its record's dynamic offset
+  changed), `bindless_slots` (sampler resolutions through the bindless table) and
+  `bindless_placeholders` (resolutions, bindless or set 0 frame texture, that read a placeholder
+  because nothing suitable was bound).
+  Compute pass kind: `compute_passes` (compute passes recorded, their barriers
   flushed with no rendering scope open; not part of `passes`) and `dispatches` (vkCmdDispatch calls).
   Native render systems (Phase 3b): `native_passes` (passes declared through the native device
   API, with explicit writes and reads instead of a draw-buffer mask) and `native_draws` (draws

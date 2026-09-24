@@ -21,23 +21,16 @@ public class TaaSettingsCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
 
-        Assert.Contains("Lang.Get(\"optimum-taa\")", gui);
-        Assert.Contains("AddSwitch(onOptimumTaaChanged", gui);
+        Assert.Contains("AddOptimumSwitchRow(\"optimum-taa\", \"optimum-taa-tooltip\", onOptimumTaaChanged", gui);
         Assert.Contains("\"optTaa\")", gui);
 
-        Assert.Contains("Lang.Get(\"optimum-taasharpness\")", gui);
-        Assert.Contains("AddSlider(onOptimumTaaSharpnessChanged", gui);
+        Assert.Contains("AddOptimumSliderRow(\"optimum-taasharpness\", onOptimumTaaSharpnessChanged", gui);
         Assert.Contains("\"optTaaSharpness\")", gui);
 
-        Assert.Contains("Lang.Get(\"optimum-taamipbias\")", gui);
-        Assert.Contains("AddSlider(onOptimumTaaMipBiasChanged", gui);
+        Assert.Contains("AddOptimumSliderRow(\"optimum-taamipbias\", onOptimumTaaMipBiasChanged", gui);
         Assert.Contains("\"optTaaMipBias\")", gui);
 
-        // Every row in this tab carries a hover text; a row without one reads as
-        // an unexplained switch in a list of explained ones.
-        Assert.Contains("Lang.Get(\"optimum-taa-tooltip\")", gui);
-        Assert.Contains("Lang.Get(\"optimum-taasharpness-tooltip\")", gui);
-        Assert.Contains("Lang.Get(\"optimum-taamipbias-tooltip\")", gui);
+        Assert.Contains("AddOptimumLabelRow(labelKey, tooltipKey);", gui);
     }
 
     [Fact]
@@ -107,7 +100,7 @@ public class TaaSettingsCoverageTests
         // The reset targets the same switch key the row is built with, and
         // takes its value from EffectiveTaa - the only truth the rest of the
         // chain reads.
-        Assert.Contains("AddSwitch(onOptimumTaaChanged", gui);
+        Assert.Contains("AddOptimumSwitchRow(\"optimum-taa\", \"optimum-taa-tooltip\", onOptimumTaaChanged", gui);
         Assert.Contains("\"optTaa\")", gui);
         Assert.Contains(
             "composer?.GetSwitch(\"optTaa\")?.SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);",
@@ -146,28 +139,18 @@ public class TaaSettingsCoverageTests
     }
 
     [Fact]
-    public void TheRowsFitTheFixedMainMenuDialog()
+    public void TheRowsScrollInsideTheMainMenuDialog()
     {
         string gui = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
 
-        // ComposerHeader lays the main-menu dialog out at a fixed 740px, and the
-        // tab starts at y0 = 87. The stock build now ends at row 23 (the AO debug
-        // view) and the feature-flag build at row 27, so the row interval has to
-        // shrink or the last rows fall off the dialog.
-        Assert.Contains("double rowH = 27.0;", gui);
-        Assert.Contains("double rowH = 23.0;", gui);
-
-        Assert.Contains("rowH * 19", gui); // TAA toggle
-        Assert.Contains("rowH * 20", gui); // sharpness
-        Assert.Contains("rowH * 21", gui); // mip bias
-        Assert.Contains("rowH * 22", gui); // ambient occlusion
-        Assert.Contains("rowH * 23", gui); // AO debug view, last stock row
-        Assert.Contains("rowH * 27", gui); // greedy far distance, shifted down
-
-        Assert.True(87.0 + 27.0 * 23 <= 740.0);
-        Assert.True(87.0 + 23.0 * 27 <= 740.0);
+        Assert.Contains("ElementBounds panelBounds = ElementBounds.Fixed(0, 87, 690, 620);", gui);
+        Assert.Contains("optimumContentBounds.fixedHeight = optimumRowY + 2;", gui);
+        Assert.Contains("composer.AddVerticalScrollbar(OnOptimumScrollChanged, scrollbarBounds, \"optimumScrollbar\");", gui);
+        Assert.Contains("AddOptimumDropdownRow(\"optimum-ao\", \"optimum-ao-tooltip\"", gui);
+        Assert.Contains("AddOptimumSwitchRow(\"optimum-aodebug\", \"optimum-aodebug-tooltip\"", gui);
+        Assert.Contains("AddOptimumSliderRow(\"optimum-greedyfardist\"", gui);
     }
 
     [Fact]

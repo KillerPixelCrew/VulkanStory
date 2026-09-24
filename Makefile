@@ -40,7 +40,7 @@ endif
 BOOTSTRAP_ARGS += --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders check-shaders-vk bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
 help: ## Show available targets

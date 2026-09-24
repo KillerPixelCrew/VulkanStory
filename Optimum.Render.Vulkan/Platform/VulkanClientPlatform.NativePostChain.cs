@@ -22,7 +22,7 @@ namespace Optimum.Render.Vulkan.Platform;
 // (VulkanClientPlatform.NativeBlit.cs).
 // RenderPostprocessingEffects' override runs the steps that live inside it and never calls base.
 //
-// Two helpers draw natively in this file - the OIT merge and sky motion - through RequestNativePipeline,
+// Four helpers draw natively here - the OIT merge, sky motion and the two TAA passes - through RequestNativePipeline,
 // BeginNativePass, WriteNative and DrawNativeFullscreen, exactly as the blit does. Every other
 // helper is LEGACY: the same work through the GL-shaped platform calls, which after the split in
 // ClientPlatformWindows is one lib virtual per pass, so the chain is complete and correct at

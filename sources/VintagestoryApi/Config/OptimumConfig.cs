@@ -909,6 +909,11 @@ public static class OptimumConfig
         _shaderCompatibilityRewriterPrograms.Add(AllShaderPrograms);
     }
 
+    public static void ReloadShaderCompatibilityReport()
+    {
+        LoadShaderCompatibilityReport();
+    }
+
     private static string? _configPath;
 
     public static void SetRepulsionDistance(int blocks)

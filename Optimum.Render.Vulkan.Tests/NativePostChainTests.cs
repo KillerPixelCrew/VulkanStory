@@ -45,8 +45,19 @@ public class NativePostChainTests(ITestOutputHelper output)
 
     private static readonly string[] Programs =
     {
-        "transparentcompose", "taa-skymotion", "taa-resolve", "blit",
+        "transparentcompose", "taa-skymotion", "taa-resolve", "taa-sharpen", "blit",
         "findbright", "blur", "godrays", "luma", "final",
+    };
+
+    /// <summary>
+    /// A jitter phase per loop step, pinned so two runs of the same length see the same sequence
+    /// whatever the global frame counter happens to be. The values are Halton-shaped: sub-pixel,
+    /// never zero, never repeating inside one run.
+    /// </summary>
+    private static readonly (float X, float Y)[] JitterPhases =
+    {
+        (0.25f, -0.375f), (-0.125f, 0.25f), (0.375f, 0.125f),
+        (-0.375f, -0.25f), (0.125f, 0.375f), (-0.25f, -0.125f),
     };
 
     /// <summary>The Vulkan platform without a window: the size seam answers for one.</summary>
@@ -557,6 +568,93 @@ public class NativePostChainTests(ITestOutputHelper output)
 
     private readonly record struct Frame(byte[] Scene, byte[] Glow, byte[] Motion);
 
+    /// <summary>The three attachments of the history slot a resolve wrote.</summary>
+    private readonly record struct Resolved(byte[] Color, byte[] Glow, byte[] Depth);
+
+    /// <summary>
+    /// One TAA resolve on the route under test, from an identically seeded frame: the history
+    /// parity pinned to slot A, both history slots seeded, and the jitter pinned to phase 0 so
+    /// the two routes see the same sub-pixel offset.
+    /// </summary>
+    private Resolved RunResolve(Session session, bool native, bool warmHistory)
+    {
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        session.AdvanceTemporalFrame(0);
+        SetParity(platform, 0);
+        SetHistoryValid(platform, warmHistory);
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        session.SeedHistory();
+        platform.CurrentFrameBuffer = session.Primary;
+
+        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
+        Assert.Equal(1, Parity(platform));
+
+        var resolved = new Resolved(session.ReadHistoryColor(0), session.ReadHistoryGlow(0),
+            session.ReadHistoryDepth(0));
+        platform.EndFrame();
+        return resolved;
+    }
+
+    /// <summary>One resolve and one sharpen on the route under test, from an identically seeded frame.</summary>
+    private byte[] RunSharpen(Session session, bool native, out int handedOn)
+    {
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        session.AdvanceTemporalFrame(0);
+        SetParity(platform, 0);
+        SetHistoryValid(platform, true);
+
+        platform.BeginFrame();
+        session.SeedFrame();
+        session.SeedHistory();
+        session.SeedSharpen();
+        platform.CurrentFrameBuffer = session.Primary;
+
+        Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run");
+        handedOn = platform.RenderOptimumTaaSharpen(platform.OptimumPostSceneTexture());
+
+        byte[] sharpened = session.ReadSharpen();
+        platform.EndFrame();
+        return sharpened;
+    }
+
+    /// <summary>
+    /// <paramref name="frames" /> resolves on the route under test, with no readback inside the
+    /// loop - only the frame boundary between them - and the history read once at the end. The
+    /// run starts cold, so the first frame is the reset frame and every frame after it blends.
+    /// An odd frame count always ends on slot A, so two runs of different length are comparable.
+    /// </summary>
+    private byte[] RunResolveFrames(Session session, bool native, int frames, int startPhase)
+    {
+        Assert.True(frames % 2 == 1, "an even frame count would end on the other history slot");
+        ChainPlatform platform = session.Platform;
+        platform.NativePostChainEnabled = native;
+        SetParity(platform, 0);
+        SetHistoryValid(platform, false);
+
+        platform.BeginFrame();
+        session.SeedHistory();
+        platform.EndFrame();
+
+        for (int frame = 0; frame < frames; frame++)
+        {
+            session.AdvanceTemporalFrame(startPhase + frame);
+            platform.BeginFrame();
+            session.SeedFrame();
+            platform.CurrentFrameBuffer = session.Primary;
+            Assert.True(platform.RenderOptimumTaaResolve(), "the resolve did not run on frame " + frame);
+            platform.EndFrame();
+        }
+
+        platform.BeginFrame();
+        byte[] history = session.ReadHistoryColor(0);
+        platform.EndFrame();
+        return history;
+    }
+
     /// <summary>Everything the chain's tail writes, on one route.</summary>
     private readonly record struct TailFrame(byte[] FindBright, byte[] BloomLow, byte[] GodRays,
         byte[] Luma, byte[] Final, byte[] Motion);
@@ -575,6 +673,9 @@ public class NativePostChainTests(ITestOutputHelper output)
 
         platform.BeginFrame();
         session.SeedFrame();
+        // The history the resolve starts from, so both routes run the chain from identical
+        // contents; SeedFrame leaves the history alone so frames can accumulate across it.
+        session.SeedHistory();
         platform.CurrentFrameBuffer = session.Primary;
 
         platform.RenderPostprocessingEffects(null);
@@ -864,9 +965,12 @@ public class NativePostChainTests(ITestOutputHelper output)
         private static readonly int[] PostTargetIndices = { 2, 3, 4, 7, 8, 9, 10, 14 };
 
         /// <summary>
-        /// Every post target seeded to its own constant, and the TAA history slots with it: the
-        /// final composition samples the bloom and god-ray targets whether or not their passes ran
-        /// this frame, so both routes have to start a run from identical contents.
+        /// Every post target seeded to its own constant: the final composition samples the bloom
+        /// and god-ray targets whether or not their passes ran this frame, so both routes have to
+        /// start a run from identical contents. The TAA history is NOT seeded here - a frame of
+        /// the chain must be able to run after another one and find the history the previous
+        /// frame wrote, which is what the accumulation test measures. Seed it with
+        /// <see cref="SeedHistory" /> where a run needs a known starting history.
         /// </summary>
         private void SeedPostTargets()
         {
@@ -879,17 +983,6 @@ public class NativePostChainTests(ITestOutputHelper output)
                 seam.BindFramebuffer(target.FboId);
                 seam.SetDrawBuffers(target.FboId, 0b1);
                 seam.ClearColor(0, level, 1f - level, level * 0.5f, 1f);
-            }
-
-            for (int parity = 0; parity < 2; parity++)
-            {
-                FrameBufferRef history = History(parity);
-                if (history == null) continue;
-                seam.BindFramebuffer(history.FboId);
-                seam.SetDrawBuffers(history.FboId, 0b111);
-                seam.ClearColor(0, 0.2f + parity * 0.1f, 0.3f, 0.4f, 1f);
-                seam.ClearColor(1, 0.1f, 0.2f + parity * 0.1f, 0.3f, 1f);
-                seam.ClearColor(2, 0.5f, 0f, 0f, 1f);
             }
         }
 
@@ -930,6 +1023,57 @@ public class NativePostChainTests(ITestOutputHelper output)
 
         private void SetField(string name, object value) =>
             typeof(ClientPlatformWindows).GetField(name, Hidden)!.SetValue(Platform, value);
+
+        /// <summary>
+        /// The scene pattern into Primary's colour 0, the same every frame: a clear can only
+        /// write a flat image, and a flat image collapses the resolve's variance clip box.
+        /// </summary>
+        private void DrawScenePattern()
+        {
+            VulkanDevice seam = Seam;
+            seam.SetDrawBuffers(Primary.FboId, 0b001);
+            seam.UseProgram(decodeProgram);
+            seam.SetSamplerUnit(decodeProgram, "source", 15);
+            seam.BindTexture(15, scenePattern);
+            SetInt(seam, decodeProgram, "motionMode", 0);
+            seam.SetViewport(0, 0, Size, Size);
+            seam.SetDepthTest(false);
+            seam.SetDepthMask(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.DrawFullscreenTriangle();
+        }
+
+        /// <summary>
+        /// Both history slots to a flat seed, so a resolve starts from known content on either
+        /// route. Inside a frame: a clear between frames is a no-op on this seam.
+        /// </summary>
+        public void SeedHistory()
+        {
+            VulkanDevice seam = Seam;
+            for (int parity = 0; parity < 2; parity++)
+            {
+                FrameBufferRef slot = History(parity);
+                seam.BindFramebuffer(slot.FboId);
+                seam.SetDrawBuffers(slot.FboId, 0b111);
+                seam.ClearColor(0, 0.9f, 0.1f, 0.4f, 1f);
+                seam.ClearColor(1, 0.4f, 0.9f, 0.1f, 1f);
+                seam.ClearColor(2, 12.5f, 0f, 0f, 1f);
+            }
+            seam.BindFramebuffer(Primary.FboId);
+            seam.SetDrawBuffers(Primary.FboId, 0b011);
+        }
+
+        /// <summary>The sharpen target to a flat seed, so "the pass wrote something" is checkable.</summary>
+        public void SeedSharpen()
+        {
+            VulkanDevice seam = Seam;
+            seam.BindFramebuffer(Sharpen.FboId);
+            seam.SetDrawBuffers(Sharpen.FboId, 0b1);
+            seam.ClearColor(0, 0.05f, 0.95f, 0.55f, 1f);
+            seam.BindFramebuffer(Primary.FboId);
+            seam.SetDrawBuffers(Primary.FboId, 0b011);
+        }
 
         /// <summary>TAA on, with the jitter window open or closed, and no sharpen pass.</summary>
         public void EnableTaa(bool jitterActive)
@@ -984,6 +1128,18 @@ public class NativePostChainTests(ITestOutputHelper output)
         public byte[] ReadGlow() => Decode(Primary.ColorTextureIds[1], Size, Size, motion: false);
 
         public byte[] ReadMotion() => Decode(Primary.ColorTextureIds[2], Size, Size, motion: true);
+
+        public byte[] ReadHistoryColor(int parity) => Decode(History(parity).ColorTextureIds[0], Size, Size, motion: false);
+
+        public byte[] ReadHistoryGlow(int parity) => Decode(History(parity).ColorTextureIds[1], Size, Size, motion: false);
+
+        /// <summary>
+        /// The history's linear depth, through the motion decode: it is an R32F in view-space
+        /// metres, which the clamping colour decode would flatten to white everywhere.
+        /// </summary>
+        public byte[] ReadHistoryDepth(int parity) => Decode(History(parity).ColorTextureIds[2], Size, Size, motion: true);
+
+        public byte[] ReadSharpen() => Decode(Sharpen.ColorTextureIds[0], Size, Size, motion: false);
 
         /// <summary>One post target's colour 0, decoded at that target's own size.</summary>
         public byte[] ReadPostTarget(int index)
@@ -1122,7 +1278,7 @@ public class NativePostChainTests(ITestOutputHelper output)
             buffers[14] = SingleTarget(Size, Size, EnumTextureInternalFormat.Rgba8);
             buffers[19] = HistoryTarget();
             buffers[20] = HistoryTarget();
-            Sharpen = SingleTarget(EnumTextureInternalFormat.Rgba16f);
+            Sharpen = SingleTarget(Size, Size, EnumTextureInternalFormat.Rgba16f);
             buffers[21] = Sharpen;
 
             scenePattern = Seeded(0.45f);

@@ -30,7 +30,7 @@ public class AsyncTransferTests
         }
         """;
 
-    private static int CreateTarget(IOptimumGraphicsDevice seam, int size, out int texture)
+    private static int CreateTarget(VulkanDevice seam, int size, out int texture)
     {
         texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -41,7 +41,7 @@ public class AsyncTransferTests
     }
 
     /// <summary>Binds and reads a target; inside a frame, so the bind takes effect.</summary>
-    private static unsafe byte[] Read(IOptimumGraphicsDevice seam, int framebuffer, int size)
+    private static unsafe byte[] Read(VulkanDevice seam, int framebuffer, int size)
     {
         var pixels = new byte[size * size * 4];
         fixed (byte* destination = pixels)
@@ -65,7 +65,7 @@ public class AsyncTransferTests
         return pixels;
     }
 
-    private static unsafe void Upload(IOptimumGraphicsDevice seam, int texture, int size, byte[] pixels)
+    private static unsafe void Upload(VulkanDevice seam, int texture, int size, byte[] pixels)
     {
         fixed (byte* source = pixels)
         {
@@ -109,7 +109,7 @@ public class AsyncTransferTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             device!.DeviceLocalStaticMeshesForTests = true;
             const int size = 8;
             const int frames = 60;
@@ -287,7 +287,7 @@ public class AsyncTransferTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             int program = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core

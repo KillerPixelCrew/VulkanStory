@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..b05b230 100644
+index 4536b4c..9bdf3f7 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,7 +48,7 @@ index afa4d5f..b05b230 100644
  		new ClientProgram(rawArgs);
  	}
  
-@@ -174,14 +209,66 @@ public class ClientProgram
+@@ -175,14 +210,66 @@ public class ClientProgram
  			Environment.CurrentDirectory = directoryName;
  		}
  		GamePaths.EnsurePathsExist();
@@ -119,7 +119,7 @@ index afa4d5f..b05b230 100644
  		GuiStyle.DecorativeFontName = ClientSettings.DecorativeFontName;
  		GuiStyle.StandardFontName = ClientSettings.DefaultFontName;
  		if (!Directory.Exists(GamePaths.AssetsPath))
-@@ -209,25 +296,11 @@ public class ClientProgram
+@@ -210,25 +297,11 @@ public class ClientProgram
  				return;
  			}
  		}
@@ -146,7 +146,7 @@ index afa4d5f..b05b230 100644
  			3 => 3, 
  			2 => 2, 
  			1 => 3, 
-@@ -295,37 +368,101 @@ public class ClientProgram
+@@ -296,37 +369,101 @@ public class ClientProgram
  		};
  		if (RuntimeEnv.OS == OS.Mac)
  		{
@@ -265,7 +265,7 @@ index afa4d5f..b05b230 100644
  		{
  			((GameWindow)gameWindowNative).Run();
  		}
-@@ -337,14 +474,55 @@ public class ClientProgram
+@@ -338,14 +475,55 @@ public class ClientProgram
  			}
  			Thread.CurrentThread.Priority = ThreadPriority.Normal;
  			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");

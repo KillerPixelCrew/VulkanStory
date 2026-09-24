@@ -54,7 +54,7 @@ public class PerDrawCostTests
         void main() { gl_Position = vec4(position, 1); }
         """;
 
-    private static int CreateTarget(IOptimumGraphicsDevice seam)
+    private static int CreateTarget(VulkanDevice seam)
     {
         int texture = seam.CreateTexture2D(Size, Size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -64,7 +64,7 @@ public class PerDrawCostTests
         return framebuffer;
     }
 
-    private static unsafe byte[] Read(IOptimumGraphicsDevice seam, int framebuffer)
+    private static unsafe byte[] Read(VulkanDevice seam, int framebuffer)
     {
         var pixels = new byte[Size * Size * 4];
         fixed (byte* destination = pixels)
@@ -75,7 +75,7 @@ public class PerDrawCostTests
         return pixels;
     }
 
-    private static unsafe int SolidTexture(IOptimumGraphicsDevice seam, byte r, byte g, byte b)
+    private static unsafe int SolidTexture(VulkanDevice seam, byte r, byte g, byte b)
     {
         var pixels = new byte[Size * Size * 4];
         for (int i = 0; i < pixels.Length; i += 4)
@@ -92,7 +92,7 @@ public class PerDrawCostTests
         }
     }
 
-    private static void BaseState(IOptimumGraphicsDevice seam)
+    private static void BaseState(VulkanDevice seam)
     {
         seam.SetViewport(0, 0, Size, Size);
         seam.SetScissorEnabled(false);
@@ -219,7 +219,7 @@ public class PerDrawCostTests
         }
     }
 
-    private static void Scene(IOptimumGraphicsDevice seam, int red, int green, int a, int b, int frame)
+    private static void Scene(VulkanDevice seam, int red, int green, int a, int b, int frame)
     {
         seam.BindFramebuffer(a);
         seam.ClearColor(0, 0f, 0f, 0f, 1f);
@@ -266,7 +266,7 @@ public class PerDrawCostTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int window = 4;
             device!.ShortLivedFramesForTests = window;
 
@@ -406,7 +406,7 @@ public class PerDrawCostTests
         };
     }
 
-    private static void DrawStrips(IOptimumGraphicsDevice seam, int target, int program, int mesh)
+    private static void DrawStrips(VulkanDevice seam, int target, int program, int mesh)
     {
         seam.BindFramebuffer(target);
         seam.ClearColor(0, 0f, 0f, 0f, 1f);
@@ -427,7 +427,7 @@ public class PerDrawCostTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             // Two indirect commands per slot buffer to start with.
             device!.IndirectMinimumCapacityForTests = 40;
 

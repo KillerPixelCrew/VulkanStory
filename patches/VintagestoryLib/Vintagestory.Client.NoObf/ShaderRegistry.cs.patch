@@ -111,7 +111,7 @@ index d3edef9..f57d2d6 100644
 +			foreach (IAsset item in many)
  			{
 -				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() && flag;
+-				flag = shaderProgram.Compile() & flag;
 +				includes[item.Name] = item.ToText();
 +			}
 +			for (int i = 0; i < nextPassId; i++)

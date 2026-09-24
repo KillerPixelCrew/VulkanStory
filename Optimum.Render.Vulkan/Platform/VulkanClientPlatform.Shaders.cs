@@ -207,7 +207,7 @@ public partial class VulkanClientPlatform
 
     public override void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
     {
-        NoteProgramTexture(program.ProgramId, samplerName, textureId);
+        NoteNativeProgramTexture(program.ProgramId, samplerName, textureId);
         device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
         stated.BindTexture(textureNumber, textureId);
         if (program.clampTToEdge)

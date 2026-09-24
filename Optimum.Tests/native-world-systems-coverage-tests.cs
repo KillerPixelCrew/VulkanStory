@@ -20,6 +20,8 @@ public class NativeWorldSystemsCoverageTests
     private const string Q = "\"";
 
     private const string SkyPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeSky.cs";
+    private const string ChunkPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeChunks.cs";
+    private const string WorldPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeWorld.cs";
     private const string GuiPlatformFile = "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeGui.cs";
     private const string DeviceMeshFile = "Optimum.Render.Vulkan/VulkanDevice.NativeMesh.cs";
     private const string DeviceNativeFile = "Optimum.Render.Vulkan/VulkanDevice.Native.cs";
@@ -791,6 +793,18 @@ public class NativeWorldSystemsCoverageTests
         int first = tracker.IndexOf("EnumBlendMode.PremultipliedAlpha =>", StringComparison.Ordinal);
         Assert.True(first >= 0);
         Assert.Equal(-1, tracker.IndexOf("EnumBlendMode.PremultipliedAlpha =>", first + 1, StringComparison.Ordinal));
+    }
+
+    private static int Count(string source, string needle)
+    {
+        int count = 0;
+        int at = source.IndexOf(needle, StringComparison.Ordinal);
+        while (at >= 0)
+        {
+            count++;
+            at = source.IndexOf(needle, at + needle.Length, StringComparison.Ordinal);
+        }
+        return count;
     }
 
     // ------------------------------------------------------------------------ helpers

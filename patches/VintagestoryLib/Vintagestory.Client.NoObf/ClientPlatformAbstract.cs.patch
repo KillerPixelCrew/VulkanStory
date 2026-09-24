@@ -127,57 +127,43 @@ index 8667d95..89597a7 100644
 +	}
 +
 +	/// <summary>
-+	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the texture-into-texture
-+	/// blit's draw, as a seam of its own.
++	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the scope one
++	/// ChunkRenderer draw group draws its chunk pools under.
 +	///
-+	/// What it draws: the unit quad ClientMain.RenderTextureIntoFrameBuffer stretches a rectangle of
-+	/// one texture over a rectangle of another with - the draw that bakes every Cairo-drawn GUI and
-+	/// text texture into a texture atlas or a dialog's own surface, several hundred times in a frame
-+	/// that opens a dialog.
-+	/// The other side: the neutral body below is the OpenGL path - it is exactly the
-+	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, so "OFF is vanilla" holds - and
-+	/// VulkanClientPlatform.RenderTextureQuad is the native one.
-+	/// Target and slots: <see cref="CurrentFrameBuffer" />, which the caller has just bound to the
-+	/// framebuffer it passes in, colour slot 0 only; texture2texture.fsh writes outColor at 0 and
-+	/// the pipeline masks every other slot off. No depth attachment is written.
-+	/// State that is not obvious: the caller computes both pieces of fixed state from its own
-+	/// arguments rather than leaving them to whatever the frame had - the depth test is off and
-+	/// blending is on exactly when alphaTest is non-negative - so <paramref name="blend" /> is that
-+	/// value passed on, and a native pass states it instead of reading it back off tracked GL state
-+	/// (decision 3). The source texture is passed because a native pass resolves what it samples
-+	/// from handles, not from the texture unit the program's setter bound it to.
-+	/// What pins it: NativeGuiTests (old route against native route) and
++	/// What it draws: nothing itself. It brackets one group of terrain multi-draws - a shadow
++	/// cascade, an opaque terrain group, a topsoil group, the OIT liquid or transparent group,
++	/// the liquid velocity redraw or the AfterOIT terrain overlay - and states the fixed state
++	/// that group runs under, so a native platform can build a pipeline from stated values
++	/// instead of reading them back out of tracked GL state (decision 3).
++	/// The other side: the neutral body below is the OpenGL path. It does nothing and returns
++	/// false, so ClientPlatformWindows keeps drawing exactly the bodies it draws today ("OFF is
++	/// vanilla"); the GlToggleBlend / GlEnableDepthTest / GlDepthMask / cull calls around the
++	/// group stay where they are and are what the GL path still runs on.
++	/// VulkanClientPlatform.BeginChunkPass is the native one: it opens a declared pass on the
++	/// bound target and routes the group's multi-draws through the native device API.
++	/// Target and slots: whatever the stage bound - Primary for the opaque, overlay and liquid
++	/// velocity groups, the Transparent target for the OIT groups, a shadow map for the
++	/// cascades. The motion window is expressed as the pass's colour-write mask, never as a
++	/// draw-buffer toggle.
++	/// State that is not obvious: <paramref name="blend" /> is the global GL_BLEND toggle the
++	/// group runs with, not a blend mode; the per-attachment functions are the ones the client
++	/// applied for that target (the standard mode plus the replace-blended SSAO G-buffer and
++	/// motion slots, or the OIT accumulation contract on the Transparent target).
++	/// What pins it: NativeChunkTests (old route against native route, per pass) and
 +	/// Optimum.Tests/native-world-systems-coverage-tests.cs.
 +	/// </summary>
-+	public virtual void RenderTextureQuad(MeshRef quad, int textureId, bool blend)
++	/// <returns>Whether a native platform took the group; false means the ordinary draw route.</returns>
++	public virtual bool BeginChunkPass(string chunkPass, bool blend, bool depthTest, bool depthWrite, bool cullFace)
 +	{
-+		RenderMesh(quad);
++		return false;
 +	}
 +
 +	/// <summary>
-+	/// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): a 2D overlay drawn as
-+	/// lines, as a seam of its own.
-+	///
-+	/// What it draws: the aiming reticle SystemRenderPlayerAimAcc puts on the screen while a bow is
-+	/// drawn - one line-topology rectangle and four line meshes, through the gui program with
-+	/// noTexture set, in the Ortho stage.
-+	/// The other side: the neutral body below is the OpenGL path - it is exactly the
-+	/// <see cref="RenderMesh(MeshRef)" /> call it replaced, so "OFF is vanilla" holds - and
-+	/// VulkanClientPlatform.RenderOverlayLines is the native one.
-+	/// Target and slots: <see cref="CurrentFrameBuffer" />, which in the Ortho stage is the default
-+	/// framebuffer, colour slot 0 only.
-+	/// State that is not obvious: the caller sets the line width and turns blending on immediately
-+	/// before each of these draws, so both are passed here and a native pipeline states them
-+	/// outright - the line width is the one piece of dynamic state a fullscreen pass never needed.
-+	/// The topology is the mesh's own draw mode, not a state toggle. <paramref name="textureId" />
-+	/// is the texture the program samples, 0 for the reticle because noTexture is 1 and the sampler
-+	/// resolves to the bindless placeholder on both routes.
-+	/// What pins it: NativeGuiTests (old route against native route, both line widths) and
-+	/// Optimum.Tests/native-world-systems-coverage-tests.cs.
++	/// Optimum (Phase 3b stage 2): closes the scope <see cref="BeginChunkPass" /> opened. A
++	/// no-op on the OpenGL path, and safe to call when Begin returned false.
 +	/// </summary>
-+	public virtual void RenderOverlayLines(MeshRef lines, int textureId, float lineWidth, bool blend)
++	public virtual void EndChunkPass()
 +	{
-+		RenderMesh(lines);
 +	}
 +
 +	/// <summary>

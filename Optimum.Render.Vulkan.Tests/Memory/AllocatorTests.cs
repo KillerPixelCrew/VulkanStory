@@ -28,7 +28,7 @@ public class AllocatorPolicyTests
 
     public AllocatorPolicyTests(ITestOutputHelper output) => _output = output;
 
-    private static int CreateTarget(IOptimumGraphicsDevice seam, int size)
+    private static int CreateTarget(VulkanDevice seam, int size)
     {
         int texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -38,7 +38,7 @@ public class AllocatorPolicyTests
         return framebuffer;
     }
 
-    private static unsafe byte[] Read(IOptimumGraphicsDevice seam, int framebuffer, int size)
+    private static unsafe byte[] Read(VulkanDevice seam, int framebuffer, int size)
     {
         var pixels = new byte[size * size * 4];
         fixed (byte* destination = pixels)
@@ -84,7 +84,7 @@ public class AllocatorPolicyTests
         void main() { color = vec4(1); }
         """;
 
-    private static void PrepareDraw(IOptimumGraphicsDevice seam, int target, int program, int size)
+    private static void PrepareDraw(VulkanDevice seam, int target, int program, int size)
     {
         seam.BindFramebuffer(target);
         seam.UseProgram(program);
@@ -108,7 +108,7 @@ public class AllocatorPolicyTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 8;
             VulkanContext context = device!.ContextForTests;
             VulkanAllocator allocator = context.Allocator;
@@ -329,7 +329,7 @@ public class AllocatorPolicyTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 8;
             VulkanAllocator allocator = device!.ContextForTests.Allocator;
             allocator.ReBarCapOverrideForTests = 0;

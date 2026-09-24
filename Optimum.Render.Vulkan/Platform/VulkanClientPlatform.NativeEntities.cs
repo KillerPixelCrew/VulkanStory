@@ -73,26 +73,14 @@ public partial class VulkanClientPlatform
     private const string EntityShadowPass = "shadowmapentityanimated";
 
     /// <summary>
-    /// What the client declared each program's samplers hold, by name: filled from
-    /// BindProgramTexture2D/Cube, which is the client saying "this program's sampler is this
-    /// texture". A program whose draws are all native never runs the emulated resolve that fills
-    /// the push block's slots from the texture units, so the native draw has to resolve every
-    /// sampler the program declares - not only the one the seam names.
+    /// The texture the client declared for a sampler, or 0 - which resolves to the placeholder.
+    /// The table itself is <see cref="nativeProgramTextures" /> in
+    /// VulkanClientPlatform.NativeChunks.cs, filled by NoteNativeProgramTexture from
+    /// BindProgramTexture2D/Cube - the client saying "this program's sampler is this texture".
+    /// A program whose draws are all native never runs the emulated resolve that fills the push
+    /// block's slots from the texture units, so the native draw has to resolve every sampler the
+    /// program declares, not only the one the seam names.
     /// </summary>
-    private readonly Dictionary<int, Dictionary<string, int>> nativeProgramTextures = new();
-
-    /// <summary>Records one sampler declaration. Render thread only, like every platform call.</summary>
-    private void NoteProgramTexture(int programId, string samplerName, int textureId)
-    {
-        if (!nativeProgramTextures.TryGetValue(programId, out Dictionary<string, int>? samplers))
-        {
-            samplers = new Dictionary<string, int>(StringComparer.Ordinal);
-            nativeProgramTextures[programId] = samplers;
-        }
-        samplers[samplerName] = textureId;
-    }
-
-    /// <summary>The texture the client declared for a sampler, or 0 - which resolves to the placeholder.</summary>
     internal int DeclaredProgramTexture(int programId, string samplerName) =>
         nativeProgramTextures.TryGetValue(programId, out Dictionary<string, int>? samplers) &&
         samplers.TryGetValue(samplerName, out int textureId)

@@ -602,6 +602,13 @@ internal sealed record PatchManifest(
             ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
             {
                 "oButtonBounds",
+                "optimumContentBounds",
+                "optimumRowY",
+                "OnOptimumScrollChanged",
+                "AddOptimumLabelRow",
+                "AddOptimumSwitchRow",
+                "AddOptimumSliderRow",
+                "AddOptimumDropdownRow",
                 "OnOptimumOptions",
                 "_AddOptimumTab",
                 "onOptimumBackgroundFpsChanged",

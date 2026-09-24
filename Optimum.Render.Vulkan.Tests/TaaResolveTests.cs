@@ -1252,6 +1252,8 @@ public class TaaResolveTests
             Assert.True(predictedBias > 0.6, "the case is too weak to catch the eye-offset bug");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 

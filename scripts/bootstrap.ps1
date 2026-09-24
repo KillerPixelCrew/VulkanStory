@@ -694,13 +694,9 @@ try {
                 throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive"
             }
 
-            Move-Item -Force $innounpPartial $innounpZip
-            # Module-qualified: another module's Expand-Archive earlier on PSModulePath
-            # (Pscx ships one) shadows the built-in cmdlet and has no -DestinationPath.
-            Microsoft.PowerShell.Archive\Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
-            $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
-            if ($found -and $found.FullName -ne $innounp) {
-                Copy-Item -Force $found.FullName $innounp
+            $sourceRoot = Join-Path $extractRoot 'app'
+            if (-not (Test-Path (Join-Path $sourceRoot 'Vintagestory.exe'))) {
+                $sourceRoot = $extractRoot
             }
             if (-not (Test-Path (Join-Path $sourceRoot 'Vintagestory.exe'))) {
                 throw "Extraction failed: Vintagestory.exe not found in $ClientArchive payload"

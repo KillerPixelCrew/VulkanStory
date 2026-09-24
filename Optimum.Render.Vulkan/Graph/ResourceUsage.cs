@@ -1,20 +1,31 @@
+using Silk.NET.Vulkan;
+
 namespace Optimum.Render.Vulkan.Graph;
 
-// LOCAL STUB (stage "frame-plan"): contract C1 is owned by stage "barriers", which also
-// defines UsageState.For next to this enum. This file exists only so FramePlan compiles
-// before the merge; the integration stage keeps the barriers stage's definition and
-// drops this file. The member list is copied verbatim from the contract.
-
-/// <summary>How a pass uses one resource. Stage and access derive from this, never from the layout alone.</summary>
+/// <summary>
+/// What a command does with an image. Layout, pipeline stage and access all
+/// derive from this (<see cref="UsageState.For" />), never from the layout
+/// alone: two uses can share a layout and still differ in stage (a depth
+/// attachment read only by the depth test versus one also sampled by the
+/// fragment shader).
+/// </summary>
 public enum ResourceUsage
 {
+    /// <summary>Colour attachment, written without reading the destination.</summary>
     ColorWrite,
+    /// <summary>Colour attachment with blending: the destination is read and written.</summary>
     ColorBlend,
+    /// <summary>Depth attachment with writes on.</summary>
     DepthWrite,
+    /// <summary>Depth attachment with writes off, read by the depth test only.</summary>
     DepthReadOnly,
+    /// <summary>Depth attachment with writes off, also sampled by the fragment shader.</summary>
     DepthReadOnlySampled,
+    /// <summary>Sampled by a fragment shader.</summary>
     SampleFragment,
+    /// <summary>Sampled by a vertex shader.</summary>
     SampleVertex,
+    /// <summary>Read as a storage image.</summary>
     StorageRead,
     /// <summary>Sampled by a compute shader.</summary>
     SampleCompute,
@@ -26,7 +37,9 @@ public enum ResourceUsage
     StorageReadWrite,
     /// <summary>Source of a copy or blit.</summary>
     TransferSrc,
+    /// <summary>Destination of a copy, blit or clear.</summary>
     TransferDst,
+    /// <summary>Handed to vkQueuePresentKHR.</summary>
     PresentSrc,
 }
 
