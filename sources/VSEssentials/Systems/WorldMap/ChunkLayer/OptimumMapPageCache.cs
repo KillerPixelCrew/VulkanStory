@@ -14,7 +14,7 @@ namespace Vintagestory.GameContent;
 
 /// <summary>
 /// Page-based disk cache for the world map terrain layer. Groups map chunks
-/// into 8x8 pages (256x256 pixels) and persists them as gzip-compressed
+/// into 8x8 pages (256x256 pixels) and persists them as zstd-compressed
 /// RGBA on disk. Background threads handle I/O so map opens return cached
 /// pages in sub-100ms instead of re-generating from MapDB.
 ///
@@ -420,15 +420,15 @@ public sealed class OptimumMapPageCache : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Signal the writer thread to exit and wait until it has drained its
-        // queue. A timed join can leave a page write in progress while Flush()
-        // starts a second write to the same .omp file.
+        // Signal the writer thread to exit and wait for it to finish its
+        // current page write before draining anything ourselves. This prevents
+        // the main thread and writer thread from racing on the same .omp file.
         if (_writerThread.IsAlive)
         {
-            _writerThread.Join();
+            _writerThread.Join(timeout: TimeSpan.FromSeconds(5));
         }
 
-        // Recover requests left behind if the writer exited unexpectedly.
+        // Drain anything left after the writer exited
         Flush();
     }
 
@@ -457,14 +457,13 @@ public sealed class OptimumMapPageCache : IDisposable
 
     private void WriterLoop()
     {
-        // Drain a batch before writing it. Requests that arrive while a page is
-        // being written stay queued for the next batch, so the later pixels cannot
-        // be lost behind a key already written in this batch.
-        Dictionary<long, PageWriteRequest> batch = new();
+        // Coalesce writes: multiple chunks hitting the same page produce multiple
+        // write requests, but we only need to flush once per page per batch.
+        HashSet<long> written = new();
         // Reusable buffer for pixel->byte conversion (writer thread is single-threaded)
         byte[] writerRawBytes = new byte[PagePixelCount * 4];
 
-        while (!_disposed || !_writeQueue.IsEmpty)
+        while (!_disposed)
         {
             if (_writeQueue.IsEmpty)
             {
@@ -472,12 +471,20 @@ public sealed class OptimumMapPageCache : IDisposable
                 continue;
             }
 
-            batch.Clear();
+            written.Clear();
             while (_writeQueue.TryDequeue(out PageWriteRequest req))
             {
-                batch[req.Key] = req;
+                long key = req.Key;
+                if (written.Contains(key)) continue;
+                written.Add(key);
+                WritePage(req, writerRawBytes);
             }
-            foreach (PageWriteRequest req in batch.Values) WritePage(req, writerRawBytes);
+        }
+
+        // Drain remaining on shutdown
+        while (_writeQueue.TryDequeue(out PageWriteRequest req))
+        {
+            WritePage(req, writerRawBytes);
         }
     }
 

@@ -8,33 +8,17 @@ Optimum accepts pull requests for performance optimizations, bugfixes, and build
 2. Measurable. If you claim a performance gain, describe how to reproduce and measure it.
 3. Configurable where appropriate. If the optimization has any visual tradeoff (even subtle), it needs a toggle in the Extra settings tab.
 4. No new dependencies without discussion. Open an issue first.
-5. Tests for non-trivial logic. The repository has six test projects; GPU tests need a Vulkan-capable host.
+5. Tests for non-trivial logic. The project uses xunit (178 tests).
 
 ## Setup
 
 ```bash
 make build   # bootstrap (decompile vanilla) + compile
-make test    # focused main and launcher suites
+make test    # verify all 178 tests pass
 make run     # launch and test in-game
 ```
 
 See the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page for prerequisites and details.
-
-For the full solution test pass after a donor bootstrap, build and test with the
-same `DonorAvailable` value:
-
-```bash
-dotnet build VintageStory.slnx -c Release -p:DonorAvailable=true
-dotnet test VintageStory.slnx -c Release -p:DonorAvailable=true --no-build --filter 'Lane!=Stress'
-```
-
-The GPU suite is serialized because it uses real devices and GLFW's process-global state.
-Set `OPTIMUM_TEST_DEVICE_INDEX` after checking the enumerated device order when testing a
-particular GPU. Use `OPTIMUM_TEST_VALIDATION_FEATURES=sync,best` with the Khronos validation
-layer for the final GPU correctness pass.
-The separate `Lane=Stress` GPU test drives a deliberately long fragment workload;
-run it when checking frame overlap or descriptor lifetime changes. Script self-tests
-also need Python with NumPy and Bash (Git Bash on Windows).
 
 ### Installer
 

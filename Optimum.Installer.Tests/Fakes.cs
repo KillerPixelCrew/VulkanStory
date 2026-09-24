@@ -1,19 +1,11 @@
-using Avalonia.Headless;
-using Avalonia;
-using Optimum.Installer.Tests;
-using Optimum.Installer;
-
-[assembly: AvaloniaTestApplication(typeof(TestAppBuilder))]
-
-// Source: Optimum.Installer.Tests/Fakes.cs
-namespace Optimum.Installer.Tests
-{
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Tests;
 using Optimum.Installer.Services;
+
+namespace Optimum.Installer.Tests;
 
 public sealed class FakeBuildDriver : IBuildDriver
 {
@@ -206,21 +198,4 @@ public static class TestServices
             Ilspycmd = ilspycmd,
         };
     }
-}
-}
-
-// Source: Optimum.Installer.Tests/TestAppBuilder.cs
-namespace Optimum.Installer.Tests
-{
-using Avalonia;
-using Avalonia.Headless;
-using Optimum.Installer;
-using Optimum.Installer.Tests;
-
-public static class TestAppBuilder
-{
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions());
-}
 }

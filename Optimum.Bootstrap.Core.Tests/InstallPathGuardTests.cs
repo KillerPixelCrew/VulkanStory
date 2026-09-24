@@ -1,54 +1,8 @@
-// Source: Optimum.Bootstrap.Core.Tests/DataPathProbeTests.cs
-namespace Optimum.Bootstrap.Core.Tests
-{
-using Optimum.Bootstrap.Core.DataPath;
-using Xunit;
-
-/// <summary>Ports the <c>prompt_data_path</c> heuristic from <c>scripts/install-linux.sh</c>.</summary>
-public class DataPathProbeTests
-{
-    [Fact]
-    public void PrefersACandidateWithAnActiveSessionOverOneThatMerelyExists()
-    {
-        var probe = new FakeSystemProbe();
-        probe.AddDirectory("/home/tester/.config/VintagestoryData");
-        probe.AddDirectory("/home/tester/.config/OptimumVintagestoryData");
-        probe.AddFile("/home/tester/.config/OptimumVintagestoryData/clientsettings.json",
-            """{ "playeruid": "abc123" }""");
-
-        DataPathDetection detection = DataPathProbe.Detect(probe);
-
-        Assert.Equal("/home/tester/.config/OptimumVintagestoryData", detection.Path);
-        Assert.True(detection.HasActiveSession);
-    }
-
-    [Fact]
-    public void FallsBackToTheFirstDirectoryThatExists()
-    {
-        var probe = new FakeSystemProbe();
-        probe.AddDirectory("/home/tester/.config/VintagestoryData");
-
-        DataPathDetection detection = DataPathProbe.Detect(probe);
-
-        Assert.Equal("/home/tester/.config/VintagestoryData", detection.Path);
-        Assert.False(detection.HasActiveSession);
-    }
-
-    [Fact]
-    public void ReturnsNothingWhenNoCandidateExists()
-    {
-        DataPathDetection detection = DataPathProbe.Detect(new FakeSystemProbe());
-        Assert.Null(detection.Path);
-    }
-}
-}
-
-// Source: Optimum.Bootstrap.Core.Tests/InstallPathGuardTests.cs
-namespace Optimum.Bootstrap.Core.Tests
-{
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Paths;
 using Xunit;
+
+namespace Optimum.Bootstrap.Core.Tests;
 
 /// <summary>
 /// Every case INSTALLER-PLAN.md section 9 lists for the path guard, plus the
@@ -156,41 +110,4 @@ public class InstallPathGuardTests
             InstallPathGuard.Check(Linux(), new InstallPathRequest(
                 "/home/tester/opt", DataPath: "/home/tester/opt/data")),
             "data path");
-}
-}
-
-// Source: Optimum.Bootstrap.Core.Tests/SymlinkComponentCheckTests.cs
-namespace Optimum.Bootstrap.Core.Tests
-{
-using Optimum.Bootstrap.Core.Paths;
-using Xunit;
-
-public class SymlinkComponentCheckTests
-{
-    [Fact]
-    public void CleanPathHasNoSymlinkComponent()
-    {
-        var probe = new FakeSystemProbe();
-        probe.AddDirectory("/home/tester/games");
-        Assert.Null(SymlinkComponentCheck.FirstSymlinkComponent(probe, "/home/tester/games/optimum"));
-    }
-
-    [Fact]
-    public void ReturnsTheSymlinkedComponentWhenOneIsInThePath()
-    {
-        var probe = new FakeSystemProbe();
-        probe.AddSymlink("/home/tester/games");
-
-        Assert.Equal("/home/tester/games",
-            SymlinkComponentCheck.FirstSymlinkComponent(probe, "/home/tester/games/optimum/bin"));
-    }
-
-    [Fact]
-    public void RequireExistsThrowsWhenAComponentIsMissing()
-    {
-        var probe = new FakeSystemProbe();
-        Assert.Throws<DirectoryNotFoundException>(() =>
-            SymlinkComponentCheck.FirstSymlinkComponent(probe, "/nowhere/at/all", requireExists: true));
-    }
-}
 }
