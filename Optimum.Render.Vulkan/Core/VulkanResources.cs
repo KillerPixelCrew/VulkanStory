@@ -1,11 +1,12 @@
 using System;
 using System.Threading;
 using Silk.NET.Vulkan;
-
-// Silk.NET.Vulkan.Buffer collides with System.Buffer.
 using Buffer = Silk.NET.Vulkan.Buffer;
+using System.Collections.Generic;
 
 namespace Optimum.Render.Vulkan.Core;
+
+// Silk.NET.Vulkan.Buffer collides with System.Buffer.
 
 /// <summary>
 /// Process-unique ids for device resources.
@@ -314,5 +315,123 @@ internal static unsafe class VulkanMemory
         }
 
         throw new InvalidOperationException($"no memory type with {properties}");
+    }
+}
+
+/// <summary>
+/// Which format a storage image is created in. A compute pass names the format it
+/// wants (the AO working term wants R8_UNORM, the prefiltered depth R32F); a device
+/// that cannot use that format as a storage image and sample it gets the first
+/// wider format of the same kind that it can, ending in RGBA8 for unsigned
+/// normalised formats and RGBA32F for float ones (the formats Vulkan guarantees
+/// storage support for). A shader writing the first channel of the wider format
+/// reads the same value back, so a fallback costs memory, never correctness.
+///
+/// Pure: the feature lookup is passed in, so the choice is testable without a device.
+/// </summary>
+internal static class StorageFormats
+{
+    /// <summary>What a storage image must support: storage writes and sampling.</summary>
+    public const FormatFeatureFlags Required = FormatFeatureFlags.StorageImageBit | FormatFeatureFlags.SampledImageBit;
+
+    /// <summary>The candidates for <paramref name="requested" />, the requested format first.</summary>
+    public static IReadOnlyList<Format> CandidatesFor(Format requested) => requested switch
+    {
+        Format.R8Unorm => new[] { Format.R8Unorm, Format.R8G8Unorm, Format.R8G8B8A8Unorm },
+        Format.R8G8Unorm => new[] { Format.R8G8Unorm, Format.R8G8B8A8Unorm },
+        Format.R16Unorm => new[] { Format.R16Unorm, Format.R16G16B16A16Unorm, Format.R8G8B8A8Unorm },
+        Format.R16Sfloat => new[] { Format.R16Sfloat, Format.R32Sfloat, Format.R16G16B16A16Sfloat, Format.R32G32B32A32Sfloat },
+        Format.R32Sfloat => new[] { Format.R32Sfloat, Format.R32G32B32A32Sfloat },
+        Format.R16G16Sfloat => new[] { Format.R16G16Sfloat, Format.R16G16B16A16Sfloat, Format.R32G32B32A32Sfloat },
+        Format.R16G16B16A16Sfloat => new[] { Format.R16G16B16A16Sfloat, Format.R32G32B32A32Sfloat },
+        Format.R8G8B8A8Unorm => new[] { Format.R8G8B8A8Unorm },
+        _ => new[] { requested, Format.R8G8B8A8Unorm },
+    };
+
+    /// <summary>
+    /// The first candidate whose optimal-tiling features include <see cref="Required" />;
+    /// RGBA8 when none does (every Vulkan device supports it as a storage image).
+    /// </summary>
+    public static Format Choose(Format requested, Func<Format, FormatFeatureFlags> optimalFeatures)
+    {
+        foreach (Format candidate in CandidatesFor(requested))
+        {
+            if ((optimalFeatures(candidate) & Required) == Required) return candidate;
+        }
+        return Format.R8G8B8A8Unorm;
+    }
+
+    /// <summary>Whether a colour attachment usage may be added: the format must support it.</summary>
+    public static bool SupportsColorAttachment(FormatFeatureFlags features) =>
+        (features & FormatFeatureFlags.ColorAttachmentBit) != 0;
+}
+
+/// <summary>
+/// The values poison mode (OPTIMUM_VULKAN_POISON=1) writes into fresh resources.
+///
+/// OpenGL and Vulkan both leave new storage undefined, but in practice GL
+/// drivers hand out zeroed memory and Vulkan allocators hand out whatever the
+/// previous tenant left. A read of never-written content therefore "works" on
+/// one backend and flickers on the other. Poison makes such a read loud and
+/// identical every frame: NaN for float formats, magenta (alpha 1) for
+/// normalised and sRGB colour, 0xDEADBEEF for integer formats and host memory,
+/// 0.5 for depth.
+/// </summary>
+internal static unsafe class VulkanPoison
+{
+    public const uint Word = 0xDEADBEEF;
+    public const float Depth = 0.5f;
+
+    public static bool IsCompressed(Format format) =>
+        format.ToString().Contains("Block", StringComparison.Ordinal);
+
+    public static bool IsFloat(Format format)
+    {
+        string name = format.ToString();
+        return name.Contains("Sfloat", StringComparison.Ordinal) || name.Contains("Ufloat", StringComparison.Ordinal);
+    }
+
+    public static bool IsInteger(Format format)
+    {
+        string name = format.ToString();
+        return name.Contains("Uint", StringComparison.Ordinal) || name.Contains("Sint", StringComparison.Ordinal);
+    }
+
+    public static ClearColorValue ColorFor(Format format)
+    {
+        var value = new ClearColorValue();
+        if (IsFloat(format))
+        {
+            value.Float32_0 = float.NaN;
+            value.Float32_1 = float.NaN;
+            value.Float32_2 = float.NaN;
+            value.Float32_3 = float.NaN;
+        }
+        else if (IsInteger(format))
+        {
+            // Uint and Sint clears read the same union bits.
+            value.Uint32_0 = Word;
+            value.Uint32_1 = Word;
+            value.Uint32_2 = Word;
+            value.Uint32_3 = Word;
+        }
+        else
+        {
+            value.Float32_0 = 1f;
+            value.Float32_1 = 0f;
+            value.Float32_2 = 1f;
+            value.Float32_3 = 1f;
+        }
+        return value;
+    }
+
+    /// <summary>Writes 0xDEADBEEF as little-endian words over the whole range, a partial word at the tail.</summary>
+    public static void FillHostMemory(IntPtr memory, ulong size)
+    {
+        byte* bytes = (byte*)memory;
+        ulong words = size / 4;
+        uint* wordPointer = (uint*)bytes;
+        for (ulong i = 0; i < words; i++) wordPointer[i] = Word;
+        for (ulong i = words * 4; i < size; i++) bytes[i] = (byte)(Word >> (int)(8 * (i % 4)));
     }
 }

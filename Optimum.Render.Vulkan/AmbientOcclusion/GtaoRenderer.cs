@@ -3,6 +3,11 @@ using System.Runtime.InteropServices;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Reflection;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Optimum.Render.Vulkan.AmbientOcclusion;
 
@@ -234,5 +239,149 @@ internal sealed class GtaoRenderer : IDisposable
         ReleasePrograms();
         if (_hilbert != 0) _device.DeleteTexture(_hilbert);
         _hilbert = 0;
+    }
+}
+
+/// <summary>
+/// The reconstruction constants of the AO passes from a GL projection
+/// (docs/research/xegtao-integration.md, integration plan step 1): view depth from the
+/// [0, 1] depth buffer and view XY from the texel's UV, in the working frame x right,
+/// y up, z forward (GL view space mirrored in z). The texel rows run bottom-up (GL order;
+/// the device never flips), so unlike XeGTAO's D3D constants the Y terms keep their sign.
+///
+/// The jitter columns of the projection (P[2][0], P[2][1]) are folded into the offset,
+/// so a jittered G-buffer reconstructs exactly rather than within a sub-pixel.
+/// </summary>
+internal readonly record struct GtaoProjection(
+    float DepthUnpackMul, float DepthUnpackAdd,
+    float NdcToViewMulX, float NdcToViewMulY,
+    float NdcToViewAddX, float NdcToViewAddY)
+{
+    /// <summary>
+    /// From a column-major GL perspective matrix (<c>m[10] = A</c>, <c>m[14] = B</c>,
+    /// <c>m[11] = -1</c>); null for anything that is not a perspective projection.
+    /// </summary>
+    public static GtaoProjection? From(float[]? m)
+    {
+        if (m == null || m.Length < 16) return null;
+        if (MathF.Abs(m[11] + 1f) > 1e-4f || MathF.Abs(m[15]) > 1e-4f) return null;
+        if (m[0] == 0f || m[5] == 0f || m[14] == 0f) return null;
+
+        float a = m[10];
+        float b = m[14];
+        float tanX = 1f / m[0];
+        float tanY = 1f / m[5];
+        return new GtaoProjection(
+            -b / 2f, (1f - a) / 2f,
+            2f * tanX, 2f * tanY,
+            (m[8] - 1f) * tanX, (m[9] - 1f) * tanY);
+    }
+
+    /// <summary>View depth (positive, forward) of a [0, 1] depth value; the shader's <c>gtaoViewDepth</c>.</summary>
+    public float ViewDepth(float screenDepth) => DepthUnpackMul / (DepthUnpackAdd - screenDepth);
+
+    /// <summary>The working-frame position of a texel UV (row 0 at the bottom) at a view depth; <c>gtaoViewPosition</c>.</summary>
+    public (float X, float Y, float Z) ViewPosition(float u, float v, float viewDepth) =>
+        ((NdcToViewMulX * u + NdcToViewAddX) * viewDepth, (NdcToViewMulY * v + NdcToViewAddY) * viewDepth, viewDepth);
+}
+
+/// <summary>
+/// The AO compute shaders, <c>sources/shaders-vk/gtao/*.comp</c>, embedded in the renderer
+/// assembly (so deploy and the packagers carry them with the DLL). Expands their
+/// <c>#include "x.glsl"</c> lines from the same directory and defines the storage format
+/// qualifiers of the formats the device chose right after <c>#version</c>.
+/// </summary>
+internal static class GtaoShaderSources
+{
+    public const string ResourcePrefix = "shaders-vk/gtao/";
+
+    private static readonly ConcurrentDictionary<string, string> Raw = new(StringComparer.Ordinal);
+    private static readonly Regex IncludeLine = new("^[ \\t]*#include[ \\t]+\"([^\"]+)\"[ \\t]*\\r?$",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+    /// <summary>A resource of the gtao directory, as committed.</summary>
+    public static string Read(string fileName) => Raw.GetOrAdd(fileName, name =>
+    {
+        Assembly assembly = typeof(GtaoShaderSources).Assembly;
+        using Stream? stream = assembly.GetManifestResourceStream(ResourcePrefix + name);
+        if (stream == null) throw new FileNotFoundException("embedded AO shader missing: " + ResourcePrefix + name);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return reader.ReadToEnd();
+    });
+
+    /// <summary>
+    /// The compilable source of <paramref name="fileName" />: includes expanded (each file
+    /// once) and <c>GTAO_DEPTH_FORMAT</c> / <c>GTAO_TERM_FORMAT</c> defined.
+    /// </summary>
+    public static string Build(string fileName, Format depthFormat, Format termFormat)
+    {
+        string source = Expand(Read(fileName), new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal));
+        int versionEnd = source.IndexOf('\n', source.IndexOf("#version", StringComparison.Ordinal)) + 1;
+        string defines = "#define GTAO_DEPTH_FORMAT " + Qualifier(depthFormat) + "\n" +
+                         "#define GTAO_TERM_FORMAT " + Qualifier(termFormat) + "\n";
+        return source.Insert(versionEnd, defines);
+    }
+
+    private static string Expand(string source, System.Collections.Generic.HashSet<string> included) =>
+        IncludeLine.Replace(source, match =>
+        {
+            string name = match.Groups[1].Value;
+            return included.Add(name) ? Expand(Read(name), included) : "";
+        });
+
+    /// <summary>The storage image format qualifier of a format a storage texture can have.</summary>
+    public static string Qualifier(Format format) => format switch
+    {
+        Format.R8Unorm => "r8",
+        Format.R8G8Unorm => "rg8",
+        Format.R8G8B8A8Unorm => "rgba8",
+        Format.R16Sfloat => "r16f",
+        Format.R32Sfloat => "r32f",
+        Format.R16G16B16A16Sfloat => "rgba16f",
+        Format.R32G32B32A32Sfloat => "rgba32f",
+        _ => throw new ArgumentOutOfRangeException(nameof(format), format, "no storage qualifier for this format"),
+    };
+}
+
+/// <summary>
+/// The 64x64 Hilbert index table the AO noise starts from (docs/research/ambient-occlusion.md
+/// C.7): generated at startup, never shipped. Neighbouring texels get neighbouring indices,
+/// so the R2 sequence the index drives is low-discrepancy across the 3x3 denoise
+/// footprint. XeGTAO's <c>HilbertIndex</c> (vaGTAO.hlsl, MIT, Intel), level 6.
+/// </summary>
+internal static class HilbertLut
+{
+    public const int Width = 64;
+
+    /// <summary>The curve index of texel (<paramref name="x" />, <paramref name="y" />), 0..4095.</summary>
+    public static uint Index(uint x, uint y)
+    {
+        uint index = 0;
+        for (uint level = Width / 2; level > 0; level /= 2)
+        {
+            uint regionX = (x & level) > 0 ? 1u : 0u;
+            uint regionY = (y & level) > 0 ? 1u : 0u;
+            index += level * level * ((3u * regionX) ^ regionY);
+            if (regionY == 0)
+            {
+                if (regionX == 1)
+                {
+                    x = Width - 1 - x;
+                    y = Width - 1 - y;
+                }
+                (x, y) = (y, x);
+            }
+        }
+        return index;
+    }
+
+    /// <summary>The table in row order as floats, for an R32F texture: every index is exact in a float.</summary>
+    public static float[] Build()
+    {
+        var table = new float[Width * Width];
+        for (uint y = 0; y < Width; y++)
+        for (uint x = 0; x < Width; x++)
+            table[y * Width + x] = Index(x, y);
+        return table;
     }
 }
