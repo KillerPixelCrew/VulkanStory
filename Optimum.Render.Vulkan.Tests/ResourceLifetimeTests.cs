@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Graph;
@@ -300,4 +301,252 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
         GpuTest.AssertClean(device);
     }
 
+
+    private const ulong MiB = 1024 * 1024;
+    private const MemoryPropertyFlags HostMemory = MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
+
+    private VulkanContext AllocationContext(List<string> messages)
+    {
+        bool created = GpuTest.TryCreateContext(output, messages, out var context);
+        if (Environment.GetEnvironmentVariable(GpuTest.DeviceIndexVariable) != null)
+            Assert.True(created, "The requested GPU could not create an allocator context.");
+        Skip.IfNot(created, "No usable Vulkan device.");
+        output.WriteLine(context!.Capabilities.DeviceName);
+        return context;
+    }
+
+    [SkippableFact]
+    public unsafe void PooledAllocationsRemainIsolatedThroughChurnAndReuse()
+    {
+        var messages = new List<string>();
+        using (var context = AllocationContext(messages))
+        {
+            var live = new List<(VulkanBuffer Buffer, int Stamp)>();
+            int serial = 0;
+            try
+            {
+                for (int round = 0; round < 6; round++)
+                {
+                    while (live.Count < 2048)
+                    {
+                        int stamp = ++serial;
+                        // Different sizes and lifetimes exercise splitting and merging holes.
+                        ulong size = (ulong)(1 + stamp % 16) * 4096;
+                        var buffer = new VulkanBuffer(context, size, BufferUsageFlags.VertexBufferBit, HostMemory);
+                        live.Add((buffer, stamp));
+                        new Span<int>((void*)buffer.Mapped, (int)size / sizeof(int)).Fill(stamp);
+                    }
+                    foreach (var group in live.GroupBy(entry => entry.Buffer.Allocation.Memory.Handle))
+                    {
+                        ulong end = 0;
+                        foreach (var entry in group.OrderBy(entry => entry.Buffer.Allocation.Offset))
+                        {
+                            var allocation = entry.Buffer.Allocation;
+                            Assert.True(allocation.Offset >= end, "Live allocations overlap.");
+                            end = allocation.Offset + allocation.Size;
+                        }
+                    }
+                    foreach (var entry in live)
+                    {
+                        var words = new ReadOnlySpan<int>((void*)entry.Buffer.Mapped, (int)entry.Buffer.Size / sizeof(int));
+                        Assert.Equal(-1, words.IndexOfAnyExcept(entry.Stamp));
+                    }
+                    Assert.InRange(context.Allocator.BlockCount, 1, 16);
+                    for (int i = live.Count - 1; i >= 0; i--)
+                        if ((i + round) % 3 != 0) { live[i].Buffer.Dispose(); live.RemoveAt(i); }
+                }
+                using var commands = new SetupQueue(context);
+                using var textures = new TextureManager(context, commands.Uploads);
+                int image = textures.Create(64, 64, Format.R8G8B8A8Unorm);
+                Assert.DoesNotContain(live, entry => entry.Buffer.Allocation.Memory.Handle == textures.Get(image)!.Allocation.Memory.Handle);
+            }
+            finally { foreach (var entry in live) entry.Buffer.Dispose(); }
+            // Repeated complete release must reuse blocks instead of growing indefinitely.
+            int blocks = context.Allocator.BlockCount;
+            for (int round = 0; round < 3; round++)
+            {
+                var batch = new List<VulkanBuffer>();
+                try
+                {
+                    for (int i = 0; i < 200; i++)
+                        batch.Add(new VulkanBuffer(context, 128 * 1024, BufferUsageFlags.VertexBufferBit, HostMemory));
+                    Assert.InRange(context.Allocator.BlockCount, 1, blocks);
+                }
+                finally { foreach (var buffer in batch) buffer.Dispose(); }
+            }
+        }
+        ValidationAssert.NoErrors(messages);
+    }
+
+    [SkippableFact]
+    public unsafe void DedicatedAllocationsAndEmptyPoolTrimmingRespectTheirBoundaries()
+    {
+        var messages = new List<string>();
+        using (var context = AllocationContext(messages))
+        {
+            var allocator = context.Allocator;
+            int baseline = allocator.BlockCount;
+            var info = new BufferCreateInfo { SType = StructureType.BufferCreateInfo, Size = 4096,
+                Usage = BufferUsageFlags.VertexBufferBit, SharingMode = SharingMode.Exclusive };
+            Assert.Equal(Result.Success, context.Api.CreateBuffer(context.Device, &info, null, out var handle));
+            MemoryAllocation dedicated = default;
+            try
+            {
+                var requirements = VulkanAllocator.BufferRequirements(context, handle, out _);
+                dedicated = allocator.Allocate(requirements, HostMemory, true, "dedicated acceptance",
+                    MemoryPoolClass.DeviceBuffers, true, handle, default);
+                Assert.True(dedicated.Block!.Dedicated);
+                Assert.Equal(requirements.Size, dedicated.Block.Size);
+                Assert.Equal(Result.Success, context.Api.BindBufferMemory(context.Device, handle, dedicated.Memory, dedicated.Offset));
+                *(int*)dedicated.Mapped = 7919;
+                Assert.Equal(7919, *(int*)dedicated.Mapped);
+            }
+            finally
+            {
+                context.Api.DestroyBuffer(context.Device, handle, null);
+                if (dedicated.Block != null) allocator.Free(dedicated);
+            }
+            Assert.Equal(baseline, allocator.BlockCount);
+            foreach (var pool in new[] { MemoryPoolClass.DeviceBuffers, MemoryPoolClass.Staging })
+            {
+                ulong threshold = VulkanAllocator.BlockSizeOf(pool) / 4;
+                using var below = new VulkanBuffer(context, threshold / 2, BufferUsageFlags.TransferSrcBit, HostMemory, pool);
+                using var at = new VulkanBuffer(context, threshold, BufferUsageFlags.TransferSrcBit, HostMemory, pool);
+                VulkanAllocator.BufferRequirements(context, below.Handle, out bool driverDedicated);
+                Assert.Equal(driverDedicated, below.Allocation.Block!.Dedicated);
+                Assert.True(at.Allocation.Block!.Dedicated);
+            }
+            allocator.HeapBudgetOverrideForTests = 1;
+            allocator.AdvanceFrame();
+            Assert.Equal(baseline, allocator.BlockCount);
+            allocator.HeapBudgetOverrideForTests = null;
+            var first = new VulkanBuffer(context, MiB, BufferUsageFlags.VertexBufferBit, HostMemory);
+            Assert.False(first.Allocation.Block!.Dedicated);
+            var snapshot = allocator.Snapshot();
+            context.Api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice, out var memory);
+            Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapUsed.Length);
+            Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapBudget.Length);
+            Assert.True(snapshot.HeapUsed[first.Allocation.Block.HeapIndex] >= first.Allocation.Block.Size);
+            Assert.True(snapshot.ClassBytes[(int)MemoryPoolClass.DeviceBuffers] >= first.Allocation.Block.Size);
+            for (int heap = 0; heap < memory.MemoryHeapCount; heap++)
+            {
+                Assert.True(snapshot.HeapBudget[heap] > 0);
+                if (!allocator.BudgetExtension)
+                    Assert.Equal((ulong)(memory.MemoryHeaps[heap].Size * VulkanAllocator.FallbackBudgetShare), snapshot.HeapBudget[heap]);
+            }
+            first.Dispose();
+            for (int i = 0; i < 60; i++) allocator.AdvanceFrame();
+            using (var refill = new VulkanBuffer(context, MiB, BufferUsageFlags.VertexBufferBit, HostMemory))
+                Assert.Equal(baseline + 1, allocator.BlockCount);
+            long freed = allocator.Snapshot().EmptyBlocksFreed;
+            for (int i = 0; i < VulkanAllocator.EmptyBlockFrames - 1; i++) allocator.AdvanceFrame();
+            Assert.Equal(baseline + 1, allocator.BlockCount);
+            allocator.AdvanceFrame();
+            Assert.Equal(baseline, allocator.BlockCount);
+            Assert.Equal(freed + 1, allocator.Snapshot().EmptyBlocksFreed);
+            using (var pressured = new VulkanBuffer(context, MiB, BufferUsageFlags.VertexBufferBit, HostMemory)) { }
+            allocator.HeapBudgetOverrideForTests = 1;
+            allocator.AdvanceFrame();
+            Assert.Equal(baseline, allocator.BlockCount);
+        }
+        ValidationAssert.NoErrors(messages);
+    }
+
+    [SkippableFact]
+    public unsafe void ReBarBudgetFallsBackToMappedStagingMemory()
+    {
+        var messages = new List<string>();
+        using (var context = AllocationContext(messages))
+        {
+            var allocator = context.Allocator;
+            allocator.ReBarCapOverrideForTests = 16 * MiB;
+            var logged = new List<string>();
+            allocator.Log = logged.Add;
+            long misses = allocator.ReBarMisses, stats = VulkanStats.RebarFallbacks;
+            var buffers = new List<VulkanBuffer>();
+            try
+            {
+                for (int i = 0; i < 40; i++)
+                {
+                    var buffer = new VulkanBuffer(context, MiB, BufferUsageFlags.UniformBufferBit,
+                        HostMemory | MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.ReBar);
+                    buffers.Add(buffer);
+                    *(int*)buffer.Mapped = i + 1;
+                    Assert.Contains(buffer.Allocation.Block!.Class, new[] { MemoryPoolClass.ReBar, MemoryPoolClass.Staging });
+                }
+                Assert.True(allocator.ReBarUsed <= 16 * MiB);
+                Assert.True(allocator.ReBarMisses > misses);
+                Assert.True(VulkanStats.RebarFallbacks - stats >= allocator.ReBarMisses - misses);
+                Assert.Contains(logged, line => line.Contains("ReBAR miss"));
+                Assert.Contains(buffers, buffer => buffer.Allocation.Block!.Class == MemoryPoolClass.Staging);
+                if (allocator.HasMemoryType(uint.MaxValue, HostMemory | MemoryPropertyFlags.DeviceLocalBit, 0))
+                    Assert.Contains(buffers, buffer => buffer.Allocation.Block!.Class == MemoryPoolClass.ReBar);
+                for (int i = 0; i < buffers.Count; i++) Assert.Equal(i + 1, *(int*)buffers[i].Mapped);
+            }
+            finally { foreach (var buffer in buffers) buffer.Dispose(); }
+        }
+        ValidationAssert.NoErrors(messages);
+    }
+
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void MeshAllocationPolicyStillProducesCorrectPixels(bool staticMesh)
+    {
+        var device = Open();
+        try
+        {
+            var allocator = device.ContextForTests.Allocator;
+            allocator.ReBarCapOverrideForTests = 0;
+            long misses = allocator.ReBarMisses;
+            int texture = device.CreateTexture2D(8, 8, EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int target = Attach(device, texture, 8, 8);
+            int program = GpuTest.LinkProgram(device, """
+                #version 330 core
+                layout(location = 0) in vec3 position;
+                void main() { gl_Position = vec4(position, 1); }
+                """, """
+                #version 330 core
+                out vec4 color;
+                void main() { color = vec4(1); }
+                """, "allocation-policy");
+            int mesh = device.CreateMesh(new MeshData(4, 6) {
+                xyz = new[] { -1f, -1f, 0f, 0f, -1f, 0f, 0f, 1f, 0f, -1f, 1f, 0f },
+                VerticesCount = 4, Indices = new[] { 0, 1, 2, 0, 2, 3 }, IndicesCount = 6,
+            }, staticMesh);
+            foreach (int slot in new[] { MeshManager.BufferXyz, -1 })
+            {
+                var buffer = device.MeshesForTests.BufferOf(mesh, slot)!;
+                Assert.Equal(MemoryPoolClass.DeviceBuffers, buffer.Allocation.Block!.Class);
+                var flags = allocator.FlagsOf(buffer.Allocation.Block.TypeIndex);
+                if (!staticMesh) Assert.NotEqual(IntPtr.Zero, buffer.Mapped);
+                else
+                {
+                    Assert.True((flags & MemoryPropertyFlags.DeviceLocalBit) != 0);
+                    var requirements = VulkanAllocator.BufferRequirements(device.ContextForTests, buffer.Handle, out _);
+                    if (allocator.HasMemoryType(requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit, MemoryPropertyFlags.HostVisibleBit))
+                        Assert.Equal(IntPtr.Zero, buffer.Mapped);
+                }
+            }
+            for (int frame = 0; frame < 4; frame++)
+            {
+                device.BeginFrame(); device.BindFramebuffer(target); device.SetViewport(0, 0, 8, 8);
+                device.SetDepthTest(false); device.SetCullFace(false);
+                device.SetBlend(false, EnumBlendMode.Standard); device.UseProgram(program);
+                device.ClearColor(0, 0, 0, 0, 1);
+                if (staticMesh) device.DrawMesh(mesh);
+                else device.DrawMeshMulti(mesh, new[] { 0, 0 }, new[] { 6 }, 1, false);
+                byte[] pixels = Read(device, 8, 8);
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++)
+                        for (int channel = 0; channel < 4; channel++)
+                            Assert.Equal((byte)(channel == 3 || x < 4 ? 255 : 0), pixels[(y * 8 + x) * 4 + channel]);
+                device.Present();
+            }
+            if (!staticMesh) Assert.True(allocator.ReBarMisses > misses);
+            device.DeleteMesh(mesh); device.DeleteFramebuffer(target); device.DeleteTexture(texture);
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
 }
