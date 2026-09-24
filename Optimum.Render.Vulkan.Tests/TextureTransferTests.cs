@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Optimum.Render.Vulkan.Core;
+using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Xunit;
 using Xunit.Abstractions;
@@ -310,4 +311,62 @@ public class TextureTransferTests(ITestOutputHelper output)
         finally { device.Dispose(); }
         GpuTest.AssertClean(device);
     }
+    [Fact]
+    public unsafe void PoisonFillsPartialHostWordsAndRequiresAnEnabledSetting()
+    {
+        foreach (string? disabled in new string?[] { null, "", "0" }) Assert.False(VulkanContext.PoisonRequested(disabled));
+        foreach (string enabled in new[] { "1", " 1 " }) Assert.True(VulkanContext.PoisonRequested(enabled));
+        var bytes = new byte[11];
+        fixed (byte* pointer = bytes) VulkanPoison.FillHostMemory((IntPtr)pointer, (ulong)bytes.Length);
+        Assert.Equal(new byte[] { 0xEF, 0xBE, 0xAD, 0xDE, 0xEF, 0xBE, 0xAD, 0xDE, 0xEF, 0xBE, 0xAD }, bytes);
+    }
+
+    [SkippableFact]
+    public unsafe void PoisonSurvivesAttachmentLoadsAndIsReplacedByClears()
+    {
+        var device = GpuTest.CreateDevice(output, d => {
+            var configure = d.ConfigureContextOptions;
+            d.ConfigureContextOptions = options => { configure?.Invoke(options); options.Poison = true; };
+        });
+        try
+        {
+            Assert.True(device.ContextForTests.PoisonFreshResources);
+            using (var buffer = new VulkanBuffer(device.ContextForTests, 68, BufferUsageFlags.TransferDstBit,
+                       MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit))
+            {
+                var words = new ReadOnlySpan<uint>((void*)buffer.Mapped, 17);
+                Assert.Equal(-1, words.IndexOfAnyExcept(0xDEADBEEFu));
+            }
+            Format[] formats = { Format.R8G8B8A8Unorm, Format.R8G8B8A8Srgb, Format.R16G16B16A16Sfloat,
+                Format.R32Sfloat, Format.R32Uint, Format.D32Sfloat };
+            int[] textures = formats.Select(format => device.TexturesForTests.Create(8, 8, format)).ToArray();
+            int target = Target(device, 8, 8, textures[..5]);
+            device.AttachTexture(target, EnumFramebufferAttachment.DepthAttachment, textures[5], 0);
+            int program = GpuTest.LinkProgram(device, Triangle, "#version 330 core\nvoid main() {}", "poison-load");
+            device.BeginFrame(); device.SetDepthMask(false); Draw(device, target, program, 8);
+            for (int kind = 0; kind < textures.Length; kind++)
+            {
+                byte[] bytes = device.ReadBackLevel0ForTests(textures[kind]);
+                Assert.Equal(8 * 8 * (kind == 2 ? 8 : 4), bytes.Length);
+                if (kind < 2) { Color(bytes, 255, 0, 255); continue; }
+                if (kind == 2)
+                {
+                    foreach (Half value in MemoryMarshal.Cast<byte, Half>(bytes)) Assert.True(Half.IsNaN(value));
+                }
+                else if (kind == 3)
+                {
+                    foreach (float value in MemoryMarshal.Cast<byte, float>(bytes)) Assert.True(float.IsNaN(value));
+                }
+                else if (kind == 4) Assert.Equal(-1, MemoryMarshal.Cast<byte, uint>(bytes).IndexOfAnyExcept(0xDEADBEEFu));
+                else Assert.Equal(-1, MemoryMarshal.Cast<byte, float>(bytes).IndexOfAnyExcept(0.5f));
+            }
+            device.BindFramebuffer(target); device.ClearColor(0, 0.25f, 0.2f, 0.75f, 1); device.ClearDepth(1);
+            Color(device.ReadBackLevel0ForTests(textures[0]), 64, 51, 191);
+            Assert.Equal(-1, MemoryMarshal.Cast<byte, float>(device.ReadBackLevel0ForTests(textures[5])).IndexOfAnyExcept(1f));
+            device.Present();
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
 }
