@@ -95,8 +95,32 @@ FPS_LOG="$OUT_DIR/fps.log"
 VK_STATS="$OUT_DIR/vulkan-stats.log"
 rm -f "$LOG" "$FPS_LOG" "$VK_STATS"
 
+# Restore only settings this run overrides, including on an early launch error.
+TAA_SAVED=""
+VSYNC_SAVED=""
+SAVED_RENDERER=""
+restore_taa() {
+  [[ -n "$TAA_SAVED" ]] || return 0
+  python3 -c 'import json,sys
+path, saved = sys.argv[1], json.loads(sys.argv[2])
+data = json.load(open(path))
+if saved[0]: data["Taa"] = saved[1]
+else: data.pop("Taa", None)
+json.dump(data, open(path, "w"), indent=2)' "$CONFIG" "$TAA_SAVED" || true
+}
+restore_vsync() {
+  if [[ -n "$VSYNC_SAVED" ]]; then set_vsync "$VSYNC_SAVED" || true; fi
+}
+restore_renderer() {
+  [[ -n "$SAVED_RENDERER" ]] || return 0
+  python3 -c 'import json,sys; p,v=sys.argv[1],sys.argv[2]; d=json.load(open(p)); d["Renderer"]=v; json.dump(d,open(p,"w"),indent=2)' "$CONFIG" "$SAVED_RENDERER" || true
+}
+restore_all() { restore_vsync; restore_renderer; restore_taa; }
+trap restore_all EXIT
+
 # 1. TAA on/off through the config file, before the launch rewrites Renderer.
 if [[ -n "$TAA_ARG" ]]; then
+  TAA_SAVED="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps(["Taa" in d,d.get("Taa")]))' "$CONFIG")" || exit 1
   if ! python3 - "$CONFIG" "$TAA_ARG" <<'PY'
 import json, sys
 path, value = sys.argv[1], sys.argv[2] == "on"
@@ -115,7 +139,6 @@ fi
 
 # 1b. vsync for the run, restored on exit whatever happens next.
 CLIENTSETTINGS="$DATA_PATH/clientsettings.json"
-VSYNC_SAVED=""
 set_vsync() {
   python3 -c 'import json,sys
 path, value = sys.argv[1], int(sys.argv[2])
@@ -123,12 +146,8 @@ data = json.load(open(path))
 data["vsyncMode"] = value
 json.dump(data, open(path, "w"), indent=2)' "$CLIENTSETTINGS" "$1"
 }
-restore_vsync() {
-  if [[ -n "$VSYNC_SAVED" ]]; then set_vsync "$VSYNC_SAVED" || true; fi
-}
 if [[ -n "$VSYNC_ARG" ]]; then
   VSYNC_SAVED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("vsyncMode", 1))' "$CLIENTSETTINGS")" || exit 1
-  trap restore_vsync EXIT
   WANT=1; [[ "$VSYNC_ARG" == "off" ]] && WANT=0
   set_vsync "$WANT" || { echo "failed to set vsyncMode in $CLIENTSETTINGS; not launching" >&2; exit 1; }
   echo "clientsettings: vsyncMode=$WANT (was $VSYNC_SAVED)"
@@ -136,12 +155,6 @@ fi
 
 # Renderer is rewritten by run-client.sh; restore the user's value on every exit path.
 SAVED_RENDERER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("Renderer",""))' "$CONFIG")" || exit 1
-restore_renderer() {
-  [[ -n "$SAVED_RENDERER" ]] || return 0
-  python3 -c 'import json,sys; p,v=sys.argv[1],sys.argv[2]; d=json.load(open(p)); d["Renderer"]=v; json.dump(d,open(p,"w"),indent=2)' "$CONFIG" "$SAVED_RENDERER" || true
-}
-restore_all() { restore_vsync; restore_renderer; }
-trap restore_all EXIT
 
 # 2. Launch. The client writes both logs itself; run-client.sh rewrites Renderer.
 export OPTIMUM_FPS_LOG="$FPS_LOG"
