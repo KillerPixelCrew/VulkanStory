@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
@@ -9,7 +10,7 @@ using Xunit.Abstractions;
 
 namespace Optimum.Render.Vulkan.Tests;
 
-public class ImageReuseTests(ITestOutputHelper output)
+public class ResourceLifetimeTests(ITestOutputHelper output)
 {
     private const string Triangle = """
         #version 330 core
@@ -181,4 +182,122 @@ public class ImageReuseTests(ITestOutputHelper output)
         Assert.Contains(first, destroyed);
         Assert.Contains(second, destroyed);
     }
+    private sealed class Retirement(Action dispose) : IDisposable
+    {
+        public void Dispose() => dispose();
+    }
+
+    [Fact]
+    public void RetirementSnapshotsBothTimelinesAndDoesNotBlockReadyFollowers()
+    {
+        var clock = new Clock { FrameRecorded = 9, TransferRecorded = 3 };
+        var queue = new RetireQueue(clock);
+        var destroyed = new List<int>();
+        queue.Retire(new Retirement(() => destroyed.Add(1)));
+        clock.FrameRecorded = 4; clock.TransferRecorded = 8;
+        queue.Retire(new Retirement(() => destroyed.Add(2)));
+        clock.FrameRecorded = 100; clock.TransferRecorded = 100;
+        clock.FrameCompleted = 4; clock.TransferCompleted = 7;
+        Assert.Equal(0, queue.Collect());
+        clock.TransferCompleted = 8;
+        Assert.Equal(1, queue.Collect());
+        Assert.Equal(new[] { 2 }, destroyed);
+        clock.FrameCompleted = 9;
+        Assert.Equal(1, queue.Collect());
+        Assert.Equal(new[] { 2, 1 }, destroyed);
+        Assert.Equal(0, queue.Collect());
+        Assert.Equal(0, queue.PendingCount);
+    }
+
+    [Fact]
+    public void ConcurrentRetirementAndReentrantDisposalDoNotLoseResources()
+    {
+        var clock = new Clock { FrameRecorded = 3, TransferRecorded = 5 };
+        var queue = new RetireQueue(clock);
+        var destroyed = new int[128];
+        Parallel.For(0, destroyed.Length, i => queue.Retire(new Retirement(() => destroyed[i]++)));
+        Assert.Equal(destroyed.Length, queue.PendingCount);
+        Assert.Equal(0, queue.Collect());
+        clock.FrameCompleted = 3; clock.TransferCompleted = 5;
+        Assert.Equal(destroyed.Length, queue.Collect());
+        Assert.All(destroyed, count => Assert.Equal(1, count));
+        int nested = 0;
+        queue.Retire(new Retirement(() => queue.Retire(new Retirement(() => nested++))));
+        Assert.Equal(1, queue.Collect());
+        Assert.Equal(0, nested);
+        Assert.Equal(1, queue.Collect());
+        Assert.Equal(1, nested);
+        queue.DisposeAll();
+        Assert.Equal(1, nested);
+    }
+
+    [Fact]
+    public void RecycledVulkanHandlesDoNotAliasDescriptorCacheEntries()
+    {
+        DescriptorSetContents Entry(ulong lifetime) => new(1, 1,
+            new[] { new SamplerBindingValue(0, new ImageView(123), new Sampler(456), Resource: lifetime) },
+            new[] { new BufferBindingValue(1, new Silk.NET.Vulkan.Buffer(789), 0, 256, Resource: lifetime) });
+        var cache = new Dictionary<DescriptorSetContents, string>();
+        cache.Add(Entry(10), "original");
+        cache.Add(Entry(11), "replacement");
+        Assert.Equal("original", cache[Entry(10)]);
+        Assert.Equal("replacement", cache[Entry(11)]);
+    }
+
+    [SkippableFact]
+    public unsafe void UploadedTexturesAndMeshesSurviveDeletionUntilTheirDrawCompletes()
+    {
+        var device = Open();
+        try
+        {
+            int program = GpuTest.LinkProgram(device, """
+                #version 330 core
+                layout(location=0) in vec3 position;
+                void main() { gl_Position = vec4(position, 1); }
+                """, """
+                #version 330 core
+                uniform sampler2D image;
+                out vec4 color;
+                void main() { color = texelFetch(image, ivec2(0), 0); }
+                """, "retirement-churn");
+            device.SetSamplerUnit(program, "image", 0);
+            int targetTexture = device.CreateTexture2D(4, 4, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int target = Attach(device, targetTexture, 4, 4);
+            for (int frame = 0; frame < 48; frame++)
+            {
+                device.BeginFrame();
+                byte[] expected = { (byte)(frame * 5), 77, 151, 255 };
+                int texture;
+                fixed (byte* pointer = expected)
+                    texture = device.CreateTexture2D(1, 1, EnumTextureInternalFormat.Rgba8,
+                        EnumTexturePixelFormat.Rgba, (IntPtr)pointer, false);
+                int mesh = device.CreateMesh(new MeshData(3, 3)
+                {
+                    xyz = new[] { -1f, -1f, 0f, 3f, -1f, 0f, -1f, 3f, 0f },
+                    VerticesCount = 3, Indices = new[] { 0, 1, 2 }, IndicesCount = 3,
+                    mode = EnumDrawMode.Triangles,
+                }, true);
+                device.BindFramebuffer(target);
+                device.SetViewport(0, 0, 4, 4);
+                device.SetDepthTest(false); device.SetCullFace(false);
+                device.SetBlend(false, EnumBlendMode.Standard);
+                device.UseProgram(program); device.BindTexture(0, texture);
+                device.DrawMesh(mesh);
+                device.DeleteMesh(mesh); device.DeleteTexture(texture);
+                // Deletion precedes submission; readback must still see this frame's upload.
+                if (frame % 6 == 5)
+                {
+                    byte[] actual = Read(device, 4, 4);
+                    for (int i = 0; i < actual.Length; i++) Assert.Equal(expected[i % 4], actual[i]);
+                }
+                device.Present();
+            }
+            device.DeleteFramebuffer(target); device.DeleteTexture(targetTexture);
+            GpuTest.AssertClean(device);
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
 }
