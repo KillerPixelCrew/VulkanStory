@@ -59,6 +59,41 @@ public class PlatformDeviceRoutingTests
         Assert.True(checkedOverrides >= 40);
     }
 
+    private abstract class BareAbstract { }
+    private class BareWindows : BareAbstract { }
+    private sealed class SealedWindows : BareAbstract { }
+
+    [Fact]
+    public void PatchedHostIsAcceptedAndMissingOrSealedHostsAreRejected()
+    {
+        Assert.True(typeof(VulkanClientPlatform).IsSubclassOf(typeof(ClientPlatformWindows)));
+        Assert.False(typeof(ClientPlatformWindows).IsSealed);
+        Assert.True(VulkanClientPlatform.VerifyHost(typeof(ClientPlatformAbstract), typeof(ClientPlatformWindows), out string? reason), reason);
+        Assert.Null(reason);
+        Assert.False(VulkanClientPlatform.VerifyHost(typeof(BareAbstract), typeof(BareWindows), out string? missing));
+        Assert.Contains("InitializeGraphics", missing);
+        Assert.False(VulkanClientPlatform.VerifyHost(typeof(BareAbstract), typeof(SealedWindows), out string? sealedReason));
+        Assert.Contains("sealed", sealedReason);
+        Assert.NotNull(new VulkanClientPlatform(null!).Logger);
+    }
+
+    [Fact]
+    public void FailedInstallNeverConstructsADevice()
+    {
+        var platform = new VulkanClientPlatform(null!);
+        int created = 0;
+        platform.DeviceFactory = () => { created++; return GpuTest.NewDevice(); };
+        string? previous = Environment.GetEnvironmentVariable(VulkanClientPlatform.ForceInstallFailureVariable);
+        Environment.SetEnvironmentVariable(VulkanClientPlatform.ForceInstallFailureVariable, "1");
+        try
+        {
+            Assert.False(platform.InitializeGraphics(IntPtr.Zero, 0, 0, out string reason));
+            Assert.Equal("forced by OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE", reason);
+            Assert.Equal(0, created); Assert.Null(platform.GraphicsDevice);
+        }
+        finally { Environment.SetEnvironmentVariable(VulkanClientPlatform.ForceInstallFailureVariable, previous); }
+    }
+
     private const string FullscreenVertex = """
         #version 330 core
         void main(void)
@@ -247,12 +282,15 @@ public class PlatformLeafRoutingTests
                 platform.ShutdownGraphics();
                 return null;
             }
+            Assert.True(File.Exists(Path.Combine(dataPath, ".optimum", "vulkan-session.lock")));
             return new Session(platform, dataPath);
         }
 
         public void Dispose()
         {
             Platform.ShutdownGraphics();
+            Assert.Null(Platform.GraphicsDevice);
+            Assert.False(File.Exists(Path.Combine(_dataPath, ".optimum", "vulkan-session.lock")));
             try
             {
                 Directory.Delete(_dataPath, true);

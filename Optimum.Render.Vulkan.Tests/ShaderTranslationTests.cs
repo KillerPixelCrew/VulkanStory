@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Shaders;
 using Vintagestory.API.Client;
 using Xunit;
@@ -357,5 +358,143 @@ public class ShaderTranslationTests
             Assert.True(ordered[i].Offset >= ordered[i - 1].Offset + ordered[i - 1].Size,
                 $"'{ordered[i].Name}' overlaps '{ordered[i - 1].Name}'");
         }
+    }
+
+    // Small synthetic programs cover translator edges absent from the shipped shader corpus.
+    private static ProgramInterfaceLayout Layout(params (EnumShaderType Stage, string Code)[] stages) =>
+        ProgramInterfaceLayout.Build(stages.Select(s => (s.Stage, GlslParser.Parse(s.Code))).ToList());
+
+    [Theory]
+    [InlineData("layout(location=0) out vec4 value[3]; void main(){ value[1] = vec4(1); }", "1")]
+    [InlineData("layout(location=0) out vec4 value[3]; void main(){ value[0] = vec4(1); value[2].r = 0; }", "0,2")]
+    [InlineData("layout(location=0) out vec4 value[3]; uniform int index; void main(){ value[index] = vec4(1); }", "0,1,2")]
+    [InlineData("layout(location=0) out vec4 value[3]; uniform vec4 src[3]; void main(){ value = src; }", "0,1,2")]
+    [InlineData("layout(location=0) out vec4 value; void main(){ if (value == vec4(0)) discard; }", "")]
+    public void FragmentWriteMaskTracksStoresWithoutTreatingReadsAsWrites(string fragment, string written)
+    {
+        var layout = Layout((EnumShaderType.FragmentShader, "#version 330 core\n" + fragment));
+        Assert.Equal(written, string.Join(",", layout.WrittenFragmentOutputs.OrderBy(i => i)));
+    }
+
+    [Fact]
+    public void UniformPackingAndNamedBlocksMatchClientUploadMemory()
+    {
+        var layout = Layout((EnumShaderType.VertexShader, """
+            #version 330 core
+            uniform vec3 pointLights[4];
+            uniform mat4x3 bones[2];
+            uniform float density = 0.75;
+            layout(std140, binding=0) uniform Lights { vec4 light; };
+            layout(std140) uniform AnimationPrev { mat4 previous[2]; };
+            layout(std140, binding=3) uniform Animation { mat4 current[2]; };
+            void main() {}
+            """));
+        Assert.Empty(layout.Errors);
+        Assert.Equal((0, 48), (layout.MembersByName["pointLights"].Offset, layout.MembersByName["pointLights"].Size));
+        Assert.Equal((48, 96), (layout.MembersByName["bones"].Offset, layout.MembersByName["bones"].Size));
+        Assert.Equal(144, layout.MembersByName["density"].Offset);
+        Assert.Equal(0.75f, BitConverter.ToSingle(layout.CreateShadowBuffer(), 144));
+        Assert.Equal(new[] { ("Lights", 4), ("AnimationPrev", SetConvention.AnimationPrevBinding),
+            ("Animation", SetConvention.AnimationBinding) },
+            layout.UniformBlocks.Select(b => (b.BlockName, b.Binding)));
+    }
+
+    [Fact]
+    public void BindlessSlotsAndFrameTexturesStayInTheirAssignedSets()
+    {
+        const string source = """
+            #version 330 core
+            uniform sampler2DArray terrainTex;
+            uniform sampler2D glowTex;
+            uniform sampler2DShadow shadowMapFar;
+            uniform sampler2D sky;
+            uniform float alphaTest;
+            out vec4 color;
+            void main() {
+                color = texture(terrainTex, vec3(0.5)) + texture(glowTex, vec2(0.5))
+                    + texture(shadowMapFar, vec3(0.5)) + texture(sky, vec2(0.5));
+            }
+            """;
+        var layout = Layout((EnumShaderType.FragmentShader, source));
+        Assert.Empty(layout.Errors);
+        Assert.Equal((TextureKind.Texture2DArray, 0), (layout.SamplersByName["terrainTex"].Kind, layout.SamplersByName["terrainTex"].PushOffset));
+        Assert.Equal((TextureKind.Texture2D, 4), (layout.SamplersByName["glowTex"].Kind, layout.SamplersByName["glowTex"].PushOffset));
+        Assert.Equal(8, layout.PushConstantSize);
+        Assert.Equal(1, layout.SamplersByName["shadowMapFar"].FrameBinding);
+        Assert.Equal(3, layout.SamplersByName["sky"].FrameBinding);
+        Assert.Equal(-1, layout.SamplersByName["terrainTex"].FrameBinding);
+        Assert.DoesNotContain("glowTex", layout.MembersByName.Keys);
+        Assert.Equal(4, layout.BlockSize);
+        string code = ShaderRewriter.Rewrite(GlslParser.Parse(source), layout, EnumShaderType.FragmentShader, false).Code;
+        Assert.Contains("texture(optimumTextures2DArray[terrainTex], vec3(0.5))", code);
+        Assert.Contains("texture(optimumTextures2D[glowTex], vec2(0.5))", code);
+        Assert.Contains("layout(set = 0, binding = 1) uniform sampler2DShadow shadowMapFar;", code);
+        Assert.Contains("layout(set = 0, binding = 3) uniform sampler2D sky;", code);
+    }
+
+    [Theory]
+    [InlineData("texture(tex, uv)")]
+    [InlineData("texelFetch(tex, ivec2(0), 0)")]
+    [InlineData("textureLod(tex, uv, 0.0)")]
+    [InlineData("textureGather(tex, uv, 1)")]
+    [InlineData("textureGrad(tex, uv, vec2(0), vec2(0))")]
+    [InlineData("vec4(textureSize(tex, 0), 0, 1)")]
+    public void SamplingCallFormsCompileWithIndexedBindlessTextures(string expression)
+    {
+        string source = "#version 330 core\nuniform sampler2D tex; in vec2 uv; out vec4 color; void main(){ color = " + expression + "; }";
+        var layout = Layout((EnumShaderType.FragmentShader, source));
+        string code = ShaderRewriter.Rewrite(GlslParser.Parse(source), layout, EnumShaderType.FragmentShader, false).Code;
+        Assert.Contains(expression.Replace("(tex,", "(optimumTextures2D[tex],", StringComparison.Ordinal), code);
+        using var compiler = new ShaderCompiler();
+        var result = compiler.Compile(code, "sampling.frag", EnumShaderType.FragmentShader);
+        Assert.True(result.Success, result.Error);
+    }
+
+    [Fact]
+    public void MalformedOrUnsupportedInterfacesAreRejectedBeforePipelineCreation()
+    {
+        ProgramInterfaceLayout One(string declaration) => Layout((EnumShaderType.FragmentShader,
+            "#version 330 core\n" + declaration + "\nvoid main() {}"));
+        Assert.Contains(One("uniform sampler2D values[4];").Errors, e => e.Contains("array", StringComparison.Ordinal));
+        Assert.Contains(One("uniform sampler1D line;").Errors, e => e.Contains("no bindless array", StringComparison.Ordinal));
+        Assert.Contains(One(string.Concat(Enumerable.Range(0, 33).Select(i => $"uniform sampler2D s{i};\n"))).Errors,
+            e => e.Contains("push byte 132", StringComparison.Ordinal));
+        Assert.Contains(One(string.Concat(Enumerable.Range(0, 5).Select(i => $"layout(std140) uniform B{i} {{ vec4 v{i}; }};\n"))).Errors,
+            e => e.Contains("does not fit set 2", StringComparison.Ordinal));
+        foreach (string invalid in new[] { "MAX_LIGHTS", "3 *", "", "4 / 0" })
+            Assert.False(GlslParser.TryEvaluateConstantInt(invalid, out _));
+        Assert.True(GlslParser.TryEvaluateConstantInt("(2 + 3) * 4", out int count)); Assert.Equal(20, count);
+    }
+
+    [Fact]
+    public void GeometryEmissionRemapsDepthAtEachCallWithoutChangingControlFlow()
+    {
+        const string source = """
+            #version 330 core
+            layout(triangles) in;
+            layout(triangle_strip, max_vertices = 4) out;
+            void main() {
+                for (int i = 0; i < 3; i++) gl_Position = gl_in[i].gl_Position, EmitVertex();
+                if (true) EmitVertex (); else EndPrimitive();
+                EndPrimitive();
+            }
+            """;
+        var layout = Layout((EnumShaderType.GeometryShader, source));
+        var rewritten = ShaderRewriter.Rewrite(GlslParser.Parse(source), layout, EnumShaderType.GeometryShader, true);
+        Assert.Empty(rewritten.Errors);
+        Assert.Contains("gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5; EmitVertex();", rewritten.Code);
+        Assert.Contains("gl_Position = gl_in[i].gl_Position, _optimum_emit_vertex();", rewritten.Code);
+        Assert.Contains("if (true) _optimum_emit_vertex (); else EndPrimitive();", rewritten.Code);
+    }
+
+    [Fact]
+    public void PreprocessingHandlesOldVersionsAndPrefixWithoutANewline()
+    {
+        Assert.StartsWith("#version 450", ShaderCompiler.RaiseVersionForPreprocessing("#version 130\nvoid main() {}"));
+        Assert.Equal("#version 330 core\nvoid main() {}", ShaderCompiler.RaiseVersionForPreprocessing("#version 330 core\nvoid main() {}"));
+        Assert.StartsWith("#version 330 core\n#define A 1\n",
+            ShaderCompiler.SplicePrefix("#version 330 core", "#define A 1\n"));
+        Assert.True(GlslParser.Parse("#version 330 core\nvoid /* comment */ main() {}").HasMain);
+        Assert.False(GlslParser.Parse("#version 330 core\nvoid mainImage() {}").HasMain);
     }
 }

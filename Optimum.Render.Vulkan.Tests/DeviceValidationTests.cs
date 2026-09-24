@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Optimum.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Client;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -68,6 +69,59 @@ public class DeviceValidationTests
         }
         // Include destruction in the validation boundary.
         ValidationAssert.NoErrors(messages);
+    }
+
+    [SkippableFact]
+    public void TranslatedFullscreenDrawUsesGlFramebufferCoordinates()
+    {
+        var device = GpuTest.CreateDevice(_output);
+        try
+        {
+            var caps = device.ContextForTests.Capabilities;
+            Assert.True(caps.ApiVersion >= VulkanContext.MinimumApiVersion);
+            Assert.True(caps.MultiDrawIndirect);
+            Assert.True(caps.MaxBoundDescriptorSets >= 3);
+            Assert.True(caps.MaxSamplerLodBias >= 2f);
+            Assert.True(caps.MaxImageDimension2D >= 4096);
+            int program = GpuTest.LinkProgram(device, """
+                #version 330 core
+                out vec2 uv;
+                void main() {
+                    float x = -1.0 + float((gl_VertexID & 1) << 2);
+                    float y = -1.0 + float((gl_VertexID & 2) << 1);
+                    gl_Position = vec4(x, y, 0.0, 1.0);
+                    uv = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);
+                }
+                """, """
+                #version 330 core
+                in vec2 uv;
+                out vec4 color;
+                void main() { color = vec4(uv, 0, 1); }
+                """, "coordinate-convention");
+            const int size = 32;
+            int image = device.CreateTexture2DRaw(size, size, 0x8058, IntPtr.Zero, 4);
+            int target = device.CreateFramebuffer(size, size);
+            device.AttachTexture(target, EnumFramebufferAttachment.ColorAttachment0, image, 0);
+            device.SetDrawBuffers(target, 1);
+            device.BeginFrame(); device.BindFramebuffer(target); device.UseProgram(program);
+            device.SetViewport(0, 0, size, size); device.SetDepthTest(false); device.SetCullFace(false);
+            device.SetBlend(false, EnumBlendMode.Standard); device.DrawFullscreenTriangle();
+            byte[] pixels = device.ReadBackLevel0ForTests(image);
+            Assert.Equal(size * size * 4, pixels.Length);
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                int i = (y * size + x) * 4;
+                int expectedX = (int)Math.Round((x + 0.5) * 255.0 / size);
+                int expectedY = (int)Math.Round((y + 0.5) * 255.0 / size);
+                Assert.InRange((int)pixels[i], expectedX - 1, expectedX + 1);
+                Assert.InRange((int)pixels[i + 1], expectedY - 1, expectedY + 1);
+                Assert.Equal(0, pixels[i + 2]); Assert.Equal(255, pixels[i + 3]);
+            }
+            device.Present();
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
     }
 
     [SkippableFact]

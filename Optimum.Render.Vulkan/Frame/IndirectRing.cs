@@ -24,19 +24,21 @@ internal sealed class IndirectRing
 
     private const ulong Granularity = 64UL * 1024;
 
-    private readonly ulong[] _capacity;
-    private readonly ulong[] _cursor;
-    private readonly ulong[] _usage;
-    private readonly int[] _overflows;
+    private struct Slot
+    {
+        public ulong Capacity;
+        public ulong Cursor;
+        public ulong Usage;
+        public int Overflows;
+    }
+
+    private readonly Slot[] _slots;
     private int _current = -1;
 
     public IndirectRing(int slots, ulong minimumCapacity = DefaultMinimumCapacity)
     {
         if (slots <= 0) throw new ArgumentOutOfRangeException(nameof(slots));
-        _capacity = new ulong[slots];
-        _cursor = new ulong[slots];
-        _usage = new ulong[slots];
-        _overflows = new int[slots];
+        _slots = new Slot[slots];
         MinimumCapacity = Math.Max(1UL, minimumCapacity);
     }
 
@@ -48,12 +50,12 @@ internal sealed class IndirectRing
     /// <summary>Bytes the busiest frame so far asked for, overflow included. Never shrinks.</summary>
     public ulong PeakFrameUsage { get; private set; }
 
-    public ulong CapacityOf(int slot) => _capacity[slot];
-    public ulong CursorOf(int slot) => _cursor[slot];
-    public ulong FrameUsageOf(int slot) => _usage[slot];
+    public ulong CapacityOf(int slot) => _slots[slot].Capacity;
+    public ulong CursorOf(int slot) => _slots[slot].Cursor;
+    public ulong FrameUsageOf(int slot) => _slots[slot].Usage;
 
     /// <summary>Allocations of the slot's current frame that did not fit its buffer.</summary>
-    public int OverflowsOf(int slot) => _overflows[slot];
+    public int OverflowsOf(int slot) => _slots[slot].Overflows;
 
     /// <summary>
     /// A buffer size that holds <paramref name="demand" /> bytes with half again as
@@ -78,15 +80,16 @@ internal sealed class IndirectRing
     /// </summary>
     public bool BeginFrame(int slot, out ulong capacity)
     {
-        foreach (ulong usage in _usage) PeakFrameUsage = Math.Max(PeakFrameUsage, usage);
+        foreach (Slot previous in _slots) PeakFrameUsage = Math.Max(PeakFrameUsage, previous.Usage);
 
         _current = slot;
-        _cursor[slot] = 0;
-        _usage[slot] = 0;
-        _overflows[slot] = 0;
+        ref Slot current = ref _slots[slot];
+        current.Cursor = 0;
+        current.Usage = 0;
+        current.Overflows = 0;
 
         capacity = CapacityFor(PeakFrameUsage);
-        return _capacity[slot] != 0 && _capacity[slot] < PeakFrameUsage;
+        return current.Capacity != 0 && current.Capacity < PeakFrameUsage;
     }
 
     /// <summary>
@@ -96,16 +99,16 @@ internal sealed class IndirectRing
     public bool NeedsBuffer(ulong bytes, out ulong capacity)
     {
         RequireFrame();
-        capacity = CapacityFor(Math.Max(PeakFrameUsage, _usage[_current] + bytes));
-        return _capacity[_current] == 0;
+        capacity = CapacityFor(Math.Max(PeakFrameUsage, _slots[_current].Usage + bytes));
+        return _slots[_current].Capacity == 0;
     }
 
     /// <summary>Records that the current slot's buffer now holds <paramref name="capacity" /> bytes.</summary>
     public void Attach(ulong capacity)
     {
         RequireFrame();
-        if (capacity < _cursor[_current]) throw new InvalidOperationException("a slot buffer cannot shrink under its cursor");
-        _capacity[_current] = capacity;
+        if (capacity < _slots[_current].Cursor) throw new InvalidOperationException("a slot buffer cannot shrink under its cursor");
+        _slots[_current].Capacity = capacity;
     }
 
     /// <summary>
@@ -116,17 +119,18 @@ internal sealed class IndirectRing
     public bool TryAllocate(ulong bytes, out ulong offset)
     {
         RequireFrame();
-        _usage[_current] += bytes;
+        ref Slot current = ref _slots[_current];
+        current.Usage += bytes;
 
-        if (_cursor[_current] + bytes > _capacity[_current])
+        if (current.Cursor + bytes > current.Capacity)
         {
-            _overflows[_current]++;
+            current.Overflows++;
             offset = 0;
             return false;
         }
 
-        offset = _cursor[_current];
-        _cursor[_current] += bytes;
+        offset = current.Cursor;
+        current.Cursor += bytes;
         return true;
     }
 
