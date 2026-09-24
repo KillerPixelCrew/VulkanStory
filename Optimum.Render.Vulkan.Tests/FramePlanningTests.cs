@@ -85,25 +85,39 @@ public class FramePlanningTests
     }
 
     [Fact]
-    public void PlacementHandlesUnsortedInclusiveLifetimesAndDistinctFormats()
+    public void AllocatorPreservesInclusiveLifetimesAndDistinctImageDescriptions()
     {
         var random = new Random(901);
         var intervals = Enumerable.Range(0, 96).Select(i =>
         {
             int first = random.Next(20);
-            return new TransientInterval(i, new SizeBucket(32, 24, i % 3, 0), first, first + random.Next(5));
-        }).ToArray();
-        int[] slots = TransientPlacement.Place(intervals);
+            return (Description: new TransientImageDesc(32, 24, Format.R8G8B8A8Unorm, (uint)(i % 3 + 1)), FirstPass: first, LastPass: first + random.Next(5));
+        }).OrderBy(i => i.FirstPass).ToArray();
+        var allocator = new TransientAllocator(new ImageBacking(), aliasing: true);
+        allocator.BeginFrame();
+        int[] slots = intervals.Select(i => allocator.Acquire(i.Description, i.FirstPass, i.LastPass).Slot).ToArray();
         for (int i = 0; i < intervals.Length; i++)
             for (int j = i + 1; j < intervals.Length; j++)
                 if (slots[i] == slots[j])
                 {
-                    Assert.Equal(intervals[i].Bucket, intervals[j].Bucket);
+                    Assert.Equal(intervals[i].Description, intervals[j].Description);
                     Assert.True(intervals[i].LastPass < intervals[j].FirstPass || intervals[j].LastPass < intervals[i].FirstPass);
                 }
-        int minimum = intervals.GroupBy(i => i.Bucket).Sum(group =>
+        int minimum = intervals.GroupBy(i => i.Description).Sum(group =>
             Enumerable.Range(0, 25).Max(pass => group.Count(i => i.FirstPass <= pass && pass <= i.LastPass)));
         Assert.Equal(minimum, slots.Distinct().Count());
+    }
+
+    private sealed class ImageBacking : ITransientBacking
+    {
+        private int _next;
+        public int Create(TransientImageDesc desc) => ++_next;
+        public void Destroy(int textureId) { }
+        public ulong BytesOf(int textureId) => 0;
+        public bool TryDescribe(int textureId, out TransientImageDesc desc) { desc = default; return false; }
+        public void Discard(int textureId) { }
+        public void Rebind(int logicalTextureId, int physicalTextureId) { }
+        public void RestoreBindings() { }
     }
 
     [Theory]

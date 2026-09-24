@@ -12,7 +12,7 @@ internal readonly record struct TransientImageDesc(uint Width, uint Height, Form
 /// One transient lifetime served by a physical image for the current frame.
 /// </summary>
 /// <param name="TextureId">The physical image (a texture id in the device's table).</param>
-/// <param name="Slot">The <see cref="TransientPlacement" /> slot for this frame.</param>
+/// <param name="Slot">The physical image slot for this frame.</param>
 /// <param name="FirstPass">First pass of the lifetime, inclusive.</param>
 /// <param name="LastPass">Last pass of the lifetime, inclusive.</param>
 /// <param name="Aliased">An earlier lease of this frame already used the same image.</param>
@@ -20,8 +20,8 @@ internal readonly record struct TransientImageDesc(uint Width, uint Height, Form
 internal readonly record struct TransientLease(int TextureId, int Slot, int FirstPass, int LastPass, bool Aliased, ulong Bytes);
 
 /// <summary>
-/// What <see cref="TransientAllocator" /> needs from the device. An interface so placement
-/// and pooling can be tested without one (<c>TransientAllocatorTests</c>).
+/// What <see cref="TransientAllocator" /> needs from the device. Separates pooling and lifetime decisions
+/// from Vulkan image creation, rebinding and retirement.
 /// </summary>
 internal interface ITransientBacking
 {
@@ -57,13 +57,12 @@ internal interface ITransientBacking
 ///
 /// <b>Aliasing off</b> (the default): every lease gets its own image and keeps its
 /// contents like any texture. <b>Aliasing on</b> (<c>OPTIMUM_VULKAN_ALIAS=1</c>): leases
-/// are placed with <see cref="TransientPlacement" />, so leases whose pass lifetimes do not
+/// use the first compatible slot whose previous lease has ended. Lifetimes that do not
 /// overlap share an image, and every lease discards: its first use this frame transitions
 /// from UNDEFINED (the previous lease's uses stay on that barrier's source side).
 ///
-/// Placement stays stable while a frame streams in: leases arrive with non-decreasing first
-/// passes and their placement ids increase, so <see cref="TransientPlacement.Place" />'s
-/// start order is arrival order and a later lease never moves an earlier one.
+/// Leases arrive with non-decreasing first passes. Placement is incremental: a later
+/// lease never moves an earlier one, and equal pass endpoints count as overlapping.
 ///
 /// Framebuffer slots 2, 3, 4, 7, 8, 9, 10, 13, 14, 15, 18 and 21 (the post chain) opt in:
 /// their colour textures are created in the Transient pool and registered
@@ -87,15 +86,15 @@ internal sealed class TransientAllocator
     private sealed class PhysicalImage
     {
         public int TextureId;
+        public TransientImageDesc Description;
+        public int LastPass;
         public ulong Bytes;
         public long LastUsedFrame;
     }
 
     private readonly ITransientBacking _backing;
     private readonly Dictionary<TransientImageDesc, List<PhysicalImage>> _pools = new();
-    private readonly Dictionary<TransientImageDesc, int> _formatIds = new();
     private readonly Dictionary<TransientImageDesc, int> _usedThisFrame = new();
-    private readonly List<TransientInterval> _intervals = new();
     private readonly List<PhysicalImage> _slotImages = new();
     private readonly List<TransientLease> _leases = new();
     private readonly Dictionary<int, int> _optedIn = new();
@@ -211,7 +210,6 @@ internal sealed class TransientAllocator
     public void BeginFrame()
     {
         _backing.RestoreBindings();
-        _intervals.Clear();
         _slotImages.Clear();
         _usedThisFrame.Clear();
         _leases.Clear();
@@ -236,16 +234,18 @@ internal sealed class TransientAllocator
         }
         _lastFirstPass = firstPass;
 
-        int slot;
+        int slot = _slotImages.Count;
         if (_aliasing)
         {
-            _intervals.Add(new TransientInterval(_intervals.Count, BucketOf(desc), firstPass, lastPass));
-            int[] slots = TransientPlacement.Place(_intervals);
-            slot = slots[slots.Length - 1];
-        }
-        else
-        {
-            slot = _slotImages.Count;
+            for (int i = 0; i < _slotImages.Count; i++)
+            {
+                PhysicalImage candidate = _slotImages[i];
+                if (candidate.Description == desc && candidate.LastPass < firstPass)
+                {
+                    slot = i;
+                    break;
+                }
+            }
         }
 
         bool aliased = slot < _slotImages.Count;
@@ -256,13 +256,11 @@ internal sealed class TransientAllocator
         }
         else
         {
-            // Placement numbers slots densely in start order, which is arrival order here.
-            if (slot != _slotImages.Count)
-                throw new InvalidOperationException("placement opened slot " + slot + " with " + _slotImages.Count + " open");
             image = Take(desc);
             _slotImages.Add(image);
         }
 
+        image.LastPass = lastPass;
         image.LastUsedFrame = _frame;
         if (_aliasing) _backing.Discard(image.TextureId);
 
@@ -299,19 +297,9 @@ internal sealed class TransientAllocator
         if (index < pool.Count) return pool[index];
 
         int id = _backing.Create(desc);
-        var image = new PhysicalImage { TextureId = id, Bytes = _backing.BytesOf(id), LastUsedFrame = _frame };
+        var image = new PhysicalImage { TextureId = id, Description = desc, Bytes = _backing.BytesOf(id), LastUsedFrame = _frame };
         pool.Add(image);
         return image;
-    }
-
-    private SizeBucket BucketOf(TransientImageDesc desc)
-    {
-        if (!_formatIds.TryGetValue(desc, out int id))
-        {
-            id = _formatIds.Count + 1;
-            _formatIds.Add(desc, id);
-        }
-        return new SizeBucket((int)desc.Width, (int)desc.Height, id, 0);
     }
 
     /// <summary>Pools serve the k-th slot with the k-th image, so only trailing images can go.</summary>
@@ -324,96 +312,6 @@ internal sealed class TransientAllocator
                 _backing.Destroy(pool[pool.Count - 1].TextureId);
                 pool.RemoveAt(pool.Count - 1);
             }
-        }
-    }
-}
-
-/// <summary>
-/// Images that may share one allocation: same extent and the same format. The format is not
-/// part of a pass signature per attachment, so it is identified by the pass's interned format
-/// list plus the attachment index, taken from the resource's first pass. That key can refuse
-/// aliasing two images that would have been compatible; it can never alias two that are not.
-/// </summary>
-internal readonly record struct SizeBucket(int Width, int Height, int FormatsId, int AttachmentIndex);
-
-/// <summary>A transient resource's lifetime within one frame, both ends inclusive.</summary>
-internal readonly record struct TransientInterval(int ResourceId, SizeBucket Bucket, int FirstPass, int LastPass);
-
-/// <summary>
-/// Assigns alias slots to transient resources. Greedy first-fit in order of first pass (then
-/// resource id, so the result is deterministic): a resource takes the lowest-numbered slot of
-/// its own bucket whose previous occupant's last pass is strictly before this resource's first
-/// pass, otherwise it opens a new slot. Two intervals in one slot therefore never overlap, a
-/// slot only ever holds one bucket, and because intervals are taken by start time the slot
-/// count per bucket equals the largest number of that bucket's lifetimes alive at one pass.
-/// </summary>
-internal static class TransientPlacement
-{
-    /// <summary>Returns one slot per input interval, in input order. Slots are dense from 0.</summary>
-    public static int[] Place(IReadOnlyList<TransientInterval> intervals)
-    {
-        if (intervals == null) throw new ArgumentNullException(nameof(intervals));
-
-        int count = intervals.Count;
-        int[] order = new int[count];
-        for (int i = 0; i < count; i++)
-        {
-            TransientInterval interval = intervals[i];
-            if (interval.FirstPass < 0 || interval.LastPass < interval.FirstPass)
-                throw new ArgumentException($"Interval for resource {interval.ResourceId} is [{interval.FirstPass},{interval.LastPass}].", nameof(intervals));
-            order[i] = i;
-        }
-
-        Array.Sort(order, new StartOrder(intervals));
-
-        int[] slots = new int[count];
-        var slotBucket = new List<SizeBucket>();
-        var slotLastPass = new List<int>();
-        for (int k = 0; k < count; k++)
-        {
-            int index = order[k];
-            TransientInterval interval = intervals[index];
-            int chosen = -1;
-            for (int s = 0; s < slotBucket.Count; s++)
-            {
-                if (slotBucket[s] == interval.Bucket && slotLastPass[s] < interval.FirstPass)
-                {
-                    chosen = s;
-                    break;
-                }
-            }
-
-            if (chosen < 0)
-            {
-                chosen = slotBucket.Count;
-                slotBucket.Add(interval.Bucket);
-                slotLastPass.Add(interval.LastPass);
-            }
-            else
-            {
-                slotLastPass[chosen] = interval.LastPass;
-            }
-
-            slots[index] = chosen;
-        }
-
-        return slots;
-    }
-
-    private sealed class StartOrder : IComparer<int>
-    {
-        private readonly IReadOnlyList<TransientInterval> _intervals;
-
-        public StartOrder(IReadOnlyList<TransientInterval> intervals) => _intervals = intervals;
-
-        public int Compare(int x, int y)
-        {
-            TransientInterval a = _intervals[x];
-            TransientInterval b = _intervals[y];
-            int c = a.FirstPass.CompareTo(b.FirstPass);
-            if (c != 0) return c;
-            c = a.ResourceId.CompareTo(b.ResourceId);
-            return c != 0 ? c : x.CompareTo(y);
         }
     }
 }
