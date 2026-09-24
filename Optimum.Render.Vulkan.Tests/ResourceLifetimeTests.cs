@@ -140,7 +140,7 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
             #version 330 core
             uniform sampler2D source;
             out vec4 color;
-            void main() { color = texelFetch(source, ivec2(1 - int(gl_FragCoord.x), 0), 0); }
+            void main() { color = texelFetch(source, ivec2(gl_FragCoord.x < 1.0 ? 1 : 0, 0), 0); }
             """, "feedback-swap");
         byte[] original = { 255, 0, 0, 255, 0, 255, 0, 255 };
         int texture;
