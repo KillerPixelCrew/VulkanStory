@@ -9,9 +9,9 @@ Final acceptance of the refactor is pending. Historical test totals and captures
 not establish correctness of the current build. Select hardware by queried identity
 and capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
 
-At revision `a9cea7c` on 2026-09-24, the Release solution run passed all active
-tests: 592 Vulkan tests on Intel UHD 770, 744 core tests (34 existing skips),
-and 306 launcher, CLI, bootstrap and installer tests. The same 592 Vulkan tests
+At revision `0011189` on 2026-09-24, the Release solution run passed all active
+tests: 556 Vulkan tests on Intel UHD 770, 744 core tests (34 existing skips),
+and 306 launcher, CLI, bootstrap and installer tests. The same 556 Vulkan tests
 passed separately on NVIDIA GeForce RTX 4070 Laptop GPU. Both GPU runs loaded
 Khronos validation with synchronization and best-practices checks. Strict donor
 validation applied all 93 source and 68 Cecil patches; all 43 runtime patches
