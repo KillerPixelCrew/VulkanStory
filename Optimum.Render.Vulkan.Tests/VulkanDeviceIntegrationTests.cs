@@ -974,7 +974,8 @@ public class VulkanDeviceIntegrationTests
             seam.BindFramebuffer(framebuffer);
             seam.UseProgram(programId);
             seam.SetSamplerUnit(programId, "source", 0);
-            seam.BindTexture(0, source);
+            seam.SetSamplerUnit(programId, "source", 5);
+            seam.BindTexture(5, source);
             seam.SetViewport(0, 0, size, size);
             seam.DrawFullscreenTriangle();
             seam.Present();

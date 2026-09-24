@@ -47,13 +47,14 @@ internal static class StatedDraw
 
         // Every sampler the program declares, from the unit it points at.
         string[] names = device.SamplerNamesOf(programId);
+        int[] samplerUnits = device.NativeSamplerUnitsOf(programId);
         int depthTexture = device.NativeFramebufferDepthTexture(framebufferId);
         bool samplesBoundDepth = false;
         var reads = new int[names.Length];
         Span<int> units = stackalloc int[names.Length];
         for (int i = 0; i < names.Length; i++)
         {
-            units[i] = device.NativeSamplerUnit(programId, names[i]);
+            units[i] = i < samplerUnits.Length ? samplerUnits[i] : -1;
             reads[i] = stated.TextureAt(units[i]);
             if (reads[i] != 0 && reads[i] == depthTexture)
             {
@@ -102,7 +103,7 @@ internal static class StatedDraw
         for (int i = 0; i < names.Length; i++)
         {
             int sampler = stated.SamplerAt(units[i]);
-            textures[i] = new NativeTexture(pipeline.Sampler(names[i]), reads[i],
+            textures[i] = new NativeTexture(pipeline.SamplerAt(i), reads[i],
                 sampler != 0 ? device.NativeStandaloneSampler(sampler) : null);
         }
 

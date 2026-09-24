@@ -111,6 +111,7 @@ internal sealed class NativePipeline
 {
     private readonly Dictionary<string, NativeUniform> _uniforms = new(StringComparer.Ordinal);
     private readonly Dictionary<string, NativeSamplerSlot> _samplers = new(StringComparer.Ordinal);
+    private readonly NativeSamplerSlot[] _samplerSlots;
 
     internal NativePipeline(ShaderProgramResources program, NativePipelineDescription description,
         PipelineKey key, GraphicsPipelineCache.PipelineRequest request, int dynamicBlendId)
@@ -137,14 +138,16 @@ internal sealed class NativePipeline
                 _uniforms[name] = new NativeUniform(NativeUniformBlock.Frame, frame.Offset, frame.Size);
             }
         }
-        SamplerNames = new string[layout.Samplers.Count];
+        SamplerNames = program.SamplerNames;
+        _samplerSlots = new NativeSamplerSlot[layout.Samplers.Count];
         for (int i = 0; i < layout.Samplers.Count; i++)
         {
             SamplerBinding sampler = layout.Samplers[i];
             TextureKind kind = sampler.Kind;
             if (sampler.IsFrameTexture) BindlessKinds.TryFromGlslType(sampler.TypeName, out kind);
-            _samplers[sampler.Name] = new NativeSamplerSlot(i, sampler.PushOffset, sampler.FrameBinding, kind);
-            SamplerNames[i] = sampler.Name;
+            NativeSamplerSlot slot = new(i, sampler.PushOffset, sampler.FrameBinding, kind);
+            _samplers[sampler.Name] = slot;
+            _samplerSlots[i] = slot;
         }
     }
 
@@ -176,6 +179,10 @@ internal sealed class NativePipeline
     /// <summary>The placement of a sampler, resolved once here rather than per draw.</summary>
     public NativeSamplerSlot Sampler(string name) =>
         _samplers.TryGetValue(name, out NativeSamplerSlot sampler) ? sampler : NativeSamplerSlot.None;
+
+    /// <summary>The declared sampler slot, already resolved when this pipeline was created.</summary>
+    public NativeSamplerSlot SamplerAt(int index) =>
+        (uint)index < (uint)_samplerSlots.Length ? _samplerSlots[index] : NativeSamplerSlot.None;
 }
 
 /// <summary>
@@ -323,18 +330,14 @@ public sealed unsafe partial class VulkanDevice
     /// bind-only setter does - states this as its own.
     /// </summary>
     /// <summary>
-    /// The unit a program's sampler reads: the client's SetSamplerUnit mapping, else the sampler's
-    /// declaration order - the resolution the removed emulated draw made. -1 for an unknown program or name.
+    /// Unit assignments in linked sampler order. Writes from SetSamplerUnit and sampler
+    /// uniform locations update this same array before the next stated draw.
     /// </summary>
-    internal int NativeSamplerUnit(int programId, string samplerName)
+    internal int[] NativeSamplerUnitsOf(int programId)
     {
-        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program)) return -1;
-        if (program.SamplerUnits.TryGetValue(samplerName, out int mapped)) return mapped;
-        foreach (SamplerBinding declared in program.Interface.Samplers)
-        {
-            if (string.Equals(declared.Name, samplerName, StringComparison.Ordinal)) return declared.Order;
-        }
-        return -1;
+        return _programs.TryGetValue(programId, out ShaderProgramResources? program)
+            ? program.SamplerUnitsByIndex
+            : Array.Empty<int>();
     }
 
     /// <summary>The sampling state of a standalone sampler object (GenSampler), or null.</summary>

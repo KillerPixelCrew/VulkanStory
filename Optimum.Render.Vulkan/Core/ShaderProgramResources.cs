@@ -69,7 +69,10 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// Which texture unit each sampler uniform points at. In GL this is just an
     /// int uniform; here it is the link between a bound texture and a descriptor.
     /// </summary>
-    public Dictionary<string, int> SamplerUnits { get; } = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _samplerIndices = new(StringComparer.Ordinal);
+
+    /// <summary>Mutable unit assignments in sampler declaration order.</summary>
+    internal int[] SamplerUnitsByIndex { get; }
 
     /// <summary>Declaration-order names, fixed for this linked program.</summary>
     public string[] SamplerNames { get; }
@@ -98,11 +101,13 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         // Sampler uniforms default to the unit matching their declaration order,
         // which is the order the game's own texture-location bookkeeping assigns.
         SamplerNames = new string[Interface.Samplers.Count];
+        SamplerUnitsByIndex = new int[Interface.Samplers.Count];
         for (int i = 0; i < Interface.Samplers.Count; i++)
         {
             SamplerBinding sampler = Interface.Samplers[i];
             SamplerNames[i] = sampler.Name;
-            SamplerUnits[sampler.Name] = sampler.Order;
+            _samplerIndices[sampler.Name] = i;
+            SamplerUnitsByIndex[i] = sampler.Order;
         }
 
         if (sharedLayout.Handle == 0)
@@ -254,7 +259,13 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         int index = SamplerIndexOf(location);
         if (index < 0 || index >= Interface.Samplers.Count) return;
 
-        SamplerUnits[Interface.Samplers[index].Name] = unit;
+        SamplerUnitsByIndex[index] = unit;
+    }
+
+    public void SetSamplerUnitByName(string name, int unit)
+    {
+        if (_samplerIndices.TryGetValue(name, out int index))
+            SamplerUnitsByIndex[index] = unit;
     }
 
     /// <summary>Writes raw bytes at an offset previously handed out by <see cref="LocationOf" />.</summary>

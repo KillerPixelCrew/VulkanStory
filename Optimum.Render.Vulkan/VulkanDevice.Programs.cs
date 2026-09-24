@@ -429,7 +429,7 @@ public sealed unsafe partial class VulkanDevice
     {
         if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
         {
-            program.SamplerUnits[samplerName] = unit;
+            program.SetSamplerUnitByName(samplerName, unit);
         }
     }
 
