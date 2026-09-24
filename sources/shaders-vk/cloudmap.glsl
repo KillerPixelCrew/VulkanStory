@@ -26,7 +26,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of cloudmap (docs/vulkan.md section 4). A fullscreen pass: one draw per
+// Program interface of cloudmap (docs/vulkan.md). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in cloudmap.fsh's declaration order, and every
 // other uniform is a record member: cloudmap.fsh's own, then the program uniforms of fogandlight.fsh and
 // fogspheres.ash, whose frame owners (fogandlight.vsh, vertexwarp.vsh) this program does not include.

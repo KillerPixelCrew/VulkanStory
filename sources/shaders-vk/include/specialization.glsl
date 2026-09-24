@@ -1,5 +1,5 @@
 // Specialization constants for Optimum's Vulkan-native shaders
-// (docs/vulkan.md section 5).
+// (docs/vulkan.md).
 //
 // This file is the source of truth for constant ids. The renderer's
 // Shaders/SetConvention.cs mirrors it. ShaderDeliveryTests verifies the compiled

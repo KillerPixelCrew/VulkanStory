@@ -22,7 +22,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of decals (docs/vulkan.md section 4). Decals are pooled like chunks:
+// Program interface of decals (docs/vulkan.md). Decals are pooled like chunks:
 // the push block holds the two sampler slots (decals.fsh order) and the DRAW uniforms origin and
 // modelViewMatrix (84 B). The record holds the rest: decals.vsh's, vertexwarp.vsh's previous-frame
 // mirrors, then decals.fsh's, each in declaration order. The TAA uniforms are declared in every variant.

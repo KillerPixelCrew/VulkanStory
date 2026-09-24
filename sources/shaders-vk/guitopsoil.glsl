@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of guitopsoil (docs/vulkan.md section 4, GUI row): the sampler slot, then
+// Program interface of guitopsoil (docs/vulkan.md, GUI row): the sampler slot, then
 // the per-element GUI uniforms (rgbaIn, extraGlow, applyColor, noTexture) in the push block; the matrices,
 // blockTextureSize and alphaTest in the record, each stage in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

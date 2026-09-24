@@ -3287,7 +3287,7 @@ index b1b2eea..dbf069b 100644
 +	/// <summary>
 +	/// Optimum TAA (P4): opens the motion window with every OTHER colour
 +	/// attachment masked out, for a pass that re-draws geometry only to record
-+	/// its motion - the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	/// its motion - the liquid velocity pass (the temporal contract in docs/vulkan.md).
 +	///
 +	/// <see cref="BeginMotionWrite" /> adds the motion attachment to the set a
 +	/// shading pass already writes; this one replaces the set entirely, so the

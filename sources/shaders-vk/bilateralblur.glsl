@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of bilateralblur (docs/vulkan.md section 4). A fullscreen pass: one draw
+// Program interface of bilateralblur (docs/vulkan.md). A fullscreen pass: one draw
 // per Use(), so the push block holds only the sampler slots and bilateralblur.vsh's two uniforms are the record.
 //
 // bilateralblur.fsh also declares an input named frameSize that no vertex stage writes and nothing reads.

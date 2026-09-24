@@ -25,7 +25,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of blockhighlights (docs/vulkan.md section 4). The push block holds the
+// Program interface of blockhighlights (docs/vulkan.md). The push block holds the
 // sampler slot. The record holds the matrices and fogandlight.fsh's windWaveCounter, whose owner
 // (vertexwarp.vsh) the program does not include; fogandlight.fsh's other program uniforms are frame members
 // through fogandlight.vsh in the vertex stage.

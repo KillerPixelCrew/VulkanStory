@@ -38,7 +38,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of entityanimated (docs/vulkan.md section 4), shared by the opaque
+// Program interface of entityanimated (docs/vulkan.md), shared by the opaque
 // program, Entityanimated_Oit (USEOIT axis) and the first-person hands (ALLOWDEPTHOFFSET axis).
 //
 // Entity placement (section 4, about 280 B of DRAW data per entity): the push block holds the sampler slot,

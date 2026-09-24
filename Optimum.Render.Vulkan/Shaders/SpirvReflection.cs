@@ -99,7 +99,7 @@ internal sealed class SpirvModuleReflection
 
 /// <summary>
 /// A small SPIR-V reader for the offline shader compiler and the native program manifest
-/// (docs/vulkan.md section 6). It reads entry points, names, decorations and the
+/// (docs/vulkan.md). It reads entry points, names, decorations and the
 /// type graph; it does not validate the module, which shaderc produced moments earlier.
 ///
 /// An optimised module has no <c>OpName</c>s and has dropped whatever nothing uses, so the

@@ -116,7 +116,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@# directory and LD_LIBRARY_PATH, not Lib/, and a copy it cannot find makes the
 	@# renderer fall back to OpenGL silently.
 	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/; fi
-	@# Native SPIR-V and its manifest (docs/vulkan.md section 6), beside the
+	@# Native SPIR-V and its manifest (docs/vulkan.md), beside the
 	@# renderer and never under assets/: the asset manager must not read SPIR-V and a mod must
 	@# not shadow engine shaders by asset priority. The build always writes the manifest, even
 	@# for an empty source tree, so a missing one means tools/shader-compiler never ran. The

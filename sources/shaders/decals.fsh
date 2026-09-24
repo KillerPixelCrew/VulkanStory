@@ -68,8 +68,7 @@ void main()
 	// b = 0: a decal is an opaque overlay on a static-or-swaying block surface
 	// and its vector is that surface's own, so the history is trustworthy. The
 	// one thing that does change without moving is the crack stage advancing to
-	// the next texture, and TAA-PLAN.md's inventory row leaves that to the
-	// resolve's neighbourhood clipping ("crack progress rejected by colour
+	// the next texture, and the resolve's neighbourhood clipping handles that ("crack progress rejected by colour
 	// clipping") rather than throwing the whole pixel's history away every time
 	// a block is being hit.
 	//

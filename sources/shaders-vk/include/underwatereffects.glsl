@@ -1,4 +1,4 @@
-// Native port of the game include underwatereffects.fsh (docs/vulkan.md section 1).
+// Native port of the game include underwatereffects.fsh (docs/vulkan.md).
 // optimum-port-of: underwatereffects.fsh
 // optimum-port: verbatim
 // optimum-frame-owner: underwatereffects.fsh

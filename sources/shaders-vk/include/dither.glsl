@@ -1,4 +1,4 @@
-// Native port of the game include dither.fsh (docs/vulkan.md section 1).
+// Native port of the game include dither.fsh (docs/vulkan.md).
 // optimum-port-of: dither.fsh
 // optimum-port: verbatim
 //

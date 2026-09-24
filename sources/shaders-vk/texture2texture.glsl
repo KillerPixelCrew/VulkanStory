@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of texture2texture (docs/vulkan.md section 4). One draw per Use(), so the push
+// Program interface of texture2texture (docs/vulkan.md). One draw per Use(), so the push
 // block holds only the sampler slot and every other uniform is a record member: texture2texture.vsh's, then
 // texture2texture.fsh's, each in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

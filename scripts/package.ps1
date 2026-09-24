@@ -294,7 +294,7 @@ try {
         Write-Warning "No native shaderc at $shadercNative; the Vulkan renderer will not load"
     }
 
-    # Native SPIR-V programs and their manifest (docs/vulkan.md section 6),
+    # Native SPIR-V programs and their manifest (docs/vulkan.md),
     # beside Optimum.Render.Vulkan.dll and never under assets\: the asset manager must not
     # read SPIR-V and a mod must not shadow engine shaders by asset priority. The build
     # always writes the manifest, even for an empty source tree, so a missing one means

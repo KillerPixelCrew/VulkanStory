@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of godrays (docs/vulkan.md section 4). A fullscreen pass: one draw per
+// Program interface of godrays (docs/vulkan.md). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots and every other uniform is a record member:
 // godrays.vsh's seven, then godrays.fsh's one, each in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

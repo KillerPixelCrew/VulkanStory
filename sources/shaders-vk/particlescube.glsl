@@ -27,14 +27,14 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlescube (docs/vulkan.md section 4). Particles have no DRAW
+// Program interface of particlescube (docs/vulkan.md). Particles have no DRAW
 // uniforms and this program samples nothing, so there is no push block; every uniform is a record member:
 // particlescube.vsh's, vertexwarp.vsh's previous-frame mirrors, then particlescube.fsh's and
 // underwatereffects.fsh's, each in declaration order. The TAA uniforms are declared in every variant
 // because collectUniformNames sees them whatever TAAMOTION is.
 //
 // The prev* warp uniforms carry GLSL 330 initializers (prevWindWaveIntensity = 1, ...); the runtime seeds
-// them from the GLSL 330 declarations (docs/vulkan.md section 8).
+// them from the GLSL 330 declarations (docs/vulkan.md).
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
 {
     vec4 rgbaFogIn;

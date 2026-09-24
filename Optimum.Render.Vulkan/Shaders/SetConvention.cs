@@ -79,7 +79,7 @@ internal static class SetConvention
 
     /// <summary>
     /// Set 2's program record: every non-frame uniform that is not in the push block
-    /// (docs/vulkan.md section 4), a dynamic uniform buffer whose offset
+    /// (docs/vulkan.md), a dynamic uniform buffer whose offset
     /// moves when the record changed. Kept out of <see cref="StorageBuffers" /> because it
     /// is a uniform buffer, not a storage buffer.
     /// </summary>
@@ -115,7 +115,7 @@ internal static class SetConvention
 }
 
 /// <summary>
-/// The specialization constants of the native shaders (docs/vulkan.md section 5).
+/// The specialization constants of the native shaders (docs/vulkan.md).
 /// Mirrors <c>sources/shaders-vk/include/specialization.glsl</c>, the source of truth for native
 /// shaders. ShaderDeliveryTests checks the compiled constant ids, types and defaults.
 ///

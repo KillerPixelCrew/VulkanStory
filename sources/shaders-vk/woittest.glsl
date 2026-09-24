@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of woittest (docs/vulkan.md section 4). No samplers, so no push block;
+// Program interface of woittest (docs/vulkan.md). No samplers, so no push block;
 // woittest.vsh's two matrices are the record.
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
 {

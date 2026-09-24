@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of helditem (docs/vulkan.md section 4). At most a couple of draws per Use(),
+// Program interface of helditem (docs/vulkan.md). At most a couple of draws per Use(),
 // so the push block holds only the sampler slots, in helditem.fsh's declaration order. The record holds
 // helditem.vsh's uniforms, then helditem.fsh's, then normalshading.fsh's lightPosition (its owner
 // fogandlight.fsh is not included), each in declaration order.

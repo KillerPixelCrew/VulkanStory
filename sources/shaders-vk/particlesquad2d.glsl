@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlesquad2d (docs/vulkan.md section 4). Particles have no DRAW
+// Program interface of particlesquad2d (docs/vulkan.md). Particles have no DRAW
 // uniforms, so the push block holds only the sampler slot; everything else is a record member,
 // particlesquad2d.vsh's then particlesquad2d.fsh's, each in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

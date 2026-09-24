@@ -1,4 +1,4 @@
-// Native port of the game include skycolor.fsh (docs/vulkan.md section 1).
+// Native port of the game include skycolor.fsh (docs/vulkan.md).
 // optimum-port-of: skycolor.fsh
 // optimum-port: transformed
 // optimum-frame-owner: skycolor.fsh

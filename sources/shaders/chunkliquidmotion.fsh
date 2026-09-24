@@ -20,7 +20,7 @@
 // pass exists to remove. Writing the surface's depth here makes the two agree
 // and gives the resolve the water surface's own linear depth for its
 // disocclusion test, which is the depth the motion vector belongs to.
-// TAA-PLAN.md rule 7 states this ("writes the surface's motion and depth").
+// The temporal contract in docs/vulkan.md states this ("writes the surface's motion and depth").
 //
 // rg = previousPixel - currentUnjitteredPixel in render pixels, b = reactive,
 // a = this fragment's window depth - the same contract chunkopaque.fsh writes.

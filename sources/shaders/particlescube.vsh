@@ -6,8 +6,8 @@
 // Cube particles are drawn on Primary, inside the Opaque stage, with blending
 // on and depth writes on - so unlike the quad particles (which go through the
 // OIT path and are covered by the merge's revealage reactive) they can and must
-// write Primary's motion attachment themselves. TAA-PLAN.md's inventory row for
-// this class reads "reactive 1, replace-blend on motion (P4)".
+// write Primary's motion attachment themselves. The temporal contract in docs/vulkan.md
+// requires reactive coverage and replace blending for motion.
 //
 // Every vanilla line below is untouched; the TAA block is added beside it and
 // preprocesses away entirely when TAAMOTION is 0.

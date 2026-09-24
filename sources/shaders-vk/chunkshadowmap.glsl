@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkshadowmap (docs/vulkan.md section 4). One draw per mesh pool
+// Program interface of chunkshadowmap (docs/vulkan.md). One draw per mesh pool
 // per cascade: the push block holds the sampler slot, then origin and mvpMatrix (80 B). The record holds
 // the subpixel padding and the previous-frame warp state vertexwarp.glsl reads.
 layout(push_constant, scalar) uniform OptimumDraw

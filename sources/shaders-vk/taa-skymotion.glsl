@@ -19,9 +19,8 @@
 //
 // Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
 //
-// TAA-PLAN.md's inventory row for "Clouds (volumetric, map), aurora, night sky,
-// sun/moon, sky colour" reads "fallback + reactive; sky uses infinite-direction
-// reprojection (P4)". This pass is that row.
+// The temporal contract in docs/vulkan.md calls for sky direction reprojection
+// with reactive coverage. This pass supplies that coverage.
 //
 // WHAT ALREADY WORKED WITHOUT IT. Sky colour, the night sky, the sun and the
 // moon all draw on Primary with the depth test off or the depth mask off, so
@@ -70,12 +69,12 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of taa-skymotion (docs/vulkan.md section 4). A fullscreen pass: one draw
+// Program interface of taa-skymotion (docs/vulkan.md). A fullscreen pass: one draw
 // per Use(), so the push block holds only the sampler slot and every other uniform is a record member.
 //
 // The GLSL 330 source declares all of these inside #if TAAMOTION > 0; the oracle reads the unpreprocessed
 // text, so they are names of every variant and are declared unconditionally here. taaCloudReactive's GLSL 330
-// initializer (1.0) is seeded by the runtime (docs/vulkan.md section 8).
+// initializer (1.0) is seeded by the runtime (docs/vulkan.md).
 layout(push_constant, scalar) uniform OptimumDraw
 {
     OPTIMUM_SAMPLER_SLOT(sampler2D, transparentRevealTex);

@@ -588,7 +588,7 @@ internal static class VulkanStats
     private static long _shadersRewritten;
     private static long _shadersFailed;
 
-    /// <summary>The counts of the latest shader load (docs/vulkan.md section 8); the device reports them once per load.</summary>
+    /// <summary>The counts of the latest shader load (docs/vulkan.md); the device reports them once per load.</summary>
     public static void NoteShaderLoad(long native, long rewritten, long failed)
     {
         Interlocked.Exchange(ref _shadersNative, native);

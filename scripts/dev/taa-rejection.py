@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """TAA history rejection rates from one OPTIMUM_PARITY_DUMP directory.
 
-Guards the 2026-09-11 finding (TAA-PLAN.md "Follow-up 2026-09-11: distant
-foliage jitter was the resolve"): a single-sample disocclusion test in
+Guards the distant foliage rejection regression in docs/vulkan.md: a
+single-sample disocclusion test in
 taa-resolve.fsh threw the history away on ~3.7% of distant leaf pixels per
 frame on both backends, because a sub-pixel leaf hits the leaf in one jitter
 phase and the far background in the next. The 3x3 nearest-depth test that

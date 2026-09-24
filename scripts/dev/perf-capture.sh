@@ -1,5 +1,5 @@
 #!/bin/bash
-# Frame-time capture for the TAA acceptance matrix (TAA-PLAN.md, P5).
+# Frame-time capture for the TAA acceptance matrix (docs/vulkan.md).
 #
 # Launches the deployed client through scripts/dev/run-client.sh on a chosen
 # renderer with TAA on or off, waits for the world ("[Client Chat] Welcome") plus

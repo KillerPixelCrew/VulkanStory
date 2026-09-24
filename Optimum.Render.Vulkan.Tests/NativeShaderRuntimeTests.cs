@@ -14,7 +14,7 @@ using TestShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// The native shader runtime seam (docs/vulkan.md section 8): the manifest looked up at
+/// The native shader runtime seam (docs/vulkan.md): the manifest looked up at
 /// <c>VulkanDevice.LinkProgram</c> by pass name and variant key, programs built from its SPIR-V with the
 /// shared layout, specialization constants from the prefix, GLSL 330 initializers seeded, and a per-program
 /// fall back to the rewriter.

@@ -264,7 +264,7 @@ public class TaaEntityMotionWriterTests
 
     /// <summary>
     /// A previous position behind the previous camera is not a motion vector, but
-    /// the contract (docs/vulkan.md section 3.2) still wants the
+    /// the contract (docs/vulkan.md) still wants the
     /// reactive value: a writer that bails out of its vector delivers b and zeroes
     /// only rg and a. The entity helper used to return vec4(0.0) there and drop the
     /// taaReactive value with the vector.

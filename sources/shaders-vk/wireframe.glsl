@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of wireframe (docs/vulkan.md section 4). No samplers, so there is no push block:
+// Program interface of wireframe (docs/vulkan.md). No samplers, so there is no push block:
 // the record holds wireframe.vsh's uniforms in declaration order, then vertexwarp.vsh's prev* uniforms in its
 // header's order (their owner rule: they are program uniforms, not frame members). The prev* GLSL 330
 // initializers (some are 1) are seeded by the runtime (section 8).

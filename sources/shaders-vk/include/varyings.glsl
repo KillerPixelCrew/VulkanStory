@@ -1,5 +1,5 @@
 // Interface locations of the varyings the shared includes declare
-// (docs/vulkan.md section 1).
+// (docs/vulkan.md).
 //
 // GLSL 330 matches varyings between stages by name; SPIR-V matches them by location, so
 // an include's `out` in the vertex stage and the program's (or include's) `in` in the

@@ -22,7 +22,7 @@
 // history: colour (RGBA16F, alpha = scene alpha), glow (RGBA8) and linear
 // view depth (R32F) for next frame's disocclusion test.
 //
-// Conventions (see TAA-PLAN.md): motion = previousPixel - currentUnjitteredPixel
+// Conventions (see docs/vulkan.md): motion = previousPixel - currentUnjitteredPixel
 // in render pixels; a raster pixel centre sits at unjittered position
 // centre - jitterPx; history is stored at unjittered pixel centres; the
 // motion attachment's alpha is the writer's WINDOW depth in [0,1] (the same
@@ -47,7 +47,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of taa-resolve (docs/vulkan.md section 4). A fullscreen pass: one draw per
+// Program interface of taa-resolve (docs/vulkan.md). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in taa-resolve.fsh's declaration order, and every other
 // uniform is a record member in declaration order.
 layout(push_constant, scalar) uniform OptimumDraw

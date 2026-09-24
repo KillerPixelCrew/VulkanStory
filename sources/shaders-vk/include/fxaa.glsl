@@ -1,4 +1,4 @@
-// Native port of the game include fxaa.fsh (docs/vulkan.md section 1).
+// Native port of the game include fxaa.fsh (docs/vulkan.md).
 // optimum-port-of: fxaa.fsh
 // optimum-port: verbatim
 //

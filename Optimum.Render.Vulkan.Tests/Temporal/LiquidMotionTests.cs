@@ -12,7 +12,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 /// <summary>
-/// The liquid velocity pass (TAA P4, TAA-PLAN.md accuracy rule 7), driven
+/// The liquid velocity pass (TAA P4, the temporal contract in docs/vulkan.md), driven
 /// through the seam with the real chunkliquidmotion program and read back as
 /// pixels.
 ///
@@ -309,7 +309,7 @@ public class TaaLiquidMotionTests
     /// bails out with a zero alpha and lets taa-resolve.fsh camera-reproject the
     /// pixel. What it must NOT drop on that path is the reactive value:
     /// taa-resolve.fsh reads motion.b whether or not the writer-depth test
-    /// accepted the pixel (TAA-PLAN.md finding (h)), so a zero there would hand
+    /// accepted the pixel (the temporal contract in docs/vulkan.md), so a zero there would hand
     /// an animating water surface full history weight in exactly the frames the
     /// camera swung hardest.
     ///

@@ -1,4 +1,4 @@
-// Native port of the game include oit.fsh (docs/vulkan.md section 1).
+// Native port of the game include oit.fsh (docs/vulkan.md).
 // optimum-port-of: oit.fsh
 // optimum-port: verbatim
 //

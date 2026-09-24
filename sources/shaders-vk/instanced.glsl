@@ -28,7 +28,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of instanced (docs/vulkan.md section 4). Every per-object value travels as
+// Program interface of instanced (docs/vulkan.md). Every per-object value travels as
 // an instance attribute (locations 4-13), and the uniforms are set once per Use(), so the push block holds only
 // the sampler slot and every uniform is a record member: instanced.vsh's, then instanced.fsh's, then
 // fogandlight.frag.glsl's windWaveCounter (no vertexwarp owner in this program), each in declaration order.

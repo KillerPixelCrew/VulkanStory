@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of lines (docs/vulkan.md section 4). No samplers, and the two matrices alone
+// Program interface of lines (docs/vulkan.md). No samplers, and the two matrices alone
 // exceed the push budget, so there is no push block: every uniform is a record member, lines.vsh's then
 // lines.fsh's, each in declaration order. glowLevel's GLSL 330 initializer (1.0) is seeded by the runtime.
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram

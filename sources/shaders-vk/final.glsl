@@ -19,13 +19,13 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of final (docs/vulkan.md section 4). A fullscreen pass: one draw per
+// Program interface of final (docs/vulkan.md). A fullscreen pass: one draw per
 // Use(), so the push block holds only the sampler slots, in final.fsh's declaration order, and every other
 // uniform is a record member: final.vsh's four, then final.fsh's, each in declaration order.
 //
 // A block member cannot carry the GLSL 330 initializers (extraGamma = 1.0, minlight = 0.0, maxlight = 1,
 // minsat = 0, maxsat = 1). The client never sets minlight, maxlight, minsat or maxsat, so the runtime seeds
-// the record from the GLSL 330 declarations' initializers (docs/vulkan.md section 8).
+// the record from the GLSL 330 declarations' initializers (docs/vulkan.md).
 layout(push_constant, scalar) uniform OptimumDraw
 {
     OPTIMUM_SAMPLER_SLOT(sampler2D, primaryScene);

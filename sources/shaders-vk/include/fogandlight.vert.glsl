@@ -1,4 +1,4 @@
-// Native port of the game include fogandlight.vsh (docs/vulkan.md section 1).
+// Native port of the game include fogandlight.vsh (docs/vulkan.md).
 // optimum-port-of: fogandlight.vsh
 // optimum-port: transformed
 // optimum-frame-owner: fogandlight.vsh

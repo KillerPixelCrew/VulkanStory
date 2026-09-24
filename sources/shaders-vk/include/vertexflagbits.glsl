@@ -1,4 +1,4 @@
-// Native port of the game include vertexflagbits.ash (docs/vulkan.md section 1).
+// Native port of the game include vertexflagbits.ash (docs/vulkan.md).
 // optimum-port-of: vertexflagbits.ash
 // optimum-port: verbatim
 //

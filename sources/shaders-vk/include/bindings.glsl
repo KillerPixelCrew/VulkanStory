@@ -14,7 +14,7 @@
 //
 // Indices into the set-1 arrays come from push constants and are uniform over a
 // draw, so they need no nonuniformEXT; an index taken from per-vertex, per-instance
-// or per-pixel data does (docs/vulkan.md#bindless-descriptors, section 4).
+// or per-pixel data does (docs/vulkan.md#bindless-descriptors).
 
 #ifndef OPTIMUM_BINDINGS_GLSL
 #define OPTIMUM_BINDINGS_GLSL
@@ -31,7 +31,7 @@
 //   OPTIMUM_SAMPLER_SLOT(sampler2DArray, terrainTex);
 // declares `uint terrainTex`. SPIR-V keeps no trace of which array a uint indexes, so the
 // offline compiler reads the type from this declaration and checks it against the set 1
-// array the shipped module actually indexes (docs/vulkan.md section 4).
+// array the shipped module actually indexes (docs/vulkan.md).
 #define OPTIMUM_SAMPLER_SLOT(glslType, name) uint name
 
 // Set 0. The FrameGlobals block itself is generated from Shaders/FrameGlobals.cs.
@@ -84,7 +84,7 @@ layout(set = OPTIMUM_SET_TEXTURES, binding = OPTIMUM_BINDING_TEXTURES_CUBE_SHADO
 #define OPTIMUM_BINDING_FACE_DATA 0
 #define OPTIMUM_BINDING_ANIMATION 1
 #define OPTIMUM_BINDING_ANIMATION_PREV 2
-// The program record (docs/vulkan.md section 4): a dynamic uniform
+// The program record (docs/vulkan.md): a dynamic uniform
 // buffer with every non-frame uniform that is not in the push block.
 #define OPTIMUM_BINDING_PROGRAM_RECORD 3
 // Any other named block a rewritten (mod or GLSL 330) program declares, as a

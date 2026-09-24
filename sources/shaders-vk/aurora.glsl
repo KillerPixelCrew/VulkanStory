@@ -26,7 +26,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of aurora (docs/vulkan.md section 4). One draw per Use(): the push block
+// Program interface of aurora (docs/vulkan.md). One draw per Use(): the push block
 // holds only the sampler slot; every other uniform is a record member: aurora.vsh's, aurora.fsh's (its second
 // auroraCounter is the same name), then fogandlight.fsh's windWaveCounter (its owner vertexwarp.vsh is not
 // included).

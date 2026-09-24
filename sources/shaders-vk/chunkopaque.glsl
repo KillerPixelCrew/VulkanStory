@@ -31,7 +31,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkopaque (docs/vulkan.md section 4). One draw per mesh pool: the
+// Program interface of chunkopaque (docs/vulkan.md). One draw per mesh pool: the
 // push block holds the two sampler slots in chunkopaque.fsh's declaration order, then origin and
 // modelViewMatrix (84 B). The record holds every other uniform, chunkopaque.vsh's first (the previous-frame
 // warp state vertexwarp.glsl reads comes with its include), then chunkopaque.fsh's and underwatereffects'

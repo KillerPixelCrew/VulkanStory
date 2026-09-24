@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of nightsky (docs/vulkan.md section 4). One draw per Use(): the push
+// Program interface of nightsky (docs/vulkan.md). One draw per Use(): the push
 // block holds only the cube map's slot; every other uniform is a record member: nightsky.vsh's,
 // nightsky.fsh's (ditherSeed, horizontalResolution and playerToSealevelOffset are its own here, because
 // skycolor.fsh, their frame owner, is not included), then fogandlight.fsh's windWaveCounter and

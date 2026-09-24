@@ -27,7 +27,7 @@ internal sealed class TranslatedProgram
 
     /// <summary>
     /// The specialization constants a native program's pipelines are created with
-    /// (docs/vulkan.md section 5); null for a rewritten program, whose
+    /// (docs/vulkan.md); null for a rewritten program, whose
     /// defines were resolved by the preprocessor.
     /// </summary>
     public NativeSpecialization? Specialization;

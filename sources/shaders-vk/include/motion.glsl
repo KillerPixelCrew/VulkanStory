@@ -1,5 +1,5 @@
 // The only writer of the motion attachment in native shaders
-// (docs/vulkan.md section 7, docs/vulkan.md section 3.2).
+// (docs/vulkan.md, docs/vulkan.md).
 //
 //   rg = motion vector: previous pixel - current unjittered pixel, render pixels
 //   b  = reactive [0,1]

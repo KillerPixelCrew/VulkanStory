@@ -27,7 +27,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquid (docs/vulkan.md section 4). One draw per mesh pool: the
+// Program interface of chunkliquid (docs/vulkan.md). One draw per mesh pool: the
 // push block holds the two sampler slots in chunkliquid.fsh's declaration order, then origin and
 // modelViewMatrix (84 B). The record holds every other uniform, chunkliquid.vsh's first (the previous-frame
 // warp state vertexwarp.glsl reads comes with its include), then chunkliquid.fsh's and underwatereffects'

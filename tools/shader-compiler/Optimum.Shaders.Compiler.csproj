@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The offline native shader compiler (docs/vulkan.md section 6).
+  <!-- The offline native shader compiler (docs/vulkan.md).
        Compiles sources/shaders-vk into bin/<Configuration>/net10.0/shaders-vk: SPIR-V per program
        and variant plus shaders.manifest.json. The work lives in the renderer
        (Shaders/NativeShaderBuilder.cs), so the runtime development loop compiles the same way;

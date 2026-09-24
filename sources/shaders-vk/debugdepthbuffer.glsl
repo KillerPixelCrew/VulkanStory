@@ -17,7 +17,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of debugdepthbuffer (docs/vulkan.md section 4). One draw per Use(), so the
+// Program interface of debugdepthbuffer (docs/vulkan.md). One draw per Use(), so the
 // push block holds only the sampler slot and debugdepthbuffer.vsh's two matrices are the record.
 layout(push_constant, scalar) uniform OptimumDraw
 {

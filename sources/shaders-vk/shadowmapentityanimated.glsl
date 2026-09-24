@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of shadowmapentityanimated (docs/vulkan.md section 4). The shadow pass
+// Program interface of shadowmapentityanimated (docs/vulkan.md). The shadow pass
 // sets modelViewMatrix per entity (EntityShapeRenderer's isShadowPass branch) and addRenderFlags; with the
 // sampler slot they fit the push block (72 B). projectionMatrix is set once per shadow map and goes to the
 // record.

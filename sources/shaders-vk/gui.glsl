@@ -19,7 +19,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of gui (docs/vulkan.md section 4, GUI row). The push block holds the two
+// Program interface of gui (docs/vulkan.md, GUI row). The push block holds the two
 // sampler slots in gui.fsh's declaration order, then the per-element uniforms RenderAPIGame.RenderRectangle
 // sets on every rectangle (rgbaIn, extraGlow, applyColor, noTexture, overlayOpacity). The record holds
 // projectionMatrix, modelViewMatrix, modelMatrix and every other uniform: gui.vsh's in declaration order,

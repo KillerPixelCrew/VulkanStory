@@ -26,7 +26,7 @@ index f19d524..ee8435e 100644
 +	// AO the vanilla way.
 +	public static ShaderProgram SceneSsao;
 +
-+	// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	// Optimum TAA (P4): the liquid velocity pass (the temporal contract in docs/vulkan.md).
 +	// Registered like the other Optimum-only programs, so a failed compile marks
 +	// LoadError instead of failing the whole shader load.
 +	public static ShaderProgram ChunkLiquidMotion;

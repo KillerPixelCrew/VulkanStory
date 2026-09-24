@@ -20,7 +20,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of sky (docs/vulkan.md section 4). One draw per Use() and no sampler of
+// Program interface of sky (docs/vulkan.md). One draw per Use() and no sampler of
 // its own (sky and glow are set 0 frame textures), so there is no push block; every uniform is a record
 // member: sky.vsh's, sky.fsh's, then fogandlight.fsh's windWaveCounter (vertexwarp.vsh, its owner, is not
 // included) and underwatereffects.fsh's frameSize.

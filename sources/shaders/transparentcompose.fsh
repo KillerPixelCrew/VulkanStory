@@ -7,7 +7,7 @@
 // Quad particles, OIT entities, liquid shading and anything else that goes
 // through oit.fsh cannot write Primary's motion attachment - their six OIT
 // outputs already fill the Transparent target's attachment set - so
-// TAA-PLAN.md's Conventions give them their reactive value here instead:
+// the temporal contract in docs/vulkan.md gives them their reactive value here:
 // "OIT transparents `1 - revealage` from the merge". This pass is the one place
 // in the frame where the total coverage of all that transparent content over a
 // pixel is known: `anet` below, which vanilla already computes and hands to

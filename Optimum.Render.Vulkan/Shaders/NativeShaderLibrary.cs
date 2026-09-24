@@ -82,7 +82,7 @@ internal sealed class GlslUniformOracle
 }
 
 /// <summary>
-/// The native shaders at runtime (docs/vulkan.md section 8): the manifest and SPIR-V
+/// The native shaders at runtime (docs/vulkan.md): the manifest and SPIR-V
 /// beside <c>Optimum.Render.Vulkan.dll</c>, or a source tree compiled at device start, looked up per
 /// program at <c>VulkanDevice.LinkProgram</c>.
 ///

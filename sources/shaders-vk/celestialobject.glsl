@@ -21,7 +21,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of celestialobject (docs/vulkan.md section 4). SystemRenderSunMoon draws
+// Program interface of celestialobject (docs/vulkan.md). SystemRenderSunMoon draws
 // once per Use(), so the push block holds only the sampler slot; every other uniform is a record member:
 // celestialobject.vsh's, celestialobject.fsh's, then fogandlight.fsh's windWaveCounter (its owner
 // vertexwarp.vsh is not included) and underwatereffects.fsh's frameSize.

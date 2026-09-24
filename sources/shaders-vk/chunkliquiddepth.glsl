@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquiddepth (docs/vulkan.md section 4). One draw per mesh pool:
+// Program interface of chunkliquiddepth (docs/vulkan.md). One draw per mesh pool:
 // the push block holds origin and modelViewMatrix (76 B). The program includes no owner of viewDistance
 // (fogandlight.vsh), so it is a record member here, with projectionMatrix and the previous-frame warp state
 // vertexwarp.glsl reads.

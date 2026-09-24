@@ -25,7 +25,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of particlesquad (docs/vulkan.md section 4). Particles have no DRAW
+// Program interface of particlesquad (docs/vulkan.md). Particles have no DRAW
 // uniforms, so the push block holds only the sampler slot; everything else is a record member:
 // particlesquad.vsh's, vertexwarp.vsh's previous-frame mirrors, then underwatereffects.fsh's frameSize.
 // The prev* initializers are seeded by the runtime (section 8).

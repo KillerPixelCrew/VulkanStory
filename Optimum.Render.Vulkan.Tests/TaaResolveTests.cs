@@ -14,7 +14,7 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
-/// Drives the real <c>taa-resolve</c> shader pair (see TAA-PLAN.md P2) on the
+/// Drives the real <c>taa-resolve</c> shader pair (see docs/vulkan.md) on the
 /// Vulkan backend with synthetic inputs, the way <see cref="WorldRenderPathTests" />
 /// and <see cref="ChunkRenderPathTests" /> drive the world programs: load through
 /// <see cref="ShaderCorpus" />, build a real pipeline against a three-attachment
@@ -644,7 +644,7 @@ public class TaaResolveTests
 
     // ------------------------------- 2026-09-11: distant foliage jitter was the resolve
     //
-    // The four tests below pin the fix for the distant-foliage flicker (TAA-PLAN.md
+    // The four tests below pin the fix for the distant-foliage flicker (docs/vulkan.md
     // "Follow-up 2026-09-11"): a single-sample disocclusion test rejected history on
     // ~3.7% of distant leaf pixels per frame and a fixed blend weight let the clip box
     // drag the history; the 3x3 nearest-depth test and the anti-flicker weight took it

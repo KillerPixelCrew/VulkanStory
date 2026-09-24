@@ -31,7 +31,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of standard (docs/vulkan.md section 4). Held items, dropped items and
+// Program interface of standard (docs/vulkan.md). Held items, dropped items and
 // block-entity models: at most a few draws per Use(), so the push block holds the two sampler slots (tex, then
 // tex2dOverlay, the GLSL 330 unit order) and the integer flags plus taaReactive, in declaration order (vertex
 // stage first). The record holds everything else: standard.vsh's uniforms, vertexwarp.glsl's prev* uniforms,

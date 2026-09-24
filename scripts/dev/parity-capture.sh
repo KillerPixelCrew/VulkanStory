@@ -1,5 +1,5 @@
 #!/bin/bash
-# Per-attachment parity capture (docs/vulkan.md, section 3).
+# Per-attachment parity capture (docs/vulkan.md).
 #
 # Launches the deployed client on one renderer with OPTIMUM_PARITY_DUMP=<out>
 # and OPTIMUM_PARITY_FRAME=<n>, waits for the world ("[Client Chat] Welcome"),

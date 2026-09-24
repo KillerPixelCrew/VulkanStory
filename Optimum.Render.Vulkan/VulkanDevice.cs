@@ -90,7 +90,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     private FrameRing _frames = null!;
     private ShaderCompiler _shaderCompiler = null!;
 
-    /// <summary>The native shaders loaded at device start; null when they are off (docs/vulkan.md section 8).</summary>
+    /// <summary>The native shaders loaded at device start; null when they are off (docs/vulkan.md).</summary>
     private NativeShaderLibrary? _nativeShaders;
     private int _nativeLinks, _rewrittenLinks, _failedNativeLinks;
     private int _nativeLinksReported, _rewrittenLinksReported, _failedNativeLinksReported;

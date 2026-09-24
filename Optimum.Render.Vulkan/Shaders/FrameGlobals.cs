@@ -242,7 +242,7 @@ internal static class FrameGlobals
             // Generated from Optimum.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
             // Regenerate with FrameGlobals.GenerateInclude; ShaderDeliveryTests verifies the compiled ABI.
             //
-            // The FrameGlobals block (docs/vulkan.md section 3): set 0, binding 0, scalar
+            // The FrameGlobals block (docs/vulkan.md): set 0, binding 0, scalar
             // layout, bound with a dynamic offset. Members sit at the offsets the renderer writes.
             //
             // No member is a global name here. A member is the shared frame value only in a program that

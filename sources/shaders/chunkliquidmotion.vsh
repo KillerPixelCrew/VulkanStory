@@ -1,7 +1,7 @@
 #version 330 core
 #extension GL_ARB_explicit_attrib_location: enable
 
-// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
+// Optimum TAA (P4): the liquid velocity pass (the temporal contract in docs/vulkan.md).
 //
 // The OIT liquid draw cannot write Primary's motion attachment - it renders
 // into the Transparent target and its six oit.fsh outputs already fill that

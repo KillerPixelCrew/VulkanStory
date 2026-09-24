@@ -3,9 +3,8 @@
 
 // Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
 //
-// TAA-PLAN.md's inventory row for "Clouds (volumetric, map), aurora, night sky,
-// sun/moon, sky colour" reads "fallback + reactive; sky uses infinite-direction
-// reprojection (P4)". This pass is that row.
+// The temporal contract in docs/vulkan.md calls for sky direction reprojection
+// with reactive coverage. This pass supplies that coverage.
 //
 // WHAT ALREADY WORKED WITHOUT IT. Sky colour, the night sky, the sun and the
 // moon all draw on Primary with the depth test off or the depth mask off, so

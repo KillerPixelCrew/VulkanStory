@@ -37,7 +37,7 @@
 // pass exists to remove. Writing the surface's depth here makes the two agree
 // and gives the resolve the water surface's own linear depth for its
 // disocclusion test, which is the depth the motion vector belongs to.
-// TAA-PLAN.md rule 7 states this ("writes the surface's motion and depth").
+// The temporal contract in docs/vulkan.md states this ("writes the surface's motion and depth").
 //
 // rg = previousPixel - currentUnjitteredPixel in render pixels, b = reactive,
 // a = this fragment's window depth - the same contract chunkopaque.fsh writes.
@@ -54,7 +54,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunkliquidmotion (docs/vulkan.md section 4). A chunk-family program: one
+// Program interface of chunkliquidmotion (docs/vulkan.md). A chunk-family program: one
 // draw per mesh pool per Use(), so the DRAW uniforms origin and modelViewMatrix sit in the push block (76 B, no
 // samplers). The record holds the rest: chunkliquidmotion.vsh's uniforms in declaration order, then the
 // vertexwarp.glsl optimum-program-uniform names (vertexwarp.vsh owns only the current-frame members; the prev*
@@ -98,7 +98,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
 #if defined(OPTIMUM_VERTEX)
 
 
-// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
+// Optimum TAA (P4): the liquid velocity pass (the temporal contract in docs/vulkan.md).
 //
 // The OIT liquid draw cannot write Primary's motion attachment - it renders
 // into the Transparent target and its six oit.fsh outputs already fill that

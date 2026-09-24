@@ -27,7 +27,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of chunktransparent (docs/vulkan.md section 4). One draw per mesh pool:
+// Program interface of chunktransparent (docs/vulkan.md). One draw per mesh pool:
 // the push block holds the sampler slot, then origin, modelViewMatrix and forcedTransparency (84 B). The
 // record holds every other uniform, chunktransparent.vsh's first (the previous-frame warp state
 // vertexwarp.glsl reads comes with its include), then underwatereffects' frameSize.

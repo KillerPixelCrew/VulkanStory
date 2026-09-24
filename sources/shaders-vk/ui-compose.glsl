@@ -18,7 +18,7 @@
 #error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
 #endif
 
-// Program interface of ui-compose (docs/vulkan.md section 4). A fullscreen pass: one draw per
+// Program interface of ui-compose (docs/vulkan.md). A fullscreen pass: one draw per
 // frame, so the push block holds only the sampler slot and there is no program record.
 layout(push_constant, scalar) uniform OptimumDraw
 {

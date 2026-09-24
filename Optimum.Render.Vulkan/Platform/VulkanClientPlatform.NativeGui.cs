@@ -14,7 +14,7 @@ namespace Optimum.Render.Vulkan.Platform;
 // Two of the systems in that group draw through the native device API here. The rest of the
 // group - Render2DTexture's gui quads, guigear, the block highlights, the wireframe cube and
 // the camera path - take the generic stated route (NativeStated.cs), and the reason is written down in
-// docs/vulkan.md section 3c: their blend and depth state is not the
+// docs/vulkan.md: their blend and depth state is not the
 // caller's, it is whatever the frame left on the tracker, and the same Render2DTexture call is
 // reached both with standard alpha and with premultiplied alpha (RenderAPIGame's
 // Render2DTexturePremultipliedAlpha brackets it with GlToggleBlend). Decision 3 forbids a
