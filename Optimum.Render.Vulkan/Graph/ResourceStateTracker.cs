@@ -340,6 +340,11 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
     /// SHADER_READ_ONLY_OPTIMAL for both aspects, because that is the layout the
     /// descriptor writes name.
     /// </summary>
+    // SHADER_READ includes sampled reads. Keep the aggregate access bit for image
+    // sampling: UHD 770 / Windows driver 101.7088 returns stale texels after
+    // attachment reuse with SHADER_SAMPLED_READ alone. The aggregate mask fixes
+    // both the transient post-chain and TAA output reproductions without adding
+    // a global barrier or widening the pipeline stages.
     public static UsageState For(ResourceUsage usage, bool depth) => Normalise(usage, depth) switch
     {
         ResourceUsage.ColorWrite => new(ImageLayout.ColorAttachmentOptimal,
@@ -353,16 +358,16 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             AccessFlags2.DepthStencilAttachmentReadBit),
         ResourceUsage.DepthReadOnlySampled => new(ImageLayout.DepthReadOnlyOptimal,
             DepthTests | PipelineStageFlags2.FragmentShaderBit,
-            AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderSampledReadBit),
+            AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleFragment => new(ImageLayout.ShaderReadOnlyOptimal,
-            PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderSampledReadBit),
+            PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleVertex => new(ImageLayout.ShaderReadOnlyOptimal,
-            PipelineStageFlags2.VertexShaderBit, AccessFlags2.ShaderSampledReadBit),
+            PipelineStageFlags2.VertexShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.StorageRead => new(ImageLayout.General,
             PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit,
             AccessFlags2.ShaderStorageReadBit),
         ResourceUsage.SampleCompute => new(ImageLayout.ShaderReadOnlyOptimal,
-            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderSampledReadBit),
+            PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.StorageReadCompute => new(ImageLayout.General,
             PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit),
         ResourceUsage.StorageWrite => new(ImageLayout.General,
