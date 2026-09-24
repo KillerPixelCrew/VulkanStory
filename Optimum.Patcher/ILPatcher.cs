@@ -189,7 +189,7 @@ public static class ILPatcher
             // vanilla type because the compiler-generated ordinal changed.
             InjectMissingMethodsForMethod(compiledMethod, vanillaAsm, compiledAsm);
 
-            TransplantBody(vanillaMethod, compiledMethod, vanillaAsm, compiledAsm);
+            TransplantBody(vanillaMethod, compiledMethod, vanillaAsm);
             patched++;
             transplantedMethodKeys.Add(MethodSignature.GetKey(vanillaMethod));
             Console.WriteLine($"  PATCHED: {target}");
@@ -658,75 +658,15 @@ public static class ILPatcher
                 targetModule.ImportReference(parameter.ParameterType)));
         }
 
-        if (!source.HasBody)
+        bool pinvoke = MethodBodyCloner.CopyPInvoke(source, target, targetModule);
+        if (pinvoke || !source.HasBody)
         {
             return target;
         }
 
-        target.Body.InitLocals = source.Body.InitLocals;
-        target.Body.MaxStackSize = source.Body.MaxStackSize;
-
-        foreach (var variable in source.Body.Variables)
-        {
-            target.Body.Variables.Add(new VariableDefinition(targetModule.ImportReference(variable.VariableType)));
-        }
-
-        var instructionMap = new Dictionary<Instruction, Instruction>();
-        var il = target.Body.GetILProcessor();
-        foreach (var instruction in source.Body.Instructions)
-        {
-            var cloned = CloneInstructionSimple(instruction, targetModule);
-            instructionMap[instruction] = cloned;
-            il.Append(cloned);
-        }
-
-        foreach (var instruction in target.Body.Instructions)
-        {
-            if (instruction.Operand is Instruction branch && instructionMap.TryGetValue(branch, out var mapped))
-            {
-                instruction.Operand = mapped;
-            }
-            else if (instruction.Operand is Instruction[] branches)
-            {
-                instruction.Operand = branches.Select(branch =>
-                    instructionMap.TryGetValue(branch, out var mappedBranch) ? mappedBranch : branch).ToArray();
-            }
-        }
-
-        foreach (var handler in source.Body.ExceptionHandlers)
-        {
-            target.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
-            {
-                TryStart = handler.TryStart != null ? instructionMap.GetValueOrDefault(handler.TryStart) : null,
-                TryEnd = handler.TryEnd != null ? instructionMap.GetValueOrDefault(handler.TryEnd) : null,
-                HandlerStart = handler.HandlerStart != null ? instructionMap.GetValueOrDefault(handler.HandlerStart) : null,
-                HandlerEnd = handler.HandlerEnd != null ? instructionMap.GetValueOrDefault(handler.HandlerEnd) : null,
-                CatchType = handler.CatchType != null ? targetModule.ImportReference(handler.CatchType) : null,
-            });
-        }
+        MethodBodyCloner.Copy(source, target, targetModule);
 
         return target;
-    }
-
-    private static Instruction CloneInstructionSimple(Instruction src, ModuleDefinition targetModule)
-    {
-        var op = src.Operand;
-        if (op == null) return Instruction.Create(src.OpCode);
-        if (op is MethodReference mr) return Instruction.Create(src.OpCode, targetModule.ImportReference(mr));
-        if (op is TypeReference tr) return Instruction.Create(src.OpCode, targetModule.ImportReference(tr));
-        if (op is FieldReference fr) return Instruction.Create(src.OpCode, targetModule.ImportReference(fr));
-        if (op is string s) return Instruction.Create(src.OpCode, s);
-        if (op is int i) return Instruction.Create(src.OpCode, i);
-        if (op is long l) return Instruction.Create(src.OpCode, l);
-        if (op is float f) return Instruction.Create(src.OpCode, f);
-        if (op is double d) return Instruction.Create(src.OpCode, d);
-        if (op is byte b) return Instruction.Create(src.OpCode, b);
-        if (op is sbyte sb) return Instruction.Create(src.OpCode, sb);
-        if (op is Instruction target) return Instruction.Create(src.OpCode, target);
-        if (op is Instruction[] targets) return Instruction.Create(src.OpCode, targets);
-        if (op is VariableDefinition vd) return Instruction.Create(src.OpCode, vd);
-        if (op is ParameterDefinition pd) return Instruction.Create(src.OpCode, pd);
-        return Instruction.Create(src.OpCode);
     }
 
     private static MethodDefinition? FindMethod(AssemblyDefinition asm, MethodTarget target)
@@ -774,127 +714,11 @@ public static class ILPatcher
     private static void TransplantBody(
         MethodDefinition vanilla,
         MethodDefinition compiled,
-        AssemblyDefinition vanillaAsm,
-        AssemblyDefinition compiledAsm)
+        AssemblyDefinition vanillaAsm)
     {
         vanilla.DebugInformation.SequencePoints.Clear();
         vanilla.DebugInformation.Scope = null;
-        var body = vanilla.Body;
-        body.Instructions.Clear();
-        body.Variables.Clear();
-        body.ExceptionHandlers.Clear();
-
-        // Copy variables (create NEW definitions in the target body)
-        var variableMap = new Dictionary<int, VariableDefinition>();
-        foreach (var v in compiled.Body.Variables)
-        {
-            var importedType = vanillaAsm.MainModule.ImportReference(v.VariableType);
-            var newVar = new VariableDefinition(importedType);
-            body.Variables.Add(newVar);
-            variableMap[v.Index] = newVar;
-        }
-
-        body.MaxStackSize = compiled.Body.MaxStackSize;
-        body.InitLocals = compiled.Body.InitLocals;
-
-        // Copy instructions (import all references into vanilla module)
-        var ilProcessor = body.GetILProcessor();
-        var instructionMap = new Dictionary<Instruction, Instruction>();
-
-        foreach (var srcInstr in compiled.Body.Instructions)
-        {
-            var newInstr = CloneInstruction(srcInstr, vanillaAsm.MainModule, variableMap, vanilla);
-            instructionMap[srcInstr] = newInstr;
-            ilProcessor.Append(newInstr);
-        }
-
-        // Fix branch targets
-        foreach (var instr in body.Instructions)
-        {
-            if (instr.Operand is Instruction targetInstr && instructionMap.TryGetValue(targetInstr, out var mapped))
-            {
-                instr.Operand = mapped;
-            }
-            else if (instr.Operand is Instruction[] targets2)
-            {
-                instr.Operand = targets2.Select(t => instructionMap.TryGetValue(t, out var m) ? m : t).ToArray();
-            }
-        }
-
-        // Copy exception handlers
-        foreach (var handler in compiled.Body.ExceptionHandlers)
-        {
-            var newHandler = new ExceptionHandler(handler.HandlerType)
-            {
-                TryStart = handler.TryStart != null ? instructionMap.GetValueOrDefault(handler.TryStart) : null,
-                TryEnd = handler.TryEnd != null ? instructionMap.GetValueOrDefault(handler.TryEnd) : null,
-                HandlerStart = handler.HandlerStart != null ? instructionMap.GetValueOrDefault(handler.HandlerStart) : null,
-                HandlerEnd = handler.HandlerEnd != null ? instructionMap.GetValueOrDefault(handler.HandlerEnd) : null,
-                FilterStart = handler.FilterStart != null ? instructionMap.GetValueOrDefault(handler.FilterStart) : null,
-            };
-            if (handler.CatchType != null)
-                newHandler.CatchType = vanillaAsm.MainModule.ImportReference(handler.CatchType);
-            body.ExceptionHandlers.Add(newHandler);
-        }
-    }
-
-    private static Instruction CloneInstruction(
-        Instruction src,
-        ModuleDefinition targetModule,
-        Dictionary<int, VariableDefinition> variableMap,
-        MethodDefinition targetMethod)
-    {
-        var operand = src.Operand;
-
-        if (operand == null)
-            return Instruction.Create(src.OpCode);
-
-        // Import references into target module
-        if (operand is MethodReference methodRef)
-            return Instruction.Create(src.OpCode, targetModule.ImportReference(methodRef));
-        if (operand is TypeReference typeRef)
-            return Instruction.Create(src.OpCode, targetModule.ImportReference(typeRef));
-        if (operand is FieldReference fieldRef)
-            return Instruction.Create(src.OpCode, targetModule.ImportReference(fieldRef));
-        if (operand is string s)
-            return Instruction.Create(src.OpCode, s);
-        if (operand is int i)
-            return Instruction.Create(src.OpCode, i);
-        if (operand is long l)
-            return Instruction.Create(src.OpCode, l);
-        if (operand is float f)
-            return Instruction.Create(src.OpCode, f);
-        if (operand is double d)
-            return Instruction.Create(src.OpCode, d);
-        if (operand is byte b)
-            return Instruction.Create(src.OpCode, b);
-        if (operand is sbyte sb)
-            return Instruction.Create(src.OpCode, sb);
-        if (operand is Instruction target)
-            return Instruction.Create(src.OpCode, target); // fixed up later
-        if (operand is Instruction[] targets)
-            return Instruction.Create(src.OpCode, targets); // fixed up later
-        // VariableDefinition: remap by index to the new body's variables
-        if (operand is VariableDefinition varDef)
-        {
-            if (variableMap.TryGetValue(varDef.Index, out var newVar))
-                return Instruction.Create(src.OpCode, newVar);
-            return Instruction.Create(src.OpCode, varDef);
-        }
-        // ParameterDefinition: remap by index to the target method's parameters
-        if (operand is ParameterDefinition paramDef)
-        {
-            var targetParam = targetMethod.Parameters.Count > paramDef.Index
-                ? targetMethod.Parameters[paramDef.Index]
-                : paramDef;
-            return Instruction.Create(src.OpCode, targetParam);
-        }
-        if (operand is CallSite callSite)
-            return Instruction.Create(src.OpCode, callSite);
-
-        // Fallback: create without operand (shouldn't happen)
-        Console.Error.WriteLine($"  WARNING: unhandled operand type {operand.GetType().Name} for {src.OpCode}");
-        return Instruction.Create(src.OpCode);
+        MethodBodyCloner.Copy(compiled, vanilla, vanillaAsm.MainModule);
     }
 }
 

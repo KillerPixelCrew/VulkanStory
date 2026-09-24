@@ -398,22 +398,7 @@ public static class MemberInjector
                     targetModule.ImportReference(param.ParameterType)));
             }
 
-            if (method.IsPInvokeImpl && method.PInvokeInfo != null)
-            {
-                var sourceModule = method.PInvokeInfo.Module;
-                var targetModuleRef = targetModule.ModuleReferences.FirstOrDefault(
-                    item => item.Name == sourceModule.Name);
-                if (targetModuleRef == null)
-                {
-                    targetModuleRef = new ModuleReference(sourceModule.Name);
-                    targetModule.ModuleReferences.Add(targetModuleRef);
-                }
-                newMethod.PInvokeInfo = new PInvokeInfo(
-                    method.PInvokeInfo.Attributes,
-                    method.PInvokeInfo.EntryPoint,
-                    targetModuleRef);
-                newMethod.ImplAttributes = method.ImplAttributes;
-            }
+            MethodBodyCloner.CopyPInvoke(method, newMethod, targetModule);
 
             newType.Methods.Add(newMethod);
             methodMap[method] = newMethod;
@@ -423,52 +408,7 @@ public static class MemberInjector
         {
             if (method.HasBody)
             {
-                newMethod.Body.InitLocals = method.Body.InitLocals;
-                newMethod.Body.MaxStackSize = method.Body.MaxStackSize;
-
-                var variableMap = new Dictionary<VariableDefinition, VariableDefinition>();
-                foreach (var v in method.Body.Variables)
-                {
-                    var newVariable = new VariableDefinition(targetModule.ImportReference(v.VariableType));
-                    newMethod.Body.Variables.Add(newVariable);
-                    variableMap[v] = newVariable;
-                }
-
-                var instrMap = new Dictionary<Instruction, Instruction>();
-                var il = newMethod.Body.GetILProcessor();
-                foreach (var instr in method.Body.Instructions)
-                {
-                    var newInstr = CloneInstructionForInjection(
-                        instr,
-                        targetModule,
-                        variableMap,
-                        method,
-                        newMethod);
-                    instrMap[instr] = newInstr;
-                    il.Append(newInstr);
-                }
-
-                // Fix branches
-                foreach (var instr in newMethod.Body.Instructions)
-                {
-                    if (instr.Operand is Instruction t && instrMap.TryGetValue(t, out var m))
-                        instr.Operand = m;
-                    else if (instr.Operand is Instruction[] ts)
-                        instr.Operand = ts.Select(x => instrMap.TryGetValue(x, out var mx) ? mx : x).ToArray();
-                }
-
-                // Exception handlers
-                foreach (var h in method.Body.ExceptionHandlers)
-                {
-                    newMethod.Body.ExceptionHandlers.Add(new ExceptionHandler(h.HandlerType)
-                    {
-                        TryStart = h.TryStart != null ? instrMap.GetValueOrDefault(h.TryStart) : null,
-                        TryEnd = h.TryEnd != null ? instrMap.GetValueOrDefault(h.TryEnd) : null,
-                        HandlerStart = h.HandlerStart != null ? instrMap.GetValueOrDefault(h.HandlerStart) : null,
-                        HandlerEnd = h.HandlerEnd != null ? instrMap.GetValueOrDefault(h.HandlerEnd) : null,
-                        CatchType = h.CatchType != null ? targetModule.ImportReference(h.CatchType) : null,
-                    });
-                }
+                MethodBodyCloner.Copy(method, newMethod, targetModule);
             }
         }
 
@@ -550,103 +490,13 @@ public static class MemberInjector
                 targetModule.ImportReference(param.ParameterType)));
         }
 
-        // extern P/Invoke methods (e.g. [DllImport]) have no IL body: MethodAttributes.PInvokeImpl
-        // is already copied above via src.Attributes, but without a matching PInvokeInfo/ImplMap
-        // row the method's flags claim PInvoke with nothing backing it. The CLR loader then treats
-        // it as an internal ECall, which is only legal in system-trusted assemblies and throws
-        // "ECall methods must be packaged into a system module" at runtime. Reconstruct the
-        // PInvokeInfo (target-module ModuleReference + entry point + calling convention/charset)
-        // and ImplAttributes so the injected method round-trips as a real P/Invoke.
-        if (src.IsPInvokeImpl && src.PInvokeInfo != null)
+        // The P/Invoke flag requires an import map in the destination module.
+        bool pinvoke = MethodBodyCloner.CopyPInvoke(src, newMethod, targetModule);
+        if (!pinvoke && src.HasBody)
         {
-            var srcModuleRef = src.PInvokeInfo.Module;
-            var targetModuleRef = targetModule.ModuleReferences.FirstOrDefault(m => m.Name == srcModuleRef.Name);
-            if (targetModuleRef == null)
-            {
-                targetModuleRef = new ModuleReference(srcModuleRef.Name);
-                targetModule.ModuleReferences.Add(targetModuleRef);
-            }
-            newMethod.PInvokeInfo = new PInvokeInfo(src.PInvokeInfo.Attributes, src.PInvokeInfo.EntryPoint, targetModuleRef);
-            newMethod.ImplAttributes = src.ImplAttributes;
-        }
-        else if (src.HasBody)
-        {
-            newMethod.Body.InitLocals = src.Body.InitLocals;
-            newMethod.Body.MaxStackSize = src.Body.MaxStackSize;
-
-            foreach (var v in src.Body.Variables)
-                newMethod.Body.Variables.Add(new VariableDefinition(targetModule.ImportReference(v.VariableType)));
-
-            var instrMap = new Dictionary<Instruction, Instruction>();
-            var il = newMethod.Body.GetILProcessor();
-            foreach (var instr in src.Body.Instructions)
-            {
-                var newInstr = CloneInstructionForInjection(instr, targetModule);
-                instrMap[instr] = newInstr;
-                il.Append(newInstr);
-            }
-
-            foreach (var instr in newMethod.Body.Instructions)
-            {
-                if (instr.Operand is Instruction t && instrMap.TryGetValue(t, out var m))
-                    instr.Operand = m;
-                else if (instr.Operand is Instruction[] ts)
-                    instr.Operand = ts.Select(x => instrMap.TryGetValue(x, out var mx) ? mx : x).ToArray();
-            }
-
-            foreach (var h in src.Body.ExceptionHandlers)
-            {
-                newMethod.Body.ExceptionHandlers.Add(new ExceptionHandler(h.HandlerType)
-                {
-                    TryStart = h.TryStart != null ? instrMap.GetValueOrDefault(h.TryStart) : null,
-                    TryEnd = h.TryEnd != null ? instrMap.GetValueOrDefault(h.TryEnd) : null,
-                    HandlerStart = h.HandlerStart != null ? instrMap.GetValueOrDefault(h.HandlerStart) : null,
-                    HandlerEnd = h.HandlerEnd != null ? instrMap.GetValueOrDefault(h.HandlerEnd) : null,
-                    CatchType = h.CatchType != null ? targetModule.ImportReference(h.CatchType) : null,
-                });
-            }
+            MethodBodyCloner.Copy(src, newMethod, targetModule);
         }
 
         target.Methods.Add(newMethod);
-    }
-
-    private static Instruction CloneInstructionForInjection(
-        Instruction src,
-        ModuleDefinition targetModule,
-        Dictionary<VariableDefinition, VariableDefinition>? variableMap = null,
-        MethodDefinition? sourceMethod = null,
-        MethodDefinition? targetMethod = null)
-    {
-        var op = src.Operand;
-        if (op == null) return Instruction.Create(src.OpCode);
-        if (op is MethodReference mr) return Instruction.Create(src.OpCode, targetModule.ImportReference(mr));
-        if (op is TypeReference tr) return Instruction.Create(src.OpCode, targetModule.ImportReference(tr));
-        if (op is FieldReference fr) return Instruction.Create(src.OpCode, targetModule.ImportReference(fr));
-        if (op is string s) return Instruction.Create(src.OpCode, s);
-        if (op is int i) return Instruction.Create(src.OpCode, i);
-        if (op is long l) return Instruction.Create(src.OpCode, l);
-        if (op is float f) return Instruction.Create(src.OpCode, f);
-        if (op is double d) return Instruction.Create(src.OpCode, d);
-        if (op is byte b) return Instruction.Create(src.OpCode, b);
-        if (op is sbyte sb) return Instruction.Create(src.OpCode, sb);
-        if (op is Instruction target) return Instruction.Create(src.OpCode, target);
-        if (op is Instruction[] targets) return Instruction.Create(src.OpCode, targets);
-        if (op is VariableDefinition variable)
-        {
-            if (variableMap != null && variableMap.TryGetValue(variable, out var mappedVariable))
-                return Instruction.Create(src.OpCode, mappedVariable);
-            return Instruction.Create(src.OpCode, variable);
-        }
-        if (op is ParameterDefinition parameter)
-        {
-            if (sourceMethod != null && targetMethod != null)
-            {
-                int index = sourceMethod.Parameters.IndexOf(parameter);
-                if (index >= 0 && index < targetMethod.Parameters.Count)
-                    return Instruction.Create(src.OpCode, targetMethod.Parameters[index]);
-            }
-            return Instruction.Create(src.OpCode, parameter);
-        }
-        return Instruction.Create(src.OpCode);
     }
 }

@@ -291,6 +291,7 @@ namespace Optimum.Tests
 {
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Optimum.Patcher;
@@ -298,6 +299,85 @@ using Xunit;
 
 public sealed class MemberInjectorTests
 {
+    [Fact]
+    public void InjectedMethodMapsArgumentsAndLocalsIntoItsOwnBody()
+    {
+        using AssemblyDefinition vanilla = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("VintagestoryLib", new Version(1, 0)),
+            "VintagestoryLib", ModuleKind.Dll);
+        using AssemblyDefinition compiled = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("VintagestoryLib", new Version(1, 0)),
+            "VintagestoryLib", ModuleKind.Dll);
+
+        TypeDefinition vanillaType = new("Fixture", "MethodHost",
+            TypeAttributes.Public | TypeAttributes.Class, vanilla.MainModule.TypeSystem.Object);
+        TypeDefinition sourceType = new("Fixture", "MethodHost",
+            TypeAttributes.Public | TypeAttributes.Class, compiled.MainModule.TypeSystem.Object);
+        vanilla.MainModule.Types.Add(vanillaType);
+        compiled.MainModule.Types.Add(sourceType);
+
+        MethodDefinition source = new("Identity", MethodAttributes.Public | MethodAttributes.Static,
+            compiled.MainModule.TypeSystem.Int32);
+        source.Parameters.Add(new ParameterDefinition("value", ParameterAttributes.None,
+            compiled.MainModule.TypeSystem.Int32));
+        var local = new VariableDefinition(compiled.MainModule.TypeSystem.Int32);
+        source.Body.Variables.Add(local);
+        source.Body.InitLocals = true;
+        var il = source.Body.GetILProcessor();
+        il.Append(Instruction.Create(OpCodes.Ldarg, source.Parameters[0]));
+        il.Append(Instruction.Create(OpCodes.Stloc, local));
+        il.Append(Instruction.Create(OpCodes.Ldloc, local));
+        il.Append(Instruction.Create(OpCodes.Ret));
+        sourceType.Methods.Add(source);
+
+        MemberInjector.InjectStaticMembers(vanilla, compiled, sourceType.FullName,
+            new List<string> { source.Name });
+
+        MethodDefinition injected = Assert.Single(vanillaType.Methods);
+        Assert.Same(injected.Parameters[0], injected.Body.Instructions[0].Operand);
+        Assert.Same(injected.Body.Variables[0], injected.Body.Instructions[1].Operand);
+        Assert.Same(injected.Body.Variables[0], injected.Body.Instructions[2].Operand);
+        using var output = new System.IO.MemoryStream();
+        vanilla.Write(output);
+        Assert.True(output.Length > 0);
+    }
+
+    [Fact]
+    public void InjectedPInvokeKeepsItsImportMap()
+    {
+        using AssemblyDefinition vanilla = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("vanilla", new Version(1, 0)), "vanilla", ModuleKind.Dll);
+        using AssemblyDefinition compiled = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("compiled", new Version(1, 0)), "compiled", ModuleKind.Dll);
+        TypeDefinition targetType = new("Fixture", "Native",
+            TypeAttributes.Public | TypeAttributes.Class, vanilla.MainModule.TypeSystem.Object);
+        TypeDefinition sourceType = new("Fixture", "Native",
+            TypeAttributes.Public | TypeAttributes.Class, compiled.MainModule.TypeSystem.Object);
+        vanilla.MainModule.Types.Add(targetType);
+        compiled.MainModule.Types.Add(sourceType);
+        var nativeModule = new ModuleReference("fixture.dll");
+        compiled.MainModule.ModuleReferences.Add(nativeModule);
+        var source = new MethodDefinition("NativeCall",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.PInvokeImpl,
+            compiled.MainModule.TypeSystem.Void)
+        {
+            PInvokeInfo = new PInvokeInfo(PInvokeAttributes.CallConvCdecl,
+                "native_call", nativeModule),
+        };
+        sourceType.Methods.Add(source);
+
+        MemberInjector.InjectStaticMembers(vanilla, compiled, sourceType.FullName,
+            new List<string> { source.Name });
+
+        MethodDefinition injected = Assert.Single(targetType.Methods);
+        Assert.Equal("native_call", injected.PInvokeInfo.EntryPoint);
+        Assert.Equal("fixture.dll", injected.PInvokeInfo.Module.Name);
+        Assert.Same(vanilla.MainModule.ModuleReferences.Single(), injected.PInvokeInfo.Module);
+        using var output = new System.IO.MemoryStream();
+        vanilla.Write(output);
+        Assert.True(output.Length > 0);
+    }
+
     [Fact]
     public void SameArityOverloadsRequireTheirParameterTypesToMatch()
     {

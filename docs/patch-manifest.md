@@ -25,3 +25,11 @@ test and `scripts/check-patches.sh` compare the generated report with the list.
 Source patches are checked against the donor tree; runtime patches target the
 vanilla assemblies separately. The list does not turn an absent source patch
 into a shipped change.
+
+`MethodBodyCloner` is the common Cecil body-copy path for member injection,
+compiler-generated nested methods and vanilla method transplants. It imports
+references into the destination module, maps locals and parameters to the new
+body, resolves branch and exception/filter boundaries, and rejects operands or
+targets it cannot map. Injection still creates members; transplantation keeps
+the vanilla member metadata. P/Invoke methods carry their import map and module
+reference when injected.
