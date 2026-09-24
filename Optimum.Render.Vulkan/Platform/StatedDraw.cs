@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
@@ -79,8 +78,7 @@ internal static class StatedDraw
         RenderTargetFormats? formats = device.NativeTargetFormats(framebufferId, slots);
         if (formats == null) return Refused("no formats for framebuffer " + framebufferId, out refusal);
 
-        var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
-        for (int i = 0; i < blend.Length; i++) blend[i] = stated.AttachmentFor(framebufferId, i);
+        AttachmentBlend[] blend = stated.BlendFor(framebufferId, Math.Max(formats.ColorFormats.Length, 1));
 
         var description = new NativePipelineDescription
         {
@@ -110,11 +108,7 @@ internal static class StatedDraw
 
         int[] passReads = reads;
         if (declared != null && declared.Reads.Length > 0)
-        {
-            var union = new List<int>(declared.Reads);
-            foreach (int read in reads) if (!union.Contains(read)) union.Add(read);
-            passReads = union.ToArray();
-        }
+            passReads = MergeReads(declared.Reads, reads);
         Rect2D viewport = stated.Viewport;
         bool drawn = false;
         if (device.BeginNativePass(new NativePassDescription
@@ -150,5 +144,26 @@ internal static class StatedDraw
     {
         refusal = reason;
         return false;
+    }
+
+    private static int[] MergeReads(int[] declared, int[] sampled)
+    {
+        int extra = 0;
+        for (int i = 0; i < sampled.Length; i++)
+        {
+            int read = sampled[i];
+            if (Array.IndexOf(declared, read) < 0 && Array.IndexOf(sampled, read, 0, i) < 0)
+                extra++;
+        }
+
+        var merged = new int[declared.Length + extra];
+        Array.Copy(declared, merged, declared.Length);
+        int next = declared.Length;
+        foreach (int read in sampled)
+        {
+            if (Array.IndexOf(merged, read, 0, next) < 0)
+                merged[next++] = read;
+        }
+        return merged;
     }
 }

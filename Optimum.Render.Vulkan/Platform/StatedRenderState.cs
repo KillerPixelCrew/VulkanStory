@@ -30,6 +30,7 @@ internal sealed class StatedRenderState
     public const int MaxTextureUnits = RenderLimits.MaxTextureUnits;
 
     private readonly AttachmentBlend[] _blend = new AttachmentBlend[MaxColorAttachments];
+    private readonly Dictionary<(int FramebufferId, int Count), AttachmentBlend[]> _blendSnapshots = new();
     private readonly Dictionary<int, uint> _drawBuffers = new();
     private readonly int[] _unitTextures = new int[MaxTextureUnits];
     private readonly int[] _unitSamplers = new int[MaxTextureUnits];
@@ -62,6 +63,7 @@ internal sealed class StatedRenderState
     /// <summary><c>glBlendFunc</c>/<c>glBlendFuncSeparate</c> of a named mode: every attachment's factors, add equations.</summary>
     public void SetBlendMode(EnumBlendMode mode)
     {
+        _blendSnapshots.Clear();
         (BlendFactor srcColor, BlendFactor dstColor, BlendFactor srcAlpha, BlendFactor dstAlpha) = AttachmentBlend.FactorsFor(mode);
         for (int i = 0; i < _blend.Length; i++)
         {
@@ -75,12 +77,18 @@ internal sealed class StatedRenderState
     }
 
     /// <summary><c>glEnable/glDisable(GL_BLEND)</c>: the functions stay.</summary>
-    public void SetBlendEnabled(bool enabled) => BlendEnabled = enabled;
+    public void SetBlendEnabled(bool enabled)
+    {
+        if (BlendEnabled == enabled) return;
+        BlendEnabled = enabled;
+        _blendSnapshots.Clear();
+    }
 
     /// <summary><c>glBlendEquationi</c> + <c>glBlendFuncSeparatei</c> with GL tokens.</summary>
     public void SetSlotBlend(int slot, int glEquation, int srcColor, int dstColor, int srcAlpha, int dstAlpha)
     {
         if ((uint)slot >= MaxColorAttachments) return;
+        _blendSnapshots.Clear();
         BlendOp op = GlEnums.BlendOpFrom(glEquation);
         _blend[slot].ColorOp = op;
         _blend[slot].AlphaOp = op;
@@ -94,6 +102,7 @@ internal sealed class StatedRenderState
     public void SetSlotEquation(int slot, int glEquation)
     {
         if ((uint)slot >= MaxColorAttachments) return;
+        _blendSnapshots.Clear();
         BlendOp op = GlEnums.BlendOpFrom(glEquation);
         _blend[slot].ColorOp = op;
         _blend[slot].AlphaOp = op;
@@ -103,6 +112,7 @@ internal sealed class StatedRenderState
     public void SetSlotFunc(int slot, int srcColor, int dstColor, int srcAlpha, int dstAlpha)
     {
         if ((uint)slot >= MaxColorAttachments) return;
+        _blendSnapshots.Clear();
         _blend[slot].SrcColor = GlEnums.BlendFactorFrom(srcColor);
         _blend[slot].DstColor = GlEnums.BlendFactorFrom(dstColor);
         _blend[slot].SrcAlpha = GlEnums.BlendFactorFrom(srcAlpha);
@@ -111,8 +121,11 @@ internal sealed class StatedRenderState
 
     public void SetColorMask(bool r, bool g, bool b, bool a)
     {
-        ColorMask = (r ? ColorComponentFlags.RBit : 0) | (g ? ColorComponentFlags.GBit : 0) |
+        ColorComponentFlags next = (r ? ColorComponentFlags.RBit : 0) | (g ? ColorComponentFlags.GBit : 0) |
                     (b ? ColorComponentFlags.BBit : 0) | (a ? ColorComponentFlags.ABit : 0);
+        if (ColorMask == next) return;
+        ColorMask = next;
+        _blendSnapshots.Clear();
     }
 
     /// <summary>
@@ -131,22 +144,58 @@ internal sealed class StatedRenderState
     }
 
     /// <summary>
+    /// An immutable snapshot for a pipeline description. Pipeline entries retain
+    /// the array, so invalidation drops this cache's reference without changing
+    /// descriptions already recorded for earlier draws.
+    /// </summary>
+    public AttachmentBlend[] BlendFor(int framebufferId, int count)
+    {
+        var key = (framebufferId, count);
+        if (_blendSnapshots.TryGetValue(key, out AttachmentBlend[]? snapshot))
+            return snapshot;
+
+        snapshot = new AttachmentBlend[count];
+        for (int i = 0; i < count; i++) snapshot[i] = AttachmentFor(framebufferId, i);
+        _blendSnapshots.Add(key, snapshot);
+        return snapshot;
+    }
+
+    /// <summary>
     /// World/UI separation: the UI image's target while the platform's UI scope is open, 0 otherwise
     /// (VulkanClientPlatform.UiSeparation.cs). While it is set, Default means that image.
     /// </summary>
-    public int UiImageFramebuffer;
+    private int _uiImageFramebuffer;
+    public int UiImageFramebuffer
+    {
+        get => _uiImageFramebuffer;
+        set
+        {
+            if (_uiImageFramebuffer == value) return;
+            _uiImageFramebuffer = value;
+            _blendSnapshots.Clear();
+        }
+    }
 
     /// <summary>Whether a draw into <paramref name="framebufferId" /> lands in the UI image.</summary>
     public bool IsUiImage(int framebufferId) =>
         UiImageFramebuffer > 0 &&
         (framebufferId == Graph.PassDeclaration.DefaultFramebuffer || framebufferId == UiImageFramebuffer);
 
-    public void SetDrawBuffers(int framebufferId, uint mask) => _drawBuffers[framebufferId] = mask;
+    public void SetDrawBuffers(int framebufferId, uint mask)
+    {
+        if (_drawBuffers.TryGetValue(framebufferId, out uint current) && current == mask) return;
+        _drawBuffers[framebufferId] = mask;
+        _blendSnapshots.Clear();
+    }
 
     public uint DrawBuffers(int framebufferId) =>
         _drawBuffers.TryGetValue(framebufferId, out uint mask) ? mask : 1u;
 
-    public void ForgetFramebuffer(int framebufferId) => _drawBuffers.Remove(framebufferId);
+    public void ForgetFramebuffer(int framebufferId)
+    {
+        _drawBuffers.Remove(framebufferId);
+        _blendSnapshots.Clear();
+    }
 
     public void BindTexture(int unit, int textureId)
     {

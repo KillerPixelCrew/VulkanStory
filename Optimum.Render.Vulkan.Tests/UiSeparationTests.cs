@@ -240,6 +240,28 @@ public class UiSeparationTests(ITestOutputHelper output)
         Assert.Equal(BlendFactor.SrcAlpha, stated.AttachmentFor(PassDeclaration.DefaultFramebuffer, 0).SrcAlpha);
     }
 
+    [Fact]
+    public void StatedBlendSnapshotsAreReusedUntilARelevantStateChanges()
+    {
+        var stated = new StatedRenderState();
+        AttachmentBlend[] first = stated.BlendFor(7, 2);
+        Assert.Same(first, stated.BlendFor(7, 2));
+
+        stated.SetDrawBuffers(7, 0b11);
+        AttachmentBlend[] bothSlots = stated.BlendFor(7, 2);
+        Assert.NotSame(first, bothSlots);
+        Assert.NotEqual(first[1].WriteMask, bothSlots[1].WriteMask);
+
+        stated.SetBlendEnabled(true);
+        stated.SetBlendMode(EnumBlendMode.Standard);
+        AttachmentBlend[] standard = stated.BlendFor(PassDeclaration.DefaultFramebuffer, 1);
+        stated.UiImageFramebuffer = 42;
+        AttachmentBlend[] ui = stated.BlendFor(PassDeclaration.DefaultFramebuffer, 1);
+        Assert.NotSame(standard, ui);
+        Assert.Equal(BlendFactor.SrcAlpha, standard[0].SrcAlpha);
+        Assert.Equal(BlendFactor.One, ui[0].SrcAlpha);
+    }
+
     // ------------------------------------------------------------------------ arithmetic
 
     /// <summary>A straight-alpha layer (rgb in bytes, alpha 0..1) as premultiplied bytes.</summary>
