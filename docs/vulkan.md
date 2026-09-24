@@ -26,8 +26,9 @@ paths provide explicit pipeline state and resources to `VulkanDevice`.
   presentation resources. Offscreen images keep the game's GL orientation.
 - `Latency/FrameTiming.cs` records CPU phases. One frame identity begins before input;
   partial submits retain that association. Present IDs survive swapchain recreation.
-  Unmeasured driver, OS and GPU intervals are not latency measurements. This foundation
-  does not change the client's frame limiter.
+  `stats.latency` reports `frames` and mean/p99 milliseconds for `input`, `sim`,
+  `render_submit`, `present` and `total`. Total ends when presentation returns on
+  the CPU. This foundation does not change the client's frame limiter.
 
 Game seams must preserve their neutral OpenGL bodies and dispatch virtually. Required
 transplanted members belong in the patcher's explicit list. Injected fields must not

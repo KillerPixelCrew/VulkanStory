@@ -21,7 +21,7 @@ public class FrameTimingTests
 
         Assert.False(tracker.TryComplete(41, 900, out _));
         Assert.True(tracker.TryComplete(42, 901, out var report));
-        Assert.Equal(new LatencyFrameReport(42, 901, 5, 20, 30, 7, 0, 0, 0, 72), report);
+        Assert.Equal(new LatencyFrameReport(42, 901, 5, 20, 30, 7, 72), report);
         Assert.False(tracker.TryComplete(42, 902, out _));
     }
 

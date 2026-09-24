@@ -53,13 +53,7 @@ internal enum WaitSite
     /// thread can stall here on GPU work it did not issue.
     /// </summary>
     QueueSubmit = 8,
-    /// <summary>
-    /// The latency backend's one sleep before the frame's input is sampled
-    /// (plan section "Latency seams", seam S6). Zero with the None backend, which
-    /// never sleeps; with a pacing backend active this is where the frame waits, and
-    /// <see cref="FramePacing" /> should find its value already signalled.
-    /// </summary>
-    LatencySleep = 9,
+
 }
 
 /// <summary>
@@ -75,16 +69,15 @@ internal enum WaitSite
 /// microseconds apiece, so they do not need gating, and having them unconditional
 /// means a report can be turned on for a session that is already misbehaving.
 ///
-/// One sample is four lines. The first is the original human-readable line and
-/// keeps its format byte for byte (older logs and readers depend on it); the
-/// other three carry stable <c>key=value</c> tokens for scripts
+/// Each sample starts with a human-readable summary. The remaining lines
+/// carry <c>key=value</c> counters and timings for scripts
 /// (<c>scripts/dev/pacing-gate.sh</c>):
 /// <code>
 /// stats 1.0s: 60 frames (16.7 ms/frame), ...
 /// stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=0
 /// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ... queue_submit_n=60 queue_submit_ms=1.9
 /// stats.counters blocking_uploads=0 uploads=0 scopes=900 barriers=12 rebar_fallbacks=0 dynamic_state=12600 uniform_ring_used=412800 uniform_ring_capacity=16777216
-/// stats.latency backend=off mode=off rev=0 sleep_n=0 sleep_ms=0.0 frames=60 input_mean_ms=0.02 input_p99_ms=0.04 ... total_mean_ms=16.60 total_p99_ms=18.20
+/// stats.latency frames=60 input_mean_ms=0.02 input_p99_ms=0.04 ... total_mean_ms=16.60 total_p99_ms=18.20
 /// </code>
 /// </summary>
 internal static class VulkanStats
@@ -101,10 +94,9 @@ internal static class VulkanStats
         "swapchain_acquire",
         "present",
         "queue_submit",
-        "latency_sleep",
     };
 
-    public const int WaitSiteCount = 10;
+    public const int WaitSiteCount = 9;
 
     /// <summary>
     /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> can record for
@@ -577,7 +569,7 @@ internal static class VulkanStats
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
                FormatCountersLine(counters) + "\n" +
-               LatencyLine(waitCounts[(int)WaitSite.LatencySleep], waitMs[(int)WaitSite.LatencySleep]) + "\n" +
+               LatencyLine() + "\n" +
                VulkanAllocator.FormatMemoryLine(memorySnapshot) + "\n" +
                FormatTransientsLine(new TransientSample(
                    TransientBytes: (ulong)Interlocked.Read(ref _transientBytes),
@@ -636,7 +628,7 @@ internal static class VulkanStats
     public static volatile FrameTimingRecorder? LatencySource;
 
     /// <summary>
-    /// The eight intervals of <see cref="LatencyFrameReport" />, in the order they
+    /// The five CPU intervals of <see cref="LatencyFrameReport" />, in the order they
     /// appear on the <c>stats.latency</c> line.
     /// </summary>
     public static readonly string[] LatencyIntervalTokens =
@@ -645,13 +637,10 @@ internal static class VulkanStats
         "sim",
         "render_submit",
         "present",
-        "driver",
-        "os_queue",
-        "gpu",
         "total",
     };
 
-    public const int LatencyIntervalCount = 8;
+    public const int LatencyIntervalCount = 5;
 
     /// <summary>The intervals of one report, in <see cref="LatencyIntervalTokens" /> order, in microseconds.</summary>
     private static void IntervalsOf(in LatencyFrameReport report, ulong[] into)
@@ -660,10 +649,7 @@ internal static class VulkanStats
         into[1] = report.SimulationUs;
         into[2] = report.RenderSubmitUs;
         into[3] = report.PresentUs;
-        into[4] = report.DriverUs;
-        into[5] = report.OsRenderQueueUs;
-        into[6] = report.GpuUs;
-        into[7] = report.TotalUs;
+        into[4] = report.TotalUs;
     }
 
     /// <summary>
@@ -705,20 +691,11 @@ internal static class VulkanStats
         }
     }
 
-    /// <summary>
-    /// <c>stats.latency</c> (seam S7): which backend is active, the mode asked of
-    /// it, the sleep it made in the interval, and each report interval reduced to
-    /// a mean and a p99. Always emitted, so "off" is as visible as "on".
-    /// </summary>
-    public static string FormatLatencyLine(string backend, string mode, uint rev, long sleepCount, double sleepMs,
-        int frames, double[] meanMs, double[] p99Ms)
+    /// <summary>CPU phase durations reduced to a mean and p99, in milliseconds.</summary>
+    public static string FormatLatencyLine(int frames, double[] meanMs, double[] p99Ms)
     {
-        var line = new StringBuilder("stats.latency backend=");
-        line.Append(backend).Append(" mode=").Append(mode);
-        line.Append(" rev=").Append(rev.ToString(CultureInfo.InvariantCulture));
-        line.Append(" sleep_n=").Append(sleepCount.ToString(CultureInfo.InvariantCulture));
-        line.Append(" sleep_ms=").Append(sleepMs.ToString("F1", CultureInfo.InvariantCulture));
-        line.Append(" frames=").Append(frames.ToString(CultureInfo.InvariantCulture));
+        var line = new StringBuilder("stats.latency frames=");
+        line.Append(frames.ToString(CultureInfo.InvariantCulture));
         for (int i = 0; i < LatencyIntervalCount; i++)
         {
             line.Append(' ').Append(LatencyIntervalTokens[i]).Append("_mean_ms=")
@@ -730,7 +707,7 @@ internal static class VulkanStats
     }
 
     /// <summary>The <c>stats.latency</c> line for the backend currently set as <see cref="LatencySource" />.</summary>
-    private static string LatencyLine(long sleepCount, double sleepMs)
+    private static string LatencyLine()
     {
         FrameTimingRecorder? latency = LatencySource;
         LatencyFrameReport[] reports = latency == null
@@ -741,7 +718,7 @@ internal static class VulkanStats
         var p99Ms = new double[LatencyIntervalCount];
         ReduceReports(reports, meanMs, p99Ms);
 
-        return FormatLatencyLine("off", "off", 0, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
+        return FormatLatencyLine(reports.Length, meanMs, p99Ms);
     }
 
     /// <summary>The original stats line. Its format must not change.</summary>

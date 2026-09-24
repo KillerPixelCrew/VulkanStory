@@ -60,6 +60,23 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
         return pixels;
     }
 
+    [Fact]
+    public void ResourceAgeWindowExpiresWithoutAffectingPermanentBindings()
+    {
+        var age = new ResourceAge(2);
+        age.NoteFrame(100); age.NoteFrame(200); age.NoteFrame(300);
+        Assert.False(age.IsShortLived(0)); Assert.False(age.IsShortLived(200));
+        Assert.True(age.IsShortLived(201));
+        var permanent = new BufferBindingValue(0, new Silk.NET.Vulkan.Buffer(1), 0, 64);
+        var recent = new SamplerBindingValue(0, new ImageView(1), new Sampler(2), Resource: 201);
+        var contents = new DescriptorSetContents(1, 0, new[] { recent }, new[] { permanent });
+        Assert.True(age.NamesShortLived(contents));
+        age.NoteFrame(400);
+        Assert.False(age.NamesShortLived(contents));
+        age.ShortLivedFrames = 0;
+        Assert.False(age.IsShortLived(401));
+    }
+
     [SkippableTheory]
     [InlineData(false, false)]
     [InlineData(false, true)]

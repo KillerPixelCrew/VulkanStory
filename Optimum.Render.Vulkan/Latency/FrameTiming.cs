@@ -4,8 +4,7 @@ using System.Diagnostics;
 namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>
-/// CPU-observed frame intervals in microseconds. Driver, OS queue and GPU fields
-/// remain zero to preserve the existing stats format; they are not measurements.
+/// CPU-observed frame intervals in microseconds.
 /// TotalUs ends when vkQueuePresentKHR returns, not when the display scans out.
 /// </summary>
 internal readonly record struct LatencyFrameReport(
@@ -15,9 +14,6 @@ internal readonly record struct LatencyFrameReport(
     ulong SimulationUs,
     ulong RenderSubmitUs,
     ulong PresentUs,
-    ulong DriverUs,
-    ulong OsRenderQueueUs,
-    ulong GpuUs,
     ulong TotalUs)
 {
     /// <summary>
@@ -44,9 +40,6 @@ internal readonly record struct LatencyFrameReport(
             Span(simulationStartUs, simulationEndUs),
             Span(renderSubmitStartUs, renderSubmitEndUs),
             Span(presentStartUs, presentEndUs),
-            0,
-            0,
-            0,
             Span(start, presentEndUs));
     }
 
