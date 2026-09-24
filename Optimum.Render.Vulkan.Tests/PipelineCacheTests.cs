@@ -131,20 +131,17 @@ public class PipelineCacheTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A frame written to disk must hold every draw, and OPTIMUM_PARITY_DUMP and
-    /// OPTIMUM_HEADLESS_FRAMES are documented as standalone switches: set without the capture
-    /// scripts (which also export OPTIMUM_VULKAN_SYNC_PIPELINES), they still force blocking
-    /// creation. Explicit settings keep the last word.
+    /// A parity frame written to disk must hold every draw. The setting works
+    /// without a capture script and an explicit pipeline policy still wins.
     /// </summary>
     [Fact]
     public void AFrameCaptureForcesBlockingPipelinesWithoutTheScripts()
     {
-        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "/tmp/dump", headlessFrames: null));
-        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: null, headlessFrames: "/tmp/frames"));
-        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, "0", parityDump: "/tmp/dump", headlessFrames: null));
+        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "/tmp/dump"));
+        Assert.True(VulkanDevice.ResolveSynchronousPipelines(null, "0", parityDump: "/tmp/dump"));
         // The capture code ignores a relative or blank directory, so the pipelines do too.
-        Assert.False(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "relative", headlessFrames: " "));
-        Assert.False(VulkanDevice.ResolveSynchronousPipelines(false, null, parityDump: "/tmp/dump", headlessFrames: "/tmp/frames"));
+        Assert.False(VulkanDevice.ResolveSynchronousPipelines(null, null, parityDump: "relative"));
+        Assert.False(VulkanDevice.ResolveSynchronousPipelines(false, null, parityDump: "/tmp/dump"));
     }
 
 
