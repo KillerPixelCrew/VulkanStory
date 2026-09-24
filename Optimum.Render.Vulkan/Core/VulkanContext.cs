@@ -113,8 +113,12 @@ internal sealed class VulkanCapabilities
     /// <summary>VK_KHR_present_id is enabled with its feature, so Swapchain.Present may chain VkPresentIdKHR.</summary>
     public bool PresentIdEnabled;
 
+    /// <summary>Swapchain maintenance is enabled, allowing explicit presentation fences.</summary>
+    public bool PresentFencesEnabled;
+
     /// <summary>The latency part of the "device up" log line.</summary>
-    public string LatencySummary => "CPU frame timing, present id " + (PresentIdEnabled ? "ON" : "OFF");
+    public string LatencySummary => "CPU frame timing, present id " + (PresentIdEnabled ? "ON" : "OFF")
+        + ", present fences " + (PresentFencesEnabled ? "ON" : "OFF");
     /// <summary>
     /// pipelineCreationCacheControl (core in 1.3, optional to support) enabled: pipelines can be
     /// created with FAIL_ON_PIPELINE_COMPILE_REQUIRED, which the background compile path needs.
@@ -301,6 +305,18 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
+        // Surface maintenance dependencies are instance extensions; enable them before
+        // choosing a device, then query that device's optional maintenance feature.
+        if (!options.Headless && extensions.Contains("VK_KHR_surface")
+            && LayerAdvertisesExtension(Api, null, "VK_KHR_get_surface_capabilities2"))
+        {
+            foreach (string maintenance in new[] { "VK_KHR_surface_maintenance1", "VK_EXT_surface_maintenance1" })
+            {
+                if (!LayerAdvertisesExtension(Api, null, maintenance)) continue;
+                if (!extensions.Contains("VK_KHR_get_surface_capabilities2")) extensions.Add("VK_KHR_get_surface_capabilities2");
+                if (!extensions.Contains(maintenance)) extensions.Add(maintenance);
+            }
+        }
         bool validation = options.EnableValidation && HasValidationLayer();
 
         // Extra layer checks (sync validation, best practices with the vendor sets,
@@ -530,11 +546,12 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// <summary>
     /// Whether <paramref name="layerName" /> advertises <paramref name="extensionName" />
     /// as an instance extension. A layer's extensions are invisible to the
-    /// loader-level enumeration, so the layer has to be named explicitly.
+    /// loader-level enumeration, so the layer has to be named explicitly. Null queries
+    /// the loader-level extensions instead.
     /// </summary>
-    internal static bool LayerAdvertisesExtension(Vk api, string layerName, string extensionName)
+    internal static bool LayerAdvertisesExtension(Vk api, string? layerName, string extensionName)
     {
-        nint layer = SilkMarshal.StringToPtr(layerName);
+        nint layer = layerName == null ? 0 : SilkMarshal.StringToPtr(layerName);
         try
         {
             uint count = 0;
@@ -564,7 +581,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
         finally
         {
-            SilkMarshal.Free(layer);
+            if (layer != 0) SilkMarshal.Free(layer);
         }
     }
 
@@ -1043,6 +1060,30 @@ internal sealed unsafe class VulkanContext : IDisposable
         bool enablePresentId = presentId.PresentId;
         if (enablePresentId) deviceExtensions.Add("VK_KHR_present_id");
 
+        string? maintenanceExtension = !options.Headless
+            && Array.IndexOf(EnabledInstanceExtensions, "VK_KHR_surface_maintenance1") >= 0
+            && deviceExtensionsAvailable.ContainsKey("VK_KHR_swapchain_maintenance1")
+                ? "VK_KHR_swapchain_maintenance1"
+                : !options.Headless
+                    && Array.IndexOf(EnabledInstanceExtensions, "VK_EXT_surface_maintenance1") >= 0
+                    && deviceExtensionsAvailable.ContainsKey("VK_EXT_swapchain_maintenance1")
+                        ? "VK_EXT_swapchain_maintenance1" : null;
+        var maintenanceFeatures = new PhysicalDeviceSwapchainMaintenance1FeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceSwapchainMaintenance1FeaturesExt,
+        };
+        if (maintenanceExtension != null)
+        {
+            var query = new PhysicalDeviceFeatures2
+            {
+                SType = StructureType.PhysicalDeviceFeatures2,
+                PNext = &maintenanceFeatures,
+            };
+            Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &query);
+        }
+        bool enablePresentFences = maintenanceFeatures.SwapchainMaintenance1;
+        if (enablePresentFences) deviceExtensions.Add(maintenanceExtension!);
+
         void* optionalFeatures = null;
         if (wantDeviceFault) { faultFeatures.PNext = optionalFeatures; optionalFeatures = &faultFeatures; }
         if (colorWriteTier == ColorWriteTier.DynamicEnable)
@@ -1050,6 +1091,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (colorWriteTier == ColorWriteTier.DynamicMask)
         { dynamicState3Features.PNext = optionalFeatures; optionalFeatures = &dynamicState3Features; }
         if (enablePresentId) { presentId.PNext = optionalFeatures; optionalFeatures = &presentId; }
+        if (enablePresentFences) { maintenanceFeatures.PNext = optionalFeatures; optionalFeatures = &maintenanceFeatures; }
         vulkan13.PNext = optionalFeatures;
 
         nint extensionsPtr = deviceExtensions.Count > 0
@@ -1100,6 +1142,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         MemoryBudgetAvailable = wantMemoryBudget;
         EnabledDeviceExtensions = deviceExtensions.ToArray();
         Capabilities.PresentIdEnabled = enablePresentId;
+        Capabilities.PresentFencesEnabled = enablePresentFences;
         Allocator = new VulkanAllocator(this);
         return true;
     }

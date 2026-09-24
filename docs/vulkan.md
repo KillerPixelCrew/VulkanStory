@@ -41,6 +41,9 @@ full image descriptions and inclusive pass lifetimes. Discarding contents still 
 ordering against earlier uses. Sampling a writable color target uses a feedback copy.
 Retirement must wait for every relevant frame/transfer submission. Swapchain retirement
 also needs presentation completion evidence, not merely a later render submission.
+Use maintenance present fences when the device supports them; otherwise defer retirement
+until successor-image reacquisition completes. Shutdown without that extension retains
+the conventional device-idle fallback, which lacks explicit presentation-fence guarantees.
 
 ## Shader contract
 

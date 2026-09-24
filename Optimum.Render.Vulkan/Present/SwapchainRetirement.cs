@@ -8,14 +8,15 @@ namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>
 /// Replaced swapchains wait for presentation completion, not just render completion.
-/// A submission waiting on reacquisition of the successor's first presented image
+/// Present fences provide a direct completion check when supported. Otherwise a
+/// submission waiting on reacquisition of the successor's first presented image
 /// provides the completion proof. Resize storms can leave several old chains queued
 /// until a successor reaches that point. Render thread only.
 /// https://docs.vulkan.org/samples/latest/samples/api/swapchain_recreation/README.html
 /// </summary>
 internal sealed class SwapchainRetirement
 {
-    private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue, ulong? CompletionValue);
+    private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue, ulong? CompletionValue, Func<bool>? PresentsComplete);
 
     private readonly ITimelineClock _clock;
     private readonly List<Entry> _entries = new();
@@ -25,8 +26,8 @@ internal sealed class SwapchainRetirement
     public int PendingCount => _entries.Count;
 
     /// <summary>Queues a replaced slot (0: never submitted for presentation).</summary>
-    public void Retire(IDisposable slot, ulong lastPresentValue) =>
-        _entries.Add(new Entry(slot, lastPresentValue, lastPresentValue == 0 ? 0UL : null));
+    public void Retire(IDisposable slot, ulong lastPresentValue, Func<bool>? presentsComplete = null) =>
+        _entries.Add(new Entry(slot, lastPresentValue, lastPresentValue == 0 ? 0UL : null, presentsComplete));
 
     /// <summary>The successor's first presented image was reacquired, and this
     /// submission waits on its acquire semaphore. Completion proves the old
@@ -53,7 +54,9 @@ internal sealed class SwapchainRetirement
         for (int i = 0; i < _entries.Count; i++)
         {
             Entry entry = _entries[i];
-            if (entry.CompletionValue is ulong value && value <= completed)
+            if (entry.LastPresentValue <= completed && (entry.PresentsComplete != null
+                ? entry.PresentsComplete()
+                : entry.CompletionValue is ulong value && value <= completed))
             {
                 entry.Slot.Dispose();
                 destroyed++;

@@ -120,6 +120,8 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     private readonly Semaphore[] _acquireSemaphores;
     private readonly Semaphore[] _presentSemaphores;
     private readonly AcquireSemaphoreFreeList _freeAcquire;
+    private readonly List<Fence> _pendingPresents = new();
+    private readonly Stack<Fence> _freePresentFences = new();
     private bool _disposed;
 
     public SwapchainSlot(VulkanContext context, KhrSwapchain api, SwapchainKHR handle,
@@ -205,6 +207,45 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         if (frameValue > LastPresentValue) LastPresentValue = frameValue;
     }
 
+    public bool PresentsComplete()
+    {
+        for (int i = _pendingPresents.Count - 1; i >= 0; i--)
+        {
+            Fence fence = _pendingPresents[i];
+            Result status = _context.Api.GetFenceStatus(_context.Device, fence);
+            if (status == Result.NotReady) continue;
+            VulkanResult.Check(status, "vkGetFenceStatus for presentation");
+            _pendingPresents.RemoveAt(i);
+            _freePresentFences.Push(fence);
+        }
+        return _pendingPresents.Count == 0;
+    }
+
+    public Fence PreparePresentFence()
+    {
+        if (!_context.Capabilities.PresentFencesEnabled) return default;
+        PresentsComplete();
+        if (_freePresentFences.TryPop(out Fence fence))
+            VulkanResult.Check(_context.Api.ResetFences(_context.Device, 1, &fence), "vkResetFences for presentation");
+        else
+        {
+            var info = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
+            VulkanResult.Check(_context.Api.CreateFence(_context.Device, &info, null, &fence), "vkCreateFence for presentation");
+        }
+        return fence;
+    }
+
+    public void FinishPresentFence(Fence fence, Result result)
+    {
+        if (fence.Handle == 0) return;
+        // Memory failures leave synchronization primitives untouched. Other present
+        // errors either enqueue the operation or lose the device.
+        if (result is Result.ErrorOutOfHostMemory or Result.ErrorOutOfDeviceMemory)
+            _freePresentFences.Push(fence);
+        else
+            _pendingPresents.Add(fence);
+    }
+
     private Semaphore[] CreateSemaphores(int count)
     {
         var semaphores = new Semaphore[count];
@@ -223,6 +264,18 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Teardown waits; ordinary retirement polls these fences before disposing.
+        foreach (Fence pending in _pendingPresents)
+        {
+            Fence fence = pending;
+            Result result = _context.Api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue);
+            if (result != Result.ErrorDeviceLost) VulkanResult.Check(result, "vkWaitForFences for presentation teardown");
+            _context.Api.DestroyFence(_context.Device, fence, null);
+        }
+        foreach (Fence fence in _freePresentFences) _context.Api.DestroyFence(_context.Device, fence, null);
+        _pendingPresents.Clear();
+        _freePresentFences.Clear();
 
         foreach (ImageView view in Views)
         {
@@ -434,7 +487,8 @@ internal sealed unsafe class Swapchain : IDisposable
         // Passing oldSwapchain retires it even when creation fails.
         if (old != null)
         {
-            _retirement.Retire(old, old.LastPresentValue);
+            _retirement.Retire(old, old.LastPresentValue,
+                _context.Capabilities.PresentFencesEnabled ? old.PresentsComplete : null);
             _current = null;
         }
 
@@ -648,10 +702,19 @@ internal sealed unsafe class Swapchain : IDisposable
             PPresentIds = &presentId,
         };
 
+        Fence presentFence = target.Slot.PreparePresentFence();
+        var fenceInfo = new SwapchainPresentFenceInfoEXT
+        {
+            SType = StructureType.SwapchainPresentFenceInfoExt,
+            PNext = PresentIdEnabled ? &presentIdInfo : null,
+            SwapchainCount = 1,
+            PFences = &presentFence,
+        };
+
         var presentInfo = new PresentInfoKHR
         {
             SType = StructureType.PresentInfoKhr,
-            PNext = PresentIdEnabled ? &presentIdInfo : null,
+            PNext = presentFence.Handle != 0 ? &fenceInfo : PresentIdEnabled ? &presentIdInfo : null,
             WaitSemaphoreCount = 1,
             PWaitSemaphores = &wait,
             SwapchainCount = 1,
@@ -667,6 +730,7 @@ internal sealed unsafe class Swapchain : IDisposable
         {
             result = _swapchainApi.QueuePresent(_context.GraphicsQueue, &presentInfo);
         }
+        target.Slot.FinishPresentFence(presentFence, result);
         VulkanStats.NoteWait(WaitSite.Present, waitStart);
         if (result is Result.Success or Result.SuboptimalKhr) target.Slot.NotePresented(index);
         if (result is Result.ErrorOutOfDateKhr or Result.SuboptimalKhr)
