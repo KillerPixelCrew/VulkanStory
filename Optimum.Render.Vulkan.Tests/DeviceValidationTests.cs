@@ -37,6 +37,23 @@ public class DeviceValidationTests
         catch { context!.Dispose(); throw; }
     }
 
+    [Fact]
+    public void ColorWriteOverridesNeverRequireUnsupportedFeatures()
+    {
+        foreach (bool enable in new[] { false, true })
+            foreach (bool mask in new[] { false, true })
+                foreach (string forced in new[] { "enable", "mask", "pipeline" })
+                {
+                    var requested = DeviceCaps.ParseColorWriteTier(forced);
+                    string actual = DeviceCaps.Token(DeviceCaps.SelectColorWriteTier(enable, mask, requested));
+                    string expected = forced == "pipeline" ? "pipeline"
+                        : forced == "enable" && enable ? "enable" : mask ? "mask" : "pipeline";
+                    Assert.Equal(expected, actual);
+                }
+        Assert.Null(DeviceCaps.ParseColorWriteTier("unknown"));
+        Assert.Equal(DeviceCaps.ParseColorWriteTier("mask"), DeviceCaps.ParseColorWriteTier(" MASK "));
+    }
+
     [SkippableFact]
     public void SelectedDeviceCreatesTheActualSharedPipelineLayout()
     {
