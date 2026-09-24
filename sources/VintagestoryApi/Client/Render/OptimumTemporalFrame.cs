@@ -7,11 +7,8 @@ using Vintagestory.API.MathTools;
 namespace Vintagestory.API.Client
 {
     /// <summary>
-    /// Why the temporal history is invalid for a frame. Every consumer of the
-    /// temporal frame contract (the in-house TAA resolve first, vendor upscalers
-    /// and frame generators later) needs the same "throw the history away" signal,
-    /// and needs to know why, because the remedies differ: a resize reallocates
-    /// targets, a teleport only clears colour.
+    /// Why TAA history is invalid for a frame: a resize reallocates targets,
+    /// while a teleport only requires history to be discarded.
     /// </summary>
     public enum EnumTemporalResetReason
     {
@@ -91,16 +88,15 @@ namespace Vintagestory.API.Client
     /// Read-only view of the current temporal frame.
     ///
     /// Deliberately a companion interface rather than new members on IRenderAPI:
-    /// every mod that implements IRenderAPI would break if the interface grew, and
-    /// the contract is expected to keep growing as upscalers and frame generation
-    /// land. Consumers reach it through <see cref="OptimumTemporal.Context" />.
+    /// every mod that implements IRenderAPI would break if the interface grew.
+    /// Consumers reach it through <see cref="OptimumTemporal.Context" />.
     ///
     /// The float[16] matrices are the live per-frame arrays, not copies; treat them
     /// as read-only and copy before keeping them past the frame.
     /// </summary>
     public interface IOptimumTemporalContext
     {
-        /// <summary>Increments once per real rendered frame. Generated frames get their own id later.</summary>
+        /// <summary>Increments once per rendered frame.</summary>
         long FrameIndex { get; }
 
         /// <summary>True while the jitter window is open: from Advance() until the resolve has run.</summary>
@@ -592,5 +588,51 @@ namespace Vintagestory.API.Client
         public static IOptimumTemporalContext Context => Frame;
 
         public static void RequestReset(EnumTemporalResetReason reason) => Frame.RequestReset(reason);
+    }
+
+    /// <summary>
+    /// Jitter sequence and projection conventions for temporal anti-aliasing.
+    /// </summary>
+    public static class OptimumTemporalMath
+    {
+        /// <summary>
+        /// The Halton low-discrepancy sequence, one-indexed (Halton(0, base) is never
+        /// requested - jitter sequences start at index 1).
+        /// </summary>
+        public static double Halton(int index, int radix)
+        {
+            double result = 0;
+            double fraction = 1.0 / radix;
+            int i = index;
+            while (i > 0)
+            {
+                result += (i % radix) * fraction;
+                i /= radix;
+                fraction /= radix;
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Number of distinct jitter offsets in the TAA jitter sequence for a given
+        /// render scale: more upscaling needs more sub-pixel samples to converge.
+        /// </summary>
+        public static int JitterPhaseCount(float renderScale)
+        {
+            return (int)Math.Ceiling(8.0 * renderScale * renderScale);
+        }
+
+        /// <summary>
+        /// Applies a sub-pixel projection jitter (in render pixels) to a column-major
+        /// perspective matrix produced by Mat4d.Perspective, in place. Matches the
+        /// convention used by the TAA jitter pass: P[8]/P[9] are the matrix's x/y
+        /// oblique terms, so nudging them shifts every clip-space x/y by a fixed
+        /// fraction of clip.w = -z_view, i.e. a constant pixel offset on screen.
+        /// </summary>
+        public static void ApplyProjectionJitter(double[] projection, double jitterX, double jitterY, double renderWidth, double renderHeight)
+        {
+            projection[8] -= 2.0 * jitterX / renderWidth;
+            projection[9] -= 2.0 * jitterY / renderHeight;
+        }
     }
 }

@@ -1,24 +1,14 @@
-# Optimum temporal frame contract — v1 (frozen 2026-09-11)
+# Optimum temporal frame contract
 
-**Status:** frozen. **Version:** `v1`. **Owner:** `TAA-PLAN.md` P6.
-**Stability test:** `Optimum.Tests/Temporal/ContractTests.cs`. Every clause below that a test can
-reach is pinned there; a change to any of them fails a test that names this document. Adding a
-member, a resource, a reset reason or an adapter is a **v2** change: bump the version here, update
-the checked-in surface list in the test, and say in `TAA-PLAN.md` P6 what moved.
-
-This is the specification of what every temporal consumer receives from Optimum: the in-house TAA
-resolve today, FSR 3.1 / XeSS 2 / DLSS super resolution next, frame generation and ray
-reconstruction after that. It describes only what the engine **produces**. How a vendor library is
-created, fed native handles and presented is explicitly out of scope — see
-[Reserved for the vendor plan](#8-reserved-for-the-vendor-plan).
-
-Sources of truth, in this order: the code, then this document, then `TAA-PLAN.md`.
+This document describes the data produced for native TAA and exposed to mod
+renderers through `IOptimumTemporalContext`. The implementation is being refactored;
+this document is not a claim that final acceptance tests have passed.
 
 | Thing | Source of truth |
 |---|---|
 | Input record, reset reasons, jitter sequence | `VintagestoryApi/Client/Render/OptimumTemporalFrame.cs` |
 | Entity, standard-model and instance motion histories | `sources/VintagestoryApi/Client/Render/OptimumTemporalMotion.cs` |
-| Jitter shear, Halton, phase count, mv adapters | `VintagestoryApi/Client/Render/OptimumTemporalMath.cs` |
+| Jitter shear, Halton and phase count | `sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs` (`OptimumTemporalMath`) |
 | Resource formats, sampler state, history slots | `build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs` |
 | Channel semantics and the validity tolerance | `sources/shaders/taa-resolve.fsh`, `taa-skymotion.fsh`, `taa-sharpen.fsh` |
 | Per-class motion status | §6 below, and the P3/P4/P5 status tables in `TAA-PLAN.md` |
@@ -195,7 +185,7 @@ a  = writerDepth  window depth in [0,1] at write time
 - **`b` — reactive.** `0` opaque, `1 − revealage` for OIT transparents (added by the merge), `1`
   for cube particles, `0.3` for liquid surfaces, `mix(coverage, taaCloudReactive, coverage)` on
   cloud-covered sky. It lowers the history weight in the resolve (`alpha = max(alpha, reactive)`)
-  and is the value that maps to the FSR reactive mask / XeSS responsive mask. **Read whether or not
+  controls TAA history rejection. **Read whether or not
   the pixel passed the validity test** (P3 finding (h)), so a writer that bails out of its vector
   must still deliver `b` and zero only `rg` and `a` (P4 finding (u)).
 - **`a` — writer depth, and the validity rule.** `a` is the **window depth in `[0,1]`** the writer
@@ -325,8 +315,7 @@ weight. Pinned by `TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifferenc
 `FlippingSubPixelLeafKeepsItsHistory`, `DisocclusionLargerThanTheNeighbourhoodStillResets` and
 `MotionComesFromTheNearestDepthTapAtAnEdge` (GPU), `Optimum.Tests/Temporal/ResolveTests.cs`
 (source), and gated in the game by `python3 scripts/dev/taa-rejection.py <parity dump dir>` (3x3
-leaf-far rejection <= 1.5 percent; `docs/taa-acceptance.md` row A19). External consumers (FSR, XeSS,
-DLSS) do their own dilation and rejection and are not bound by this.
+leaf-far rejection <= 1.5 percent; `docs/taa-acceptance.md` row A19).
 
 ---
 
@@ -387,11 +376,11 @@ reactive value is what prevents the smear. Consolidated from the P3, P4 and P5 s
 | Forge / anvil work items | fallback | 0 | drawn on the mod's own `smithingWorkItemShader`, which declares no motion output |
 | Instanced mechanical power | exact | 0 | per-instance previous transform in the instance stream, history keyed on the device object |
 | ClothManager (shares the instanced program) | fallback | 0 | 20-float instance mesh, draws outside the window; missing attributes read `(0,0,0,1)` = no history |
-| Cube particles | fallback, camera-only | 1 | the instance stream carries position and scale only, so there is no previous per-particle position. **Wrong data for FSR/XeSS mv and for frame generation** |
+| Cube particles | fallback, camera-only | 1 | the instance stream carries position and scale only, so there is no previous per-particle position. **No per-particle object motion** |
 | Quad particles, OIT entities, liquid shading, aurora | none | `1 − revealage`, additive | the merge adds `anet` into `b` alone; `rg`/`a` written as zero |
 | Sky colour, night sky | none, by design | 0 | depth test off for the whole pass, so depth stays 1 and the resolve's infinite-direction fallback is the **exact** answer |
 | Sun, moon, celestial objects | fallback, bounded | 0 | depth tested, never written; the fallback ignores only the celestial rotation, ~0.004° per frame |
-| Volumetric clouds, aurora | camera-rotation-only | `mix(coverage, taaCloudReactive, coverage)` on sky pixels | `taa-skymotion` claims depth-1 pixels under `GL_LEQUAL`. **The cloud's own scrolling is not in the vector** (P4 finding (n)) — correct for the resolve, wrong data for FSR/XeSS and especially frame generation |
+| Volumetric clouds, aurora | camera-rotation-only | `mix(coverage, taaCloudReactive, coverage)` on sky pixels | `taa-skymotion` claims depth-1 pixels under `GL_LEQUAL`. **The cloud's own scrolling is not in the vector** (P4 finding (n)) — handled through reactive rejection rather than complete object motion |
 | Clear sky (no cloud coverage) | exact | 0 | coverage 0, so the dithered gradient keeps full history weight |
 | Decals | exact | 0 | own writer: chunk previous path + `PrevWarp` + both z-offsets, `a = gl_FragCoord.z` |
 | AfterFinalComposition overlays (work-item guides, selection boxes, wireframes) | none | none | outside the temporal window; the motion window is refused on `JitterActive` |
@@ -403,161 +392,11 @@ in-house resolve: cube particles (camera-only vector at reactive 1) and volumetr
 (camera-rotation-only vector). Both are listed here so an upscaler or frame generator adapter does
 not discover them by looking at smeared output.
 
-### 6.1 Cloud pixels are UNSUPPORTED for external motion consumers
+### Motion limitations
 
-This is a contract term, not a caveat. `taa-skymotion` writes a **camera-rotation-only** vector on
-cloud pixels: it reprojects the view direction, never the cloud. A cloud scrolling across a still
-camera therefore carries `mv = 0`, which is indistinguishable from static geometry in the motion
-attachment. The in-house resolve is unaffected because `taaCloudReactive` raises `b` on those
-pixels and the resolve discards the history there.
+Cube particles have camera-only fallback motion. Cloud and aurora motion captures
+camera rotation, not the content's own scrolling. Their reactive values are part of
+TAA history rejection; they do not establish accurate object motion.
 
-Consequently, for every external consumer (FSR, XeSS, DLSS, any frame generator):
-
-- **Cloud pixels must be rejected using the reactive mask** (`motion.b`, section 3.2). Treating
-  their `rg` as a valid motion vector produces a static cloud layer under a moving camera and
-  duplicated/stuttering clouds in generated frames.
-- A **real** cloud vector is future work and requires the previous frame's `cloudOffset` together
-  with the ray-marched hit position from `cloudvolumetric.fsh`, i.e. a motion output from the cloud
-  volume itself; it cannot reach Primary's attachment without a second pass over that volume.
-- Until that exists, no adapter may claim cloud motion support, and a v1 adapter that needs correct
-  cloud motion is out of contract rather than a bug in this document.
-
----
-
-## 7. Adapters
-
-Optimum's stored form is one thing; each vendor wants its own units. These are the conversions the
-vendor plan implements, derived from this contract's definitions. **Only the motion-vector scale is
-executable today** — `OptimumTemporalMath.AdaptMotionVector`, pinned by the stability test. The
-remaining rows are the specification a vendor adapter is written against and **must be validated
-against the SDK headers when that adapter lands**; the Y-axis question in particular is real, since
-Optimum renders Y-up offscreen on both backends and each SDK assumes its own raster convention.
-
-### 7.1 Motion vectors
-
-Stored: `mv = previousPixel − currentPixel`, render pixels, Y up, jitter excluded, undilated.
-
-| Consumer | Scale | Sign | Flags |
-|---|---|---|---|
-| **FSR 3.1** | `motionVectorScale = (1, 1)` — the value is already in render pixels | unchanged; FSR wants current → previous, which is our stored direction | no dilation flag; vectors are render-resolution, not display-resolution |
-| **XeSS 2** | identity — pixel mode | unchanged | `XESS_INIT_FLAG_USE_NDC_VELOCITY` **not** set (we hand over pixels); `XESS_INIT_FLAG_HIGH_RES_MV` **not** set (render-resolution vectors); `XESS_INIT_FLAG_JITTERED_MV` **not** set (our vectors exclude jitter) |
-| **DLSS** (Streamline) | `mvecScale = (1 / renderWidth, 1 / renderHeight)` | unchanged | `motionVectorsJittered = false`, `motionVectorsDilated = false` |
-
-`OptimumTemporalMath.AdaptMotionVector(x, y, w, h, adapter)` implements exactly this: identity for
-`Fsr` and `Xess`, `(x/w, y/h)` for `Dlss`.
-
-### 7.2 Jitter
-
-Stored: `JitterPx` = the raster displacement of a static point, Y up, applied by
-`P[8] -= 2*jx/W; P[9] -= 2*jy/H`.
-
-Every SDK asks for "the jitter offset applied to the camera" in pixels, but defines it against a
-projection built by **adding** the shear. In our sign that is `-JitterPx`. The Y component
-additionally depends on whether the SDK assumes a Y-down raster (D3D-style) — that is the one thing
-the adapter must confirm against the SDK's own sample before it is trusted, not inferred from this
-document. The engine-side invariant a consumer can rely on unconditionally:
-
-- the applied offset is `JitterPx`, and it is `(0,0)` whenever `JitterActive` is false;
-- the phase count is `max(1, ceil(8 * upscale^2))` — FSR's `ffxFsr2GetJitterPhaseCount` and XeSS's
-  recommended phase count are both of that shape, so the sequence length can be taken from the SDK
-  instead if a vendor requires it, at the cost of diverging from the in-house resolve's sequence.
-
-### 7.3 Depth
-
-Stored: window depth `[0,1]`, **0 = near**, not reversed, `GL_LESS`, `GL_DEPTH_COMPONENT32` /
-`D32_SFLOAT`.
-
-| Consumer | Setting |
-|---|---|
-| FSR 3.1 | the inverted-depth flag **not** set |
-| XeSS 2 | `XESS_INIT_FLAG_INVERTED_DEPTH` **not** set |
-| DLSS | `depthInverted = false` |
-
-Linear view depth is available separately as history attachment 2 (`R32F`, positive, in blocks),
-should a consumer want it; it is the previous frame's, not this frame's.
-
-### 7.4 Reactive and transparency masks
-
-Stored: `motion.b`, `[0,1]`, per pixel, in the motion attachment.
-
-| Consumer | Mapping |
-|---|---|
-| FSR 3.1 | reactive mask ← `motion.b` directly, single channel. The transparency-and-composition mask is **not** produced today; FSR's auto-generation path is the intended starting point |
-| XeSS 2 | responsive-pixel mask ← `motion.b`. XeSS reads it as "1 = responsive", the same polarity |
-| DLSS | no first-class reactive input; `motion.b` is the signal an exposure/bias texture or a DLSS-RR guide would be built from |
-
-The semantics of `b` per class are in §6. The caveat in §3.2 applies to every consumer: `b` is
-present even on pixels whose vector was rejected.
-
-### 7.5 Exposure
-
-Optimum has **no HDR exposure path**. Primary colour 0 is `RGBA8` scene colour before bloom, god
-rays and final composition; there is no engine-side exposure scalar or texture.
-
-| Consumer | Setting |
-|---|---|
-| FSR 3.1 | `preExposure = 1.0`, no exposure texture, auto-exposure enabled |
-| XeSS 2 | `exposureScale = 1.0`, no exposure-scale texture, `XESS_INIT_FLAG_EXPOSURE_SCALE_TEXTURE` not set |
-| DLSS | `preExposure = 1.0`, auto-exposure on |
-
-An HDR colour path is a renderer change, reserved (§8).
-
-### 7.6 Camera constants
-
-| Quantity | Contract member |
-|---|---|
-| near / far | `ZNear`, `ZFar` (blocks) |
-| vertical FOV | `Fov` (**radians**; SDKs that want degrees convert) |
-| view matrix (terrain / camera-relative-origin space) | `CameraMatrixOrigin`, `PrevCameraMatrixOrigin` |
-| view matrix (entity space) | `CameraMatrix`, `PrevCameraMatrix` |
-| projection, unjittered | `GetProjection(view)`, `GetPrevProjection(view)` |
-| camera translation | `CameraPosDelta` (blocks, double-differenced) |
-| render / display size | `RenderWidth`, `RenderHeight`; display size is the window size |
-| frame time | `DeltaTimeMs` (milliseconds) |
-| reset | `Reset`, `ResetReason` |
-| frame id | `FrameIndex` (real frames only) |
-
-Two things every adapter must handle rather than assume:
-
-1. **World space is camera-relative and rebased.** The resolve works in the
-   `CameraMatrixOrigin` space, not in absolute world coordinates, and the reference position moves
-   (`Rebase`). Any consumer that wants a world-space camera has to account for that.
-2. **Two views.** A draw under the hand FOV must be reprojected through the hand FOV's previous
-   projection. `ActiveView` says which view the currently loaded projection belongs to;
-   `IsViewCaptured` / `WasViewCaptured` say whether that view existed this frame and last frame.
-   A vendor upscaler that takes a single camera matrix pair gets the **World** view, and the
-   first-person hands are then a known approximation.
-
----
-
-## 8. Reserved for the vendor plan
-
-Explicitly **not** part of this contract, and not to be added to it without a version bump:
-
-- **Native handles.** `VkImage`/`VkImageView`/`VkDevice`/`VkQueue`/`ID3D12Resource` and the
-  command-buffer the library records into. The contract is backend-neutral and speaks in
-  `FrameBufferRef` / texture ids through the `IOptimumGraphicsDevice` seam; a backend-native
-  capability interface is the vendor plan's first deliverable.
-- **Extension negotiation.** Device and instance extensions have to be requested at device
-  creation, before anything in this contract exists.
-- **Presentation lifetime.** Completion-based resource lifetimes past `Present`, a replaceable
-  present path, and the generated-vs-real frame id split that frame generation needs.
-- **HUD-less colour and late world content.** A HUD-less image exists today (Primary after Final,
-  before the blit), but AfterBlit rifts and AfterFinalComposition guides are world content **outside**
-  it; frame generation needs them moved before the boundary or composited after, and the UI needs
-  its own alpha target with defined premultiplication.
-- **Ray-reconstruction guides.** Linear HDR noisy colour, separate diffuse and specular albedo,
-  normals + roughness, specular motion or hit distance. Optimum's SSAO gposition/gnormal are **not**
-  those guides. This contract only keeps the attachment scheme and the input record extensible.
-- **Availability.** XeSS-FG and AMD Ray Regeneration are D3D12-only today; DLSS SR/FG/RR and
-  FSR 3.1 have Vulkan paths. Which of these Optimum can run is a vendor-plan question.
-
----
-
-## 9. Changing this contract
-
-1. Change the code.
-2. Update this document and bump the version at the top.
-3. Update the checked-in surface list in `Optimum.Tests/Temporal/ContractTests.cs` — the test
-   prints the actual list on failure, so the new list is the failure message.
-4. Record the change in `TAA-PLAN.md` P6 under **Contract**.
+Vendor upscalers and frame generation are outside this PR. No vendor adapter is
+implemented or specified by this contract.
