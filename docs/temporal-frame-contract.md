@@ -1,7 +1,7 @@
 # Optimum temporal frame contract — v1 (frozen 2026-09-11)
 
 **Status:** frozen. **Version:** `v1`. **Owner:** `TAA-PLAN.md` P6.
-**Stability test:** `Optimum.Tests/temporal-contract-tests.cs`. Every clause below that a test can
+**Stability test:** `Optimum.Tests/Temporal/ContractTests.cs`. Every clause below that a test can
 reach is pinned there; a change to any of them fails a test that names this document. Adding a
 member, a resource, a reset reason or an adapter is a **v2** change: bump the version here, update
 the checked-in surface list in the test, and say in `TAA-PLAN.md` P6 what moved.
@@ -17,6 +17,7 @@ Sources of truth, in this order: the code, then this document, then `TAA-PLAN.md
 | Thing | Source of truth |
 |---|---|
 | Input record, reset reasons, jitter sequence | `VintagestoryApi/Client/Render/OptimumTemporalFrame.cs` |
+| Entity, standard-model and instance motion histories | `sources/VintagestoryApi/Client/Render/OptimumTemporalMotion.cs` |
 | Jitter shear, Halton, phase count, mv adapters | `VintagestoryApi/Client/Render/OptimumTemporalMath.cs` |
 | Resource formats, sampler state, history slots | `build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs` |
 | Channel semantics and the validity tolerance | `sources/shaders/taa-resolve.fsh`, `taa-skymotion.fsh`, `taa-sharpen.fsh` |
@@ -322,7 +323,7 @@ Measured: leaf-far rejection **~3.7% -> ~1.1%** per frame; the user confirmed on
 distant-foliage flicker is gone. **Never revert** to a single-sample depth test or a fixed blend
 weight. Pinned by `TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference`,
 `FlippingSubPixelLeafKeepsItsHistory`, `DisocclusionLargerThanTheNeighbourhoodStillResets` and
-`MotionComesFromTheNearestDepthTapAtAnEdge` (GPU), `Optimum.Tests/taa-antiflicker-coverage-tests.cs`
+`MotionComesFromTheNearestDepthTapAtAnEdge` (GPU), `Optimum.Tests/Temporal/ResolveTests.cs`
 (source), and gated in the game by `python3 scripts/dev/taa-rejection.py <parity dump dir>` (3x3
 leaf-far rejection <= 1.5 percent; `docs/taa-acceptance.md` row A19). External consumers (FSR, XeSS,
 DLSS) do their own dilation and rejection and are not bound by this.
@@ -557,6 +558,6 @@ Explicitly **not** part of this contract, and not to be added to it without a ve
 
 1. Change the code.
 2. Update this document and bump the version at the top.
-3. Update the checked-in surface list in `Optimum.Tests/temporal-contract-tests.cs` — the test
+3. Update the checked-in surface list in `Optimum.Tests/Temporal/ContractTests.cs` — the test
    prints the actual list on failure, so the new list is the failure message.
 4. Record the change in `TAA-PLAN.md` P6 under **Contract**.

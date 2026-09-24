@@ -440,27 +440,7 @@ public sealed unsafe partial class VulkanDevice
         bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
         int count = description.Targets.ColorFormats.Length;
 
-        // The blend set as the pipeline bakes it under the colour write tier.
-        var baked = new AttachmentBlend[Math.Max(count, 1)];
-        for (int i = 0; i < baked.Length; i++)
-        {
-            AttachmentBlend blend = AttachmentBlend.Default;
-            if (i < description.Blend.Length) blend = description.Blend[i];
-            else blend.WriteMask = 0;
-
-            switch (tier)
-            {
-            case ColorWriteTier.DynamicMask:
-                if (dynamicBlend) blend = AttachmentBlend.Default;
-                blend.WriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit
-                    | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
-                break;
-            }
-            baked[i] = blend;
-        }
-
-        int rawBlendId = _nativeBlends.Intern(new BlendSignature(NativeBlendSpan(description, count)));
-        int bakedBlendId = _nativeBlends.Intern(new BlendSignature(baked.AsSpan(0, Math.Max(count, 0))));
+        int rawBlendId = _nativeBlends.Intern(new BlendSignature(description.Blend, count));
         int formatsId = _nativeFormats.Intern(description.Targets);
 
         // Keyed on the blend set as described, not as baked: the draw emits its dynamic blend and
@@ -475,6 +455,25 @@ public sealed unsafe partial class VulkanDevice
         {
             return cached;
         }
+
+        // Baked blend state is owned by a new pipeline request. A cache hit only
+        // needs the allocation-free raw signature above.
+        var baked = new AttachmentBlend[Math.Max(count, 1)];
+        for (int i = 0; i < baked.Length; i++)
+        {
+            AttachmentBlend blend = AttachmentBlend.Default;
+            if (i < description.Blend.Length) blend = description.Blend[i];
+            else blend.WriteMask = 0;
+
+            if (tier == ColorWriteTier.DynamicMask)
+            {
+                if (dynamicBlend) blend = AttachmentBlend.Default;
+                blend.WriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit
+                    | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+            }
+            baked[i] = blend;
+        }
+        int bakedBlendId = _nativeBlends.Intern(new BlendSignature(baked.AsSpan(0, count)));
 
         // The system's own vertex layout - the reserved empty one for a pass that generates its
         // vertices, the mesh's interned layout for a mesh draw - plus the constant attribute
@@ -510,17 +509,6 @@ public sealed unsafe partial class VulkanDevice
         // the compile and the first draws are skipped until it is published.
         _pipelines.Prepare(key, request);
         return pipeline;
-    }
-
-    private static ReadOnlySpan<AttachmentBlend> NativeBlendSpan(NativePipelineDescription description, int count)
-    {
-        if (description.Blend.Length >= count) return description.Blend.AsSpan(0, Math.Max(count, 0));
-        var padded = new AttachmentBlend[Math.Max(count, 0)];
-        for (int i = 0; i < padded.Length; i++)
-        {
-            padded[i] = i < description.Blend.Length ? description.Blend[i] : AttachmentBlend.Default;
-        }
-        return padded;
     }
 
     /// <summary>Whether a pipeline's program is still the linked one of that id (a shader reload replaces it).</summary>

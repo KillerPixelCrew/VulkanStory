@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using static Optimum.Render.Vulkan.Tests.GpuTest;
 using Optimum.Render.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
@@ -722,71 +723,6 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
-    /// <summary>
-    /// A minimal shader stand-in. The client passes its own IShader and
-    /// IShaderProgram implementations across the seam, so the device must work
-    /// against the interfaces rather than any concrete type.
-    /// </summary>
-    internal sealed class TestShader : IShader
-    {
-        public EnumShaderType Type { get; set; }
-        public string Code { get; set; } = "";
-        public string PrefixCode { get; set; } = "";
-        public bool Compile() => true;
-    }
-
-    internal sealed class TestProgram : IShaderProgram
-    {
-        public int ProgramId { get; set; }
-        public string AssetDomain { get; set; } = "game";
-        public int PassId { get; set; }
-        public string PassName { get; set; } = "test";
-        public bool ClampTexturesToEdge { get; set; }
-        public IShader VertexShader { get; set; } = null!;
-        public IShader FragmentShader { get; set; } = null!;
-        public IShader GeometryShader { get; set; } = null!;
-        public bool Oit { get; set; } = true;
-        public bool Disposed => false;
-        public bool LoadError => false;
-        public Vintagestory.API.Datastructures.OrderedDictionary<string, UBORef> UBOs { get; } = new();
-
-        public void Use() { }
-        public void Stop() { }
-        public bool Compile() => true;
-        public void Dispose() { }
-        public void Uniform(string uniformName, float value) { }
-        public void Uniform(string uniformName, int value) { }
-        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec2f value) { }
-        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec2i value) { }
-        public void Uniform(string uniformName, float valueX, float valueY) { }
-        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec3f value) { }
-        public void Uniform(string uniformName, float valueX, float valueY, float valueZ) { }
-        public void Uniform(string uniformName, float valueX, float valueY, float valueZ, float valueW) { }
-        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec4f value) { }
-        public void Uniforms4(string uniformName, int count, float[] values) { }
-        public void UniformMatrix(string uniformName, float[] matrix) { }
-        public void BindTexture2D(string samplerName, int textureId, int textureNumber) { }
-        public void BindTextureCube(string samplerName, int textureId, int textureNumber) { }
-        public void UniformMatrices(string uniformName, int count, float[] matrix) { }
-        public void UniformMatrices4x3(string uniformName, int count, float[] matrix) { }
-        public bool HasUniform(string uniformName) => false;
-    }
-
-    internal static int LinkProgram(
-        VulkanDevice device, string vertexCode, string fragmentCode, string name = "test")
-    {
-        var vertex = new TestShader { Type = EnumShaderType.VertexShader, Code = vertexCode };
-        var fragment = new TestShader { Type = EnumShaderType.FragmentShader, Code = fragmentCode };
-
-        Assert.True(device.CompileShader(vertex));
-        Assert.True(device.CompileShader(fragment));
-
-        var program = new TestProgram { PassName = name, VertexShader = vertex, FragmentShader = fragment };
-        int programId = device.LinkProgram(program);
-        Assert.True(programId > 0, device.GetError() ?? "link failed");
-        return programId;
-    }
-
     [SkippableFact]
     public void TheDeviceReportsItsCapabilitiesThroughTheSeam()
     {
@@ -1409,6 +1345,7 @@ public class VulkanDeviceIntegrationTests
     /// changed the set contents would grow the cache without bound.
     /// </summary>
     [SkippableFact]
+    [Trait("Lane", "Stress")]
     public unsafe void ConsecutiveFramesEachSeeTheirOwnBlockContents()
     {
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");

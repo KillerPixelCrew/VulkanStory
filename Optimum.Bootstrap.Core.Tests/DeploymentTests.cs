@@ -1,0 +1,374 @@
+// Source: Optimum.Bootstrap.Core.Tests/DeployRoundTripTests.cs
+namespace Optimum.Bootstrap.Core.Tests
+{
+using Optimum.Bootstrap.Core;
+using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Platform;
+using Xunit;
+
+/// <summary>
+/// PackageDeployer and Uninstaller do real filesystem work, so these run against
+/// temp directories with a real <see cref="SystemProbe"/>.
+/// </summary>
+public sealed class DeployRoundTripTests : IDisposable
+{
+    private readonly string _root = Directory.CreateTempSubdirectory("optimum-deploy-test").FullName;
+
+    public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    private string StagePackage()
+    {
+        string package = Path.Combine(_root, "staged", "Optimum-v0.3.14-linux-x64");
+        Directory.CreateDirectory(Path.Combine(package, ".optimum"));
+        Directory.CreateDirectory(Path.Combine(package, "assets"));
+        File.WriteAllText(Path.Combine(package, "run.sh"), "#!/bin/sh\nexec ./Optimum\n");
+        File.WriteAllText(Path.Combine(package, "Optimum"), "binary");
+        File.WriteAllText(Path.Combine(package, "assets", "gameicon.png"), "png");
+        File.WriteAllText(Path.Combine(package, ".optimum", "version"), "0.3.14");
+        return package;
+    }
+
+    [Fact]
+    public void DeployThenUninstallLeavesNothingBehind()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+        string dataPath = Path.Combine(_root, "data");
+
+        DeployResult deploy = new PackageDeployer(probe).Deploy(
+            new DeployRequest(package, installDir, dataPath));
+
+        Assert.True(deploy.Ok, deploy.Message);
+        Assert.True(File.Exists(Path.Combine(installDir, "run.sh")));
+        Assert.True(File.Exists(Path.Combine(installDir, "assets", "gameicon.png")));
+        Assert.True(File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)));
+        Assert.Equal(dataPath, File.ReadAllText(Path.Combine(installDir, "datapath.cfg")));
+
+        string launcherName = probe.Os == OsKind.Windows ? "optimum-launch.cmd" : "optimum-launch.sh";
+        Assert.True(File.Exists(Path.Combine(installDir, launcherName)));
+
+        InstallManifest manifest = InstallManifest.Deserialize(
+            File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+        Assert.Equal("0.3.14", manifest.OptimumVersion);
+
+        UninstallResult uninstall = new Uninstaller(probe).Uninstall(installDir);
+
+        Assert.True(uninstall.Ok);
+        Assert.False(Directory.Exists(installDir));
+    }
+
+    [Fact]
+    public void DeployRefusesANonEmptyDirectoryWithNoManifest()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string occupied = Path.Combine(_root, "occupied");
+        Directory.CreateDirectory(occupied);
+        File.WriteAllText(Path.Combine(occupied, "someone-elses-file"), "x");
+
+        DeployResult result = new PackageDeployer(probe).Deploy(new DeployRequest(package, occupied));
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.OutputExists, result.Reason);
+        Assert.True(File.Exists(Path.Combine(occupied, "someone-elses-file")));
+    }
+
+    [Fact]
+    public void DeployCleansANonEmptyDirectoryWhenCleanDestinationIsTrue()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string occupied = Path.Combine(_root, "occupied-clean");
+        Directory.CreateDirectory(occupied);
+        File.WriteAllText(Path.Combine(occupied, "someone-elses-file"), "x");
+
+        DeployResult result = new PackageDeployer(probe).Deploy(new DeployRequest(package, occupied, CleanDestination: true));
+
+        Assert.True(result.Ok);
+        Assert.False(File.Exists(Path.Combine(occupied, "someone-elses-file")));
+        Assert.True(File.Exists(Path.Combine(occupied, "run.sh")));
+    }
+
+    [Fact]
+    public void DeployReplacesAnExistingOptimumInstallInPlace()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        File.WriteAllText(Path.Combine(installDir, "stale-from-old-install"), "old");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+
+        Assert.False(File.Exists(Path.Combine(installDir, "stale-from-old-install")));
+        Assert.True(File.Exists(Path.Combine(installDir, "run.sh")));
+        // No stage or backup directories left behind.
+        Assert.Empty(Directory.EnumerateDirectories(Path.GetDirectoryName(installDir)!, ".optimum-*"));
+    }
+
+    [Fact]
+    public void AFailureDuringTheSwapRollsBackToThePreviousInstall()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        string manifestBefore = File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath));
+        File.WriteAllText(Path.Combine(installDir, "user-added-mod"), "keep across a failed reinstall");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "swap") throw new IOException("simulated swap failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.EngineInternal, result.Reason);
+        Assert.Contains("rolled back", result.Message);
+        // The previous install is intact, including the user's file.
+        Assert.True(File.Exists(Path.Combine(installDir, "user-added-mod")));
+        Assert.Equal(manifestBefore, File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)));
+        Assert.Empty(Directory.EnumerateDirectories(Path.GetDirectoryName(installDir)!, ".optimum-*"));
+    }
+
+    [Fact]
+    public void AFailureAfterTheSwapKeepsTheNewInstall()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        File.WriteAllText(Path.Combine(installDir, "from-the-old-install"), "old");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "commit") throw new IOException("simulated post-swap failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        // Past the swap the install is complete; a cleanup failure is not fatal.
+        Assert.True(result.Ok, result.Message);
+        Assert.False(File.Exists(Path.Combine(installDir, "from-the-old-install")));
+        Assert.True(File.Exists(Path.Combine(installDir, "run.sh")));
+        Assert.True(File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)));
+    }
+
+    [Fact]
+    public void AFailureBeforeTheSwapOnAFreshInstallLeavesNothing()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "backup") throw new IOException("simulated early failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        Assert.False(result.Ok);
+        Assert.False(Directory.Exists(installDir));
+        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(_root, "install"), ".optimum-*"));
+    }
+
+    [Fact]
+    public void ManifestRecordsTheVersionFromThePackageDirectoryName()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+
+        InstallManifest manifest = InstallManifest.Deserialize(
+            File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+        Assert.Equal("0.3.14", manifest.OptimumVersion);
+    }
+
+    [Fact]
+    public void UninstallSkipsAManifestEntryThatEscapesTheInstallDirectory()
+    {
+        var probe = SystemProbe.Default;
+        string installDir = Path.Combine(_root, "install", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
+        string outside = Path.Combine(_root, "outside.txt");
+        File.WriteAllText(outside, "do not touch");
+
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.14",
+            InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = installDir,
+            Entries = ["../outside.txt", "run.sh"],
+        };
+        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
+        File.WriteAllText(Path.Combine(installDir, "run.sh"), "x");
+
+        UninstallResult result = new Uninstaller(probe).Uninstall(installDir);
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.BadInput, result.Reason);
+        Assert.True(File.Exists(outside));
+    }
+
+    [Fact]
+    public void MenuShortcutIsRecordedInTheManifestAndRemovedByUninstall()
+    {
+        if (OperatingSystem.IsWindows())
+            return; // this path exercises the Linux .desktop writer
+
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+        string dataHome = Path.Combine(_root, "xdg-data");
+        string? previous = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+        try
+        {
+            Assert.True(new PackageDeployer(probe).Deploy(
+                new DeployRequest(package, installDir, DataPath: null, ShortcutKinds.Menu)).Ok);
+
+            string entry = Path.Combine(dataHome, "applications", "optimum.desktop");
+            Assert.True(File.Exists(entry));
+
+            InstallManifest manifest = InstallManifest.Deserialize(
+                File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+            Assert.Contains(entry, manifest.Shortcuts);
+
+            Assert.True(new Uninstaller(probe).Uninstall(installDir).Ok);
+            Assert.False(File.Exists(entry));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previous);
+        }
+    }
+
+    [Fact]
+    public void DeployRejectsAnUnsafeInstallPath()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+
+        DeployResult deploy = new PackageDeployer(probe).Deploy(
+            new DeployRequest(package, probe.HomeDirectory));
+
+        Assert.False(deploy.Ok);
+        Assert.Equal(FailureReason.BadInput, deploy.Reason);
+    }
+
+    [Fact]
+    public void UninstallStillRemovesShortcutsWhenAListedEntryIsAlreadyGone()
+    {
+        var probe = SystemProbe.Default;
+        string installDir = Path.Combine(_root, "install", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
+        string shortcut = Path.Combine(_root, "menu", "optimum.desktop");
+        Directory.CreateDirectory(Path.GetDirectoryName(shortcut)!);
+        File.WriteAllText(shortcut, "[Desktop Entry]");
+
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.14",
+            InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = installDir,
+            Entries = ["run.sh"],           // never created
+            Shortcuts = [shortcut],
+        };
+        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
+
+        UninstallResult result = new Uninstaller(probe).Uninstall(installDir);
+
+        Assert.True(result.Ok);
+        Assert.False(File.Exists(shortcut));
+        Assert.False(Directory.Exists(installDir));
+    }
+
+    [Fact]
+    public void UninstallRefusesADirectoryWithNoManifest()
+    {
+        string bare = Path.Combine(_root, "bare");
+        Directory.CreateDirectory(bare);
+        File.WriteAllText(Path.Combine(bare, "important.txt"), "keep me");
+
+        UninstallResult result = new Uninstaller(SystemProbe.Default).Uninstall(bare);
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.BadInput, result.Reason);
+        Assert.True(File.Exists(Path.Combine(bare, "important.txt")));
+    }
+}
+}
+
+// Source: Optimum.Bootstrap.Core.Tests/ShortcutWriterTests.cs
+namespace Optimum.Bootstrap.Core.Tests
+{
+using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Platform;
+using Xunit;
+
+public sealed class ShortcutWriterTests : IDisposable
+{
+    private readonly string _home = Directory.CreateTempSubdirectory("optimum-shortcut-test").FullName;
+
+    public void Dispose() => Directory.Delete(_home, recursive: true);
+
+    private FakeSystemProbe LinuxProbe()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = _home.Replace('\\', '/') };
+        probe.Environment["XDG_DATA_HOME"] = _home.Replace('\\', '/') + "/.local/share";
+        return probe;
+    }
+
+    [Fact]
+    public void WritesAndRemovesTheLinuxMenuAndDesktopEntries()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        // A Linux install uses '/' paths. Build them with '/' so the generated
+        // .desktop Exec matches regardless of the host running the test (on
+        // Windows Path.Combine would inject '\', which the Desktop Entry writer
+        // then backslash-escapes, diverging from this assertion).
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.Desktop);
+
+        string menuEntry = $"{home}/.local/share/applications/optimum.desktop";
+        string desktopEntry = $"{home}/Desktop/Optimum.desktop";
+        Assert.Contains(menuEntry, created);
+        Assert.Contains(desktopEntry, created);
+        Assert.True(File.Exists(menuEntry));
+        Assert.Contains($"Exec=\"{launcher}\"", File.ReadAllText(menuEntry));
+
+        writer.Remove(created);
+        Assert.False(File.Exists(menuEntry));
+        Assert.False(File.Exists(desktopEntry));
+    }
+
+    [Fact]
+    public void NoneWritesNothing()
+    {
+        Assert.Empty(new ShortcutWriter(LinuxProbe()).Create("/x", "/x/launch", ShortcutKinds.None));
+    }
+
+    [Fact]
+    public void CopiesTheHicolorIconWhenThePackageHasOne()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string installDir = Path.Combine(_home, "games", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, "assets"));
+        File.WriteAllText(Path.Combine(installDir, "assets", "gameicon.png"), "PNG");
+
+        new ShortcutWriter(probe).Create(installDir, Path.Combine(installDir, "optimum-launch.sh"), ShortcutKinds.Menu);
+
+        Assert.True(File.Exists(Path.Combine(_home, ".local", "share", "icons", "hicolor", "256x256", "apps", "optimum.png")));
+    }
+}
+}

@@ -23,7 +23,6 @@ internal sealed unsafe partial class ShaderCompiler
     /// </summary>
     public ShaderCompileResult CompileNative(string code, string filename, EnumShaderType stage, string includeDirectory)
     {
-        var result = new ShaderCompileResult();
         var resolver = new IncludeResolver(includeDirectory);
         GCHandle handle = GCHandle.Alloc(resolver);
 
@@ -39,23 +38,7 @@ internal sealed unsafe partial class ShaderCompiler
             CompilationResult* compiled = CompileWith(code, filename, stage, options, preprocessOnly: false);
             try
             {
-                if (!Succeeded(compiled, out string? error))
-                {
-                    result.Error = error;
-                    return result;
-                }
-
-                nuint length = _api.ResultGetLength(compiled);
-                byte* bytes = (byte*)_api.ResultGetBytes(compiled);
-                var spirv = new byte[(int)length];
-                fixed (byte* destination = spirv)
-                {
-                    Buffer.MemoryCopy(bytes, destination, spirv.Length, (long)length);
-                }
-
-                result.Spirv = spirv;
-                result.Success = true;
-                return result;
+                return ReadCompiledSpirv(compiled);
             }
             finally
             {

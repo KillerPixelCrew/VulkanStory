@@ -461,7 +461,7 @@ public partial class VulkanClientPlatform
     private string[] ChunkSamplerNames(int programId)
     {
         if (nativeProgramSamplers.TryGetValue(programId, out string[]? names)) return names;
-        names = device.SamplerNamesOf(programId).ToArray();
+        names = device.SamplerNamesOf(programId);
         nativeProgramSamplers[programId] = names;
         return names;
     }

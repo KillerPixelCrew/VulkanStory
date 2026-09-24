@@ -186,36 +186,38 @@ internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
     }
 }
 
-/// <summary>A set of per-attachment blend states, interned as a unit.</summary>
-internal sealed class BlendSignature : IEquatable<BlendSignature>
+/// <summary>A set of per-attachment blend states, interned as a unit without heap storage.</summary>
+internal readonly struct BlendSignature : IEquatable<BlendSignature>
 {
-    private readonly uint[] _packed;
-    private readonly int _hash;
+    private readonly UInt128 _first;
+    private readonly UInt128 _second;
+    private readonly byte _count;
 
-    public BlendSignature(ReadOnlySpan<AttachmentBlend> attachments)
+    public BlendSignature(ReadOnlySpan<AttachmentBlend> attachments) : this(attachments, attachments.Length) { }
+
+    public BlendSignature(ReadOnlySpan<AttachmentBlend> attachments, int count)
     {
-        _packed = new uint[attachments.Length];
-        var hash = new HashCode();
-        for (int i = 0; i < attachments.Length; i++)
+        if ((uint)count > RenderLimits.MaxColorAttachments)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        _count = (byte)count;
+        UInt128 first = 0;
+        UInt128 second = 0;
+        for (int i = 0; i < count; i++)
         {
-            _packed[i] = attachments[i].Pack();
-            hash.Add(_packed[i]);
+            uint packed = (i < attachments.Length ? attachments[i] : AttachmentBlend.Default).Pack();
+            if (i < 4) first |= (UInt128)packed << (i * 32);
+            else second |= (UInt128)packed << ((i - 4) * 32);
         }
-        _hash = hash.ToHashCode();
+        _first = first;
+        _second = second;
     }
 
-    public bool Equals(BlendSignature? other)
-    {
-        if (other is null || other._hash != _hash || other._packed.Length != _packed.Length) return false;
-        for (int i = 0; i < _packed.Length; i++)
-        {
-            if (_packed[i] != other._packed[i]) return false;
-        }
-        return true;
-    }
+    public bool Equals(BlendSignature other) =>
+        _count == other._count && _first == other._first && _second == other._second;
 
-    public override bool Equals(object? obj) => Equals(obj as BlendSignature);
-    public override int GetHashCode() => _hash;
+    public override bool Equals(object? obj) => obj is BlendSignature other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(_count, _first, _second);
 }
 
 /// <summary>

@@ -71,6 +71,9 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// </summary>
     public Dictionary<string, int> SamplerUnits { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Declaration-order names, fixed for this linked program.</summary>
+    public string[] SamplerNames { get; }
+
     /// <param name="sharedLayout">
     /// The device's shared pipeline layout. Programs built outside a device - in
     /// tests - pass none and get a <see cref="StandaloneLayout" /> of the same shape.
@@ -94,8 +97,11 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
 
         // Sampler uniforms default to the unit matching their declaration order,
         // which is the order the game's own texture-location bookkeeping assigns.
-        foreach (SamplerBinding sampler in Interface.Samplers)
+        SamplerNames = new string[Interface.Samplers.Count];
+        for (int i = 0; i < Interface.Samplers.Count; i++)
         {
+            SamplerBinding sampler = Interface.Samplers[i];
+            SamplerNames[i] = sampler.Name;
             SamplerUnits[sampler.Name] = sampler.Order;
         }
 

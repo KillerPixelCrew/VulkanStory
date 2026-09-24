@@ -8,8 +8,8 @@ using Vintagestory.API.Client;
 using Xunit;
 using Xunit.Abstractions;
 using static Optimum.Render.Vulkan.Tests.GpuTest;
-using TestProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
-using TestShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+using TestProgram = Optimum.Render.Vulkan.Tests.GpuTest.TestProgram;
+using TestShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 
 namespace Optimum.Render.Vulkan.Tests;
 

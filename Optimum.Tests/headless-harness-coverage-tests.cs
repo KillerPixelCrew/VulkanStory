@@ -211,7 +211,7 @@ public class HeadlessHarnessCoverageTests
 
         // The device stays untouched: it is the general "read a target's colour 0"
         // operation the GPU tests inspect attachments with, in their stored order.
-        string deviceFile = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string deviceFile = VulkanDeviceSource.Read();
         int deviceAt = deviceFile.IndexOf(
             "private void ReadFramebufferColor(VulkanFramebuffer? target, int x, int y, int width, int height, IntPtr destination)",
             StringComparison.Ordinal);

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Xunit;
 
@@ -82,7 +83,7 @@ public class VulkanTestValidationCoverageTests
         Assert.Contains("DefaultValidationFeatures = \"sync,best\"", helper);
         Assert.Contains("EnableValidation = true", helper);
 
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         Assert.Contains("ConfigureContextOptions?.Invoke(options);", device);
     }
 
@@ -100,8 +101,18 @@ public class VulkanTestValidationCoverageTests
         Assert.Contains("VulkanPoison.FillHostMemory(Mapped, size);", resources);
     }
 
-    private static string[] TestSources() =>
-        Directory.GetFiles(Path.GetDirectoryName(PatchReader.FindRepositoryFile(TestProject + "/GpuTest.cs"))!, "*.cs");
+    private static string[] TestSources()
+    {
+        string root = Path.GetDirectoryName(PatchReader.FindRepositoryFile(TestProject + "/GpuTest.cs"))!;
+        return Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(file =>
+            {
+                string relative = Path.GetRelativePath(root, file);
+                string first = relative.Split(Path.DirectorySeparatorChar)[0];
+                return first != "obj" && first != "bin";
+            })
+            .ToArray();
+    }
 
     private static int Count(string source, string value)
     {

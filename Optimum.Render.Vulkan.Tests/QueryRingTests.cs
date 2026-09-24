@@ -106,7 +106,7 @@ public class QueryRingTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int framebuffer = CreateTarget(seam);
             int query = seam.CreateOcclusionQuery();
             bool precise = device!.PreciseOcclusionForTests;
@@ -181,7 +181,7 @@ public class QueryRingTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int framebuffer = CreateTarget(seam);
             bool precise = device!.PreciseOcclusionForTests;
 
@@ -244,7 +244,7 @@ public class QueryRingTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int targetA = CreateTarget(seam);
             int targetB = CreateTarget(seam);
             bool precise = device!.PreciseOcclusionForTests;

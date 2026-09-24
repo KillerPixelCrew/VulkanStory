@@ -109,8 +109,8 @@ public class PerDrawCostTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
-            int red = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SolidFragment("1.0, 0.0, 0.0, 1.0"), "dyn-red");
+            VulkanDevice seam = device!;
+            int red = GpuTest.LinkProgram(seam, FullscreenVertex, SolidFragment("1.0, 0.0, 0.0, 1.0"), "dyn-red");
             int a = CreateTarget(seam);
             int b = CreateTarget(seam);
             int all = device!.DynamicStateCommandsPerDrawForTests;
@@ -179,9 +179,9 @@ public class PerDrawCostTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
-            int red = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SolidFragment("1.0, 0.0, 0.0, 1.0"), "dyn-red");
-            int green = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SolidFragment("0.0, 1.0, 0.0, 1.0"), "dyn-green");
+            VulkanDevice seam = device!;
+            int red = GpuTest.LinkProgram(seam, FullscreenVertex, SolidFragment("1.0, 0.0, 0.0, 1.0"), "dyn-red");
+            int green = GpuTest.LinkProgram(seam, FullscreenVertex, SolidFragment("0.0, 1.0, 0.0, 1.0"), "dyn-green");
 
             var targets = new int[4];
             for (int i = 0; i < targets.Length; i++) targets[i] = CreateTarget(seam);
@@ -270,7 +270,7 @@ public class PerDrawCostTests
             const int window = 4;
             device!.ShortLivedFramesForTests = window;
 
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SampleFragment, "arena-sample");
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, SampleFragment, "arena-sample");
             int target = CreateTarget(seam);
 
             // Frames pass so the texture below is the only young resource.
@@ -352,8 +352,8 @@ public class PerDrawCostTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SampleFragment, "arena-delete");
+            VulkanDevice seam = device!;
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, SampleFragment, "arena-delete");
             int target = CreateTarget(seam);
 
             byte[] last = Array.Empty<byte>();
@@ -431,7 +431,7 @@ public class PerDrawCostTests
             // Two indirect commands per slot buffer to start with.
             device!.IndirectMinimumCapacityForTests = 40;
 
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, MeshVertex, SolidFragment("1.0, 1.0, 1.0, 1.0"), "indirect-strips");
+            int program = GpuTest.LinkProgram(seam, MeshVertex, SolidFragment("1.0, 1.0, 1.0, 1.0"), "indirect-strips");
             int mesh = seam.CreateMesh(Strips(), false);
             int first = CreateTarget(seam);
             int second = CreateTarget(seam);

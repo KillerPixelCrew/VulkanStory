@@ -330,13 +330,13 @@ public class TransientAllocatorTests
 
         using (seam)
         {
-            int fill = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int fill = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 in vec2 uv;
                 layout(location = 0) out vec4 outColor;
                 void main(void) { outColor = vec4(floor(uv.x * 16.0) / 16.0, floor(uv.y * 16.0) / 16.0, 0.25, 1.0); }
                 """, "chain-fill");
-            int rotate = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int rotate = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 uniform sampler2D src;
                 in vec2 uv;
@@ -469,7 +469,7 @@ public class TransientAllocatorTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, """
+            int program = GpuTest.LinkProgram(seam, """
                 #version 330 core
                 void main() {
                     gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2),

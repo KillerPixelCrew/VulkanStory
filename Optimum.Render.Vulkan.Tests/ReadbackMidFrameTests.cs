@@ -107,7 +107,7 @@ public class ReadbackMidFrameTests
             VulkanDevice seam = device!;
             const int size = 16;
 
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, """
+            int program = GpuTest.LinkProgram(seam, """
                 #version 330 core
                 void main(void)
                 {

@@ -184,8 +184,6 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
 
     private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage)
     {
-        var result = new ShaderCompileResult();
-
         CompileOptions* options = CreateOptions();
         if (!optimize) _api.CompileOptionsSetOptimizationLevel(options, OptimizationLevel.Zero);
         try
@@ -193,23 +191,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
             CompilationResult* compiled = CompileWith(code, filename, stage, options, preprocessOnly: false);
             try
             {
-                if (!Succeeded(compiled, out string? error))
-                {
-                    result.Error = error;
-                    return result;
-                }
-
-                nuint length = _api.ResultGetLength(compiled);
-                byte* bytes = (byte*)_api.ResultGetBytes(compiled);
-                var spirv = new byte[(int)length];
-                fixed (byte* destination = spirv)
-                {
-                    Buffer.MemoryCopy(bytes, destination, spirv.Length, (long)length);
-                }
-
-                result.Spirv = spirv;
-                result.Success = true;
-                return result;
+                return ReadCompiledSpirv(compiled);
             }
             finally
             {
@@ -341,6 +323,28 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
         byte* message = _api.ResultGetErrorMessage(result);
         error = message == null ? "unknown shaderc error" : Marshal.PtrToStringUTF8((IntPtr)message);
         return false;
+    }
+
+    private ShaderCompileResult ReadCompiledSpirv(CompilationResult* compiled)
+    {
+        var result = new ShaderCompileResult();
+        if (!Succeeded(compiled, out string? error))
+        {
+            result.Error = error;
+            return result;
+        }
+
+        nuint length = _api.ResultGetLength(compiled);
+        byte* bytes = (byte*)_api.ResultGetBytes(compiled);
+        var spirv = new byte[(int)length];
+        fixed (byte* destination = spirv)
+        {
+            Buffer.MemoryCopy(bytes, destination, spirv.Length, (long)length);
+        }
+
+        result.Spirv = spirv;
+        result.Success = true;
+        return result;
     }
 
     private string ReadBytesAsText(CompilationResult* result)

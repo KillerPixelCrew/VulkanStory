@@ -303,7 +303,8 @@ public class GetErrorCounterTests
     [Fact]
     public void TheSteadyStatePathIsACounterReadWithNoAllocation()
     {
-        string device = File.ReadAllText(Path.Combine(ShaderCorpus.RepositoryRoot, "Optimum.Render.Vulkan", "VulkanDevice.cs"));
+        string device = File.ReadAllText(Path.Combine(ShaderCorpus.RepositoryRoot, "Optimum.Render.Vulkan", "VulkanDevice.cs"))
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
         int start = device.IndexOf("public string GetError()", StringComparison.Ordinal);
         Assert.True(start >= 0);
         string body = device.Substring(start, device.IndexOf("\n    }\n", start, StringComparison.Ordinal) - start);

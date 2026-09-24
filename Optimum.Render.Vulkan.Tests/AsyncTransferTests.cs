@@ -115,7 +115,7 @@ public class AsyncTransferTests
             const int frames = 60;
             const int workerTextureCount = 4;
 
-            int meshProgram = VulkanDeviceIntegrationTests.LinkProgram(seam, """
+            int meshProgram = GpuTest.LinkProgram(seam, """
                 #version 330 core
                 layout(location = 0) in vec3 position;
                 void main() { gl_Position = vec4(position, 1); }
@@ -124,7 +124,7 @@ public class AsyncTransferTests
                 out vec4 color;
                 void main() { color = vec4(1); }
                 """, "async-mesh");
-            int mipProgram = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int mipProgram = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 uniform sampler2D source;
                 out vec4 color;
@@ -289,7 +289,7 @@ public class AsyncTransferTests
         {
             IOptimumGraphicsDevice seam = device!;
             const int size = 4;
-            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int program = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 uniform sampler2D source;
                 out vec4 color;

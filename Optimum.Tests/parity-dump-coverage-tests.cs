@@ -125,7 +125,7 @@ public class ParityDumpCoverageTests
         Assert.Equal(1, Count(platform, "OptimumParityDump.Write("));
         Assert.DoesNotContain("FileStream", MethodBody(platform, "private OptimumTextureReadback OptimumParityReadTextureGl(int textureId)"));
 
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         string dump = Read("Optimum.Render.Vulkan/Core/TextureDump.cs");
         Assert.Contains("public OptimumTextureReadback? ReadTextureForParity(int textureId)", device);
         Assert.Contains("TextureDump.ToParityReadback(", device);
@@ -237,7 +237,7 @@ public class ParityDumpCoverageTests
     {
         string script = PatchReader.FindRepositoryFile("scripts/dev/ssim.py");
         string root = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(script)))!;
-        var start = new ProcessStartInfo("python3")
+        var start = new ProcessStartInfo(TestToolchain.Python)
         {
             WorkingDirectory = root,
             RedirectStandardOutput = true,
@@ -300,7 +300,7 @@ public class ParityDumpCoverageTests
         Assert.Contains("| attachment | reason | max accepted deviation |", allowlist);
         Assert.DoesNotMatch(new Regex(@"^\|\s*[^a|\-\s]", RegexOptions.Multiline), allowlist); // table starts empty
 
-        string acceptance = Read("docs/vulkan-acceptance.md");
+        string acceptance = Read("docs/vulkan-acceptance.md").Replace("\r\n", "\n", StringComparison.Ordinal);
         string[] sections =
         {
             "## 0. Preconditions", "## 1. Renderer confirmation", "## 2. Acceptance rows",

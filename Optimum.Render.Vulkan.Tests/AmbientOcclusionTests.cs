@@ -136,7 +136,7 @@ public class AmbientOcclusionTests(ITestOutputHelper output)
         public Rig(VulkanDevice device)
         {
             Device = device;
-            Program = VulkanDeviceIntegrationTests.LinkProgram(device, FullscreenVertex, SceneFragment, "ao-scene");
+            Program = GpuTest.LinkProgram(device, FullscreenVertex, SceneFragment, "ao-scene");
             Depth = device.CreateTexture2D(Size, Size, EnumTextureInternalFormat.DepthComponent32,
                 EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
             Normal = device.CreateTexture2D(Size, Size, EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba,
@@ -399,7 +399,7 @@ public class AmbientOcclusionTests(ITestOutputHelper output)
         {
             var rig = new Rig(device!);
             const int frames = 6;
-            int copy = VulkanDeviceIntegrationTests.LinkProgram(device!, FullscreenVertex, CopyFragment, "ao-copy");
+            int copy = GpuTest.LinkProgram(device!, FullscreenVertex, CopyFragment, "ao-copy");
             device!.SetSamplerUnit(copy, "ao", 0);
             var colours = new int[frames];
             var targets = new int[frames];

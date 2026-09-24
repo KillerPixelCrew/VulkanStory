@@ -11,8 +11,8 @@ using Vintagestory.Client.NoObf;
 using Xunit;
 using Xunit.Abstractions;
 
-using LinkedProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
-using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+using LinkedProgram = Optimum.Render.Vulkan.Tests.GpuTest.TestProgram;
+using LinkedShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 
 namespace Optimum.Render.Vulkan.Tests;
 

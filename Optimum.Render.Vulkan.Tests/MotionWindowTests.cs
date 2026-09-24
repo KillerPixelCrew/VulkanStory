@@ -183,10 +183,10 @@ public class MotionWindowTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int opaque = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex,
+            int opaque = GpuTest.LinkProgram(seam, FullscreenVertex,
                 FourOutputs("1.0, 0.0, 0.0, 1.0", "0.0, 1.0, 0.0, 1.0", "0.75, 0.75, 0.75, 0.75", "1.0, 1.0, 1.0, 1.0"),
                 "mw-opaque");
-            int motionOnly = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex,
+            int motionOnly = GpuTest.LinkProgram(seam, FullscreenVertex,
                 FourOutputs("0.0, 0.0, 1.0, 1.0", "0.0, 0.0, 1.0, 1.0", "1.0, 0.5, 0.0, 1.0", "0.0, 0.0, 0.0, 0.0"),
                 "mw-motion-only");
             Scene scene = CreateScene(seam);
@@ -259,7 +259,7 @@ public class MotionWindowTests
         using (device)
         {
             VulkanDevice seam = device!;
-            int merge = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int merge = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 layout(location = 0) out vec4 outColor;
                 layout(location = 2) out vec4 outMotion;
@@ -332,14 +332,14 @@ public class MotionWindowTests
         {
             VulkanDevice seam = device!;
             seam.FrameGraphEnabled = frameGraph;
-            int compose = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
+            int compose = GpuTest.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 uniform sampler2D glowTex;
                 in vec2 uv;
                 layout(location = 0) out vec4 outColor;
                 void main(void) { outColor = texture(glowTex, uv); }
                 """, "mw-compose");
-            int writeGlow = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex,
+            int writeGlow = GpuTest.LinkProgram(seam, FullscreenVertex,
                 FourOutputs("0.0, 0.0, 0.0, 1.0", "1.0, 0.0, 0.0, 1.0", "0.0, 0.0, 0.0, 0.0", "0.0, 0.0, 0.0, 0.0"),
                 "mw-write-glow");
             Scene scene = CreateScene(seam);

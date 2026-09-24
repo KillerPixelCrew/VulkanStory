@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using Optimum.Render.Vulkan;
 using Optimum.Render.Vulkan.Core;
+using Optimum.Tests;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 using Xunit;
@@ -279,7 +280,7 @@ public class PacingStatsTests
 
     private static (int Code, string Output) RunGate(params string[] arguments)
     {
-        var start = new ProcessStartInfo("bash")
+        var start = new ProcessStartInfo(TestToolchain.Bash)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -303,6 +304,7 @@ public class PacingStatsTests
 
     private static string Body(string source, string signature)
     {
+        source = source.Replace("\r\n", "\n", StringComparison.Ordinal);
         int start = source.IndexOf(signature, StringComparison.Ordinal);
         Assert.True(start >= 0, "missing " + signature);
         int end = source.IndexOf("\n    }\n", start, StringComparison.Ordinal);
@@ -394,7 +396,7 @@ public class PacingStatsTests
         Assert.DoesNotContain("WaitSite.OcclusionQuery", device);
         Assert.DoesNotContain("WaitSite.FlushFrame", frameRing);
         Assert.DoesNotContain("ResultWaitBit", Source("Frame/QueryRing.cs"));
-        string readBack = Body(device, "private void ReadBack(");
+        string readBack = Body(Source("VulkanDevice.Readback.cs"), "private void ReadBack(");
         Assert.DoesNotContain("WaitDeviceIdle", readBack);
         Assert.Contains("_readbacks.WaitAndCopy(ticket, destination);", readBack);
         Assert.Contains("_frames.Timeline.WaitForFrame(ticket.FrameValue, WaitSite.Readback);",
@@ -406,7 +408,7 @@ public class PacingStatsTests
         // The per-draw dynamic-state count matches the commands actually recorded. The
         // emission is shared: the emulated draw resolves the values from the state tracker,
         // a native draw from its pipeline's fixed state, and both record them here.
-        string dynamicState = Body(device, "private void EmitDynamicState(");
+        string dynamicState = Body(Source("VulkanDevice.Binding.cs"), "private void EmitDynamicState(");
         Assert.Equal(VulkanStats.DynamicStateCommandsPerDraw, Count(dynamicState, "api.CmdSet"));
         // Phase 1B step 6: dirty-masked, so the count is what was emitted, not a constant.
         Assert.Contains("DynamicStateDirty dirty = _dynamicState.Update(serial, values);", dynamicState);
@@ -421,7 +423,9 @@ public class PacingStatsTests
         Assert.DoesNotContain("MemoryPoolClass.ReBar", meshCreateBuffer);
         Assert.DoesNotContain("MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit", meshCreateBuffer);
         Assert.Contains("_allocator.AdvanceFrame();", ringBegin);
-        Assert.Equal(Count(device, "CmdPipelineBarrier2("), Count(device, "VulkanStats.NoteImageBarriers(1);"));
+        string barriers = Body(Source("Graph/BarrierBatcher.cs"), "public void Flush(CommandBuffer commandBuffer)");
+        Assert.Contains("_api.CmdPipelineBarrier2(commandBuffer, &dependency);", barriers);
+        Assert.Contains("VulkanStats.NoteImageBarriers(_count);", barriers);
     }
 
     // ------------------------------------------------------------------ GPU

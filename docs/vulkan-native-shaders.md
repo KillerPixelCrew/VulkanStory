@@ -462,7 +462,7 @@ vec4 optimumWriteReactiveOnly(float reactive);                             // rg
     `[Optimum] shaders: native '<name>' linked through the rewriter: a mod replaces its GLSL (launcher shader scan)`.
     When the scan answers `all`, the load line says `the mod shader scan makes every program rewriter-only`;
     under `OPTIMUM_VK_NATIVE_SHADERS=force` it says `mod shader scan ignored` and the scan is not consulted. Pinned by
-    `Optimum.Tests/shader-compatibility-config-tests.cs` (names, `all`, missing field, v1, failed, missing and
+    `Optimum.Tests/Launcher/ShaderCompatibilityTests.cs` (names, `all`, missing field, v1, failed, missing and
     malformed report) and `NativeShaderRuntimeTests.AProgramTheModScanNamesLinksThroughTheRewriterUnlessForced`.
   - **SPIR-V is verified lazily:** read and SHA-256-checked the first time a variant links; a mismatch or an
     unreadable file fails that variant for the life of the device.

@@ -7,8 +7,8 @@ using Xunit;
 // threads at once: xunit's default of running collections in parallel crashed
 // the test host outright once the windowing tests joined the suite.
 //
-// The suite is a few seconds either way, so serialising it costs nothing worth
-// having.
+// Some integration and stress cases are long-running. Keep real-device tests
+// serialized until the GLFW and device lifecycle are isolated from pure cases.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Optimum.Render.Vulkan.Tests;

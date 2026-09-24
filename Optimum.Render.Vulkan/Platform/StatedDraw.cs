@@ -47,12 +47,12 @@ internal static class StatedDraw
         if (layoutId < 0) return Refused("the mesh has no layout", out refusal);
 
         // Every sampler the program declares, from the unit it points at.
-        List<string> names = device.SamplerNamesOf(programId);
+        string[] names = device.SamplerNamesOf(programId);
         int depthTexture = device.NativeFramebufferDepthTexture(framebufferId);
         bool samplesBoundDepth = false;
-        var reads = new int[names.Count];
-        var units = new int[names.Count];
-        for (int i = 0; i < names.Count; i++)
+        var reads = new int[names.Length];
+        Span<int> units = stackalloc int[names.Length];
+        for (int i = 0; i < names.Length; i++)
         {
             units[i] = device.NativeSamplerUnit(programId, names[i]);
             reads[i] = stated.TextureAt(units[i]);
@@ -100,8 +100,8 @@ internal static class StatedDraw
         NativePipeline? pipeline = device.RequestNativePipeline(description, out string error);
         if (pipeline == null) return Refused(error, out refusal);
 
-        var textures = new NativeTexture[names.Count];
-        for (int i = 0; i < names.Count; i++)
+        var textures = new NativeTexture[names.Length];
+        for (int i = 0; i < names.Length; i++)
         {
             int sampler = stated.SamplerAt(units[i]);
             textures[i] = new NativeTexture(pipeline.Sampler(names[i]), reads[i],

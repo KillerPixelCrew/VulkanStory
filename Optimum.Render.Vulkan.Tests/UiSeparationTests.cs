@@ -335,9 +335,9 @@ public class UiSeparationTests(ITestOutputHelper output)
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             typeof(ClientPlatformWindows).GetField("frameBuffers", flags)!.SetValue(platform, list);
 
-            session.LayerAProgram = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, LayerAFragment, "ui-layer-a");
-            session.LayerBProgram = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, LayerBFragment, "ui-layer-b");
-            int compose = VulkanDeviceIntegrationTests.LinkProgram(
+            session.LayerAProgram = GpuTest.LinkProgram(seam, FullscreenVertex, LayerAFragment, "ui-layer-a");
+            session.LayerBProgram = GpuTest.LinkProgram(seam, FullscreenVertex, LayerBFragment, "ui-layer-b");
+            int compose = GpuTest.LinkProgram(
                 seam, ComposeSource("vsh"), ComposeSource("fsh"), "ui-compose");
             ShaderPrograms.UiCompose = new ShaderProgram { ProgramId = compose, PassName = "ui-compose" };
             return session;

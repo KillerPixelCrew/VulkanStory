@@ -368,7 +368,7 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("FrameWait = PipelineStageFlags.ColorAttachmentOutputBit;", stages);
         Assert.Contains("BlitAcquireWait = PipelineStageFlags.TransferBit;", stages);
 
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         int present = device.IndexOf("    public void Present()", StringComparison.Ordinal);
         int frameSubmit = device.IndexOf("ulong renderValue = _frames.EndFrame();", present, StringComparison.Ordinal);
         int acquire = device.IndexOf("_swapchain.TryAcquire(out PresentTarget target)", present, StringComparison.Ordinal);
@@ -418,7 +418,7 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("_timeline.NoteFrameSubmitted(FrameValue);", ring);
 
         // Every deferred destroy in the renderer goes through the ring's retire queue.
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         Assert.DoesNotContain("_frames.Current.DeferDeletion(", device);
         Assert.Contains("ring.DeferDeletion(texture)", Read("Optimum.Render.Vulkan/Core/TextureManager.cs"));
         Assert.Contains("ring.DeferDeletion(mesh)", Read("Optimum.Render.Vulkan/Core/MeshManager.cs"));
@@ -432,7 +432,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void ReadbacksAndOcclusionQueriesNeverFlushTheFrameOrWaitForTheDevice()
     {
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         Assert.DoesNotContain("FlushFrame", device);
         Assert.DoesNotContain("Thread.Yield", device);
         Assert.DoesNotContain("BeforeSynchronousSubmit", device);
@@ -516,7 +516,7 @@ public class VulkanBackendIntegrationTests
         string meshes = Read("Optimum.Render.Vulkan/Core/MeshManager.cs");
         Assert.Contains("_uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);", meshes);
 
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         Assert.DoesNotContain("_setupCommands", device);
         Assert.Contains("_uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);", device);
         Assert.Contains("ulong transferValue = _uploads.SubmitStandalone();", device);
@@ -526,7 +526,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void ValidationMessagesAlwaysReachAFileAndExtraFeaturesCanBeRequested()
     {
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         Assert.Contains("DefaultValidationLogPath", device);
         Assert.Contains("OPTIMUM_VULKAN_VALIDATION_FEATURES", device);
         string context = Read("Optimum.Render.Vulkan/Core/VulkanContext.cs");

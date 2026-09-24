@@ -915,7 +915,7 @@ public class NativeWorldSystemsCoverageTests
         Assert.Contains("statedColorMaskOff =",
             Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.State.cs"));
         Assert.Contains("_targets.ScopeClosing = _queryRing.OnScopeClosing;",
-            Read("Optimum.Render.Vulkan/VulkanDevice.cs"));
+            VulkanDeviceSource.Read());
     }
     /// <summary>
     /// The early loading screen's quads under the platform's hardcoded ShaderProgramMinimalGui
@@ -983,7 +983,7 @@ public class NativeWorldSystemsCoverageTests
         // target, no unit tables, no draw that is not a native one.
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(PatchReader.FindRepositoryFile("VintageStory.slnx"))!,
             "Optimum.Render.Vulkan", "Core", "GlStateTracker.cs")));
-        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string device = VulkanDeviceSource.Read();
         foreach (string removed in new[]
                  {
                      "public void UseProgram(", "public void SetBlend(", "public void SetDepthTest(", "public void SetViewport(",

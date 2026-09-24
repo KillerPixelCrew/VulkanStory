@@ -11,8 +11,8 @@ using Vintagestory.Client.NoObf;
 using Xunit;
 using Xunit.Abstractions;
 
-using LinkedProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
-using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+using LinkedProgram = Optimum.Render.Vulkan.Tests.GpuTest.TestProgram;
+using LinkedShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 
 namespace Optimum.Render.Vulkan.Tests;
 
@@ -186,11 +186,12 @@ public class NativeSkyTests(ITestOutputHelper output)
 
             session.SkyTexture = Gradient(seam, 0);
             session.GlowTexture = Gradient(seam, 1);
-            foreach (string name in seam.SamplerNamesOf(program.ProgramId))
+            string[] samplerNames = seam.SamplerNamesOf(program.ProgramId);
+            foreach (string name in samplerNames)
             {
                 // The units the client's ShaderProgramSky setters bind: what the stated route
                 // resolves its samplers through. The native route passes the handles instead.
-                int unit = program.uniformLocations.Count + seam.SamplerNamesOf(program.ProgramId).IndexOf(name);
+                int unit = program.uniformLocations.Count + Array.IndexOf(samplerNames, name);
                 seam.SetSamplerUnit(program.ProgramId, name, unit);
                 seam.BindTexture(unit, name == "sky" ? session.SkyTexture
                     : name == "glow" ? session.GlowTexture : session.SkyTexture);

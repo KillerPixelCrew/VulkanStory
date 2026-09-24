@@ -30,7 +30,9 @@
 # in perf-capture.sh (Optimum.Tests/pacing-log-format-coverage-tests.cs).
 set -euo pipefail
 
-exec python3 - "$@" <<'PY'
+python_cmd=python3
+if ! "$python_cmd" -c 'import sys' >/dev/null 2>&1; then python_cmd=python; fi
+exec "$python_cmd" - "$@" <<'PY'
 import argparse, os, re, statistics, sys
 
 FPS_LINE_RE = re.compile(r"\[Optimum\] fps window=(?P<window>[\d.]+) frames=(?P<frames>\d+) mean=(?P<mean>[\d.]+) min=(?P<min>[\d.]+) max=(?P<max>[\d.]+) p99=(?P<p99>[\d.]+)(?: stddev=(?P<stddev>[\d.]+))?")

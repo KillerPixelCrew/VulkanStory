@@ -17,6 +17,8 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAnimLod.cs" Link="Config\OptimumAnimLod.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumConfig.cs" Link="Config\OptimumConfig.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumDiagnostics.cs" Link="Config\OptimumDiagnostics.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumIndirectRendering.cs" Link="Config\OptimumIndirectRendering.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Model\Mesh\OptimumMeshPartPool.cs" Link="Client\Model\Mesh\OptimumMeshPartPool.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumGreedyMesher.cs" Link="Config\OptimumGreedyMesher.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumThreadGuard.cs" Link="Config\OptimumThreadGuard.cs" />
@@ -29,6 +31,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalMath.cs" Link="Client\Render\OptimumTemporalMath.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalFrame.cs" Link="Client\Render\OptimumTemporalFrame.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalMotion.cs" Link="Client\Render\OptimumTemporalMotion.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumModPasses.cs" Link="Client\Render\OptimumModPasses.cs" />
     <Compile Include="optimum-api-bridge.cs" />
   </ItemGroup>

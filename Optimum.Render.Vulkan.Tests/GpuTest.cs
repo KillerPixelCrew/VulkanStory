@@ -1,12 +1,14 @@
+// Source: Optimum.Render.Vulkan.Tests/GpuTest.cs
+namespace Optimum.Render.Vulkan.Tests
+{
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Config;
+using Vintagestory.API.Client;
 using Xunit;
 using Xunit.Abstractions;
-
-namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
 /// The one place GPU tests get a <see cref="VulkanContext" /> or a
@@ -141,4 +143,164 @@ internal static class GpuTest
         }
         Assert.True(remaining.Count == 0, "device diagnostics:\n" + string.Join("\n", remaining));
     }
+    /// <summary>
+    /// A minimal shader stand-in. The client passes its own IShader and
+    /// IShaderProgram implementations across the seam, so the device must work
+    /// against the interfaces rather than any concrete type.
+    /// </summary>
+    internal sealed class TestShader : IShader
+    {
+        public EnumShaderType Type { get; set; }
+        public string Code { get; set; } = "";
+        public string PrefixCode { get; set; } = "";
+        public bool Compile() => true;
+    }
+
+    internal sealed class TestProgram : IShaderProgram
+    {
+        public int ProgramId { get; set; }
+        public string AssetDomain { get; set; } = "game";
+        public int PassId { get; set; }
+        public string PassName { get; set; } = "test";
+        public bool ClampTexturesToEdge { get; set; }
+        public IShader VertexShader { get; set; } = null!;
+        public IShader FragmentShader { get; set; } = null!;
+        public IShader GeometryShader { get; set; } = null!;
+        public bool Oit { get; set; } = true;
+        public bool Disposed => false;
+        public bool LoadError => false;
+        public Vintagestory.API.Datastructures.OrderedDictionary<string, UBORef> UBOs { get; } = new();
+
+        public void Use() { }
+        public void Stop() { }
+        public bool Compile() => true;
+        public void Dispose() { }
+        public void Uniform(string uniformName, float value) { }
+        public void Uniform(string uniformName, int value) { }
+        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec2f value) { }
+        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec2i value) { }
+        public void Uniform(string uniformName, float valueX, float valueY) { }
+        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec3f value) { }
+        public void Uniform(string uniformName, float valueX, float valueY, float valueZ) { }
+        public void Uniform(string uniformName, float valueX, float valueY, float valueZ, float valueW) { }
+        public void Uniform(string uniformName, Vintagestory.API.MathTools.Vec4f value) { }
+        public void Uniforms4(string uniformName, int count, float[] values) { }
+        public void UniformMatrix(string uniformName, float[] matrix) { }
+        public void BindTexture2D(string samplerName, int textureId, int textureNumber) { }
+        public void BindTextureCube(string samplerName, int textureId, int textureNumber) { }
+        public void UniformMatrices(string uniformName, int count, float[] matrix) { }
+        public void UniformMatrices4x3(string uniformName, int count, float[] matrix) { }
+        public bool HasUniform(string uniformName) => false;
+    }
+
+    internal static int LinkProgram(
+        VulkanDevice device, string vertexCode, string fragmentCode, string name = "test")
+    {
+        var vertex = new TestShader { Type = EnumShaderType.VertexShader, Code = vertexCode };
+        var fragment = new TestShader { Type = EnumShaderType.FragmentShader, Code = fragmentCode };
+
+        Assert.True(device.CompileShader(vertex));
+        Assert.True(device.CompileShader(fragment));
+
+        var program = new TestProgram { PassName = name, VertexShader = vertex, FragmentShader = fragment };
+        int programId = device.LinkProgram(program);
+        Assert.True(programId > 0, device.GetError() ?? "link failed");
+        return programId;
+    }
+
+}
+}
+
+// Source: Optimum.Render.Vulkan.Tests/SetupQueue.cs
+namespace Optimum.Render.Vulkan.Tests
+{
+using System;
+using Optimum.Render.Vulkan.Core;
+using Silk.NET.Vulkan;
+
+/// <summary>
+/// Component tests' stand-in for the synchronous setup submit the renderer no
+/// longer has (Phase 1B step 3 deleted VulkanCommands.SubmitAndWait).
+///
+/// It owns a Transfer timeline and an <see cref="UploadManager" /> for managers
+/// used without a frame ring. <see cref="SubmitAndWait" /> appends the test's
+/// commands to the open upload batch, after every upload recorded so far, submits
+/// the batch on its own and waits for its Transfer value: the order a test wrote
+/// its calls in is the order the GPU runs them. Test code only; the renderer
+/// itself never waits for an upload.
+/// </summary>
+internal sealed unsafe class SetupQueue : IDisposable
+{
+    private readonly VulkanContext _context;
+    private bool _disposed;
+
+    public FrameTimeline Timeline { get; }
+    public RetireQueue Retired { get; }
+    public UploadManager Uploads { get; }
+
+    public SetupQueue(VulkanContext context, ulong stagingPerSlot = 4UL << 20)
+    {
+        _context = context;
+        Timeline = new FrameTimeline(context);
+        Retired = new RetireQueue(Timeline);
+        Uploads = new UploadManager(context, Timeline, Retired, framesInFlight: 2, stagingPerSlot);
+    }
+
+    /// <summary>Records into the open upload batch, submits it and waits for it.</summary>
+    public void SubmitAndWait(Action<CommandBuffer> record)
+    {
+        CommandBuffer commandBuffer = Uploads.BeginRecording(inlineInFrame: false);
+        try
+        {
+            record(commandBuffer);
+        }
+        finally
+        {
+            Uploads.EndRecording();
+        }
+
+        ulong transferValue = Uploads.SubmitStandalone();
+        Timeline.WaitForTransfer(transferValue, WaitSite.Readback);
+        Retired.Collect();
+    }
+
+    /// <summary>
+    /// Moves a standalone image between layouts with a broad synchronization2
+    /// barrier (all commands on both sides), for tests that drive raw images.
+    /// </summary>
+    public void TransitionImage(CommandBuffer commandBuffer, VulkanImage image, ImageLayout target, ImageAspectFlags aspect)
+    {
+        var barrier = new ImageMemoryBarrier2
+        {
+            SType = StructureType.ImageMemoryBarrier2,
+            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
+            SrcAccessMask = AccessFlags2.MemoryWriteBit,
+            DstStageMask = PipelineStageFlags2.AllCommandsBit,
+            DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+            OldLayout = image.Layout,
+            NewLayout = target,
+            Image = image.Handle,
+            SubresourceRange = new ImageSubresourceRange(aspect, 0, 1, 0, 1),
+        };
+
+        var dependency = new DependencyInfo
+        {
+            SType = StructureType.DependencyInfo,
+            ImageMemoryBarrierCount = 1,
+            PImageMemoryBarriers = &barrier,
+        };
+
+        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
+        image.Layout = target;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Uploads.Dispose();
+        Retired.DisposeAll();
+        Timeline.Dispose();
+    }
+}
 }

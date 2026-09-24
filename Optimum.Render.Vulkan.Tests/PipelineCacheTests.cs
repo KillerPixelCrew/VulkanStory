@@ -551,7 +551,7 @@ public class PipelineCacheTests
         const int size = 8;
 
         byte[] colour = UniqueColour();
-        int program = VulkanDeviceIntegrationTests.LinkProgram(device, FullscreenVertex, SolidFragment(colour));
+        int program = GpuTest.LinkProgram(device, FullscreenVertex, SolidFragment(colour));
         int framebuffer = ColourTarget(device, size);
 
         BeginDraw(device, framebuffer, size, program);
@@ -596,7 +596,7 @@ public class PipelineCacheTests
         const int size = 8;
 
         byte[] colour = UniqueColour();
-        int program = VulkanDeviceIntegrationTests.LinkProgram(device, FullscreenVertex, SolidFragment(colour));
+        int program = GpuTest.LinkProgram(device, FullscreenVertex, SolidFragment(colour));
         int framebuffer = ColourTarget(device, size);
 
         BeginDraw(device, framebuffer, size, program);
@@ -651,7 +651,7 @@ public class PipelineCacheTests
                     "The device lacks pipelineCreationCacheControl.");
                 identity = PipelineCacheIdentity.Of(first.ContextForTests.Capabilities);
 
-                int program = VulkanDeviceIntegrationTests.LinkProgram(first, FullscreenVertex, fragment);
+                int program = GpuTest.LinkProgram(first, FullscreenVertex, fragment);
                 int framebuffer = ColourTarget(first, size);
                 BeginDraw(first, framebuffer, size, program);
                 first.DrawFullscreenTriangle();
@@ -669,7 +669,7 @@ public class PipelineCacheTests
             GraphicsPipelineCache pipelines = second!.PipelinesForTests;
             Assert.True(pipelines.AsyncCompiles);
 
-            int relinked = VulkanDeviceIntegrationTests.LinkProgram(second, FullscreenVertex, fragment);
+            int relinked = GpuTest.LinkProgram(second, FullscreenVertex, fragment);
             Assert.Equal(1, pipelines.PendingCompiles);
             Assert.True(pipelines.WaitForBackgroundCompiles(TimeSpan.FromSeconds(60)), "the prewarm did not finish");
             Assert.Equal(1, pipelines.Prewarmed);
@@ -710,7 +710,7 @@ public class PipelineCacheTests
     {
         using VulkanDevice? first = OpenDevice(synchronousPipelines: true, cacheRoot: root);
         if (first == null || !first.ContextForTests.Capabilities.PipelineCreationCacheControl) return false;
-        int program = VulkanDeviceIntegrationTests.LinkProgram(first, FullscreenVertex, fragment);
+        int program = GpuTest.LinkProgram(first, FullscreenVertex, fragment);
         int framebuffer = ColourTarget(first, size);
         BeginDraw(first, framebuffer, size, program);
         first.DrawFullscreenTriangle();
@@ -755,7 +755,7 @@ public class PipelineCacheTests
             Skip.IfNot(pipelines.SeedAccepted, "The driver rejected its own saved cache.");
             pipelines.HoldBackgroundCompilesForTests = true;
 
-            int program = VulkanDeviceIntegrationTests.LinkProgram(second, FullscreenVertex, fragment);
+            int program = GpuTest.LinkProgram(second, FullscreenVertex, fragment);
             Assert.Equal(1, pipelines.PendingCompiles);
 
             int target = ColourTarget(second, size);
@@ -807,7 +807,7 @@ public class PipelineCacheTests
             Skip.If(second == null, "No usable Vulkan device.");
             GraphicsPipelineCache pipelines = second!.PipelinesForTests;
 
-            int program = VulkanDeviceIntegrationTests.LinkProgram(second, FullscreenVertex, fragment);
+            int program = GpuTest.LinkProgram(second, FullscreenVertex, fragment);
             Assert.Equal(1, pipelines.PendingCompiles);
             Assert.True(pipelines.WaitForBackgroundCompiles(TimeSpan.FromSeconds(60)), "the prewarm did not finish");
 

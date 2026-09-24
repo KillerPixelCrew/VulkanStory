@@ -204,7 +204,7 @@ public class TemporalRenderInventoryTests
         // Phase 1B step 4 moved the blit into the present path (Submit B); the
         // flip itself is unchanged and still happens exactly once.
         string presentPath = Read("Optimum.Render.Vulkan/Present/IPresentPath.cs");
-        string vulkanDevice = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        string vulkanDevice = VulkanDeviceSource.Read();
 
         Assert.Contains("This inverted blit is the entire Y-flip story for the backend.", presentPath);
         Assert.Contains("// Source Y runs backwards: this is the flip.", presentPath);

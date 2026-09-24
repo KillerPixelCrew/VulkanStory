@@ -16,8 +16,8 @@ using Xunit.Abstractions;
 
 // The device integration tests' stand-ins for the client's shader types, under names that do
 // not read as a device construction to the GPU suite's helper-bypass check.
-using LinkedProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
-using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+using LinkedProgram = Optimum.Render.Vulkan.Tests.GpuTest.TestProgram;
+using LinkedShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 
 namespace Optimum.Render.Vulkan.Tests;
 

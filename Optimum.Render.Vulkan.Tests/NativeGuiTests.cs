@@ -11,8 +11,8 @@ using Vintagestory.Client.NoObf;
 using Xunit;
 using Xunit.Abstractions;
 
-using LinkedProgram = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestProgram;
-using LinkedShader = Optimum.Render.Vulkan.Tests.VulkanDeviceIntegrationTests.TestShader;
+using LinkedProgram = Optimum.Render.Vulkan.Tests.GpuTest.TestProgram;
+using LinkedShader = Optimum.Render.Vulkan.Tests.GpuTest.TestShader;
 
 namespace Optimum.Render.Vulkan.Tests;
 
@@ -309,8 +309,8 @@ public class NativeGuiTests(ITestOutputHelper output)
         /// </summary>
         private static void BindSamplerUnits(VulkanDevice seam, ShaderProgramBase program, int texture)
         {
-            List<string> names = seam.SamplerNamesOf(program.ProgramId);
-            for (int i = 0; i < names.Count; i++)
+            string[] names = seam.SamplerNamesOf(program.ProgramId);
+            for (int i = 0; i < names.Length; i++)
             {
                 int unit = program.uniformLocations.Count + i;
                 seam.SetSamplerUnit(program.ProgramId, names[i], unit);
