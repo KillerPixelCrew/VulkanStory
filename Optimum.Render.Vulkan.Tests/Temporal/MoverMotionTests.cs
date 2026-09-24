@@ -36,7 +36,7 @@ using Xunit.Abstractions;
 ///   previous matrix - the case every one of these renderers hits on its first
 ///   frame, on a mesh swap, and after a reset.
 ///
-/// As in TaaStandardMotionWriterTests the RGBA16F attachment comes back through
+/// This legacy harness reads the RGBA16F attachment through
 /// an RGBA8 decode pass, because the seam's readback is fixed at four bytes per
 /// pixel from colour attachment 0.
 /// </summary>

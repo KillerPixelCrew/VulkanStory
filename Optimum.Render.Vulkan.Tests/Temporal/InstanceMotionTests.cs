@@ -29,7 +29,7 @@ using Xunit.Abstractions;
 ///   reordered buffer) falls back to camera-only motion and carries reactive 1,
 ///   instead of reprojecting by whatever matrix landed in its slot.
 ///
-/// As in TaaStandardMotionWriterTests the RGBA16F attachment comes back through
+/// This legacy harness reads the RGBA16F attachment through
 /// an RGBA8 decode pass, because the seam's readback is fixed at four bytes per
 /// pixel from colour attachment 0. Decode quantisation is 2*DecodeScale/255 px,
 /// so the tolerances stay above it.

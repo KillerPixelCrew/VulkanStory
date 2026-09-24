@@ -10,6 +10,55 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>Shared shader and uniform setup for the independent motion scenarios.</summary>
 internal static class MotionFixture
 {
+    internal readonly record struct MotionTarget(int Framebuffer, int MotionTexture);
+
+    internal static MotionTarget CreateMotionTarget(VulkanDevice device, int size)
+    {
+        int color = device.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int glow = device.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int motion = device.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba16f,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        int depth = device.CreateTexture2D(size, size, EnumTextureInternalFormat.DepthComponent32,
+            EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+
+        int framebuffer = device.CreateFramebuffer(size, size);
+        device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, color, 0);
+        device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment1, glow, 0);
+        device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment2, motion, 0);
+        device.AttachTexture(framebuffer, EnumFramebufferAttachment.DepthAttachment, depth, 0);
+        device.SetDrawBuffers(framebuffer, 0b111);
+        Assert.True(device.CheckFramebufferComplete(framebuffer, out string status), status);
+        return new MotionTarget(framebuffer, motion);
+    }
+
+    internal static float[] ReadMotion(VulkanDevice device, int texture, int size)
+    {
+        OptimumTextureReadback? readback = device.ReadTextureForParity(texture);
+        Assert.NotNull(readback);
+        Assert.Equal(size, readback.Width);
+        Assert.Equal(size, readback.Height);
+        Assert.NotNull(readback.Floats);
+        Assert.Equal(size * size * 4, readback.Floats.Length);
+        return readback.Floats;
+    }
+
+    internal static int CreateFaceMesh(VulkanDevice device)
+    {
+        var face = new MeshData(4, 6, withNormals: false, withUv: true, withRgba: true, withFlags: true);
+        float[] xy = [-0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f];
+        float[] uv = [0, 0, 1, 0, 1, 1, 0, 1];
+        for (int i = 0; i < 4; i++)
+            face.AddVertexWithFlags(xy[i * 2], xy[i * 2 + 1], 0,
+                uv[i * 2], uv[i * 2 + 1], Vintagestory.API.MathTools.ColorUtil.WhiteArgb,
+                7 << 18);
+        foreach (int index in new[] { 0, 1, 2, 0, 2, 3 }) face.AddIndex(index);
+        int mesh = device.CreateMesh(face, staticDraw: true);
+        Assert.True(mesh > 0, device.GetError() ?? "motion face upload failed");
+        return mesh;
+    }
+
     internal static void SetFloat(VulkanDevice seam, int program, string name, float value)
     {
         int location = seam.GetUniformLocation(program, name);
