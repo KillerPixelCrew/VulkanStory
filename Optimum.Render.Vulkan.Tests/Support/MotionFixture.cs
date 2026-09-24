@@ -10,7 +10,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>Shared shader and uniform setup for the independent motion scenarios.</summary>
 internal static class MotionFixture
 {
-    internal readonly record struct MotionTarget(int Framebuffer, int MotionTexture);
+    internal readonly record struct MotionTarget(int Framebuffer, int ColorTexture, int MotionTexture);
 
     internal static MotionTarget CreateMotionTarget(VulkanDevice device, int size)
     {
@@ -30,7 +30,7 @@ internal static class MotionFixture
         device.AttachTexture(framebuffer, EnumFramebufferAttachment.DepthAttachment, depth, 0);
         device.SetDrawBuffers(framebuffer, 0b111);
         Assert.True(device.CheckFramebufferComplete(framebuffer, out string status), status);
-        return new MotionTarget(framebuffer, motion);
+        return new MotionTarget(framebuffer, color, motion);
     }
 
     internal static float[] ReadMotion(VulkanDevice device, int texture, int size)
@@ -44,7 +44,7 @@ internal static class MotionFixture
         return readback.Floats;
     }
 
-    internal static MeshData CreateFaceData(float z = 0)
+    internal static MeshData CreateFaceData(float z = 0, int flags = 7 << 18)
     {
         var face = new MeshData(4, 6, withNormals: false, withUv: true, withRgba: true, withFlags: true);
         float[] xy = [-0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f];
@@ -52,7 +52,7 @@ internal static class MotionFixture
         for (int i = 0; i < 4; i++)
             face.AddVertexWithFlags(xy[i * 2], xy[i * 2 + 1], z,
                 uv[i * 2], uv[i * 2 + 1], Vintagestory.API.MathTools.ColorUtil.WhiteArgb,
-                7 << 18);
+                flags);
         foreach (int index in new[] { 0, 1, 2, 0, 2, 3 }) face.AddIndex(index);
         return face;
     }

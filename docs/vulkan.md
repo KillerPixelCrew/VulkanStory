@@ -9,15 +9,13 @@ Final acceptance of the refactor is pending. Historical test totals and captures
 not establish correctness of the current build. Select hardware by queried identity
 and capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
 
-At `de19f2f` on 2026-09-24, the Release solution passed all active tests:
-551 Vulkan tests on Intel UHD 770, 744 core tests
-(34 existing skips), and 306 launcher, CLI, bootstrap and installer tests.
-The subsequent standard-object, mover, instanced and entity test replacements
-bring the renderer suite to 528 cases; the eleven current terrain/object/mover/
-instanced/entity cases passed on Intel and NVIDIA. The full
-NVIDIA 556-test renderer run was at the preceding `0011189` revision, before
-these test-only changes. Both GPUs loaded Khronos validation with
-synchronization and best-practices checks. Strict donor
+On 2026-09-24, the current Release solution passed 1,560 tests with zero failures:
+510 Vulkan tests on Intel UHD 770, 744 core tests (plus 34 existing skips),
+and 306 launcher, CLI, bootstrap and installer tests. All 25 consolidated
+terrain, object, entity, liquid, particle and sky motion cases also passed on
+NVIDIA. Both GPUs loaded Khronos validation with synchronization and
+best-practices checks. The Vulkan test project now has 42 C# files, including
+35 test suites. Strict donor
 validation applied all 93 source and 68 Cecil patches; all 43 runtime patches
 compiled against the pinned donor. All 286 packaged SPIR-V modules remained byte
 identical to the pre-refactor baseline. AMD and a real-client scene/performance
