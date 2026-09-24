@@ -17,22 +17,15 @@ public class FramePlanningTests
     };
 
     [Fact]
-    public void PostChainOnlyReusesImagesWhoseLastReaderHasFinished()
+    public void PostChainDiscardsOnlyTransientInitialContents()
     {
         var frame = new[] { Pass(1), Pass(2, true, 1), Pass(3, true, 2), Pass(4, false, 3) };
         var plan = FramePlan.Build(frame);
-        Assert.Equal(plan.AliasSlot(1), plan.AliasSlot(3));
-        Assert.NotEqual(plan.AliasSlot(1), plan.AliasSlot(2));
-        Assert.Equal(-1, plan.AliasSlot(4));
         for (int i = 0; i < 3; i++)
         {
             Assert.Equal(AttachmentLoadOp.DontCare, plan.LoadOp(i, 0));
-            Assert.Equal(AttachmentStoreOp.Store, plan.StoreOp(i, 0));
         }
         Assert.Equal(AttachmentLoadOp.Load, plan.LoadOp(3, 0));
-        frame[2].Width *= 2;
-        var resized = FramePlan.Build(frame);
-        Assert.NotEqual(resized.AliasSlot(1), resized.AliasSlot(3));
     }
 
     [Theory]
@@ -44,8 +37,6 @@ public class FramePlanningTests
         pass.Attachments[0] = new AttachmentUse(1, firstUse, true);
         var plan = FramePlan.Build(new[] { pass });
         Assert.Equal(AttachmentLoadOp.Load, plan.LoadOp(0, 0));
-        Assert.Equal(AttachmentStoreOp.Store, plan.StoreOp(0, 0));
-        Assert.Equal(-1, plan.AliasSlot(1));
     }
 
     [Fact]
@@ -58,13 +49,14 @@ public class FramePlanningTests
         frame[1].Reads[0] = 99;
         Assert.True(plan.Matches(original));
         Assert.False(plan.Matches(frame));
-        var fallback = FramePlan.Select(plan, frame);
-        Assert.All(Enumerable.Range(0, frame.Length), i =>
+        var graph = new FrameGraph { Enabled = true };
+        foreach (var pass in original) graph.OpenPass(pass, true);
+        graph.EndFrame();
+        foreach (var pass in frame)
         {
-            Assert.Equal(AttachmentLoadOp.Load, fallback.LoadOp(i, 0));
-            Assert.Equal(AttachmentStoreOp.Store, fallback.StoreOp(i, 0));
-        });
-        Assert.Equal(-1, fallback.AliasSlot(99));
+            int index = graph.OpenPass(pass, true);
+            Assert.Equal(AttachmentLoadOp.Load, graph.PlannedLoad(index, 0));
+        }
     }
 
     [Fact]

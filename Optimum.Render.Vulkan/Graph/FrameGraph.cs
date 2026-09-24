@@ -180,7 +180,7 @@ internal sealed class FrameGraph
         for (int k = 0; k < _plans.Length; k++)
         {
             FramePlan? plan = _plans[k];
-            _prefixMatches[k] = _prefixMatches[k] && plan != null && !plan.IsConservative &&
+            _prefixMatches[k] = _prefixMatches[k] && plan != null &&
                                 plan.MatchesPass(index, signature);
         }
         _frame.Add(signature);
@@ -233,7 +233,7 @@ internal sealed class FrameGraph
             for (int i = 0; i < _plans.Length; i++)
             {
                 FramePlan? plan = _plans[i];
-                if (plan != null && !plan.IsConservative && plan.Matches(_frame))
+                if (plan != null && plan.Matches(_frame))
                 {
                     match = i;
                     break;
@@ -244,7 +244,7 @@ internal sealed class FrameGraph
                 PlanHits++;
                 VulkanStats.NotePlanHit();
                 // Keep both recurring frame shapes (e.g. alternating TAA history).
-                // A matching immutable plan needs no new snapshots or placement solve.
+                // A matching immutable plan needs no new snapshots or load-op solve.
                 if (match == 1) (_plans[0], _plans[1]) = (_plans[1], _plans[0]);
             }
             else
