@@ -170,8 +170,9 @@ public class SwapchainRetirementTests
         var retirement = new SwapchainRetirement(clock);
         var slot = new Slot("old");
         retirement.Retire(slot, lastPresentValue: 7);
+        retirement.NoteSuccessorReacquired(8);
 
-        for (ulong completed = 0; completed < 7; completed++)
+        for (ulong completed = 0; completed < 8; completed++)
         {
             clock.FrameCompleted = completed;
             Assert.Equal(0, retirement.Collect());
@@ -179,7 +180,7 @@ public class SwapchainRetirementTests
             Assert.Equal(1, retirement.PendingCount);
         }
 
-        clock.FrameCompleted = 7;
+        clock.FrameCompleted = 8;
         Assert.Equal(1, retirement.Collect());
         Assert.Equal(1, slot.DisposeCount);
         Assert.Equal(0, retirement.PendingCount);
@@ -189,28 +190,19 @@ public class SwapchainRetirementTests
         Assert.Equal(1, slot.DisposeCount);
     }
 
-    /// <summary>
-    /// Phase 1 review regression: a replaced slot is keyed on the frame after its last present
-    /// submission. That submission completing only signals the present semaphore; the
-    /// vkQueuePresentKHR queued after it may still be pending, and only the next frame's
-    /// submission (queued after the present) completing proves it was processed.
-    /// </summary>
     [Fact]
-    public void AReplacedSlotOutlivesItsLastPresentSubmissionByOneFrame()
+    public void LaterFramesAloneDoNotProvePresentationCompletion()
     {
-        Assert.Equal(0UL, SwapchainPolicy.RetireAfter(0));
-        Assert.Equal(8UL, SwapchainPolicy.RetireAfter(7));
-
         var clock = new FakeClock();
         var retirement = new SwapchainRetirement(clock);
         var slot = new Slot("old");
-        retirement.Retire(slot, SwapchainPolicy.RetireAfter(7));
-
-        clock.FrameCompleted = 7;
+        retirement.Retire(slot, 7);
+        clock.FrameCompleted = 100;
         Assert.Equal(0, retirement.Collect());
         Assert.Equal(0, slot.DisposeCount);
-
-        clock.FrameCompleted = 8;
+        retirement.NoteSuccessorReacquired(101);
+        Assert.Equal(0, retirement.Collect());
+        clock.FrameCompleted = 101;
         Assert.Equal(1, retirement.Collect());
         Assert.Equal(1, slot.DisposeCount);
     }
@@ -226,26 +218,24 @@ public class SwapchainRetirementTests
     }
 
     [Fact]
-    public void SlotsRetireIndependentlyAndReadyOnesGoInRetirementOrder()
+    public void ResizeStormWaitsForASuccessorAndPreservesRetirementOrder()
     {
         var order = new List<string>();
         var clock = new FakeClock();
         var retirement = new SwapchainRetirement(clock);
-        var a = new Slot("a", order);
-        var b = new Slot("b", order);
-        var c = new Slot("c", order);
-        retirement.Retire(a, 9);
-        retirement.Retire(b, 4);
-        retirement.Retire(c, 6);
-
-        clock.FrameCompleted = 6;
+        retirement.Retire(new Slot("a", order), 4);
+        retirement.Retire(new Slot("b", order), 6);
+        retirement.NoteSuccessorReacquired(10);
+        retirement.Retire(new Slot("c", order), 12);
+        clock.FrameCompleted = 20;
         Assert.Equal(2, retirement.Collect());
-        Assert.Equal(new[] { "b", "c" }, order);
-        Assert.Equal(0, a.DisposeCount);
-
-        clock.FrameCompleted = 9;
+        Assert.Equal(new[] { "a", "b" }, order);
+        Assert.Equal(1, retirement.PendingCount);
+        retirement.NoteSuccessorReacquired(21);
+        Assert.Equal(0, retirement.Collect());
+        clock.FrameCompleted = 21;
         Assert.Equal(1, retirement.Collect());
-        Assert.Equal(new[] { "b", "c", "a" }, order);
+        Assert.Equal(new[] { "a", "b", "c" }, order);
     }
 
     [Fact]

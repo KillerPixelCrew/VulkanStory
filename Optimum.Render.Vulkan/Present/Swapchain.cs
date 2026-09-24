@@ -110,8 +110,8 @@ internal readonly struct PresentTarget
 /// One vkCreateSwapchainKHR result and everything that belongs to it: images,
 /// views, the acquire-semaphore free list (<c>imageCount + 1</c>) and one present
 /// semaphore per image. Created by <see cref="Swapchain" /> and retired as one
-/// unit through <see cref="SwapchainRetirement" /> once the last present
-/// submission that used it completed, so its semaphores die with it.
+/// unit through <see cref="SwapchainRetirement" /> once a successor image
+/// reacquisition proves presentation has released it, so its semaphores die with it.
 /// </summary>
 internal sealed unsafe class SwapchainSlot : IDisposable
 {
@@ -181,6 +181,10 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 
     /// <summary>Frame timeline value of the newest present submission that used one of this slot's images; 0 before the first.</summary>
     public ulong LastPresentValue { get; private set; }
+
+    public uint? FirstPresentedImage { get; private set; }
+
+    public void NotePresented(uint imageIndex) => FirstPresentedImage ??= imageIndex;
 
     public Semaphore PresentSemaphoreFor(uint imageIndex) => _presentSemaphores[imageIndex];
 
@@ -430,7 +434,7 @@ internal sealed unsafe class Swapchain : IDisposable
         // Passing oldSwapchain retires it even when creation fails.
         if (old != null)
         {
-            _retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));
+            _retirement.Retire(old, old.LastPresentValue);
             _current = null;
         }
 
@@ -608,10 +612,13 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>
     /// The present submission waiting on <paramref name="target" />'s acquire
     /// semaphore was accepted with Frame value <paramref name="frameValue" />: the
-    /// semaphore is reusable, and the slot destroyable, once that value completed.
+    /// acquire semaphore is reusable once that value completes. If this reacquired
+    /// the successor's first presented image, completion also releases retired chains.
     /// </summary>
     public void NotePresentSubmitted(in PresentTarget target, ulong frameValue)
     {
+        if (target.Slot.FirstPresentedImage == target.ImageIndex)
+            _retirement.NoteSuccessorReacquired(frameValue);
         target.Slot.ReturnAcquireSemaphoreAfter(target.AcquireSemaphore, frameValue);
         target.Slot.NotePresentSubmitted(frameValue);
     }
@@ -661,6 +668,7 @@ internal sealed unsafe class Swapchain : IDisposable
             result = _swapchainApi.QueuePresent(_context.GraphicsQueue, &presentInfo);
         }
         VulkanStats.NoteWait(WaitSite.Present, waitStart);
+        if (result is Result.Success or Result.SuboptimalKhr) target.Slot.NotePresented(index);
         if (result is Result.ErrorOutOfDateKhr or Result.SuboptimalKhr)
         {
             if (ReferenceEquals(target.Slot, _current)) NeedsRecreation = true;

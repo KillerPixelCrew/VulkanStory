@@ -7,22 +7,15 @@ using Silk.NET.Vulkan;
 namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>
-/// Swapchain slots that were replaced but may still be referenced by work the GPU
-/// has not finished.
-///
-/// A slot (its swapchain handle, images, views, acquire and present semaphores)
-/// is retired as one unit, keyed on the Frame timeline value of the last present
-/// submission that used one of its images. It is destroyed at the first
-/// <see cref="Collect" /> that sees the Frame counter at or past that value: the
-/// batch that blitted into its image and signalled its present semaphore has
-/// completed, and vkQueuePresentKHR, which is synchronous on the CPU, returned
-/// before the slot could be replaced. No vkDeviceWaitIdle is involved.
-///
-/// Render thread only: slots are created, presented and retired there.
+/// Replaced swapchains wait for presentation completion, not just render completion.
+/// A submission waiting on reacquisition of the successor's first presented image
+/// provides the completion proof. Resize storms can leave several old chains queued
+/// until a successor reaches that point. Render thread only.
+/// https://docs.vulkan.org/samples/latest/samples/api/swapchain_recreation/README.html
 /// </summary>
 internal sealed class SwapchainRetirement
 {
-    private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue);
+    private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue, ulong? CompletionValue);
 
     private readonly ITimelineClock _clock;
     private readonly List<Entry> _entries = new();
@@ -31,11 +24,25 @@ internal sealed class SwapchainRetirement
 
     public int PendingCount => _entries.Count;
 
-    /// <summary>Queues <paramref name="slot" /> until Frame value <paramref name="lastPresentValue" /> completed (0: never presented).</summary>
+    /// <summary>Queues a replaced slot (0: never submitted for presentation).</summary>
     public void Retire(IDisposable slot, ulong lastPresentValue) =>
-        _entries.Add(new Entry(slot, lastPresentValue));
+        _entries.Add(new Entry(slot, lastPresentValue, lastPresentValue == 0 ? 0UL : null));
 
-    /// <summary>Destroys, oldest first, every slot whose last present submission completed. Returns how many.</summary>
+    /// <summary>The successor's first presented image was reacquired, and this
+    /// submission waits on its acquire semaphore. Completion proves the old
+    /// chains are no longer being presented. Merely returning from acquire does not.</summary>
+    public void NoteSuccessorReacquired(ulong frameValue)
+    {
+        if (frameValue == 0) throw new ArgumentOutOfRangeException(nameof(frameValue));
+        for (int i = 0; i < _entries.Count; i++)
+        {
+            Entry entry = _entries[i];
+            if (!entry.CompletionValue.HasValue && frameValue > entry.LastPresentValue)
+                _entries[i] = entry with { CompletionValue = frameValue };
+        }
+    }
+
+    /// <summary>Destroys, oldest first, every slot whose presentation completion was proven. Returns how many.</summary>
     public int Collect()
     {
         if (_entries.Count == 0) return 0;
@@ -46,7 +53,7 @@ internal sealed class SwapchainRetirement
         for (int i = 0; i < _entries.Count; i++)
         {
             Entry entry = _entries[i];
-            if (entry.LastPresentValue <= completed)
+            if (entry.CompletionValue is ulong value && value <= completed)
             {
                 entry.Slot.Dispose();
                 destroyed++;
@@ -112,18 +119,6 @@ internal static class SwapchainPolicy
         if (capabilitiesMax > 0 && wanted > capabilitiesMax) wanted = capabilitiesMax;
         return wanted;
     }
-
-    /// <summary>
-    /// The Frame value a replaced slot retires on. Completing the present submission
-    /// (Submit B, <paramref name="lastPresentValue" />) only proves the present semaphore
-    /// was signalled; vkQueuePresentKHR on that image is queued after it and may still be
-    /// pending in the WSI (VUID-vkDestroySwapchainKHR-swapchain-01282). The next Frame
-    /// value is reserved only by the following frame, whose submission is queued after that
-    /// vkQueuePresentKHR, so its completion is the first timeline proof the present was
-    /// processed. Without present fences (VK_EXT_swapchain_maintenance) the Khronos
-    /// swapchain_recreation sample likewise waits for a later operation. 0: never presented.
-    /// </summary>
-    public static ulong RetireAfter(ulong lastPresentValue) => lastPresentValue == 0 ? 0 : lastPresentValue + 1;
 
     /// <summary>A minimised window reports a zero extent; presentation parks until it grows again.</summary>
     public static bool IsParked(Extent2D extent) => extent.Width == 0 || extent.Height == 0;
