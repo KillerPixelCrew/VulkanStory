@@ -731,6 +731,9 @@ public class FrameGraphFrameTests
             Assert.Equal(0.9375f, HalfAt(texels["historyB"], centre, 0));
             Assert.Equal(0.5f, HalfAt(texels["historyA"], centre, 1));
             // Final composition read the history it just wrote and Primary 1 while writing Primary 0.
+            _output.WriteLine($"centre: colour={texels["colour"][centre * 4]},{texels["colour"][centre * 4 + 1]},{texels["colour"][centre * 4 + 2]} " +
+                              $"glow={texels["glow"][centre * 4]},{texels["glow"][centre * 4 + 1]},{texels["glow"][centre * 4 + 2]} " +
+                              $"output={texels["output"][centre * 4]},{texels["output"][centre * 4 + 1]},{texels["output"][centre * 4 + 2]}");
             Assert.Equal(247, texels["output"][centre * 4]);
             Assert.Equal(102, texels["output"][centre * 4 + 1]);
             Assert.Equal(51, texels["output"][centre * 4 + 2]);

@@ -443,8 +443,10 @@ public class TransientAllocatorTests
         (byte r1, byte g1, byte b1) = (g0, b0, Half8(r0));
         (byte r2, byte g2, byte b2) = (g1, b1, Half8(r1));
         (byte r3, byte g3, byte b3) = (g2, b2, Half8(r2));
-        _output.WriteLine("pixel " + x + "," + y + ": " + on.Value.Pixels[index] + "," + on.Value.Pixels[index + 1] +
-                          "," + on.Value.Pixels[index + 2] + " expected about " + r3 + "," + g3 + "," + b3);
+        _output.WriteLine("pixel " + x + "," + y + ": off=" +
+                          off.Value.Pixels[index] + "," + off.Value.Pixels[index + 1] + "," + off.Value.Pixels[index + 2] +
+                          " on=" + on.Value.Pixels[index] + "," + on.Value.Pixels[index + 1] + "," +
+                          on.Value.Pixels[index + 2] + " expected about " + r3 + "," + g3 + "," + b3);
         Assert.InRange(on.Value.Pixels[index], (byte)Math.Max(0, r3 - 2), (byte)Math.Min(255, r3 + 2));
         Assert.InRange(on.Value.Pixels[index + 1], (byte)Math.Max(0, g3 - 2), (byte)Math.Min(255, g3 + 2));
         Assert.InRange(on.Value.Pixels[index + 2], (byte)Math.Max(0, b3 - 2), (byte)Math.Min(255, b3 + 2));
