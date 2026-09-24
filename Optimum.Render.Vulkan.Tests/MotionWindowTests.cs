@@ -950,3 +950,210 @@ public sealed class InstancedMotionContractTests(ITestOutputHelper output)
         }
     }
 }
+
+/// <summary>Previous skinning and model motion from the opaque entity shader.</summary>
+public sealed class EntityMotionContractTests(ITestOutputHelper output)
+{
+    private const int Size = 64;
+    private const int AnimationUboBytes = 35 * 16 * sizeof(float);
+    private static readonly float[] Identity =
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
+
+    private static float[] Translation(float x, float y, float z) =>
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        x, y, z, 1,
+    ];
+
+    [SkippableFact]
+    public void SeparatePreviousBoneAndModelSourcesProduceExpectedPixels()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            Check(new Scene(device!, Identity).Draw(Identity), 0, 0, 0.5f, 0);
+            Check(new Scene(device!, Translation(0.25f, 0, 0)).Draw(Identity),
+                8, 0, 0.5f, 0);
+            Check(new Scene(device!, Translation(0, -0.125f, 0)).Draw(Identity),
+                0, -4, 0.5f, 0);
+            Check(new Scene(device!, Translation(-0.1875f, 0.0625f, 0)).Draw(Identity),
+                -6, 2, 0.5f, 0);
+            Check(new Scene(device!, Identity).Draw(Translation(-0.25f, 0.125f, 0)),
+                -8, 4, 0.5f, 0);
+            GpuTest.AssertClean(device!);
+        }
+    }
+
+    [SkippableFact]
+    public void InvalidHistoryWarpAndBehindCameraKeepTheirReactiveContract()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            Check(new Scene(device!, Translation(0.75f, 0.75f, 0)).Draw(
+                Translation(-0.5f, 0.5f, 0), history: false,
+                cameraX: 0.25f, cameraY: -0.125f), 8, -4, 0.5f, 1);
+
+            double offset = (Math.Sin(0) + Math.Sin(0.5) + Math.Sin(1) / 3) / 30 * 8;
+            float expectedWarp = (float)(offset * Size / 2);
+            Assert.True(expectedWarp > 1);
+            Check(new Scene(device!, Identity).Draw(Identity, previousWarp: 8),
+                expectedWarp, 0, 0.5f, 0);
+
+            float[] behindProjection =
+            [
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, -1,
+                0, 0, 0, 0,
+            ];
+            Check(new Scene(device!, Identity).Draw(Identity,
+                previousView: Translation(0, 0, 1),
+                previousProjection: behindProjection, reactive: 0.6f),
+                0, 0, 0, 0.6f);
+            GpuTest.AssertClean(device!);
+        }
+    }
+
+    private static void Check(float[] pixels, float x, float y, float depth, float reactive)
+    {
+        int centre = ((Size / 2) * Size + Size / 2) * 4;
+        Assert.InRange(pixels[centre], x - 0.05f, x + 0.05f);
+        Assert.InRange(pixels[centre + 1], y - 0.05f, y + 0.05f);
+        Assert.InRange(pixels[centre + 2], reactive - 0.01f, reactive + 0.01f);
+        Assert.InRange(pixels[centre + 3], depth - 0.01f, depth + 0.01f);
+    }
+
+    private sealed class Scene
+    {
+        private readonly VulkanDevice device;
+        private readonly int program;
+        private readonly MotionTarget target;
+        private readonly int mesh;
+
+        public Scene(VulkanDevice device, float[] previousBone)
+        {
+            this.device = device;
+            var variant = new ShaderCorpus.ShaderVariant
+            {
+                Name = "taa-entity-opaque",
+                UseOit = 0,
+                TaaMotion = 1,
+                TaaMotionLocation = 2,
+                MaxAnimatedElements = 35,
+            };
+            var stages = ShaderCorpus.BuildProgram("entityanimated", ShaderCorpus.LoadShaderFiles(),
+                ShaderCorpus.LoadIncludes(), variant);
+            program = LinkFromCorpus(device, stages, "entityanimated", oit: false);
+            foreach (string required in new[] { "taaRenderSize", "taaHistoryValid" })
+                Assert.True(device.GetUniformLocation(program, required) >= 0, required + " is missing");
+            int unit = BindEveryDeclaredSampler(device, device, program);
+            int atlas = CreateWhiteTexture(device);
+            device.SetSamplerUnit(program, "entityTex", unit);
+            device.BindTexture(unit, atlas);
+
+            int current = device.CreateUniformBuffer(program, 0, "Animation", AnimationUboBytes);
+            int previous = device.CreateUniformBuffer(program, 1, "AnimationPrev", AnimationUboBytes);
+            WriteBone(device, current, Identity);
+            WriteBone(device, previous, previousBone);
+            target = CreateMotionTarget(device, Size);
+            mesh = device.CreateMesh(SkinnedFace(), staticDraw: true);
+            Assert.True(mesh > 0, device.GetError() ?? "entity face upload failed");
+        }
+
+        public float[] Draw(float[] previousModel, bool history = true, float cameraX = 0,
+            float cameraY = 0, float previousWarp = 0, float[]? previousView = null,
+            float[]? previousProjection = null, float reactive = 0)
+        {
+            device.BeginFrame();
+            device.BindFramebuffer(target.Framebuffer);
+            device.ClearColor(0, 0, 0, 0, 1);
+            device.ClearColor(1, 0, 0, 0, 1);
+            device.ClearColor(2, 0, 0, 0, 0);
+            device.ClearDepth(1);
+            device.UseProgram(program);
+            SetMatrix(device, program, "projectionMatrix", Identity);
+            SetMatrix(device, program, "viewMatrix", Identity);
+            SetMatrix(device, program, "modelMatrix", Identity);
+            SetMatrix(device, program, "toShadowMapSpaceMatrixFar", Identity);
+            SetMatrix(device, program, "toShadowMapSpaceMatrixNear", Identity);
+            SetMatrix(device, program, "prevProjectionMatrix", previousProjection ?? Identity);
+            SetMatrix(device, program, "prevViewMatrix", previousView ?? Identity);
+            SetMatrix(device, program, "prevModelMatrix", previousModel);
+            SetInt(device, program, "taaHistoryValid", history ? 1 : 0);
+            SetFloat(device, program, "taaReactive", history ? reactive : 1);
+            SetFloat3(device, program, "cameraPosDelta", cameraX, cameraY, 0);
+            SetFloat2(device, program, "taaRenderSize", Size, Size);
+            SetFloat2(device, program, "taaJitterPx", 0, 0);
+            SetFloat(device, program, "alphaTest", -1);
+            SetFloat(device, program, "viewDistance", 1024);
+            SetFloat(device, program, "viewDistanceLod0", 1024);
+            SetFloat(device, program, "zNear", 0.1f);
+            SetFloat(device, program, "zFar", 1024);
+            SetFloat(device, program, "shadowRangeFar", 1024);
+            SetFloat(device, program, "shadowRangeNear", 64);
+            SetFloat(device, program, "shadowMapWidthInv", 1);
+            SetFloat(device, program, "shadowMapHeightInv", 1);
+            SetInt(device, program, "entityId", 1);
+            SetFloat3(device, program, "rgbaAmbientIn", 1, 1, 1);
+            SetFloat4(device, program, "rgbaLightIn", 1, 1, 1, 1);
+            SetFloat4(device, program, "rgbaFogIn", 1, 1, 1, 1);
+            SetFloat4(device, program, "renderColor", 1, 1, 1, 1);
+            SetFloat2(device, program, "frameSize", Size, Size);
+            SetInt(device, program, "perceptionEffectId", 1);
+            SetInt(device, program, "prevPerceptionEffectId", 1);
+            SetFloat(device, program, "windWaveIntensity", 1);
+            SetFloat(device, program, "waterWaveIntensity", 1);
+            SetFloat(device, program, "prevWindWaveIntensity", 1);
+            SetFloat(device, program, "prevWaterWaveIntensity", 1);
+            SetFloat(device, program, "globalWarpIntensity", 0);
+            SetFloat(device, program, "prevGlobalWarpIntensity", previousWarp);
+
+            device.SetViewport(0, 0, Size, Size);
+            device.SetDepthTest(true);
+            device.SetDepthMask(true);
+            device.SetDepthFunc(0x203); // GL_LEQUAL
+            device.SetCullFace(false);
+            device.SetBlend(false, EnumBlendMode.Standard);
+            device.DrawMesh(mesh);
+            float[] pixels = ReadMotion(device, target.MotionTexture, Size);
+            device.Present();
+            return pixels;
+        }
+
+        private static unsafe void WriteBone(VulkanDevice device, int buffer, float[] matrix)
+        {
+            fixed (float* values = matrix)
+                device.UpdateUniformBuffer(buffer, (IntPtr)values, 0, 16 * sizeof(float));
+        }
+
+        private static MeshData SkinnedFace()
+        {
+            MeshData mesh = CreateFaceData();
+            mesh.CustomFloats = new CustomMeshDataPartFloat(4)
+            {
+                Count = 4,
+                InterleaveSizes = [1],
+                InterleaveOffsets = [0],
+                InterleaveStride = 4,
+            };
+            mesh.CustomInts = new CustomMeshDataPartInt(4)
+            {
+                Count = 4,
+                InterleaveSizes = [1],
+                InterleaveOffsets = [0],
+                InterleaveStride = 4,
+            };
+            return mesh;
+        }
+    }
+}
