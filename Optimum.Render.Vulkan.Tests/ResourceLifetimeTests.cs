@@ -566,4 +566,53 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
         finally { device.Dispose(); }
         GpuTest.AssertClean(device);
     }
+
+    [SkippableFact]
+    public unsafe void YoungDescriptorsReuseSlotStorageAndThenBecomeCached()
+    {
+        var device = Open();
+        try
+        {
+            device.ShortLivedFramesForTests = 4;
+            int target = Attach(device, device.CreateTexture2D(4, 4, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false), 4, 4);
+            int program = GpuTest.LinkProgram(device, Triangle, """
+                #version 330 core
+                uniform sampler2D sky;
+                out vec4 color;
+                void main() { color = texelFetch(sky, ivec2(0), 0); }
+                """, "descriptor-age");
+            device.SetSamplerUnit(program, "sky", 0);
+            for (int i = 0; i < 5; i++) { device.BeginFrame(); device.Present(); }
+            byte[] pixel = { 40, 120, 200, 255 };
+            int texture;
+            fixed (byte* pointer = pixel) texture = device.CreateTexture2D(1, 1, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, (IntPtr)pointer, false);
+            int cached = -1;
+            var poolCounts = new Dictionary<int, int>();
+            for (int frame = 0; frame < 10; frame++)
+            {
+                device.BeginFrame();
+                int slot = device.CurrentSlotForTests;
+                var arena = device.DescriptorArenaForTests(slot);
+                Assert.Equal(0, arena.SetsThisFrame);
+                device.BindTexture(0, texture);
+                Draw(device, target, program, 4, 4);
+                long allocations = arena.Allocations;
+                for (int i = 0; i < 16; i++) device.DrawFullscreenTriangle();
+                Assert.Equal(allocations, arena.Allocations);
+                if (frame == 0) cached = device.CachedDescriptorSets;
+                if (frame < 3) { Assert.Equal(1, arena.SetsThisFrame); Assert.Equal(cached, device.CachedDescriptorSets); }
+                if (frame >= 4) { Assert.Equal(0, arena.SetsThisFrame); Assert.Equal(cached + 1, device.CachedDescriptorSets); }
+                if (poolCounts.TryGetValue(slot, out int pools)) Assert.Equal(pools, arena.PoolCount);
+                else poolCounts.Add(slot, arena.PoolCount);
+                byte[] actual = Read(device, 4, 4);
+                for (int i = 0; i < actual.Length; i++) Assert.Equal(pixel[i % 4], actual[i]);
+                device.Present();
+            }
+            device.DeleteTexture(texture);
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
 }

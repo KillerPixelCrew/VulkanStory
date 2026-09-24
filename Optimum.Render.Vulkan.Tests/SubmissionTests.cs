@@ -455,4 +455,105 @@ public class SubmissionTests(ITestOutputHelper output)
         }
         ValidationAssert.NoErrors(messages);
     }
+
+    [SkippableTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DynamicStateReusePreservesPixelsAcrossPartialSubmissions(bool cached)
+    {
+        var device = OpenDevice();
+        try
+        {
+            device.DynamicStateMaskingForTests = cached;
+            int target = Target(device);
+            int red = GpuTest.LinkProgram(device, Triangle, """
+                #version 330 core
+                out vec4 color;
+                void main() { color = vec4(1, 0, 0, 1); }
+                """, "state-red");
+            int green = GpuTest.LinkProgram(device, Triangle, """
+                #version 330 core
+                out vec4 color;
+                void main() { color = vec4(0, 1, 0, 1); }
+                """, "state-green");
+            int complete = device.DynamicStateCommandsPerDrawForTests;
+            for (int frame = 0; frame < 3; frame++)
+            {
+                device.BeginFrame();
+                Prepare(device, target, red, 8); device.SetColorMask(true, true, true, true);
+                device.SetScissorEnabled(false); device.ClearColor(0, 0, 0, 0, 1);
+                device.SetViewport(0, 0, 4, 8);
+                long commands = device.DynamicStateCommandsForTests;
+                for (int i = 0; i < 32; i++) device.DrawFullscreenTriangle();
+                Assert.Equal((cached ? 1 : 32) * complete, device.DynamicStateCommandsForTests - commands);
+                device.UseProgram(green); device.SetViewport(0, 0, 8, 8);
+                device.SetScissorEnabled(true); device.SetScissor(4, 4, 4, 4);
+                device.DrawFullscreenTriangle();
+                byte[] pixels = Read(device, target);
+                for (int y = 0; y < 8; y++)
+                    for (int x = 0; x < 8; x++)
+                    {
+                        int at = (y * 8 + x) * 4;
+                        Assert.Equal(x < 4 ? 255 : 0, pixels[at]);
+                        Assert.Equal(x >= 4 && y >= 4 ? 255 : 0, pixels[at + 1]);
+                        Assert.Equal(0, pixels[at + 2]); Assert.Equal(255, pixels[at + 3]);
+                    }
+                commands = device.DynamicStateCommandsForTests;
+                device.DrawFullscreenTriangle(); // Same state, new command buffer after readback.
+                Assert.Equal(complete, device.DynamicStateCommandsForTests - commands);
+                device.Present();
+            }
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
+    [SkippableFact]
+    public void IndirectOverflowAndLaterGrowthPreserveEveryDrawsRegion()
+    {
+        var device = OpenDevice();
+        try
+        {
+            device.IndirectMinimumCapacityForTests = 40; // Two indexed commands fit initially.
+            var positions = new float[48]; var indices = new int[24];
+            for (int strip = 0; strip < 4; strip++)
+            {
+                float left = -1 + strip * 0.5f, right = left + 0.5f;
+                new[] { left, -1f, 0f, right, -1f, 0f, right, 1f, 0f, left, 1f, 0f }.CopyTo(positions, strip * 12);
+                new[] { 0, 1, 2, 0, 2, 3 }.Select(index => index + strip * 4).ToArray().CopyTo(indices, strip * 6);
+            }
+            int mesh = device.CreateMesh(new MeshData(16, 24) { xyz = positions, Indices = indices, VerticesCount = 16, IndicesCount = 24 }, false);
+            int program = GpuTest.LinkProgram(device, """
+                #version 330 core
+                layout(location = 0) in vec3 position;
+                void main() { gl_Position = vec4(position, 1); }
+                """, """
+                #version 330 core
+                uniform float tint;
+                out vec4 color;
+                void main() { color = vec4(tint, 1, 1, 1); }
+                """, "indirect-region-lifetime");
+            int tint = device.GetUniformLocation(program, "tint");
+            int[] targets = Enumerable.Range(0, 3).Select(_ => Target(device)).ToArray();
+            for (int frame = 0; frame < 3; frame++)
+            {
+                device.BeginFrame(); Prepare(device, targets[frame], program, 8);
+                device.SetColorMask(true, true, true, true); device.ClearColor(0, 0, 0, 0, 1);
+                device.SetUniform(program, tint, (30 + frame * 60) / 255f);
+                for (int strip = 0; strip < 4; strip++)
+                    device.DrawMeshMulti(mesh, new[] { strip * 6 * sizeof(int), 0 }, new[] { 6 }, 1, false);
+                Assert.Equal(2, device.IndirectOverflowsForTests);
+                if (frame == 0) Assert.Equal(40UL, device.IndirectRingForTests.CapacityOf(device.CurrentSlotForTests));
+                if (frame == 2) Assert.True(device.IndirectGrowthsForTests > 0);
+                device.Present();
+            }
+            // Read only after slot reuse; early readbacks would hide lifetime mistakes.
+            device.BeginFrame();
+            for (int frame = 0; frame < targets.Length; frame++)
+                Assert.Equal(Pixels(8, (byte)(30 + frame * 60), 255, 255), Read(device, targets[frame]));
+            device.Present(); device.DeleteMesh(mesh);
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
 }
