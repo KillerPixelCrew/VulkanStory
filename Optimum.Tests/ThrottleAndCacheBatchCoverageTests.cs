@@ -36,7 +36,7 @@ public class ThrottleAndCacheBatchCoverageTests
     [Fact]
     public void SystemRenderPlayerEffectsOnBeforeRenderIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = PatcherSource.Read();
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemRenderPlayerEffects\", \"onBeforeRender\", 1", programSource);
     }
 
@@ -62,7 +62,7 @@ public class ThrottleAndCacheBatchCoverageTests
     [Fact]
     public void SystemSoundEngineOnRenderFrameIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = PatcherSource.Read();
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemSoundEngine\", \"OnRenderFrame\", 2", programSource);
     }
 

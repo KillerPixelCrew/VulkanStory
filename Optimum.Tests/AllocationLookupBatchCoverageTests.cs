@@ -31,7 +31,7 @@ public class AllocationLookupBatchCoverageTests
     [Fact]
     public void UpdateFreeMouseIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = PatcherSource.Read();
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"UpdateFreeMouse\", 0", programSource);
     }
 
@@ -149,7 +149,7 @@ public class AllocationLookupBatchCoverageTests
     [Fact]
     public void AllFourEditedAmbientManagerMethodsAreRegisteredAsCecilTransplantTargets()
     {
-        string programSource = PatcherSource.Read();
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
 
         Assert.Contains("\"Vintagestory.Client.NoObf.AmbientManager\", \"UpdateAmbient\", 1", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.AmbientManager\", \"setWaterColors\", 0", programSource);
@@ -179,7 +179,7 @@ public class AllocationLookupBatchCoverageTests
     [Fact]
     public void OnRenderFrame3DIsRegisteredAsACecilTransplantTarget()
     {
-        string programSource = PatcherSource.Read();
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"Vintagestory.Client.NoObf.SystemRenderSkyColor\", \"OnRenderFrame3D\", 1", programSource);
     }
 

@@ -1,6 +1,6 @@
-# Generated from Optimum.Patcher/PatchManifest.cs.
-# Regenerate: bash scripts/update-cecil-owned.sh
-# Source patches with a release effect transplanted into vanilla by Mono.Cecil.
+# Source patches transplanted into vanilla by Optimum.Patcher/Program.cs.
+# Keep this list aligned with its method, member and hook targets.
+# scripts/check-patches.sh checks donor application and ownership.
 patches/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch
@@ -15,6 +15,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patc
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
@@ -53,6 +54,7 @@ patches/VintagestoryLib/Vintagestory.ClientNative/Screenshot.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch

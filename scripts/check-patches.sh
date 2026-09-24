@@ -6,8 +6,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 patches_dir="$repo_root/patches"
 vanilla_patch_projects="VintagestoryLib Vintagestory"
 cecil_list="$patches_dir/cecil-owned.list"
-patcher_manifest="$repo_root/Optimum.Patcher/PatchManifest.cs"
-patcher_release_dll="$repo_root/Optimum.Patcher/bin/Release/net10.0/Optimum.Patcher.dll"
+patcher_program="$repo_root/Optimum.Patcher/Program.cs"
 
 usage() {
   cat <<'EOF'
@@ -25,7 +24,7 @@ still counts as a conflict.
 
 The script marks absent targets in partial checkouts as unavailable. Use
 --strict-unavailable when every fork should exist, or when a mismatch between
-patches/cecil-owned.list and Optimum.Patcher/PatchManifest.cs's target list
+patches/cecil-owned.list and Optimum.Patcher/Program.cs's own target list
 should fail the run instead of just printing a warning.
 EOF
 }
@@ -152,7 +151,7 @@ check_cecil_cross_reference() {
   local -A expected=()
   local type rel
 
-  if [[ ! -f "$patcher_manifest" ]]; then
+  if [[ ! -f "$patcher_program" ]]; then
     return 0
   fi
 
@@ -164,28 +163,17 @@ check_cecil_cross_reference() {
       continue
     fi
     if [[ -z "${cecil_owned["$rel"]:-}" ]]; then
-      echo "cecil-owned.list is missing a patch PatchManifest.cs targets: $rel" >&2
+      echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(ClientNative|Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_manifest" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(ClientNative|Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then
-      echo "cecil-owned.list lists a patch no PatchManifest.cs target maps to: $rel" >&2
+      echo "cecil-owned.list lists a patch no Program.cs target maps to: $rel" >&2
       mismatch=1
     fi
   done
-
-  # A built patcher reports the exact existing source patches reached by its
-  # typed operations. Keep the checked-in list byte-for-byte in that order.
-  if [[ -f "$patcher_release_dll" ]] && command -v dotnet >/dev/null 2>&1; then
-    if ! diff -u \
-      <(grep '^patches/VintagestoryLib/' "$cecil_list" | tr -d '\r') \
-      <(dotnet "$patcher_release_dll" --list-cecil-owned "$repo_root" | tr -d '\r'); then
-      echo "cecil-owned.list differs from PatchManifest.cs's generated ownership report" >&2
-      mismatch=1
-    fi
-  fi
 
   return "$mismatch"
 }
@@ -325,7 +313,7 @@ if [[ "$runtime_total" -gt 0 ]]; then
 fi
 
 if [[ "$cecil_cross_reference_mismatch" == "1" ]]; then
-  echo "cecil-owned.list and Optimum.Patcher/PatchManifest.cs disagree, see warnings above." >&2
+  echo "cecil-owned.list and Optimum.Patcher/Program.cs disagree, see warnings above." >&2
   if [[ "$strict_unavailable" == "1" ]]; then
     exit 1
   fi

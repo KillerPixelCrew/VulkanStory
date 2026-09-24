@@ -148,11 +148,10 @@ namespace Optimum.Tests
 {
 using System.IO;
 
-/// <summary>The patch selection and CLI source, kept separate at runtime.</summary>
+/// <summary>The patch selection and command-line source.</summary>
 internal static class PatcherSource
 {
     public static string Read() =>
-        File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/PatchManifest.cs")) + "\n" +
         File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
 }
 }
