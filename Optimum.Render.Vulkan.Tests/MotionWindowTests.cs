@@ -1,8 +1,12 @@
 using System;
+using System.Linq;
 using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Shaders;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 using Xunit;
 using Xunit.Abstractions;
+using static Optimum.Render.Vulkan.Tests.MotionFixture;
 
 namespace Optimum.Render.Vulkan.Tests;
 
@@ -375,6 +379,207 @@ public class MotionWindowTests
             AssertEveryPixel(glowAfterWrite, 4, new byte[] { 255, 0, 0, 255 }, "glow written after it rejoined");
 
             GpuTest.AssertClean(seam);
+        }
+    }
+}
+
+/// <summary>GPU contract for the terrain shaders' TAA motion attachment.</summary>
+public sealed class TerrainMotionContractTests(ITestOutputHelper output)
+{
+    private const int Size = 64;
+    private const int UpNormalFlags = 7 << 18;
+    private static readonly float[] Identity =
+    [
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ];
+
+    [SkippableTheory]
+    [InlineData("chunkopaque")]
+    [InlineData("chunktopsoil")]
+    public void TerrainWritesPreviousMinusCurrentPixelsAndDepth(string shader)
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            var scene = new Scene(device!, shader);
+
+            // Identity projections map one NDC unit to half the render width.
+            // Both axes and both signs matter: a magnitude-only check misses
+            // flipped or swapped motion vectors.
+            Check(scene.Draw(0, 0, 0), 0, 0);
+            Check(scene.Draw(0.25f, 0, 0), 8, 0);
+            Check(scene.Draw(0, -0.125f, 0), 0, -4);
+            Check(scene.Draw(-0.1875f, 0.0625f, 0), -6, 2);
+
+            GpuTest.AssertClean(device!);
+        }
+    }
+
+    [SkippableTheory]
+    [InlineData("chunkopaque")]
+    [InlineData("chunktopsoil")]
+    public void PreviousWarpMovesTheVectorWithoutWritingUncoveredPixels(string shader)
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            var scene = new Scene(device!, shader);
+            float[] motion = scene.Draw(0, 0, 8);
+
+            // Vertexwarp's phase is zero for this face. Compute its displacement
+            // independently of the shader output, then convert NDC to pixels.
+            double warp = (Math.Sin(0) + Math.Sin(0.5) + Math.Sin(1) / 3) / 30 * 8;
+            float expectedX = (float)(warp * Size / 2);
+            Assert.True(expectedX > 1);
+            Check(motion, expectedX, 0);
+            Assert.InRange(Pixel(motion, 2, 2, 3), 0, 0.001f);
+
+            GpuTest.AssertClean(device!);
+        }
+    }
+
+    private static void Check(float[] pixels, float expectedX, float expectedY)
+    {
+        Assert.InRange(Pixel(pixels, Size / 2, Size / 2, 0), expectedX - 0.05f, expectedX + 0.05f);
+        Assert.InRange(Pixel(pixels, Size / 2, Size / 2, 1), expectedY - 0.05f, expectedY + 0.05f);
+        Assert.InRange(Pixel(pixels, Size / 2, Size / 2, 3), 0.49f, 0.51f);
+    }
+
+    private static float Pixel(float[] pixels, int x, int y, int channel) =>
+        pixels[(y * Size + x) * 4 + channel];
+
+    private sealed class Scene
+    {
+        private readonly VulkanDevice device;
+        private readonly int program;
+        private readonly int framebuffer;
+        private readonly int motion;
+        private readonly int mesh;
+
+        public Scene(VulkanDevice device, string shader)
+        {
+            this.device = device;
+            var variant = ShaderCorpus.Variants().Single(v => v.Name == "taa-no-ssao");
+            Assert.Equal(1, variant.TaaMotion);
+            Assert.Equal(2, variant.TaaMotionLocation);
+            var stages = ShaderCorpus.BuildProgram(shader, ShaderCorpus.LoadShaderFiles(),
+                ShaderCorpus.LoadIncludes(), variant);
+            program = LinkFromCorpus(device, stages, shader, oit: true);
+            Assert.True(device.GetUniformLocation(program, "taaRenderSize") >= 0,
+                shader + " has no motion writer");
+
+            int unit = BindEveryDeclaredSampler(device, device, program);
+            int atlas = CreateWhiteTexture(device);
+            foreach (string sampler in new[] { "terrainTex", "terrainTexLinear" })
+            {
+                device.SetSamplerUnit(program, sampler, unit);
+                device.BindTexture(unit++, atlas);
+            }
+
+            int color = Texture(EnumTextureInternalFormat.Rgba8);
+            int glow = Texture(EnumTextureInternalFormat.Rgba8);
+            motion = Texture(EnumTextureInternalFormat.Rgba16f);
+            int depth = device.CreateTexture2D(Size, Size, EnumTextureInternalFormat.DepthComponent32,
+                EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+            framebuffer = device.CreateFramebuffer(Size, Size);
+            device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, color, 0);
+            device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment1, glow, 0);
+            device.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment2, motion, 0);
+            device.AttachTexture(framebuffer, EnumFramebufferAttachment.DepthAttachment, depth, 0);
+            device.SetDrawBuffers(framebuffer, 0b111);
+            Assert.True(device.CheckFramebufferComplete(framebuffer, out string status), status);
+
+            mesh = device.CreateMesh(Face(), staticDraw: true);
+            Assert.True(mesh > 0, device.GetError() ?? "terrain face upload failed");
+        }
+
+        private int Texture(EnumTextureInternalFormat format) =>
+            device.CreateTexture2D(Size, Size, format, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+
+        public float[] Draw(float cameraX, float cameraY, float previousWarp)
+        {
+            device.BeginFrame();
+            device.BindFramebuffer(framebuffer);
+            device.ClearColor(0, 0, 0, 0, 1);
+            device.ClearColor(1, 0, 0, 0, 1);
+            device.ClearColor(2, 0, 0, 0, 0);
+            device.ClearDepth(1);
+            device.UseProgram(program);
+
+            SetMatrix(device, program, "projectionMatrix", Identity);
+            SetMatrix(device, program, "modelViewMatrix", Identity);
+            SetMatrix(device, program, "prevProjectionMatrix", Identity);
+            SetMatrix(device, program, "prevModelViewMatrix", Identity);
+            SetMatrix(device, program, "toShadowMapSpaceMatrixFar", Identity);
+            SetMatrix(device, program, "toShadowMapSpaceMatrixNear", Identity);
+            SetFloat3(device, program, "cameraPosDelta", cameraX, cameraY, 0);
+            SetFloat2(device, program, "taaRenderSize", Size, Size);
+            SetFloat2(device, program, "taaJitterPx", 0, 0);
+            SetViewUniforms();
+            SetWarpUniforms(previousWarp);
+
+            device.SetViewport(0, 0, Size, Size);
+            device.SetDepthTest(true);
+            device.SetDepthMask(true);
+            device.SetDepthFunc(0x203); // GL_LEQUAL
+            device.SetCullFace(false);
+            device.SetBlend(false, EnumBlendMode.Standard);
+            device.DrawMesh(mesh);
+
+            OptimumTextureReadback? readback = device.ReadTextureForParity(motion);
+            device.Present();
+            Assert.NotNull(readback);
+            Assert.Equal(Size, readback.Width);
+            Assert.Equal(Size, readback.Height);
+            Assert.NotNull(readback.Floats);
+            Assert.Equal(Size * Size * 4, readback.Floats.Length);
+            return readback.Floats;
+        }
+
+        private void SetViewUniforms()
+        {
+            SetFloat(device, program, "viewDistance", 1024);
+            SetFloat(device, program, "viewDistanceLod0", 1024);
+            SetFloat(device, program, "alphaTest", 0.001f);
+            SetFloat(device, program, "zNear", 0.1f);
+            SetFloat(device, program, "zFar", 1024);
+            SetFloat(device, program, "shadowRangeFar", 1024);
+            SetFloat(device, program, "shadowRangeNear", 64);
+            SetFloat(device, program, "shadowMapWidthInv", 1);
+            SetFloat(device, program, "shadowMapHeightInv", 1);
+            SetFloat2(device, program, "blockTextureSize", 1, 1);
+            SetFloat3(device, program, "rgbaAmbientIn", 1, 1, 1);
+            SetFloat2(device, program, "frameSize", Size, Size);
+        }
+
+        private void SetWarpUniforms(float previousWarp)
+        {
+            SetInt(device, program, "perceptionEffectId", 1);
+            SetInt(device, program, "prevPerceptionEffectId", 1);
+            SetFloat(device, program, "windWaveIntensity", 1);
+            SetFloat(device, program, "waterWaveIntensity", 1);
+            SetFloat(device, program, "prevWindWaveIntensity", 1);
+            SetFloat(device, program, "prevWaterWaveIntensity", 1);
+            SetFloat(device, program, "globalWarpIntensity", 0);
+            SetFloat(device, program, "prevGlobalWarpIntensity", previousWarp);
+        }
+
+        private static MeshData Face()
+        {
+            var face = new MeshData(4, 6, withNormals: false, withUv: true, withRgba: true, withFlags: true);
+            float[] xy = [-0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f];
+            float[] uv = [0, 0, 1, 0, 1, 1, 0, 1];
+            for (int i = 0; i < 4; i++)
+                face.AddVertexWithFlags(xy[i * 2], xy[i * 2 + 1], 0,
+                    uv[i * 2], uv[i * 2 + 1], Vintagestory.API.MathTools.ColorUtil.WhiteArgb,
+                    UpNormalFlags);
+            foreach (int index in new[] { 0, 1, 2, 0, 2, 3 }) face.AddIndex(index);
+            return face;
         }
     }
 }

@@ -9,11 +9,13 @@ Final acceptance of the refactor is pending. Historical test totals and captures
 not establish correctness of the current build. Select hardware by queried identity
 and capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
 
-At revision `0011189` on 2026-09-24, the Release solution run passed all active
-tests: 556 Vulkan tests on Intel UHD 770, 744 core tests (34 existing skips),
-and 306 launcher, CLI, bootstrap and installer tests. The same 556 Vulkan tests
-passed separately on NVIDIA GeForce RTX 4070 Laptop GPU. Both GPU runs loaded
-Khronos validation with synchronization and best-practices checks. Strict donor
+On 2026-09-24 after the terrain motion test replacement, the Release solution
+passed all active tests: 551 Vulkan tests on Intel UHD 770, 744 core tests
+(34 existing skips), and 306 launcher, CLI, bootstrap and installer tests.
+The four replacement terrain cases also passed on NVIDIA GeForce RTX 4070 Laptop
+GPU; its full 556-test renderer run was at the preceding `0011189` revision,
+before this test-only change. Both GPUs loaded Khronos validation with
+synchronization and best-practices checks. Strict donor
 validation applied all 93 source and 68 Cecil patches; all 43 runtime patches
 compiled against the pinned donor. All 286 packaged SPIR-V modules remained byte
 identical to the pre-refactor baseline. AMD and a real-client scene/performance
