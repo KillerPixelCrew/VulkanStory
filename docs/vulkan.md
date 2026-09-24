@@ -12,9 +12,9 @@ and capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
 At `de19f2f` on 2026-09-24, the Release solution passed all active tests:
 551 Vulkan tests on Intel UHD 770, 744 core tests
 (34 existing skips), and 306 launcher, CLI, bootstrap and installer tests.
-The subsequent standard-object and mover test replacements bring the renderer
-suite to 539 cases; the seven current terrain/object/mover cases passed on
-Intel and NVIDIA. The full
+The subsequent standard-object, mover and instanced test replacements bring the
+renderer suite to 534 cases; the nine current terrain/object/mover/instanced
+cases passed on Intel and NVIDIA. The full
 NVIDIA 556-test renderer run was at the preceding `0011189` revision, before
 these test-only changes. Both GPUs loaded Khronos validation with
 synchronization and best-practices checks. Strict donor

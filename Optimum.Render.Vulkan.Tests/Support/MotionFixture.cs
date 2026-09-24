@@ -44,7 +44,7 @@ internal static class MotionFixture
         return readback.Floats;
     }
 
-    internal static int CreateFaceMesh(VulkanDevice device, float z = 0)
+    internal static MeshData CreateFaceData(float z = 0)
     {
         var face = new MeshData(4, 6, withNormals: false, withUv: true, withRgba: true, withFlags: true);
         float[] xy = [-0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f];
@@ -54,7 +54,12 @@ internal static class MotionFixture
                 uv[i * 2], uv[i * 2 + 1], Vintagestory.API.MathTools.ColorUtil.WhiteArgb,
                 7 << 18);
         foreach (int index in new[] { 0, 1, 2, 0, 2, 3 }) face.AddIndex(index);
-        int mesh = device.CreateMesh(face, staticDraw: true);
+        return face;
+    }
+
+    internal static int CreateFaceMesh(VulkanDevice device, float z = 0)
+    {
+        int mesh = device.CreateMesh(CreateFaceData(z), staticDraw: true);
         Assert.True(mesh > 0, device.GetError() ?? "motion face upload failed");
         return mesh;
     }
