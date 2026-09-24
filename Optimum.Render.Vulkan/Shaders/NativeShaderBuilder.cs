@@ -24,7 +24,7 @@ internal sealed class NativeShaderBuildResult
 /// The offline native shader compiler behind <c>tools/shader-compiler</c>
 /// (docs/vulkan-native-shaders.md sections 5 and 6).
 ///
-/// For every <c>&lt;program&gt;.vert</c>/<c>.frag</c> pair in the source directory it resolves
+/// For every <c>&lt;program&gt;.glsl</c> in the source directory it resolves
 /// <c>#include</c>s (the including file's directory first, then <c>include/</c>), finds the variant
 /// axes the source branches on, compiles every combination twice - the shipped optimised module and
 /// an unoptimised twin that keeps names and declarations - reflects both, checks the result against
@@ -83,7 +83,7 @@ internal sealed class NativeShaderBuilder
         {
             if (!programs.Contains(onlyProgram))
             {
-                result.Errors.Add("no program '" + onlyProgram + "' (needs " + onlyProgram + ".vert and " + onlyProgram + ".frag)");
+                result.Errors.Add("no program '" + onlyProgram + "' (needs " + onlyProgram + ".glsl)");
                 return result;
             }
             programs = new List<string> { onlyProgram };
@@ -97,22 +97,11 @@ internal sealed class NativeShaderBuilder
         return result;
     }
 
-    /// <summary>Program names with both stages present, sorted; a lone stage is an error.</summary>
+    /// <summary>Each root GLSL file owns both stages and their shared interface.</summary>
     public static List<string> DiscoverPrograms(string sourceDirectory, List<string> errors)
     {
-        var vertex = new SortedSet<string>(StringComparer.Ordinal);
-        var fragment = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (string file in Directory.GetFiles(sourceDirectory))
-        {
-            string extension = Path.GetExtension(file);
-            if (extension == ".vert") vertex.Add(Path.GetFileNameWithoutExtension(file));
-            else if (extension == ".frag") fragment.Add(Path.GetFileNameWithoutExtension(file));
-        }
-
-        foreach (string name in vertex.Except(fragment)) errors.Add(name + ".vert has no " + name + ".frag");
-        foreach (string name in fragment.Except(vertex)) errors.Add(name + ".frag has no " + name + ".vert");
-
-        var programs = vertex.Intersect(fragment).ToList();
+        var programs = Directory.GetFiles(sourceDirectory, "*.glsl")
+            .Select(Path.GetFileNameWithoutExtension).ToList();
         programs.Sort(StringComparer.Ordinal);
         return programs;
     }
@@ -125,25 +114,22 @@ internal sealed class NativeShaderBuilder
             ("frag", "fragment", EnumShaderType.FragmentShader),
         };
 
-        var texts = new string[stages.Length];
         var includes = new SortedSet<string>(StringComparer.Ordinal);
-        for (int i = 0; i < stages.Length; i++)
+        string source;
+        string fileName = name + ".glsl";
+        try
         {
-            string path = Path.Combine(sourceDirectory, name + "." + stages[i].Extension);
-            try
-            {
-                texts[i] = ExpandIncludes(path, sourceDirectory, includes);
-            }
-            catch (InvalidDataException error)
-            {
-                result.Errors.Add(name + ": " + error.Message);
-                return null;
-            }
+            source = ExpandIncludes(Path.Combine(sourceDirectory, fileName), sourceDirectory, includes);
+        }
+        catch (InvalidDataException error)
+        {
+            result.Errors.Add(name + ": " + error.Message);
+            return null;
         }
 
         int errorsBefore = result.Errors.Count;
-        List<string> axes = AxesOf(name, texts, result.Errors);
-        Dictionary<string, string> slotTypes = SamplerSlotDeclarations(name, texts, result.Errors);
+        List<string> axes = AxesOf(name, new[] { source }, result.Errors);
+        Dictionary<string, string> slotTypes = SamplerSlotDeclarations(name, new[] { source }, result.Errors);
         if (result.Errors.Count > errorsBefore) return null;
 
         var program = new NativeProgram { Name = name, Axes = axes };
@@ -167,8 +153,8 @@ internal sealed class NativeShaderBuilder
             bool compiled = true;
             for (int i = 0; i < stages.Length; i++)
             {
-                string code = ShaderCompiler.SplicePrefix(texts[i], prefix.ToString());
-                string fileName = name + "." + stages[i].Extension;
+                string stageDefine = i == 0 ? "OPTIMUM_VERTEX" : "OPTIMUM_FRAGMENT";
+                string code = ShaderCompiler.SplicePrefix(source, "#define " + stageDefine + " 1\n" + prefix);
                 ShaderCompileResult optimised = _compiler.Compile(code, fileName, stages[i].Type);
                 ShaderCompileResult reflection = optimised.Success
                     ? _compiler.CompileForReflection(code, fileName, stages[i].Type)
@@ -214,7 +200,7 @@ internal sealed class NativeShaderBuilder
     {
         int errorsBefore = errors.Count;
 
-        // Push block: both stages include the same interface file, so they must agree.
+        // Both stages share declarations in the program source, so their layouts must agree.
         SpirvBlock? push = Agree(label, "push block", vertex.PushConstants, fragment.PushConstants, errors);
         if (push != null && push.Size > SetConvention.PushConstantBytes)
         {

@@ -13,12 +13,15 @@ Inputs:
 
 ## 1. Files
 
-- **Program sources:** `sources/shaders-vk/<program>.vert` and `.frag`, named after the program's `PassName`
-  (`chunkopaque`, `taa-resolve`, ...). Never `.vsh`/`.fsh` (`SetConventionTests` enforces it), so no packager
-  glob over `sources/shaders/` can pick them up.
-- **Per-program interface:** `sources/shaders-vk/<program>.interface.glsl` declares the program's push block
-  and record (section 4). Both stages include it, so the two declarations cannot drift. It is included right
-  after `specialization.glsl` (it uses `OPTIMUM_SAMPLER_SLOT` and the set/binding defines) and needs no guard.
+- **Program sources:** one `sources/shaders-vk/<program>.glsl` file per `PassName`
+  (`chunkopaque`, `taa-resolve`, ...), containing both stages and their shared interface.
+  The compiler defines exactly one of `OPTIMUM_VERTEX` and `OPTIMUM_FRAGMENT` for each
+  compilation. Stage-specific includes and declarations live inside the corresponding
+  conditional branches; shared push-block and record declarations appear once after the
+  stage preambles. Both stages must compile independently.
+- **Source inventory:** 50 program files, 22 reusable include files and four GTAO files,
+  totaling 76. Generated SPIR-V remains separate per stage and variant in build output.
+  Shader sources are not copied into the game's `sources/shaders/` asset namespace.
 - **What the rewriter did that a native stage now does itself** (settled by the family 1 pilot, 2026-09-15):
   - the last vertex stage ends `main` with `gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;`, the GL to
     Vulkan clip-depth remap `ShaderRewriter` wraps around every GLSL 330 `main`. No Y flip and no `gl_FragCoord`
@@ -98,7 +101,7 @@ A static parity test per program per variant (names, sampler order, inputs, outp
 family stage.
 
 **The harness (delivered 2026-09-15 with the family 1 pilot):** `Optimum.Render.Vulkan.Tests/NativeShaderParityTests.cs`,
-data-driven over every `<program>.vert`/`.frag` pair in `sources/shaders-vk`. A family stage adds shaders and
+data-driven over both stages of every `<program>.glsl` in `sources/shaders-vk`. A family stage adds shaders and
 never touches the test. Per program it:
 - builds the manifest for the tree through `NativeShaderBuilder.Build` (the library entry point the tool runs), and
   fails on any build error of the program;
@@ -197,7 +200,7 @@ records the decision here):
 ## 4. Placement: push block and program record
 
 ```glsl
-// <program>.interface.glsl
+// Shared interface inside <program>.glsl
 layout(push_constant, scalar) uniform OptimumDraw {
     OPTIMUM_SAMPLER_SLOT(sampler2DArray, terrainTex);  // uint slot, the GLSL 330 sampler's name and type
     vec3 origin;              // DRAW-frequency uniforms that fit
@@ -278,7 +281,7 @@ The prefix is `ShaderRegistry.registerDefaultShaderCodePrefixes`, `ShaderRegistr
     can request it through the `optimumAoThin` block attribute.
   - `OPTIMUMAO_MULTIBOUNCE` is never stamped by `ShaderRegistry` (the albedo hook of
     `docs/research/ambient-occlusion.md` C.11, off in the first version), so it is neither a constant nor an
-    axis: `scene-ssao.frag` declares a plain `const int OPTIMUM_AO_MULTIBOUNCE = 0` and branches on it, which
+    axis: the fragment section of `scene-ssao.glsl` declares a plain `const int OPTIMUM_AO_MULTIBOUNCE = 0` and branches on it, which
     compiles the multibounce code out. `optimumMultiBounce` and the `aoAlbedo` sampler slot are declared
     unconditionally, as the oracle sees them; the optimiser drops both. When the albedo hook ships it becomes a
     real constant with a stamped define.
@@ -312,7 +315,7 @@ The prefix is `ShaderRegistry.registerDefaultShaderCodePrefixes`, `ShaderRegistr
   compiles the same way; the command line is `NativeShaderTool.Run`, which the tests drive. Output always lands in
   `<output dir>/shaders-vk/`. Exit codes: 0 success, 1 build or verify failure (a failed build writes nothing),
   2 usage.
-  - `--build <source dir> <output dir>`: compiles every `<program>.vert`/`.frag` pair (a lone stage is an error)
+  - `--build <source dir> <output dir>`: compiles both stages of every root `<program>.glsl` source
     for every combination of the program's axes. It writes `<program>[.<AXIS><value>...].<vert|frag>.spv`, axes
     sorted (`chunkopaque.GBUFFER1.TAAMOTION0.frag.spv`), plus `shaders.manifest.json`. Only files whose bytes
     changed are rewritten, and SPIR-V no program produces any more is deleted. A tree with only `include/`
@@ -560,11 +563,11 @@ Worked through on family 1 (`blit`, `final`, `luma`, 2026-09-15). A family stage
 2. **Classify the defines** (section 5): a define that gates a declaration (input, output, uniform, buffer,
    varying) is an axis and stays `#if AXIS == 1` / `#if GBUFFER` by value. Every other one becomes
    `if (OPTIMUM_X ...)` with the same comparison, the gated declarations unconditional.
-3. **Write `<program>.interface.glsl`** (section 4): `OPTIMUM_SAMPLER_SLOT(<GLSL 330 type>, <name>)` for every
+3. **Write the shared interface in `<program>.glsl`** (section 4): `OPTIMUM_SAMPLER_SLOT(<GLSL 330 type>, <name>)` for every
    non-frame sampler in GLSL 330 declaration order (vertex stage first, then fragment), then DRAW uniforms that fit;
    the record holds the rest, vertex-stage uniforms first, each in declaration order. Leave out frame members whose
    owner the program includes, and list each included port's `optimum-program-uniform` names that are not.
-4. **Write `<program>.vert` and `.frag`:** `#version 450`, the two extensions, then `bindings.glsl`,
+4. **Write the stage sections in `<program>.glsl`**, selected by `OPTIMUM_VERTEX` and `OPTIMUM_FRAGMENT`: `#version 450`, the two extensions, then `bindings.glsl`,
    `frame.glsl`, `specialization.glsl` and the interface, with any `OPTIMUM_FRAME_OWNER_*` a cross-stage name
    needs defined first (section 3). Keep the bodies token for token except: `texture(name, ...)` becomes
    `texture(optimumTextures<Array>[name], ...)`, a sampler passed to a function becomes the indexed array
@@ -663,8 +666,8 @@ USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `insta
 - **Placement:** the six fullscreen programs push only their slots. `chunkliquidmotion` is a chunk draw: push holds
   `origin` and `modelViewMatrix` (76 B, no sampler); `projectionMatrix`, the previous-frame matrices,
   `cameraPosDelta`, vertexwarp's twelve `prev*` uniforms and the fragment's TAA uniforms are record members.
-- **Depth remap:** `taa-skymotion.vert` keeps `z = w = 1`, so the remap yields window depth 1 as in GL.
-  `chunkliquidmotion.vert` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
+- **Depth remap:** the vertex section of `taa-skymotion.glsl` keeps `z = w = 1`, so the remap yields window depth 1 as in GL.
+  the vertex section of `chunkliquidmotion.glsl` remaps after its `w` offset, as the rewriter's wrapper did; `taaPrevClip` stays in GL clip
   convention, which the motion arithmetic expects.
 
 ### ui-compose (world/UI separation, 2026-09-17)
@@ -672,7 +675,7 @@ USEOIT=1); `standard` ALLOWDEPTHOFFSET, GBUFFER, GLOWSUB, TAAMOTION (16); `insta
 `ui-compose` joins the Optimum programs: a fullscreen pass-through of the UI image (`uiTex`), push block with the
 one sampler slot and no record. The Vulkan platform draws it twice per frame: opaque into the HUD-less snapshot
 (slot 23) and under premultiplied-alpha blending into the window image (the compose). Its fragment must never force
-alpha (`blit.frag`'s `outColor.a = 1` would cover the world with the UI image); `ui-separation-coverage-tests.cs`
+alpha (the fragment section of `blit.glsl` and its `outColor.a = 1` would cover the world with the UI image); `ui-separation-coverage-tests.cs`
 pins that for both twins.
 
 ## 10. Family decisions
