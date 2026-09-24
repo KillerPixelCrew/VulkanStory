@@ -27,25 +27,8 @@ public class SubmissionTests(ITestOutputHelper output)
     };
     private static long[] WaitCounts() => NonblockingSites.Select(VulkanStats.WaitCount).ToArray();
 
-    private VulkanContext OpenContext(List<string> messages)
-    {
-        bool created = GpuTest.TryCreateContext(output, messages, out var context);
-        if (Environment.GetEnvironmentVariable(GpuTest.DeviceIndexVariable) != null)
-            Assert.True(created, "Could not initialize the selected GPU.");
-        Skip.IfNot(created, "No usable Vulkan device.");
-        output.WriteLine(context!.Capabilities.DeviceName);
-        return context;
-    }
-
-    private VulkanDevice OpenDevice()
-    {
-        bool created = GpuTest.TryCreateDevice(output, out var device);
-        if (Environment.GetEnvironmentVariable(GpuTest.DeviceIndexVariable) != null)
-            Assert.True(created, "Could not initialize the selected GPU.");
-        Skip.IfNot(created, "No usable Vulkan device.");
-        output.WriteLine(device!.RendererString);
-        return device;
-    }
+    private VulkanContext OpenContext(List<string> messages) => GpuTest.CreateContext(output, messages);
+    private VulkanDevice OpenDevice() => GpuTest.CreateDevice(output);
 
     private sealed class Retired(Action destroy) : IDisposable
     {

@@ -20,18 +20,8 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
         }
         """;
 
-    private VulkanDevice Open(bool aliasing = false)
-    {
-        var device = GpuTest.NewDevice();
-        device.TransientAliasingOverride = aliasing;
-        if (!device.Initialize(IntPtr.Zero, 0, 0, out string reason))
-        {
-            device.Dispose();
-            Skip.If(true, "Vulkan unavailable: " + reason);
-        }
-        output.WriteLine(device.RendererString);
-        return device;
-    }
+    private VulkanDevice Open(bool aliasing = false) =>
+        GpuTest.CreateDevice(output, device => device.TransientAliasingOverride = aliasing);
 
     private static int Attach(VulkanDevice device, int texture, int width, int height)
     {
@@ -322,15 +312,7 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
     private const ulong MiB = 1024 * 1024;
     private const MemoryPropertyFlags HostMemory = MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
 
-    private VulkanContext AllocationContext(List<string> messages)
-    {
-        bool created = GpuTest.TryCreateContext(output, messages, out var context);
-        if (Environment.GetEnvironmentVariable(GpuTest.DeviceIndexVariable) != null)
-            Assert.True(created, "The requested GPU could not create an allocator context.");
-        Skip.IfNot(created, "No usable Vulkan device.");
-        output.WriteLine(context!.Capabilities.DeviceName);
-        return context;
-    }
+    private VulkanContext AllocationContext(List<string> messages) => GpuTest.CreateContext(output, messages);
 
     [SkippableFact]
     public unsafe void PooledAllocationsRemainIsolatedThroughChurnAndReuse()

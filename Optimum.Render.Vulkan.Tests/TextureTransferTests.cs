@@ -15,15 +15,7 @@ public class TextureTransferTests(ITestOutputHelper output)
         void main() { gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2), -1 + ((gl_VertexID & 2) << 1), 0, 1); }
         """;
 
-    private VulkanDevice Open()
-    {
-        bool created = GpuTest.TryCreateDevice(output, out var device);
-        if (Environment.GetEnvironmentVariable(GpuTest.DeviceIndexVariable) != null)
-            Assert.True(created, "Could not initialize the selected GPU.");
-        Skip.IfNot(created, "No usable Vulkan device.");
-        output.WriteLine(device!.RendererString);
-        return device;
-    }
+    private VulkanDevice Open() => GpuTest.CreateDevice(output);
 
     private static int Target(VulkanDevice device, int width, int height, params int[] textures)
     {

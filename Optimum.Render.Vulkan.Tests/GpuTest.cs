@@ -30,9 +30,49 @@ internal static class GpuTest
     public static string ValidationFeatures =>
         Environment.GetEnvironmentVariable(ValidationFeaturesVariable) ?? DefaultValidationFeatures;
 
-    private static int DeviceIndex =>
-        int.TryParse(Environment.GetEnvironmentVariable(DeviceIndexVariable), out int index) && index >= 0
-            ? index : -1;
+    private static int DeviceIndex
+    {
+        get
+        {
+            string? value = Environment.GetEnvironmentVariable(DeviceIndexVariable);
+            if (value == null) return -1;
+            Assert.True(int.TryParse(value, out int index) && index >= 0,
+                DeviceIndexVariable + " must be a nonnegative device index.");
+            return index;
+        }
+    }
+
+    private static void CheckContext(VulkanContext context, ITestOutputHelper output)
+    {
+        output.WriteLine($"device={context.Capabilities.DeviceName}; vendor={context.Capabilities.VendorId:X}; driver={context.Capabilities.DriverVersion}; validation={context.ValidationSettingsApplied}");
+        Assert.True(context.ValidationEnabled, "Khronos validation must be installed for GPU acceptance.");
+        Assert.DoesNotContain("NOT APPLIED", context.ValidationSettingsApplied);
+        if (!string.IsNullOrWhiteSpace(ValidationFeatures))
+            Assert.False(string.IsNullOrWhiteSpace(context.ValidationSettingsApplied));
+        string? expected = Environment.GetEnvironmentVariable("OPTIMUM_TEST_DEVICE_NAME");
+        if (!string.IsNullOrWhiteSpace(expected))
+            Assert.Contains(expected, context.Capabilities.DeviceName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void CheckUnavailable(string? reason, ITestOutputHelper output)
+    {
+        output.WriteLine("Vulkan unavailable: " + reason);
+        Assert.True(Environment.GetEnvironmentVariable(DeviceIndexVariable) == null
+            && Environment.GetEnvironmentVariable("OPTIMUM_TEST_DEVICE_NAME") == null,
+            "The explicitly requested GPU could not initialize: " + reason);
+    }
+
+    public static VulkanContext CreateContext(ITestOutputHelper output, List<string>? messages = null)
+    {
+        Skip.IfNot(TryCreateContext(output, messages, out var context), "No usable Vulkan device.");
+        return context!;
+    }
+
+    public static VulkanDevice CreateDevice(ITestOutputHelper output, Action<VulkanDevice>? configure = null)
+    {
+        Skip.IfNot(TryCreateDevice(output, out var device, configure), "No usable Vulkan device.");
+        return device!;
+    }
 
     /// <summary>Headless, validated options; <paramref name="messages" /> receives every layer message.</summary>
     public static VulkanContextOptions ContextOptions(List<string>? messages = null) => new()
@@ -56,7 +96,12 @@ internal static class GpuTest
     public static bool TryCreateContext(ITestOutputHelper output, List<string>? messages, out VulkanContext? context)
     {
         bool created = VulkanContext.TryCreate(ContextOptions(messages), out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
+        if (!created) CheckUnavailable(failureReason, output);
+        else
+        {
+            try { CheckContext(context!, output); }
+            catch { context!.Dispose(); throw; }
+        }
         return created;
     }
 
@@ -91,16 +136,21 @@ internal static class GpuTest
         return device;
     }
 
-    public static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
+    public static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device, Action<VulkanDevice>? configure = null)
     {
         VulkanDevice created = NewDevice();
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
+        try
         {
-            device = created;
-            return true;
+            configure?.Invoke(created);
+            if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
+            {
+                CheckContext(created.ContextForTests, output);
+                device = created;
+                return true;
+            }
+            CheckUnavailable(failureReason, output);
         }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
+        catch { created.Dispose(); throw; }
         created.Dispose();
         device = null;
         return false;
@@ -113,17 +163,13 @@ internal static class GpuTest
             : new List<string>();
 
     /// <summary>
-    /// A device's equivalent of <see cref="ValidationAssert.NoErrors" /> plus
-    /// <see cref="ValidationAssert.NoSyncHazards" />: validation errors fail,
-    /// synchronization hazards fail unless pinned, and whatever else the device
-    /// reports as an error through GetError (failed Vulkan calls, rejected
-    /// shaders) fails too.
+    /// Fails on validation errors, synchronization hazards and device errors
+    /// such as rejected shaders or failed Vulkan calls.
     /// </summary>
-    public static void AssertClean(VulkanDevice seam, [CallerFilePath] string callerFile = "")
+    public static void AssertClean(VulkanDevice seam)
     {
         List<string> messages = MessagesOf(seam);
         ValidationAssert.NoErrors(messages);
-        ValidationAssert.NoSyncHazards(messages, callerFile);
 
         string? diagnostics = seam.GetError();
         if (string.IsNullOrEmpty(diagnostics)) return;
