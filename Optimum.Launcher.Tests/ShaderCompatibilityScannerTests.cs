@@ -264,7 +264,7 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
     public void EveryNativeProgramIsAKnownOverridableProgram()
     {
         string shadersVk = Path.Combine(FindRepositoryRoot(), "sources", "shaders-vk");
-        string[] native = Directory.EnumerateFiles(shadersVk, "*.frag")
+        string[] native = Directory.EnumerateFiles(shadersVk, "*.glsl", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileNameWithoutExtension)
             .Cast<string>()
             .ToArray();
