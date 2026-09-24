@@ -42,8 +42,6 @@
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Remove="Config\OptimumAnimLod.cs" />
     <Compile Remove="Config\OptimumConfig.cs" />
-    <Compile Remove="Config\OptimumDiagnostics.cs" />
-    <Compile Remove="Config\OptimumIndirectRendering.cs" />
     <Compile Remove="Config\OptimumGreedyMesher.cs" />
     <Compile Remove="Config\OptimumThreadGuard.cs" />
     <Compile Remove="Config\OptimumWorkerInstances.cs" />
