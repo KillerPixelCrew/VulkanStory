@@ -880,6 +880,12 @@ public sealed unsafe partial class VulkanDevice
             }
 
             uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling, layout);
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("native sample program=" + program.ProgramId + " sampler=" + sampler.Index +
+                    " logical=" + sampled.TextureId + " physical=" + (texture?.Id ?? 0) +
+                    " slot=" + slot + " layout=" + layout);
+            }
             VulkanStats.NoteBindlessSlotResolution();
             BitConverter.TryWriteBytes(_pushShadow.AsSpan(sampler.PushOffset, ProgramInterfaceLayout.SlotBytes), slot);
         }
