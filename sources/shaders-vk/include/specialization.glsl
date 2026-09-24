@@ -2,9 +2,8 @@
 // (docs/vulkan.md section 5).
 //
 // This file is the source of truth for constant ids. The renderer's
-// Shaders/SpecializationConvention.cs mirrors it, and SpecializationConventionTests
-// fails when the two disagree or when a constant no longer matches a define
-// ShaderRegistry.registerDefaultShaderCodePrefixes stamps.
+// Shaders/SetConvention.cs mirrors it. ShaderDeliveryTests verifies the compiled
+// ids, types and defaults against the CPU definitions.
 //
 // Each constant replaces the quality or code-path define of the same name: a native
 // source writes `if (OPTIMUM_BLOOM != 0)` where the GLSL 330 source has `#if BLOOM > 0`,

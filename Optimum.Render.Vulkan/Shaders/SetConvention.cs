@@ -5,8 +5,8 @@ namespace Optimum.Render.Vulkan.Shaders;
 /// <summary>
 /// The descriptor set convention of plan decision 9: one pipeline layout shared by
 /// every program. Mirrors <c>sources/shaders-vk/include/bindings.glsl</c>, the
-/// source of truth for native shaders; SetConventionTests keeps the two in
-/// agreement, define by define and declaration by declaration.
+/// source of truth for native shaders. ShaderDeliveryTests checks compiled bindings
+/// against the actual shared pipeline layout.
 ///
 /// | Set | Update | Contents |
 /// | 0 frame | once per frame | FrameGlobals UBO (dynamic offset) and the fixed frame textures |
@@ -117,8 +117,7 @@ internal static class SetConvention
 /// <summary>
 /// The specialization constants of the native shaders (docs/vulkan.md section 5).
 /// Mirrors <c>sources/shaders-vk/include/specialization.glsl</c>, the source of truth for native
-/// shaders; SpecializationConventionTests keeps the two in agreement and checks every constant
-/// against the <c>#define</c> <c>ShaderRegistry.registerDefaultShaderCodePrefixes</c> stamps.
+/// shaders. ShaderDeliveryTests checks the compiled constant ids, types and defaults.
 ///
 /// Every constant replaces one quality or code-path define: a native source branches on
 /// <c>if (OPTIMUM_BLOOM != 0)</c> where the GLSL 330 source has <c>#if BLOOM &gt; 0</c>, the

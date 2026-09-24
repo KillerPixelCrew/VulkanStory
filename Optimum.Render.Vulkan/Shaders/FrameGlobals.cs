@@ -43,7 +43,7 @@ internal static class FrameGlobals
     private readonly record struct Entry(string Name, string TypeName, int Capacity, string Owner, string? Initializer = null);
 
     // Owners and initialisers mirror ShaderProgramBase.Use() and the vanilla
-    // include declarations; FrameGlobalsTests pins both against the assets.
+    // include declarations; shader delivery and draw tests verify the resulting ABI.
     private static readonly Entry[] Entries =
     {
         // fogandlight.fsh
@@ -240,7 +240,7 @@ internal static class FrameGlobals
         var text = new System.Text.StringBuilder();
         text.Append("""
             // Generated from Optimum.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
-            // Do not edit: FrameGlobalsTests regenerates this file and fails on any difference.
+            // Regenerate with FrameGlobals.GenerateInclude; ShaderDeliveryTests verifies the compiled ABI.
             //
             // The FrameGlobals block (docs/vulkan.md section 3): set 0, binding 0, scalar
             // layout, bound with a dynamic offset. Members sit at the offsets the renderer writes.

@@ -2,8 +2,8 @@
 // one pipeline layout shared by every program.
 //
 // This file is the source of truth for set and binding numbers. The renderer's
-// Shaders/SetConvention.cs mirrors it, and SetConventionTests fails when the two
-// disagree on any define or declaration.
+// Shaders/SetConvention.cs mirrors it. ShaderDeliveryTests verifies compiled
+// bindings against the actual shared pipeline layout.
 //
 //   set 0  frame     once per frame        FrameGlobals UBO (dynamic offset) + frame textures
 //   set 1  textures  on create / retire    bindless combined-image-sampler arrays,

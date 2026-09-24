@@ -128,13 +128,16 @@ public sealed class ShaderDeliveryTests : IDisposable
         NativeShaderBuilder.Write(build, Output);
         var library = NativeShaderLibrary.Load(Package, compiler.Identity, out string reason);
         Assert.True(library != null, reason);
+        var sharedBindings = SharedBindings();
         foreach (var program in build.Manifest.Programs)
             foreach (var variant in program.Variants)
                 foreach (var stage in variant.Stages)
                 {
                     Assert.True(library!.TryGetSpirv(stage, out byte[] bytes, out string error), error);
                     Assert.Equal(build.Files[stage.Spirv], bytes);
-                    SpirvReflection.Reflect(bytes);
+                    var reflected = SpirvReflection.Reflect(bytes);
+                    foreach (var binding in reflected.Bindings)
+                        Assert.Contains((binding.Set, binding.Binding, binding.Kind), sharedBindings);
                 }
         Assert.Empty(NativeShaderBuilder.Compare(build, Output));
     }
@@ -257,5 +260,131 @@ public sealed class ShaderDeliveryTests : IDisposable
         Assert.Empty(loaded.Matching(2, new UInt128(0, 21)));
         File.WriteAllText(path, "invalid partial write");
         Assert.Equal(0, PipelineKeyLog.Load(path).Count);
+    }
+
+    private static HashSet<(int Set, int Binding, SpirvDescriptorKind Kind)> SharedBindings()
+    {
+        static SpirvDescriptorKind Kind(Silk.NET.Vulkan.DescriptorType type) => type switch {
+            Silk.NET.Vulkan.DescriptorType.UniformBuffer or Silk.NET.Vulkan.DescriptorType.UniformBufferDynamic => SpirvDescriptorKind.UniformBuffer,
+            Silk.NET.Vulkan.DescriptorType.StorageBuffer or Silk.NET.Vulkan.DescriptorType.StorageBufferDynamic => SpirvDescriptorKind.StorageBuffer,
+            _ => SpirvDescriptorKind.CombinedImageSampler,
+        };
+        return SharedPipelineLayout.FrameBindings().Select(b => (SetConvention.FrameSet, (int)b.Binding, Kind(b.DescriptorType)))
+            .Concat(SharedPipelineLayout.StorageBindings().Select(b => (SetConvention.StorageSet, (int)b.Binding, Kind(b.DescriptorType))))
+            .Concat(SetConvention.TextureArrays.Select(b => (SetConvention.TextureSet, b.Value, SpirvDescriptorKind.CombinedImageSampler))).ToHashSet();
+    }
+
+    [Fact]
+    public void ReflectionPreservesDeclaredAbiAndFindsActualUsesInOptimizedCode()
+    {
+        const string source = """
+            #version 450
+            #extension GL_EXT_scalar_block_layout : require
+            #extension GL_EXT_nonuniform_qualifier : require
+            layout(set=0, binding=1) uniform sampler2DShadow unusedShadow;
+            layout(set=1, binding=2) uniform sampler2D images[];
+            layout(set=2, binding=4, std430) readonly buffer Data { uint words[]; } data;
+            layout(push_constant, scalar) uniform Draw { uint index; vec3 origin; mat4 transform; } draw;
+            layout(set=2, binding=3, scalar) uniform Record { vec2 scale; float weights[3]; mat3 normal; int kind; } record;
+            layout(constant_id=3) const int MODE = 2;
+            layout(constant_id=7) const float THRESHOLD = 0.25;
+            layout(constant_id=9) const bool ENABLE = true;
+            layout(constant_id=11) const uint COUNT = 5u;
+            layout(location=0) in vec2 uv;
+            layout(location=1) flat in ivec3 flags;
+            layout(location=0) out vec4 color;
+            layout(location=2) out vec4 unwritten;
+            layout(location=3) out vec4 partial;
+            void main() {
+                color = texture(images[draw.index], uv * record.scale) + vec4(record.normal * draw.origin, 1) * record.weights[2];
+                color *= float(data.words[flags.x]) + float(MODE) + THRESHOLD + float(COUNT);
+                if (ENABLE) partial.xy = draw.origin.xy;
+            }
+            """;
+        using var compiler = new ShaderCompiler();
+        var declaredCode = compiler.CompileForReflection(source, "abi.frag", EnumShaderType.FragmentShader);
+        var shippedCode = compiler.Compile(source, "abi.frag", EnumShaderType.FragmentShader);
+        Assert.True(declaredCode.Success, declaredCode.Error); Assert.True(shippedCode.Success, shippedCode.Error);
+        var declared = SpirvReflection.Reflect(declaredCode.Spirv);
+        var shipped = SpirvReflection.Reflect(shippedCode.Spirv);
+        Assert.Equal("main", declared.EntryPoint);
+        Assert.Equal(SpirvReflection.ExecutionModelFragment, declared.ExecutionModel);
+        Assert.Equal(new[] { (0, "vec2"), (1, "ivec3") }, declared.Inputs.Select(v => (v.Location, v.GlslType)));
+        Assert.Equal(new[] { 0, 2, 3 }, declared.Outputs.Select(v => v.Location));
+        Assert.Equal(new[] { ("index", 0, 4), ("origin", 4, 12), ("transform", 16, 64) },
+            declared.PushConstants!.Members.Select(m => (m.Name, m.Offset, m.Size)));
+        Assert.Equal(80, declared.PushConstants.Size);
+        var record = declared.Bindings.Single(b => b.Set == 2 && b.Binding == 3);
+        Assert.Equal(SpirvDescriptorKind.UniformBuffer, record.Kind);
+        Assert.Equal(new[] { ("scale", 0, 8, 0), ("weights", 8, 12, 3), ("normal", 20, 36, 0), ("kind", 56, 4, 0) },
+            record.Block!.Members.Select(m => (m.Name, m.Offset, m.Size, m.ArrayLength)));
+        Assert.Equal(60, record.Block.Size);
+        Assert.True(declared.Bindings.Single(b => b.Set == 1).RuntimeArray);
+        var storage = declared.Bindings.Single(b => b.Binding == 4);
+        Assert.Equal(SpirvDescriptorKind.StorageBuffer, storage.Kind);
+        Assert.Equal(-1, Assert.Single(storage.Block!.Members).ArrayLength);
+        Assert.Equal(new[] { (3, "int", 2.0), (7, "float", 0.25), (9, "bool", 1.0), (11, "uint", 5.0) },
+            declared.SpecConstants.Select(c => (c.SpecId, c.GlslType, c.DefaultValue)));
+        Assert.Equal(new[] { 0, 3 }, shipped.WrittenOutputLocations);
+        Assert.Equal(new[] { (1, 2), (2, 3), (2, 4) }, shipped.Bindings.Where(b => shipped.UsedVariables.Contains(b.VariableId)).Select(b => (b.Set, b.Binding)));
+        Assert.Equal(new[] { (1, 2) }, shipped.PushMemberIndexes[0]);
+        Assert.All(shipped.Bindings, binding => Assert.Empty(binding.Name));
+        Assert.Throws<FormatException>(() => SpirvReflection.Reflect(new byte[] { 1, 2, 3 }));
+        Assert.Throws<FormatException>(() => SpirvReflection.Reflect(new byte[20]));
+
+        var vertex = compiler.CompileForReflection("""
+            #version 450
+            layout(location=0) in vec3 position;
+            layout(location=1) in mat2 packedIn;
+            layout(location=3) in ivec4 color;
+            layout(location=0) out vec2 uv;
+            void main() { uv = packedIn[0] + vec2(color.xy); gl_Position = vec4(position, 1); }
+            """, "abi.vert", EnumShaderType.VertexShader);
+        Assert.True(vertex.Success, vertex.Error);
+        var input = SpirvReflection.Reflect(vertex.Spirv);
+        Assert.Equal(SpirvReflection.ExecutionModelVertex, input.ExecutionModel);
+        Assert.Equal(new[] { (0, "vec3"), (1, "mat2"), (3, "ivec4") }, input.Inputs.Select(v => (v.Location, v.GlslType)));
+        Assert.Equal("uv", Assert.Single(input.Outputs).Name);
+    }
+
+    [Fact]
+    public void CompiledSharedIncludesMatchCpuFrameOffsetsAndSpecializationIds()
+    {
+        using var compiler = new ShaderCompiler();
+        string sum = string.Join(" + ", SpecializationConvention.Constants.Select(c => "float(" + c.Name + ")"));
+        string probe = "#version 450\n#include \"frame.glsl\"\n#include \"specialization.glsl\"\n" +
+            "layout(location=0) out vec4 color;\nvoid main() { color = vec4(optimumFrame.zNear + optimumFrame.pointLights[99].x + " + sum + "); }";
+        var compiled = NativeShaderTree.Compile(compiler, probe, EnumShaderType.FragmentShader, "shared-abi");
+        Assert.True(compiled.Success, compiled.Error);
+        var reflected = SpirvReflection.Reflect(compiled.Spirv);
+        var block = reflected.Bindings.Single(b => b.Set == FrameGlobals.Set && b.Binding == FrameGlobals.Binding).Block!;
+        Assert.Equal(FrameGlobals.BlockSize, block.Size);
+        Assert.Equal(FrameGlobals.Members.Select(m => (m.Offset, m.Size, m.ArrayLength)),
+            block.Members.Select(m => (m.Offset, m.Size, m.ArrayLength)));
+        Assert.Equal(SpecializationConvention.Constants.Select(c => ((int)c.Id, c.GlslType, double.Parse(c.Default, System.Globalization.CultureInfo.InvariantCulture))).Order(),
+            reflected.SpecConstants.Select(c => (c.SpecId, c.GlslType, c.DefaultValue)).Order());
+        foreach (var binding in reflected.Bindings)
+            Assert.Contains((binding.Set, binding.Binding, binding.Kind), SharedBindings());
+    }
+
+    [Fact]
+    public void OnlyCompatibleUniformsFromTheirOwningIncludesEnterTheSharedBlock()
+    {
+        const string code = "uniform vec3 pointLights[4]; uniform float viewDistance; uniform vec3 lightPosition; uniform float tint; void main() {}";
+        ProgramInterfaceLayout Layout(string source, IReadOnlySet<string>? owners) => ProgramInterfaceLayout.Build(
+            new[] { (EnumShaderType.VertexShader, GlslParser.Parse(source)) }, null, owners);
+        var owned = Layout(code, new HashSet<string> { "fogandlight.vsh" });
+        Assert.Equal(new[] { "pointLights", "viewDistance" }, owned.FrameMemberDeclaredLengths.Keys.Order());
+        Assert.Equal(new[] { "lightPosition", "tint" }, owned.Members.Select(m => m.Name).Order());
+        Assert.Equal(4, owned.FrameMemberDeclaredLengths["pointLights"]);
+        Assert.False(Layout(code, null).UsesFrameBlock);
+        Assert.False(Layout("uniform float pointLights[4]; void main() {}", new HashSet<string> { "fogandlight.vsh" }).UsesFrameBlock);
+        Assert.False(Layout("uniform vec3 pointLights[101]; void main() {}", new HashSet<string> { "fogandlight.vsh" }).UsesFrameBlock);
+        byte[] defaults = FrameGlobals.CreateShadow();
+        foreach (var pair in new[] { ("zNear", 0.3f), ("zFar", 1500f), ("windWaveIntensity", 1f) })
+        {
+            Assert.True(FrameGlobals.TryGetMember(pair.Item1, out var member));
+            Assert.Equal(pair.Item2, BitConverter.ToSingle(defaults, member.Offset));
+        }
     }
 }
