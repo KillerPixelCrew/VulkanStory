@@ -4,27 +4,10 @@ using System.Diagnostics;
 namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>
-/// One frame's latency breakdown, in microseconds: the eight intervals every
-/// vendor tool reports (NV's <c>VkLatencyTimingsFrameReportNV</c> is the widest
-/// of them, and this is its shape).
-///
-/// Backends with a driver report (NV) fill every field from
-/// <c>vkGetLatencyTimingsNV</c>. Backends without one (None, Native, AMD) fill
-/// the CPU-observable intervals from their own marker timestamps through
-/// <see cref="FromCpuTimestamps" /> and leave <see cref="DriverUs" />,
-/// <see cref="OsRenderQueueUs" /> and <see cref="GpuUs" /> at zero; the stats
-/// line (seam S7) prints what is there.
+/// CPU-observed frame intervals in microseconds. Driver, OS queue and GPU fields
+/// remain zero to preserve the existing stats format; they are not measurements.
+/// TotalUs ends when vkQueuePresentKHR returns, not when the display scans out.
 /// </summary>
-/// <param name="FrameId">The latency frame id allocated at the sleep (seam S2).</param>
-/// <param name="PresentId">The present id chained as <c>VkPresentIdKHR</c>, or 0 when the frame never presented.</param>
-/// <param name="InputUs">Input sample to simulation start.</param>
-/// <param name="SimulationUs">Simulation start to simulation end.</param>
-/// <param name="RenderSubmitUs">Render submit start to render submit end.</param>
-/// <param name="PresentUs">Present start to present end (the <c>vkQueuePresentKHR</c> call itself).</param>
-/// <param name="DriverUs">Driver start to driver end; 0 without a driver report.</param>
-/// <param name="OsRenderQueueUs">OS render queue start to end; 0 without a driver report.</param>
-/// <param name="GpuUs">GPU render start to end; 0 without a driver report.</param>
-/// <param name="TotalUs">Input sample to present end: the whole frame as the player feels it.</param>
 internal readonly record struct LatencyFrameReport(
     ulong FrameId,
     ulong PresentId,
@@ -38,8 +21,7 @@ internal readonly record struct LatencyFrameReport(
     ulong TotalUs)
 {
     /// <summary>
-    /// Builds a report from the CPU timestamps a backend without a driver report
-    /// collected, all on one monotonic clock in microseconds (see
+    /// Builds a report from CPU timestamps on one monotonic clock in microseconds (see
     /// <see cref="LatencyClock" />). A missing marker is passed as 0 and makes the
     /// intervals that need it 0; intervals never go negative.
     /// </summary>
@@ -73,69 +55,16 @@ internal readonly record struct LatencyFrameReport(
         fromUs <= 0 || toUs <= 0 || toUs <= fromUs ? 0UL : (ulong)(toUs - fromUs);
 }
 
-/// <summary>
-/// The frame phases every vendor latency tool knows about.
-///
-/// The values are the values of <c>VkLatencyMarkerNV</c> (Silk.NET's
-/// <c>LatencyMarkerNV</c>), so the NV backend can cast this straight into
-/// <c>vkSetLatencyMarkerNV</c> without a translation table; a unit test pins
-/// every one of them against Silk.NET. The other backends use the same set:
-/// AMD's anti-lag has only INPUT and PRESENT, and the None backend records all
-/// of them as CPU timestamps.
-///
-/// Where each one is stamped in an Optimum frame (plan section "Latency seams",
-/// seams S3 and S4; the renderer owns all of them, never double-stamped):
-/// <list type="bullet">
-/// <item><description><see cref="InputSample" /> and <see cref="SimulationStart" />:
-/// in <c>VulkanClientPlatform.LatencySleep</c>, right after the sleep returns and
-/// immediately before the client gathers the mouse delta.</description></item>
-/// <item><description><see cref="SimulationEnd" /> and <see cref="RenderSubmitStart" />:
-/// on the first <c>BeginRenderStage(Before)</c> of the frame.</description></item>
-/// <item><description><see cref="RenderSubmitEnd" />: after Submit A in
-/// <c>VulkanDevice.Present</c>.</description></item>
-/// <item><description><see cref="PresentStart" /> / <see cref="PresentEnd" />:
-/// around <c>Swapchain.Present</c>.</description></item>
-/// <item><description>The OutOfBand markers: reserved for submissions outside the
-/// frame loop (standalone uploads, async present paths). Nothing stamps them yet.</description></item>
-/// </list>
-/// </summary>
+/// <summary>CPU phase boundaries owned by the input, render and present call sites.</summary>
 internal enum LatencyMarker
 {
-    /// <summary>The client's simulation tick starts (after the sleep and the input sample).</summary>
-    SimulationStart = 0,
-
-    /// <summary>The simulation tick ends; rendering begins.</summary>
-    SimulationEnd = 1,
-
-    /// <summary>The renderer starts recording and submitting the frame's work.</summary>
-    RenderSubmitStart = 2,
-
-    /// <summary>The frame's last work submission has been queued (Submit A).</summary>
-    RenderSubmitEnd = 3,
-
-    /// <summary>Immediately before <c>vkQueuePresentKHR</c>.</summary>
-    PresentStart = 4,
-
-    /// <summary>Immediately after <c>vkQueuePresentKHR</c> returns.</summary>
-    PresentEnd = 5,
-
-    /// <summary>The frame's input is sampled; this is the point latency is measured from.</summary>
-    InputSample = 6,
-
-    /// <summary>A latency-measurement flash was triggered (tooling only).</summary>
-    TriggerFlash = 7,
-
-    /// <summary>A submission outside the frame loop starts.</summary>
-    OutOfBandRenderSubmitStart = 8,
-
-    /// <summary>A submission outside the frame loop has been queued.</summary>
-    OutOfBandRenderSubmitEnd = 9,
-
-    /// <summary>A present outside the frame loop starts.</summary>
-    OutOfBandPresentStart = 10,
-
-    /// <summary>A present outside the frame loop has returned.</summary>
-    OutOfBandPresentEnd = 11,
+    SimulationStart,
+    SimulationEnd,
+    RenderSubmitStart,
+    RenderSubmitEnd,
+    PresentStart,
+    PresentEnd,
+    InputSample,
 }
 
 /// <summary>One monotonic microsecond clock for every latency timestamp.</summary>
@@ -152,14 +81,9 @@ internal static class LatencyClock
 }
 
 /// <summary>
-/// Turns the marker stream of a frame into one <see cref="LatencyFrameReport" />,
-/// and applies the self-healing rule from the plan: a phase still open when the
-/// next frame starts is closed at the new frame's first marker and logged - once,
-/// never every frame, because a dropped marker repeats and would otherwise fill
-/// the log.
-///
-/// Pure logic, no Vulkan: the None backend uses it, the Native and AMD backends
-/// will, and it is unit-tested on its own.
+/// Collects the current frame's CPU phases. A new frame discards incomplete
+/// timestamps and logs the interruption once, so missing markers cannot leak
+/// into another frame or repeatedly fill the client log.
 /// </summary>
 internal sealed class LatencyPhaseTracker
 {
@@ -196,15 +120,11 @@ internal sealed class LatencyPhaseTracker
 
     /// <summary>
     /// Stamps one marker. A marker of a frame id other than the current one
-    /// starts a new frame first, closing whatever the old one left open. The
-    /// OutOfBand markers belong to submissions outside the frame loop and are
-    /// ignored here.
+    /// starts a new frame first, closing whatever the old one left open.
     /// </summary>
     public void Mark(ulong frameId, LatencyMarker marker, long timestampUs)
     {
-        if (marker >= LatencyMarker.OutOfBandRenderSubmitStart) return;
-
-        if (!_frameOpen || frameId != _frameId) BeginFrame(frameId, timestampUs);
+        if (!_frameOpen || frameId != _frameId) BeginFrame(frameId);
 
         switch (marker)
         {
@@ -219,10 +139,10 @@ internal sealed class LatencyPhaseTracker
     }
 
     /// <summary>
-    /// Starts a frame: closes every phase the previous frame left open (counted,
+    /// Starts a frame: discards any phases the previous frame left open (counted,
     /// and logged the first time only) and clears the timestamps.
     /// </summary>
-    public void BeginFrame(ulong frameId, long timestampUs)
+    private void BeginFrame(ulong frameId)
     {
         if (_frameOpen && HasOpenPhase)
         {
@@ -234,9 +154,6 @@ internal sealed class LatencyPhaseTracker
                     " was still open when frame " + frameId +
                     " started; closing it. Reported once, however often it happens.");
             }
-            // Closing means exactly that: the open phases end here, so the frame
-            // that follows starts from a clean slate.
-            CloseOpenPhases(timestampUs);
         }
 
         _frameId = frameId;
@@ -248,13 +165,6 @@ internal sealed class LatencyPhaseTracker
         _renderSubmitEnd = 0;
         _presentStart = 0;
         _presentEnd = 0;
-    }
-
-    private void CloseOpenPhases(long timestampUs)
-    {
-        if (_simStart != 0 && _simEnd == 0) _simEnd = timestampUs;
-        if (_renderSubmitStart != 0 && _renderSubmitEnd == 0) _renderSubmitEnd = timestampUs;
-        if (_presentStart != 0 && _presentEnd == 0) _presentEnd = timestampUs;
     }
 
     /// <summary>
@@ -281,19 +191,8 @@ internal sealed class LatencyPhaseTracker
 }
 
 /// <summary>
-/// The finished frame reports a CPU-timestamp backend keeps until the stats
-/// sample drains them (seam S7), as a fixed ring.
-///
-/// A ring rather than a <c>List</c> with <c>RemoveAt(0)</c>, which is what the
-/// backends used before the review of 2026-09-12: nothing guarantees the stats
-/// sample ever runs (<c>OPTIMUM_VULKAN_STATS</c> is normally unset), so the
-/// buffer sits full for the whole session and every present shifted the whole
-/// array down by one - about 20 KB of memmove per frame, under a lock, in the
-/// present path, with the default None backend. The ring drops the oldest entry
-/// by moving one index instead.
-///
-/// Every member takes the lock: the frame thread adds and amends, the stats
-/// sample takes.
+/// Bounded completed-frame reports. Overflow drops the oldest entry in constant
+/// time; taking reports returns chronological order and empties the buffer.
 /// </summary>
 internal sealed class LatencyReportBuffer
 {
@@ -334,27 +233,6 @@ internal sealed class LatencyReportBuffer
         }
     }
 
-    /// <summary>
-    /// Fills in the GPU interval of a report that is still waiting, newest first.
-    /// False when that frame's report has already been taken (the Native backend
-    /// observes the completion after the fact and never guesses).
-    /// </summary>
-    public bool AmendGpuUs(ulong frameId, ulong gpuUs)
-    {
-        lock (_lock)
-        {
-            for (int i = 1; i <= _count; i++)
-            {
-                int index = _next - i;
-                if (index < 0) index += _reports.Length;
-                if (_reports[index].FrameId != frameId) continue;
-                _reports[index] = _reports[index] with { GpuUs = gpuUs };
-                return true;
-            }
-            return false;
-        }
-    }
-
     /// <summary>The reports since the last call, oldest first, and clears them.</summary>
     public LatencyFrameReport[] Take()
     {
@@ -376,4 +254,23 @@ internal sealed class LatencyReportBuffer
             return taken;
         }
     }
+}
+
+/// <summary>CPU phase timestamps and bounded reports for completed frames.</summary>
+internal sealed class FrameTimingRecorder
+{
+    private readonly LatencyPhaseTracker _tracker;
+    private readonly LatencyReportBuffer _reports = new();
+
+    public FrameTimingRecorder(Action<string>? log = null) => _tracker = new LatencyPhaseTracker(log);
+
+    public void Marker(ulong frameId, LatencyMarker marker) =>
+        _tracker.Mark(frameId, marker, LatencyClock.NowUs());
+
+    public void OnPresent(ulong frameId, ulong presentId)
+    {
+        if (_tracker.TryComplete(frameId, presentId, out LatencyFrameReport report)) _reports.Add(report);
+    }
+
+    public LatencyFrameReport[] TakeReports() => _reports.Take();
 }

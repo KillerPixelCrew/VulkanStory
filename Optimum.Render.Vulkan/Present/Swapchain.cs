@@ -84,16 +84,6 @@ internal sealed class PresentIdMap
     }
 }
 
-/// <summary>
-/// Fills the pNext chain of <c>VkSwapchainCreateInfoKHR</c> (seam S5). A latency
-/// backend that needs per-swapchain state - NV's
-/// <c>VkSwapchainLatencyCreateInfoNV</c> - hands one of these to the swapchain;
-/// it is called on every creation and recreation, with the chain built so far,
-/// and returns the chain to use. Whatever it returns must stay valid until
-/// <c>vkCreateSwapchainKHR</c> returns.
-/// </summary>
-internal unsafe delegate void* SwapchainCreateChain(void* pNext);
-
 /// <summary>An acquired swapchain image and the semaphores its present submission uses.</summary>
 internal readonly struct PresentTarget
 {
@@ -305,20 +295,6 @@ internal sealed unsafe class Swapchain : IDisposable
     internal SwapchainSlot? CurrentSlotForTests => _current;
 
     /// <summary>
-    /// The active latency backend (seam S5): every swapchain creation tells it,
-    /// so a backend can re-apply the per-swapchain sleep mode a resize, a vsync
-    /// toggle, an OUT_OF_DATE rebuild or the FIFO_RELAXED promotion dropped. The
-    /// None backend does nothing with it.
-    /// </summary>
-    internal ILatencyBackend Latency { get; set; } = new NoneLatencyBackend();
-
-    /// <summary>
-    /// The pNext chain the latency backend adds to <c>VkSwapchainCreateInfoKHR</c>;
-    /// null when it needs none. See <see cref="SwapchainCreateChain" />.
-    /// </summary>
-    internal SwapchainCreateChain? CreateChain { get; set; }
-
-    /// <summary>
     /// Whether <c>VkPresentIdKHR</c> may be chained onto the present (seam S2).
     /// Set from the capabilities when VK_KHR_present_id is enabled AND its feature
     /// was turned on; chaining it otherwise is a validation error, so it stays off
@@ -349,8 +325,7 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </remarks>
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync, ITimelineClock clock,
-        out Swapchain? swapchain, out string? failureReason, ILatencyBackend? latency = null,
-        SwapchainCreateChain? createChain = null)
+        out Swapchain? swapchain, out string? failureReason)
     {
         swapchain = null;
         failureReason = null;
@@ -385,10 +360,6 @@ internal sealed unsafe class Swapchain : IDisposable
         }
 
         var created = new Swapchain(context, surfaceApi, swapchainApi, surface, clock);
-        // Before the first Build, so the backend is told about the first
-        // swapchain exactly as it is told about every later one.
-        if (latency != null) created.Latency = latency;
-        created.CreateChain = createChain;
         created._width = width;
         created._height = height;
         created._vsync = vsync;
@@ -455,12 +426,6 @@ internal sealed unsafe class Swapchain : IDisposable
             OldSwapchain = old?.Handle ?? default,
         };
 
-        // Seam S5: the latency backend's per-swapchain create struct, if it has
-        // one. Build is the single creation and recreation path, so a backend
-        // that needs one gets it on every resize, vsync toggle, OUT_OF_DATE
-        // rebuild and FIFO_RELAXED promotion.
-        if (CreateChain != null) createInfo.PNext = CreateChain(createInfo.PNext);
-
         Result result = _swapchainApi.CreateSwapchain(_context.Device, &createInfo, null, out SwapchainKHR handle);
 
         // Passing oldSwapchain retires it even when creation fails.
@@ -468,11 +433,6 @@ internal sealed unsafe class Swapchain : IDisposable
         {
             _retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));
             _current = null;
-            // Seam S5: the handle the backend holds is now the retired one, and
-            // the retirement queue will destroy it. Told before the new handle is
-            // announced, so a creation that fails below leaves the backend with
-            // no swapchain at all rather than with a dead one.
-            Latency.OnSwapchainRetired();
         }
 
         if (result != Result.Success)
@@ -487,10 +447,6 @@ internal sealed unsafe class Swapchain : IDisposable
         Extent = extent;
         PresentMode = presentMode;
         Creations++;
-        // Exactly once per created swapchain, and only for one that exists: a
-        // failed creation returned above. The sleep mode a backend set on the old
-        // handle does not carry over, so this is where it is re-applied.
-        Latency.OnSwapchainCreated(handle);
         NeedsRecreation = false;
         RebuildFailure = null;
         return true;
@@ -731,7 +687,6 @@ internal sealed unsafe class Swapchain : IDisposable
         _current = null;
         // Nothing may be called against these handles again; the backend outlives
         // the swapchain (the device disposes it last).
-        Latency.OnSwapchainRetired();
 
         if (_surface.Handle != 0)
         {

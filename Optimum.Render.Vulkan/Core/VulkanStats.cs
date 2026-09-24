@@ -632,21 +632,8 @@ internal static class VulkanStats
     /// </summary>
     public static volatile VulkanAllocator? MemorySource;
 
-    /// <summary>
-    /// The latency backend the <c>stats.latency</c> line reports (seam S7); the
-    /// device sets it whenever the active backend changes and clears it at
-    /// dispose. Null means the line still appears, with the "off" backend and no
-    /// frames - the line is always present so a parser never has to branch.
-    /// </summary>
-    public static volatile ILatencyBackend? LatencySource;
-
-    /// <summary>
-    /// The vendor extension revision behind the active backend, for the
-    /// <c>rev=</c> token of the line (seam S7): VK_NV_low_latency2's specVersion,
-    /// which decides whether submits carry per-submit attribution. 0 for the None
-    /// backend, which is the only one on this branch.
-    /// </summary>
-    public static volatile uint LatencyRevision;
+    /// <summary>The current device's bounded CPU timing reports.</summary>
+    public static volatile FrameTimingRecorder? LatencySource;
 
     /// <summary>
     /// The eight intervals of <see cref="LatencyFrameReport" />, in the order they
@@ -745,7 +732,7 @@ internal static class VulkanStats
     /// <summary>The <c>stats.latency</c> line for the backend currently set as <see cref="LatencySource" />.</summary>
     private static string LatencyLine(long sleepCount, double sleepMs)
     {
-        ILatencyBackend? latency = LatencySource;
+        FrameTimingRecorder? latency = LatencySource;
         LatencyFrameReport[] reports = latency == null
             ? Array.Empty<LatencyFrameReport>()
             : latency.TakeReports();
@@ -754,18 +741,8 @@ internal static class VulkanStats
         var p99Ms = new double[LatencyIntervalCount];
         ReduceReports(reports, meanMs, p99Ms);
 
-        string backend = LatencyBackends.Token(latency == null ? LatencyBackendKind.None : latency.Kind);
-        string mode = latency == null ? "off" : ModeToken(latency.Settings.Mode);
-        return FormatLatencyLine(backend, mode, LatencyRevision, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
+        return FormatLatencyLine("off", "off", 0, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
     }
-
-    /// <summary>The token of one <see cref="LatencyMode" /> on the stats line.</summary>
-    public static string ModeToken(LatencyMode mode) => mode switch
-    {
-        LatencyMode.On => "on",
-        LatencyMode.Boost => "boost",
-        _ => "off",
-    };
 
     /// <summary>The original stats line. Its format must not change.</summary>
     public static string FormatIntervalLine(double elapsed, long frames, long allocations, int liveAllocations,

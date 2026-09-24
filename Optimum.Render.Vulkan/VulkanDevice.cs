@@ -467,7 +467,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             "; " + _context.Capabilities.LatencySummary);
         // Seams S1-S5: the backend is installed before the frame ring and the first
         // swapchain exist, so nothing in the frame ever sees a different instance.
-        InstallSelectedLatencyBackend();
+        InitializeFrameTiming();
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
@@ -477,7 +477,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         // it already used the destination; see UploadManager).
         _frames = new FrameRing(_context);
         // Seam S4: the installed backend tags this ring's submits.
-        _frames.Latency.Backend = Latency;
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
         _meshes = new MeshManager(_context, _uploads);
@@ -569,7 +568,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
             }
 
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError, Latency))
+                    out Swapchain? swapchain, out string? swapchainError))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;

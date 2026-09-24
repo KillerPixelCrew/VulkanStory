@@ -10,25 +10,9 @@ namespace Optimum.Render.Vulkan.Core;
 /// <summary>Where a uniform upload landed in the ring buffer.</summary>
 internal readonly record struct RingAllocation(Buffer Buffer, uint Offset, IntPtr Pointer);
 
-/// <summary>
-/// What a frame's submissions are tagged with (plan section "Latency seams",
-/// seam S4): the active latency backend and the latency frame id the renderer
-/// allocated for the frame being recorded.
-///
-/// One mutable holder rather than a parameter on every submit, because the tag
-/// has to reach the shared <see cref="FrameSlot.Submit" /> that Submit A,
-/// Submit B and SubmitPartial all pass through, and because the backend and the
-/// frame id change at different moments (the backend once at device setup, the
-/// id once per frame). <c>UploadManager.SubmitStandalone</c> does not go through
-/// that path and stays untagged, which is the rule for NV's revision-3 tagging:
-/// a frame's submits are all tagged or none of them are.
-/// </summary>
+/// <summary>The logical frame shared by all submissions while recording it.</summary>
 internal sealed class LatencySubmitTag
 {
-    /// <summary>The active backend; the None backend adds nothing to any chain.</summary>
-    public ILatencyBackend Backend = new NoneLatencyBackend();
-
-    /// <summary>The latency frame id of the frame being recorded; 0 before the first.</summary>
     public ulong FrameId;
 }
 
@@ -328,16 +312,10 @@ internal sealed unsafe class FrameSlot : IDisposable
                 PSignalSemaphoreValues = signalValues,
             };
 
-            // Seam S4: every submit of the frame passes through here, so the
-            // backend chains its per-submit struct (NV's VkLatencySubmissionPresentIdNV
-            // at extension revision 3 and up) onto the chain the frame already
-            // built. The None backend returns it unchanged, so nothing branches.
-            void* chain = _latency.Backend.TagSubmit(_latency.FrameId, &timelineInfo);
-
             var submit = new SubmitInfo
             {
                 SType = StructureType.SubmitInfo,
-                PNext = chain,
+                PNext = &timelineInfo,
                 CommandBufferCount = commandBufferCount,
                 PCommandBuffers = commandBuffers,
                 WaitSemaphoreCount = waitCount,
@@ -362,7 +340,11 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
         _timeline.NoteFrameSubmitted(FrameValue);
         LastSignalledValue = FrameValue;
+        LastSubmittedFrameId = _latency.FrameId;
     }
+
+    /// <summary>The frame associated with LastSignalledValue, including partial submits.</summary>
+    public ulong LastSubmittedFrameId { get; private set; }
 
     public ulong UniformBytesUsed => _cursor;
     public ulong UniformCapacity => _regionSize;
