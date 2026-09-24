@@ -1,9 +1,9 @@
 # Vulkan renderer
 
 Optimum's Vulkan backend delivers native rendering and shaders, TAA and GTAO, with
-separate scene/UI images and frame timing. Vendor upscalers, frame generation and
-Vulkan-to-DX12 interop are outside this PR. Existing game rendering options remain
-compatibility requirements.
+separate scene/UI images and frame timing. It also supports Optimum's existing FSR 1
+render-scale option through the native final blit. New upscaler integrations, frame
+generation and Vulkan-to-DX12 interop are outside this PR.
 
 Final acceptance of the refactor is pending. Historical test totals and captures do
 not establish correctness of the current build. Select hardware by queried identity
