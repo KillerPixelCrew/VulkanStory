@@ -114,9 +114,9 @@ internal sealed unsafe class PassRecorder
     /// <paramref name="attachments" />' load ops and clear values; the views and
     /// layouts are the caller's.
     /// </summary>
-    public void Prepare(CommandBuffer commandBuffer, VulkanFramebuffer framebuffer, VulkanTexture?[] colour,
+    public void Prepare(CommandBuffer commandBuffer, VulkanFramebuffer framebuffer, ReadOnlySpan<VulkanTexture?> colour,
         VulkanTexture? depth, bool depthReadOnly, int formatsId, IReadOnlyList<VulkanFramebuffer?> framebuffers,
-        RenderingAttachmentInfo[] attachments, ref RenderingAttachmentInfo depthAttachment)
+        Span<RenderingAttachmentInfo> attachments, ref RenderingAttachmentInfo depthAttachment)
     {
         PassDeclaration? declaration = ReferenceEquals(DeclaredOn, framebuffer) ? Declared : null;
         bool split = declaration != null && Opened;
@@ -239,7 +239,7 @@ internal sealed unsafe class PassRecorder
         }
     }
 
-    private static bool InScope(VulkanTexture texture, VulkanTexture?[] colour, VulkanTexture? depth)
+    private static bool InScope(VulkanTexture texture, ReadOnlySpan<VulkanTexture?> colour, VulkanTexture? depth)
     {
         if (ReferenceEquals(texture, depth)) return true;
         for (int i = 0; i < colour.Length; i++)
@@ -254,7 +254,7 @@ internal sealed unsafe class PassRecorder
     /// what a mod-hosted stage might sample.
     /// </summary>
     private void ForEachOpenSamplingCandidate(CommandBuffer commandBuffer, IReadOnlyList<VulkanFramebuffer?> framebuffers,
-        VulkanTexture?[] colour, VulkanTexture? depth, bool flushClears)
+        ReadOnlySpan<VulkanTexture?> colour, VulkanTexture? depth, bool flushClears)
     {
         for (int f = 0; f < framebuffers.Count; f++)
         {

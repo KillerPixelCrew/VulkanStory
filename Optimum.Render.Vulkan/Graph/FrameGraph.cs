@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Optimum.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Client;
 
 namespace Optimum.Render.Vulkan.Graph;
 
@@ -138,14 +139,7 @@ internal sealed class FrameGraph
     /// </summary>
     public int OpenPass(PassSignature signature, bool declared)
     {
-        int index = _frame.Count;
-        for (int k = 0; k < _plans.Length; k++)
-        {
-            FramePlan? plan = _plans[k];
-            _prefixMatches[k] = _prefixMatches[k] && plan != null && !plan.IsConservative &&
-                                plan.MatchesPass(index, signature);
-        }
-        _frame.Add(signature);
+        int index = RecordPass(signature);
         Passes++;
         if (declared) DeclaredPasses++;
         VulkanStats.NotePass();
@@ -170,6 +164,18 @@ internal sealed class FrameGraph
         VulkanStats.NoteComputePass();
         if (!Enabled) return -1;
 
+        int index = RecordPass(signature);
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("compute pass " + index + " name=" + signature.NameId + " writes=" +
+                signature.Attachments.Length + " reads=" + signature.Reads.Length + " " + signature.Width + "x" +
+                signature.Height + " plan=" + (PrefixMatchesPlan ? "match" : "conservative"));
+        }
+        return index;
+    }
+
+    private int RecordPass(PassSignature signature)
+    {
         int index = _frame.Count;
         for (int k = 0; k < _plans.Length; k++)
         {
@@ -178,12 +184,6 @@ internal sealed class FrameGraph
                                 plan.MatchesPass(index, signature);
         }
         _frame.Add(signature);
-        if (RenderTrace.Enabled)
-        {
-            RenderTrace.Write("compute pass " + index + " name=" + signature.NameId + " writes=" +
-                signature.Attachments.Length + " reads=" + signature.Reads.Length + " " + signature.Width + "x" +
-                signature.Height + " plan=" + (PrefixMatchesPlan ? "match" : "conservative"));
-        }
         return index;
     }
 
@@ -223,29 +223,37 @@ internal sealed class FrameGraph
 
     /// <summary>
     /// Ends the frame: a hit when every pass matched the plan the frame was recorded
-    /// against, then the plan for the next frame is solved from this one.
+    /// against. Reuses a matching plan or solves a new one when the frame changed.
     /// </summary>
     public void EndFrame()
     {
         if (_frame.Count > 0)
         {
-            bool hit = false;
-            foreach (FramePlan? plan in _plans)
+            int match = -1;
+            for (int i = 0; i < _plans.Length; i++)
             {
-                hit |= plan != null && !plan.IsConservative && plan.Matches(_frame);
+                FramePlan? plan = _plans[i];
+                if (plan != null && !plan.IsConservative && plan.Matches(_frame))
+                {
+                    match = i;
+                    break;
+                }
             }
-            if (hit)
+            if (match >= 0)
             {
                 PlanHits++;
                 VulkanStats.NotePlanHit();
+                // Keep both recurring frame shapes (e.g. alternating TAA history).
+                // A matching immutable plan needs no new snapshots or placement solve.
+                if (match == 1) (_plans[0], _plans[1]) = (_plans[1], _plans[0]);
             }
             else
             {
                 PlanMisses++;
                 VulkanStats.NotePlanMiss();
+                _plans[1] = _plans[0];
+                _plans[0] = FramePlan.Build(_frame);
             }
-            _plans[1] = _plans[0];
-            _plans[0] = FramePlan.Build(_frame);
         }
         _frame.Clear();
         _prefixMatches[0] = true;
@@ -335,4 +343,19 @@ internal sealed class FrameGraph
             if (ReferenceEquals(_pending[i].Texture, texture)) _pending.RemoveAt(i);
         }
     }
+}
+
+/// <summary>
+/// Vulkan-native plan, Phase 2 (contract C3): receives the render-stage bracket
+/// <c>ClientMain.TriggerRenderStage</c> issues around each stage's renderers, forwarded by
+/// <see cref="Platform.VulkanClientPlatform" />. The frame graph implements it to map
+/// <c>(stage, target)</c> to passes. Called on the render thread only.
+/// </summary>
+internal interface IRenderStageListener
+{
+    /// <summary>Before the stage's renderers run.</summary>
+    void OnBeginRenderStage(EnumRenderStage stage);
+
+    /// <summary>After the stage's renderers ran, before the GL error check.</summary>
+    void OnEndRenderStage(EnumRenderStage stage);
 }

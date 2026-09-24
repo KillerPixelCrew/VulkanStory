@@ -83,6 +83,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public long FeedbackSplits { get; private set; }
 
     // What the open scope was begun with, to recognise a restart that changed nothing.
+    // Scratch is used only while preparing a scope; pass signatures own their snapshots.
+    private readonly VulkanTexture?[] _scopeColour = new VulkanTexture?[RenderLimits.MaxColorAttachments];
     private readonly ImageView[] _openViews = new ImageView[RenderLimits.MaxColorAttachments];
     private int _openCount = -1;
     private ImageView _openDepthView;
@@ -379,9 +381,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         int count = highest + 1;
         bool graph = _graph.Enabled;
 
-        var attachments = new RenderingAttachmentInfo[Math.Max(count, 0)];
+        Span<RenderingAttachmentInfo> attachments = stackalloc RenderingAttachmentInfo[count];
         // Frame-graph path: the pass recorder queues the barriers and picks the load ops.
-        VulkanTexture?[]? scopeColour = graph ? new VulkanTexture?[attachments.Length] : null;
+        Span<VulkanTexture?> scopeColour = _scopeColour.AsSpan(0, count);
+        scopeColour.Clear();
         VulkanTexture? scopeDepth = null;
 
         for (int i = 0; i < count; i++)
@@ -412,7 +415,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
             // Blend state can change inside the scope, so the attachment is
             // declared for the widest colour use (read and write).
-            if (graph) scopeColour![i] = texture;
+            if (graph) scopeColour[i] = texture;
             else _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.ColorBlend);
 
             attachments[i] = new RenderingAttachmentInfo
@@ -457,8 +460,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         if (graph)
         {
-            _recorder.Prepare(commandBuffer, framebuffer, scopeColour!, scopeDepth, DepthReadOnly,
+            _recorder.Prepare(commandBuffer, framebuffer, scopeColour, scopeDepth, DepthReadOnly,
                 FormatsIdOf(framebuffer), _framebuffers, attachments, ref depthAttachment);
+            scopeColour.Clear();
         }
 
         _barriers.Flush(commandBuffer);
