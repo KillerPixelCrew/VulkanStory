@@ -572,6 +572,18 @@ public sealed class StandardMotionContractTests(ITestOutputHelper output)
         x, y, z, 1,
     ];
 
+    // At view z = -1 the shear moves the raster position by exactly the
+    // requested subpixel jitter; the previous projection remains unjittered.
+    private static float[] Projection(float jitterX, float jitterY)
+    {
+        var projection = new float[16];
+        projection[0] = projection[5] = 1;
+        projection[8] = -2 * jitterX / Size;
+        projection[9] = -2 * jitterY / Size;
+        projection[10] = projection[11] = projection[14] = -1;
+        return projection;
+    }
+
     [SkippableFact]
     public void PreviousModelAndMissingHistoryProduceIndependentPixelVectors()
     {
@@ -620,6 +632,41 @@ public sealed class StandardMotionContractTests(ITestOutputHelper output)
         }
     }
 
+    [SkippableFact]
+    public void MoverMotionExcludesProjectionJitterAndIgnoresStaleHistory()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            var scene = new Scene(device!, perspective: true);
+            Check(scene.Draw(Identity, noWarp: true, jitterX: 0.37f, jitterY: -0.24f),
+                0, 0, 0.5f, 0);
+            Check(scene.Draw(Identity, noWarp: true, jitterX: -0.5f, jitterY: 0.5f),
+                0, 0, 0.5f, 0);
+            Check(scene.Draw(Translation(0.25f, 0, 0), noWarp: true,
+                jitterX: 0.5f, jitterY: -0.5f), 8, 0, 0.5f, 0);
+            Check(scene.Draw(Translation(0, -0.125f, 0), noWarp: true,
+                jitterX: -0.5f, jitterY: 0.5f), 0, -4, 0.5f, 0);
+
+            float[] previous = Translation(-0.1875f, 0.0625f, 0);
+            float[] unjittered = scene.Draw(previous, noWarp: true);
+            float[] jittered = scene.Draw(previous, noWarp: true,
+                jitterX: 0.31f, jitterY: 0.47f);
+            Check(jittered, -6, 2, 0.5f, 0);
+            int centre = ((Size / 2) * Size + Size / 2) * 4;
+            Assert.InRange(jittered[centre], unjittered[centre] - 0.05f,
+                unjittered[centre] + 0.05f);
+            Assert.InRange(jittered[centre + 1], unjittered[centre + 1] - 0.05f,
+                unjittered[centre + 1] + 0.05f);
+
+            Check(scene.Draw(Translation(-0.5f, 0.5f, 0), history: false,
+                noWarp: true, cameraX: 0.25f, cameraY: -0.125f,
+                jitterX: 0.42f, jitterY: 0.13f), 8, -4, 0.5f, 1);
+            GpuTest.AssertClean(device!);
+        }
+    }
+
     private static void Check(float[] pixels, float x, float y, float depth, float reactive)
     {
         int centre = ((Size / 2) * Size + Size / 2) * 4;
@@ -635,10 +682,12 @@ public sealed class StandardMotionContractTests(ITestOutputHelper output)
         private readonly int program;
         private readonly MotionTarget target;
         private readonly int mesh;
+        private readonly bool perspective;
 
-        public Scene(VulkanDevice device)
+        public Scene(VulkanDevice device, bool perspective = false)
         {
             this.device = device;
+            this.perspective = perspective;
             var variant = new ShaderCorpus.ShaderVariant
             {
                 Name = "taa-standard",
@@ -652,12 +701,13 @@ public sealed class StandardMotionContractTests(ITestOutputHelper output)
                 Assert.True(device.GetUniformLocation(program, required) >= 0, required + " is missing");
             BindEveryDeclaredSampler(device, device, program);
             target = CreateMotionTarget(device, Size);
-            mesh = CreateFaceMesh(device);
+            mesh = CreateFaceMesh(device, perspective ? -1 : 0);
         }
 
         public float[] Draw(float[] previousModel, bool history = true, bool noWarp = false,
             float cameraX = 0, float cameraY = 0, float previousWarp = 0,
-            float[]? previousView = null, float[]? previousProjection = null, float reactive = 0)
+            float[]? previousView = null, float[]? previousProjection = null, float reactive = 0,
+            float jitterX = 0, float jitterY = 0)
         {
             device.BeginFrame();
             device.BindFramebuffer(target.Framebuffer);
@@ -667,19 +717,21 @@ public sealed class StandardMotionContractTests(ITestOutputHelper output)
             device.ClearDepth(1);
             device.UseProgram(program);
 
-            SetMatrix(device, program, "projectionMatrix", Identity);
+            SetMatrix(device, program, "projectionMatrix",
+                perspective ? Projection(jitterX, jitterY) : Identity);
             SetMatrix(device, program, "viewMatrix", Identity);
             SetMatrix(device, program, "modelMatrix", Identity);
             SetMatrix(device, program, "toShadowMapSpaceMatrixFar", Identity);
             SetMatrix(device, program, "toShadowMapSpaceMatrixNear", Identity);
-            SetMatrix(device, program, "prevProjectionMatrix", previousProjection ?? Identity);
+            SetMatrix(device, program, "prevProjectionMatrix",
+                previousProjection ?? (perspective ? Projection(0, 0) : Identity));
             SetMatrix(device, program, "prevViewMatrix", previousView ?? Identity);
             SetMatrix(device, program, "prevModelMatrix", previousModel);
             SetInt(device, program, "taaHistoryValid", history ? 1 : 0);
             SetFloat(device, program, "taaReactive", history ? reactive : 1);
             SetFloat3(device, program, "cameraPosDelta", cameraX, cameraY, 0);
             SetFloat2(device, program, "taaRenderSize", Size, Size);
-            SetFloat2(device, program, "taaJitterPx", 0, 0);
+            SetFloat2(device, program, "taaJitterPx", jitterX, jitterY);
             SetInt(device, program, "dontWarpVertices", noWarp ? 1 : 0);
             SetFloat(device, program, "alphaTest", -1);
             SetFloat(device, program, "viewDistance", 1024);
