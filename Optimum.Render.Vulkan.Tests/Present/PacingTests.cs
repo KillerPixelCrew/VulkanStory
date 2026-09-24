@@ -355,7 +355,7 @@ public class PresentWaitStageTests
     [Fact]
     public void TheBlitPathWaitsForTheAcquiredImageAtTransfer()
     {
-        IPresentPath blit = new BlitPresentPath(null!, null!, () => null);
+        var blit = new BlitPresentPath(null!, null!, () => null);
         Assert.Equal(PipelineStageFlags.TransferBit, blit.AcquireWaitStage);
         Assert.Equal(blit.AcquireWaitStage, PresentWaitStages.RequireAcquireStage(blit.AcquireWaitStage));
     }

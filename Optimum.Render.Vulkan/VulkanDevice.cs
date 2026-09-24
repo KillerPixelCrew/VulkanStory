@@ -586,7 +586,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable
     }
 
     private Swapchain? _swapchain;
-    private IPresentPath? _presentPath;
+    private BlitPresentPath? _presentPath;
     private readonly MissedVsyncDetector _missedVsyncs = new();
     private long _lastPresentReturn;
     private string? _reportedRebuildFailure;
