@@ -239,3 +239,11 @@ backend started.
   reports undefined reads and synchronisation hazards. A hazard inside your pass is a real finding.
 - **Logs.** `[Optimum] mod pass '<name>' of <mod> skipped: ...` names a write whose texture does not
   exist this session. `... threw: ...` is an exception from your draw.
+
+## 8. Thin occluders for GTAO
+
+Cross-quad block geometry is classified as thin automatically. Its snow-layer geometry remains
+solid. Blocks whose other non-wind chunk geometry should cast only thin AO can set the boolean
+`optimumAoThin` attribute in their block JSON. Wind-mode geometry is already thin and needs no
+attribute. The class is carried in bit 15 of the chunk colour-map integer and affects only the
+Vulkan GTAO path; the game's OpenGL SSAO keeps its existing classification.

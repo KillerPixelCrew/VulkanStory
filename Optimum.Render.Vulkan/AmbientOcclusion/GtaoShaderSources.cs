@@ -19,7 +19,7 @@ internal static class GtaoShaderSources
     public const string ResourcePrefix = "shaders-vk/gtao/";
 
     private static readonly ConcurrentDictionary<string, string> Raw = new(StringComparer.Ordinal);
-    private static readonly Regex IncludeLine = new("^[ \\t]*#include[ \\t]+\"([^\"]+)\"[ \\t]*$",
+    private static readonly Regex IncludeLine = new("^[ \\t]*#include[ \\t]+\"([^\"]+)\"[ \\t]*\\r?$",
         RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
     /// <summary>A resource of the gtao directory, as committed.</summary>

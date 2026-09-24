@@ -80,7 +80,8 @@ public class FsrPipelineCoverageTests
         string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.NativeBlit.cs");
         Assert.Contains("if (OptimumConfig.TaaDebugView != 0 && MotionAttachmentIndex >= 0)", native);
         Assert.Contains("if (taaDebug != null && !taaDebug.LoadError)", native);
-        Assert.Contains("if (OptimumFsrBlitActive())", native);
+        Assert.Contains("bool useFsr = OptimumFsrBlitActive();", native);
+        Assert.Contains("if (useFsr)", native);
         Assert.Contains("DisableOptimumFsr(error);", native);
         // EASU upsamples Primary colour 0, and the two FSR targets are two declared passes.
         Assert.Contains("new NativeTexture(nativeFsrEasu.Samplers[0], scene2D),", native);

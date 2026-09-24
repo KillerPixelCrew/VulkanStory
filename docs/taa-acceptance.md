@@ -215,9 +215,10 @@ scripts/dev/perf-capture.sh --renderer opengl --taa on  --label gl-on
   the log, not from the argument), and the **power mode and thermals** - these last two have no
   tooling in the repo and must be noted by hand from the handheld's own readout at the start and
   end of each run.
-- **GPU pass timestamps** are also owed by the plan and have no implementation on either
-  backend (no `vkCmdWriteTimestamp`, no `GL_TIME_ELAPSED` query anywhere). Until they exist,
-  record `ScreenManager.FrameProfiler` marks as the per-phase stand-in and say so.
+- **GPU pass timestamps:** Vulkan now records timestamp queries when
+  `OPTIMUM_VULKAN_PASS_TIMES=1` and emits `stats.passes` once per second. Record that line
+  alongside the CPU frame numbers. OpenGL has no equivalent pass timestamps here; use
+  `ScreenManager.FrameProfiler` marks as its per-phase stand-in and label them as CPU marks.
 
 ### P2. Memory at 1080p
 - Commands: `OPTIMUM_VULKAN_STATS=<file>` is already set by `perf-capture.sh` on Vulkan; read the

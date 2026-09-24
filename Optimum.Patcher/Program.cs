@@ -54,6 +54,7 @@ var typesToInject = new List<string>
     "Optimum.EntityLightBatchBuffer",
     "Optimum.OptimumOptiTimeGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
+    "Vintagestory.Client.NoObf.OptimumAoClass",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -1151,6 +1152,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons_EdgeOnly", 3),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildDecorPolygons", 5),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "GetMeshPoolForPass", 3),
+    // GTAO thin class: stamp cross quads independently of snow and JSON faces.
+    new("Vintagestory.Client.NoObf.CrossTesselator", "DrawCross", 2),
+    new("Vintagestory.Client.NoObf.JsonTesselator", "AddJsonModelDataToMesh", 7),
     new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddModelAndStoreLocation", 8),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),

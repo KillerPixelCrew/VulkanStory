@@ -213,6 +213,11 @@ The first of the four system stages, and the heaviest draw path in the game.
   declared pass and one indirect draw per group, pipelines built once) and the chunk facts in
   `Optimum.Tests/native-world-systems-coverage-tests.cs`.
 
+The experimental `ShadowCasterSplit` program is dropped from this branch. Its opaque
+no-alpha-test path was pixel-identical and cut near-cascade time by 63%, but made the
+draw-count-bound far cascade 18% slower at shadow quality 4, a net loss of 1.5 FPS in
+the measured scene. It can be reconsidered after far-cascade draw batching.
+
 ### Entities (stage 2, one of the four system stages)
 
 - **Seam:** `ClientPlatformAbstract.RenderEntityMesh(MeshRef, string samplerName, int textureId)`,

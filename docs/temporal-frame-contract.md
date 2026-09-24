@@ -250,9 +250,10 @@ resolve treats a NaN/Inf history sample as a reset.
 ### 3.4 Sharpen target (frame buffer slot 21)
 
 One `RGBA16F` render-resolution colour attachment, LINEAR + CLAMP_TO_EDGE, allocated and released
-with the two history slots. Holds the sharpened copy of the slot the resolve just wrote. Null when
-TAA is off or when its allocation failed — in which case the post chain simply reads the unsharpened
-resolve. `TaaSharpness <= 0` is a true bypass and the pass does not run; the pass also skips itself
+with the two history slots. Holds a sharpened copy of the final Primary composition, after bloom,
+god rays and `AfterFinalComposition` overlays. Those effects therefore consume the unsharpened TAA
+resolve. Null when TAA is off or when its allocation failed; presentation then reads Primary.
+`TaaSharpness <= 0` is a true bypass and the pass does not run; the pass also skips itself
 entirely when `OptimumFsrBlitActive()` says FSR 1's RCAS will finish the frame at native resolution.
 Known cost (P5 finding (ae)): the target is allocated whenever TAA is on, including at render scales
 where the pass can never run.
@@ -287,6 +288,12 @@ contract and nothing else:
 MRT outputs: `outColor` (colour), `outGlow` (glow), `outDepth` (linear view depth) — the three
 history attachments. The camera fallback reprojects a finite surface as `world + cameraDelta` and
 sky (`depth >= 0.999999`) as a **direction** with `w = 0`, so camera translation cannot move it.
+
+The resolve widens its YCoCg variance clip by at most `0.25 * sigma` where at least three
+axial neighbours match the centre depth and show fine luminance contrast. It still clamps the
+box to the observed 3x3 colour range. Flat areas and depth edges keep the original clip width.
+This is a local resolve rule in both shader twins; it adds no uniform or history resource and
+does not change the temporal frame contract.
 
 **Note (2026-09-11): anti-flicker weighting and nearest-depth disocclusion.** A change inside the
 reference consumer only: the contract stays **v1** (motion-vector semantics, the §3.2 validity rule,

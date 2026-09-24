@@ -273,6 +273,9 @@ The prefix is `ShaderRegistry.registerDefaultShaderCodePrefixes`, `ShaderRegistr
     `scene-ssao`'s GTAO compose branch), never an output or varying, so it is the constant `OPTIMUM_OPTIMUMAO`
     (added 2026-09-16). `scene-ssao`'s `#if OPTIMUMAO > 0 if (optimumAoMode == 1) {...} else #endif {...}` becomes
     `if (OPTIMUM_OPTIMUMAO > 0 && optimumAoMode == 1) {...} else {...}`, the same control flow.
+    Terrain uses the shape's wind flag or bit 15 of non-wind chunk colour-map metadata for the thin
+    class. Cross quads set the bit without tagging their accompanying snow layers; other blocks
+    can request it through the `optimumAoThin` block attribute.
   - `OPTIMUMAO_MULTIBOUNCE` is never stamped by `ShaderRegistry` (the albedo hook of
     `docs/research/ambient-occlusion.md` C.11, off in the first version), so it is neither a constant nor an
     axis: `scene-ssao.frag` declares a plain `const int OPTIMUM_AO_MULTIBOUNCE = 0` and branches on it, which

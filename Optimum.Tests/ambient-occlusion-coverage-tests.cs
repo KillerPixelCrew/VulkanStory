@@ -184,24 +184,34 @@ public class AmbientOcclusionCoverageTests
     }
 
     /// <summary>
-    /// The thin class (C.5) is the vertex stage's wind flag, which vanilla writes into gnormal.w
-    /// (grass, plants and leaves wave; blocks and snow layers do not). The fragment stage no longer
-    /// forces it for a whole pool: the blend-no-cull pool holds solid blocks too - snow layers - so
-    /// keying the class off haxyFade made 59 % of the visible pixels in a snow-covered world, 158 of
-    /// 168 flat faces, 0.05-block occluders (2026-09-17).
+    /// The thin class (C.5) comes from wind mode or a per-block colour-map bit. Cross quads
+    /// carry the bit without tagging their accompanying snow layers. The fragment stage must
+    /// never force it for a whole pool: the blend-no-cull pool contains solid snow too.
     /// </summary>
     [Fact]
-    public void TheThinClassIsTheVertexWindFlagAndTheComposeDropsTheRowMin()
+    public void TheThinClassUsesWindAndPerBlockMetadataAndTheComposeDropsTheRowMin()
     {
         string vertex = Read("sources/shaders/chunkopaque.vsh");
         Assert.Contains("bool isLeaves = ((renderFlags & WindModeBitMask) > 0);", vertex);
         Assert.Contains("gnormal.w = isLeaves ? 1 : 0;", vertex);
+        Assert.Contains("(vdata.colormapData & 0x8000) != 0) gnormal.w = 1;", vertex);
+        Assert.Contains("(colormapData & 0x8000) != 0) gnormal.w = 1;", vertex);
+        string nativeVertex = Read("sources/shaders-vk/chunkopaque.vert");
+        Assert.Contains("(vdata.colormapData & 0x8000) != 0) gnormal.w = 1;", nativeVertex);
+        string classSource = Read("sources/VintagestoryLib/Optimum/OptimumAoClass.cs");
+        Assert.Contains("block.Attributes?[\"optimumAoThin\"]?.AsBool(false) == true", classSource);
+        Assert.Contains("colorMapData & ~ThinBit", classSource);
+        Assert.Contains("internal static int PackCross", classSource);
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"Vintagestory.Client.NoObf.OptimumAoClass\"", patcher);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.CrossTesselator\", \"DrawCross\", 2)", patcher);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.JsonTesselator\", \"AddJsonModelDataToMesh\", 7)", patcher);
         foreach (string path in new[] { "sources/shaders/chunkopaque.fsh", "sources/shaders-vk/chunkopaque.frag" })
         {
             string chunk = Read(path);
             Assert.DoesNotContain("outGNormal.w = 1.0;", chunk);
             Assert.DoesNotContain("optimumThinClass", chunk);
-            Assert.Contains("the thin class is the", chunk);
+            Assert.Contains("explicit per-block class", chunk);
             Assert.Contains("vertex stage's wind flag", chunk);
         }
         Assert.DoesNotContain("optimumThinClass", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs"));

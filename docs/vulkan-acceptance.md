@@ -58,6 +58,23 @@ Every recorded row carries the renderer line copied from the client log of that 
 to report when it is missing or names the other backend (the bootstrap falls back to OpenGL
 silently). A row without the line, or with the wrong one, is not run - rerun it.
 
+### Vendor device selection for the GPU suite
+
+`vulkaninfo --summary` lists the loader's physical-device indices and driver versions. The
+GPU suite normally chooses the best device automatically; set `OPTIMUM_TEST_DEVICE_INDEX` to
+an index from that list to pin it for a run (for example,
+`OPTIMUM_TEST_DEVICE_INDEX=0 dotnet test Optimum.Render.Vulkan.Tests`). Record the device name,
+driver, Vulkan version and suite result. A passing headless suite does not replace a real
+client session on that device: presentation, mod rendering and pacing still need their own
+rows. If the device cannot satisfy the backend's Vulkan requirements, record its rejection
+reason rather than counting skipped GPU tests as a pass.
+
+On 2026-09-24, GPU0 on a Windows host was **Intel UHD Graphics 770 (Xe-LP, not Arc)**,
+driver 101.7088, Vulkan 1.4.323. Pinned headless runs passed device selection (1/1),
+TAA resolve (18/18), and GTAO (12/12). The Khronos validation layer was absent, so
+these runs did not provide validation-layer coverage. An Intel client presentation and
+pacing row remains open, as does AMD hardware verification.
+
 ## 2. Acceptance rows
 
 ### Phase 0 exit

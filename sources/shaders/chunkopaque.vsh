@@ -180,6 +180,16 @@ void main(void)
 #if SSAOLEVEL > 0
 	gnormal = modelViewMatrix * vec4(normal.xyz, 0);
 	gnormal.w = isLeaves ? 1 : 0;
+#if OPTIMUMAO > 0
+	// Bit 15 of colour-map metadata is Optimum's explicit thin-block class
+	// for non-wind chunk geometry. Wind-mode geometry is already thin; the
+	// same bit retains its vanilla season-offset meaning there.
+#if USESSBO > 0
+	if (!isLeaves && (vdata.colormapData & 0x8000) != 0) gnormal.w = 1;
+#else
+	if (!isLeaves && (colormapData & 0x8000) != 0) gnormal.w = 1;
+#endif
+#endif
 #endif
 
 

@@ -99,6 +99,8 @@ void main(void)
 
 	// ---- current frame: 3x3 neighbourhood, un-jittered reconstruction and statistics
 	vec4 centreSample = texelFetch(sceneTex, pixel, 0);
+	float centreDepth = texelFetch(depthTex, pixel, 0).r;
+	float centreLuma = rgbToYCoCg(centreSample.rgb).x;
 	// Nearest window depth in the 3x3 (0 = near): its motion and its linear depth
 	// drive the reprojection and the disocclusion test, so a sub-pixel leaf in front
 	// of a far background keeps one consistent answer across jitter phases.
@@ -108,6 +110,8 @@ void main(void)
 	float filteredWeight = 0.0;
 	vec3 m1 = vec3(0.0), m2 = vec3(0.0);
 	vec3 boxMin = vec3(1e9), boxMax = vec3(-1e9);
+	float fineContrast = 0.0;
+	int fineTaps = 0;
 	for (int y = -1; y <= 1; y++)
 	for (int x = -1; x <= 1; x++)
 	{
@@ -118,6 +122,12 @@ void main(void)
 		vec3 ycc = rgbToYCoCg(c.rgb);
 		m1 += ycc; m2 += ycc * ycc;
 		boxMin = min(boxMin, ycc); boxMax = max(boxMax, ycc);
+		// Only same-surface axial texels count as fine texture. A silhouette's
+		// colour jump must not loosen the history clip across its depth edge.
+		if (abs(x) + abs(y) == 1 && abs(tapDepth - centreDepth) <= max(2e-4, 8e-4 * centreDepth)) {
+			fineContrast += abs(ycc.x - centreLuma);
+			fineTaps++;
+		}
 		// Reconstruct at this pixel's unjittered centre. The tap's raster
 		// centre (pixel + (x,y) + 0.5) sits at unjittered position
 		// pixelCentre + (x,y) - jitterPx, so its offset from the
@@ -131,11 +141,18 @@ void main(void)
 	current = max(current, vec4(0.0));
 	vec3 mu = m1 / 9.0;
 	vec3 sigma = sqrt(max(m2 / 9.0 - mu * mu, vec3(0.0)));
-	vec3 clipMin = max(boxMin, mu - varianceGamma * sigma);
-	vec3 clipMax = min(boxMax, mu + varianceGamma * sigma);
+	// Fine per-texel detail needs a slightly wider variance box to survive
+	// alternating jitter samples. Bound the extra width by the observed 3x3
+	// range; flat regions and depth edges keep the original clip.
+	float textureDetail = fineTaps >= 3
+		? clamp((fineContrast / float(fineTaps)) / max(centreLuma, 0.05) * 2.0, 0.0, 1.0)
+		: 0.0;
+	float localGamma = varianceGamma + 0.25 * textureDetail;
+	vec3 clipMin = max(boxMin, mu - localGamma * sigma);
+	vec3 clipMax = min(boxMax, mu + localGamma * sigma);
 
 	// ---- depth and linear view depth of this pixel
-	float depth = texelFetch(depthTex, pixel, 0).r;
+	float depth = centreDepth;
 	vec2 ndc = pixelCentre * invSize * 2.0 - 1.0;
 	vec4 worldH = invViewProjJittered * vec4(ndc, depth * 2.0 - 1.0, 1.0);
 	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6) * sign(worldH.w);

@@ -36,6 +36,7 @@
     <Compile Remove="Client\optimum-entity-render-batch.cs" />
     <Compile Remove="Client\optimum-render-device.cs" />
     <Compile Remove="Client\optimum-render-bootstrap.cs" />
+    <Compile Remove="Client\Model\Mesh\OptimumMeshPartPool.cs" />
     <Compile Remove="Config\AdaptiveWorkerController.cs" />
     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
@@ -54,6 +55,10 @@
     <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
     <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
     <Compile Remove="Client\Render\OptimumModPasses.cs" />
+    <Compile Remove="Config\OptimumChunkVisibilityBfs.cs" />
+    <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
+    <Compile Remove="Config\OptimumKometGuard.cs" />
+    <Compile Remove="Config\OptimumCompatibilityGuard.cs" />
   </ItemGroup>
 
   <ItemGroup>

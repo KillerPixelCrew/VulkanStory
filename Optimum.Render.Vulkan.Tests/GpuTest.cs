@@ -23,9 +23,14 @@ internal static class GpuTest
 {
     public const string ValidationFeaturesVariable = "OPTIMUM_TEST_VALIDATION_FEATURES";
     public const string DefaultValidationFeatures = "sync,best";
+    public const string DeviceIndexVariable = "OPTIMUM_TEST_DEVICE_INDEX";
 
     public static string ValidationFeatures =>
         Environment.GetEnvironmentVariable(ValidationFeaturesVariable) ?? DefaultValidationFeatures;
+
+    private static int DeviceIndex =>
+        int.TryParse(Environment.GetEnvironmentVariable(DeviceIndexVariable), out int index) && index >= 0
+            ? index : -1;
 
     /// <summary>Headless, validated options; <paramref name="messages" /> receives every layer message.</summary>
     public static VulkanContextOptions ContextOptions(List<string>? messages = null) => new()
@@ -33,6 +38,7 @@ internal static class GpuTest
         Headless = true,
         EnableValidation = true,
         ValidationFeatures = ValidationFeatures,
+        PreferredDeviceIndex = DeviceIndex,
         DebugCallback = messages == null ? null : Recorder(messages),
     };
 
@@ -71,6 +77,7 @@ internal static class GpuTest
         {
             options.EnableValidation = true;
             options.ValidationFeatures = ValidationFeatures;
+            options.PreferredDeviceIndex = DeviceIndex;
             Action<string>? client = options.DebugCallback;
             options.DebugCallback = message =>
             {

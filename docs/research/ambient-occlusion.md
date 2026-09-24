@@ -472,6 +472,13 @@ the CDF mapping fails that comparison.
   (RGBA16F, mip 0 only), or pack the class into the sign of mip 0 of the working depth so it rides along for free
   [Inference; the prefilter must preserve it and reconstruction must `abs()` it]. Not from any source; D.3 measures
   the thin-foliage scenes with and without the channel.
+
+  **Implementation update (2026-09-24):** Non-wind chunk meshes use bit 15 of their existing colour-map
+  integer as a per-block thin-class flag. Cross quads stamp it where their vertices are emitted, so a
+  `CrossAndSnowlayer` block's snow mesh stays solid. Other block shapes opt in with the boolean
+  `optimumAoThin` block attribute. Wind geometry retains the bit's vanilla season-offset meaning
+  and is already classified as thin by its wind mode. The chunk vertex shaders read the bit only
+  for non-wind geometry while Optimum AO is active; OpenGL's vanilla SSAO path keeps its old class.
 - Bottosson's same-surface width estimate is the principled version ("estimate if subsequent samples along a horizon
   are a part of the same surface ... use the width as the thickness estimate"). [Uncertain] its code was unreadable;
   it needs consecutive-sample bookkeeping per slice side, so it is a switchable `THICKNESS = CONST | DIST | RANDOM |

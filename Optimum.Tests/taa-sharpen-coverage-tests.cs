@@ -210,8 +210,8 @@ public class TaaSharpenCoverageTests
 
         // Tie the executable decision to both implementations' boundaries. If either route stops
         // feeding the post-overlay Primary image into the decision, this test fails structurally.
-        AssertOrdered(gl, "bool useFsr = OptimumFsrBlitActive();", "if (!useFsr)",
-            "int primaryScene = scene2D;", "scene2D = RenderOptimumTaaSharpen(scene2D);",
+        AssertOrdered(gl, "bool useFsr = OptimumFsrBlitActive();", "int primaryScene = scene2D;",
+            "if (!useFsr)", "scene2D = RenderOptimumTaaSharpen(scene2D);",
             "OptimumApiBridge.SelectTaaPresentationTexture", "blit.Scene2D = scene2D;");
         AssertOrdered(native, "bool useFsr = OptimumFsrBlitActive();", "if (!useFsr)",
             "scene2D = RenderOptimumTaaSharpen(scene2D);", "int finalScene = NativeFinalBlitSceneTexture(scene2D, useFsr);");
