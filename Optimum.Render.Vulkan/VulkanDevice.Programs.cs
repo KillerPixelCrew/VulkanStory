@@ -327,7 +327,6 @@ public sealed unsafe partial class VulkanDevice
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? (byte[])program.UniformShadow.Clone() : null;
 
     /// <summary>A copy of the shared frame block's current bytes. For tests.</summary>
-    internal byte[] FrameGlobalsForTests => (byte[])_frameGlobals.Clone();
 
     public void SetUniform(int programId, int location, float value) =>
         Write(programId, location, new ReadOnlySpan<byte>(&value, sizeof(float)));

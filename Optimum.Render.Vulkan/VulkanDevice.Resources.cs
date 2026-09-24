@@ -640,7 +640,6 @@ public sealed unsafe partial class VulkanDevice
         // routes recorded (the differential tests compare the two).
         if (_nativePass is { Generic: true })
         {
-            _genericDraws++;
             return;
         }
         _nativeDraws++;

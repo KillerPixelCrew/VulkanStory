@@ -41,8 +41,6 @@ public sealed partial class VulkanDevice : Platform.ILatencyStageListener
         Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitStart);
     }
 
-    internal ulong LastPresentIdForTests { get; private set; }
-
     private void DisposeLatency()
     {
         if (ReferenceEquals(VulkanStats.LatencySource, Latency)) VulkanStats.LatencySource = null;

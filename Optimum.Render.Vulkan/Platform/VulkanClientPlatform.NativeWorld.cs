@@ -745,7 +745,6 @@ public partial class VulkanClientPlatform
     /// <summary>Draws the generic route recorded, and draws it could not record. Tests read them.</summary>
     internal long StatedDrawsForTests { get; private set; }
 
-    internal long StatedRefusalsForTests { get; private set; }
 
     // ------------------------------------------------------------------ recording helpers
 
@@ -845,7 +844,6 @@ public partial class VulkanClientPlatform
 
     private bool Refuse(int programId, string reason)
     {
-        StatedRefusalsForTests++;
         if (statedRefusalReported.Add(programId))
         {
             ShaderProgramBase? current = ShaderProgramBase.CurrentShaderProgram;

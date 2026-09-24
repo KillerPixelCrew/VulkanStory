@@ -857,20 +857,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable
     private long _lastFrameStart;
 
     /// <summary>Deferred destructions still waiting on the timelines. Tests only.</summary>
-    internal int PendingRetirementsForTests => _frames.PendingDeletionCount;
-
     /// <summary>The frame ring's timelines. Tests only.</summary>
     internal FrameTimeline TimelineForTests => _frames.Timeline;
 
     /// <summary>The frame ring's upload manager. Tests only.</summary>
-    internal UploadManager UploadsForTests => _uploads;
-
     /// <summary>Decision 9's set 1. Tests only.</summary>
     internal BindlessTextureTable BindlessForTests => _bindless!;
 
     /// <summary>Decision 9's shared pipeline layout. Tests only.</summary>
-    internal SharedPipelineLayout SharedLayoutForTests => _sharedLayout!;
-
     // ------------------------------------------------------------------ compute
 
     /// <summary>The compute programs. Tests only.</summary>
@@ -1062,12 +1056,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         return true;
     }
 
-    /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
-    internal bool DeviceLocalStaticMeshesForTests
-    {
-        set => _meshes.DeviceLocalStaticBuffers = value;
-    }
-
     /// <summary>The mesh store. Tests only.</summary>
     internal MeshManager MeshesForTests => _meshes;
 
@@ -1212,7 +1200,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
         ulong presentId = _swapchain.Present(target, _latencyFrameId);
         Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
         Latency.OnPresent(_latencyFrameId, presentId);
-        LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
 
@@ -1236,10 +1223,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable
 
     /// <summary>The swapchain, null when headless. Tests only.</summary>
     internal Swapchain? SwapchainForTests => _swapchain;
-
-    /// <summary>The present path's acquire wait stage. Tests only.</summary>
-    internal PipelineStageFlags PresentAcquireWaitStageForTests =>
-        _presentPath?.AcquireWaitStage ?? PresentWaitStages.BlitAcquireWait;
 
     private void ReportRebuildFailure()
     {

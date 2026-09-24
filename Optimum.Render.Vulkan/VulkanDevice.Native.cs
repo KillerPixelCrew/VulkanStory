@@ -258,8 +258,6 @@ public sealed unsafe partial class VulkanDevice
     private VulkanFramebuffer? _nativeTarget;
     private long _nativePasses;
     private long _nativeDraws;
-    private long _genericPasses;
-    private long _genericDraws;
     private long _nativeFullscreenDraws;
     private long _nativeMeshDraws;
     private long _nativeInstancedDraws;
@@ -281,10 +279,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Native passes declared and native draws recorded (every kind). Tests only.</summary>
     internal long NativePassesForTests => _nativePasses;
     internal long NativeDrawsForTests => _nativeDraws;
-
-    /// <summary>Passes and draws of the generic stated route (Platform/StatedDraw.cs), counted apart from the above. Tests only.</summary>
-    internal long GenericPassesForTests => _genericPasses;
-    internal long GenericDrawsForTests => _genericDraws;
 
     /// <summary>Native draws by kind: the fullscreen triangle, a mesh, an instanced mesh, a multi-draw. Tests only.</summary>
     internal long NativeFullscreenDrawsForTests => _nativeFullscreenDraws;
@@ -571,8 +565,7 @@ public sealed unsafe partial class VulkanDevice
 
         _nativePass = pass;
         _nativeTarget = target;
-        if (pass.Generic) _genericPasses++;
-        else _nativePasses++;
+        if (!pass.Generic) _nativePasses++;
         VulkanStats.NoteNativePass();
         if (RenderTrace.Enabled)
         {

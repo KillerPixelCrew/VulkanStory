@@ -33,8 +33,8 @@ public class NativeMeshDrawTests(ITestOutputHelper output)
 
     /// <summary>
     /// The same face, drawn twice into the same target: once through the tests' GL-shaped
-    /// <c>DrawMesh</c> (<see cref="GlShapedDevice" />: the platform's generic stated draw, the route
-    /// every draw without a dedicated one takes) and once through <see cref="VulkanDevice.DrawNativeMesh" />. Both paths run the same shader
+    /// <c>DrawMesh</c> (the platform's generic stated draw) and once through
+    /// <see cref="VulkanDevice.DrawNativeMesh" />. Both paths run the same shader
     /// over the same vertices with the same fixed state, so the pixels are bitwise equal.
     /// </summary>
     [SkippableFact]
