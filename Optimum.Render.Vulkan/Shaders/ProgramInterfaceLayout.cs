@@ -647,8 +647,8 @@ internal sealed partial class ProgramInterfaceLayout
         var indices = new HashSet<int>();
         foreach (System.Text.RegularExpressions.Match match in store.Matches(source))
         {
-            int lineStart = source.LastIndexOf('\n', Math.Max(match.Index - 1, 0)) + 1;
-            string before = source.Substring(lineStart, match.Index - lineStart);
+            int statementStart = source.LastIndexOfAny(new[] { ';', '{', '}' }, Math.Max(match.Index - 1, 0)) + 1;
+            string before = source.Substring(statementStart, match.Index - statementStart);
             if (System.Text.RegularExpressions.Regex.IsMatch(before, @"\bout\b|\bin\b|\buniform\b")) continue;
 
             assigned = true;

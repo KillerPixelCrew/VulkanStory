@@ -214,14 +214,11 @@ public sealed class NativeShaderParityTests
                      "; only native " + Describe(native.Except(glsl330)) + ", only GLSL 330 " + Describe(glsl330.Except(native)));
     }
 
-    /// <summary>The include file names a program's two stages pull in, transitively (the builder's own expansion).</summary>
+    /// <summary>The includes used by both stages of a program, transitively.</summary>
     internal static SortedSet<string> IncludesOf(string program)
     {
         var included = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (string extension in new[] { ".vert", ".frag" })
-        {
-            NativeShaderBuilder.ExpandIncludes(Path.Combine(SourceDirectory, program + extension), SourceDirectory, included);
-        }
+        NativeShaderBuilder.ExpandIncludes(Path.Combine(SourceDirectory, program + ".glsl"), SourceDirectory, included);
         return included;
     }
 
@@ -433,7 +430,8 @@ public sealed class NativeShaderParityTests
 
                     EnumShaderType type = stage.Stage == "vertex" ? EnumShaderType.VertexShader : EnumShaderType.FragmentShader;
                     string expanded = NativeShaderBuilder.ExpandIncludes(Path.Combine(SourceDirectory, stage.Source), SourceDirectory, new HashSet<string>());
-                    ShaderCompileResult preprocessed = compiler!.Preprocess(expanded, prefix, stage.Source, type);
+                    string stagePrefix = "#define " + (type == EnumShaderType.VertexShader ? "OPTIMUM_VERTEX" : "OPTIMUM_FRAGMENT") + " 1\n";
+                    ShaderCompileResult preprocessed = compiler!.Preprocess(expanded, stagePrefix + prefix, stage.Source, type);
                     Assert.True(preprocessed.Success, label + " " + stage.Source + ": " + preprocessed.Error);
 
                     CheckDeclaredBlock(failures, label + " " + stage.Source + " push block", DeclaredBlock(preprocessed.PreprocessedText, push: true), variant.Push);

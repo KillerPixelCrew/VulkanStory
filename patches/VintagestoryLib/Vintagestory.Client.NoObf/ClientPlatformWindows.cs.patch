@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..dbf069b 100644
+index b1b2eea..8b5c11f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -2751,7 +2751,7 @@ index b1b2eea..dbf069b 100644
 +		{
 +			// Optimum (Phase 3b): the window size through the seam the native blit already
 +			// reads it through, so the OpenGL body and the native pass take the same value
-+			// (docs/vulkan.md, decision 3). The GL body of
++			// (docs/vulkan.md). The GL body of
 +			// OptimumWindowClientSize is this exact ClientSize read.
 +			Size2i optimumClientSize = OptimumWindowClientSize();
 +			int x = optimumClientSize.Width;
@@ -2801,7 +2801,7 @@ index b1b2eea..dbf069b 100644
 +		{
 +			// Optimum (Phase 3b): the window size through the seam the native blit already
 +			// reads it through, so the OpenGL body and the native pass take the same value
-+			// (docs/vulkan.md, decision 3). The GL body of
++			// (docs/vulkan.md). The GL body of
 +			// OptimumWindowClientSize is this exact ClientSize read.
 +			Size2i optimumClientSize = OptimumWindowClientSize();
 +			int x = optimumClientSize.Width;
@@ -3025,7 +3025,7 @@ index b1b2eea..dbf069b 100644
 +			final.Uniform("optimumAoDebug", optimumAoDebugView ? 1 : 0);
 +			// Optimum (Phase 3b): the window size through the seam the native blit already
 +			// reads it through, so the OpenGL body and the native pass take the same value
-+			// (docs/vulkan.md, decision 3). The GL body of
++			// (docs/vulkan.md). The GL body of
 +			// OptimumWindowClientSize is this exact ClientSize read.
 +			Size2i optimumClientSize = OptimumWindowClientSize();
 +			final.Uniform("invFrameSizeIn", 1f / ((float)optimumClientSize.Width * ssaaLevel), 1f / ((float)optimumClientSize.Height * ssaaLevel));

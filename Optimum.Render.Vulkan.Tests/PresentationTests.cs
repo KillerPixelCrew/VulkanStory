@@ -120,6 +120,7 @@ public class PresentationTests(ITestOutputHelper output)
             GLFW.WindowHint(WindowHintBool.Visible, false);
             window = GLFW.CreateWindow(128, 96, "Optimum presentation acceptance", null, null);
             Skip.If(window == null, "Window creation unavailable.");
+            GLFW.GetFramebufferSize(window, out int initialWidth, out int initialHeight);
             device = GpuTest.NewDevice();
             var configure = device.ConfigureContextOptions;
             device.ConfigureContextOptions = options =>
@@ -128,7 +129,7 @@ public class PresentationTests(ITestOutputHelper output)
                 options.ValidationFeatures = "sync,best";
                 options.AcquireDelayForTests = TimeSpan.FromMilliseconds(acquireDelayMs);
             };
-            Assert.True(device.Initialize((IntPtr)window, 128, 96, out string reason), reason);
+            Assert.True(device.Initialize((IntPtr)window, initialWidth, initialHeight, out string reason), reason);
             output.WriteLine(device.RendererString);
             var context = device.ContextForTests;
             Assert.True(context.ValidationEnabled);
@@ -143,7 +144,9 @@ public class PresentationTests(ITestOutputHelper output)
                 var (width, height) = sizes[step];
                 GLFW.SetWindowSize(window, width, height);
                 GLFW.PollEvents();
-                device.Resize(width, height);
+                GLFW.GetFramebufferSize(window, out int pixelWidth, out int pixelHeight);
+                Assert.True(pixelWidth > 0 && pixelHeight > 0);
+                device.Resize(pixelWidth, pixelHeight);
                 device.SetVSync(step % 2 == 0);
                 for (int frame = 0; frame < 8; frame++)
                 {
@@ -174,8 +177,8 @@ public class PresentationTests(ITestOutputHelper output)
                     Assert.Equal(device.LatencyFrameId, swapchain.PresentIds.LastFrameId);
                     Assert.Null(swapchain.RebuildFailure);
                 }
-                Assert.Equal((uint)width, swapchain.Extent.Width);
-                Assert.Equal((uint)height, swapchain.Extent.Height);
+                Assert.Equal((uint)pixelWidth, swapchain.Extent.Width);
+                Assert.Equal((uint)pixelHeight, swapchain.Extent.Height);
             }
             // Complete submitted work, then let the next acquisition collect retired
             // chains. A fence-enabled device may finish presentation after rendering.

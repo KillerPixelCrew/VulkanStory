@@ -360,7 +360,8 @@ public class TextureTransferTests(ITestOutputHelper output)
                 else if (kind == 4) Assert.Equal(-1, MemoryMarshal.Cast<byte, uint>(bytes).IndexOfAnyExcept(0xDEADBEEFu));
                 else Assert.Equal(-1, MemoryMarshal.Cast<byte, float>(bytes).IndexOfAnyExcept(0.5f));
             }
-            device.BindFramebuffer(target); device.ClearColor(0, 0.25f, 0.2f, 0.75f, 1); device.ClearDepth(1);
+            device.BindFramebuffer(target); device.SetDepthMask(true);
+            device.ClearColor(0, 0.25f, 0.2f, 0.75f, 1); device.ClearDepth(1);
             Color(device.ReadBackLevel0ForTests(textures[0]), 64, 51, 191);
             Assert.Equal(-1, MemoryMarshal.Cast<byte, float>(device.ReadBackLevel0ForTests(textures[5])).IndexOfAnyExcept(1f));
             device.Present();
