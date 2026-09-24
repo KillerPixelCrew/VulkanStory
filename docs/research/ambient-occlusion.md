@@ -1,7 +1,7 @@
 # Ambient occlusion for the Vulkan path: sources, comparison, combined design
 
-Deep research for the AO step of the Vulkan branch (`feat/vulkan-taa`), collected 2026-09-15. Extends
-`docs/research/xegtao-integration.md` (read in full; referred to as "the note"). Every source below was read
+Historical research for the AO step of the Vulkan branch (`feat/vulkan-taa`), collected 2026-09-15.
+This supersedes the earlier XeGTAO candidate note; references to "the note" describe that historical evaluation. Every source below was read
 from the actual paper or code (downloaded locally for the reading, not committed); the three Shadertoys linked
 from bevy#19713 could not be read (Cloudflare challenge on every fetch route), so anything about their internals
 is marked [Uncertain] and taken from the issue text, the Bluesky thread and the authors' descriptions.
@@ -9,8 +9,7 @@ is marked [Uncertain] and taken from the issue text, the Bluesky thread and the 
 Conventions: [Inference] = my conclusion, not a source claim. [Uncertain] = could not verify against a primary
 source. Repository facts are cited as `file:line` at the current branch.
 
-**Owner decisions taken as given** (`docs/research/xegtao-integration.md` section 0 and the branch status notes
-section 4): the chosen AO is the default on Vulkan whenever TAA is active; vanilla SSAO otherwise and always on
+**Design assumptions at the time of this research:** the chosen AO is the default on Vulkan whenever TAA is active; vanilla SSAO otherwise and always on
 OpenGL; AO is composed into the scene before the TAA resolve and never onto the glow attachment; jitter is
 `P[8] -= 2*jx/W` (`docs/temporal-frame-contract.md` section 2); the TAA resolve invariants stay (3x3 nearest-depth disocclusion with motion from the nearest-depth tap, luminance anti-flicker 0.3x..1.2x; pinned by `TaaResolveTests` and `Optimum.Tests/taa-antiflicker-coverage-tests.cs`).
 
@@ -730,6 +729,6 @@ bias against this game's reference.
 - Unreal GTAO state: https://artiliada.github.io/2024/12/27/GTAO.html
 - Noise: https://github.com/electronicarts/fastnoise (BSD-3) ; https://github.com/NVIDIAGameWorks/SpatiotemporalBlueNoiseSDK (`License.txt`: non-commercial)
 - Arc 140V: https://chipsandcheese.com/p/lunar-lakes-igpu-debut-of-intels ; https://cputronic.com/gpu/intel-arc-140v
-- Repository: `docs/research/xegtao-integration.md`, `docs/temporal-frame-contract.md`,
+- Repository: `docs/temporal-frame-contract.md`,
   `sources/shaders/ssao.fsh`, `scene-ssao.fsh`, `final.fsh`, `taa-resolve.fsh`, `.vanilla/.../shaders/{ssao,chunkopaque,bilateralblur}.{vsh,fsh}`,
   `build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs`, `Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs`.
