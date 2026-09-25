@@ -110,6 +110,10 @@ public class PresentationTests(ITestOutputHelper output)
     [InlineData(30)]
     public unsafe void RealWindowSurvivesResizeVsyncChangesAndResourceRetirement(int acquireDelayMs)
     {
+        // A loader can advertise Vulkan to GLFW even when the host has no
+        // compatible driver. The headless probe uses the suite's normal skip
+        // rule, while an actual windowed failure remains an assertion below.
+        using (GpuTest.CreateContext(output)) { }
         Window* window = null;
         VulkanDevice? device = null;
         try
