@@ -7,8 +7,8 @@ taa-resolve.fsh threw the history away on ~3.7% of distant leaf pixels per
 frame on both backends, because a sub-pixel leaf hits the leaf in one jitter
 phase and the far background in the next. The 3x3 nearest-depth test that
 replaced it measured ~1.1%. A later real-world capture exposed remaining
-hard resets at distant depth edges; the resolve now retains colour-clipped
-history there. Do not revert to a single-sample depth test.
+hard resets at sparse distant depth edges; the resolve now retains colour-clipped
+history there. Solid silhouettes still reset. Do not revert to a single-sample depth test.
 
 Inputs, by the file names both backends share (OptimumParityDump.FileNameFormat):
   19-OptimumTaaHistoryA-color2-r32f.pfm  linear view depth, one history slot
@@ -24,7 +24,7 @@ positive and the window depth is finite and not sky:
   single-sample  |a - b| > 0.5 + 0.08 * min(a, b)
   3x3 nearest    the same on min3x3(a) and min3x3(b) (a 3x3 minimum filter on
                  both sides first; non-finite taps ignored, edges clamped)
-  hard resets    3x3 nearest failures outside a distant depth edge. The two
+  hard resets    3x3 nearest failures outside a sparse distant depth edge. The two
                  history depths approximate the resolve's current linear depth.
 
 Regions, by the quantiles p50 and p90 of min(a, b) over those pixels:
@@ -108,7 +108,18 @@ def analyse(a, b, depth, alpha):
     nearest = rejected(min3x3(a), min3x3(b)) & valid
     # The shipped resolve keeps clipped history at distant depth edges. The
     # history slots approximate its closest current linear depth for this dump.
-    distant_edge = (reference > 20.0) & (filter3x3(depth, "max") - min3x3(depth) > 2e-4)
+    nearest_depth = min3x3(depth)
+    height, width = depth.shape
+    padded = np.pad(depth, 1, mode="edge")
+    near_taps = np.zeros(depth.shape, dtype=np.uint8)
+    for dy in range(3):
+        for dx in range(3):
+            near_taps += (np.abs(padded[dy:dy + height, dx:dx + width] - nearest_depth)
+                          <= 2e-4).astype(np.uint8)
+    # Match the resolve's sparse-coverage exception. A broad solid silhouette
+    # must stay in the hard-reset numerator, even when it is distant.
+    distant_edge = ((reference > 20.0) & (filter3x3(depth, "max") - nearest_depth > 2e-4)
+                    & (near_taps <= 2))
     hard_reset = nearest & ~distant_edge
     rows = {}
     for name in REGIONS:
@@ -223,6 +234,11 @@ def self_test():
     edge = analyse(a, b, edge_depth, alpha)
     assert edge["rows"]["leaf-far"][2] == leaves, edge["rows"]["leaf-far"]
     assert edge["rows"]["leaf-far"][3] == 0, edge["rows"]["leaf-far"]
+
+    solid_depth = depth.copy()
+    solid_depth[58:, :32] = 0.49
+    solid = analyse(a, b, solid_depth, alpha)
+    assert solid["rows"]["leaf-far"][3] > 0, solid["rows"]["leaf-far"]
 
     with tempfile.TemporaryDirectory(prefix="optimum-taa-rejection-self-test-") as root:
         # 3. through the files: the moving leaf passes the gate
