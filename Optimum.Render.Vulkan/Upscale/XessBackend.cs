@@ -8,7 +8,9 @@ namespace Optimum.Render.Vulkan.Core;
 
 internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementContributor
 {
-    internal const uint InitFlags = 1u << 8; // HDR, low-res unjittered motion, forward depth, auto exposure.
+    // xess.h: ENABLE_AUTOEXPOSURE is bit 8; LDR_INPUT_COLOR is bit 6.
+    // We feed linear HDR without an exposure texture, with low-res unjittered motion and forward depth.
+    internal const uint InitFlags = 1u << 8;
     private readonly XessNative? api;
     private readonly Action<string> log;
     private VulkanDevice? device;
@@ -173,9 +175,12 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         if (!Check(api!.Resolution(context!.Handle, &output, QualityOf(quality), &optimal, &minimum, &maximum),
             "xessGetOptimalInputResolution")) return false;
         plan = new UpscalerPlan((int)optimal.Width, (int)optimal.Height, displayWidth, displayHeight, quality,
-            OptimumConfig.RecommendedUpscalerLodBias((int)optimal.Width, displayWidth));
+            RecommendedLodBias((int)optimal.Width, displayWidth));
         return plan.IsValid;
     }
+    // XeSS-SR guide: additional bias = log2(input width / target width).
+    internal static float RecommendedLodBias(int renderWidth, int displayWidth) =>
+        MathF.Log2((float)renderWidth / displayWidth);
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)
     {
         error = null;

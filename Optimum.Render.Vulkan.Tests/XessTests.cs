@@ -19,6 +19,23 @@ public class XessTests(ITestOutputHelper log)
     }
 
     [Fact]
+    public void InitFlagsSelectAutoExposureForHdrInput()
+    {
+        // Bit assignments in the bundled XeSS xess.h, not DLSS or another SDK.
+        Assert.Equal(1u << 8, XessBackend.InitFlags);
+        Assert.Equal(0u, XessBackend.InitFlags & (1u << 6));
+    }
+
+    [Theory]
+    [InlineData(1920, 1920, 0f)]
+    [InlineData(960, 1920, -1f)]
+    [InlineData(640, 1920, -1.5849625f)]
+    public void MipBiasFollowsIntelInputToOutputRatio(int inputWidth, int outputWidth, float expected)
+    {
+        Assert.Equal(expected, XessBackend.RecommendedLodBias(inputWidth, outputWidth), 5);
+    }
+
+    [Fact]
     public void NativeAbiMatchesIntelHeaders()
     {
         Assert.Equal(48, Marshal.SizeOf<XessImage>());
@@ -205,7 +222,7 @@ public class XessTests(ITestOutputHelper log)
             {
                 (string quality, int dw, int dh) = setting;
                 Assert.True(backend.TryPlan(dw, dh, quality, out var plan), backend.Unavailable);
-                Assert.Equal(OptimumConfig.RecommendedUpscalerLodBias(plan.RenderWidth, plan.DisplayWidth), plan.LodBias, 5);
+                Assert.Equal(XessBackend.RecommendedLodBias(plan.RenderWidth, plan.DisplayWidth), plan.LodBias, 5);
                 int w = plan.RenderWidth, h = plan.RenderHeight;
                 var colors = new Half[w * h * 4];
                 var motion = new Half[w * h * 4];

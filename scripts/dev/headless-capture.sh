@@ -123,8 +123,29 @@ for pair in "COUNT:$COUNT" "STRIDE:$STRIDE" "COMMAND_FRAME:$COMMAND_FRAME" "FIRS
     echo "${pair%%:*} takes a non-negative integer (got '${value}')" >&2; exit 2
   fi
 done
+if [[ -z "$FRAME_LIST" && "$COUNT" =~ ^0+$ ]]; then
+  echo "--count must be between 1 and 100000" >&2; exit 2
+fi
 if ! [[ "$FIXED_DT" =~ ^[0-9]*\.?[0-9]+$ ]]; then
   echo "--fixed-dt takes seconds, e.g. 0.0166667 (got '${FIXED_DT}')" >&2; exit 2
+fi
+# Match the client's unique, sorted explicit frame plan. Normalize separators
+# before exporting it; removing spaces alone would turn "1 2" into frame 12.
+if [[ -n "$FRAME_LIST" ]]; then
+  FRAME_SUMMARY=$(python3 -c 'import re, sys
+frames = sorted({int(value) for value in re.split(r"[,\s]+", sys.argv[1]) if value})
+if not frames or frames[-1] > 2**63 - 1:
+    sys.exit("--frames must contain in-range frame indices")
+print(len(frames))
+print(",".join(map(str, frames)))' "$FRAME_LIST") || exit 2
+  EXPECTED_FRAMES="${FRAME_SUMMARY%%$'\n'*}"
+  CANONICAL_FRAME_LIST="${FRAME_SUMMARY#*$'\n'}"
+else
+  EXPECTED_FRAMES=$(python3 -c 'import sys
+count = int(sys.argv[1])
+if not 1 <= count <= 100000:
+    sys.exit("--count must be between 1 and 100000")
+print(count)' "$COUNT") || exit 2
 fi
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -143,8 +164,7 @@ rm -f "$LOG"
 # The first frame the capture writes, needed here only to default --parity-frame
 # to something inside the captured range.
 if [[ -n "$FRAME_LIST" ]]; then
-  FIRST_CAPTURED="${FRAME_LIST%%,*}"
-  FIRST_CAPTURED="${FIRST_CAPTURED//[[:space:]]/}"
+  FIRST_CAPTURED="${CANONICAL_FRAME_LIST%%,*}"
 elif [[ -n "$FIRST" ]]; then
   FIRST_CAPTURED="$FIRST"
 elif [[ -n "$COMMANDS" ]]; then
@@ -222,7 +242,7 @@ if [[ -n "$COMMANDS" ]]; then
   export OPTIMUM_HEADLESS_COMMANDS="$(cd -- "$(dirname -- "$COMMANDS")" && pwd)/$(basename -- "$COMMANDS")"
 fi
 if [[ -n "$FRAME_LIST" ]]; then
-  export OPTIMUM_HEADLESS_FRAME_LIST="${FRAME_LIST// /}"
+  export OPTIMUM_HEADLESS_FRAME_LIST="$CANONICAL_FRAME_LIST"
 else
   export OPTIMUM_HEADLESS_FRAME_COUNT="$COUNT"
   export OPTIMUM_HEADLESS_FRAME_STRIDE="$STRIDE"
@@ -311,8 +331,8 @@ CRASHES=$(grep -c "Critical error occurred" "$LOG" || true)
 if (( CRASHES > 0 )); then
   echo "crashes    $CRASHES critical error(s) in the log - the frames may still be fine, the shutdown was not" >&2
 fi
-if (( FILES == 0 )); then
-  echo "the capture line appeared but no frames were written" >&2
+if (( FILES != EXPECTED_FRAMES )); then
+  echo "capture incomplete: requested $EXPECTED_FRAMES unique frames but found $FILES" >&2
   exit 1
 fi
 echo "compare    scripts/dev/ssim.py <other capture> $OUT_DIR"

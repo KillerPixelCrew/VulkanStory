@@ -134,7 +134,8 @@ public partial class VulkanClientPlatform
         IUpscalerBackend? selected = SelectedUpscaler;
         if (OptimumConfig.DisableUpscalerAtRuntime())
             LogUpscaler("[Optimum] " + OptimumConfig.Upscaler + " unavailable: " + reason + "; using the ordinary render path.");
-        selected?.RetireFeature();
+        try { selected?.RetireFeature(); }
+        catch (Exception error) { LogUpscaler("[Optimum] " + selected!.Id + " teardown: " + error.Message); }
         allocatedUpscalePlan = default;
         upscaledThisFrame = false;
         OptimumConfig.ClearUpscalerPlan();
@@ -169,11 +170,7 @@ public partial class VulkanClientPlatform
         UpscalerPlan plan = allocatedUpscalePlan;
         var frame = new UpscalerFrame(primary.ColorTextureIds[0], primary.DepthTextureId,
             primary.ColorTextureIds[MotionAttachmentIndex], output.ColorTextureIds[0], OptimumTemporal.Context);
-        if (!selected.Evaluate(plan, frame, out string? error))
-        {
-            DisableUpscaler(error ?? "provider evaluation failed");
-            return false;
-        }
+        if (!TryEvaluateUpscaler(selected, plan, frame, DisableUpscaler)) return false;
         if (lastEvaluatedUpscalePlan != plan)
         {
             lastEvaluatedUpscalePlan = plan;
@@ -198,6 +195,22 @@ public partial class VulkanClientPlatform
         }
         upscaledThisFrame = true;
         return true;
+    }
+
+    internal static bool TryEvaluateUpscaler(IUpscalerBackend selected, in UpscalerPlan plan,
+        in UpscalerFrame frame, Action<string> disable)
+    {
+        string? error;
+        try
+        {
+            if (selected.Evaluate(plan, frame, out error)) return true;
+        }
+        catch (Exception exception)
+        {
+            error = selected.Id + " evaluation threw: " + exception.Message;
+        }
+        disable(error ?? "provider evaluation failed");
+        return false;
     }
 
     private string UpscalerDataPath()
