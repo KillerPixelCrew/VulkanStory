@@ -155,11 +155,15 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         configured ?? environment?.Trim() is "1" or "on" or "true";
 
     /// <summary>
-    /// A parity capture forces blocking creation so its exact frame includes every draw.
-    /// An explicit <paramref name="configured" /> still wins.
+    /// The same, where a frame capture also forces blocking creation: OPTIMUM_PARITY_DUMP and
+    /// OPTIMUM_HEADLESS_FRAMES write exact frames to disk, and a background compile would leave
+    /// draws out of them. Each counts when it names an absolute directory, which is when the
+    /// capture code acts on it. An explicit <paramref name="configured" /> still wins.
     /// </summary>
-    internal static bool ResolveSynchronousPipelines(bool? configured, string? environment, string? parityDump) =>
-        configured ?? (ResolveSynchronousPipelines(null, environment) || NamesCaptureDirectory(parityDump));
+    internal static bool ResolveSynchronousPipelines(bool? configured, string? environment, string? parityDump,
+        string? headlessFrames) =>
+        configured ?? (ResolveSynchronousPipelines(null, environment) || NamesCaptureDirectory(parityDump) ||
+                       NamesCaptureDirectory(headlessFrames));
 
     private static bool NamesCaptureDirectory(string? value) =>
         !string.IsNullOrWhiteSpace(value) && System.IO.Path.IsPathRooted(value);
@@ -546,7 +550,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // pipeline is not in the driver cache is skipped while a worker compiles it.
         bool synchronousPipelines = ResolveSynchronousPipelines(SynchronousPipelines,
             Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_SYNC_PIPELINES"),
-            Environment.GetEnvironmentVariable("OPTIMUM_PARITY_DUMP"));
+            Environment.GetEnvironmentVariable("OPTIMUM_PARITY_DUMP"),
+            Environment.GetEnvironmentVariable("OPTIMUM_HEADLESS_FRAMES"));
         _pipelines.AsyncCompiles = !synchronousPipelines;
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);

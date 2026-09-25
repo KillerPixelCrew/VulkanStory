@@ -442,13 +442,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumSsaoInScene",
         "ApplyOptimumSceneSsao",
         // Optimum AO: this frame's GTAO visibility texture (0 = vanilla SSAO), composed through
-        // ApplyOptimumSceneSsao, and the slots of its opt-in debug outputs in the parity dump.
+        // ApplyOptimumSceneSsao, and the slots of its opt-in debug outputs in the parity dump and
+        // the headless harness.
         "optimumAmbientOcclusionTexture",
         "OptimumAoWorkingSlot",
         "OptimumAoEdgesSlot",
         "OptimumAoDepthSlot",
         "OptimumAoOutputSlot",
         "OptimumAoOutputCount",
+        "OptimumHeadlessWriteAmbientOcclusion",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -458,6 +460,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Headless render harness: the per-frame hook window_RenderFrame calls next
+        // to the parity dump, its own in-world frame counter, the chat-command
+        // script dispatch, the presented-frame readback and the clean close from
+        // the render thread once the run's artefacts are written.
+        "optimumHeadlessWorldFrames",
+        "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone",
+        "optimumHeadlessFramesWritten",
+        "optimumHeadlessExitRequested",
+        "OptimumHeadlessTick",
+        "OptimumHeadlessExitIfDone",
+        "OptimumHeadlessRunCommands",
+        "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame",
         // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
         // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
         // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.

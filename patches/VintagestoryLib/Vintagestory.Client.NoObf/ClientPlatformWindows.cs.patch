@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..a10f3f4 100644
+index b1b2eea..53f11e4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -173,7 +173,7 @@ index b1b2eea..a10f3f4 100644
 +
 +	private const int OptimumUiTargetIndex = 24;
 +
-+	// Optimum AO: the parity-dump slot numbers of the compute-only AO outputs,
++	// Optimum AO: the parity-dump and headless slot numbers of the compute-only AO outputs,
 +	// in OptimumAmbientOcclusionDebugTexture's index order. No framebuffer holds them.
 +	private const int OptimumAoWorkingSlot = 40;
 +
@@ -310,7 +310,24 @@ index b1b2eea..a10f3f4 100644
  	private int ShadowMapQuality;
  
  	private float ssaaLevel;
-@@ -256,10 +518,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -200,11 +462,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		{
+ 			return audio.MasterSoundLevel;
+ 		}
+ 		set
+ 		{
+-			audio.MasterSoundLevel = value;
++			// Optimum: while the headless harness is capturing, every path that would
++			// restore the volume (the settings watcher, a settings reload, the sound
++			// options page) is answered with silence instead. Only the running mixer
++			// is affected; ClientSettings keeps whatever the user chose.
++			audio.MasterSoundLevel = (Vintagestory.API.Config.OptimumHeadless.Enabled ? 0f : value);
+ 		}
+ 	}
+ 
+ 	public override AssetManager AssetManager => assetManager;
+ 
+@@ -256,10 +522,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -334,7 +351,7 @@ index b1b2eea..a10f3f4 100644
  		get
  		{
  			return serverRunning;
-@@ -278,34 +553,65 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,34 +557,65 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -408,19 +425,27 @@ index b1b2eea..a10f3f4 100644
  	public override bool GlDebugMode
  	{
  		get
-@@ -379,10 +685,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -379,10 +689,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public void StartAudio()
  	{
  		if (audio == null)
  		{
  			audio = new AudioOpenAl(logger);
-+
++			// Optimum (headless render harness): a capture runs in the user's session
++			// with no window, so it must not play sound at them either. The mixer is
++			// still created - AvailableAudioDevices, CurrentAudioDevice and the
++			// settings watchers all dereference it - it just runs silent, and the
++			// persisted sound settings are never written.
++			if (Vintagestory.API.Config.OptimumHeadless.Enabled)
++			{
++				audio.MasterSoundLevel = 0f;
++			}
  		}
  	}
  
  	public override void AddAudioSettingsWatchers()
  	{
-@@ -478,40 +785,169 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,40 +797,177 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -579,6 +604,14 @@ index b1b2eea..a10f3f4 100644
 +		{
 +			OptimumRunParityDump();
 +		}
++		// Optimum: the headless render harness (OptimumHeadless) - the scripted chat
++		// commands and the presented-frame capture, in the same place and for the
++		// same reason as the dump above: after the post chain and the final blit,
++		// before presentation. Off, this is one static bool check.
++		if (Vintagestory.API.Config.OptimumHeadless.Active)
++		{
++			OptimumHeadlessTick();
++		}
 +		EndFrame();
 +		Vintagestory.API.Config.OptimumDiagnostics.RecordChunkRenderFrame();
  		ScreenManager.FrameProfiler.End();
@@ -597,7 +630,7 @@ index b1b2eea..a10f3f4 100644
  	}
  
  	public void LogAndTestHardwareInfosStage1()
-@@ -531,11 +967,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -531,11 +987,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
@@ -610,7 +643,7 @@ index b1b2eea..a10f3f4 100644
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
-@@ -702,24 +1138,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1158,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -655,7 +688,7 @@ index b1b2eea..a10f3f4 100644
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1250,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1270,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -675,7 +708,7 @@ index b1b2eea..a10f3f4 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1023,11 +1486,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1023,11 +1506,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -688,7 +721,7 @@ index b1b2eea..a10f3f4 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1038,29 +1501,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1038,29 +1521,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		RenderMesh(modelRef, indices, indicesSizes, groupCount, useSSBOs: false);
  	}
  
@@ -778,7 +811,7 @@ index b1b2eea..a10f3f4 100644
  	public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
  	{
  		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1150,111 +1669,674 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,94 +1689,867 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -794,14 +827,33 @@ index b1b2eea..a10f3f4 100644
 +	private bool optimumParityDumpDone;
 +
 +	/// <summary>
-+	/// Optimum: the per-attachment parity dump (<see cref="OptimumParityDump" />).
-+	/// Called from window_RenderFrame only when OPTIMUM_PARITY_DUMP is set; dumps
-+	/// every attachment of every framebuffer slot once, on in-world frame
-+	/// OPTIMUM_PARITY_FRAME, on either backend. A texture shared by two slots
-+	/// (Transparent borrows Primary's depth on the device path) is written once,
-+	/// under the first slot that holds it.
++	/// Optimum (headless render harness): frames rendered while the player is in the
++	/// world, counted independently of the parity dump's counter so the two never
++	/// interfere. No initializer: an injected field starts at the CLR default.
 +	/// </summary>
-+	private void OptimumRunParityDump()
++	private long optimumHeadlessWorldFrames;
++
++	private bool optimumHeadlessCommandsDone;
++
++	private bool optimumHeadlessCaptureDone;
++
++	private int optimumHeadlessFramesWritten;
++
++	private bool optimumHeadlessExitRequested;
++
++	/// <summary>
++	/// Optimum (headless render harness, <see cref="OptimumHeadless" />): everything
++	/// the harness does per frame. Called from window_RenderFrame after the post
++	/// chain and the final blit and before presentation, only when one of the
++	/// harness environment variables is set.
++	///
++	/// In order, once the player is actually in the world: pin the simulated frame
++	/// step if one was asked for, dispatch the chat-command script once on its
++	/// frame, then read the presented image back on each frame the capture asked
++	/// for. The frame loop itself is untouched - nothing here changes what is
++	/// rendered or when.
++	/// </summary>
++	private void OptimumHeadlessTick()
  	{
 -		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
 -		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
@@ -822,12 +874,16 @@ index b1b2eea..a10f3f4 100644
 -		//IL_0a8c: Unknown result type (might be due to invalid IL or missing references)
 -		SetupSSAO = ClientSettings.SSAOQuality > 0;
 -		if (ClientSettings.IsNewSettingsFile && ((NativeWindow)window).ClientSize.X > 1920)
--		{
++		Vintagestory.Client.ScreenManager screenManager = Vintagestory.Client.ClientProgram.screenManager;
++		if (screenManager == null)
+ 		{
 -			ClientSettings.SSAA = 0.5f;
--		}
++			return;
+ 		}
 -		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
 -		for (int i = 0; i <= 24; i++)
-+		if (optimumParityDumpDone)
++		Vintagestory.Client.GuiScreenRunningGame runningScreen = screenManager.CurrentScreen as Vintagestory.Client.GuiScreenRunningGame;
++		if (runningScreen == null)
  		{
 -			list.Add(null);
 +			return;
@@ -837,8 +893,8 @@ index b1b2eea..a10f3f4 100644
 -		int num = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
 -		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
 -		if (num == 0 || num2 == 0)
-+		Vintagestory.Client.ScreenManager screenManager = Vintagestory.Client.ClientProgram.screenManager;
-+		if (screenManager == null)
++		ClientMain game = runningScreen.runningGame;
++		if (game == null || !game.BlocksReceivedAndLoaded)
  		{
 -			return list;
 +			return;
@@ -846,7 +902,11 @@ index b1b2eea..a10f3f4 100644
 -		PixelFormat val = (PixelFormat)6408;
 -		CheckGlError("sdfb-begin");
 -		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
--		{
++
++		// Reasserted every frame rather than set once: this is the same field
++		// vanilla's cinematic recorder writes, and it resets it when a path stops.
++		if (OptimumHeadless.FixedDeltaTime > 0f)
+ 		{
 -			FboId = GL.GenFramebuffer(),
 -			Width = num,
 -			Height = num2
@@ -854,11 +914,20 @@ index b1b2eea..a10f3f4 100644
 -		FrameBufferRef frameBufferRef3 = frameBufferRef;
 -		frameBufferRef3.DepthTextureId = GL.GenTexture();
 -		if (frameBufferRef3.FboId == 0)
-+		Vintagestory.Client.GuiScreenRunningGame runningScreen = screenManager.CurrentScreen as Vintagestory.Client.GuiScreenRunningGame;
-+		if (runningScreen == null || runningScreen.runningGame == null || !runningScreen.runningGame.BlocksReceivedAndLoaded)
++			game.DeltaTimeLimiter = OptimumHeadless.FixedDeltaTime;
++		}
++
++		long worldFrame = optimumHeadlessWorldFrames;
++		optimumHeadlessWorldFrames = worldFrame + 1;
++
++		if (!optimumHeadlessCommandsDone && worldFrame >= OptimumHeadless.CommandFrame)
  		{
 -			base.XPlatInterface.ShowMessageBox("Fatal error", "Unable to generate a new framebuffer. This shouldn't happen, ever. Maybe a restart resolves the problem?");
-+			return;
++			optimumHeadlessCommandsDone = true;
++			if (OptimumHeadless.CommandScriptPath != null)
++			{
++				OptimumHeadlessRunCommands(game);
++			}
  		}
 -		CurrentFrameBufferKeepVw = frameBufferRef3;
 -		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
@@ -881,9 +950,8 @@ index b1b2eea..a10f3f4 100644
 -		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
 -		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[1], 0);
 -		if (SetupSSAO)
-+		long worldFrame = optimumParityWorldFrames;
-+		optimumParityWorldFrames = worldFrame + 1;
-+		if (worldFrame != OptimumParityDump.Frame)
++
++		if (!optimumHeadlessCaptureDone && OptimumHeadless.CaptureEnabled)
  		{
 -			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[2]);
 -			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
@@ -896,16 +964,208 @@ index b1b2eea..a10f3f4 100644
 -			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[3]);
 -			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)IntPtr.Zero);
 -			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33069);
--			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33069);
--			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36067, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[3], 0);
--			DrawBuffersEnum[] array2 = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
--			GL.DrawBuffers(4, array2);
++			if (OptimumHeadless.ShouldCapture(worldFrame))
++			{
++				OptimumHeadlessCaptureFrame(worldFrame);
++			}
++			if (OptimumHeadless.CaptureFinished(worldFrame))
++			{
++				optimumHeadlessCaptureDone = true;
++				// The line scripts/dev/headless-capture.sh waits for.
++				logger.Notification("[Optimum] headless: " + optimumHeadlessFramesWritten + " frames -> " + OptimumHeadless.FrameDirectory);
++			}
++		}
++
++		OptimumHeadlessExitIfDone();
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): closes the client from the render thread once
++	/// everything the run asked for has been written, when
++	/// <see cref="OptimumHeadless.ExitWhenDone" /> is set.
++	///
++	/// <para>This is the whole point of the flag: an unmapped window cannot receive
++	/// the window manager's close event, so without it the harness has to fall
++	/// through to SIGTERM, whose handler runs on a signal thread and closes the
++	/// window out from under a frame the render thread is still inside. That race
++	/// wrote a crash report on every headless run. Here the close is
++	/// <see cref="WindowExit" /> on the render thread between frames - the same call
++	/// the main menu's quit button makes, and the only one the game loop agrees
++	/// with.</para>
++	///
++	/// <para>"Everything the run asked for" is both artefacts, not just the frames:
++	/// the parity dump's frame can be later than the last captured one, so exiting
++	/// on the capture alone would truncate it.</para>
++	/// </summary>
++	private void OptimumHeadlessExitIfDone()
++	{
++		if (!OptimumHeadless.ExitWhenDone || optimumHeadlessExitRequested)
++		{
 +			return;
- 		}
--		else
++		}
++		if (OptimumHeadless.CaptureEnabled && !optimumHeadlessCaptureDone)
++		{
++			return;
++		}
++		if (Vintagestory.API.Config.OptimumParityDump.Enabled && !optimumParityDumpDone)
++		{
++			return;
++		}
++		if (!OptimumHeadless.CaptureEnabled && !Vintagestory.API.Config.OptimumParityDump.Enabled)
++		{
++			// Nothing was asked for, so there is nothing to be done with; a run like
++			// that is a scripted session and closes when its driver says so.
++			return;
++		}
++		optimumHeadlessExitRequested = true;
++		logger.Notification("[Optimum] headless: capture complete, closing the client");
++		WindowExit("headless capture finished", EnumExitMode.SoftExit);
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): dispatches the command script's lines, in order,
++	/// once. A failing line is logged and the rest still run - a capture with one
++	/// command missing is worth looking at, a dead client is not.
++	/// </summary>
++	private void OptimumHeadlessRunCommands(ClientMain game)
++	{
++		string[] commands = OptimumHeadless.ReadCommands();
++		int dispatched = 0;
++		for (int i = 0; i < commands.Length; i++)
++		{
++			string line = commands[i];
++			try
++			{
++				OptimumHeadlessRunCommand(game, line);
++				dispatched = dispatched + 1;
++			}
++			catch (Exception error)
++			{
++				logger.Error("[Optimum] headless: command failed: " + line + ": " + error.Message);
++			}
++		}
++		logger.Notification("[Optimum] headless: " + dispatched + " commands dispatched");
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): one chat line, routed exactly the way the chat
++	/// HUD routes what a human types - the client command prefix runs the command
++	/// locally (that is how <c>.cam</c> is driven), anything else goes to the server
++	/// as chat (that is how <c>/time</c>, <c>/weather</c> and <c>/gamemode</c> set
++	/// the fixed scene).
++	/// </summary>
++	private void OptimumHeadlessRunCommand(ClientMain game, string line)
++	{
++		if (line.StartsWith(Vintagestory.Common.ChatCommandApi.ClientCommandPrefix, StringComparison.Ordinal))
++		{
++			string rest = line.Substring(1);
++			int space = rest.IndexOf(' ');
++			string commandName = rest;
++			string arguments = "";
++			if (space > 0)
++			{
++				commandName = rest.Substring(0, space);
++				arguments = rest.Substring(space + 1);
++			}
++			game.api.chatcommandapi.Execute(commandName, game.player, game.currentGroupid, arguments, null);
++			return;
++		}
++		game.api.SendChatMessage(line, game.currentGroupid, null);
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): reads the presented image back through the same
++	/// polymorphic call the in-game screenshot uses - GL.ReadPixels on the OpenGL
++	/// path, a device-side copy on the Vulkan one - and writes it as a PPM. No OS
++	/// window capture anywhere in here, which is why it works on a window that was
++	/// never mapped.
++	/// </summary>
++	private void OptimumHeadlessCaptureFrame(long worldFrame)
++	{
++		int width = ((NativeWindow)window).ClientSize.X;
++		int height = ((NativeWindow)window).ClientSize.Y;
++		if (width <= 0 || height <= 0)
++		{
++			return;
++		}
++		try
++		{
++			byte[] pixels = new byte[width * height * 4];
++			GCHandle handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
++			try
++			{
++				ReadDefaultFramebuffer(0, 0, width, height, handle.AddrOfPinnedObject());
++			}
++			finally
++			{
++				handle.Free();
++			}
++			if (OptimumHeadless.WriteFrame(worldFrame, width, height, pixels, OptimumDefaultFramebufferIsBgra))
++			{
++				optimumHeadlessFramesWritten = optimumHeadlessFramesWritten + 1;
++			}
++			if (OptimumParityDump.AmbientOcclusionOutputs)
++			{
++				OptimumHeadlessWriteAmbientOcclusion(worldFrame);
++			}
++		}
++		catch (Exception error)
++		{
++			logger.Error("[Optimum] headless: frame " + worldFrame + " failed: " + error.Message);
++		}
++	}
++
++	/// <summary>
++	/// Optimum AO (headless harness): the AO debug outputs of a captured frame, written beside
++	/// the frame file under the parity dump's file-name format with the frame number as the
++	/// attachment name (OPTIMUM_AO_OUTPUTS opts in).
++	/// </summary>
++	private void OptimumHeadlessWriteAmbientOcclusion(long worldFrame)
++	{
++		string attachment = "frame" + worldFrame.ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
++		for (int aoIndex = 0; aoIndex < OptimumAoOutputCount; aoIndex++)
++		{
++			int aoTexture = OptimumAmbientOcclusionDebugTexture(aoIndex);
++			if (aoTexture == 0)
++			{
++				continue;
++			}
++			int aoSlot = OptimumAoWorkingSlot + aoIndex;
++			// Through the dump's single readback and writer, into the frame directory.
++			OptimumParityDumpAttachment(OptimumHeadless.FrameDirectory, aoSlot, OptimumParitySlotName(aoSlot), attachment, aoTexture);
++		}
++	}
++
++	/// <summary>
++	/// Optimum: the per-attachment parity dump (<see cref="OptimumParityDump" />).
++	/// Called from window_RenderFrame only when OPTIMUM_PARITY_DUMP is set; dumps
++	/// every attachment of every framebuffer slot once, on in-world frame
++	/// OPTIMUM_PARITY_FRAME, on either backend. A texture shared by two slots
++	/// (Transparent borrows Primary's depth on the device path) is written once,
++	/// under the first slot that holds it.
++	/// </summary>
++	private void OptimumRunParityDump()
++	{
++		if (optimumParityDumpDone)
++		{
++			return;
++		}
++		Vintagestory.Client.ScreenManager screenManager = Vintagestory.Client.ClientProgram.screenManager;
++		if (screenManager == null)
++		{
++			return;
++		}
++		Vintagestory.Client.GuiScreenRunningGame runningScreen = screenManager.CurrentScreen as Vintagestory.Client.GuiScreenRunningGame;
++		if (runningScreen == null || runningScreen.runningGame == null || !runningScreen.runningGame.BlocksReceivedAndLoaded)
++		{
++			return;
++		}
++		long worldFrame = optimumParityWorldFrames;
++		optimumParityWorldFrames = worldFrame + 1;
++		if (worldFrame != OptimumParityDump.Frame)
++		{
++			return;
++		}
 +		optimumParityDumpDone = true;
 +
 +		string directory = OptimumParityDump.Directory;
@@ -913,12 +1173,10 @@ index b1b2eea..a10f3f4 100644
 +		HashSet<int> dumped = new HashSet<int>();
 +		List<FrameBufferRef> list = frameBuffers;
 +		for (int slot = 0; list != null && slot < list.Count; slot++)
- 		{
--			DrawBuffersEnum[] array3 = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
++		{
 +			FrameBufferRef frameBuffer = list[slot];
 +			if (frameBuffer == null)
- 			{
--				(DrawBuffersEnum)36064,
++			{
 +				continue;
 +			}
 +			string slotName = OptimumParitySlotName(slot);
@@ -1489,19 +1747,13 @@ index b1b2eea..a10f3f4 100644
 +			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[3]);
 +			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)IntPtr.Zero);
 +			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33069);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33069);
-+			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36067, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[3], 0);
-+			DrawBuffersEnum[] array2 = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
-+			GL.DrawBuffers(4, array2);
-+		}
-+		else
-+		{
-+			DrawBuffersEnum[] array3 = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
-+			{
-+				(DrawBuffersEnum)36064,
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33069);
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33069);
+ 			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36067, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[3], 0);
+@@ -1251,10 +2563,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
  			GL.DrawBuffers(2, array3);
@@ -1539,7 +1791,7 @@ index b1b2eea..a10f3f4 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2518,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +2776,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1615,7 +1867,7 @@ index b1b2eea..a10f3f4 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2695,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2953,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1630,7 +1882,7 @@ index b1b2eea..a10f3f4 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2718,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +2976,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1725,7 +1977,7 @@ index b1b2eea..a10f3f4 100644
  			}
  		}
  	}
-@@ -1591,11 +2812,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +3070,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1744,7 +1996,7 @@ index b1b2eea..a10f3f4 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1619,27 +2847,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1619,27 +3105,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -1831,7 +2083,7 @@ index b1b2eea..a10f3f4 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +2956,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +3214,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1922,7 +2174,7 @@ index b1b2eea..a10f3f4 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,39 +3041,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1753,39 +3299,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
@@ -2008,7 +2260,7 @@ index b1b2eea..a10f3f4 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,110 +3123,379 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,110 +3381,379 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2203,7 +2455,7 @@ index b1b2eea..a10f3f4 100644
 +		if (invViewProj == null)
 +		{
 +			invViewProj = Mat4f.Identity(new float[16]);
- 		}
++		}
 +
 +		// Optimum (Vulkan-native render systems, Phase 3b): the draw is a seam of its
 +		// own, so a platform that owns this pass natively replaces the draw and nothing
@@ -2380,7 +2632,7 @@ index b1b2eea..a10f3f4 100644
 +		if (!OffscreenBuffer)
 +		{
 +			return;
-+		}
+ 		}
 +		OptimumPostAmbientOcclusion(projectMatrix);
 +		// Optimum TAA: resolve first, so bloom, god rays and the final input read
 +		// the temporally stable image instead of the jittered one.
@@ -2457,7 +2709,7 @@ index b1b2eea..a10f3f4 100644
  			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
  			bilateralblur.Use();
  			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
-@@ -1915,35 +3514,269 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,35 +3772,269 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -2731,7 +2983,7 @@ index b1b2eea..a10f3f4 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,26 +3786,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,26 +4044,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2783,7 +3035,7 @@ index b1b2eea..a10f3f4 100644
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
  			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
-@@ -1987,24 +3839,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +4097,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2840,7 +3092,7 @@ index b1b2eea..a10f3f4 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3894,505 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +4152,505 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3347,7 +3599,7 @@ index b1b2eea..a10f3f4 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4551,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4809,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3387,7 +3639,7 @@ index b1b2eea..a10f3f4 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4949,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5207,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3440,7 +3692,7 @@ index b1b2eea..a10f3f4 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5044,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5302,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3485,7 +3737,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5081,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5339,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3506,7 +3758,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5100,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5358,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3527,7 +3779,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5119,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5377,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3548,7 +3800,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5138,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5396,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3569,7 +3821,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5161,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5419,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3590,7 +3842,7 @@ index b1b2eea..a10f3f4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5723,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5981,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3614,7 +3866,7 @@ index b1b2eea..a10f3f4 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6082,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6340,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);
