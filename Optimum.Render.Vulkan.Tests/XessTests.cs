@@ -29,6 +29,48 @@ public class XessTests(ITestOutputHelper log)
     }
 
     [Fact]
+    public unsafe void FailedDeviceFeatureNegotiationRestoresEveryExistingNode()
+    {
+        var optional = new PhysicalDeviceFaultFeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceFaultFeaturesExt,
+            DeviceFault = true,
+        };
+        var v12 = new PhysicalDeviceVulkan12Features
+        {
+            SType = StructureType.PhysicalDeviceVulkan12Features,
+            BufferDeviceAddress = true,
+            PNext = &optional,
+        };
+        var root = new PhysicalDeviceFeatures2
+        {
+            SType = StructureType.PhysicalDeviceFeatures2,
+            PNext = &v12,
+        };
+        void* chain = &root;
+        int result = XessBackend.InvokeDeviceFeatureNegotiation(&chain, features =>
+        {
+            var changedRoot = (PhysicalDeviceFeatures2*)*features;
+            var changed12 = (PhysicalDeviceVulkan12Features*)changedRoot->PNext;
+            var changedOptional = (PhysicalDeviceFaultFeaturesEXT*)changed12->PNext;
+            changedRoot->Features.ShaderInt16 = true;
+            changed12->BufferDeviceAddress = false;
+            changed12->PNext = null;
+            changedOptional->DeviceFault = false;
+            *features = null;
+            return -1;
+        });
+
+        Assert.Equal(-1, result);
+        Assert.Equal((nint)(&root), (nint)chain);
+        Assert.False(root.Features.ShaderInt16);
+        Assert.True(v12.BufferDeviceAddress);
+        Assert.Equal((nint)(&v12), (nint)root.PNext);
+        Assert.Equal((nint)(&optional), (nint)v12.PNext);
+        Assert.True(optional.DeviceFault);
+    }
+
+    [Fact]
     public void FailedProviderDoesNotDisableAnotherProvider()
     {
         string previous = OptimumConfig.Upscaler;

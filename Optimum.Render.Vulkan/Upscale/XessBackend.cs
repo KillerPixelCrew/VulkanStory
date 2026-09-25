@@ -83,29 +83,66 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
     public void FinalizeDeviceFeatures(DeviceRequirements requirements, void** features)
     {
         if (api == null || Unavailable != null) return;
-        // Preserve the core feature values and chain links if negotiation fails.
-        // XeSS requests core bits plus its own mutable-descriptor extension node.
+        try
+        {
+            Check(InvokeDeviceFeatureNegotiation(features,
+                chain => api.DeviceFeatures(instance, physical, chain)), "XeSS feature negotiation");
+        }
+        catch (Exception e)
+        {
+            Unavailable = "XeSS feature negotiation failed: " + e.Message;
+            log("[Optimum] " + Unavailable);
+        }
+    }
+
+    internal delegate int DeviceFeatureCall(void** features);
+
+    // The SDK may change any node in the supplied pNext chain before returning an
+    // error. Save every node we currently put in that chain, not only the core
+    // Vulkan 1.2/1.3 nodes, so another provider sees the original feature set.
+    internal static int InvokeDeviceFeatureNegotiation(void** features, DeviceFeatureCall call)
+    {
         void* original = *features;
-        var links = new List<(nint Node, nint Next)>();
-        PhysicalDeviceFeatures2* root = null;
-        PhysicalDeviceVulkan12Features* v12 = null;
-        PhysicalDeviceVulkan13Features* v13 = null;
+        var saved = new List<(nint Address, byte[] Data)>();
+        var visited = new HashSet<nint>();
         for (BaseOutStructure* node = (BaseOutStructure*)original; node != null; node = node->PNext)
         {
-            links.Add(((nint)node, (nint)node->PNext));
-            if (node->SType == StructureType.PhysicalDeviceFeatures2) root = (PhysicalDeviceFeatures2*)node;
-            if (node->SType == StructureType.PhysicalDeviceVulkan12Features) v12 = (PhysicalDeviceVulkan12Features*)node;
-            if (node->SType == StructureType.PhysicalDeviceVulkan13Features) v13 = (PhysicalDeviceVulkan13Features*)node;
+            if (!visited.Add((nint)node) || saved.Count >= 32)
+                throw new InvalidOperationException("invalid Vulkan feature chain");
+            int size = node->SType switch
+            {
+                StructureType.PhysicalDeviceFeatures2 => sizeof(PhysicalDeviceFeatures2),
+                StructureType.PhysicalDeviceVulkan12Features => sizeof(PhysicalDeviceVulkan12Features),
+                StructureType.PhysicalDeviceVulkan13Features => sizeof(PhysicalDeviceVulkan13Features),
+                StructureType.PhysicalDeviceFaultFeaturesExt => sizeof(PhysicalDeviceFaultFeaturesEXT),
+                StructureType.PhysicalDeviceColorWriteEnableFeaturesExt => sizeof(PhysicalDeviceColorWriteEnableFeaturesEXT),
+                StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt => sizeof(PhysicalDeviceExtendedDynamicState3FeaturesEXT),
+                StructureType.PhysicalDevicePresentIDFeaturesKhr => sizeof(PhysicalDevicePresentIdFeaturesKHR),
+                StructureType.PhysicalDeviceSwapchainMaintenance1FeaturesExt => sizeof(PhysicalDeviceSwapchainMaintenance1FeaturesEXT),
+                _ => throw new InvalidOperationException("unknown Vulkan feature node: " + node->SType),
+            };
+            var data = new byte[size];
+            Marshal.Copy((nint)node, data, 0, size);
+            saved.Add(((nint)node, data));
         }
-        PhysicalDeviceFeatures2 savedRoot = root == null ? default : *root;
-        PhysicalDeviceVulkan12Features saved12 = v12 == null ? default : *v12;
-        PhysicalDeviceVulkan13Features saved13 = v13 == null ? default : *v13;
-        if (Check(api.DeviceFeatures(instance, physical, features), "XeSS feature negotiation")) return;
-        *features = original;
-        if (root != null) *root = savedRoot;
-        if (v12 != null) *v12 = saved12;
-        if (v13 != null) *v13 = saved13;
-        foreach (var link in links) ((BaseOutStructure*)link.Node)->PNext = (BaseOutStructure*)link.Next;
+        bool success = false;
+        try
+        {
+            int result = call(features);
+            success = result >= 0;
+            return result;
+        }
+        finally
+        {
+            // A successful call deliberately keeps XeSS's additions and bits.
+            // Restore on error or exception; the caller marks XeSS unavailable.
+            if (!success)
+            {
+                *features = original;
+                foreach (var (address, data) in saved)
+                    Marshal.Copy(data, 0, address, data.Length);
+            }
+        }
     }
     public bool BringUp(VulkanDevice target, nint instance, nint physicalDevice, nint logicalDevice)
     {

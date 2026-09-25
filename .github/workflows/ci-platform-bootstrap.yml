@@ -1,6 +1,16 @@
 name: Platform bootstrap
 
 on:
+  pull_request:
+    paths:
+      - 'Optimum.Render.Vulkan/**'
+      - 'Optimum.Render.Vulkan.Tests/**'
+      - 'sources/shaders-vk/**'
+      - 'sources/shaders/**'
+      - 'sources/VintagestoryApi/Config/OptimumConfig.cs'
+      - 'native/optimum-ngx/**'
+      - 'native/optimum-fsr3/**'
+      - '.github/workflows/ci-platform-bootstrap.yml'
   workflow_dispatch:
     inputs:
       platform:
@@ -25,7 +35,7 @@ jobs:
     name: Bootstrap windows
     runs-on: windows-latest
     timeout-minutes: 45
-    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    if: github.event_name == 'pull_request' || inputs.platform == 'all' || inputs.platform == 'windows'
     steps:
       - uses: actions/checkout@v6
 
@@ -109,6 +119,10 @@ jobs:
       - name: Run launcher tests
         shell: bash
         run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
+
+      - name: Run Vulkan renderer tests
+        shell: bash
+        run: dotnet test Optimum.Render.Vulkan.Tests/Optimum.Render.Vulkan.Tests.csproj -c Release --no-build --nologo
 
       - name: Upload logs on failure
         if: failure()

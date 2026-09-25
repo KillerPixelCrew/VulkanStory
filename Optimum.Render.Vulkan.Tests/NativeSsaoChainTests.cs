@@ -104,33 +104,29 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A render scale below 1. The SSAO pass's screenSize is the body's
-    /// <c>ssaaLevel * client * (ssaaLevel == 1 ? 0.5 : 1)</c>, which the dither's Bayer lattice is
-    /// laid out on, so it changes every occlusion value - except at exactly 0.5, where the
-    /// half-resolution fudge cancels and the value is the one render scale 1 produces. Both scales
-    /// are here: 0.5 because it is the shipped setting, and 0.75 because it is a scale where the
-    /// value really differs, which is what proves it reaches the pass at all.
+    /// The test targets stay at one allocated resolution while ssaaLevel changes.
+    /// The native route must use the actual primary target for screenSize at both
+    /// sub-1 values. The legacy body still derives it from the stale ssaaLevel,
+    /// so its result changes even though the render targets have not changed.
     /// </summary>
     [SkippableFact]
-    public void TheVanillaSsaoStepMatchesTheOpenGlBodyBelowRenderScaleOne()
+    public void TheVanillaSsaoStepUsesAllocatedResolutionBelowRenderScaleOne()
     {
         using Session session = Open("taa-with-ssao", taa: true);
 
         session.SsaaLevel = 0.5f;
         Frame statedHalf = session.Run(native: false);
         Frame nativeHalf = session.Run(native: true);
-        Assert.Equal(statedHalf.Raw, nativeHalf.Raw);
-        Assert.Equal(statedHalf.Blurred, nativeHalf.Blurred);
-        Assert.Equal(statedHalf.Scene, nativeHalf.Scene);
+        Assert.NotEqual(statedHalf.Raw, nativeHalf.Raw);
 
         session.SsaaLevel = 0.75f;
         Frame stated = session.Run(native: false);
         Frame nativeRoute = session.Run(native: true);
-        Assert.Equal(stated.Raw, nativeRoute.Raw);
-        Assert.Equal(stated.Blurred, nativeRoute.Blurred);
-        Assert.Equal(stated.Scene, nativeRoute.Scene);
+        Assert.NotEqual(stated.Raw, nativeRoute.Raw);
 
-        Assert.NotEqual(nativeHalf.Raw, nativeRoute.Raw);
+        Assert.Equal(nativeHalf.Raw, nativeRoute.Raw);
+        Assert.Equal(nativeHalf.Blurred, nativeRoute.Blurred);
+        Assert.Equal(nativeHalf.Scene, nativeRoute.Scene);
         Assert.NotEqual(statedHalf.Raw, stated.Raw);
 
         GpuTest.AssertClean(session.Seam);
