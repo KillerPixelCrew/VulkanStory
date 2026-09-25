@@ -338,8 +338,10 @@ void main(void)
 	// sample. Keep the colour-clipped history at these edges; a solid surface and
 	// nearby geometry still take the ordinary disocclusion reset.
 	bool distantDepthEdge = closestLinearDepth > 20.0 && farthestDepth - closestDepth > 2e-4;
-	if (abs(historyNearest - closestLinearDepth) > depthTolerance && !distantDepthEdge)
+	bool depthMismatch = abs(historyNearest - closestLinearDepth) > depthTolerance;
+	if (depthMismatch && !distantDepthEdge)
 	{ alpha = 1.0; rejected = true; }
+	else if (depthMismatch) historyGlowSample = glow;
 
 	// ---- rectify and blend in YCoCg with luminance weighting
 	float clipKeep = 1.0;

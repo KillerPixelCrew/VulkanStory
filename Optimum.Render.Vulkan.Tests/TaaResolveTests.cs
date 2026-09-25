@@ -890,9 +890,9 @@ public class TaaResolveTests
 
     /// <summary>The disocclusion line the shipped resolve carries, and the per-sample line it replaced.</summary>
     private const string NearestDepthRejection =
-        "if (abs(historyNearest - closestLinearDepth) > depthTolerance && !distantDepthEdge)";
+        "bool depthMismatch = abs(historyNearest - closestLinearDepth) > depthTolerance;";
     private const string PerSampleRejection =
-        "if (abs(historyLinear - linearDepth) > 0.5 + 0.08 * linearDepth)";
+        "bool depthMismatch = abs(historyLinear - linearDepth) > 0.5 + 0.08 * linearDepth;";
 
     private static string WithPerSampleDisocclusion(string fragment)
     {
@@ -918,7 +918,8 @@ public class TaaResolveTests
             },
             (_, textures, inputs) =>
             {
-                UploadFlatRgba16F(textures, inputs.SceneTex, 0.5f, 0.5f, 0.5f, 1f);
+                Func<int, int, float> colour = (x, y) => x == LeafX && y == LeafY ? 0.9f : 0.5f;
+                UploadRgba16F(textures, inputs.SceneTex, colour, colour, colour, (_, _) => 1f);
                 UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
                 UploadR32F(textures, inputs.DepthTex,
                     (x, y) => !edge || (x == LeafX && y == LeafY) ? nearDepth : farDepth);
@@ -928,10 +929,14 @@ public class TaaResolveTests
         TemporalRun? silhouette = Run(edge: true);
         TemporalRun? flat = Run(edge: false);
         Skip.If(silhouette == null || flat == null, "No usable Vulkan device.");
-        float retained = ReadByteChannel(silhouette!.Glow, LeafX, LeafY, 0);
-        float reset = ReadByteChannel(flat!.Glow, LeafX, LeafY, 0);
-        Assert.True(retained > 0.8f, $"distant edge discarded clipped history ({retained:F3})");
-        Assert.True(reset < 0.05f, $"flat-depth disocclusion kept history ({reset:F3})");
+        float retained = ReadHalf(silhouette!.Color, LeafX, LeafY, 0, 8);
+        float reset = ReadHalf(flat!.Color, LeafX, LeafY, 0, 8);
+        Assert.True(retained < 0.75f, $"distant edge discarded clipped colour history ({retained:F3})");
+        Assert.True(reset > 0.85f, $"flat-depth disocclusion kept colour history ({reset:F3})");
+        Assert.True(ReadByteChannel(silhouette.Glow, LeafX, LeafY, 0) < 0.05f,
+            "distant edge carried stale glow into a new surface");
+        Assert.True(ReadByteChannel(flat.Glow, LeafX, LeafY, 0) < 0.05f,
+            "flat-depth disocclusion carried stale glow");
     }
 
     private TemporalRun? RunLeafFlip(Func<string, string>? fragmentTransform)
