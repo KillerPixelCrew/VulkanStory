@@ -84,4 +84,14 @@ public class NgxFeaturePathTests
                 OperatingSystem.IsWindows() ? "nvngx_dlss.dll" : "libnvidia-ngx-*.so*"));
         }
     }
+
+    [Fact]
+    public void DisposedSessionRejectsNativeDiscoveryAndCanBeDisposedAgain()
+    {
+        var session = new NgxSession("1.0", Path.GetTempPath(), Array.Empty<string>());
+        session.Dispose();
+        session.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => session.InstanceExtensions(NgxFeature.SuperSampling, out _));
+        Assert.Throws<ObjectDisposedException>(() => session.Initialize(IntPtr.Zero, IntPtr.Zero, IntPtr.Zero));
+    }
 }

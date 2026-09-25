@@ -11,7 +11,7 @@ namespace Optimum.Render.Vulkan.Core;
 internal enum NgxDlssCreateFlags
 {
     None = 0,
-    /// <summary>The colour buffer is HDR. Optimum's colour is LDR RGBA8, so this stays off.</summary>
+    /// <summary>The upscaler input is linear RGBA16F, so this is enabled.</summary>
     IsHdr = 1 << 0,
     /// <summary>Motion vectors are at render resolution, not display resolution.</summary>
     MotionVectorsLowRes = 1 << 1,
@@ -158,6 +158,7 @@ internal readonly record struct NgxDlssEvaluation
 /// </summary>
 internal sealed unsafe class NgxDlssFeature : IDisposable
 {
+    private readonly object _gate = new();
     private IntPtr _handle;
     private IntPtr _parameters;
     private bool _disposed;
@@ -173,10 +174,10 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
     public NgxDlssSettings Settings { get; }
 
     /// <summary>The NVSDK_NGX_Handle*, or zero once released.</summary>
-    public IntPtr Handle => _handle;
+    public IntPtr Handle { get { lock (_gate) return _handle; } }
 
     /// <summary>Whether the feature is still usable.</summary>
-    public bool IsValid => !_disposed && _handle != IntPtr.Zero;
+    public bool IsValid { get { lock (_gate) return !_disposed && _handle != IntPtr.Zero; } }
 
     /// <summary>
     /// Whether this feature can serve <paramref name="settings" />. Anything else
@@ -257,69 +258,72 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
         NgxResourceVk depth, NgxResourceVk motionVectors,
         in NgxDlssEvaluation frame)
     {
-        if (!IsValid) return NgxResult.FailFeatureNotFound;
-        if (!NgxShim.IsAvailable) return NgxResult.FailShimMissing;
-
-        var block = new NgxParameters(_parameters);
-
+        lock (_gate)
         {
-            NgxResourceVk* colorPtr = &color;
-            NgxResourceVk* outputPtr = &output;
-            NgxResourceVk* depthPtr = &depth;
-            NgxResourceVk* motionPtr = &motionVectors;
+            if (!IsValid) return NgxResult.FailFeatureNotFound;
+            if (!NgxShim.IsAvailable) return NgxResult.FailShimMissing;
 
-            block.SetVoidPointer(NgxParameterNames.Color, (IntPtr)colorPtr);
-            block.SetVoidPointer(NgxParameterNames.Output, (IntPtr)outputPtr);
-            block.SetVoidPointer(NgxParameterNames.Depth, (IntPtr)depthPtr);
-            block.SetVoidPointer(NgxParameterNames.MotionVectors, (IntPtr)motionPtr);
+            var block = new NgxParameters(_parameters);
 
-            block.SetFloat(NgxParameterNames.JitterOffsetX, frame.JitterOffsetX);
-            block.SetFloat(NgxParameterNames.JitterOffsetY, frame.JitterOffsetY);
-            block.SetFloat(NgxParameterNames.Sharpness, frame.Sharpness);
-            block.SetInt(NgxParameterNames.Reset, frame.Reset ? 1 : 0);
+            {
+                NgxResourceVk* colorPtr = &color;
+                NgxResourceVk* outputPtr = &output;
+                NgxResourceVk* depthPtr = &depth;
+                NgxResourceVk* motionPtr = &motionVectors;
 
-            // The SDK helper substitutes 1 for a zero scale; do the same rather
-            // than handing NGX a scale that annihilates every vector.
-            block.SetFloat(NgxParameterNames.MvScaleX,
-                frame.MotionVectorScaleX == 0f ? 1f : frame.MotionVectorScaleX);
-            block.SetFloat(NgxParameterNames.MvScaleY,
-                frame.MotionVectorScaleY == 0f ? 1f : frame.MotionVectorScaleY);
+                block.SetVoidPointer(NgxParameterNames.Color, (IntPtr)colorPtr);
+                block.SetVoidPointer(NgxParameterNames.Output, (IntPtr)outputPtr);
+                block.SetVoidPointer(NgxParameterNames.Depth, (IntPtr)depthPtr);
+                block.SetVoidPointer(NgxParameterNames.MotionVectors, (IntPtr)motionPtr);
 
-            // Optional inputs Optimum does not produce. Cleared every frame:
-            // this block is long-lived and NGX reads whatever is in it.
-            block.SetVoidPointer(NgxParameterNames.TransparencyMask, IntPtr.Zero);
-            block.SetVoidPointer(NgxParameterNames.ExposureTexture, IntPtr.Zero);
-            block.SetVoidPointer(NgxParameterNames.DlssInputBiasCurrentColorMask, IntPtr.Zero);
-            block.SetUInt(NgxParameterNames.TonemapperType, 0);
+                block.SetFloat(NgxParameterNames.JitterOffsetX, frame.JitterOffsetX);
+                block.SetFloat(NgxParameterNames.JitterOffsetY, frame.JitterOffsetY);
+                block.SetFloat(NgxParameterNames.Sharpness, frame.Sharpness);
+                block.SetInt(NgxParameterNames.Reset, frame.Reset ? 1 : 0);
 
-            block.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsWidth,
-                frame.RenderSubrectWidth == 0 ? Settings.RenderWidth : frame.RenderSubrectWidth);
-            block.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsHeight,
-                frame.RenderSubrectHeight == 0 ? Settings.RenderHeight : frame.RenderSubrectHeight);
+                // The SDK helper substitutes 1 for a zero scale; do the same rather
+                // than handing NGX a scale that annihilates every vector.
+                block.SetFloat(NgxParameterNames.MvScaleX,
+                    frame.MotionVectorScaleX == 0f ? 1f : frame.MotionVectorScaleX);
+                block.SetFloat(NgxParameterNames.MvScaleY,
+                    frame.MotionVectorScaleY == 0f ? 1f : frame.MotionVectorScaleY);
 
-            block.SetFloat(NgxParameterNames.DlssPreExposure,
-                frame.PreExposure == 0f ? 1f : frame.PreExposure);
-            block.SetFloat(NgxParameterNames.DlssExposureScale,
-                frame.ExposureScale == 0f ? 1f : frame.ExposureScale);
-            block.SetInt(NgxParameterNames.DlssIndicatorInvertXAxis, 0);
-            block.SetInt(NgxParameterNames.DlssIndicatorInvertYAxis, 0);
+                // Optional inputs Optimum does not produce. Cleared every frame:
+                // this block is long-lived and NGX reads whatever is in it.
+                block.SetVoidPointer(NgxParameterNames.TransparencyMask, IntPtr.Zero);
+                block.SetVoidPointer(NgxParameterNames.ExposureTexture, IntPtr.Zero);
+                block.SetVoidPointer(NgxParameterNames.DlssInputBiasCurrentColorMask, IntPtr.Zero);
+                block.SetUInt(NgxParameterNames.TonemapperType, 0);
 
-            // Optimum hands over whole images, so every subrect starts at (0, 0).
-            block.SetUInt(NgxParameterNames.DlssInputColorSubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssInputColorSubrectBaseY, 0);
-            block.SetUInt(NgxParameterNames.DlssInputDepthSubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssInputDepthSubrectBaseY, 0);
-            block.SetUInt(NgxParameterNames.DlssInputMvSubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssInputMvSubrectBaseY, 0);
-            block.SetUInt(NgxParameterNames.DlssInputTranslucencySubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssInputTranslucencySubrectBaseY, 0);
-            block.SetUInt(NgxParameterNames.DlssInputBiasCurrentColorSubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssInputBiasCurrentColorSubrectBaseY, 0);
-            block.SetUInt(NgxParameterNames.DlssOutputSubrectBaseX, 0);
-            block.SetUInt(NgxParameterNames.DlssOutputSubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsWidth,
+                    frame.RenderSubrectWidth == 0 ? Settings.RenderWidth : frame.RenderSubrectWidth);
+                block.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsHeight,
+                    frame.RenderSubrectHeight == 0 ? Settings.RenderHeight : frame.RenderSubrectHeight);
 
-            return NgxShim.EvaluateFeature(
-                (IntPtr)commandBuffer.Handle, _handle, _parameters, IntPtr.Zero);
+                block.SetFloat(NgxParameterNames.DlssPreExposure,
+                    frame.PreExposure == 0f ? 1f : frame.PreExposure);
+                block.SetFloat(NgxParameterNames.DlssExposureScale,
+                    frame.ExposureScale == 0f ? 1f : frame.ExposureScale);
+                block.SetInt(NgxParameterNames.DlssIndicatorInvertXAxis, 0);
+                block.SetInt(NgxParameterNames.DlssIndicatorInvertYAxis, 0);
+
+                // Optimum hands over whole images, so every subrect starts at (0, 0).
+                block.SetUInt(NgxParameterNames.DlssInputColorSubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssInputColorSubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssInputDepthSubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssInputDepthSubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssInputMvSubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssInputMvSubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssInputTranslucencySubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssInputTranslucencySubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssInputBiasCurrentColorSubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssInputBiasCurrentColorSubrectBaseY, 0);
+                block.SetUInt(NgxParameterNames.DlssOutputSubrectBaseX, 0);
+                block.SetUInt(NgxParameterNames.DlssOutputSubrectBaseY, 0);
+
+                return NgxShim.EvaluateFeature(
+                    (IntPtr)commandBuffer.Handle, _handle, _parameters, IntPtr.Zero);
+            }
         }
     }
 
@@ -331,16 +335,19 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
 
-        IntPtr handle = _handle;
-        IntPtr parameters = _parameters;
-        _handle = IntPtr.Zero;
-        _parameters = IntPtr.Zero;
+            IntPtr handle = _handle;
+            IntPtr parameters = _parameters;
+            _handle = IntPtr.Zero;
+            _parameters = IntPtr.Zero;
 
-        if (handle != IntPtr.Zero && NgxShim.IsAvailable) LastReleaseResult = NgxShim.ReleaseFeature(handle);
-        if (parameters != IntPtr.Zero) LastDestroyParametersResult = NgxInterop.DestroyParameters(parameters);
+            if (handle != IntPtr.Zero && NgxShim.IsAvailable) LastReleaseResult = NgxShim.ReleaseFeature(handle);
+            if (parameters != IntPtr.Zero) LastDestroyParametersResult = NgxInterop.DestroyParameters(parameters);
+        }
     }
 
     /// <summary>What <c>ReleaseFeature</c> answered, for the log and the tests.</summary>

@@ -137,9 +137,10 @@ view depth. Color/glow use linear filtering, depth nearest. Reject nonfinite his
 reset on invalid/missing resources or discontinuities, and preserve world/hand history
 ownership. Resolve uses nearest-depth disocclusion over 3x3 with motion from the same
 tap, reactive handling and luminance anti-flicker weighting.
-At distant depth edges, retain colour-clipped scene history when a subpixel leaf
-leaves the previous 3x3 window, while taking the current glow to avoid bloom ghosts.
-Keep the hard depth reset for flat regions and near geometry. The headless parity
+At sparse distant depth edges (at most two foreground taps in the 3x3), retain
+colour-clipped scene history when a subpixel leaf leaves the previous window,
+while taking current glow to avoid bloom ghosts. Solid silhouettes, flat regions
+and near geometry still take a hard depth reset. The headless parity
 gate measures both raw depth mismatches and the remaining hard resets.
 
 AO composition precedes resolve. Bloom and god rays consume the unsharpened scene.

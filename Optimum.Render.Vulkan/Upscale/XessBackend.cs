@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Config;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -35,15 +36,29 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         log("[Optimum] " + Unavailable);
         return false;
     }
+    private bool CheckExtensionList(uint count, byte** names)
+    {
+        if (count <= 256 && (count == 0 || names != null)) return true;
+        Unavailable = "XeSS returned an invalid Vulkan extension list";
+        log("[Optimum] " + Unavailable);
+        return false;
+    }
     public void ContributeInstanceExtensions(InstanceRequirements requirements)
     {
         if (api == null || Unavailable != null) return;
         uint count = 0, version = 0; byte** names = null;
         if (!Check(api.InstanceExtensions(&count, &names, &version), "XeSS instance requirements")) return;
         if (version > Vk.Version13) { Unavailable = "XeSS requires a newer Vulkan API"; return; }
+        if (!CheckExtensionList(count, names)) return;
         for (uint i = 0; i < count; i++)
-            if (!requirements.Request(Marshal.PtrToStringUTF8((nint)names[i])!, Name))
+        {
+            string? extension = names[i] == null ? null : Marshal.PtrToStringUTF8((nint)names[i]);
+            if (string.IsNullOrWhiteSpace(extension) || !requirements.Request(extension, Name))
+            {
                 Unavailable = "XeSS requires an unavailable instance extension";
+                return;
+            }
+        }
     }
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
@@ -51,12 +66,19 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         instance = requirements.Instance.Handle; physical = requirements.PhysicalDevice.Handle;
         uint count = 0; byte** names = null;
         if (!Check(api.DeviceExtensions(instance, physical, &count, &names), "XeSS device extensions")) return;
+        if (!CheckExtensionList(count, names)) return;
         // Probe support before modifying the renderer's feature chain.
         void* probe = null;
         if (!Check(api.DeviceFeatures(instance, physical, &probe), "XeSS device features")) return;
         for (uint i = 0; i < count; i++)
-            if (!requirements.Request(Marshal.PtrToStringUTF8((nint)names[i])!, requestedBy: Name))
+        {
+            string? extension = names[i] == null ? null : Marshal.PtrToStringUTF8((nint)names[i]);
+            if (string.IsNullOrWhiteSpace(extension) || !requirements.Request(extension, requestedBy: Name))
+            {
                 Unavailable = "XeSS requires an unavailable device extension";
+                return;
+            }
+        }
     }
     public void FinalizeDeviceFeatures(DeviceRequirements requirements, void** features)
     {
@@ -99,7 +121,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         context = new XessContext(api, handle);
         return true;
     }
-    internal static int QualityOf(string quality) => quality.ToLowerInvariant() switch
+    internal static int QualityOf(string? quality) => quality?.ToLowerInvariant() switch
     {
         "ultraperformance" => 100, "performance" => 101, "balanced" => 102,
         "ultraquality" => 104, "ultraqualityplus" => 105, "dlaa" or "native" => 106, _ => 103,
@@ -110,10 +132,11 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         if (!Active || displayWidth <= 0 || displayHeight <= 0) return false;
         if (context == null && !CreateContext()) return false;
         XessSize output = new(displayWidth, displayHeight), optimal = default, minimum = default, maximum = default;
+        quality = string.IsNullOrWhiteSpace(quality) ? "quality" : quality;
         if (!Check(api!.Resolution(context!.Handle, &output, QualityOf(quality), &optimal, &minimum, &maximum),
             "xessGetOptimalInputResolution")) return false;
         plan = new UpscalerPlan((int)optimal.Width, (int)optimal.Height, displayWidth, displayHeight, quality,
-            MathF.Log2((float)optimal.Width / displayWidth));
+            OptimumConfig.RecommendedUpscalerLodBias((int)optimal.Width, displayWidth));
         return plan.IsValid;
     }
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)

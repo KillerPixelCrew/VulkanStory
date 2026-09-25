@@ -9,6 +9,7 @@ namespace Optimum.Render.Vulkan.Core;
 // Keep the module loaded for the process: deferred contexts can outlive a selected provider.
 internal sealed unsafe class XessNative
 {
+    private static readonly object loadGate = new();
     private static XessNative? loaded;
     private readonly nint module;
     public readonly delegate* unmanaged[Cdecl]<uint*, byte***, uint*, int> InstanceExtensions;
@@ -35,16 +36,19 @@ internal sealed unsafe class XessNative
     private nint Export(string name) => NativeLibrary.GetExport(module, name);
     public static XessNative? TryLoad(out string? error)
     {
-        error = null;
-        if (loaded != null) return loaded;
-        if (!OperatingSystem.IsWindows() || IntPtr.Size != 8)
-        { error = "XeSS-SR requires the Windows x64 runtime"; return null; }
-        string path = Environment.GetEnvironmentVariable("OPTIMUM_XESS_LIBRARY") ??
-            Path.Combine(Path.GetDirectoryName(typeof(XessNative).Assembly.Location)!, "libxess.dll");
-        nint handle = 0;
-        try { handle = NativeLibrary.Load(Path.GetFullPath(path)); return loaded = new XessNative(handle); }
-        catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
-        { if (handle != 0) NativeLibrary.Free(handle); error = "libxess.dll unavailable: " + e.Message; return null; }
+        lock (loadGate)
+        {
+            error = null;
+            if (loaded != null) return loaded;
+            if (!OperatingSystem.IsWindows() || IntPtr.Size != 8)
+            { error = "XeSS-SR requires the Windows x64 runtime"; return null; }
+            string path = Environment.GetEnvironmentVariable("OPTIMUM_XESS_LIBRARY") ??
+                Path.Combine(Path.GetDirectoryName(typeof(XessNative).Assembly.Location)!, "libxess.dll");
+            nint handle = 0;
+            try { handle = NativeLibrary.Load(Path.GetFullPath(path)); return loaded = new XessNative(handle); }
+            catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
+            { if (handle != 0) NativeLibrary.Free(handle); error = "libxess.dll unavailable: " + e.Message; return null; }
+        }
     }
 }
 
@@ -67,9 +71,12 @@ internal struct XessImage
     public uint Width, Height;
     public static XessImage From(VulkanTexture texture) => new()
     {
-        View = texture.View.Handle, Image = texture.Image.Handle,
+        View = texture.View.Handle,
+        Image = texture.Image.Handle,
         Range = new ImageSubresourceRange(texture.Aspect, 0, 1, 0, 1),
-        Format = texture.Format, Width = texture.Width, Height = texture.Height,
+        Format = texture.Format,
+        Width = texture.Width,
+        Height = texture.Height,
     };
 }
 [StructLayout(LayoutKind.Sequential, Pack = 8)]

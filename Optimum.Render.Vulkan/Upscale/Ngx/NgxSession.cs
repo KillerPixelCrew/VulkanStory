@@ -30,9 +30,10 @@ internal sealed unsafe class NgxSession : IDisposable
     public const string FeaturePathVariable = "OPTIMUM_NGX_FEATURE_PATH";
 
     private readonly List<IntPtr> _scratch = new();
-    private readonly IntPtr _projectId;
-    private readonly IntPtr _engineVersion;
-    private readonly IntPtr _applicationDataPath;
+    private readonly object _gate = new();
+    private IntPtr _projectId;
+    private IntPtr _engineVersion;
+    private IntPtr _applicationDataPath;
     private NgxFeatureCommonInfo* _featureInfo;
     private bool _disposed;
 
@@ -71,33 +72,43 @@ internal sealed unsafe class NgxSession : IDisposable
     public string ApplicationDataPath { get; }
     public IReadOnlyList<string> FeaturePaths { get; }
 
-    public NgxFeatureCommonInfo* FeatureInfo => _featureInfo;
-
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void LogNgx(IntPtr message, int level, int feature)
     {
-        string? line = Marshal.PtrToStringUTF8(message);
-        if (line != null) Console.Error.WriteLine("[NGX " + feature + "/" + level + "] " + line);
+        // Exceptions cannot cross a native callback boundary.
+        try
+        {
+            string? line = Marshal.PtrToStringUTF8(message);
+            if (line != null) Console.Error.WriteLine("[NGX " + feature + "/" + level + "] " + line);
+        }
+        catch { }
     }
 
     /// <summary>A discovery record for one feature, pointing at this session's strings.</summary>
-    public NgxFeatureDiscoveryInfo Discovery(NgxFeature feature) => new()
+    private NgxFeatureDiscoveryInfo Discovery(NgxFeature feature)
     {
-        SdkVersion = NgxInterop.VersionApi,
-        FeatureId = feature,
-        Identifier = new NgxApplicationIdentifier
+        lock (_gate)
         {
-            IdentifierType = 1, // NVSDK_NGX_Application_Identifier_Type_Project_Id
-            ProjectDesc = new NgxProjectIdDescription
+            ThrowIfDisposed();
+            return new NgxFeatureDiscoveryInfo
             {
-                ProjectId = _projectId,
-                EngineType = NgxEngineType.Custom,
-                EngineVersion = _engineVersion,
-            },
-        },
-        ApplicationDataPath = _applicationDataPath,
-        FeatureInfo = (IntPtr)_featureInfo,
-    };
+                SdkVersion = NgxInterop.VersionApi,
+                FeatureId = feature,
+                Identifier = new NgxApplicationIdentifier
+                {
+                    IdentifierType = 1, // NVSDK_NGX_Application_Identifier_Type_Project_Id
+                    ProjectDesc = new NgxProjectIdDescription
+                    {
+                        ProjectId = _projectId,
+                        EngineType = NgxEngineType.Custom,
+                        EngineVersion = _engineVersion,
+                    },
+                },
+                ApplicationDataPath = _applicationDataPath,
+                FeatureInfo = (IntPtr)_featureInfo,
+            };
+        }
+    }
 
     /// <summary>
     /// The instance extensions NGX reports for a feature. Needs no VkInstance,
@@ -106,14 +117,19 @@ internal sealed unsafe class NgxSession : IDisposable
     public NgxResult InstanceExtensions(NgxFeature feature, out List<string> extensions)
     {
         extensions = new List<string>();
-        if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
 
-        NgxFeatureDiscoveryInfo discovery = Discovery(feature);
-        uint count = 0;
-        NgxExtensionProperties* properties = null;
-        NgxResult result = NgxInterop.GetFeatureInstanceExtensionRequirements(&discovery, &count, &properties);
-        if (NgxInterop.Succeeded(result)) Collect(count, properties, extensions);
-        return result;
+            NgxFeatureDiscoveryInfo discovery = Discovery(feature);
+            uint count = 0;
+            NgxExtensionProperties* properties = null;
+            NgxResult result = NgxInterop.GetFeatureInstanceExtensionRequirements(&discovery, &count, &properties);
+            if (NgxInterop.Succeeded(result) && !Collect(count, properties, extensions))
+                return NgxResult.FailInvalidParameter;
+            return result;
+        }
     }
 
     /// <summary>The device extensions NGX reports for a feature on this adapter.</summary>
@@ -121,15 +137,20 @@ internal sealed unsafe class NgxSession : IDisposable
         IntPtr instance, IntPtr physicalDevice, NgxFeature feature, out List<string> extensions)
     {
         extensions = new List<string>();
-        if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
 
-        NgxFeatureDiscoveryInfo discovery = Discovery(feature);
-        uint count = 0;
-        NgxExtensionProperties* properties = null;
-        NgxResult result = NgxInterop.GetFeatureDeviceExtensionRequirements(
-            instance, physicalDevice, &discovery, &count, &properties);
-        if (NgxInterop.Succeeded(result)) Collect(count, properties, extensions);
-        return result;
+            NgxFeatureDiscoveryInfo discovery = Discovery(feature);
+            uint count = 0;
+            NgxExtensionProperties* properties = null;
+            NgxResult result = NgxInterop.GetFeatureDeviceExtensionRequirements(
+                instance, physicalDevice, &discovery, &count, &properties);
+            if (NgxInterop.Succeeded(result) && !Collect(count, properties, extensions))
+                return NgxResult.FailInvalidParameter;
+            return result;
+        }
     }
 
     /// <summary>
@@ -143,16 +164,20 @@ internal sealed unsafe class NgxSession : IDisposable
         supported = NgxFeatureSupport.CheckNotPresent;
         minHwArchitecture = 0;
         minOsVersion = "";
-        if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
 
-        NgxFeatureDiscoveryInfo discovery = Discovery(feature);
-        NgxFeatureRequirement requirement = default;
-        NgxResult result = NgxInterop.GetFeatureRequirements(
-            instance, physicalDevice, &discovery, &requirement);
-        supported = requirement.FeatureSupported;
-        minHwArchitecture = requirement.MinHwArchitecture;
-        minOsVersion = Marshal.PtrToStringUTF8((IntPtr)requirement.MinOsVersion) ?? "";
-        return result;
+            NgxFeatureDiscoveryInfo discovery = Discovery(feature);
+            NgxFeatureRequirement requirement = default;
+            NgxResult result = NgxInterop.GetFeatureRequirements(
+                instance, physicalDevice, &discovery, &requirement);
+            supported = requirement.FeatureSupported;
+            minHwArchitecture = requirement.MinHwArchitecture;
+            minOsVersion = Marshal.PtrToStringUTF8((IntPtr)requirement.MinOsVersion) ?? "";
+            return result;
+        }
     }
 
     /// <summary>
@@ -162,25 +187,29 @@ internal sealed unsafe class NgxSession : IDisposable
     /// </summary>
     public NgxResult Initialize(IntPtr instance, IntPtr physicalDevice, IntPtr device)
     {
-        if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
 
-        // Best effort, exactly as the host's own preparation does it: NGX writes only
-        // logs and caches there, and an unwritable path is not worth refusing the
-        // feature over - let alone failing InitializeGraphics, which is what an
-        // exception here would do, falling the whole client back to OpenGL.
-        try
-        {
-            if (!string.IsNullOrEmpty(ApplicationDataPath)) Directory.CreateDirectory(ApplicationDataPath);
+            // Best effort, exactly as the host's own preparation does it: NGX writes only
+            // logs and caches there, and an unwritable path is not worth refusing the
+            // feature over - let alone failing InitializeGraphics, which is what an
+            // exception here would do, falling the whole client back to OpenGL.
+            try
+            {
+                if (!string.IsNullOrEmpty(ApplicationDataPath)) Directory.CreateDirectory(ApplicationDataPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            return NgxInterop.InitProjectId(
+                _projectId, NgxEngineType.Custom, _engineVersion, _applicationDataPath,
+                instance, physicalDevice, device, NgxInterop.VersionApi, _featureInfo);
         }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-        return NgxInterop.InitProjectId(
-            _projectId, NgxEngineType.Custom, _engineVersion, _applicationDataPath,
-            instance, physicalDevice, device, NgxInterop.VersionApi, _featureInfo);
     }
 
     // There is deliberately no Shutdown here. NVSDK_NGX_VULKAN_Shutdown1 has exactly
@@ -334,10 +363,18 @@ internal sealed unsafe class NgxSession : IDisposable
         return candidates;
     }
 
-    private static void Collect(uint count, NgxExtensionProperties* properties, List<string> into)
+    private static bool Collect(uint count, NgxExtensionProperties* properties, List<string> into)
     {
-        if (properties == null) return;
+        // A corrupt count from a mismatched NGX ABI must never index arbitrarily
+        // far into driver-owned memory. Real extension lists are much smaller.
+        if (count > 256 || (count != 0 && properties == null)) return false;
         for (uint i = 0; i < count; i++) into.Add(properties[i].Name);
+        return true;
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(NgxSession));
     }
 
     private IntPtr Utf8(string value)
@@ -370,11 +407,17 @@ internal sealed unsafe class NgxSession : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        _featureInfo = null;
-        for (int i = 0; i < _scratch.Count; i++) Marshal.FreeHGlobal(_scratch[i]);
-        _scratch.Clear();
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _featureInfo = null;
+            _projectId = IntPtr.Zero;
+            _engineVersion = IntPtr.Zero;
+            _applicationDataPath = IntPtr.Zero;
+            for (int i = 0; i < _scratch.Count; i++) Marshal.FreeHGlobal(_scratch[i]);
+            _scratch.Clear();
+        }
     }
 }
 

@@ -19,7 +19,8 @@ namespace Optimum.Render.Vulkan.Platform;
 //
 // The step is the OpenGL body's (ClientPlatformWindows.OptimumPostAmbientOcclusion and the
 // private ApplyOptimumSceneSsao it calls), value for value: the same guards, the same order, the
-// same uniform expressions, the same textures. What changes is how each draw reaches the GPU -
+// same textures. Uniform sizes use the allocated render targets, which can differ from
+// window size when a vendor upscaler is active. What changes is how each draw reaches the GPU -
 // a pipeline built for stated fixed state (per-attachment blend, depth test/write/compare, cull,
 // topology and the target's formats) instead of whatever the GL state tracker happens to hold,
 // a pass that names its target, its written colour slots and the textures it samples instead of
@@ -72,19 +73,19 @@ public partial class VulkanClientPlatform
 
         if (OptimumPostAmbientOcclusionTexture == 0 && OptimumRenderSsao && projectMatrix != null)
         {
-            Size2i client = OptimumWindowClientSize();
             float ssaa = OptimumPostSsaaLevel;
+            FrameBufferRef primary = FrameBuffers[0];
 
             // Outside every native pass, exactly where the OpenGL body puts them: this is the
             // GL-shaped state the steps after this one inherit.
             GlToggleBlend(on: false);
-            NativeVanillaSsaoPass(projectMatrix, client, ssaa);
+            NativeVanillaSsaoPass(projectMatrix, ssaa);
             NativeBilateralBlurPasses();
             // The body's tail: the blur's last target is what it leaves bound, with the viewport
             // back at full render resolution - the Luma step inherits that viewport.
             LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
             GlToggleBlend(on: true);
-            GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
+            GlViewport(0, 0, primary.Width, primary.Height);
             if (NativeAoTemporalActive)
             {
                 NativeSceneSsaoPass();
@@ -131,10 +132,10 @@ public partial class VulkanClientPlatform
     /// The raw SSAO pass. One colour slot on frameBuffers[13], cleared white at pass entry the
     /// way the body's ClearSsaoTarget clears it, no blend, no depth, and the viewport the body's
     /// LoadFrameBuffer(SSAO) case sets - the target's own size. The four samplers and the four
-    /// uniform values are the body's, including the half-resolution screenSize fudge and the
-    /// temporal dither index, which is written under exactly the condition that compiles it in.
+    /// uniform values follow the body's half-resolution screenSize rule using the actual
+    /// render targets. The temporal dither index uses the same compile condition.
     /// </summary>
-    private void NativeVanillaSsaoPass(float[] projectMatrix, Size2i client, float ssaa)
+    private void NativeVanillaSsaoPass(float[] projectMatrix, float ssaa)
     {
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef primary = buffers[0];
@@ -155,8 +156,9 @@ public partial class VulkanClientPlatform
         {
             // screenSize: the body's num is 0.5 at SSAA 1 and 1 otherwise, so the value is the
             // SSAO target's resolution at SSAA 1 and the full render resolution above it.
-            float half = ssaa == 1f ? 0.5f : 1f;
-            device.WriteNative(pipeline, nativeSsao.Uniforms[0], ssaa * client.Width * half, ssaa * client.Height * half);
+            device.WriteNative(pipeline, nativeSsao.Uniforms[0],
+                ssaa == 1f ? target.Width : primary.Width,
+                ssaa == 1f ? target.Height : primary.Height);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[1], projectMatrix);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[2], OptimumSsaoKernel);
             if (OptimumConfig.EffectiveTemporalPipeline)

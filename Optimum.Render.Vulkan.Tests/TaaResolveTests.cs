@@ -900,16 +900,16 @@ public class TaaResolveTests
         return fragment.Replace(NearestDepthRejection, PerSampleRejection, StringComparison.Ordinal);
     }
 
-    /// <summary>A distant silhouette keeps colour-clipped history when its leaf is
-    /// absent from the previous 3x3; a flat-depth disocclusion still resets it.</summary>
+    /// <summary>A sparse distant leaf keeps clipped history, while a solid
+    /// silhouette and a flat-depth disocclusion reset it.</summary>
     [SkippableFact]
-    public void DistantDepthEdgeKeepsHistoryWithoutWeakeningFlatDisocclusion()
+    public void SparseDistantEdgeKeepsHistoryWhileSolidDisocclusionResets()
     {
         PerspectiveCamera camera = CreatePerspective();
         float nearDepth = camera.WindowDepth(80f);
         float farDepth = camera.WindowDepth(120f);
 
-        TemporalRun? Run(bool edge) => RunTemporal(1, camera.Uniforms(0.1f),
+        TemporalRun? Run(bool edge, bool solid = false) => RunTemporal(1, camera.Uniforms(0.1f),
             (textures, history) =>
             {
                 UploadFlatRgba16F(textures, history.Color, 0.5f, 0.5f, 0.5f, 1f);
@@ -922,16 +922,20 @@ public class TaaResolveTests
                 UploadRgba16F(textures, inputs.SceneTex, colour, colour, colour, (_, _) => 1f);
                 UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
                 UploadR32F(textures, inputs.DepthTex,
-                    (x, y) => !edge || (x == LeafX && y == LeafY) ? nearDepth : farDepth);
+                    (x, y) => !edge || (x == LeafX && y == LeafY) || (solid && x <= LeafX)
+                        ? nearDepth : farDepth);
                 UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, nearDepth);
             });
 
         TemporalRun? silhouette = Run(edge: true);
+        TemporalRun? solid = Run(edge: true, solid: true);
         TemporalRun? flat = Run(edge: false);
-        Skip.If(silhouette == null || flat == null, "No usable Vulkan device.");
+        Skip.If(silhouette == null || solid == null || flat == null, "No usable Vulkan device.");
         float retained = ReadHalf(silhouette!.Color, LeafX, LeafY, 0, 8);
+        float solidReset = ReadHalf(solid!.Color, LeafX, LeafY, 0, 8);
         float reset = ReadHalf(flat!.Color, LeafX, LeafY, 0, 8);
         Assert.True(retained < 0.75f, $"distant edge discarded clipped colour history ({retained:F3})");
+        Assert.True(solidReset > 0.85f, $"solid distant edge kept stale colour history ({solidReset:F3})");
         Assert.True(reset > 0.85f, $"flat-depth disocclusion kept colour history ({reset:F3})");
         Assert.True(ReadByteChannel(silhouette.Glow, LeafX, LeafY, 0) < 0.05f,
             "distant edge carried stale glow into a new surface");

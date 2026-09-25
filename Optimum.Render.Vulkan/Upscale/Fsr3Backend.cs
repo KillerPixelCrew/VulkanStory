@@ -1,5 +1,6 @@
 using System;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Config;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -63,7 +64,7 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         ready = true;
         return true;
     }
-    internal static uint QualityOf(string quality) => quality.ToLowerInvariant() switch
+    internal static uint QualityOf(string? quality) => quality?.ToLowerInvariant() switch
     {
         "dlaa" or "native" => 0, "balanced" => 2, "performance" => 3,
         "ultraperformance" => 4, _ => 1,
@@ -73,10 +74,11 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         plan = default;
         if (!Active || displayWidth <= 0 || displayHeight <= 0) return false;
         uint renderWidth = 0, renderHeight = 0;
+        quality = string.IsNullOrWhiteSpace(quality) ? "quality" : quality;
         if (!Check(api!.Plan((uint)displayWidth, (uint)displayHeight, QualityOf(quality),
             &renderWidth, &renderHeight), "FSR 3.1 resolution query")) return false;
         plan = new UpscalerPlan((int)renderWidth, (int)renderHeight, displayWidth, displayHeight, quality,
-            MathF.Log2((float)renderWidth / displayWidth) - 1f);
+            OptimumConfig.RecommendedUpscalerLodBias((int)renderWidth, displayWidth));
         return plan.IsValid;
     }
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)

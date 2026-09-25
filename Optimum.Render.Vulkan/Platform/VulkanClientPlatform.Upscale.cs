@@ -74,8 +74,17 @@ public partial class VulkanClientPlatform
         target.UpscalerHandles(out IntPtr instance, out IntPtr physical, out IntPtr logical);
         foreach (IUpscalerBackend backend in new List<IUpscalerBackend>(upscalers.Values))
         {
-            if (backend.BringUp(target, instance, physical, logical)) continue;
-            backend.Shutdown();
+            try
+            {
+                if (backend.BringUp(target, instance, physical, logical)) continue;
+            }
+            catch (Exception error)
+            {
+                LogUpscaler("[Optimum] " + backend.Id + " bring-up: " + error.Message);
+            }
+            try { backend.Shutdown(); }
+            catch (Exception error) { LogUpscaler("[Optimum] " + backend.Id + " teardown: " + error.Message); }
+            upscalers.Remove(backend.Id);
         }
     }
 

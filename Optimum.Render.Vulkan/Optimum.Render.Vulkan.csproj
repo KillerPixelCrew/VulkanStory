@@ -140,8 +140,9 @@
   </ItemGroup>
   <Target Name="BuildFsr3Bridge" BeforeTargets="Build"
           Condition="'$(OS)' == 'Windows_NT' and Exists('$(Fsr3SdkDir)/PrebuiltSignedDLL/amd_fidelityfx_vk.dll') and '$(VULKAN_SDK)' != ''">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-fsr3/build.ps1&quot; -SdkRoot &quot;$(Fsr3SdkDir)&quot; -Output &quot;$(TargetDir)OptimumFsr3.dll&quot;" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-fsr3/build.ps1&quot; -SdkRoot &quot;$(Fsr3SdkDir)&quot; -Output &quot;$(TargetDir)OptimumFsr3.dll&quot;" ContinueOnError="true" />
     <Copy SourceFiles="$(Fsr3SdkDir)/PrebuiltSignedDLL/amd_fidelityfx_vk.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(Fsr3SdkDir)/sdk/LICENSE.txt" DestinationFiles="$(TargetDir)Fsr3-LICENSE.txt" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(Fsr3SdkDir)/sdk/LICENSE.txt" DestinationFiles="$(TargetDir)Fsr3-LICENSE.txt"
+          SkipUnchangedFiles="true" Condition="Exists('$(Fsr3SdkDir)/sdk/LICENSE.txt')" />
   </Target>
 </Project>

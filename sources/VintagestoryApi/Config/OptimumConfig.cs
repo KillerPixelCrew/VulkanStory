@@ -555,16 +555,25 @@ public static class OptimumConfig
     public static string[] QualityNamesFor(string provider) => provider == "xess" ? XessQualityNames : UpscalerQualityNames;
     public static float UpscalerLodBiasOffset = 1.0f;
     private static readonly HashSet<string> disabledUpscalers = new(StringComparer.OrdinalIgnoreCase);
-    public static bool IsUpscalerDisabled(string provider) => disabledUpscalers.Contains(provider);
+    private static readonly object disabledUpscalersGate = new();
+    public static bool IsUpscalerDisabled(string provider)
+    {
+        lock (disabledUpscalersGate) return disabledUpscalers.Contains(provider);
+    }
     public static bool UpscalerRuntimeDisabled => IsUpscalerDisabled(Upscaler);
     public static bool DisableUpscalerAtRuntime()
     {
-        if (UpscalerRuntimeDisabled) return false;
-        disabledUpscalers.Add(Upscaler);
-        ClearUpscalerPlan();
-        return true;
+        lock (disabledUpscalersGate)
+        {
+            if (!disabledUpscalers.Add(Upscaler)) return false;
+            ClearUpscalerPlan();
+            return true;
+        }
     }
-    public static void ResetUpscalerRuntimeDisabledForTests() => disabledUpscalers.Clear();
+    public static void ResetUpscalerRuntimeDisabledForTests()
+    {
+        lock (disabledUpscalersGate) disabledUpscalers.Clear();
+    }
     public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
     public static bool EffectiveUpscalerIsDlss =>
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
@@ -580,8 +589,9 @@ public static class OptimumConfig
     public static float RecommendedUpscalerLodBias(int renderWidth, int displayWidth) =>
         displayWidth <= 0 ? 0f : RecommendedUpscalerLodBiasForScale((float)renderWidth / displayWidth);
     public static float RecommendedUpscalerLodBiasForScale(float renderScale) =>
-        renderScale <= 0f || renderScale >= 1f ? 0f : MathF.Log2(Math.Clamp(renderScale, 0.01f, 1f)) -
-            Math.Clamp(UpscalerLodBiasOffset, 0f, 1f);
+        !float.IsFinite(renderScale) || renderScale <= 0f || renderScale >= 1f ? 0f :
+            MathF.Log2(Math.Clamp(renderScale, 0.01f, 1f)) -
+            (float.IsFinite(UpscalerLodBiasOffset) ? Math.Clamp(UpscalerLodBiasOffset, 0f, 1f) : 1f);
     public static void SetUpscalerPlan(float renderScale, float lodBias)
     {
         UpscalerRenderScale = renderScale;

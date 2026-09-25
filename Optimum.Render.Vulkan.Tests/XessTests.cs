@@ -13,6 +13,12 @@ namespace Optimum.Render.Vulkan.Tests;
 public class XessTests(ITestOutputHelper log)
 {
     [Fact]
+    public void MissingQualityUsesTheDefaultPreset()
+    {
+        Assert.Equal(XessBackend.QualityOf("quality"), XessBackend.QualityOf(null));
+    }
+
+    [Fact]
     public void NativeAbiMatchesIntelHeaders()
     {
         Assert.Equal(48, Marshal.SizeOf<XessImage>());
@@ -138,7 +144,7 @@ public class XessTests(ITestOutputHelper log)
             {
                 (string quality, int dw, int dh) = setting;
                 Assert.True(backend.TryPlan(dw, dh, quality, out var plan), backend.Unavailable);
-                Assert.Equal(MathF.Log2(plan.RenderScale), plan.LodBias, 5);
+                Assert.Equal(OptimumConfig.RecommendedUpscalerLodBias(plan.RenderWidth, plan.DisplayWidth), plan.LodBias, 5);
                 int w = plan.RenderWidth, h = plan.RenderHeight;
                 var colors = new Half[w * h * 4];
                 var motion = new Half[w * h * 4];

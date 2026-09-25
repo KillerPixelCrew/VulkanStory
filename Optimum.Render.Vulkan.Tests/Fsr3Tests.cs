@@ -13,6 +13,12 @@ namespace Optimum.Render.Vulkan.Tests;
 public sealed class Fsr3Tests(ITestOutputHelper log)
 {
     [Fact]
+    public void MissingQualityUsesTheDefaultPreset()
+    {
+        Assert.Equal(Fsr3Backend.QualityOf("quality"), Fsr3Backend.QualityOf(null));
+    }
+
+    [Fact]
     public void BridgeAbiMatchesTheNativeStructs()
     {
         Assert.Equal(24, Marshal.SizeOf<Fsr3Image>());
@@ -48,7 +54,7 @@ public sealed class Fsr3Tests(ITestOutputHelper log)
                 { ("quality", 640, 384), ("performance", 640, 384), ("dlaa", 640, 384), ("quality", 800, 448) })
             {
                 Assert.True(backend.TryPlan(dw, dh, quality, out var plan), backend.Unavailable);
-                Assert.Equal(MathF.Log2(plan.RenderScale) - 1f, plan.LodBias, 5);
+                Assert.Equal(OptimumConfig.RecommendedUpscalerLodBias(plan.RenderWidth, plan.DisplayWidth), plan.LodBias, 5);
                 int w = plan.RenderWidth, h = plan.RenderHeight;
                 var colors = new Half[w * h * 4];
                 var motion = new Half[w * h * 4];
