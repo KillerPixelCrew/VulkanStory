@@ -117,6 +117,15 @@ internal sealed record GtaoSettings
         return new GtaoSettings { SliceCount = slices, StepsPerSlice = steps, DenoisePasses = passes };
     }
 
+    /// <summary>
+    /// Keep the AO input stable before the temporal scene resolve. The default
+    /// Medium choice uses XeGTAO's 18-sample quality and two spatial denoise
+    /// passes; an explicit Low choice stays available for slower GPUs.
+    /// The caller holds the AO sampling phase fixed between frames.
+    /// </summary>
+    public static GtaoSettings ForStableTemporal(GtaoPreset preset) =>
+        ForPreset(preset == GtaoPreset.Medium ? GtaoPreset.High : preset, temporal: false);
+
     /// <summary>The persisted preset name ("low", "medium", "high", "ultra"); anything else is Medium.</summary>
     public static GtaoPreset ParsePreset(string? name) => (name ?? "").Trim().ToLowerInvariant() switch
     {

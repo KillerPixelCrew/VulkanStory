@@ -137,6 +137,10 @@ view depth. Color/glow use linear filtering, depth nearest. Reject nonfinite his
 reset on invalid/missing resources or discontinuities, and preserve world/hand history
 ownership. Resolve uses nearest-depth disocclusion over 3x3 with motion from the same
 tap, reactive handling and luminance anti-flicker weighting.
+At distant depth edges, retain colour-clipped history when a subpixel leaf
+leaves the previous 3x3 window; keep the hard depth reset for flat regions and
+near geometry. The headless parity gate measures both raw depth mismatches and
+the remaining hard resets.
 
 AO composition precedes resolve. Bloom and god rays consume the unsharpened scene.
 Sharpening writes slot 21 after final composition and late scene overlays; zero
@@ -155,6 +159,9 @@ sampling must follow the same coordinate/depth conventions as the scene.
 
 Composite visibility into scene color before TAA, preserving glow and the intended
 water/fog/OIT attenuation. Keep vanilla SSAO and AO-disabled behavior available.
+When TAA is active, GTAO holds its sample pattern fixed and spatially denoises the
+visibility before the scene resolve. The default Medium choice uses the 18-sample
+High kernel and two edge-aware passes; explicit Low remains available for slower GPUs.
 Cross-quad and wind geometry is thin; snow layers remain solid. Blocks can declare
 `optimumAoThin` for other thin chunk geometry. Classification travels with the chunk
 metadata; do not infer a whole block's class from unrelated geometry.

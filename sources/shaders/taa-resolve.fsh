@@ -105,6 +105,7 @@ void main(void)
 	// drive the reprojection and the disocclusion test, so a sub-pixel leaf in front
 	// of a far background keeps one consistent answer across jitter phases.
 	float closestDepth = 2.0;
+	float farthestDepth = 0.0;
 	ivec2 closestPixel = pixel;
 	vec4 filtered = vec4(0.0);
 	float filteredWeight = 0.0;
@@ -119,6 +120,7 @@ void main(void)
 		vec4 c = texelFetch(sceneTex, p, 0);
 		float tapDepth = texelFetch(depthTex, p, 0).r;
 		if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }
+		farthestDepth = max(farthestDepth, tapDepth);
 		vec3 ycc = rgbToYCoCg(c.rgb);
 		m1 += ycc; m2 += ycc * ycc;
 		boxMin = min(boxMin, ycc); boxMax = max(boxMax, ycc);
@@ -268,7 +270,13 @@ void main(void)
 		if (!isnan(h) && !isinf(h)) historyNearest = min(historyNearest, h);
 	}
 	float depthTolerance = 0.5 + 0.08 * closestLinearDepth;
-	if (abs(historyNearest - closestLinearDepth) > depthTolerance) { alpha = 1.0; rejected = true; }
+	// At a distant silhouette, a leaf can leave the previous 3x3 window entirely
+	// between jitter phases. A hard depth reset then exposes the aliased current
+	// sample. Keep the colour-clipped history at these edges; a solid surface and
+	// nearby geometry still take the ordinary disocclusion reset.
+	bool distantDepthEdge = closestLinearDepth > 20.0 && farthestDepth - closestDepth > 2e-4;
+	if (abs(historyNearest - closestLinearDepth) > depthTolerance && !distantDepthEdge)
+	{ alpha = 1.0; rejected = true; }
 
 	// ---- rectify and blend in YCoCg with luminance weighting
 	float clipKeep = 1.0;

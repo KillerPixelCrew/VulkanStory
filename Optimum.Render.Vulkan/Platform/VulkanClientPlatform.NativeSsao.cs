@@ -374,7 +374,8 @@ public partial class VulkanClientPlatform
         FrameBufferRef? primary = FrameBuffers is { Count: > 0 } buffers ? buffers[0] : null;
         if (primary?.ColorTextureIds == null || primary.ColorTextureIds.Length < 4 || primary.DepthTextureId == 0) return 0;
 
-        // The noise advances with the temporal clock only while TAA accumulates (C.7).
+        // Avoid feeding high-variance rotating AO into the scene TAA. Keep
+        // the AO sampling phase fixed and denoise before scene composition.
         bool temporal = OptimumConfig.EffectiveTaa && TaaTargetsReady;
         GtaoSettings settings = AmbientOcclusionSettings(temporal);
         if (!ambientOcclusionToneRefusalLogged && settings.EffectiveTone(0, out string? refusal) != settings.Tone)
@@ -382,7 +383,7 @@ public partial class VulkanClientPlatform
             ambientOcclusionToneRefusalLogged = true;
             Logger.Warning("[Optimum] AO: " + refusal);
         }
-        uint noiseIndex = temporal ? (uint)(OptimumTemporal.Frame.FrameIndex & 0xFFFFFFFFL) : 0u;
+        const uint noiseIndex = 0u;
 
         ambientOcclusion ??= new GtaoRenderer(device);
         int output = ambientOcclusion.Render(primary.DepthTextureId, primary.ColorTextureIds[2], projectMatrix, settings, noiseIndex);
@@ -427,7 +428,10 @@ public partial class VulkanClientPlatform
         {
             return cached.Settings;
         }
-        GtaoSettings settings = GtaoSettings.ForPreset(GtaoSettings.ParsePreset(preset), temporal)
+        GtaoPreset parsed = GtaoSettings.ParsePreset(preset);
+        GtaoSettings settings = (temporal
+                ? GtaoSettings.ForStableTemporal(parsed)
+                : GtaoSettings.ForPreset(parsed, temporal: false))
             .WithEnvironment(Environment.GetEnvironmentVariable);
         ambientOcclusionSettingsCache = (preset, temporal, settings);
         return settings;
