@@ -89,6 +89,25 @@ public class XessTests(ITestOutputHelper log)
         finally { OptimumConfig.ResetUpscalerRuntimeDisabledForTests(); OptimumConfig.Upscaler = previous; }
     }
 
+    [Fact]
+    public void InvalidMutableProviderDoesNotEnterTheTemporalUpscalerPath()
+    {
+        string previous = OptimumConfig.Upscaler;
+        try
+        {
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.Upscaler = null!;
+            Assert.Equal("off", OptimumConfig.EffectiveUpscaler);
+            Assert.False(OptimumConfig.UpscalerRuntimeDisabled);
+            Assert.False(OptimumConfig.DisableUpscalerAtRuntime());
+            OptimumConfig.Upscaler = "unrecognised";
+            Assert.Equal("off", OptimumConfig.EffectiveUpscaler);
+            OptimumConfig.Upscaler = " FSR3 ";
+            Assert.Equal("fsr3", OptimumConfig.EffectiveUpscaler);
+        }
+        finally { OptimumConfig.ResetUpscalerRuntimeDisabledForTests(); OptimumConfig.Upscaler = previous; }
+    }
+
     [SkippableFact]
     public unsafe void JitterKeepsStaticSceneRegistered()
     {

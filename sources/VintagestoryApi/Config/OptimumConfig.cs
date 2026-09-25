@@ -553,19 +553,28 @@ public static class OptimumConfig
     public static readonly string[] XessQualityNames =
         { "dlaa", "ultraqualityplus", "ultraquality", "quality", "balanced", "performance", "ultraperformance" };
     public static string[] QualityNamesFor(string provider) => provider == "xess" ? XessQualityNames : UpscalerQualityNames;
+    private static string ValidUpscaler(string? provider)
+    {
+        foreach (string name in UpscalerNames)
+            if (string.Equals(name, provider?.Trim(), StringComparison.OrdinalIgnoreCase)) return name;
+        return "off";
+    }
     public static float UpscalerLodBiasOffset = 1.0f;
     private static readonly HashSet<string> disabledUpscalers = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object disabledUpscalersGate = new();
     public static bool IsUpscalerDisabled(string provider)
     {
+        if (string.IsNullOrWhiteSpace(provider)) return false;
         lock (disabledUpscalersGate) return disabledUpscalers.Contains(provider);
     }
-    public static bool UpscalerRuntimeDisabled => IsUpscalerDisabled(Upscaler);
+    public static bool UpscalerRuntimeDisabled => IsUpscalerDisabled(ValidUpscaler(Upscaler));
     public static bool DisableUpscalerAtRuntime()
     {
+        string provider = ValidUpscaler(Upscaler);
+        if (provider == "off") return false;
         lock (disabledUpscalersGate)
         {
-            if (!disabledUpscalers.Add(Upscaler)) return false;
+            if (!disabledUpscalers.Add(provider)) return false;
             ClearUpscalerPlan();
             return true;
         }
@@ -574,7 +583,14 @@ public static class OptimumConfig
     {
         lock (disabledUpscalersGate) disabledUpscalers.Clear();
     }
-    public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
+    public static string EffectiveUpscaler
+    {
+        get
+        {
+            string provider = ValidUpscaler(Upscaler);
+            return IsUpscalerDisabled(provider) ? "off" : provider;
+        }
+    }
     public static bool EffectiveUpscalerIsDlss =>
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
     public static bool UpscalerReplacesTaa => OptimumRender.IsVulkan &&
