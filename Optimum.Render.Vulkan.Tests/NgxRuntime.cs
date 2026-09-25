@@ -236,10 +236,11 @@ public sealed class NgxRuntime : IDisposable
     /// <summary>Everything the environment has to provide before NGX can be brought up at all.</summary>
     private static string? Diagnose()
     {
-        if (!OperatingSystem.IsLinux()) return "NGX is reached through the Linux driver library here.";
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows())
+            return "NGX runtime tests require Windows or Linux.";
         if (!NgxInterop.IsDriverLibraryPresent())
         {
-            return "The NVIDIA driver library " + NgxInterop.LibraryName + " is not installed.";
+            return "The NVIDIA driver library " + NgxInterop.RuntimeLibraryName + " is not installed.";
         }
         if (!NgxShim.IsAvailable)
         {
@@ -255,7 +256,7 @@ public sealed class NgxRuntime : IDisposable
         if (NgxSession.FindFeaturePaths().Count == 0)
         {
             return "No NGX feature libraries found; set " + NgxSession.FeaturePathVariable +
-                " to a directory holding libnvidia-ngx-dlss.so.* and libnvidia-ngx-dlssg.so.*.";
+                " to a directory holding the DLSS feature library.";
         }
         return null;
     }

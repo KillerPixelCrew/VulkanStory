@@ -35,6 +35,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
 {
     float invRenderHeight;
     int optimumAoMode;
+    int optimumAoDebugInScene;
 };
 
 #if defined(OPTIMUM_VERTEX)
@@ -95,6 +96,11 @@ void main()
     if (OPTIMUM_SSAOLEVEL > 1) {
         ao = min(ao, texture(optimumTextures2D[ssaoScene], texCoord - vec2(0.0, invRenderHeight)).r);
     }
+    }
+    // Put the attenuated AO on the scene path, including its temporal resolve when active.
+    if (optimumAoDebugInScene != 0) {
+        outColor = vec4(vec3(clamp(ao, 0.0, 1.0)), 1.0);
+        return;
     }
     // EnumBlendMode.Multiply: dstRGB * (1 - srcAlpha). RGB is not read.
     outColor = vec4(0.0, 0.0, 0.0, 1.0 - clamp(ao, 0.0, 1.0));

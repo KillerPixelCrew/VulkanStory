@@ -33,6 +33,11 @@ namespace Optimum.Render.Vulkan.Platform;
 // what keeps the final composition from applying it a second time.
 public partial class VulkanClientPlatform
 {
+    // Vendor upscalers consume the motion attachment but do not allocate TAA history targets.
+    // Both routes still need AO in scene color before their temporal reconstruction.
+    private bool NativeAoTemporalActive => OptimumConfig.EffectiveTemporalPipeline &&
+        (TaaTargetsReady || (OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0));
+
     private readonly NativeFullscreenPass nativeSsao = new("ssao",
         new[] { "screenSize", "projection", "samples", "temporalFrameIndex" },
         new[] { "gPosition", "gNormal", "texNoise", "revealage" });
@@ -42,7 +47,7 @@ public partial class VulkanClientPlatform
         new[] { "inputTexture", "depthTexture" });
 
     private readonly NativeFullscreenPass nativeSceneSsao = new("scene-ssao",
-        new[] { "invRenderHeight", "optimumAoMode" },
+        new[] { "invRenderHeight", "optimumAoMode", "optimumAoDebugInScene" },
         new[] { "ssaoScene", "gPositionScene", "revealageScene" });
 
     /// <summary>The frame buffer indices this step draws into and reads back, as the base indexes them.</summary>
@@ -54,7 +59,7 @@ public partial class VulkanClientPlatform
     /// The AO step, natively. Reproduces
     /// <see cref="ClientPlatformWindows.OptimumPostAmbientOcclusion" /> exactly: the platform's own
     /// AO first, vanilla SSAO and its blur when that stood down, then the composite - under the
-    /// vanilla branch only while TAA is actually running, under the GTAO branch always.
+    /// vanilla branch while TAA or an upscaler is active, under the GTAO branch always.
     /// </summary>
     private void NativeAmbientOcclusion(float[] projectMatrix)
     {
@@ -80,7 +85,7 @@ public partial class VulkanClientPlatform
             LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
             GlToggleBlend(on: true);
             GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
-            if (OptimumConfig.EffectiveTemporalPipeline && TaaTargetsReady)
+            if (NativeAoTemporalActive)
             {
                 NativeSceneSsaoPass();
             }
@@ -259,8 +264,10 @@ public partial class VulkanClientPlatform
         int gPosition = gtao ? primary.ColorTextureIds[3] : 0;
         int revealage = gtao ? transparent.ColorTextureIds[1] : 0;
 
+        bool debugInScene = OptimumConfig.AmbientOcclusionDebugView;
         NativePipeline? pipeline = NativePostPipeline(nativeSceneSsao, composite, primary.FboId, 1u,
-            NativeMultiplySlotZeroBlend(), depthTest: false, depthWrite: false, CompareOp.Less);
+            debugInScene ? NativeOpaqueSlotZeroBlend() : NativeMultiplySlotZeroBlend(),
+            depthTest: false, depthWrite: false, CompareOp.Less);
         if (pipeline == null) return;
 
         // The body binds Primary through LoadFrameBuffer here, which is also what puts the
@@ -286,6 +293,7 @@ public partial class VulkanClientPlatform
                     OptimumPostAmbientOcclusionTexture != 0 ? 1 : 0);
             }
             device.WriteNative(pipeline, nativeSceneSsao.Uniforms[0], 1f / primary.Height);
+            device.WriteNative(pipeline, nativeSceneSsao.Uniforms[2], debugInScene ? 1 : 0);
             device.DrawNativeFullscreen(pipeline, textures.ToArray());
         }
         device.EndNativePass();
@@ -359,7 +367,7 @@ public partial class VulkanClientPlatform
 
     private bool ambientOcclusionToneRefusalLogged;
 
-    private (string Preset, bool Temporal, GtaoSettings Settings)? ambientOcclusionSettingsCache;
+    private (string Preset, bool Temporal, bool Upscaler, GtaoSettings Settings)? ambientOcclusionSettingsCache;
 
     /// <summary>
     /// Runs GTAO when the live shaders were built for it (OPTIMUMAO, stamped from
@@ -374,9 +382,11 @@ public partial class VulkanClientPlatform
         FrameBufferRef? primary = FrameBuffers is { Count: > 0 } buffers ? buffers[0] : null;
         if (primary?.ColorTextureIds == null || primary.ColorTextureIds.Length < 4 || primary.DepthTextureId == 0) return 0;
 
-        // The noise advances with the temporal clock only while TAA accumulates (C.7).
-        bool temporal = OptimumConfig.EffectiveTemporalPipeline && TaaTargetsReady;
-        GtaoSettings settings = AmbientOcclusionSettings(temporal);
+        // Vendor upscalers receive AO in scene color, not as a denoising input.
+        // Use spatially stable AO there; the game's own TAA can accumulate
+        // XeGTAO's rotating noise instead.
+        bool temporal = OptimumConfig.EffectiveTaa && TaaTargetsReady;
+        GtaoSettings settings = AmbientOcclusionSettings(temporal, OptimumConfig.UpscalerReplacesTaa);
         if (!ambientOcclusionToneRefusalLogged && settings.EffectiveTone(0, out string? refusal) != settings.Tone)
         {
             ambientOcclusionToneRefusalLogged = true;
@@ -419,17 +429,21 @@ public partial class VulkanClientPlatform
         };
     }
 
-    /// <summary>The preset with the measurement overrides from the environment, rebuilt only when the preset or TAA changes.</summary>
-    private GtaoSettings AmbientOcclusionSettings(bool temporal)
+    /// <summary>The preset with measurement overrides, rebuilt when the temporal path changes.</summary>
+    private GtaoSettings AmbientOcclusionSettings(bool temporal, bool upscaler)
     {
         string preset = OptimumConfig.AmbientOcclusionPreset ?? "";
-        if (ambientOcclusionSettingsCache is { } cached && cached.Preset == preset && cached.Temporal == temporal)
+        if (ambientOcclusionSettingsCache is { } cached && cached.Preset == preset &&
+            cached.Temporal == temporal && cached.Upscaler == upscaler)
         {
             return cached.Settings;
         }
-        GtaoSettings settings = GtaoSettings.ForPreset(GtaoSettings.ParsePreset(preset), temporal)
+        GtaoPreset parsed = GtaoSettings.ParsePreset(preset);
+        GtaoSettings settings = (upscaler
+                ? GtaoSettings.ForUpscaler(parsed)
+                : GtaoSettings.ForPreset(parsed, temporal))
             .WithEnvironment(Environment.GetEnvironmentVariable);
-        ambientOcclusionSettingsCache = (preset, temporal, settings);
+        ambientOcclusionSettingsCache = (preset, temporal, upscaler, settings);
         return settings;
     }
 

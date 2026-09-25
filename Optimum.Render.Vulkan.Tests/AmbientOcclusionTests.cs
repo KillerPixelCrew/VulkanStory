@@ -597,6 +597,10 @@ public class AmbientOcclusionTests(ITestOutputHelper output)
         Assert.Equal((3u, 3u, 1u), Counts(GtaoSettings.ForPreset(GtaoPreset.High, true)));
         Assert.Equal((9u, 3u, 2u), Counts(GtaoSettings.ForPreset(GtaoPreset.Ultra, true)));
         Assert.Equal((2u, 2u, 2u), Counts(GtaoSettings.ForPreset(GtaoPreset.Medium, false)));
+        Assert.Equal((1u, 2u, 2u), Counts(GtaoSettings.ForUpscaler(GtaoPreset.Low)));
+        Assert.Equal((3u, 3u, 2u), Counts(GtaoSettings.ForUpscaler(GtaoPreset.Medium)));
+        Assert.Equal((3u, 3u, 2u), Counts(GtaoSettings.ForUpscaler(GtaoPreset.High)));
+        Assert.Equal((9u, 3u, 2u), Counts(GtaoSettings.ForUpscaler(GtaoPreset.Ultra)));
         Assert.Equal(GtaoPreset.Medium, GtaoSettings.ParsePreset("nonsense"));
         Assert.Equal(GtaoPreset.Ultra, GtaoSettings.ParsePreset(" Ultra "));
 

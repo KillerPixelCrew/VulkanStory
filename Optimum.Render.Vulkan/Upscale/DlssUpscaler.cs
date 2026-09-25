@@ -209,6 +209,26 @@ internal sealed class DlssUpscaler : IDisposable
                   " in this process, which allows exactly one lifetime");
         }
 
+        NgxResult capabilities = NgxInterop.GetCapabilityParameters(out IntPtr capabilityHandle);
+        if (capabilities != NgxResult.Success || capabilityHandle == IntPtr.Zero)
+        {
+            return Fail("NVSDK_NGX_VULKAN_GetCapabilityParameters: " + NgxInterop.Describe(capabilities));
+        }
+        try
+        {
+            NgxResult availableStatus = new NgxParameters(capabilityHandle).GetUInt(
+                NgxParameterNames.SuperSamplingAvailable, out uint available);
+            if (availableStatus != NgxResult.Success || available == 0)
+            {
+                return Fail("NGX reports SuperSampling.Available=" + available +
+                    " (" + NgxInterop.Describe(availableStatus) + ")");
+            }
+        }
+        finally
+        {
+            NgxInterop.DestroyParameters(capabilityHandle);
+        }
+
         _device = device;
         _vkDevice = vkDevice;
         Unavailable = null;
@@ -259,8 +279,15 @@ internal sealed class DlssUpscaler : IDisposable
                 out NgxOptimalSettings settings);
             if (result != NgxResult.Success || settings.OptimalWidth == 0 || settings.OptimalHeight == 0)
             {
+                var probe = new NgxParameters(handle);
+                NgxResult widthStatus = probe.GetUInt(NgxParameterNames.Width, out uint widthValue);
+                NgxResult heightStatus = probe.GetUInt(NgxParameterNames.Height, out uint heightValue);
+                NgxResult qualityStatus = probe.GetInt(NgxParameterNames.PerfQualityValue, out int qualityValue);
                 return Fail("the optimal-settings query for " + displayWidth + "x" + displayHeight +
-                    " " + quality + " answered " + NgxInterop.Describe(result));
+                    " " + quality + " answered " + NgxInterop.Describe(result) +
+                    "; width=" + widthValue + " (" + NgxInterop.Describe(widthStatus) +
+                    "), height=" + heightValue + " (" + NgxInterop.Describe(heightStatus) +
+                    "), quality=" + qualityValue + " (" + NgxInterop.Describe(qualityStatus) + ")");
             }
 
             plan = new UpscalePlan(
@@ -465,13 +492,14 @@ internal sealed class DlssUpscaler : IDisposable
         {
             return "DLSS is reached through the NVIDIA driver library, which this platform does not have";
         }
-        if (!NgxInterop.IsDriverLibraryPresent())
-        {
-            return "the NVIDIA driver library " + NgxInterop.LibraryName + " is not installed";
-        }
         if (!NgxShim.IsAvailable)
         {
             return "the NGX shim is not loadable: " + NgxShim.Diagnosis;
+        }
+        if (!NgxInterop.IsDriverLibraryPresent())
+        {
+            return "the NVIDIA driver library " + NgxInterop.RuntimeLibraryName +
+                " is not loadable: " + NgxShim.LastLoadError;
         }
         NgxResult runtime = NgxShim.LoadRuntime();
         if (!NgxInterop.Succeeded(runtime))
@@ -481,7 +509,8 @@ internal sealed class DlssUpscaler : IDisposable
         if (NgxSession.FindFeaturePaths().Count == 0)
         {
             return "no NGX feature libraries were found; set " + NgxSession.FeaturePathVariable +
-                " to the directory holding libnvidia-ngx-dlss.so.*";
+                " to the directory holding " +
+                (OperatingSystem.IsWindows() ? "nvngx_dlss.dll" : "libnvidia-ngx-dlss.so.*");
         }
         return null;
     }

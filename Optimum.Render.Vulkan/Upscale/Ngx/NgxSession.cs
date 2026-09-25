@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -58,6 +59,12 @@ internal sealed unsafe class NgxSession : IDisposable
         *_featureInfo = default;
         _featureInfo->PathListInfo.Path = pathArray;
         _featureInfo->PathListInfo.Length = (uint)featurePaths.Count;
+        if (Environment.GetEnvironmentVariable("OPTIMUM_NGX_LOG") == "1")
+        {
+            _featureInfo->LoggingInfo.LoggingCallback =
+                (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, int, int, void>)&LogNgx;
+            _featureInfo->LoggingInfo.MinimumLoggingLevel = 2;
+        }
     }
 
     public string EngineVersionString { get; }
@@ -65,6 +72,13 @@ internal sealed unsafe class NgxSession : IDisposable
     public IReadOnlyList<string> FeaturePaths { get; }
 
     public NgxFeatureCommonInfo* FeatureInfo => _featureInfo;
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void LogNgx(IntPtr message, int level, int feature)
+    {
+        string? line = Marshal.PtrToStringUTF8(message);
+        if (line != null) Console.Error.WriteLine("[NGX " + feature + "/" + level + "] " + line);
+    }
 
     /// <summary>A discovery record for one feature, pointing at this session's strings.</summary>
     public NgxFeatureDiscoveryInfo Discovery(NgxFeature feature) => new()

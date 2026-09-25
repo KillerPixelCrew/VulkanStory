@@ -6,12 +6,12 @@ namespace Optimum.Render.Vulkan.Core;
 
 /// <summary>A vendor-independent render/display size pair returned by the selected backend.</summary>
 internal readonly record struct UpscalerPlan(
-    int RenderWidth, int RenderHeight, int DisplayWidth, int DisplayHeight, string Quality)
+    int RenderWidth, int RenderHeight, int DisplayWidth, int DisplayHeight, string Quality, float? ProviderLodBias = null)
 {
     public bool IsValid => RenderWidth > 0 && RenderHeight > 0 && DisplayWidth > 0 &&
         DisplayHeight > 0 && RenderWidth <= DisplayWidth && RenderHeight <= DisplayHeight;
     public float RenderScale => DisplayWidth > 0 ? (float)RenderWidth / DisplayWidth : 1f;
-    public float LodBias => OptimumConfig.RecommendedUpscalerLodBias(RenderWidth, DisplayWidth);
+    public float LodBias => ProviderLodBias ?? OptimumConfig.RecommendedUpscalerLodBias(RenderWidth, DisplayWidth);
 }
 
 internal readonly record struct UpscalerFrame(

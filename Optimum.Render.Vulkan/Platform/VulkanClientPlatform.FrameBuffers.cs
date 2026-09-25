@@ -77,6 +77,9 @@ public partial class VulkanClientPlatform
         {
             width = plannedWidth;
             height = plannedHeight;
+            LogUpscaler("[Optimum] " + OptimumConfig.EffectiveUpscaler + " " +
+                OptimumConfig.UpscalerQuality + ": world target " + width + "x" + height +
+                ", display target " + displayWidth + "x" + displayHeight + ".");
         }
         if (width == 0 || height == 0)
         {

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..d31b9bf 100644
+index 4d08f84..fe58d3c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,16 @@ public class GuiCompositeSettings : GuiComposite
@@ -111,7 +111,7 @@ index 4d08f84..d31b9bf 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1762,344 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1762,349 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -205,19 +205,21 @@ index 4d08f84..d31b9bf 100644
 +			.AddInset(panelBounds)
 +			.BeginClip(clippingBounds);
 +		AddOptimumDropdownRow("optimum-renderer", "optimum-renderer-tooltip", new string[] { "auto", "vulkan", "opengl" }, new string[] { Lang.Get("optimum-renderer-auto"), Lang.Get("optimum-renderer-vulkan"), Lang.Get("optimum-renderer-opengl") }, 0, onOptimumRendererChanged, "optRenderer");
-+		string dlssUnavailable = ScreenManager.Platform.OptimumUpscalerUnavailableFor("dlss");
-+		string dlssName = Lang.Get("optimum-upscaler-dlss") +
-+			(dlssUnavailable == null ? "" : " (" + dlssUnavailable + ")");
-+		AddOptimumDropdownRow("optimum-upscaler", "optimum-upscaler-tooltip",
-+			new string[] { "off", "dlss" },
-+			new string[] { Lang.Get("optimum-upscaler-off"), dlssName },
-+			0, onOptimumUpscalerChanged, "optUpscaler");
-+		AddOptimumDropdownRow("optimum-upscaler-quality", "optimum-upscaler-quality-tooltip",
-+			Vintagestory.API.Config.OptimumConfig.UpscalerQualityNames,
-+			new string[] { Lang.Get("optimum-upscaler-dlaa"), Lang.Get("optimum-upscaler-quality-mode"),
-+				Lang.Get("optimum-upscaler-balanced"), Lang.Get("optimum-upscaler-performance"),
-+				Lang.Get("optimum-upscaler-ultra-performance") },
-+			0, onOptimumUpscalerQualityChanged, "optUpscalerQuality");
++        string[] providers = Vintagestory.API.Config.OptimumConfig.UpscalerNames;
++        string[] providerLabels = new string[providers.Length];
++        for (int i = 0; i < providers.Length; i++) {
++            string provider = providers[i];
++            string unavailable = ScreenManager.Platform.OptimumUpscalerUnavailableFor(provider);
++            providerLabels[i] = Lang.Get("optimum-upscaler-" + provider) + (unavailable == null ? "" : " (" + unavailable + ")");
++        }
++        AddOptimumDropdownRow("optimum-upscaler", "optimum-upscaler-tooltip", providers,
++            providerLabels, 0, onOptimumUpscalerChanged, "optUpscaler");
++        string[] qualities = Vintagestory.API.Config.OptimumConfig.QualityNamesFor(Vintagestory.API.Config.OptimumConfig.Upscaler);
++        string[] qualityLabels = new string[qualities.Length];
++        for (int i = 0; i < qualities.Length; i++) qualityLabels[i] = Lang.Get("optimum-upscaler-preset-" + qualities[i]);
++        AddOptimumDropdownRow("optimum-upscaler-quality", "optimum-upscaler-quality-tooltip", qualities,
++            qualityLabels,
++            0, onOptimumUpscalerQualityChanged, "optUpscalerQuality");
 +		AddOptimumSwitchRow("optimum-taa", "optimum-taa-tooltip", onOptimumTaaChanged, "optTaa");
 +		AddOptimumSliderRow("optimum-taasharpness", onOptimumTaaSharpnessChanged, "optTaaSharpness");
 +		AddOptimumSliderRow("optimum-taamipbias", onOptimumTaaMipBiasChanged, "optTaaMipBias");
@@ -233,8 +235,8 @@ index 4d08f84..d31b9bf 100644
 +		composer.GetToggleButton("vulkan")?.SetValue(true);
 +		string renderer = Vintagestory.API.Config.OptimumConfig.Renderer;
 +		composer.GetDropDown("optRenderer").SetSelectedIndex(renderer == "vulkan" ? 1 : renderer == "opengl" ? 2 : 0);
-+		composer.GetDropDown("optUpscaler").SetSelectedIndex(Vintagestory.API.Config.OptimumConfig.Upscaler == "dlss" ? 1 : 0);
-+		int upscalerQualityIndex = Array.IndexOf(Vintagestory.API.Config.OptimumConfig.UpscalerQualityNames,
++		composer.GetDropDown("optUpscaler").SetSelectedIndex(Math.Max(0, Array.IndexOf(providers, Vintagestory.API.Config.OptimumConfig.Upscaler)));
++		int upscalerQualityIndex = Array.IndexOf(qualities,
 +			Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
 +		composer.GetDropDown("optUpscalerQuality").SetSelectedIndex(Math.Max(0, upscalerQualityIndex));
 +		composer.GetSwitch("optTaa").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
@@ -344,24 +346,27 @@ index 4d08f84..d31b9bf 100644
 +	}
 +	private void onOptimumUpscalerChanged(string code, bool selected)
 +	{
-+		if (code == "dlss" && ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) != null)
++		if (code != "off" && ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) != null)
 +		{
-+			composer?.GetDropDown("optUpscaler")?.SetSelectedIndex(0);
++			composer?.GetDropDown("optUpscaler")?.SetSelectedIndex(Math.Max(0, Array.IndexOf(Vintagestory.API.Config.OptimumConfig.UpscalerNames, Vintagestory.API.Config.OptimumConfig.Upscaler)));
 +			return;
 +		}
 +		if (Vintagestory.API.Config.OptimumConfig.Upscaler == code) return;
 +		Vintagestory.API.Config.OptimumConfig.Upscaler = code;
++        if (Array.IndexOf(Vintagestory.API.Config.OptimumConfig.QualityNamesFor(code), Vintagestory.API.Config.OptimumConfig.UpscalerQuality) < 0)
++            Vintagestory.API.Config.OptimumConfig.UpscalerQuality = "quality";
 +		Vintagestory.API.Config.OptimumConfig.Save();
 +		ScreenManager.Platform.ApplyOptimumUpscalerSettings();
 +		handler.ReloadShaders();
 +		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++        OnVulkanOptions(true);
 +	}
 +	private void onOptimumUpscalerQualityChanged(string code, bool selected)
 +	{
 +		if (Vintagestory.API.Config.OptimumConfig.UpscalerQuality == code) return;
 +		Vintagestory.API.Config.OptimumConfig.UpscalerQuality = code;
 +		Vintagestory.API.Config.OptimumConfig.Save();
-+		if (Vintagestory.API.Config.OptimumConfig.Upscaler == "dlss")
++		if (Vintagestory.API.Config.OptimumConfig.Upscaler != "off")
 +		{
 +			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
 +			OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
@@ -456,7 +461,7 @@ index 4d08f84..d31b9bf 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2174,83 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2179,83 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

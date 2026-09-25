@@ -49,6 +49,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         new(true, "InitializeGraphics", new[] { "IntPtr", "Int32", "Int32", "String&" }),
         new(true, "ShutdownGraphics", Array.Empty<string>()),
+        new(true, "OptimumUpscalerUnavailableFor", new[] { "String" }),
+        new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
+        new(false, "OptimumPostSceneTexture", Array.Empty<string>()),
         new(false, "SetupDefaultFrameBuffers", Array.Empty<string>()),
         new(false, "DisposeFrameBuffers", new[] { "List`1" }),
         new(false, "RenderFullscreenTriangle", new[] { "MeshRef" }),

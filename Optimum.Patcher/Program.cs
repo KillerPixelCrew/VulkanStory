@@ -71,6 +71,8 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        "OptimumUpscalerUnavailableFor",
+        "ApplyOptimumUpscalerSettings",
         // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
         // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
         "MotionAttachmentIndex",
@@ -577,6 +579,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumOcclusionScaleChanged",
         "onOptimumDynLightCacheChanged",
         "onOptimumRendererChanged",
+        "onOptimumUpscalerChanged",
+        "onOptimumUpscalerQualityChanged",
         "onOptimumEntityLightBatchChanged",
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",

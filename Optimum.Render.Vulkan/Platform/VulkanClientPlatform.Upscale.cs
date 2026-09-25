@@ -16,6 +16,7 @@ public partial class VulkanClientPlatform
     private bool upscaledCompositeReady;
     private bool depthUpscaleRefusalLogged;
     private bool rebuildUpscalerTargetsPending;
+    private UpscalerPlan lastEvaluatedUpscalePlan;
 
     internal bool UpscaledThisFrame => upscaledThisFrame;
     internal UpscalerPlan AllocatedUpscalePlan => allocatedUpscalePlan;
@@ -27,7 +28,7 @@ public partial class VulkanClientPlatform
     public override string OptimumUpscalerUnavailableFor(string provider)
     {
         if (string.Equals(provider, "off", StringComparison.OrdinalIgnoreCase)) return null;
-        if (OptimumConfig.UpscalerRuntimeDisabled) return "upscaling was disabled for this session";
+        if (OptimumConfig.IsUpscalerDisabled(provider)) return "this provider was disabled for this session";
         if (!upscalers.TryGetValue(provider, out IUpscalerBackend? backend))
             return "this provider is unavailable on this Vulkan device";
         return backend.Active ? null : backend.Unavailable;
@@ -38,6 +39,7 @@ public partial class VulkanClientPlatform
         foreach (IUpscalerBackend backend in upscalers.Values) backend.RetireFeature();
         OptimumConfig.ClearUpscalerPlan();
         upscaledThisFrame = false;
+        lastEvaluatedUpscalePlan = default;
         base.ApplyOptimumUpscalerSettings();
         ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(OptimumConfig.EffectiveTerrainLodBias);
     }
@@ -55,6 +57,8 @@ public partial class VulkanClientPlatform
         DlssUpscaler? dlss = DlssUpscaler.TryPrepare(UpscalerDataPath(), LogUpscaler,
             prepareForSwitching: true);
         if (dlss != null) upscalers.Add("dlss", new DlssBackend(dlss));
+        upscalers.Add("xess", new XessBackend(LogUpscaler));
+        upscalers.Add("fsr3", new Fsr3Backend(LogUpscaler));
         Action<VulkanContextOptions>? previous = target.ConfigureContextOptions;
         target.ConfigureContextOptions = options =>
         {
@@ -71,8 +75,7 @@ public partial class VulkanClientPlatform
         foreach (IUpscalerBackend backend in new List<IUpscalerBackend>(upscalers.Values))
         {
             if (backend.BringUp(target, instance, physical, logical)) continue;
-            backend.Dispose();
-            upscalers.Remove(backend.Id);
+            backend.Shutdown();
         }
     }
 
@@ -86,6 +89,7 @@ public partial class VulkanClientPlatform
         upscalers.Clear();
         allocatedUpscalePlan = default;
         upscaledThisFrame = false;
+        lastEvaluatedUpscalePlan = default;
         OptimumConfig.ClearUpscalerPlan();
     }
 
@@ -111,15 +115,17 @@ public partial class VulkanClientPlatform
         {
             renderWidth = plan.RenderWidth;
             renderHeight = plan.RenderHeight;
+            OptimumConfig.SetUpscalerPlan(plan.RenderScale, plan.LodBias);
         }
         return planned;
     }
 
     private void DisableUpscaler(string reason)
     {
+        IUpscalerBackend? selected = SelectedUpscaler;
         if (OptimumConfig.DisableUpscalerAtRuntime())
-            LogUpscaler("[Optimum] DLSS unavailable: " + reason + "; using the ordinary render path.");
-        SelectedUpscaler?.RetireFeature();
+            LogUpscaler("[Optimum] " + OptimumConfig.Upscaler + " unavailable: " + reason + "; using the ordinary render path.");
+        selected?.RetireFeature();
         allocatedUpscalePlan = default;
         upscaledThisFrame = false;
         OptimumConfig.ClearUpscalerPlan();
@@ -151,14 +157,20 @@ public partial class VulkanClientPlatform
             primary.ColorTextureIds.Length <= MotionAttachmentIndex || output.ColorTextureIds.Length == 0)
             return false;
 
-        var plan = new UpscalerPlan(primary.Width, primary.Height, output.Width, output.Height,
-            OptimumConfig.UpscalerQuality);
+        UpscalerPlan plan = allocatedUpscalePlan;
         var frame = new UpscalerFrame(primary.ColorTextureIds[0], primary.DepthTextureId,
             primary.ColorTextureIds[MotionAttachmentIndex], output.ColorTextureIds[0], OptimumTemporal.Context);
         if (!selected.Evaluate(plan, frame, out string? error))
         {
             DisableUpscaler(error ?? "provider evaluation failed");
             return false;
+        }
+        if (lastEvaluatedUpscalePlan != plan)
+        {
+            lastEvaluatedUpscalePlan = plan;
+            LogUpscaler("[Optimum] " + selected.Id + " " + plan.Quality +
+                ": first successful upscale from " + plan.RenderWidth + "x" + plan.RenderHeight +
+                " to " + plan.DisplayWidth + "x" + plan.DisplayHeight + ".");
         }
         ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(OptimumConfig.EffectiveTerrainLodBias);
 
@@ -172,7 +184,7 @@ public partial class VulkanClientPlatform
             if (!depthUpscaleRefusalLogged)
             {
                 depthUpscaleRefusalLogged = true;
-                LogUpscaler("[Optimum] DLSS: depth blit unsupported; late 3D overlays have no scene occlusion.");
+                LogUpscaler("[Optimum] Upscaler: depth blit unsupported; late 3D overlays have no scene occlusion.");
             }
         }
         upscaledThisFrame = true;

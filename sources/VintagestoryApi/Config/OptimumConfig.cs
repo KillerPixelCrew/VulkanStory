@@ -547,19 +547,24 @@ public static class OptimumConfig
     /// <summary>Native Vulkan upscaler. The optional NGX runtime is used only for "dlss".</summary>
     public static string Upscaler = "off";
     public static string UpscalerQuality = "quality";
-    public static readonly string[] UpscalerNames = { "off", "dlss" };
+    public static readonly string[] UpscalerNames = { "off", "dlss", "xess", "fsr3" };
     public static readonly string[] UpscalerQualityNames =
         { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
+    public static readonly string[] XessQualityNames =
+        { "dlaa", "ultraqualityplus", "ultraquality", "quality", "balanced", "performance", "ultraperformance" };
+    public static string[] QualityNamesFor(string provider) => provider == "xess" ? XessQualityNames : UpscalerQualityNames;
     public static float UpscalerLodBiasOffset = 1.0f;
-    public static bool UpscalerRuntimeDisabled { get; private set; }
+    private static readonly HashSet<string> disabledUpscalers = new(StringComparer.OrdinalIgnoreCase);
+    public static bool IsUpscalerDisabled(string provider) => disabledUpscalers.Contains(provider);
+    public static bool UpscalerRuntimeDisabled => IsUpscalerDisabled(Upscaler);
     public static bool DisableUpscalerAtRuntime()
     {
         if (UpscalerRuntimeDisabled) return false;
-        UpscalerRuntimeDisabled = true;
+        disabledUpscalers.Add(Upscaler);
         ClearUpscalerPlan();
         return true;
     }
-    public static void ResetUpscalerRuntimeDisabledForTests() => UpscalerRuntimeDisabled = false;
+    public static void ResetUpscalerRuntimeDisabledForTests() => disabledUpscalers.Clear();
     public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
     public static bool EffectiveUpscalerIsDlss =>
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
@@ -1223,7 +1228,7 @@ public static class OptimumConfig
                 name => string.Equals(name, upscalerName, StringComparison.OrdinalIgnoreCase))
                 ? upscalerName.ToLowerInvariant() : "off";
             string quality = data.UpscalerQuality?.Trim() ?? "";
-            UpscalerQuality = Array.Exists(UpscalerQualityNames,
+            UpscalerQuality = Array.Exists(QualityNamesFor(Upscaler),
                 name => string.Equals(name, quality, StringComparison.OrdinalIgnoreCase))
                 ? quality.ToLowerInvariant() : "quality";
             UpscalerLodBiasOffset = Math.Clamp(data.UpscalerLodBiasOffset, 0f, 1f);

@@ -283,6 +283,21 @@ try {
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir
     $ngxShim = Join-Path $apiOut 'OptimumNgx.dll'
     if (Test-Path -LiteralPath $ngxShim) { Copy-Item -Force $ngxShim $stageDir }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'nvngx_dlss.dll')) {
+        foreach ($dlssFile in @('nvngx_dlss.dll', 'Dlss-LICENSE.txt')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $dlssFile) -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'libxess.dll')) {
+        foreach ($xessFile in @('libxess.dll', 'Xess-LICENSE.txt', 'Xess-third-party-programs.txt')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $xessFile) -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'amd_fidelityfx_vk.dll')) {
+        foreach ($fsrFile in @('amd_fidelityfx_vk.dll', 'OptimumFsr3.dll', 'Fsr3-LICENSE.txt')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $fsrFile) -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
     Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
 

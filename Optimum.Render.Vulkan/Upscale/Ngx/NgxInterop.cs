@@ -200,6 +200,9 @@ internal static unsafe class NgxInterop
     /// <summary>The NVIDIA driver library that exports NVSDK_NGX_VULKAN_*.</summary>
     public const string LibraryName = "libnvidia-ngx.so.1";
 
+    /// <summary>The runtime name on this platform (the direct P/Invoke name above is Linux-only).</summary>
+    public static string RuntimeLibraryName => OperatingSystem.IsWindows() ? "nvngx.dll" : LibraryName;
+
     /// <summary>NVSDK_NGX_VERSION_API_MACRO for SDK 310.9.1.</summary>
     public const int VersionApi = 0x0000015;
 
@@ -217,6 +220,10 @@ internal static unsafe class NgxInterop
     /// <summary>Whether the driver library can be loaded at all.</summary>
     public static bool IsDriverLibraryPresent()
     {
+        // Windows drivers keep nvngx.dll in DriverStore. The shim knows how to
+        // locate it there; a direct NativeLibrary.TryLoad would report a false
+        // negative even when the driver is installed.
+        if (OperatingSystem.IsWindows()) return Succeeded(NgxShim.LoadRuntime());
         if (!NativeLibrary.TryLoad(LibraryName, out IntPtr handle)) return false;
         NativeLibrary.Free(handle);
         return true;

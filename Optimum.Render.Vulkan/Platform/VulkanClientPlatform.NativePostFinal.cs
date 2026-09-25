@@ -360,7 +360,7 @@ public partial class VulkanClientPlatform
             NativeUniform[] u = nativeFinal.Uniforms;
             device.WriteNative(pipeline, u[0], NativeAmbientBloomLevel());
             device.WriteNative(pipeline, u[1], (OptimumSsaoInScene || !renderSsao) ? 1 : 0);
-            device.WriteNative(pipeline, u[2], aoDebugView ? 1 : 0);
+            device.WriteNative(pipeline, u[2], aoDebugView ? (OptimumSsaoInScene ? 2 : 1) : 0);
             device.WriteNative(pipeline, u[3], 1f / composite.Width, 1f / composite.Height);
             device.WriteNative(pipeline, u[4], ClientSettings.GammaLevel);
             device.WriteNative(pipeline, u[5], ClientSettings.ExtraGammaLevel);

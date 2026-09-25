@@ -1131,6 +1131,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
         vulkan13.PNext = optionalFeatures;
 
+        void* deviceFeatureChain = &features2;
+        foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+            contributor.FinalizeDeviceFeatures(vendorRequirements, &deviceFeatureChain);
+
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
             : 0;
@@ -1140,7 +1144,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             var createInfo = new DeviceCreateInfo
             {
                 SType = StructureType.DeviceCreateInfo,
-                PNext = &features2,
+                PNext = deviceFeatureChain,
                 QueueCreateInfoCount = 1,
                 PQueueCreateInfos = &queueCreateInfo,
                 EnabledExtensionCount = (uint)deviceExtensions.Count,

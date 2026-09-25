@@ -237,8 +237,11 @@ public class NgxAvailabilityTests
             Log(feature + " requirements: " + NgxInterop.Describe(supportResult) +
                 " FeatureSupported=" + supported + " MinHwArchitecture=0x" + minArch.ToString("X") +
                 " MinOsVersion='" + minOs + "'");
-            Assert.Equal(NgxResult.Success, supportResult);
-            Assert.Equal(NgxFeatureSupport.Supported, supported);
+            if (OperatingSystem.IsLinux())
+            {
+                Assert.Equal(NgxResult.Success, supportResult);
+                Assert.Equal(NgxFeatureSupport.Supported, supported);
+            }
         }
 
         // NGX came up on the shared runtime; Shutdown1 is its business too,

@@ -343,13 +343,30 @@ OptimumNgxResult OptimumNgx_GetFeatureDeviceExtensionRequirements(
 
 /*
  * NVSDK_NGX_Parameter's vtable, in the declaration order of
- * nvsdk_ngx_params.h. There is no virtual destructor, so slot 0 is the first
- * Set overload. Under the Itanium C++ ABI the first pointer-sized word of the
- * object is the vptr and `this` is the first argument, which is exactly what
- * the C calls below do.
+ * nvsdk_ngx_params.h. The Linux driver uses declaration order (Itanium ABI),
+ * while the Windows SDK's MSVC wrappers call the overloads in reverse order.
+ * The Windows offsets below match nvsdk_ngx_s.lib from DLSS SDK 310.9.1.
  */
 enum
 {
+#if defined(_WIN32)
+    SLOT_SET_ULL   = 7,
+    SLOT_SET_F     = 6,
+    SLOT_SET_D     = 5,
+    SLOT_SET_UI    = 4,
+    SLOT_SET_I     = 3,
+    SLOT_SET_D3D11 = 2,
+    SLOT_SET_D3D12 = 1,
+    SLOT_SET_VP    = 0,
+    SLOT_GET_ULL   = 15,
+    SLOT_GET_F     = 14,
+    SLOT_GET_D     = 13,
+    SLOT_GET_UI    = 12,
+    SLOT_GET_I     = 11,
+    SLOT_GET_D3D11 = 10,
+    SLOT_GET_D3D12 = 9,
+    SLOT_GET_VP    = 8
+#else
     SLOT_SET_ULL   = 0,
     SLOT_SET_F     = 1,
     SLOT_SET_D     = 2,
@@ -366,6 +383,7 @@ enum
     SLOT_GET_D3D11 = 13,
     SLOT_GET_D3D12 = 14,
     SLOT_GET_VP    = 15
+#endif
 };
 
 #define VTABLE(p) (*(void ***)(p))
@@ -486,7 +504,6 @@ OptimumNgxResult OptimumNgx_DlssGetOptimalSettings(
     OptimumNgx_ParameterSetUInt(parameters, "Height", displayHeight);
     OptimumNgx_ParameterSetInt(parameters, "PerfQualityValue", perfQuality);
     OptimumNgx_ParameterSetInt(parameters, "RTXValue", 0);
-
     /* The callback lives inside libnvidia-ngx, so it reads the return address
        the same way; the volatile keeps this frame alive across it. */
     volatile OptimumNgxResult called = ((pfn_optimal)callback)(parameters);

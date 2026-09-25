@@ -31,6 +31,10 @@ internal interface IDeviceRequirementContributor
     /// for. Anything chained here is part of the VkDeviceCreateInfo pNext chain.
     /// </summary>
     void ContributeDeviceRequirements(DeviceRequirements requirements);
+
+    // Called after the complete core/optional chain is assembled. SDKs that patch
+    // an existing chain must see promoted Vulkan 1.2/1.3 structures to avoid duplicates.
+    unsafe void FinalizeDeviceFeatures(DeviceRequirements requirements, void** features) { }
 }
 
 /// <summary>What the loader advertises, and what the instance will enable.</summary>

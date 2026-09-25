@@ -6,7 +6,9 @@ single-sample disocclusion test in
 taa-resolve.fsh threw the history away on ~3.7% of distant leaf pixels per
 frame on both backends, because a sub-pixel leaf hits the leaf in one jitter
 phase and the far background in the next. The 3x3 nearest-depth test that
-replaced it measured ~1.1%. Do not revert to a single-sample depth test.
+replaced it measured ~1.1%. A later real-world capture exposed remaining
+hard resets at distant depth edges; the resolve now retains colour-clipped
+history there. Do not revert to a single-sample depth test.
 
 Inputs, by the file names both backends share (OptimumParityDump.FileNameFormat):
   19-OptimumTaaHistoryA-color2-r32f.pfm  linear view depth, one history slot
@@ -22,6 +24,8 @@ positive and the window depth is finite and not sky:
   single-sample  |a - b| > 0.5 + 0.08 * min(a, b)
   3x3 nearest    the same on min3x3(a) and min3x3(b) (a 3x3 minimum filter on
                  both sides first; non-finite taps ignored, edges clamped)
+  hard resets    3x3 nearest failures outside a distant depth edge. The two
+                 history depths approximate the resolve's current linear depth.
 
 Regions, by the quantiles p50 and p90 of min(a, b) over those pixels:
   near <= p50 < mid <= p90 < far; leaf-mid and leaf-far are the leaf-masked
@@ -30,7 +34,7 @@ Regions, by the quantiles p50 and p90 of min(a, b) over those pixels:
 Usage:
   scripts/dev/taa-rejection.py <dump dir> [--max-leaf-far 1.5]
   scripts/dev/taa-rejection.py --self-test
-Exit: 0 pass; 1 the 3x3 leaf-far rejection rate (percent) is above
+Exit: 0 pass; 1 the distant leaf hard-reset rate (percent) is above
 --max-leaf-far; 2 usage or input error (missing file, shape mismatch, no
 leaf-far pixels to judge). numpy only.
 """
@@ -54,16 +58,21 @@ REGIONS = ("near", "mid", "far", "leaf-mid", "leaf-far")
 SKY_DEPTH = 0.999999
 
 
-def min3x3(plane):
-    """3x3 minimum filter; non-finite taps count as +inf, edges clamp."""
-    finite = np.where(np.isfinite(plane), plane, np.inf)
+def filter3x3(plane, kind):
+    """3x3 depth extrema; non-finite taps cannot win, edges clamp."""
+    finite = np.where(np.isfinite(plane), plane, np.inf if kind == "min" else -np.inf)
     padded = np.pad(finite, 1, mode="edge")
     height, width = plane.shape
-    out = np.full(plane.shape, np.inf)
+    out = np.full(plane.shape, np.inf if kind == "min" else -np.inf)
     for dy in range(3):
         for dx in range(3):
-            out = np.minimum(out, padded[dy:dy + height, dx:dx + width])
+            op = np.minimum if kind == "min" else np.maximum
+            out = op(out, padded[dy:dy + height, dx:dx + width])
     return out
+
+
+def min3x3(plane):
+    return filter3x3(plane, "min")
 
 
 def rejected(a, b):
@@ -97,10 +106,15 @@ def analyse(a, b, depth, alpha):
     }
     single = rejected(a, b) & valid
     nearest = rejected(min3x3(a), min3x3(b)) & valid
+    # The shipped resolve keeps clipped history at distant depth edges. The
+    # history slots approximate its closest current linear depth for this dump.
+    distant_edge = (reference > 20.0) & (filter3x3(depth, "max") - min3x3(depth) > 2e-4)
+    hard_reset = nearest & ~distant_edge
     rows = {}
     for name in REGIONS:
         mask = masks[name]
-        rows[name] = (int(mask.sum()), int((single & mask).sum()), int((nearest & mask).sum()))
+        rows[name] = (int(mask.sum()), int((single & mask).sum()),
+                      int((nearest & mask).sum()), int((hard_reset & mask).sum()))
     return {"pixels": count, "p50": p50, "p90": p90, "rows": rows}
 
 
@@ -127,19 +141,20 @@ def run(directory, max_leaf_far=1.5, out=sys.stdout):
     out.write("taa-rejection: %s\n" % directory)
     out.write("%d pixels judged; linear depth p50 %.4g, p90 %.4g blocks\n\n"
               % (result["pixels"], result["p50"], result["p90"]))
-    out.write("| region | pixels | single-sample rejected | 3x3 nearest rejected |\n")
-    out.write("|---|---|---|---|\n")
+    out.write("| region | pixels | single-sample rejected | 3x3 nearest rejected | hard resets |\n")
+    out.write("|---|---|---|---|---|\n")
     for name in REGIONS:
-        pixels, single, nearest = result["rows"][name]
-        out.write("| %s | %d | %s | %s |\n" % (name, pixels, _format(percent(single, pixels)),
-                                                _format(percent(nearest, pixels))))
-    pixels, _, nearest = result["rows"]["leaf-far"]
+        pixels, single, nearest, hard_reset = result["rows"][name]
+        out.write("| %s | %d | %s | %s | %s |\n" %
+                  (name, pixels, _format(percent(single, pixels)),
+                   _format(percent(nearest, pixels)), _format(percent(hard_reset, pixels))))
+    pixels, _, _, hard_reset = result["rows"]["leaf-far"]
     if pixels == 0:
         raise ParityError("no leaf pixels beyond p90 (%.4g blocks): the dump has no distant foliage to judge"
                           % result["p90"])
-    rate = percent(nearest, pixels)
+    rate = percent(hard_reset, pixels)
     ok = rate <= max_leaf_far
-    out.write("\n3x3 nearest-depth leaf-far rejection %.2f%% (max %.2f%%): %s\n"
+    out.write("\nDistant leaf hard resets %.2f%% (max %.2f%%): %s\n"
               % (rate, max_leaf_far, "ok" if ok else "FAIL"))
     return 0 if ok else 1
 
@@ -185,15 +200,29 @@ def self_test():
     assert result["pixels"] == 63 * 64, result["pixels"]
 
     # 1. a flipping sub-pixel leaf fails the single-sample test and passes the 3x3 test
-    pixels, single, nearest = result["rows"]["leaf-far"]
+    pixels, single, nearest, hard_reset = result["rows"]["leaf-far"]
     assert pixels == leaves, (pixels, leaves)
     assert single == leaves, result["rows"]["leaf-far"]
     assert nearest == 0, result["rows"]["leaf-far"]
+    assert hard_reset == 0, result["rows"]["leaf-far"]
 
     # 2. a disocclusion larger than 3x3 is rejected by both tests
-    _, single, nearest = result["rows"]["near"]
+    _, single, nearest, hard_reset = result["rows"]["near"]
     assert single >= 144, result["rows"]["near"]
     assert nearest >= 100, result["rows"]["near"]
+    assert hard_reset >= 100, result["rows"]["near"]
+
+    # A distant leaf that leaves both 3x3 windows retains clipped history
+    # at a silhouette; a flat-depth mismatch still resets.
+    vanished = synthetic_dump(leaf_moves=False)
+    flat = analyse(*vanished)
+    assert flat["rows"]["leaf-far"][3] == leaves, flat["rows"]["leaf-far"]
+    a, b, depth, alpha = vanished
+    edge_depth = depth.copy()
+    edge_depth[alpha > 0.5] = 0.49
+    edge = analyse(a, b, edge_depth, alpha)
+    assert edge["rows"]["leaf-far"][2] == leaves, edge["rows"]["leaf-far"]
+    assert edge["rows"]["leaf-far"][3] == 0, edge["rows"]["leaf-far"]
 
     with tempfile.TemporaryDirectory(prefix="optimum-taa-rejection-self-test-") as root:
         # 3. through the files: the moving leaf passes the gate
@@ -201,7 +230,7 @@ def self_test():
         write_dump(passing, moving)
         sink = io.StringIO()
         assert run(passing, out=sink) == 0, sink.getvalue()
-        assert "| leaf-far | %d | 100.00%% | 0.00%% |" % leaves in sink.getvalue(), sink.getvalue()
+        assert "| leaf-far | %d | 100.00%% | 0.00%% | 0.00%% |" % leaves in sink.getvalue(), sink.getvalue()
         assert ": ok" in sink.getvalue(), sink.getvalue()
 
         # 4. a leaf that vanishes from the other slot is rejected by the 3x3 test too: exit 1
@@ -240,7 +269,7 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("dump_dir", nargs="?")
     parser.add_argument("--max-leaf-far", type=float, default=1.5,
-                        help="maximum 3x3 nearest-depth leaf-far rejection rate, percent (default 1.5)")
+                        help="maximum distant leaf hard-reset rate, percent (default 1.5)")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     try:

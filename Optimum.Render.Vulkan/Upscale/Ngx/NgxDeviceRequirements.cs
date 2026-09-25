@@ -46,13 +46,13 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
         foreach (NgxFeature feature in _features)
         {
             NgxResult result = _session.InstanceExtensions(feature, out List<string> extensions);
-            if (result == NgxResult.FailNotImplemented)
+            if (result is NgxResult.FailNotImplemented or NgxResult.FailShimEntryPointMissing)
             {
                 // What the SDK's own wrapper does with this answer, which is the
                 // answer driver 615.71.09 gives on Linux.
                 extensions = new List<string>(NgxSession.InstanceExtensionFallback);
                 _log?.Invoke("NGX instance extension query for " + feature +
-                    " is not implemented by this driver; using the SDK's fallback list");
+                    " is unavailable in this driver; using the SDK's fallback list");
             }
             else if (!NgxInterop.Succeeded(result))
             {
@@ -78,11 +78,11 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
         {
             NgxResult result = _session.DeviceExtensions(
                 instance, physicalDevice, feature, out List<string> extensions);
-            if (result == NgxResult.FailNotImplemented)
+            if (result is NgxResult.FailNotImplemented or NgxResult.FailShimEntryPointMissing)
             {
                 extensions = new List<string>(NgxSession.DeviceExtensionFallback);
                 _log?.Invoke("NGX device extension query for " + feature +
-                    " is not implemented by this driver; using the SDK's fallback list");
+                    " is unavailable in this driver; using the SDK's fallback list");
             }
             else if (!NgxInterop.Succeeded(result))
             {
