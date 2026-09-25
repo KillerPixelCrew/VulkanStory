@@ -1,5 +1,11 @@
 {
-	"optimum-tab-header": "Extra",
+	"optimum-tab-header": "Optimum",
+	"optimum-vulkan-tab-header": "Vulkan",
+	"optimum-renderer": "Graphics Backend",
+	"optimum-renderer-tooltip": "Choose the renderer for the next game launch. Changing this setting requires a restart.",
+	"optimum-renderer-auto": "Auto",
+	"optimum-renderer-vulkan": "Vulkan",
+	"optimum-renderer-opengl": "OpenGL",
 	"optimum-bgfps": "Limit Background FPS",
 	"optimum-bgfps-tooltip": "Cap to 30 FPS when the game window loses focus.",
 	"optimum-framepacing": "Smooth Frame Pacing",
