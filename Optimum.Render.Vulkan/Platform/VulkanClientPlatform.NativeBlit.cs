@@ -167,7 +167,7 @@ public partial class VulkanClientPlatform
 
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef primary = buffers[0];
-        int scene2D = primary.ColorTextureIds[0];
+        int scene2D = UpscaledSceneTarget?.ColorTextureIds?[0] ?? primary.ColorTextureIds[0];
         Size2i client = OptimumWindowClientSize();
 
         // TAA debug views (P1): bypasses FSR and the blit entirely, exactly as the GL body does.
@@ -201,8 +201,8 @@ public partial class VulkanClientPlatform
 
         // AfterFinalComposition renderers draw onto Primary between FinalComposition and this
         // method. Sharpen only now, after those overlays are complete; FSR owns RCAS instead.
-        bool useFsr = OptimumFsrBlitActive();
-        if (!useFsr)
+        bool useFsr = !upscaledThisFrame && OptimumFsrBlitActive();
+        if (!useFsr && !upscaledThisFrame)
         {
             scene2D = RenderOptimumTaaSharpen(scene2D);
         }

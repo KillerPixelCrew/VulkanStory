@@ -281,6 +281,8 @@ try {
     # the OpenGL path - but a missing dependency would make the backend
     # unselectable with a load error rather than a clear reason.
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir
+    $ngxShim = Join-Path $apiOut 'OptimumNgx.dll'
+    if (Test-Path -LiteralPath $ngxShim) { Copy-Item -Force $ngxShim $stageDir }
     Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
 

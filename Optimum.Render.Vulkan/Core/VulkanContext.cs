@@ -26,6 +26,9 @@ internal sealed class VulkanContextOptions
     /// <summary>Instance extensions the window system needs (from GLFW).</summary>
     public string[] RequiredInstanceExtensions = Array.Empty<string>();
 
+    /// <summary>Optional vendor backends can request extensions and Vulkan features before creation.</summary>
+    public List<IDeviceRequirementContributor> RequirementContributors { get; } = new();
+
     /// <summary>Called with each validation message when validation is on.</summary>
     public Action<string>? DebugCallback;
 
@@ -305,6 +308,24 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
+        if (options.RequirementContributors.Count != 0)
+        {
+            var available = new HashSet<string>(StringComparer.Ordinal);
+            uint availableCount = 0;
+            if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, null) == Result.Success && availableCount != 0)
+            {
+                var properties = new ExtensionProperties[availableCount];
+                fixed (ExtensionProperties* pointer = properties)
+                {
+                    if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, pointer) == Result.Success)
+                        for (int i = 0; i < availableCount; i++)
+                            available.Add(SilkMarshal.PtrToString((nint)pointer[i].ExtensionName) ?? "");
+                }
+            }
+            var requests = new InstanceRequirements(available, extensions);
+            foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+                contributor.ContributeInstanceExtensions(requests);
+        }
         // Surface maintenance dependencies are instance extensions; enable them before
         // choosing a device, then query that device's optional maintenance feature.
         if (!options.Headless && extensions.Contains("VK_KHR_surface")
@@ -1084,6 +1105,12 @@ internal sealed unsafe class VulkanContext : IDisposable
         bool enablePresentFences = maintenanceFeatures.SwapchainMaintenance1;
         if (enablePresentFences) deviceExtensions.Add(maintenanceExtension!);
 
+        using var vendorRequirements = new DeviceRequirements(
+            Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
+        { Vulkan12 = &vulkan12 };
+        foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+            contributor.ContributeDeviceRequirements(vendorRequirements);
+
         void* optionalFeatures = null;
         if (wantDeviceFault) { faultFeatures.PNext = optionalFeatures; optionalFeatures = &faultFeatures; }
         if (colorWriteTier == ColorWriteTier.DynamicEnable)
@@ -1092,6 +1119,16 @@ internal sealed unsafe class VulkanContext : IDisposable
         { dynamicState3Features.PNext = optionalFeatures; optionalFeatures = &dynamicState3Features; }
         if (enablePresentId) { presentId.PNext = optionalFeatures; optionalFeatures = &presentId; }
         if (enablePresentFences) { maintenanceFeatures.PNext = optionalFeatures; optionalFeatures = &maintenanceFeatures; }
+        if (vendorRequirements.Chain != null)
+        {
+            // The contributor chain is owned through vkCreateDevice. Append the native optional
+            // features after it, preserving both sets of requests.
+            void* tail = vendorRequirements.Chain;
+            while (*(void**)((byte*)tail + IntPtr.Size) != null)
+                tail = *(void**)((byte*)tail + IntPtr.Size);
+            *(void**)((byte*)tail + IntPtr.Size) = optionalFeatures;
+            optionalFeatures = vendorRequirements.Chain;
+        }
         vulkan13.PNext = optionalFeatures;
 
         nint extensionsPtr = deviceExtensions.Count > 0

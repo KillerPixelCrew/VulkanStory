@@ -101,4 +101,27 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <Target Name="BuildNgxShim" BeforeTargets="AssignTargetPaths">
+    <PropertyGroup>
+      <NgxShimDir>$(MSBuildThisFileDirectory)../native/optimum-ngx</NgxShimDir>
+      <NgxShimOut>$(MSBuildThisFileDirectory)../bin/native</NgxShimOut>
+    </PropertyGroup>
+    <Exec Condition="'$(OS)' != 'Windows_NT'"
+          Command="bash &quot;$(NgxShimDir)/build.sh&quot; &quot;$(NgxShimOut)&quot;"
+          ContinueOnError="true" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(NgxShimDir)/build.ps1&quot; -OutputDirectory &quot;$(NgxShimOut)&quot;"
+          ContinueOnError="true" />
+    <ItemGroup>
+      <None Include="$(NgxShimOut)/libOptimumNgx.so" Condition="Exists('$(NgxShimOut)/libOptimumNgx.so')">
+        <Link>libOptimumNgx.so</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Include="$(NgxShimOut)/OptimumNgx.dll" Condition="Exists('$(NgxShimOut)/OptimumNgx.dll')">
+        <Link>OptimumNgx.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
+
 </Project>

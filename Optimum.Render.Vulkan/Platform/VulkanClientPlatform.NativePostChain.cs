@@ -105,7 +105,7 @@ public partial class VulkanClientPlatform
         PostStepAmbientOcclusion(projectMatrix);
 
         NotePostStep(NativePostStep.TaaResolve);
-        PostStepTaaResolve();
+        if (!RenderUpscaler()) PostStepTaaResolve();
 
         int scene = OptimumPostSceneTexture();
         int glow = OptimumPostGlowTexture();
@@ -237,7 +237,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool NativeSkyMotion()
     {
-        if (!OptimumConfig.EffectiveTaa) return false;
+        if (!OptimumConfig.EffectiveTemporalPipeline) return false;
         if (!TaaTargetsReady || MotionAttachmentIndex < 0) return false;
         ShaderProgram skyMotion = ShaderPrograms.TaaSkyMotion;
         if (skyMotion == null || skyMotion.LoadError || skyMotion.Disposed) return false;
@@ -570,7 +570,7 @@ public partial class VulkanClientPlatform
     {
         if (OptimumMotionWriteActive) return false;
         if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
-        if (!OptimumConfig.EffectiveTaa) return false;
+        if (!OptimumConfig.EffectiveTemporalPipeline) return false;
         if (!OptimumTemporal.Frame.JitterActive) return false;
         // The same "Primary is the target being drawn into" invariant, so a native pass never
         // writes the motion attachment from under another target.

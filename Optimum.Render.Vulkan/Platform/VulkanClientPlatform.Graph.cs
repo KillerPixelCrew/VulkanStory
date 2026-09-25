@@ -350,9 +350,6 @@ public partial class VulkanClientPlatform
         {
             LegacyFinalComposition();
         }
-        // World/UI separation: the composited image holds the scene alone for exactly this long -
-        // RenderAfterFinalComposition draws the world-space overlays onto it next.
-        CaptureSceneNoHud();
     }
 
     /// <summary>
@@ -363,6 +360,8 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BlitPrimaryToDefault()
     {
+        // The final world image now includes AfterFinalComposition overlays and still excludes UI.
+        CaptureSceneNoHud();
         if (NativeBlitEnabled && UseNativePostChain)
         {
             RenderNativeBlit();

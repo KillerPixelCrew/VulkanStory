@@ -312,6 +312,10 @@ public enum ResourceUsage
     StorageWrite,
     /// <summary>Read and written as a storage image by a compute shader.</summary>
     StorageReadWrite,
+    /// <summary>Vendor upscaler input; may be sampled by compute outside our pass recorder.</summary>
+    SampleExternal,
+    /// <summary>Vendor upscaler output; NGX can also clear it on first evaluate.</summary>
+    StorageWriteExternal,
     /// <summary>Source of a copy or blit.</summary>
     TransferSrc,
     /// <summary>Destination of a copy, blit or clear.</summary>
@@ -377,6 +381,12 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
         ResourceUsage.StorageReadWrite => new(ImageLayout.General,
             PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit),
+        ResourceUsage.SampleExternal => new(ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.FragmentShaderBit,
+            AccessFlags2.ShaderReadBit),
+        ResourceUsage.StorageWriteExternal => new(ImageLayout.General,
+            PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.AllTransferBit,
+            AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit | AccessFlags2.TransferWriteBit),
         ResourceUsage.TransferSrc => new(ImageLayout.TransferSrcOptimal,
             PipelineStageFlags2.TransferBit, AccessFlags2.TransferReadBit),
         ResourceUsage.TransferDst => new(ImageLayout.TransferDstOptimal,
@@ -404,6 +414,9 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             // A dispatch's storage write: the next barrier must make it available.
             ResourceUsage.StorageWrite or ResourceUsage.StorageReadWrite =>
                 (PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
+            ResourceUsage.StorageWriteExternal =>
+                (PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.AllTransferBit,
+                    AccessFlags2.ShaderStorageWriteBit | AccessFlags2.TransferWriteBit),
             _ => (PipelineStageFlags2.None, AccessFlags2.None),
         };
 

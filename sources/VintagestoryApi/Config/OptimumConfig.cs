@@ -544,6 +544,50 @@ public static class OptimumConfig
     /// </summary>
     public static bool TaaJitterDev = false;
 
+    /// <summary>Native Vulkan upscaler. The optional NGX runtime is used only for "dlss".</summary>
+    public static string Upscaler = "off";
+    public static string UpscalerQuality = "quality";
+    public static readonly string[] UpscalerNames = { "off", "dlss" };
+    public static readonly string[] UpscalerQualityNames =
+        { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
+    public static float UpscalerLodBiasOffset = 1.0f;
+    public static bool UpscalerRuntimeDisabled { get; private set; }
+    public static bool DisableUpscalerAtRuntime()
+    {
+        if (UpscalerRuntimeDisabled) return false;
+        UpscalerRuntimeDisabled = true;
+        ClearUpscalerPlan();
+        return true;
+    }
+    public static void ResetUpscalerRuntimeDisabledForTests() => UpscalerRuntimeDisabled = false;
+    public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
+    public static bool EffectiveUpscalerIsDlss =>
+        string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
+    public static bool UpscalerReplacesTaa => OptimumRender.IsVulkan &&
+        !string.Equals(EffectiveUpscaler, "off", StringComparison.OrdinalIgnoreCase);
+    public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa;
+    public static bool JitterWindowOpen => TaaJitterDev || EffectiveTemporalPipeline;
+
+    public static float UpscalerRenderScale { get; private set; }
+    public static float UpscalerLodBias { get; private set; }
+    public static float EffectiveTemporalRenderScale =>
+        UpscalerReplacesTaa && UpscalerRenderScale > 0f ? UpscalerRenderScale : EffectiveRenderScale;
+    public static float RecommendedUpscalerLodBias(int renderWidth, int displayWidth) =>
+        displayWidth <= 0 ? 0f : RecommendedUpscalerLodBiasForScale((float)renderWidth / displayWidth);
+    public static float RecommendedUpscalerLodBiasForScale(float renderScale) =>
+        renderScale <= 0f || renderScale >= 1f ? 0f : MathF.Log2(Math.Clamp(renderScale, 0.01f, 1f)) -
+            Math.Clamp(UpscalerLodBiasOffset, 0f, 1f);
+    public static void SetUpscalerPlan(float renderScale, float lodBias)
+    {
+        UpscalerRenderScale = renderScale;
+        UpscalerLodBias = lodBias;
+    }
+    public static void ClearUpscalerPlan()
+    {
+        UpscalerRenderScale = 0f;
+        UpscalerLodBias = 0f;
+    }
+
     /// <summary>
     /// Which ambient occlusion runs: "auto", "vanilla" or "gtao"
     /// (docs/vulkan.md#ambient-occlusion, section E).
@@ -601,7 +645,7 @@ public static class OptimumConfig
     }
 
     /// <summary>GTAO for the backend actually running and the TAA state actually in effect.</summary>
-    public static bool EffectiveGtao => GtaoSelected(OptimumRender.IsVulkan, EffectiveTaa);
+    public static bool EffectiveGtao => GtaoSelected(OptimumRender.IsVulkan, EffectiveTemporalPipeline);
 
     /// <summary>
     /// Stamped by ShaderRegistry when it builds the shader prefixes: true when the shaders were
@@ -701,6 +745,10 @@ public static class OptimumConfig
             {
                 bias += Math.Clamp(TaaMipBias, -2.0f, 1.0f);
             }
+            if (UpscalerReplacesTaa && UpscalerRenderScale > 0f)
+            {
+                bias = Math.Clamp(UpscalerLodBias, -3.0f, 1.0f);
+            }
             return bias;
         }
     }
@@ -708,7 +756,7 @@ public static class OptimumConfig
     // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
     // missing launcher scan must not disable it (IsShaderFeatureDisabled reports
     // everything disabled without a scan), only an explicit scan verdict does.
-    public static bool EffectiveTaa => Taa &&
+    public static bool EffectiveTaa => Taa && !UpscalerReplacesTaa &&
         !TaaRuntimeDisabled &&
         !IsFeatureExplicitlyDisabled("Taa");
 
@@ -1047,6 +1095,9 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
         (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
+        (nameof(OptimumConfigData.Upscaler), Upscaler),
+        (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
+        (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
         (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
         (nameof(OptimumConfigData.AmbientOcclusionPreset), AmbientOcclusionPreset),
         (nameof(OptimumConfigData.AmbientOcclusionEnabled), AmbientOcclusionEnabled.ToString()),
@@ -1167,6 +1218,15 @@ public static class OptimumConfig
             TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
             TaaDebugView = Math.Max(0, data.TaaDebugView);
             TaaJitterDev = data.TaaJitterDev;
+            string upscalerName = data.Upscaler?.Trim() ?? "";
+            Upscaler = Array.Exists(UpscalerNames,
+                name => string.Equals(name, upscalerName, StringComparison.OrdinalIgnoreCase))
+                ? upscalerName.ToLowerInvariant() : "off";
+            string quality = data.UpscalerQuality?.Trim() ?? "";
+            UpscalerQuality = Array.Exists(UpscalerQualityNames,
+                name => string.Equals(name, quality, StringComparison.OrdinalIgnoreCase))
+                ? quality.ToLowerInvariant() : "quality";
+            UpscalerLodBiasOffset = Math.Clamp(data.UpscalerLodBiasOffset, 0f, 1f);
             // Unrecognised values degrade to the defaults rather than failing the file.
             string requestedAo = data.AmbientOcclusion?.Trim().ToLowerInvariant() ?? "";
             AmbientOcclusion = requestedAo is "vanilla" or "gtao" ? requestedAo : "auto";
@@ -1254,6 +1314,9 @@ public static class OptimumConfig
             TaaMipBias = TaaMipBias,
             TaaDebugView = TaaDebugView,
             TaaJitterDev = TaaJitterDev,
+            Upscaler = Upscaler,
+            UpscalerQuality = UpscalerQuality,
+            UpscalerLodBiasOffset = UpscalerLodBiasOffset,
             AmbientOcclusion = AmbientOcclusion,
             AmbientOcclusionPreset = AmbientOcclusionPreset,
             AmbientOcclusionEnabled = AmbientOcclusionEnabled,
@@ -1348,6 +1411,9 @@ internal sealed class OptimumConfigData
     public float TaaMipBias { get; set; } = -0.5f;
     public int TaaDebugView { get; set; } = 0;
     public bool TaaJitterDev { get; set; } = false;
+    public string Upscaler { get; set; } = "off";
+    public string UpscalerQuality { get; set; } = "quality";
+    public float UpscalerLodBiasOffset { get; set; } = 1.0f;
     public string AmbientOcclusion { get; set; } = "auto";
     public string AmbientOcclusionPreset { get; set; } = "medium";
     public bool AmbientOcclusionEnabled { get; set; } = true;

@@ -80,7 +80,7 @@ public partial class VulkanClientPlatform
             LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
             GlToggleBlend(on: true);
             GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
-            if (OptimumTaaRequested && TaaTargetsReady)
+            if (OptimumConfig.EffectiveTemporalPipeline && TaaTargetsReady)
             {
                 NativeSceneSsaoPass();
             }
@@ -154,7 +154,7 @@ public partial class VulkanClientPlatform
             device.WriteNative(pipeline, nativeSsao.Uniforms[0], ssaa * client.Width * half, ssaa * client.Height * half);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[1], projectMatrix);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[2], OptimumSsaoKernel);
-            if (OptimumConfig.EffectiveTaa)
+            if (OptimumConfig.EffectiveTemporalPipeline)
             {
                 device.WriteNative(pipeline, nativeSsao.Uniforms[3],
                     (float)(OptimumTemporal.Frame.FrameIndex & 1023L));
@@ -375,7 +375,7 @@ public partial class VulkanClientPlatform
         if (primary?.ColorTextureIds == null || primary.ColorTextureIds.Length < 4 || primary.DepthTextureId == 0) return 0;
 
         // The noise advances with the temporal clock only while TAA accumulates (C.7).
-        bool temporal = OptimumConfig.EffectiveTaa && TaaTargetsReady;
+        bool temporal = OptimumConfig.EffectiveTemporalPipeline && TaaTargetsReady;
         GtaoSettings settings = AmbientOcclusionSettings(temporal);
         if (!ambientOcclusionToneRefusalLogged && settings.EffectiveTone(0, out string? refusal) != settings.Tone)
         {

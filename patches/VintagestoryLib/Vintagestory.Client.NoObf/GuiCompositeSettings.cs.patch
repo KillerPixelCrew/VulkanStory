@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..28930bd 100644
+index 4d08f84..d31b9bf 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-@@ -48,6 +48,12 @@ public class GuiCompositeSettings : GuiComposite
+@@ -46,10 +46,16 @@ public class GuiCompositeSettings : GuiComposite
+ 
+ 	private ElementBounds iButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private ElementBounds dButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
@@ -15,7 +17,11 @@ index 4d08f84..28930bd 100644
  	private ElementBounds backButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
-@@ -144,6 +150,8 @@ public class GuiCompositeSettings : GuiComposite
+ 
+ 	private bool mousecontrolsTabActive;
+@@ -142,19 +148,23 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds;
+ 			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
  			iButtonBounds.ParentBounds = elementBounds;
  			dButtonBounds.ParentBounds = elementBounds;
@@ -24,7 +30,8 @@ index 4d08f84..28930bd 100644
  			result = handler.dialogBase(dialogName + "main", elementBounds.fixedWidth, elementBounds.fixedHeight).BeginChildElements(elementBounds).AddToggleButton(Lang.Get("setting-graphics-header"), font, OnGraphicsOptions, gButtonBounds, "graphics")
  				.AddToggleButton(Lang.Get("setting-mouse-header"), font, OnMouseOptions, mButtonBounds, "mouse")
  				.AddToggleButton(Lang.Get("setting-controls-header"), font, OnControlOptions, cButtonBounds, "controls")
-@@ -152,7 +160,9 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-accessibility-header"), font, OnAccessibilityOptions, aButtonBounds, "accessibility")
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
@@ -35,7 +42,11 @@ index 4d08f84..28930bd 100644
  		}
  		else
  		{
-@@ -170,6 +180,8 @@ public class GuiCompositeSettings : GuiComposite
+ 			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
+ 			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
+@@ -168,10 +178,12 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds3;
+ 			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
  			iButtonBounds.ParentBounds = elementBounds3;
  			dButtonBounds.ParentBounds = elementBounds3;
@@ -44,7 +55,11 @@ index 4d08f84..28930bd 100644
  			backButtonBounds.ParentBounds = elementBounds3;
  			result = handler.GuiComposers.Create(dialogName + "ingame", elementBounds2).AddShadedDialogBG(elementBounds3, withTitleBar: false).AddStaticCustomDraw(elementBounds3, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
  			{
-@@ -187,6 +199,8 @@ public class GuiCompositeSettings : GuiComposite
+ 				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
+ 				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
+@@ -185,10 +197,12 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
+ 				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
  				.EndIf()
@@ -53,7 +68,11 @@ index 4d08f84..28930bd 100644
  				.AddButton(Lang.Get("general-back"), delegate
  				{
  					clickedItemIndex = null;
-@@ -201,6 +215,8 @@ public class GuiCompositeSettings : GuiComposite
+ 					hotkeyCapturer?.EndCapture(wasCancelled: true);
+ 					return handler.OnBackPressed();
+@@ -199,10 +213,12 @@ public class GuiCompositeSettings : GuiComposite
+ 		result.GetToggleButton("controls").SetValue(currentTab == "controls");
+ 		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
  		result.GetToggleButton("interface").SetValue(currentTab == "interface");
  		result.GetToggleButton("developer")?.SetValue(currentTab == "developer");
@@ -62,7 +81,11 @@ index 4d08f84..28930bd 100644
  		return result;
  	}
  
-@@ -237,6 +253,10 @@ public class GuiCompositeSettings : GuiComposite
+ 	private void updateButtonBounds()
+ 	{
+@@ -235,20 +251,26 @@ public class GuiCompositeSettings : GuiComposite
+ 		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
+ 		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-dev-header"));
  		double width7 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -73,7 +96,9 @@ index 4d08f84..28930bd 100644
  		textExtents = cairoFont.GetTextExtents(Lang.Get("general-back"));
  		double width8 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		gButtonBounds.WithFixedWidth(width);
-@@ -246,7 +266,9 @@ public class GuiCompositeSettings : GuiComposite
+ 		mButtonBounds.WithFixedWidth(width2).FixedRightOf(gButtonBounds, 15.0);
+ 		cButtonBounds.WithFixedWidth(width3).FixedRightOf(mButtonBounds, 15.0);
+ 		aButtonBounds.WithFixedWidth(width4).FixedRightOf(cButtonBounds, 15.0);
  		sButtonBounds.WithFixedWidth(width5).FixedRightOf(aButtonBounds, 15.0);
  		iButtonBounds.WithFixedWidth(width6).FixedRightOf(sButtonBounds, 15.0);
  		dButtonBounds.WithFixedWidth(width7).FixedRightOf(iButtonBounds, 15.0);
@@ -84,7 +109,11 @@ index 4d08f84..28930bd 100644
  	}
  
  	internal bool OpenSettingsMenu()
-@@ -1742,6 +1764,298 @@ public class GuiCompositeSettings : GuiComposite
+ 	{
+ 		OnGraphicsOptions(on: true);
+@@ -1740,10 +1762,344 @@ public class GuiCompositeSettings : GuiComposite
+ 		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
+ 		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -176,6 +205,19 @@ index 4d08f84..28930bd 100644
 +			.AddInset(panelBounds)
 +			.BeginClip(clippingBounds);
 +		AddOptimumDropdownRow("optimum-renderer", "optimum-renderer-tooltip", new string[] { "auto", "vulkan", "opengl" }, new string[] { Lang.Get("optimum-renderer-auto"), Lang.Get("optimum-renderer-vulkan"), Lang.Get("optimum-renderer-opengl") }, 0, onOptimumRendererChanged, "optRenderer");
++		string dlssUnavailable = ScreenManager.Platform.OptimumUpscalerUnavailableFor("dlss");
++		string dlssName = Lang.Get("optimum-upscaler-dlss") +
++			(dlssUnavailable == null ? "" : " (" + dlssUnavailable + ")");
++		AddOptimumDropdownRow("optimum-upscaler", "optimum-upscaler-tooltip",
++			new string[] { "off", "dlss" },
++			new string[] { Lang.Get("optimum-upscaler-off"), dlssName },
++			0, onOptimumUpscalerChanged, "optUpscaler");
++		AddOptimumDropdownRow("optimum-upscaler-quality", "optimum-upscaler-quality-tooltip",
++			Vintagestory.API.Config.OptimumConfig.UpscalerQualityNames,
++			new string[] { Lang.Get("optimum-upscaler-dlaa"), Lang.Get("optimum-upscaler-quality-mode"),
++				Lang.Get("optimum-upscaler-balanced"), Lang.Get("optimum-upscaler-performance"),
++				Lang.Get("optimum-upscaler-ultra-performance") },
++			0, onOptimumUpscalerQualityChanged, "optUpscalerQuality");
 +		AddOptimumSwitchRow("optimum-taa", "optimum-taa-tooltip", onOptimumTaaChanged, "optTaa");
 +		AddOptimumSliderRow("optimum-taasharpness", onOptimumTaaSharpnessChanged, "optTaaSharpness");
 +		AddOptimumSliderRow("optimum-taamipbias", onOptimumTaaMipBiasChanged, "optTaaMipBias");
@@ -191,6 +233,10 @@ index 4d08f84..28930bd 100644
 +		composer.GetToggleButton("vulkan")?.SetValue(true);
 +		string renderer = Vintagestory.API.Config.OptimumConfig.Renderer;
 +		composer.GetDropDown("optRenderer").SetSelectedIndex(renderer == "vulkan" ? 1 : renderer == "opengl" ? 2 : 0);
++		composer.GetDropDown("optUpscaler").SetSelectedIndex(Vintagestory.API.Config.OptimumConfig.Upscaler == "dlss" ? 1 : 0);
++		int upscalerQualityIndex = Array.IndexOf(Vintagestory.API.Config.OptimumConfig.UpscalerQualityNames,
++			Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
++		composer.GetDropDown("optUpscalerQuality").SetSelectedIndex(Math.Max(0, upscalerQualityIndex));
 +		composer.GetSwitch("optTaa").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
 +		composer.GetSlider("optTaaSharpness").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaSharpness * 100f), 0, 100, 5, "%");
 +		composer.GetSlider("optTaaMipBias").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaMipBias * 100f), -100, 0, 5, "/100");
@@ -296,6 +342,31 @@ index 4d08f84..28930bd 100644
 +		ScreenManager.Platform.RebuildFrameBuffers();
 +		handler.ReloadShaders();
 +	}
++	private void onOptimumUpscalerChanged(string code, bool selected)
++	{
++		if (code == "dlss" && ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) != null)
++		{
++			composer?.GetDropDown("optUpscaler")?.SetSelectedIndex(0);
++			return;
++		}
++		if (Vintagestory.API.Config.OptimumConfig.Upscaler == code) return;
++		Vintagestory.API.Config.OptimumConfig.Upscaler = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		handler.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++	}
++	private void onOptimumUpscalerQualityChanged(string code, bool selected)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerQuality == code) return;
++		Vintagestory.API.Config.OptimumConfig.UpscalerQuality = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (Vintagestory.API.Config.OptimumConfig.Upscaler == "dlss")
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++			OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		}
++	}
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumTaaChanged(bool on)
 +	{
@@ -383,7 +454,11 @@ index 4d08f84..28930bd 100644
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
-@@ -1820,4 +2134,81 @@ public class GuiCompositeSettings : GuiComposite
+ 	}
+ 
+@@ -1818,6 +2174,83 @@ public class GuiCompositeSettings : GuiComposite
+ 	{
+ 		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
  		return true;
  	}

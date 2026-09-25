@@ -498,6 +498,18 @@ internal sealed class FrameRing : IDisposable
 
     public int PendingDeletionCount => _retired.PendingCount;
 
+    /// <summary>Teardown only: release vendor handles before their runtime is shut down.</summary>
+    public int DrainRetirements()
+    {
+        // Device idle covers every submitted frame. A command buffer still being recorded
+        // cannot reach the GPU, so its retired resources may be destroyed as well.
+        _timeline.WaitForSignalledFramesAtTeardown();
+        _timeline.WaitForSignalledTransfersAtTeardown();
+        int pending = _retired.PendingCount;
+        _retired.DisposeAll();
+        return pending;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

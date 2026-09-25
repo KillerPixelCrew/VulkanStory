@@ -69,6 +69,7 @@ __pycache__/
 # (docs/* rather than docs/, so the one tracked deliverable below can be excepted -
 # a negation inside a fully excluded directory is never reconsidered by git.)
 docs/*
+!docs/upscaler.md
 # ...except the TAA acceptance checklist: it is a deliverable the P5 coverage test
 # (Optimum.Tests/Temporal/AcceptanceTests.cs) reads, so it has to be tracked.
 !docs/vulkan.md

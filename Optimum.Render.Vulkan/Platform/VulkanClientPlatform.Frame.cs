@@ -2,6 +2,7 @@ using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Config;
 using Optimum.Render.Vulkan.Graph;
 using Vintagestory.API.Client;
+using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
@@ -31,6 +32,14 @@ public partial class VulkanClientPlatform
         // unwound past both compose call sites; the new frame starts with the scope closed, so the
         // world pass draws to the targets it names under the factors it states.
         CloseUiScope();
+        if (rebuildUpscalerTargetsPending)
+        {
+            rebuildUpscalerTargetsPending = false;
+            RebuildFrameBuffers();
+            ShaderRegistry.ReloadShaders();
+        }
+        upscaledThisFrame = false;
+        upscaledCompositeReady = false;
         device.BeginFrame();
         // Until a stage or a post method says otherwise, passes are named after the frame.
         passContext = "Frame";

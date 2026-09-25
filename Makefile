@@ -111,6 +111,8 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@# The Vulkan renderer and its dependencies, loaded by name at startup; a
 	@# stale copy here makes the probe throw and the client fall back to OpenGL.
 	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
+	@if [ -f "$(MOD_OUT)/libOptimumNgx.so" ]; then cp "$(MOD_OUT)/libOptimumNgx.so" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/OptimumNgx.dll" ]; then cp "$(MOD_OUT)/OptimumNgx.dll" "$(VANILLA_DIR)/"; fi
 	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
 	@# shaderc goes into the application root: Silk.NET.Shaderc probes the application
 	@# directory and LD_LIBRARY_PATH, not Lib/, and a copy it cannot find makes the
@@ -154,6 +156,8 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
+		if [ -f "$(MOD_OUT)/libOptimumNgx.so" ]; then cp "$(MOD_OUT)/libOptimumNgx.so" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/OptimumNgx.dll" ]; then cp "$(MOD_OUT)/OptimumNgx.dll" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/; fi; \
 		rm -rf "$(INSTALL_DIR)/shaders-vk" && mkdir -p "$(INSTALL_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(INSTALL_DIR)/shaders-vk/" || exit 1; \
 		for f in $(MOD_OUT)/shaders-vk/*; do d="$(INSTALL_DIR)/shaders-vk/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \

@@ -16,12 +16,27 @@ namespace Optimum.Render.Vulkan.Platform;
 // base's shared post-chain logic calls.
 public partial class VulkanClientPlatform
 {
+    public override void LoadFrameBuffer(EnumFrameBuffer framebuffer)
+    {
+        // Late world overlays still ask for Primary. Once final composition has moved
+        // the scene to the upscaled target, bind that target and its matching depth.
+        if (framebuffer == EnumFrameBuffer.Primary && upscaledCompositeReady &&
+            UpscaledSceneTarget is FrameBufferRef composite)
+        {
+            CurrentFrameBuffer = composite;
+            GlViewport(0, 0, composite.Width, composite.Height);
+            return;
+        }
+        base.LoadFrameBuffer(framebuffer);
+    }
+
     // ClientPlatformWindows' private slot constants; the parity dump and the post chain
     // index FrameBuffers by the same numbers.
     private const int OptimumFsrFramebufferIndex = 18;
     private const int OptimumTaaHistoryIndexA = 19;
     private const int OptimumTaaHistoryIndexB = 20;
     private const int OptimumTaaSharpenIndex = 21;
+    private const int OptimumUpscaledSceneIndex = 22;
     private const int OptimumGlR32f = 0x822E;
 
     // GL keeps the clear colour in driver state and applies it at glClear; the device
@@ -53,14 +68,23 @@ public partial class VulkanClientPlatform
         int shadowMapQuality = ClientSettings.ShadowMapQuality;
         float ssaaLevel = ClientSettings.SSAA;
 
-        int width = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
-        int height = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
+        int displayWidth = ((NativeWindow)window).ClientSize.X;
+        int displayHeight = ((NativeWindow)window).ClientSize.Y;
+        int width = (int)(displayWidth * ssaaLevel);
+        int height = (int)(displayHeight * ssaaLevel);
+        bool upscaling = TryPlanUpscale(displayWidth, displayHeight, out int plannedWidth, out int plannedHeight);
+        if (upscaling)
+        {
+            width = plannedWidth;
+            height = plannedHeight;
+        }
         if (width == 0 || height == 0)
         {
             return list;
         }
 
-        bool taaRequested = OptimumTaaRequested;
+        bool taaRequested = OptimumTaaRequested && !upscaling;
+        bool temporalRequested = taaRequested || upscaling;
         int motionAttachmentIndex = -1;
 
         // Primary: depth, colour, glow, and the SSAO position/normal G-buffer.
@@ -76,7 +100,8 @@ public partial class VulkanClientPlatform
         int primaryAttachments = (setupSsao ? 4 : 2);
         primary.ColorTextureIds = new int[primaryAttachments];
         primary.ColorTextureIds[0] = device.CreateTexture2D(width, height,
-            EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            upscaling ? EnumTextureInternalFormat.Rgba16f : EnumTextureInternalFormat.Rgba8,
+            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
         primary.ColorTextureIds[1] = device.CreateTexture2D(width, height,
             EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
         if (setupSsao)
@@ -95,7 +120,7 @@ public partial class VulkanClientPlatform
                 attachment >= 2 || ssaaLevel > 1f ? 9729 : 9728, attachment >= 2 ? 33069 : 10497);
             if (attachment >= 2) device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
         }
-        if (taaRequested)
+        if (temporalRequested)
         {
             // Optimum: TAA motion attachment, appended after the SSAO G-buffer
             // so every existing attachment index is unchanged. Deliberately not
@@ -113,7 +138,8 @@ public partial class VulkanClientPlatform
             }
             catch (Exception error)
             {
-                DisableOptimumTaa("Primary motion attachment (device): " + error.Message);
+                if (upscaling) DisableUpscaler("Primary motion attachment: " + error.Message);
+                else DisableOptimumTaa("Primary motion attachment (device): " + error.Message);
                 motionAttachmentIndex = -1;
             }
         }
@@ -206,13 +232,15 @@ public partial class VulkanClientPlatform
             list[15] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
         }
 
-        list[2] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-        list[3] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-        list[9] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-        list[8] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-        list[4] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
-        list[7] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba16f);
-        list[10] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
+        int postWidth = upscaling ? displayWidth : width;
+        int postHeight = upscaling ? displayHeight : height;
+        list[2] = CreateOptimumColorTarget(postWidth / 2, postHeight / 2, EnumTextureInternalFormat.Rgba8);
+        list[3] = CreateOptimumColorTarget(postWidth / 2, postHeight / 2, EnumTextureInternalFormat.Rgba8);
+        list[9] = CreateOptimumColorTarget(postWidth / 4, postHeight / 4, EnumTextureInternalFormat.Rgba8);
+        list[8] = CreateOptimumColorTarget(postWidth / 4, postHeight / 4, EnumTextureInternalFormat.Rgba8);
+        list[4] = CreateOptimumColorTarget(postWidth, postHeight, EnumTextureInternalFormat.Rgba16f);
+        list[7] = CreateOptimumColorTarget(postWidth / 2, postHeight / 2, EnumTextureInternalFormat.Rgba16f);
+        list[10] = CreateOptimumColorTarget(postWidth, postHeight, EnumTextureInternalFormat.Rgba16f);
 
         // Optimum: TAA history, render-resolution like Primary. Two slots so the
         // resolve reads last frame's parity while writing this frame's; never
@@ -247,11 +275,25 @@ public partial class VulkanClientPlatform
         OptimumAdoptTaaTargets(list, taaRequested);
 
         // FSR renders at a reduced scale and resolves into a native-sized target.
-        if (ClientSettings.OptimumRenderScale < 1.0f)
+        if (!upscaling && ClientSettings.OptimumRenderScale < 1.0f)
         {
             list[OptimumFsrFramebufferIndex] = CreateOptimumColorTarget(
                 ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y,
                 EnumTextureInternalFormat.Rgba8);
+        }
+
+        if (upscaling)
+        {
+            try
+            {
+                list[OptimumUpscaledSceneIndex] = CreateOptimumOwnedTarget(displayWidth, displayHeight,
+                    withDepth: true, storage: true);
+            }
+            catch (Exception error)
+            {
+                DisableUpscaler("display-resolution output: " + error.Message);
+                list[OptimumUpscaledSceneIndex] = null;
+            }
         }
 
         list[5] = CreateOptimumDepthTarget(width / 4, height / 4);
@@ -292,7 +334,7 @@ public partial class VulkanClientPlatform
         }
 
         // World/UI separation: the HUD-less scene snapshot and the UI image (UiSeparation.cs).
-        AllocateUiSeparationTargets(list, width, height);
+        AllocateUiSeparationTargets(list, postWidth, postHeight);
 
         OptimumFinishDeviceFrameBufferSetup(list);
         return list;
@@ -717,6 +759,11 @@ public partial class VulkanClientPlatform
 
     public override void RestoreWorldDrawBuffers(bool ssaoAttachments)
     {
+        if (upscaledThisFrame && ReferenceEquals(CurrentFrameBuffer, UpscaledSceneTarget))
+        {
+            StateDrawBuffers(CurrentFrameBuffer.FboId, 1);
+            return;
+        }
         if (ssaoAttachments)
         {
             StateDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);
