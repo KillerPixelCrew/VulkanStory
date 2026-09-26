@@ -138,6 +138,9 @@
     <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == '' and Exists('$(MSBuildProjectDirectory)/../_ref/fsr-vulkan')">$(MSBuildProjectDirectory)/../_ref/fsr-vulkan</Fsr3SdkDir>
     <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == '' and Exists('$(OptimumSdkReferenceRoot)/fsr-vulkan')">$(OptimumSdkReferenceRoot)/fsr-vulkan</Fsr3SdkDir>
     <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/fsr-vulkan</Fsr3SdkDir>
+    <Fsr4SdkDir Condition="'$(Fsr4SdkDir)' == '' and Exists('$(MSBuildProjectDirectory)/../_ref/fsr/Kits/FidelityFX')">$(MSBuildProjectDirectory)/../_ref/fsr</Fsr4SdkDir>
+    <Fsr4SdkDir Condition="'$(Fsr4SdkDir)' == '' and Exists('$(OptimumSdkReferenceRoot)/fsr/Kits/FidelityFX')">$(OptimumSdkReferenceRoot)/fsr</Fsr4SdkDir>
+    <Fsr4SdkDir Condition="'$(Fsr4SdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/fsr</Fsr4SdkDir>
   </PropertyGroup>
   <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlss.dll')">
     <None Include="$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlss.dll" Link="nvngx_dlss.dll" CopyToOutputDirectory="PreserveNewest" />
@@ -197,5 +200,12 @@
     <Copy SourceFiles="$(Fsr3SdkDir)/PrebuiltSignedDLL/amd_fidelityfx_vk.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="$(Fsr3SdkDir)/sdk/LICENSE.txt" DestinationFiles="$(TargetDir)Fsr3-LICENSE.txt"
           SkipUnchangedFiles="true" Condition="Exists('$(Fsr3SdkDir)/sdk/LICENSE.txt')" />
+  </Target>
+  <Target Name="BuildFsr4Bridge" BeforeTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(Fsr4SdkDir)/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll') and '$(VULKAN_SDK)' != ''">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-fsr4/build.ps1&quot; -SdkRoot &quot;$(Fsr4SdkDir)&quot; -Output &quot;$(TargetDir)OptimumFsr4.dll&quot;" />
+    <Copy SourceFiles="$(Fsr4SdkDir)/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(Fsr4SdkDir)/Kits/FidelityFX/docs/license.md" DestinationFiles="$(TargetDir)Fsr4-LICENSE.md"
+          SkipUnchangedFiles="true" Condition="Exists('$(Fsr4SdkDir)/Kits/FidelityFX/docs/license.md')" />
   </Target>
 </Project>

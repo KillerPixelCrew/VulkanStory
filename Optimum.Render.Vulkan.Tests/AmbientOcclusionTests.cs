@@ -391,6 +391,58 @@ public class AmbientOcclusionTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// Every working-depth level above 0 is XeGTAO's weighted mip filter of the 2x2 texels
+    /// below it, independent of how the prefilter splits the work across invocations.
+    /// </summary>
+    [SkippableFact]
+    public void TheWorkingDepthLevelsFollowTheXeGtaoMipFilter()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(output, out VulkanDevice? device), "No Vulkan device");
+        using (device)
+        {
+            var rig = new Rig(device!);
+            GtaoSettings settings = Settings();
+            device!.BeginFrame();
+            rig.Draw(Scene.Crease);
+            rig.Render(settings, 0);
+            var levels = new float[GtaoRenderer.DepthLevels][];
+            for (uint level = 0; level < GtaoRenderer.DepthLevels; level++)
+                levels[level] = MemoryMarshal.Cast<byte, float>(device.ReadBackLevelForTests(rig.Ao.WorkingDepthTexture, level)).ToArray();
+            device.Present();
+
+            float effectRadius = 0.75f * settings.EffectRadius * settings.RadiusMultiplier;
+            float falloffRange = settings.FalloffRange * effectRadius;
+            float falloffFrom = effectRadius * (1f - settings.FalloffRange);
+            float falloffMul = -1f / falloffRange;
+            float falloffAdd = falloffFrom / falloffRange + 1f;
+            float Filter(float d0, float d1, float d2, float d3)
+            {
+                float max = MathF.Max(MathF.Max(d0, d1), MathF.Max(d2, d3));
+                float W(float d) => Math.Clamp((max - d) * falloffMul + falloffAdd, 0f, 1f);
+                float w0 = W(d0), w1 = W(d1), w2 = W(d2), w3 = W(d3);
+                return (w0 * d0 + w1 * d1 + w2 * d2 + w3 * d3) / (w0 + w1 + w2 + w3);
+            }
+
+            for (int level = 1; level < GtaoRenderer.DepthLevels; level++)
+            {
+                int size = Size >> level, below = Size >> (level - 1);
+                float[] source = levels[level - 1];
+                for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    int i = 2 * y * below + 2 * x;
+                    float expected = Filter(source[i], source[i + 1], source[i + below], source[i + below + 1]);
+                    float actual = levels[level][y * size + x];
+                    Assert.True(MathF.Abs(actual - expected) <= 1e-5f * MathF.Max(1f, expected),
+                        "level " + level + " (" + x + "," + y + "): " + actual + " vs " + expected);
+                }
+            }
+            rig.Dispose();
+            GpuTest.AssertClean(device);
+        }
+    }
+
     [SkippableFact]
     public void TheResultIsStableAcrossPresentedFramesWithAFixedNoiseIndex()
     {

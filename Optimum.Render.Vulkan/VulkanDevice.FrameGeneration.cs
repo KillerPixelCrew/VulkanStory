@@ -22,6 +22,7 @@ public sealed unsafe partial class VulkanDevice
         int uprightDepthId, int uprightMotionId, int uprightHudlessId, int uprightUiId,
         in NgxFrameGenerationCamera camera, bool reset)
     {
+        using GpuSection gpuSection = BeginGpuSection("fg_dlss_tag_flips");
         if (!StreamlineFrameGenerationReady || !_frameActive) return -1;
         VulkanTexture? depth = _textures.Get(depthId);
         VulkanTexture? motion = _textures.Get(motionId);
@@ -76,15 +77,17 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
-    internal int SetStreamlineFrameGeneration(bool enabled) =>
+    internal int SetStreamlineFrameGeneration(bool enabled, uint generatedFrames = 1) =>
         _context.Streamline == null || _swapchain == null ? -1 :
-        _context.Streamline.SetFrameGeneration(enabled, _swapchain.Extent.Width,
+        _context.Streamline.SetFrameGeneration(enabled, generatedFrames, _swapchain.Extent.Width,
             _swapchain.Extent.Height, _swapchain.Format, _swapchain.ImageCount);
 
-    internal int GetStreamlineFrameGenerationState(out uint status, out uint presented)
+    internal int GetStreamlineFrameGenerationState(out uint status, out uint presented,
+        out uint maxGenerated)
     {
-        status = 0; presented = 0;
-        return _context.Streamline?.GetFrameGenerationState(out status, out presented) ?? -1;
+        status = 0; presented = 0; maxGenerated = 0;
+        return _context.Streamline?.GetFrameGenerationState(out status, out presented,
+            out maxGenerated) ?? -1;
     }
 
     internal int TakeStreamlinePresentError() => _context.Streamline?.TakePresentError() ?? 0;
@@ -230,6 +233,7 @@ public sealed unsafe partial class VulkanDevice
         int backbufferId, int depthId, int motionId, int hudlessId, int uiId,
         int interpolatedId, int realId, in NgxFrameGenerationCamera camera, bool reset)
     {
+        using GpuSection gpuSection = BeginGpuSection("fg_ngx_dispatch");
         if (feature == null || !feature.IsValid) return NgxResult.FailFeatureNotFound;
         if (!_frameActive) return NgxResult.FailNotInitialized;
 

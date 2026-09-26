@@ -493,7 +493,7 @@ internal sealed unsafe class Swapchain : IDisposable
             if (old != null)
             {
                 if (_context.Streamline != null)
-                    _context.Streamline.SetFrameGeneration(false, old.Extent.Width,
+                    _context.Streamline.SetFrameGeneration(false, 1, old.Extent.Width,
                         old.Extent.Height, old.Format, old.ImageCount);
                 VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before FG proxy transition");
                 _retirement.DisposeAll();
@@ -512,7 +512,7 @@ internal sealed unsafe class Swapchain : IDisposable
         // The DLSS-G guide requires generation to be off before a resize or
         // present-mode change. The next valid world frame turns it back on.
         if (old != null && _context.Streamline != null)
-            _context.Streamline.SetFrameGeneration(false, old.Extent.Width, old.Extent.Height,
+            _context.Streamline.SetFrameGeneration(false, 1, old.Extent.Width, old.Extent.Height,
                 old.Format, old.ImageCount);
         var createInfo = new SwapchainCreateInfoKHR
         {

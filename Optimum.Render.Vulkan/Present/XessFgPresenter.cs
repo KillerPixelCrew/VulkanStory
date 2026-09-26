@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
@@ -42,6 +43,21 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private int _nextImageSet;
     private bool _disposed;
 
+    // The proxy's Present blocks while the SDK paces presentation. Called on the
+    // render thread, it kept the next frame from being recorded, so the GPU ran
+    // dry every frame (docs/performance-profile-2026-09-26.md). One present runs
+    // here at a time; the render thread takes its outcome before handing over
+    // the next, which bounds the added latency to one frame.
+    private readonly Thread _presentThread;
+    private readonly object _presentGate = new();
+    private bool _presentPending;
+    private bool _presentStopping;
+    private PreparedFrame _queuedFrame;
+    private XessPresentationFrame _queuedConstants;
+    private ulong _queuedLatencyFrame;
+    private PresentOutcome? _outcome;
+    private ulong _lastQueuedDone;
+
     private XessFgPresenter(VulkanContext context, XessFgRuntime runtime,
         XessSharedFence fence, ImageSet[] images, uint width, uint height)
     {
@@ -51,6 +67,145 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         _images = images;
         Width = width;
         Height = height;
+        _presentThread = new Thread(PresentLoop)
+        {
+            IsBackground = true,
+            Name = "XeSS-FG present",
+            Priority = ThreadPriority.AboveNormal,
+        };
+        _presentThread.Start();
+    }
+
+    /// <summary>The result of one proxy present, taken by the render thread a frame later.</summary>
+    public readonly record struct PresentOutcome(int Code, uint FramesPresented, int FrameGenResult,
+        bool FrameGenEnabled, Exception? Error, long StartTicks, long EndTicks);
+
+    /// <summary>
+    /// Hands one prepared frame to the present thread. The previous present must
+    /// have been taken with <see cref="TakePresentOutcome" />.
+    /// </summary>
+    public void QueuePresent(in PreparedFrame prepared, in XessPresentationFrame constants, ulong latencyFrameId)
+    {
+        _lastQueuedDone = prepared.DoneByDx12;
+        if (!PresentThreadEnabled)
+        {
+            // A/B and diagnostics: present on the render thread, as before the worker.
+            PresentOutcome inline = RunPresent(prepared, constants, latencyFrameId);
+            lock (_presentGate) _outcome = inline;
+            return;
+        }
+        lock (_presentGate)
+        {
+            while (_presentPending) Monitor.Wait(_presentGate);
+            _queuedFrame = prepared;
+            _queuedConstants = constants;
+            _queuedLatencyFrame = latencyFrameId;
+            _presentPending = true;
+            Monitor.PulseAll(_presentGate);
+        }
+    }
+
+    /// <summary>Waits for the in-flight present, if any, and returns its outcome once.</summary>
+    public PresentOutcome? TakePresentOutcome()
+    {
+        lock (_presentGate)
+        {
+            while (_presentPending) Monitor.Wait(_presentGate);
+            PresentOutcome? outcome = _outcome;
+            _outcome = null;
+            return outcome;
+        }
+    }
+
+    /// <summary>Waits for the in-flight present without taking its outcome.</summary>
+    public void WaitForPresentIdle()
+    {
+        lock (_presentGate)
+        {
+            while (_presentPending) Monitor.Wait(_presentGate);
+        }
+    }
+
+    private void PresentLoop()
+    {
+        while (true)
+        {
+            PreparedFrame prepared;
+            XessPresentationFrame constants;
+            ulong latencyFrame;
+            lock (_presentGate)
+            {
+                while (!_presentPending && !_presentStopping) Monitor.Wait(_presentGate);
+                if (!_presentPending) return;
+                prepared = _queuedFrame;
+                constants = _queuedConstants;
+                latencyFrame = _queuedLatencyFrame;
+            }
+
+            PresentOutcome outcome = RunPresent(prepared, constants, latencyFrame);
+
+            lock (_presentGate)
+            {
+                _outcome = outcome;
+                _presentPending = false;
+                Monitor.PulseAll(_presentGate);
+            }
+        }
+    }
+
+    private static readonly bool PresentThreadEnabled =
+        Environment.GetEnvironmentVariable("OPTIMUM_XESS_PRESENT_THREAD") != "0";
+
+    private PresentOutcome RunPresent(in PreparedFrame prepared, in XessPresentationFrame constants, ulong latencyFrame)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            // XeLL's present markers bracket the real Present.
+            _runtime.Marker(latencyFrame, LatencyMarker.PresentStart);
+            int code = Present(prepared, constants, out uint presented, out int fgResult, out bool fgEnabled);
+            _runtime.Marker(latencyFrame, LatencyMarker.PresentEnd);
+            return new PresentOutcome(code, presented, fgResult, fgEnabled, null, start,
+                System.Diagnostics.Stopwatch.GetTimestamp());
+        }
+        catch (Exception error)
+        {
+            return new PresentOutcome(-1, 0, 0, false, error, start, System.Diagnostics.Stopwatch.GetTimestamp());
+        }
+    }
+
+    /// <summary>
+    /// The graphics queue may be gated on a DX12 "done" value (VulkanDevice's XeSS GPU
+    /// gate), which is only ever the "done" value of a frame handed to
+    /// <see cref="QueuePresent" />. The bridge signals every value it is handed; should
+    /// one still be missing, WaitDeviceIdle would stall forever, so the fence is advanced
+    /// to it from the host. Every "ready" value still pending behind the gate is higher,
+    /// so the timeline stays monotonic.
+    /// </summary>
+    private unsafe void ReleaseGatedQueue()
+    {
+        ulong issued = _lastQueuedDone;
+        if (issued == 0) return;
+        Vk api = _context.Api;
+        if (api.GetSemaphoreCounterValue(_context.Device, _fence.Semaphore, out ulong current) != Result.Success ||
+            current >= issued) return;
+        var signal = new SemaphoreSignalInfo
+        {
+            SType = StructureType.SemaphoreSignalInfo,
+            Semaphore = _fence.Semaphore,
+            Value = issued,
+        };
+        api.SignalSemaphore(_context.Device, &signal);
+    }
+
+    private void StopPresentThread()
+    {
+        lock (_presentGate)
+        {
+            _presentStopping = true;
+            Monitor.PulseAll(_presentGate);
+        }
+        _presentThread.Join();
     }
 
     public uint Width { get; }
@@ -96,6 +251,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             }
             int code = runtime!.Start(window, width, height, vsync);
             if (code != 0) throw new InvalidOperationException("Intel proxy initialization failed (" + code + ")");
+            code = runtime.SetGeneratedFrames(1, out _, out _);
+            if (code < 0) throw new InvalidOperationException("Intel generated-frame count setup failed (" + code + ")");
             code = runtime.SetEnabled(true);
             if (code < 0) throw new InvalidOperationException("Intel proxy enable failed (" + code + ")");
             presenter = new XessFgPresenter(context, runtime, fence!, sets, width, height);
@@ -185,6 +342,9 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        // The in-flight present finishes before anything it uses goes away.
+        StopPresentThread();
+        ReleaseGatedQueue();
         _context.WaitDeviceIdle();
         _runtime.SetEnabled(false);
         if (_runtime.WaitIdle() != 0)

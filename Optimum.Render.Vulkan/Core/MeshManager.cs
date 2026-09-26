@@ -101,11 +101,21 @@ internal sealed unsafe class MeshManager : IDisposable
     /// </summary>
     internal bool DeviceLocalStaticBuffers { get; set; } = true;
 
+    /// <summary>
+    /// Persistent (mapped, game-written) meshes in device-local host-visible memory.
+    /// Only with a BAR heap of at least 1 GiB; <c>OPTIMUM_VK_PERSISTENT_MESH_VRAM=0</c>
+    /// keeps them in system memory. Cleared after the first allocation that does not fit.
+    /// </summary>
+    internal bool PersistentMeshesInVram { get; set; }
+
     public MeshManager(VulkanContext context, UploadManager? uploads = null)
     {
         _context = context;
         _uploads = uploads;
         _meshes.Add(null);   // 0 is never a real mesh
+        PersistentMeshesInVram = uploads != null &&
+            Environment.GetEnvironmentVariable("OPTIMUM_VK_PERSISTENT_MESH_VRAM") != "0" &&
+            context.Allocator.HasLargeHostVisibleDeviceMemory(1UL << 30);
 
         int emptyId = _layouts.Intern(VertexLayoutDescription.Empty);
         if (emptyId != EmptyLayoutId)
@@ -314,8 +324,27 @@ internal sealed unsafe class MeshManager : IDisposable
         // A dynamic mesh is host visible and stays mapped, because the game
         // writes straight through the pointer while the GPU may still be
         // reading - the same lack of synchronisation GL allowed and the chunk
-        // tesselator relies on. A static mesh with no upload manager to stage
-        // through (component tests) is host visible too, still off ReBAR.
+        // tesselator relies on. With resizable BAR it is mapped VRAM: chunk pools
+        // are read by every chunk pass, and from system memory each vertex fetch
+        // crosses PCIe (docs/performance-profile-2026-09-26.md). The CPU only
+        // writes these buffers, which write-combined VRAM handles well. When the
+        // BAR heap is full the allocation falls back to system memory.
+        if (persistent && PersistentMeshesInVram)
+        {
+            try
+            {
+                return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
+                    MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit |
+                    MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
+            }
+            catch (InvalidOperationException)
+            {
+                PersistentMeshesInVram = false;
+            }
+        }
+
+        // A static mesh with no upload manager to stage through (component tests)
+        // is host visible too, still off ReBAR.
         return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
     }

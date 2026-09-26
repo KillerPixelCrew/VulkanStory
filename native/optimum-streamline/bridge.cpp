@@ -31,6 +31,9 @@ PFun_slReflexSleep* reflexSleep{};
 PFun_slPCLSetMarker* pclMarker{};
 PFun_slDLSSGSetOptions* fgOptions{};
 PFun_slDLSSGGetState* fgState{};
+bool fgConfigured{};
+bool fgEnabled{};
+uint32_t fgCount{}, fgWidth{}, fgHeight{}, fgFormat{}, fgBackBuffers{};
 sl::FrameToken* frameToken{};
 std::atomic<int> lastPresentError{0};
 bool verboseLog{};
@@ -199,6 +202,7 @@ __declspec(dllexport) void OptimumSlShutdown() {
     module = nullptr;
     reflexOptions = nullptr; reflexSleep = nullptr; pclMarker = nullptr;
     fgOptions = nullptr; fgState = nullptr; frameToken = nullptr;
+    fgConfigured = false;
     lastPresentError.store(0, std::memory_order_relaxed);
 }
 
@@ -228,10 +232,12 @@ __declspec(dllexport) void OptimumSlDestroySurface(VkInstance instance, VkSurfac
 }
 __declspec(dllexport) VkResult OptimumSlCreateSwapchain(VkDevice device,
     const VkSwapchainCreateInfoKHR* info, VkSwapchainKHR* swapchain) {
+    fgConfigured = false;
     auto call = module ? reinterpret_cast<PFN_vkCreateSwapchainKHR>(deviceProc(device, "vkCreateSwapchainKHR")) : nullptr;
     return call ? call(device, info, nullptr, swapchain) : VK_ERROR_INITIALIZATION_FAILED;
 }
 __declspec(dllexport) void OptimumSlDestroySwapchain(VkDevice device, VkSwapchainKHR swapchain) {
+    fgConfigured = false;
     auto call = module ? reinterpret_cast<PFN_vkDestroySwapchainKHR>(deviceProc(device, "vkDestroySwapchainKHR")) : nullptr;
     if (call) call(device, swapchain, nullptr);
 }
@@ -353,28 +359,42 @@ __declspec(dllexport) int OptimumSlInvalidateFrameTags() {
     };
     return static_cast<int>(setTagForFrame(*frameToken, viewport, tags, 4, nullptr));
 }
-__declspec(dllexport) int OptimumSlSetFrameGeneration(int enabled, uint32_t width, uint32_t height,
-    uint32_t colorFormat, uint32_t backBuffers) {
+__declspec(dllexport) int OptimumSlSetFrameGeneration(int enabled, uint32_t count,
+    uint32_t width, uint32_t height, uint32_t colorFormat, uint32_t backBuffers) {
     if (!fgOptions) return -1;
+    if (enabled && count == 0) return -2;
+    if (fgConfigured && fgEnabled == (enabled != 0) && fgCount == count &&
+        fgWidth == width && fgHeight == height && fgFormat == colorFormat &&
+        fgBackBuffers == backBuffers) return 0;
     sl::DLSSGOptions options{};
     options.mode = enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
-    options.numFramesToGenerate = 1;
+    options.numFramesToGenerate = enabled ? count : 1;
     options.colorWidth = width; options.colorHeight = height;
     options.colorBufferFormat = colorFormat; options.numBackBuffers = backBuffers;
     options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
     options.onErrorCallback = onPresentError;
-    return static_cast<int>(fgOptions(viewport, options));
+    int result = static_cast<int>(fgOptions(viewport, options));
+    if (result == 0) {
+        fgConfigured = true;
+        fgEnabled = enabled != 0;
+        fgCount = count;
+        fgWidth = width; fgHeight = height; fgFormat = colorFormat;
+        fgBackBuffers = backBuffers;
+    }
+    return result;
 }
 __declspec(dllexport) int OptimumSlTakePresentError() {
     return lastPresentError.exchange(0, std::memory_order_relaxed);
 }
-__declspec(dllexport) int OptimumSlGetFrameGenerationState(uint32_t* status, uint32_t* presented) {
-    if (!fgState || !status || !presented) return -1;
+__declspec(dllexport) int OptimumSlGetFrameGenerationState(uint32_t* status,
+    uint32_t* presented, uint32_t* maxGenerated) {
+    if (!fgState || !status || !presented || !maxGenerated) return -1;
     sl::DLSSGState state{};
     auto result = fgState(viewport, state, nullptr);
     if (result == sl::Result::eOk) {
         *status = static_cast<uint32_t>(state.status);
         *presented = state.numFramesActuallyPresented;
+        *maxGenerated = state.numFramesToGenerateMax;
     }
     return static_cast<int>(result);
 }

@@ -11,6 +11,7 @@ public sealed unsafe partial class VulkanDevice
     internal int EvaluateFsr3(Fsr3Native api, nint context, int motionRg,
         in UpscalerFrame frame, bool firstFrame)
     {
+        using GpuSection gpuSection = BeginGpuSection("upscale_fsr3");
         if (!_frameActive) return -3;
         VulkanTexture? color = _textures.Get(frame.Color), depth = _textures.Get(frame.Depth),
             sourceMotion = _textures.Get(frame.Motion), motion = _textures.Get(motionRg),
@@ -44,6 +45,7 @@ public sealed unsafe partial class VulkanDevice
         int uiId, int uprightSceneId, int uprightUiId, int uprightDepthId,
         int uprightMotionId, in IOptimumTemporalContext temporal, ulong frameId)
     {
+        using GpuSection gpuSection = BeginGpuSection("fg_fsr3_dispatch");
         if (!_frameActive || Fsr3ProxyContext == 0) return -3;
         VulkanTexture? backbuffer = _textures.Get(backbufferId);
         VulkanTexture? depth = _textures.Get(depthId);

@@ -29,13 +29,14 @@ internal unsafe struct XessPresentationFrame
 /// Owns the matching DX12 device, XeLL context, and Intel XeSS-FG context.
 /// The DXGI proxy is initialized only after Vulkan relinquishes the window.
 /// </summary>
-internal sealed unsafe class XessFgRuntime : IDisposable
+internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
 {
     private nint _module;
     private nint _context;
     private readonly delegate* unmanaged[Cdecl]<nint, void> _destroy;
     private readonly delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, int> _start;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, int> _setEnabled;
+    private readonly delegate* unmanaged[Cdecl]<nint, uint, uint*, uint*, int> _setGeneratedFrames;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, uint, int> _setLatencyMode;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, int> _sleep;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, int, int> _marker;
@@ -54,6 +55,7 @@ internal sealed unsafe class XessFgRuntime : IDisposable
         _destroy = (delegate* unmanaged[Cdecl]<nint, void>)Export("OptimumXessFgDestroy");
         _start = (delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, int>)Export("OptimumXessFgStart");
         _setEnabled = (delegate* unmanaged[Cdecl]<nint, uint, int>)Export("OptimumXessFgSetEnabled");
+        _setGeneratedFrames = (delegate* unmanaged[Cdecl]<nint, uint, uint*, uint*, int>)Export("OptimumXessFgSetGeneratedFrames");
         _setLatencyMode = (delegate* unmanaged[Cdecl]<nint, uint, uint, int>)Export("OptimumXessFgSetLatencyMode");
         _sleep = (delegate* unmanaged[Cdecl]<nint, uint, int>)Export("OptimumXessFgSleep");
         _marker = (delegate* unmanaged[Cdecl]<nint, uint, int, int>)Export("OptimumXessFgMarker");
@@ -111,15 +113,24 @@ internal sealed unsafe class XessFgRuntime : IDisposable
     public int Start(nint window, uint width, uint height, bool vsync) =>
         _context != 0 ? _start(_context, window, width, height, vsync ? 1u : 0u) : -1;
     public int SetEnabled(bool enabled) => _context != 0 ? _setEnabled(_context, enabled ? 1u : 0u) : -1;
+    public int SetGeneratedFrames(uint requested, out uint effective, out uint maximum)
+    {
+        effective = maximum = 0;
+        fixed (uint* effectivePtr = &effective)
+        fixed (uint* maximumPtr = &maximum)
+            return _context != 0 ? _setGeneratedFrames(_context, requested,
+                effectivePtr, maximumPtr) : -1;
+    }
     public int SetLatencyMode(int maxFps, bool enabled) => _context != 0 ?
         _setLatencyMode(_context, maxFps > 0 ? (uint)Math.Max(1, 1_000_000 / maxFps) : 0,
             enabled ? 1u : 0u) : -1;
     public int Sleep(ulong frameId) => _context != 0 ? _sleep(_context, (uint)frameId) : -1;
     public int Marker(ulong frameId, LatencyMarker marker) => _context != 0 ?
         _marker(_context, (uint)frameId, (int)marker) : -1;
-    public int CreateSharedImage(uint width, uint height, Format format,
+    public int CreateSharedImage(uint width, uint height, Format format, bool writable,
         out nint sharedHandle, out nint resource)
     {
+        if (writable) { sharedHandle = resource = 0; return -1; }
         nint handle = 0;
         nint created = 0;
         int code = _context != 0 ?

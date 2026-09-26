@@ -121,6 +121,34 @@ public sealed class ModPatcherManifestConsistencyTests
         Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
     }
 
+    /// <summary>
+    /// A transplanted method is copied from the donor built from the runtime
+    /// patches. Without a runtime patch for its type the donor body is vanilla,
+    /// and the transplant silently undoes whatever the source-tree patch changed:
+    /// the FluffyClouds renderers shipped raw OpenGL calls on Vulkan that way,
+    /// because only patches/VSEssentials carried their device routing.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Manifests))]
+    public void EveryTransplantedMethodHasARuntimePatch(string manifestMethodName, string project)
+    {
+        var methods = GetManifestProperty<List<MethodTarget>>(manifestMethodName, "Methods");
+
+        var problems = new List<string>();
+        foreach (MethodTarget method in methods)
+        {
+            string shortName = ShortName(method.TypeFullName);
+            if (FindPatchFile(project, shortName) is null)
+            {
+                problems.Add(
+                    $"{method.TypeFullName}::{method.MethodName}: no runtime patch found (searched " +
+                    $"patches/runtime/{project} for {shortName}.cs.patch), so the donor body is vanilla.");
+            }
+        }
+
+        Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
+    }
+
     private static string FormatFailure(string manifestMethodName, List<string> problems) =>
         $"ModPatcher.{manifestMethodName} is out of sync with the runtime patches:\n  " +
         string.Join("\n  ", problems);

@@ -367,6 +367,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void RenderParticles(MeshRef model, int quantity, int particleTextureId)
     {
+        device?.GpuMark("particles");
         if (quantity <= 0)
         {
             base.RenderParticles(model, quantity, particleTextureId);
@@ -512,6 +513,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private bool TryRenderStandardMeshNative(MeshRef mesh)
     {
+        device?.GpuMark("standard_meshes");
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         if (!NativeWorldEnabled || device == null || mesh == null || program == null ||
             !ReferenceEquals(program, ShaderPrograms.Standard))
@@ -690,6 +692,7 @@ public partial class VulkanClientPlatform
     internal bool TryDrawDecalPoolNative(MeshRef decalMesh, int[] indicesStarts, int[] indicesSizes, int groupCount)
     {
         if (!decalScopeActive) return false;
+        device?.GpuMark("decals");
         if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
 
         if (!NativeWorldPrepare(nativeDecals, decalMesh, blending: true, depth: true,

@@ -838,6 +838,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         var missing = new List<string>();
         if (!vulkan13.DynamicRendering) missing.Add("dynamicRendering");
         if (!vulkan13.Synchronization2) missing.Add("synchronization2");
+        // Required by Vulkan 1.3; native terrain shaders demote alpha-tested fragments.
+        if (!vulkan13.ShaderDemoteToHelperInvocation) missing.Add("shaderDemoteToHelperInvocation");
         // Scalar layout is what lets the game's tightly packed float[] uniform
         // uploads land in the generated block as a memcpy.
         if (!vulkan12.ScalarBlockLayout) missing.Add("scalarBlockLayout");
@@ -1056,6 +1058,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             SType = StructureType.PhysicalDeviceVulkan13Features,
             DynamicRendering = true,
             Synchronization2 = true,
+            ShaderDemoteToHelperInvocation = true,
             PipelineCreationCacheControl = pipelineCacheControl,
         };
         var vulkan12 = new PhysicalDeviceVulkan12Features

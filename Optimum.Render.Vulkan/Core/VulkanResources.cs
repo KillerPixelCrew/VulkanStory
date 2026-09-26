@@ -91,8 +91,17 @@ internal sealed unsafe class VulkanBuffer : IDisposable
         MemoryRequirements requirements = VulkanAllocator.BufferRequirements(context, buffer, out bool dedicated);
 
         // A buffer is linear, so it shares blocks only with other buffers.
-        _allocation = context.Allocator.Allocate(
-            requirements, properties, linear: true, $"a {size} byte buffer", poolClass, dedicated, buffer, default);
+        try
+        {
+            _allocation = context.Allocator.Allocate(
+                requirements, properties, linear: true, $"a {size} byte buffer", poolClass, dedicated, buffer, default);
+        }
+        catch
+        {
+            // A caller may retry with other memory properties; the handle must not leak.
+            api.DestroyBuffer(context.Device, buffer, null);
+            throw;
+        }
 
         api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset);
         Mapped = _allocation.Mapped;

@@ -10,6 +10,7 @@
 Optimum is a high-performance, client-side fork of [Vintage Story](https://www.vintagestory.at).
 
 Read the [Optimum Privacy Policy](PRIVACY.md) for the information handled by the build scripts, installers, launcher, and patcher.
+The current renderer status and remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
 

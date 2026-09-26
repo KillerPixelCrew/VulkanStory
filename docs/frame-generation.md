@@ -15,6 +15,13 @@ and pacing while its swapchain proxy is active.
 | FSR 3 Frame Generation | FidelityFX Vulkan swapchain proxy calls the SDK generation callback on present and composes the separate UI resource | Requires `amd_fidelityfx_vk.dll` and `OptimumFsr3.dll`; after world load, 120 rendered frames added 240 SDK presents in a headless run |
 | XeSS Frame Generation | XeSS 3.0.2 DX12 proxy replaces Vulkan WSI on the same window; Vulkan blits the rendered color, depth, motion, HUD-free scene and UI into imported D3D12 resources and signals a shared fence | Selectable in the Vulkan options; a headless world run reported 239 SDK presents for 120 rendered frames with generation enabled |
 
+The graphics options expose a requested 2× through 6× frame generation
+multiplier. DLSS and XeSS clamp the requested generated-frame count to the
+maximum reported by their active SDK and GPU. AMD FSR 3 Frame Generation uses
+its SDK swapchain's supported single interpolated frame, so its effective
+multiplier stays at 2×. FSR 4 is offered separately for Super Resolution through
+the DX12 interop path; it does not add another frame generation mode.
+
 XeSS-FG's SDK 3.0.2 uses a DX12 `IDXGISwapChain4` proxy. A provider switch
 destroys Vulkan WSI before creating the Intel proxy; leaving XeSS-FG restores
 Vulkan WSI. A temporary loss of XeSS inputs returns to normal Vulkan

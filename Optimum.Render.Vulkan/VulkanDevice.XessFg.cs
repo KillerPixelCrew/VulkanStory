@@ -15,6 +15,7 @@ public sealed unsafe partial class VulkanDevice
     private string? _xessFailure;
     private ulong _xessRenderedFrames;
     private ulong _xessPresentedFrames;
+    private uint _xessEffectiveGeneratedFrames;
     private long _lastSwapchainRestoreAttempt;
     private string? _lastSwapchainRestoreFailure;
 
@@ -25,6 +26,7 @@ public sealed unsafe partial class VulkanDevice
     internal int PrepareXessFrame(int depthId, int motionId, int motionRgId,
         int hudlessId, int uiId, in XessPresentationFrame constants)
     {
+        using GpuSection gpuSection = BeginGpuSection("fg_xess_prepare");
         if (!_frameActive || _frameGenerationProvider != "xess") return -1;
         VulkanTexture? color = DefaultColorTexture();
         VulkanTexture? depth = _textures.Get(depthId);
@@ -74,6 +76,7 @@ public sealed unsafe partial class VulkanDevice
         _xessFailure = null;
         _xessRenderedFrames = 0;
         _xessPresentedFrames = 0;
+        _xessEffectiveGeneratedFrames = 0;
         int latencyResult = _xessPresenter!.Runtime.SetLatencyMode(_vendorFrameCap,
             DesiredLatencyMode != 0);
         if (latencyResult != 0)
@@ -127,9 +130,13 @@ public sealed unsafe partial class VulkanDevice
         RestoreVulkanSwapchain();
     }
 
+    private static readonly bool XessGpuGate =
+        Environment.GetEnvironmentVariable("OPTIMUM_XESS_GPU_GATE") != "0";
+
     private void StopXessPresenter()
     {
         _xessSources = null;
+        _frames.ClearSubmitGate();
         XessFgPresenter? active = _xessPresenter;
         _xessPresenter = null;
         if (active != null)
@@ -149,32 +156,40 @@ public sealed unsafe partial class VulkanDevice
         XessFgPresenter presenter = _xessPresenter!;
         try
         {
+            // The previous frame's proxy Present ran on the present thread while
+            // this frame was recorded; its outcome is settled before the next hand-off.
+            if (presenter.TakePresentOutcome() is { } previous) ConsumeXessPresentOutcome(previous);
+            uint requested = (uint)System.Math.Clamp(
+                Vintagestory.API.Config.OptimumConfig.FrameGenerationMultiplier - 1, 1, 5);
+            int countResult = presenter.Runtime.SetGeneratedFrames(requested,
+                out uint effective, out uint maximum);
+            if (countResult < 0)
+                throw new InvalidOperationException("XeSS-FG generated-frame count failed (" +
+                    countResult + ")");
+            if (effective != _xessEffectiveGeneratedFrames)
+            {
+                OwnerPlatform?.Logger.Notification("Optimum: XeSS-FG requested {0}×, effective {1}× (SDK maximum {2}×)",
+                    requested + 1, effective + 1, maximum + 1);
+                _xessEffectiveGeneratedFrames = effective;
+            }
             CommandBuffer commands = _frames.BeginPresentCommands();
+            _gpuTimestamps?.Mark(commands, "fg_xess_handoff_copies");
             XessFgPresenter.PreparedFrame prepared = presenter.RecordCopies(commands,
                 _textures, _barriers, sources);
             ulong presentValue = _frames.SubmitExternalPresent(renderValue,
                 presenter.SharedSemaphore, prepared.WaitForDx12, prepared.ReadyForDx12);
             _xessConstants.Vsync = _vsync ? 1u : 0u;
-            MarkLatency(_latencyFrameId, LatencyMarker.PresentStart);
-            int result = presenter.Present(prepared, _xessConstants,
-                out uint presented, out int fgResult, out bool fgEnabled);
-            MarkLatency(_latencyFrameId, LatencyMarker.PresentEnd);
-            if (result != 0)
-                throw new InvalidOperationException("XeSS-FG proxy Present failed (" + result + ")");
-            if (fgResult < 0)
-                throw new InvalidOperationException("XeSS-FG SDK reported " + fgResult);
-            VulkanStats.NoteSdkActualPresents(presented);
+            // XeLL's present markers come from the present thread around the real
+            // Present; the frame-timing recorder marks the hand-off.
+            Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
+            presenter.QueuePresent(prepared, _xessConstants, _latencyFrameId);
+            // The DX12 and Vulkan contexts time-slice the GPU: run concurrently, XeSS-FG's
+            // ~2 ms of interpolation took ~5.4 ms and both queues idled at the switches.
+            // The next frame's GPU work waits for this frame's DX12 work instead; the CPU
+            // still records ahead (docs/performance-profile-2026-09-26.md).
+            if (XessGpuGate) _frames.GateNextFrameSubmit(presenter.SharedSemaphore, prepared.DoneByDx12);
+            Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
             VulkanStats.NotePresent(generated: false);
-            _xessRenderedFrames++;
-            _xessPresentedFrames += presented;
-            if (_xessRenderedFrames == 120 &&
-                _xessPresentedFrames <= _xessRenderedFrames)
-                OwnerPlatform?.Logger.Warning(
-                    "Optimum: XeSS-FG has not reported extra presented frames after 120 rendered frames; enabled={0}, SDK result={1}",
-                    fgEnabled, fgResult);
-            if (_xessRenderedFrames % 120 == 0)
-                OwnerPlatform?.Logger.Notification("Optimum: XeSS-FG SDK reports {0} frames presented over {1} rendered frames; enabled={2}",
-                    _xessPresentedFrames, _xessRenderedFrames, fgEnabled);
             Latency.OnPresent(_latencyFrameId, _realPresentId);
             _realPresentId = 0;
             _generatedPresentId = 0;
@@ -190,5 +205,26 @@ public sealed unsafe partial class VulkanDevice
             StopXessPresenter();
             return true;
         }
+    }
+
+    private void ConsumeXessPresentOutcome(in XessFgPresenter.PresentOutcome outcome)
+    {
+        if (outcome.Error != null)
+            throw new InvalidOperationException("XeSS-FG proxy Present threw: " + outcome.Error.Message, outcome.Error);
+        if (outcome.Code != 0)
+            throw new InvalidOperationException("XeSS-FG proxy Present failed (" + outcome.Code + ")");
+        if (outcome.FrameGenResult < 0)
+            throw new InvalidOperationException("XeSS-FG SDK reported " + outcome.FrameGenResult);
+        VulkanStats.NoteSdkActualPresents(outcome.FramesPresented);
+        _xessRenderedFrames++;
+        _xessPresentedFrames += outcome.FramesPresented;
+        if (_xessRenderedFrames == 120 &&
+            _xessPresentedFrames <= _xessRenderedFrames)
+            OwnerPlatform?.Logger.Warning(
+                "Optimum: XeSS-FG has not reported extra presented frames after 120 rendered frames; enabled={0}, SDK result={1}",
+                outcome.FrameGenEnabled, outcome.FrameGenResult);
+        if (_xessRenderedFrames % 120 == 0)
+            OwnerPlatform?.Logger.Notification("Optimum: XeSS-FG SDK reports {0} frames presented over {1} rendered frames; enabled={2}",
+                _xessPresentedFrames, _xessRenderedFrames, outcome.FrameGenEnabled);
     }
 }

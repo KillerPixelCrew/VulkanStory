@@ -10,11 +10,62 @@
 #include <array>
 #include <new>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 #include "xess_fg/xefg_swapchain_d3d12.h"
 #include "xell/xell_d3d12.h"
 
 template<typename T> static void Release(T*& value) {
     if (value) { value->Release(); value = nullptr; }
+}
+
+// Opt-in present-phase timing (OPTIMUM_XESS_FG_TIMING=1): mean and max milliseconds
+// per phase, written to stderr every 120 presents. Diagnostics only.
+namespace {
+enum TimingPhase { kAllocatorWait, kRecord, kSubmit, kPresent, kRetire, kSleep, kPhaseCount };
+const char* const kPhaseNames[kPhaseCount] = {
+    "allocator_wait", "record", "submit", "dxgi_present", "retire", "xell_sleep" };
+struct PresentTiming {
+    bool enabled = std::getenv("OPTIMUM_XESS_FG_TIMING") != nullptr;
+    double frequency = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return static_cast<double>(f.QuadPart); }();
+    double sum[kPhaseCount]{};
+    double max[kPhaseCount]{};
+    uint32_t presents = 0;
+    // DX12 queue work of one present (our copy list through the list submitted
+    // after Present, so it includes the SDK's interpolation on this queue),
+    // placed on the CPU clock through the queue's clock calibration.
+    double gpuSum = 0, gpuMax = 0;
+    double copiesSum = 0;
+    double startAfterEnterSum = 0;
+    double exitAfterGpuEndSum = 0;
+    uint32_t gpuSamples = 0;
+    double sequence[24]{};
+    uint32_t sequenceCount = 0;
+    int64_t Now() const { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
+    void Add(TimingPhase phase, int64_t start, int64_t end) {
+        double ms = (end - start) * 1000.0 / frequency;
+        sum[phase] += ms;
+        if (ms > max[phase]) max[phase] = ms;
+        if (phase == kPresent && sequenceCount < 24) sequence[sequenceCount++] = ms;
+    }
+    void EndPresent() {
+        if (++presents < 120) return;
+        std::fprintf(stderr, "[xess-fg timing] presents=%u", presents);
+        for (int i = 0; i < kPhaseCount; i++)
+            std::fprintf(stderr, " %s_mean_ms=%.3f %s_max_ms=%.3f", kPhaseNames[i], sum[i] / presents,
+                kPhaseNames[i], max[i]);
+        if (gpuSamples)
+            std::fprintf(stderr, " dx12_gpu_mean_ms=%.3f dx12_gpu_max_ms=%.3f gpu_start_after_present_enter_ms=%.3f"
+                " present_exit_after_gpu_end_ms=%.3f dx12_our_copies_ms=%.3f", gpuSum / gpuSamples, gpuMax,
+                startAfterEnterSum / gpuSamples, exitAfterGpuEndSum / gpuSamples, copiesSum / gpuSamples);
+        std::fprintf(stderr, " sequence_ms=");
+        for (uint32_t i = 0; i < sequenceCount; i++) std::fprintf(stderr, i ? ",%.1f" : "%.1f", sequence[i]);
+        std::fputc('\n', stderr);
+        std::fflush(stderr);
+        *this = PresentTiming{};
+    }
+};
+PresentTiming timing;
 }
 
 struct OptimumXessFg {
@@ -33,10 +84,21 @@ struct OptimumXessFg {
     HANDLE completionEvent = nullptr;
     uint64_t completionValue = 0;
     uint32_t nextAllocator = 0;
+    uint64_t lastDoneSignalled = 0;
     bool allowTearing = false;
+    // Timing only (OPTIMUM_XESS_FG_TIMING): two timestamps per allocator slot.
+    ID3D12QueryHeap* queryHeap = nullptr;
+    ID3D12Resource* queryReadback = nullptr;
+    std::array<ID3D12CommandAllocator*, 3> postAllocators{};
+    ID3D12GraphicsCommandList* postList = nullptr;
+    uint64_t gpuFrequency = 0;
+    std::array<int64_t, 3> presentEnter{};
+    std::array<int64_t, 3> presentExit{};
+    std::array<bool, 3> slotTimed{};
     xell_context_handle_t xell = nullptr;
     xefg_swapchain_handle_t fg = nullptr;
     uint32_t width = 0, height = 0;
+    uint32_t maxInterpolations = 0, activeInterpolations = 0;
     bool started = false;
 
     decltype(&xellD3D12CreateContext) createXell = nullptr;
@@ -52,6 +114,7 @@ struct OptimumXessFg {
     decltype(&xefgSwapChainSetEnabled) setEnabled = nullptr;
     decltype(&xefgSwapChainSetPresentId) setPresentId = nullptr;
     decltype(&xefgSwapChainSetNumInterpolatedFrames) setInterpolations = nullptr;
+    decltype(&xefgSwapChainGetProperties) getProperties = nullptr;
     decltype(&xefgSwapChainSetUiCompositionState) setUi = nullptr;
     decltype(&xefgSwapChainD3D12TagFrameResource) tagResource = nullptr;
     decltype(&xefgSwapChainTagFrameConstants) tagConstants = nullptr;
@@ -113,6 +176,7 @@ static bool LoadRuntime(OptimumXessFg* value) {
     LOAD(fgModule, setEnabled, xefgSwapChainSetEnabled);
     LOAD(fgModule, setPresentId, xefgSwapChainSetPresentId);
     LOAD(fgModule, setInterpolations, xefgSwapChainSetNumInterpolatedFrames);
+    LOAD(fgModule, getProperties, xefgSwapChainGetProperties);
     LOAD(fgModule, setUi, xefgSwapChainSetUiCompositionState);
     LOAD(fgModule, tagResource, xefgSwapChainD3D12TagFrameResource);
     LOAD(fgModule, tagConstants, xefgSwapChainTagFrameConstants);
@@ -122,6 +186,7 @@ static bool LoadRuntime(OptimumXessFg* value) {
         value->sleep && value->marker && value->createFg && value->destroyFg &&
         value->setLatency && value->initSwapchain && value->getSwapchain &&
         value->setEnabled && value->setPresentId && value->setInterpolations &&
+        value->getProperties &&
         value->setUi && value->tagResource && value->tagConstants &&
         value->presentStatus;
 }
@@ -143,6 +208,10 @@ extern "C" __declspec(dllexport) void OptimumXessFgDestroy(OptimumXessFg* value)
     if (value->fg && value->setEnabled) value->setEnabled(value->fg, 0);
     Release(value->commandList);
     for (auto*& allocator : value->allocators) Release(allocator);
+    Release(value->postList);
+    for (auto*& allocator : value->postAllocators) Release(allocator);
+    Release(value->queryReadback);
+    Release(value->queryHeap);
     Release(value->completionFence);
     if (value->completionEvent) CloseHandle(value->completionEvent);
     Release(value->swapchain);
@@ -188,6 +257,18 @@ extern "C" __declspec(dllexport) int OptimumXessFgCreate(uint64_t adapterLuid,
         if (xell != 0 || !value->xell) { error = xell ? xell : -8; break; }
         int fg = static_cast<int>(value->createFg(value->device, &value->fg));
         if (fg != 0 || !value->fg) { error = fg ? fg : -9; break; }
+        if (std::getenv("OPTIMUM_XESS_FG_LOG")) {
+            using SetLogging = xefg_swapchain_result_t (*)(xefg_swapchain_handle_t,
+                xefg_swapchain_logging_level_t, xefg_swapchain_app_log_callback_t, void*);
+            auto setLogging = reinterpret_cast<SetLogging>(reinterpret_cast<void*>(
+                GetProcAddress(value->fgModule, "xefgSwapChainSetLoggingCallback")));
+            if (setLogging)
+                setLogging(value->fg, XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG,
+                    [](const char* message, xefg_swapchain_logging_level_t level, void*) {
+                        std::fprintf(stderr, "[xess-fg sdk %d] %s\n", static_cast<int>(level), message);
+                        std::fflush(stderr);
+                    }, nullptr);
+        }
         fg = static_cast<int>(value->setLatency(value->fg, value->xell));
         if (fg != 0) { error = fg; break; }
         xell_sleep_params_t mode{};
@@ -240,11 +321,16 @@ extern "C" __declspec(dllexport) int OptimumXessFgStart(OptimumXessFg* value,
     desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     desc.Flags = value->allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     xefg_swapchain_d3d12_init_params_t params{};
-    params.maxInterpolatedFrames = 1;
+    params.maxInterpolatedFrames = XEFG_SWAPCHAIN_USE_MAX_SUPPORTED_INTERPOLATED_FRAMES;
     params.uiMode = XEFG_SWAPCHAIN_UI_MODE_HUDLESS_UITEXTURE;
     int code = static_cast<int>(value->initSwapchain(value->fg, window, &desc, nullptr,
         value->queue, value->factory, &params));
     if (code < 0) return code;
+    xefg_swapchain_properties_t properties{};
+    code = static_cast<int>(value->getProperties(value->fg, &properties));
+    if (code < 0 || !properties.maxSupportedInterpolations)
+        return code < 0 ? code : -4;
+    value->maxInterpolations = properties.maxSupportedInterpolations;
     code = static_cast<int>(value->getSwapchain(value->fg,
         __uuidof(IDXGISwapChain4), reinterpret_cast<void**>(&value->swapchain)));
     if (code < 0 || !value->swapchain) return code < 0 ? code : -2;
@@ -278,6 +364,19 @@ extern "C" __declspec(dllexport) int OptimumXessFgSetEnabled(OptimumXessFg* valu
     uint32_t enabled) {
     return value && value->fg && value->started ?
         static_cast<int>(value->setEnabled(value->fg, enabled ? 1 : 0)) : -1;
+}
+
+extern "C" __declspec(dllexport) int OptimumXessFgSetGeneratedFrames(
+    OptimumXessFg* value, uint32_t requested, uint32_t* effective, uint32_t* maximum) {
+    if (!value || !value->fg || !value->started || !effective || !maximum ||
+        !value->maxInterpolations) return -1;
+    *maximum = value->maxInterpolations;
+    *effective = requested < 1 ? 1 :
+        requested > value->maxInterpolations ? value->maxInterpolations : requested;
+    if (*effective == value->activeInterpolations) return 0;
+    int code = static_cast<int>(value->setInterpolations(value->fg, *effective));
+    if (code >= 0) value->activeInterpolations = *effective;
+    return code;
 }
 
 // VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT is a handle to a D3D12
@@ -373,10 +472,67 @@ static void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource
     list->ResourceBarrier(1, &barrier);
 }
 
+namespace {
+bool EnsureGpuTiming(OptimumXessFg* value) {
+    if (value->postList) return true;
+    D3D12_QUERY_HEAP_DESC heap{};
+    heap.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    heap.Count = 9;
+    if (FAILED(value->device->CreateQueryHeap(&heap, IID_PPV_ARGS(&value->queryHeap)))) return false;
+    D3D12_HEAP_PROPERTIES readbackHeap{};
+    readbackHeap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = 9 * sizeof(uint64_t);
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = 1;
+    buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(value->device->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &buffer,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&value->queryReadback)))) return false;
+    for (auto*& allocator : value->postAllocators)
+        if (FAILED(value->device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                IID_PPV_ARGS(&allocator)))) return false;
+    if (FAILED(value->device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+            value->postAllocators[0], nullptr, IID_PPV_ARGS(&value->postList)))) return false;
+    value->postList->Close();
+    return SUCCEEDED(value->queue->GetTimestampFrequency(&value->gpuFrequency)) && value->gpuFrequency;
+}
+
+// The slot's previous present has completed on the DX12 queue: its two
+// timestamps are final and go on the CPU clock through a fresh calibration.
+void HarvestGpuTiming(OptimumXessFg* value, uint32_t slot) {
+    if (!value->slotTimed[slot]) return;
+    value->slotTimed[slot] = false;
+    uint64_t* mapped = nullptr;
+    D3D12_RANGE range{slot * 3 * sizeof(uint64_t), (slot * 3 + 3) * sizeof(uint64_t)};
+    if (FAILED(value->queryReadback->Map(0, &range, reinterpret_cast<void**>(&mapped)))) return;
+    uint64_t gpuStart = mapped[slot * 3], gpuCopiesEnd = mapped[slot * 3 + 1], gpuEnd = mapped[slot * 3 + 2];
+    D3D12_RANGE none{0, 0};
+    value->queryReadback->Unmap(0, &none);
+    uint64_t gpuCalibration = 0, cpuCalibration = 0;
+    if (gpuEnd <= gpuStart || FAILED(value->queue->GetClockCalibration(&gpuCalibration, &cpuCalibration))) return;
+    auto toCpu = [&](uint64_t gpu) {
+        return static_cast<double>(cpuCalibration) -
+            (static_cast<double>(gpuCalibration) - static_cast<double>(gpu)) * timing.frequency / value->gpuFrequency;
+    };
+    double msPerTick = 1000.0 / timing.frequency;
+    double duration = (gpuEnd - gpuStart) * 1000.0 / value->gpuFrequency;
+    timing.gpuSum += duration;
+    if (gpuCopiesEnd >= gpuStart && gpuCopiesEnd <= gpuEnd)
+        timing.copiesSum += (gpuCopiesEnd - gpuStart) * 1000.0 / value->gpuFrequency;
+    if (duration > timing.gpuMax) timing.gpuMax = duration;
+    timing.startAfterEnterSum += (toCpu(gpuStart) - value->presentEnter[slot]) * msPerTick;
+    timing.exitAfterGpuEndSum += (value->presentExit[slot] - toCpu(gpuEnd)) * msPerTick;
+    timing.gpuSamples++;
+}
+}
+
 // The Vulkan queue signals readyFenceValue after releasing shared-image
 // ownership. The SDK records its ONLY_NOW input copies into this command list;
 // doneFenceValue is signalled only after its proxy Present has queued work.
-extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
+static int PresentFrame(OptimumXessFg* value,
     const OptimumXessFrame* frame, uint32_t* framesPresented,
     int* frameGenResult, uint32_t* frameGenEnabled) {
     if (framesPresented) *framesPresented = 0;
@@ -403,6 +559,8 @@ extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
         motion.Format != DXGI_FORMAT_R16G16_FLOAT ||
         depth.Format != DXGI_FORMAT_D32_FLOAT) return -2;
 
+    const bool timed = timing.enabled;
+    int64_t phaseStart = timed ? timing.Now() : 0;
     uint32_t slot = value->nextAllocator++ % static_cast<uint32_t>(value->allocators.size());
     uint64_t completion = value->allocatorCompletion[slot];
     if (completion && value->completionFence->GetCompletedValue() < completion) {
@@ -411,10 +569,14 @@ extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
         if (FAILED(result)) return static_cast<int>(result);
         if (WaitForSingleObject(value->completionEvent, 10000) != WAIT_OBJECT_0) return -3;
     }
+    if (timed) { int64_t now = timing.Now(); timing.Add(kAllocatorWait, phaseStart, now); phaseStart = now; }
+    const bool gpuTimed = timed && EnsureGpuTiming(value);
+    if (gpuTimed) HarvestGpuTiming(value, slot);
     HRESULT result = value->allocators[slot]->Reset();
     if (FAILED(result)) return static_cast<int>(result);
     result = value->commandList->Reset(value->allocators[slot], nullptr);
     if (FAILED(result)) return static_cast<int>(result);
+    if (gpuTimed) value->commandList->EndQuery(value->queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 3);
 
     std::array<ID3D12Resource*, 5> inputs = {
         frame->color, frame->depth, frame->motion, frame->hudless, frame->ui
@@ -459,6 +621,7 @@ extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
     Transition(value->commandList, backbuffer, D3D12_RESOURCE_STATE_COPY_DEST,
         D3D12_RESOURCE_STATE_PRESENT);
     Release(backbuffer);
+    if (gpuTimed) value->commandList->EndQuery(value->queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 3 + 1);
     result = value->commandList->Close();
     if (FAILED(result)) return static_cast<int>(result);
 
@@ -473,19 +636,44 @@ extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
     constants.resetHistory = frame->reset;
     int code = static_cast<int>(value->tagConstants(value->fg, frame->frameId, &constants));
     if (code < 0) return code;
+    if (timed) { int64_t now = timing.Now(); timing.Add(kRecord, phaseStart, now); phaseStart = now; }
     result = value->queue->Wait(value->sharedFence, frame->readyFenceValue);
     if (FAILED(result)) return static_cast<int>(result);
     ID3D12CommandList* lists[] = {value->commandList};
     value->queue->ExecuteCommandLists(1, lists);
     int presentIdCode = static_cast<int>(value->setPresentId(value->fg, frame->frameId));
     uint32_t flags = !frame->vsync && value->allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0;
+    if (timed) { int64_t now = timing.Now(); timing.Add(kSubmit, phaseStart, now); phaseStart = now; }
+    if (gpuTimed) value->presentEnter[slot] = timing.Now();
     result = presentIdCode >= 0 ? value->swapchain->Present(frame->vsync ? 1 : 0, flags) : E_FAIL;
+    if (timed) { int64_t now = timing.Now(); timing.Add(kPresent, phaseStart, now); phaseStart = now; }
+    if (gpuTimed) {
+        value->presentExit[slot] = timing.Now();
+        if (SUCCEEDED(value->postAllocators[slot]->Reset()) &&
+            SUCCEEDED(value->postList->Reset(value->postAllocators[slot], nullptr))) {
+            value->postList->EndQuery(value->queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 3 + 2);
+            value->postList->ResolveQueryData(value->queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, slot * 3, 3,
+                value->queryReadback, slot * 3 * sizeof(uint64_t));
+            if (SUCCEEDED(value->postList->Close())) {
+                ID3D12CommandList* post[] = {value->postList};
+                value->queue->ExecuteCommandLists(1, post);
+                value->slotTimed[slot] = true;
+            }
+        }
+    }
     // Even a failed present must release Vulkan's shared images after the
     // already-submitted copy/tag list has finished on this queue.
     HRESULT handoff = value->queue->Signal(value->sharedFence, frame->doneFenceValue);
+    if (SUCCEEDED(handoff)) value->lastDoneSignalled = frame->doneFenceValue;
     uint64_t finished = ++value->completionValue;
     HRESULT retire = value->queue->Signal(value->completionFence, finished);
     value->allocatorCompletion[slot] = finished;
+    // Diagnostics (OPTIMUM_XESS_FG_SERIALIZE): finish this present's DX12 work before
+    // returning, so its GPU time is measured without the Vulkan queue competing.
+    static const bool serialize = std::getenv("OPTIMUM_XESS_FG_SERIALIZE") != nullptr;
+    if (serialize && SUCCEEDED(retire) &&
+        SUCCEEDED(value->completionFence->SetEventOnCompletion(finished, value->completionEvent)))
+        WaitForSingleObject(value->completionEvent, 10000);
     if (FAILED(handoff)) return static_cast<int>(handoff);
     if (FAILED(retire)) return static_cast<int>(retire);
     if (presentIdCode < 0) return presentIdCode;
@@ -496,7 +684,25 @@ extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
     *framesPresented = status.framesPresented;
     *frameGenResult = static_cast<int>(status.frameGenResult);
     *frameGenEnabled = status.isFrameGenEnabled;
+    if (timed) { timing.Add(kRetire, phaseStart, timing.Now()); timing.EndPresent(); }
     return 0;
+}
+
+// Vulkan may already wait on doneFenceValue (the next frame's submission is gated on
+// it), so every call signals it, failed ones included. A failed call first waits for
+// readyFenceValue on this queue: the shared timeline must never move backwards.
+extern "C" __declspec(dllexport) int OptimumXessFgPresent(OptimumXessFg* value,
+    const OptimumXessFrame* frame, uint32_t* framesPresented,
+    int* frameGenResult, uint32_t* frameGenEnabled) {
+    int code = PresentFrame(value, frame, framesPresented, frameGenResult, frameGenEnabled);
+    if (value && frame && value->queue && value->sharedFence &&
+        frame->doneFenceValue > value->lastDoneSignalled &&
+        frame->doneFenceValue > frame->readyFenceValue) {
+        value->queue->Wait(value->sharedFence, frame->readyFenceValue);
+        if (SUCCEEDED(value->queue->Signal(value->sharedFence, frame->doneFenceValue)))
+            value->lastDoneSignalled = frame->doneFenceValue;
+    }
+    return code;
 }
 
 extern "C" __declspec(dllexport) int OptimumXessFgSetLatencyMode(OptimumXessFg* value,
@@ -510,8 +716,11 @@ extern "C" __declspec(dllexport) int OptimumXessFgSetLatencyMode(OptimumXessFg* 
 
 extern "C" __declspec(dllexport) int OptimumXessFgSleep(OptimumXessFg* value,
     uint32_t frameId) {
-    return value && value->xell ?
-        static_cast<int>(value->sleep(value->xell, frameId)) : -1;
+    if (!value || !value->xell) return -1;
+    int64_t start = timing.enabled ? timing.Now() : 0;
+    int result = static_cast<int>(value->sleep(value->xell, frameId));
+    if (timing.enabled) timing.Add(kSleep, start, timing.Now());
+    return result;
 }
 
 extern "C" __declspec(dllexport) int OptimumXessFgMarker(OptimumXessFg* value,

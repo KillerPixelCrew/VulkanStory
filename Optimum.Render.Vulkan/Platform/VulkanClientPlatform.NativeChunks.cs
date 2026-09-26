@@ -200,6 +200,7 @@ public partial class VulkanClientPlatform
         chunkScopeMotionOnly = string.Equals(chunkScopeName, "chunk-liquid-motion", StringComparison.Ordinal);
         chunkScopeSlots = ChunkColorSlots(target);
         chunkScopePassOpen = false;
+        device.GpuMark(chunkScopeName);
         return true;
     }
 
@@ -216,6 +217,7 @@ public partial class VulkanClientPlatform
             SetPassContext(chunkScopeOuterContext, chunkScopeOuterFlags);
         }
         chunkScopeTarget = null;
+        device?.GpuMark(StageGpuLabel(CurrentRenderStage, begin: true));
     }
 
     /// <summary>

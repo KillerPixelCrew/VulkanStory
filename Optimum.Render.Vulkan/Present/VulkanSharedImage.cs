@@ -16,12 +16,12 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         ExternalMemoryHandleTypeFlags.D3D12ResourceBit;
     private const uint ExternalQueueFamily = uint.MaxValue - 1;
     private readonly VulkanContext _context;
-    private readonly XessFgRuntime _runtime;
+    private readonly IDx12SharedRuntime _runtime;
     private readonly KhrExternalMemoryWin32 _external;
     private bool _disposed;
     private bool _releasedToDx12;
 
-    private VulkanSharedImage(VulkanContext context, XessFgRuntime runtime,
+    private VulkanSharedImage(VulkanContext context, IDx12SharedRuntime runtime,
         KhrExternalMemoryWin32 external, Image image, DeviceMemory memory,
         nint handle, nint resource, uint width, uint height, Format format)
     {
@@ -51,7 +51,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         if (source.Width != Width || source.Height != Height ||
             (source.Usage & ImageUsageFlags.TransferSrcBit) == 0)
         {
-            reason = "source extent or transfer usage does not match XeSS-FG image";
+            reason = "source extent or transfer usage does not match shared DX12 image";
             return false;
         }
         bool depth = Format == Format.D32Sfloat;
@@ -62,7 +62,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
                 source.Aspect != ImageAspectFlags.DepthBit :
             source.Aspect != ImageAspectFlags.ColorBit || !colorFormatMatches)
         {
-            reason = "source aspect or format is incompatible with XeSS-FG image";
+            reason = "source aspect or format is incompatible with shared DX12 image";
             return false;
         }
         _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice,
@@ -84,7 +84,10 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
     /// on the semaphore value signalled by the submission containing this copy.
     /// On reuse, that submission must first wait for DX12 to return ownership.
     /// </summary>
-    public void RecordFlippedCopy(CommandBuffer commands, VulkanTexture source)
+    public void RecordFlippedCopy(CommandBuffer commands, VulkanTexture source) =>
+        RecordCopyFrom(commands, source, flip: true);
+
+    public void RecordCopyFrom(CommandBuffer commands, VulkanTexture source, bool flip)
     {
         if (!CanBlitFrom(source, out string reason))
             throw new InvalidOperationException(reason);
@@ -117,8 +120,8 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
             SrcSubresource = new ImageSubresourceLayers(source.Aspect, 0, 0, 1),
             DstSubresource = new ImageSubresourceLayers(aspect, 0, 0, 1),
         };
-        blit.SrcOffsets.Element0 = new Offset3D(0, (int)Height, 0);
-        blit.SrcOffsets.Element1 = new Offset3D((int)Width, 0, 1);
+        blit.SrcOffsets.Element0 = new Offset3D(0, flip ? (int)Height : 0, 0);
+        blit.SrcOffsets.Element1 = new Offset3D((int)Width, flip ? 0 : (int)Height, 1);
         blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
         blit.DstOffsets.Element1 = new Offset3D((int)Width, (int)Height, 1);
         _context.Api.CmdBlitImage(commands, source.Image, ImageLayout.TransferSrcOptimal,
@@ -143,9 +146,111 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         _releasedToDx12 = true;
     }
 
-    public static bool TryCreate(VulkanContext context, XessFgRuntime runtime,
+    /// <summary>Establishes GENERAL layout and external ownership before the
+    /// first DX12 write to an imported output image.</summary>
+    public void RecordPrepareForDx12(CommandBuffer commands)
+    {
+        if (_releasedToDx12) return;
+        if (Format == Format.D32Sfloat)
+            throw new InvalidOperationException("DX12 output image must have a color format");
+        var acquire = new ImageMemoryBarrier2
+        {
+            SType = StructureType.ImageMemoryBarrier2,
+            SrcStageMask = PipelineStageFlags2.None,
+            SrcAccessMask = AccessFlags2.None,
+            DstStageMask = PipelineStageFlags2.AllCommandsBit,
+            DstAccessMask = AccessFlags2.None,
+            OldLayout = ImageLayout.Undefined,
+            NewLayout = ImageLayout.General,
+            SrcQueueFamilyIndex = ExternalQueueFamily,
+            DstQueueFamilyIndex = _context.GraphicsQueueFamily,
+            Image = Image,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
+        };
+        var dependency = new DependencyInfo
+        {
+            SType = StructureType.DependencyInfo,
+            ImageMemoryBarrierCount = 1,
+            PImageMemoryBarriers = &acquire,
+        };
+        _context.Api.CmdPipelineBarrier2(commands, &dependency);
+        var release = acquire;
+        release.SrcStageMask = PipelineStageFlags2.AllCommandsBit;
+        release.DstStageMask = PipelineStageFlags2.None;
+        release.OldLayout = ImageLayout.General;
+        release.SrcQueueFamilyIndex = _context.GraphicsQueueFamily;
+        release.DstQueueFamilyIndex = ExternalQueueFamily;
+        dependency.PImageMemoryBarriers = &release;
+        _context.Api.CmdPipelineBarrier2(commands, &dependency);
+        _releasedToDx12 = true;
+    }
+
+    /// <summary>Copies a DX12-produced image back into a Vulkan texture after the
+    /// submission waits on the shared DX12 fence.</summary>
+    public void RecordCopyTo(CommandBuffer commands, VulkanTexture destination)
+    {
+        if (!_releasedToDx12)
+            throw new InvalidOperationException("DX12 output image was not released for writing");
+        if (destination.Width != Width || destination.Height != Height ||
+            destination.Format != Format ||
+            (destination.Usage & ImageUsageFlags.TransferDstBit) == 0 ||
+            Format == Format.D32Sfloat)
+            throw new InvalidOperationException("DX12 output cannot copy to Vulkan target");
+        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice,
+            Format, out FormatProperties properties);
+        if ((properties.OptimalTilingFeatures &
+             (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit)) !=
+            (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit))
+            throw new InvalidOperationException("DX12 output format does not support Vulkan blit");
+        var acquire = new ImageMemoryBarrier2
+        {
+            SType = StructureType.ImageMemoryBarrier2,
+            SrcStageMask = PipelineStageFlags2.None,
+            SrcAccessMask = AccessFlags2.None,
+            DstStageMask = PipelineStageFlags2.TransferBit,
+            DstAccessMask = AccessFlags2.TransferReadBit,
+            OldLayout = ImageLayout.General,
+            NewLayout = ImageLayout.TransferSrcOptimal,
+            SrcQueueFamilyIndex = ExternalQueueFamily,
+            DstQueueFamilyIndex = _context.GraphicsQueueFamily,
+            Image = Image,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
+        };
+        var dependency = new DependencyInfo
+        {
+            SType = StructureType.DependencyInfo,
+            ImageMemoryBarrierCount = 1,
+            PImageMemoryBarriers = &acquire,
+        };
+        _context.Api.CmdPipelineBarrier2(commands, &dependency);
+        var blit = new ImageBlit
+        {
+            SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+            DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+        };
+        blit.SrcOffsets.Element0 = new Offset3D(0, 0, 0);
+        blit.SrcOffsets.Element1 = new Offset3D((int)Width, (int)Height, 1);
+        blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
+        blit.DstOffsets.Element1 = new Offset3D((int)Width, (int)Height, 1);
+        _context.Api.CmdBlitImage(commands, Image, ImageLayout.TransferSrcOptimal,
+            destination.Image, ImageLayout.TransferDstOptimal, 1, &blit, Filter.Nearest);
+        var release = acquire;
+        release.SrcStageMask = PipelineStageFlags2.TransferBit;
+        release.SrcAccessMask = AccessFlags2.TransferReadBit;
+        release.DstStageMask = PipelineStageFlags2.None;
+        release.DstAccessMask = AccessFlags2.None;
+        release.OldLayout = ImageLayout.TransferSrcOptimal;
+        release.NewLayout = ImageLayout.General;
+        release.SrcQueueFamilyIndex = _context.GraphicsQueueFamily;
+        release.DstQueueFamilyIndex = ExternalQueueFamily;
+        dependency.PImageMemoryBarriers = &release;
+        _context.Api.CmdPipelineBarrier2(commands, &dependency);
+        _releasedToDx12 = true;
+    }
+
+    public static bool TryCreate(VulkanContext context, IDx12SharedRuntime runtime,
         uint width, uint height, Format format, out VulkanSharedImage? result,
-        out string reason)
+        out string reason, bool writable = false)
     {
         result = null;
         if (!OperatingSystem.IsWindows() || width == 0 || height == 0)
@@ -172,6 +277,8 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
                 SType = StructureType.PhysicalDeviceExternalImageFormatInfo,
                 HandleType = SharedResource,
             };
+            ImageUsageFlags usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.SampledBit;
+            if (writable) usage |= ImageUsageFlags.TransferSrcBit | ImageUsageFlags.StorageBit;
             var formatInfo = new PhysicalDeviceImageFormatInfo2
             {
                 SType = StructureType.PhysicalDeviceImageFormatInfo2,
@@ -179,7 +286,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
                 Format = format,
                 Type = ImageType.Type2D,
                 Tiling = ImageTiling.Optimal,
-                Usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.SampledBit,
+                Usage = usage,
             };
             var externalProperties = new ExternalImageFormatProperties
             {
@@ -192,14 +299,14 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
             };
             VulkanResult.Check(api.GetPhysicalDeviceImageFormatProperties2(context.PhysicalDevice,
                     &formatInfo, &formatProperties),
-                "vkGetPhysicalDeviceImageFormatProperties2 for XeSS-FG sharing");
+                "vkGetPhysicalDeviceImageFormatProperties2 for DX12 sharing");
             if ((externalProperties.ExternalMemoryProperties.ExternalMemoryFeatures &
                  ExternalMemoryFeatureFlags.ImportableBit) == 0 ||
                 (externalProperties.ExternalMemoryProperties.CompatibleHandleTypes &
                  SharedResource) == 0)
                 throw new InvalidOperationException("D3D12 resource import is unsupported for " + format);
 
-            int createResult = runtime.CreateSharedImage(width, height, format,
+            int createResult = runtime.CreateSharedImage(width, height, format, writable,
                 out handle, out resource);
             if (createResult != 0 || handle == 0 || resource == 0)
                 throw new InvalidOperationException("D3D12 shared resource creation failed (" +
@@ -221,12 +328,12 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
                 ArrayLayers = 1,
                 Samples = SampleCountFlags.Count1Bit,
                 Tiling = ImageTiling.Optimal,
-                Usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.SampledBit,
+                Usage = usage,
                 SharingMode = SharingMode.Exclusive,
                 InitialLayout = ImageLayout.Undefined,
             };
             VulkanResult.Check(api.CreateImage(context.Device, &imageInfo, null, out image),
-                "vkCreateImage for XeSS-FG sharing");
+                "vkCreateImage for DX12 sharing");
             api.GetImageMemoryRequirements(context.Device, image, out MemoryRequirements requirements);
             var handleProperties = new MemoryWin32HandlePropertiesKHR
             {
@@ -234,7 +341,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
             };
             VulkanResult.Check(external.GetMemoryWin32HandleProperties(context.Device,
                     SharedResource, handle, &handleProperties),
-                "vkGetMemoryWin32HandlePropertiesKHR for XeSS-FG sharing");
+                "vkGetMemoryWin32HandlePropertiesKHR for DX12 sharing");
             api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice,
                 out PhysicalDeviceMemoryProperties memoryProperties);
             uint memoryType = uint.MaxValue;
@@ -271,9 +378,9 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
                 MemoryTypeIndex = memoryType,
             };
             VulkanResult.Check(api.AllocateMemory(context.Device, &allocation, null, out memory),
-                "vkAllocateMemory for XeSS-FG sharing");
+                "vkAllocateMemory for DX12 sharing");
             VulkanResult.Check(api.BindImageMemory(context.Device, image, memory, 0),
-                "vkBindImageMemory for XeSS-FG sharing");
+                "vkBindImageMemory for DX12 sharing");
             result = new VulkanSharedImage(context, runtime, external, image, memory,
                 handle, resource, width, height, format);
             reason = "ready";

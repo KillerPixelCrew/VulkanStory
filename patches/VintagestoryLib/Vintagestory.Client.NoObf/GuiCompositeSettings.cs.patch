@@ -84,7 +84,7 @@ index 4d08f849..e0df7b93 100644
  	}
  
  	internal bool OpenSettingsMenu()
-@@ -1742,6 +1764,384 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1742,6 +1764,400 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -197,6 +197,11 @@ index 4d08f849..e0df7b93 100644
 +            frameGeneratorLabels[i] = Lang.Get("optimum-frame-generation-" + frameGenerators[i]);
 +        AddOptimumDropdownRow("optimum-frame-generation", "optimum-frame-generation-tooltip",
 +            frameGenerators, frameGeneratorLabels, 0, onOptimumFrameGenerationChanged, "optFrameGeneration");
++        string[] frameMultipliers = Vintagestory.API.Config.OptimumConfig.FrameGenerationMultiplierNamesFor(Vintagestory.API.Config.OptimumConfig.FrameGeneration);
++        string[] frameMultiplierLabels = new string[frameMultipliers.Length];
++        for (int i = 0; i < frameMultipliers.Length; i++) frameMultiplierLabels[i] = frameMultipliers[i] + "×";
++        AddOptimumDropdownRow("optimum-frame-generation-multiplier", "optimum-frame-generation-multiplier-tooltip",
++            frameMultipliers, frameMultiplierLabels, 0, onOptimumFrameGenerationMultiplierChanged, "optFrameMultiplier");
 +        AddOptimumSwitchRow("optimum-fps-counter", "optimum-fps-counter-tooltip",
 +            onOptimumFpsCounterChanged, "optFpsCounter");
 +        string[] latencyModes = Vintagestory.API.Config.OptimumConfig.LowLatencyModeNames;
@@ -226,6 +231,8 @@ index 4d08f849..e0df7b93 100644
 +		composer.GetDropDown("optUpscalerQuality").SetSelectedIndex(Math.Max(0, upscalerQualityIndex));
 +        composer.GetDropDown("optFrameGeneration").SetSelectedIndex(Math.Max(0,
 +            Array.IndexOf(frameGenerators, Vintagestory.API.Config.OptimumConfig.FrameGeneration)));
++        composer.GetDropDown("optFrameMultiplier").SetSelectedIndex(Math.Max(0,
++            Array.IndexOf(frameMultipliers, Vintagestory.API.Config.OptimumConfig.FrameGenerationMultiplier.ToString())));
 +        composer.GetSwitch("optFpsCounter").SetValue(Vintagestory.API.Config.OptimumConfig.ShowFpsCounter);
 +        composer.GetDropDown("optLowLatency").SetSelectedIndex(Math.Max(0,
 +            Array.IndexOf(latencyModes, Vintagestory.API.Config.OptimumConfig.LowLatencyMode)));
@@ -370,6 +377,15 @@ index 4d08f849..e0df7b93 100644
 +        ScreenManager.Platform.ApplyOptimumUpscalerSettings();
 +        handler.ReloadShaders();
 +        OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++        OnVulkanOptions(true);
++    }
++    private void onOptimumFrameGenerationMultiplierChanged(string code, bool selected)
++    {
++        if (!int.TryParse(code, out int multiplier)) return;
++        multiplier = Math.Clamp(multiplier, 2, 6);
++        if (Vintagestory.API.Config.OptimumConfig.FrameGenerationMultiplier == multiplier) return;
++        Vintagestory.API.Config.OptimumConfig.FrameGenerationMultiplier = multiplier;
++        Vintagestory.API.Config.OptimumConfig.Save();
 +    }
 +    private void onOptimumFpsCounterChanged(bool on)
 +    {
@@ -469,7 +485,7 @@ index 4d08f849..e0df7b93 100644
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
-@@ -1820,4 +2220,81 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1820,4 +2236,81 @@ public class GuiCompositeSettings : GuiComposite
  		OnDeveloperOptions(on: true);
  		return true;
  	}

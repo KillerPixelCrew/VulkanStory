@@ -1,8 +1,10 @@
 # Native Vulkan upscaler integration
 
 The selectable providers are **DLSS Super Resolution**, **XeSS Super Resolution**,
-and **FSR 3.1 Super Resolution**. Reflex and frame generation are separate later
-work. The existing FSR 1 render-scale control remains available independently.
+**FSR 3.1 Super Resolution**, and **FSR 4 Super Resolution** through DX12 interop.
+Frame generation and vendor low-latency integrations are documented separately in
+[`frame-generation.md`](frame-generation.md). The existing FSR 1 render-scale
+control remains available independently.
 
 ## Shared frame contract
 
@@ -126,11 +128,21 @@ The FSR GPU test covers all five preset queries, HDR readback, RGBA-to-RG motion
 conversion, in-flight context retirement, size and quality changes, and Vulkan
 validation. Visual acceptance on AMD and Intel hardware remains necessary.
 
-The newer FSR 4 ML runtime in AMD FidelityFX SDK 2.3.0 supports DirectX 12 but
-does not support Vulkan. Consequently the Vulkan selector uses FSR 3.1 on both
-older and newer hardware; no FSR 4 mode is offered until AMD releases Vulkan
-support. The AMD signed binary supplied here is Windows only. Frame generation
-remains a separate later integration.
+AMD FSR 4 is a separate upscaler choice. The Vulkan renderer uses a matching
+DX12 device on the same adapter because FidelityFX SDK 2.3 has no FSR 4 Vulkan
+backend. Each frame, it copies linear RGBA16F color, D32 depth and RG16F motion
+into shared D3D12 resources, dispatches the signed FSR 4 provider, and copies
+the shared RGBA16F output back into the Vulkan post chain. A shared timeline
+fence orders both queues without a CPU image readback. The game keeps its
+ordinary Vulkan swapchain; this interop is for Super Resolution only.
+
+The FSR 4 option requires Windows, an AMD GPU with a compatible FidelityFX
+provider, `amd_fidelityfx_upscaler_dx12.dll` and `OptimumFsr4.dll`. The build
+copies the signed runtime from `_ref/fsr/Kits/FidelityFX/signedbin` and compiles
+the bridge against that SDK; override the SDK path with `-p:Fsr4SdkDir=...`.
+The backend checks the created provider's version and refuses a legacy FSR
+provider. Failure returns to the ordinary render path. AMD hardware and visible
+image quality validation remain required for this new path.
 
 ## Frame generation preparation
 

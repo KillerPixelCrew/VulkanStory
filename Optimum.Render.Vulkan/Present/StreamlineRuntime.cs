@@ -61,8 +61,8 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     private readonly delegate* unmanaged[Cdecl]<uint, int> _beginFrame;
     private readonly delegate* unmanaged[Cdecl]<int> _reflexSleep;
     private readonly delegate* unmanaged[Cdecl]<uint, int> _marker;
-    private readonly delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, int> _setFg;
-    private readonly delegate* unmanaged[Cdecl]<uint*, uint*, int> _getFgState;
+    private readonly delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int> _setFg;
+    private readonly delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int> _getFgState;
     private readonly delegate* unmanaged[Cdecl]<int> _invalidateFrameTags;
     private readonly delegate* unmanaged[Cdecl]<int> _takePresentError;
     private readonly delegate* unmanaged[Cdecl]<CommandBuffer, StreamlineTaggedImage*, StreamlineTaggedImage*,
@@ -91,8 +91,8 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         _beginFrame = (delegate* unmanaged[Cdecl]<uint, int>)Export("OptimumSlBeginFrame");
         _reflexSleep = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlReflexSleep");
         _marker = (delegate* unmanaged[Cdecl]<uint, int>)Export("OptimumSlMarker");
-        _setFg = (delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, int>)Export("OptimumSlSetFrameGeneration");
-        _getFgState = (delegate* unmanaged[Cdecl]<uint*, uint*, int>)Export("OptimumSlGetFrameGenerationState");
+        _setFg = (delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int>)Export("OptimumSlSetFrameGeneration");
+        _getFgState = (delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int>)Export("OptimumSlGetFrameGenerationState");
         _invalidateFrameTags = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlInvalidateFrameTags");
         _takePresentError = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlTakePresentError");
         _tagFrame = (delegate* unmanaged[Cdecl]<CommandBuffer, StreamlineTaggedImage*, StreamlineTaggedImage*,
@@ -184,14 +184,17 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     internal int BeginFrame(ulong id) => _beginFrame((uint)id);
     internal int ReflexSleep() => _reflexSleep();
     internal int Marker(uint marker) => _marker(marker);
-    internal int SetFrameGeneration(bool enabled, uint width, uint height, Format colorFormat, uint buffers) =>
-        _setFg(enabled ? 1 : 0, width, height, (uint)colorFormat, buffers);
-    internal int GetFrameGenerationState(out uint status, out uint presented)
+    internal int SetFrameGeneration(bool enabled, uint generatedFrames, uint width,
+        uint height, Format colorFormat, uint buffers) =>
+        _setFg(enabled ? 1 : 0, generatedFrames, width, height, (uint)colorFormat, buffers);
+    internal int GetFrameGenerationState(out uint status, out uint presented,
+        out uint maxGenerated)
     {
-        status = 0; presented = 0;
+        status = 0; presented = 0; maxGenerated = 0;
         fixed (uint* statusPtr = &status)
         fixed (uint* presentedPtr = &presented)
-            return _getFgState(statusPtr, presentedPtr);
+        fixed (uint* maxPtr = &maxGenerated)
+            return _getFgState(statusPtr, presentedPtr, maxPtr);
     }
     internal int TakePresentError() => _takePresentError();
     internal int InvalidateFrameTags() => _invalidateFrameTags();
