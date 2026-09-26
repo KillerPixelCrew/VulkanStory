@@ -8,6 +8,9 @@ Windows 11), and development moves onto it. Work is judged by frame-time consist
 battery life, and controller-first play. Results from the RTX 4070 Laptop development system
 (an Optimus laptop whose Intel iGPU scans out) find costs; they are not the target.
 
+Players get it as a **double-click installer and launcher from GitHub Releases**: no SDKs,
+build tools, scripts, or PowerShell execution-policy changes on their machine.
+
 The project is standalone. It renders with Vulkan only and supports Windows and Linux.
 macOS is dropped. DX12 remains as an optional Windows interop subsystem for XeSS FG and
 FSR 4.
@@ -38,7 +41,54 @@ frame-generation providers: 334 FPS for FSR 3 FG, 258 FPS for DLSS-G, and 286 FP
 XeSS-FG (229 before its pacing fix). These numbers describe that system and scene; they
 are not guarantees.
 
-## Now: milestone 1 — Claw baseline, handheld preset, and power
+## Now: milestone 0 — player installer and launcher
+
+Without this, no casual player can use anything below. Today `Optimum.Installer` (an
+Avalonia GUI with EULA, options, progress, and completion pages, Velopack self-update,
+and a GitHub Releases workflow) is a **build appliance**: its prerequisites page and
+`ScriptBuildDriver` run `bootstrap.ps1`/bash to decompile the player's client and compile
+donors, which needs the .NET SDK, git, perl, python, and a decompiler on the player's PC.
+`Optimum.Launcher` already patches the official DLLs at startup (`PatchEngine`, with a
+cache and splash screen) and needs no SDK; only its donors come from the local build.
+
+1. **Decide what ships instead of the local build (blocking).** Game files and
+   Anego-derived code are not redistributable (`NOTICE`).
+   - **Option A, prebuilt transplant pack (preferred):** per supported VS version, a
+     stripped pack holding only the types and methods the Cecil manifests transplant, built
+     by us, not by the player. It still contains modified game methods, so ask Anego for
+     permission.
+   - **Option B, binary diffs:** Forge-style binpatches. Opaque, and they break on any DLL
+     change.
+   - **Option C, runtime IL transpilers:** Harmony-style, shipping only our own code. The
+     cleanest legally, but every patch has to be rewritten.
+2. **Installer without prerequisites:** remove the prerequisites page and
+   `ScriptBuildDriver` from the player flow. The steps:
+   - detect existing Vintage Story installs and their version;
+   - EULA, install location, shortcuts, and preset (desktop or handheld);
+   - download or unpack the matching pack and our binaries, and verify hashes;
+   - install side by side without touching the player's vanilla install;
+   - register uninstall.
+   Everything runs in-process C#, published self-contained (no .NET runtime to install), as
+   a Windows setup .exe and a Linux AppImage. The UI must work with touch and a controller
+   on handhelds.
+3. **Launcher as the front door:**
+   - check the VS version against the installed pack, fetch a matching pack on game
+     updates, and otherwise start vanilla with a clear message;
+   - a Vulkan 1.3 preflight with a readable error (OpenGL is being retired);
+   - self-update through Velopack;
+   - "repair" and "uninstall to vanilla".
+4. **Trust:** code-sign the installer and launcher, so SmartScreen and antivirus warnings
+   don't scare players off (e.g. Azure Trusted Signing or SignPath for open source). Publish
+   checksums, and confirm each SDK's redistribution terms: Streamline/DLSS, XeSS/XeLL,
+   FidelityFX, SDL3.
+5. **Release pipeline:** CI builds the installer, launcher, renderer, and native bridges.
+   Packs are built per VS version where the game client is available to the build (never
+   published as game binaries). Releases carry version compatibility notes.
+6. **Retire script entry points for players:** `install-windows.ps1`/`.cmd` and
+   `install-linux.sh` become developer tools or go away; the README leads with the
+   installer.
+
+## Milestone 1 — Claw baseline, handheld preset, and power
 
 1. **Claw baseline:** capture native, XeSS SR, and XeSS SR + FG at 1920×1200 and at lower
    render scales, with GPU timestamps, PresentMon, and power/clock telemetry, in surface,
@@ -74,7 +124,7 @@ are not guarantees.
    shared memory (all heaps are device-local there), and track memory footprint and
    battery life per preset.
 
-## Next (in order)
+## Next (in order, after milestones 0 and 1)
 
 ### 2. Retire the OpenGL renderer
 
