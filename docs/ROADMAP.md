@@ -33,7 +33,8 @@ These are follow-up validation or tuning tasks, not missing feature integrations
 - Fix input sampling order for the latency SDKs: the Reflex/XeLL/Anti-Lag sleep currently
   runs after OpenTK has pumped window input, so input waits through the sleep. Sleep
   before the input pump, mark a real `InputSample`, and answer Streamline PCL's
-  `statsWindowMessage` ping with `ePCLatencyPing`.
+  `statsWindowMessage` ping with `ePCLatencyPing`. The SDL3 platform layer below solves
+  this structurally; an interim fix is only worth doing if SDL3 is far off.
 - Confirm XeSS-FG pacing on a dGPU-wired display and on Intel GPUs, where the driver
   paces presentation instead of the SDK's cross-vendor pacer.
 - Run FSR 4 on supported AMD hardware; its unavailable-provider fallback and code path
@@ -47,30 +48,48 @@ These are follow-up validation or tuning tasks, not missing feature integrations
 
 ## Next
 
-- **Controller support (SDL3):** first-class gamepad play in the spirit of Minecraft
-  Java's controller mods (Controlify, Controllable), built into the client rather than
-  added as a mod:
-  - **Input backend:** SDL3's gamepad, sensor, and haptic subsystems next to the existing
-    GLFW window, through a C# binding such as `ppy.SDL3-CS`. Hot-plug, the community
-    mapping database, and Xbox, PlayStation (DualShock 4, DualSense), Switch Pro, and
-    Steam Deck controllers, without fighting Steam Input.
-  - **Sampling:** controllers are polled at the frame's input-sampling point, after the
-    latency sleep, so Reflex/XeLL/Anti-Lag and frame generation cover controller input
-    exactly like keyboard and mouse.
-  - **Gameplay:** actions map onto the game's hotkey system so existing and mod hotkeys
-    remain bindable. Analog movement and camera look with deadzones and response curves,
-    optional gyro aiming, hotbar cycling, sneak/sprint toggles, and radial menus for
-    hotbar, tool modes, and other quick actions.
-  - **Menus:** full GUI navigation without a mouse. A virtual cursor that snaps to slots
-    and widgets, D-pad focus movement, inventory and crafting slot actions (pick up, split,
-    move stack), and an on-screen keyboard for chat, signs, and text fields.
+- **SDL3 platform layer (window and all input):** replace OpenTK/GLFW windowing and input
+  with SDL3, keyboard and mouse included, then build first-class controller play on top
+  in the spirit of Minecraft Java's controller mods (Controlify, Controllable). SDL only
+  delivers keyboard and mouse events for windows it owns, so SDL3 takes over the window
+  and the event loop. OpenTK stays where it is not windowing: OpenAL audio and GL bindings.
+  - **Scope today:** window and input use is concentrated in `ClientPlatformWindows`
+    (83 window references, 48 of them `ClientSize`), `GameWindowNative`, and
+    `ClientProgram`'s `GameWindow.Run` loop. Every key reaches the game through one
+    translation, `KeyConverter.NewKeysToGlKeys`, and the game, API, and mods only see
+    `GlKeys`, `KeyEvent`, and `MouseEvent`. A single SDL scancode table at that seam keeps
+    game and mod code unchanged.
+  - **Window and loop:** an SDL3 window and our own frame loop replace `GameWindow.Run`.
+    Vulkan gets its surface from SDL. DLSS-G, FSR3, and the XeSS-FG DXGI proxy get the
+    HWND from SDL's window properties. Fullscreen and display modes, DPI, window state,
+    icon, cursors, clipboard, and file drop move to SDL.
+  - **Keyboard, mouse, text:** relative mouse mode on raw input replaces the per-frame
+    cursor-recentring in `UpdateMousePosition`. SDL text input and IME cover chat, signs,
+    and text fields, including composition for non-Latin languages.
+  - **Latency:** owning the pump makes the frame order sleep → `SDL_PumpEvents` → sample,
+    so Reflex, XeLL, and Anti-Lag cover all input. SDL3 event timestamps make
+    `InputSample` real, and `SDL_SetWindowsMessageHook` answers the Streamline PCL
+    `statsWindowMessage` ping. This subsumes the input-sampling fix listed above.
+  - **Controllers:** SDL3's gamepad, sensor, and haptic subsystems through a C# binding such
+    as `ppy.SDL3-CS`. Hot-plug, the community mapping database, and Xbox, PlayStation
+    (DualShock 4, DualSense), Switch Pro, and Steam Deck controllers, coexisting with Steam
+    Input. Controller actions map onto the hotkey system so vanilla and mod hotkeys stay
+    bindable. Analog movement and look with deadzones and response curves, optional gyro
+    aiming, radial menus, and sneak/sprint toggles.
+  - **Menus without a mouse:** a virtual cursor that snaps to slots and widgets, D-pad focus
+    movement, inventory and crafting slot actions (pick up, split, move stack), and an
+    on-screen keyboard for text entry.
   - **Feedback and settings:** controller-specific button glyphs in hints and keybinding
     screens, rumble and DualSense trigger/haptic effects, per-controller profiles, and a
-    remapping and sensitivity UI in the Optimum settings. Switching seamlessly between
-    controller and keyboard/mouse mid-session.
-  - **Validation:** a device matrix (Xbox, DualSense, Switch Pro, Steam Deck, generic
-    DirectInput) and proof that keyboard/mouse play and latency markers are unchanged
-    with SDL3 active. SDL3 is zlib-licensed.
+    remapping and sensitivity UI. Seamless switching between controller and keyboard/mouse.
+  - **Open decision:** whether the OpenGL renderer also moves to the SDL3 window (an SDL
+    GL context with OpenTK's GL bindings loaded through it), which keeps one platform path,
+    or stays on OpenTK until it is retired.
+  - **Compatibility and validation:** mods that reach into OpenTK windowing or GLFW
+    directly would break and need a list and shims where practical. Key-by-key parity for
+    layouts (QWERTY/AZERTY/QWERTZ, dead keys), alt-tab, minimize/restore, multi-monitor,
+    and a controller device matrix (Xbox, DualSense, Switch Pro, Steam Deck, generic
+    DirectInput). SDL3 is zlib-licensed.
 - **Mod-facing renderer API:** stabilize native pass, resource, motion-writer, and
   capability contracts so mods can participate without OpenGL assumptions.
 - **HDR output:** add an HDR scene range and tone mapper, display-referred UI, HDR10 or
