@@ -1,5 +1,13 @@
 # Optimum roadmap
 
+**Goal:** a smooth, playable Vintage Story on handheld PCs, not only maximum FPS on strong
+GPUs. The reference device is the **MSI Claw 8 AI+** (Intel Core Ultra 7 258V, Arc 140V
+iGPU with XMX, unified LPDDR5X, 1920×1200 120 Hz VRR, Windows 11), and development moves
+onto it. Work is judged by frame-time consistency (1% lows), CPU and GPU efficiency under
+a shared power budget, streaming without hitches, and controller-first play. Results from
+the RTX 4070 Laptop development system (an Optimus laptop) are useful for finding costs
+but are not the target.
+
 This roadmap tracks product-level renderer work. **Done** means the implementation is
 integrated into the Vulkan renderer, exposed through the product configuration where
 appropriate, and has passed the available automated and in-game validation. A vendor or
@@ -48,6 +56,14 @@ These are follow-up validation or tuning tasks, not missing feature integrations
 
 ## Next
 
+- **Handheld baseline on the Claw 8 AI+:** capture native, XeSS SR, and XeSS SR + FG at
+  1920×1200 and at lower render scales, with GPU timestamps, PresentMon, and power/clock
+  telemetry. Establish targets such as a stable 60 FPS and a 40–60 FPS base for frame
+  generation at the handheld's power limits. On Intel the XeSS-FG present path is paced by
+  the driver rather than the cross-vendor pacer measured so far, and XeLL is native, so the
+  XeSS path gets revalidated there. Check that the unified-memory placement is right
+  (VRAM-placement logic written for discrete GPUs must not regress), and add power-aware
+  frame caps (40/45/60 and VRR) and battery-life measurements.
 - **Retire the OpenGL renderer:** this fork renders with Vulkan only; players who install
   it have Vulkan-capable hardware. DX12 is not retired with it. XeSS FG exists only as a
   D3D12 swap-chain proxy (`xefg_swapchain_d3d12.h`) with D3D12-only XeLL, and FSR 4 also
@@ -64,11 +80,11 @@ These are follow-up validation or tuning tasks, not missing feature integrations
     still translates game and mod shaders to Vulkan.
   - Drop OpenGL-only Cecil transplants and patches once nothing calls them, and give mods
     a documented Vulkan path instead of raw GL.
-  - **Open decision: macOS.** A macOS package target exists. Without OpenGL it depends on
-    MoltenVK covering the required Vulkan 1.3 features (dynamic rendering,
-    synchronization2, timeline semaphores, update-after-bind descriptor indexing, scalar
-    block layout, demote-to-helper). Validate MoltenVK or drop macOS.
-- **SDL3 platform layer (window and all input):** replace OpenTK/GLFW windowing and input
+  - **Platforms:** Windows and Linux. macOS is dropped entirely (no development or test
+    device); its packaging, installer, CI, and bootstrap paths are removed rather than
+    left untested.
+- **SDL3 platform layer (window and all input):** a requirement for handheld play, not a
+  nice-to-have. Replace OpenTK/GLFW windowing and input
   with SDL3, keyboard and mouse included, then build first-class controller play on top
   in the spirit of Minecraft Java's controller mods (Controlify, Controllable). SDL only
   delivers keyboard and mouse events for windows it owns, so SDL3 takes over the window
@@ -111,6 +127,65 @@ These are follow-up validation or tuning tasks, not missing feature integrations
     layouts (QWERTY/AZERTY/QWERTZ, dead keys), alt-tab, minimize/restore, multi-monitor,
     and a controller device matrix (Xbox, DualSense, Switch Pro, Steam Deck, generic
     DirectInput). SDL3 is zlib-licensed.
+- **Culling rework:** visibility is the classic voxel-engine bottleneck, and chunk
+  geometry is still most of the frame: after the optimization pass, chunk passes were
+  about 2.9 ms of a 4.5 ms native 1080p GPU frame, shadows included. On Minecraft Java,
+  Sodium plus culling add-ons are credited with large FPS gains; the goal is the
+  equivalent here, proven by measurement.
+  - **Today:** VS's ray-based `ChunkCuller` plus Optimum's Sodium-style BFS visibility
+    walk (face connectivity through `ClientChunk.IsTraversable`), on by default, at whole
+    32³-chunk granularity. CPU frustum tests per mesh-pool part (`MeshDataPoolManager`)
+    before the multi-draw. Hardware backface culling only in the opaque, topsoil, and
+    decorative passes; every back-facing vertex is still fetched and shaded, and vertex
+    work was the measured chunk bottleneck. All four shadow passes draw with face culling
+    off.
+  - **Measure first:** per-pass counters for loaded, frustum-visible, BFS-visible, and
+    drawn chunks and triangles, plus a sampled estimate of how much drawn geometry is
+    actually occluded (occlusion queries or a depth-pyramid test) across surface, forest,
+    cave, and city scenes. Rank the items below by that data.
+  - **Per-facing geometry:** tessellate chunk quads into six facing groups (plus
+    unaligned) and draw only the groups that can face the camera, relative to each chunk's
+    bounds. This is Sodium's block-face culling, and it removes back-facing vertices
+    before the vertex shader instead of after it. The same test against the light
+    direction applies to shadow passes.
+  - **GPU-driven culling:** move frustum and occlusion tests into a compute pass that
+    writes the existing indirect draw commands (depth-pyramid occlusion from the previous
+    frame, reprojected), so culling scales with chunk count without CPU cost. Shadow
+    cascades get their own frustum and occlusion tests.
+  - **Finer granularity (16³ culling sections):** a Vintage Story chunk is 32³ blocks,
+    8× the volume of Minecraft/Sodium's 16³ culling section, so every frustum, BFS, and
+    occlusion decision is coarse. Keep 32³ chunks for storage and meshing, but split each
+    chunk's index ranges and face-connectivity graph into eight 16³ sections at
+    tessellation time and cull per section. Multi-draw indirect keeps the extra ranges
+    cheap. Also check whether the ray culler still earns its cost next to BFS.
+  - **Entities and block entities:** entities are culled today by dimension, distance
+    (with hysteresis), a frustum sphere, and their chunk's visibility
+    (`SystemRenderEntities`), so anything inside a visible 32³ chunk is animated and drawn
+    even when hidden behind terrain. Add per-entity occlusion (asynchronous ray-casts
+    against block opacity, as Minecraft's Entity Culling does, or the GPU depth pyramid)
+    with hysteresis. Culled entities skip animation (`BeforeRender`), draws, and name
+    tags; shadows get their own light-view test. Put block-entity renderers behind the
+    same visibility gate. Much of the saving is CPU time, which on a handheld raises GPU
+    clocks. Also add distance/size culling for small decorative geometry.
+  - **Guardrails:** no visible popping or see-through holes (the MC-70850 class of bug that
+    the BFS connectivity already guards against). Culling state must stay consistent for
+    frame generation and TAA history, and GPU timestamps plus the counters above prove
+    each step.
+- **CPU efficiency and streaming:** on the development system the main thread already
+  spends about as long per frame as the GPU (simulation ~1.6 ms plus render
+  recording/submit ~2.8 ms against a 4.5 ms GPU frame). On a handheld, CPU time also takes
+  power from the GPU.
+  - **Render thread:** cut per-draw overhead (pass preparation, descriptor binding and
+    per-draw managed allocations, barrier flushing) by moving culling and draw generation
+    to the GPU and caching descriptor state.
+  - **Streaming (C2ME-style):** worldgen is already multithreaded (from Stratum), chunk
+    deserialization is parallel, and frustum culling uses SIMD. Measure a fly/teleport
+    benchmark (chunks generated, lit, meshed, and uploaded per second, plus hitch counts)
+    on the Claw's Lunar Lake cores, then parallelize or vectorize the stages it points
+    to: noise with `Vector256`, lighting propagation, and chunk tessellation, which
+    changes anyway for per-facing groups and 16³ sections.
+  - **Rule:** faster math only in measured hot loops; engine overhead is fixed by doing
+    less work, not by faster arithmetic.
 - **Mod-facing renderer API:** stabilize native pass, resource, motion-writer, and
   capability contracts so mods can participate without OpenGL assumptions.
 - **HDR output:** add an HDR scene range and tone mapper, display-referred UI, HDR10 or
