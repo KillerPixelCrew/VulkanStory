@@ -101,7 +101,7 @@ public class IndirectDrawCoverageTests
 
         try
         {
-            // Default capability support depends on platform detection, but when unsupported (e.g. macOS OpenGL 4.1):
+            // Default capability support depends on platform detection, but when unsupported (e.g. a driver without OpenGL 4.3):
             OptimumConfig.IndirectDrawSupported = false;
             OptimumConfig.IndirectDrawEnabled = true;
             Assert.False(OptimumConfig.EffectiveIndirectDraw, "EffectiveIndirectDraw must be false when hardware/driver does not support OpenGL 4.3 MDI");

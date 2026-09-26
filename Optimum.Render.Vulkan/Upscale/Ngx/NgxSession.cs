@@ -318,8 +318,7 @@ internal sealed unsafe class NgxSession : IDisposable
         foreach (string candidate in FeaturePathCandidates())
         {
             if (!Directory.Exists(candidate)) continue;
-            string pattern = OperatingSystem.IsWindows() ? "nvngx_dlss.dll" :
-                OperatingSystem.IsMacOS() ? "libnvidia-ngx*.dylib" : "libnvidia-ngx-*.so*";
+            string pattern = OperatingSystem.IsWindows() ? "nvngx_dlss.dll" : "libnvidia-ngx-*.so*";
             if (Directory.GetFiles(candidate, pattern).Length == 0) continue;
             string full = Path.GetFullPath(candidate);
             if (!found.Contains(full)) found.Add(full);

@@ -49,13 +49,13 @@ Some optimizations in this repository do not yet reach the shipped game. The per
 
 ## Getting Started
 
-Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
+Optimum supports Windows and Linux; macOS is not supported. Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
 
 ### Graphical installer
 
 `Optimum.Installer` is a cross-platform Avalonia wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build.
 
-The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.17-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.17-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
+The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.17-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.17-linux-x64-Installer.AppImage`). Nothing is code-signed yet, so Windows SmartScreen warns on first run.
 
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
@@ -169,18 +169,6 @@ dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
 
 Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+.
 
-### macOS
-
-```bash
-git clone https://github.com/StratumServer/Optimum.git
-cd Optimum
-make build
-./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
-./scripts/package-macos.sh --arch x64          # Intel .dmg
-```
-
-Open the .dmg and drag Optimum.app to Applications. Requires .NET 10 SDK, bash, python3, git, curl, perl.
-
 ## Settings
 
 Optimum persists its runtime settings to `ModConfig/optimum.json` inside your
@@ -195,10 +183,6 @@ The data path depends on the platform:
 |---|---|
 | Windows | `%APPDATA%\VintagestoryData` |
 | Linux | `~/.config/VintagestoryData` |
-| macOS | `~/Library/Application Support/VintagestoryData` |
-
-Older macOS installs may still have `~/.config/VintagestoryData`; the game
-moves that folder to the new location on first run.
 
 The client reads the file once at startup, so a full restart is required
 after editing it. When troubleshooting world-generation problems, the four
@@ -259,7 +243,6 @@ The complete 0.3.0 shipping inventory appears in
 make package              # all targets this host can produce
 make package-linux        # tar.gz
 make package-appimage     # single .AppImage executable
-make package-macos        # .dmg (ARCH=arm64 or x64)
 make package-win          # Windows zip (native Windows or off-platform with innoextract >= 1.11)
 ```
 
@@ -269,13 +252,11 @@ Or call the scripts directly:
 ./scripts/package-linux.sh                     # Optimum-v0.3.17-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
 ./scripts/package-linux.sh --format appimage   # Optimum-v0.3.17-linux-x64.AppImage
-./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
-./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once
-./scripts/package-all.sh --targets linux-x64,osx-arm64
+./scripts/package-all.sh --targets linux-x64
 ```
 
-The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer when no matching `.vanilla/win-x64/package-client` cache exists. A matching package cache is reused without the extractor, and a fresh extraction leaves the bootstrap/decompile cache at `.vanilla/win-x64/vintagestory` intact for `make run` and `make patch-il`. Pass `-ClientArchive` to supply the installer when no matching package cache exists.
+The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer when no matching `.vanilla/win-x64/package-client` cache exists. A matching package cache is reused without the extractor, and a fresh extraction leaves the bootstrap/decompile cache at `.vanilla/win-x64/vintagestory` intact for `make run` and `make patch-il`. Pass `-ClientArchive` to supply the installer when no matching package cache exists.
 
 ### Host prerequisites for packaging
 
@@ -287,22 +268,17 @@ Beyond the build requirements (.NET 10 SDK, bash, git, curl, perl), packaging ne
 | `pwsh` | Windows packaging off-platform (win-x64 target only) | [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) |
 | `innoextract` >= 1.11 | Extracts the official Inno Setup 6.4.3 Windows client when no matching package cache exists | [Current releases](https://github.com/crazy-max/innoextract/releases) (distro 1.9 is too old) |
 | Windows interoperability (`wslpath` + Windows PowerShell) | Runs the official Inno 6.4.3 installer into a disposable directory when bootstrapping win-x64 from WSL | included with WSL |
-| `mkisofs` / `genisoimage` | Creates hybrid HFS image for .dmg on Linux | `sudo apt install cdrtools` or `genisoimage` |
-| `cmake` + `git` | Build libdmg-hfsplus (compiled once into .tools/) | `sudo apt install cmake git` |
 
-Linux and macOS packaging runs with bash. No PowerShell required for those targets.
+Linux packaging runs with bash. No PowerShell required for that target.
 
 ### Host x target matrix
 
-| Produce ↓ \ on → | Linux host | macOS host | Windows host |
-|---|---|---|---|
-| **linux-x64** | ✅ tar.gz / AppImage | ✅ tar.gz | ✅ tar.gz |
-| **osx-x64 / osx-arm64** | ✅ unsigned .dmg | ✅ signed .dmg (hdiutil) | ⚠️ .tar.gz fallback |
-| **win-x64** | ✅ pwsh + innoextract >= 1.11, or package-client cache | ✅ pwsh + innoextract >= 1.11, or package-client cache | ✅ native |
+| Produce ↓ \ on → | Linux host | Windows host |
+|---|---|---|
+| **linux-x64** | ✅ tar.gz / AppImage | ✅ tar.gz |
+| **win-x64** | ✅ pwsh + innoextract >= 1.11, or package-client cache | ✅ native |
 
-The .dmg files built on Linux are unsigned. macOS Gatekeeper shows a warning on first open; users right-click > Open to accept. For a notarizable .dmg, build on macOS with an Apple Developer certificate.
-
-**ARM note.** Vintage Story ships native ARM clients only for macOS (`osx-arm64`). Linux and Windows have no native ARM client. Those packages are x64-only; ARM hardware runs them via emulation ([box64](https://github.com/ptitSeb/box64) on Linux, Windows-on-ARM x64 emulation).
+**ARM note.** Linux and Windows have no native ARM Vintage Story client. Those packages are x64-only; ARM hardware runs them via emulation ([box64](https://github.com/ptitSeb/box64) on Linux, Windows-on-ARM x64 emulation).
 
 ## How It Works
 

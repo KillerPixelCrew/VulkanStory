@@ -589,7 +589,6 @@ try {
         $toolsDir = Join-Path $repoRoot '.tools'
         New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
         $isWin = ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
-        $isMac = ($null -ne $IsMacOS) -and $IsMacOS
         $exeSuffix = if ($isWin) { '.exe' } else { '' }
         $localInno = Join-Path $toolsDir "innoextract$exeSuffix"
 
@@ -627,8 +626,6 @@ try {
 
             $assetName = if ($isWin) {
                 'innoextract-windows-amd64.exe'
-            } elseif ($isMac) {
-                "innoextract-darwin-$arch"
             } else {
                 "innoextract-linux-$arch"
             }
@@ -637,8 +634,6 @@ try {
                 'innoextract-windows-amd64.exe' = '5700fb1e82e6812bb341b964470537161e07a127d29eecfe176f5198cf215a59'
                 'innoextract-linux-amd64'       = 'c898db2ecc282ff8d943e9868d03dd6f1fc6069ddd40430341b211f93826b360'
                 'innoextract-linux-arm64'       = 'e3852c6225f1b6043025fbfb459d6f8c38c5418f6c3a18720f525a0161d37969'
-                'innoextract-darwin-amd64'      = '55a384d8f077508b04c888a9f68a40c5fb4345565586632124d80b6efec7629d'
-                'innoextract-darwin-arm64'      = '6b8f11062e4feb153141e85d2f2cd70fc8f1d6fc4354d59e81933308536d3164'
             }
 
             $innoUrl = "https://github.com/crazy-max/innoextract/releases/download/v1.13.0/$assetName"

@@ -107,9 +107,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
 
     internal static string NativeLibraryIdentity()
     {
-        string name = OperatingSystem.IsWindows() ? "shaderc_shared.dll"
-            : OperatingSystem.IsMacOS() ? "libshaderc_shared.dylib"
-            : "libshaderc_shared.so";
+        string name = OperatingSystem.IsWindows() ? "shaderc_shared.dll" : "libshaderc_shared.so";
         string runtime = RuntimeInformation.RuntimeIdentifier;
 
         foreach (string? directory in new[]

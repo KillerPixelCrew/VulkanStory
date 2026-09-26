@@ -5,7 +5,7 @@ namespace Optimum.Bootstrap.Core.Install;
 /// <summary>
 /// Registers and removes the Windows "Apps &amp; features" uninstall entry
 /// (<c>HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1</c>),
-/// matching <c>scripts/install-windows.ps1</c>. A no-op on Linux and macOS, where
+/// matching <c>scripts/install-windows.ps1</c>. A no-op on Linux, where
 /// the install manifest and the <c>.desktop</c> entry are the record.
 /// </summary>
 public static class UninstallRegistration

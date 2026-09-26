@@ -3,9 +3,8 @@
 Builds every Optimum package this host is capable of producing, in one run.
 Requires a successful build first (dotnet build VintageStory.slnx -c Release).
 
-Targets: linux-x64, osx-x64, osx-arm64, win-x64. The optimized DLLs are
-platform-agnostic IL, so any host can target any platform - but quality varies
-(e.g. a .dmg needs macOS hdiutil or a Linux libdmg toolchain; the Windows
+Targets: linux-x64, win-x64. The optimized DLLs are platform-agnostic IL, so
+either host can target either platform - but quality varies (the Windows
 package off-Windows downloads the official Inno 6.4.3 installer and needs
 innoextract >= 1.11). This script reports what the host can do
 and runs only the capable targets. There is no native ARM client for Linux or
@@ -15,7 +14,7 @@ Windows - x64 runs there via emulation (box64 / Windows-on-ARM).
 Where to write packages. Default: repo root.
 
 .PARAMETER Targets
-Subset to build, e.g. -Targets linux-x64,osx-arm64. Default: all capable.
+Subset to build, e.g. -Targets linux-x64. Default: all capable.
 
 .PARAMETER IncludeDegraded
 Also run targets the host can only build in degraded quality (default: on).
@@ -23,7 +22,7 @@ Use -IncludeDegraded:$false to build only Full-quality targets.
 
 .EXAMPLE
 pwsh ./scripts/package-all.ps1
-pwsh ./scripts/package-all.ps1 -Targets linux-x64,osx-arm64 -OutputDir ~/releases
+pwsh ./scripts/package-all.ps1 -Targets linux-x64 -OutputDir ~/releases
 #>
 
 [CmdletBinding()]
@@ -61,10 +60,6 @@ foreach ($c in $runnable) {
     try {
         switch -Regex ($c.Target) {
             '^linux-x64$' { & "$scriptDir/package-linux.ps1" -OutputDir $OutputDir }
-            '^osx-(x64|arm64)$' {
-                $arch = $c.Target -replace '^osx-', ''
-                & "$scriptDir/package-macos.ps1" -Arch $arch -OutputDir $OutputDir
-            }
             '^win-x64$' { & "$scriptDir/package.ps1" -OutputDir $OutputDir -Zip }
         }
         $results += [pscustomobject]@{ Target=$c.Target; Status='OK' }

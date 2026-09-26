@@ -1,14 +1,13 @@
 # Optimum development targets.
 # Requires (dev):       .NET 10 SDK, bash, python3, git, curl, perl.
 # Requires (packaging): tar, curl. Optional per target:
-#                         macOS .dmg on Linux -> cmake + mkisofs/genisoimage
 #                         Windows package off-Windows -> pwsh + innoextract >= 1.11
 # Run `make check` to see exactly what your host is missing.
 # Windows: use Git Bash, WSL, or adapt to PowerShell.
 #
 # Packaging note: the optimized DLLs are platform-agnostic IL, so any host can
 # target any platform (quality varies - see README "Host x target matrix").
-# Vintage Story ships native ARM only for macOS, so Linux/Windows packages are
+# Vintage Story ships no native ARM client for Linux or Windows, so packages are
 # x64-only; ARM there runs x64 via emulation (box64 / Windows-on-ARM).
 
 # --- Configuration (override via env or make VAR=value) ---
@@ -40,7 +39,7 @@ endif
 BOOTSTRAP_ARGS += --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders check-shaders-vk bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        package package-overlay package-linux package-appimage package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
 help: ## Show available targets
@@ -255,7 +254,7 @@ worldgen-benchmark-smoke: build ## Run one short precise worldgen trial per trea
 worldgen-benchmark: build ## Run the 12-trial precise worldgen release suite
 	bash scripts/worldgen-benchmark-suite.sh
 
-package: build ## Build every package this host can produce (Linux/macOS/Windows)
+package: build ## Build every package this host can produce (Linux/Windows)
 	bash scripts/package-all.sh --version $(VERSION)
 
 package-overlay: build ## Package patch overlay and manifest for RiftLauncher
@@ -267,8 +266,6 @@ package-linux: build ## Package Linux x64 (tar.gz)
 package-appimage: build ## Package Linux x64 as AppImage (single executable)
 	bash scripts/package-linux.sh --format appimage --version $(VERSION)
 
-package-macos: build ## Package macOS (.dmg/.app); ARCH=arm64 or x64
-	bash scripts/package-macos.sh --arch $(or $(ARCH),arm64) --version $(VERSION)
 
 package-win: build ## Package Windows x64 (folder + zip); needs innoextract >= 1.11 off-Windows without package-client cache
 	pwsh scripts/package.ps1 -Zip -Version $(VERSION) $(if $(CLIENT_ARCHIVE),-ClientArchive "$(CLIENT_ARCHIVE)")

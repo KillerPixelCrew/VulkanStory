@@ -39,7 +39,7 @@ internal static class TestEnvironment
         // .NET's SetEnvironmentVariable only updates the managed copy on Unix;
         // the Vulkan loader is native and reads the real environment, so it has
         // to be set through libc as well or nothing changes.
-        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        if (OperatingSystem.IsLinux())
         {
             try
             {

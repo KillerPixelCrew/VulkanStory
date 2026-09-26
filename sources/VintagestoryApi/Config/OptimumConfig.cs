@@ -186,7 +186,7 @@ public static class OptimumConfig
     public static bool IndirectDrawEnabled = false;
 
     /// <summary>
-    /// Set at startup after OpenGL capability probe. False on macOS (OpenGL 4.1) and legacy drivers.
+    /// Set at startup after OpenGL capability probe. False on drivers without OpenGL 4.3 multi-draw-indirect.
     /// </summary>
     public static bool IndirectDrawSupported = false;
 

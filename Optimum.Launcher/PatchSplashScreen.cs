@@ -20,14 +20,13 @@ namespace Optimum.Launcher;
 /// Uses core-profile GL (shader + VAO/VBO), not the legacy fixed-function
 /// pipeline: drivers are free to hand back a core profile even when a
 /// compatibility profile is requested (confirmed happening here, on Mesa/
-/// Zink), and macOS never exposes a compatibility profile at all for GL
-/// 3.2+. Legacy glBegin/glMatrixMode calls fail silently (GL_INVALID_ENUM/
+/// Zink). Legacy glBegin/glMatrixMode calls fail silently (GL_INVALID_ENUM/
 /// GL_INVALID_OPERATION, no exception) under a core context, which read as
 /// "nothing draws" rather than a crash - caught by reading back the
 /// framebuffer in a throwaway test harness, not by anything visual.
 ///
 /// Must be constructed, pumped, and disposed from the same thread (GLFW
-/// requires this, and is strict about it on macOS). Do the actual patch
+/// requires this). Do the actual patch
 /// work on a background thread and call <see cref="PumpAndRender"/> in a
 /// loop on the thread that owns this instance.
 /// </summary>

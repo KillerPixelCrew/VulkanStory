@@ -10,9 +10,9 @@ namespace Optimum.Bootstrap.Core.Prerequisites;
 /// lives in the Nix store, so the downloaded SDK cannot run. Core keeps the same
 /// refusal and the same <c>nix profile install</c> substitute.
 ///
-/// The whole concept is Linux-only: the checks short-circuit on Windows and
-/// macOS, where the <c>dot.net</c> installer ships a native runtime with no
-/// glibc interpreter dependency.
+/// The whole concept is Linux-only: the checks short-circuit on Windows, where
+/// the <c>dot.net</c> installer ships a native runtime with no glibc interpreter
+/// dependency.
 /// </summary>
 public static class NixEnvironment
 {

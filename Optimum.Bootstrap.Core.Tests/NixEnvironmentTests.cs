@@ -20,12 +20,11 @@ public class NixEnvironmentTests
 
     [Theory]
     [InlineData(OsKind.Windows)]
-    [InlineData(OsKind.MacOs)]
     public void TheNonFhsCheckIsLinuxOnly(OsKind os)
     {
         var probe = new FakeSystemProbe { Os = os };
         // A leftover NIX_STORE / interpreter override must not make a native
-        // Windows or macOS host look non-FHS.
+        // Windows host look non-FHS.
         probe.Environment["NIX_STORE"] = "/nix/store";
         probe.Environment["OPTIMUM_GLIBC_INTERPRETER"] = "/tmp/missing-ld-linux";
 

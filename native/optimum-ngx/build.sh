@@ -23,7 +23,6 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 src="$here/optimum_ngx.c"
 
 case "$(uname -s)" in
-    Darwin) name="libOptimumNgx.dylib" ;;
     MINGW*|MSYS*|CYGWIN*) name="OptimumNgx.dll" ;;
     *) name="libOptimumNgx.so" ;;
 esac

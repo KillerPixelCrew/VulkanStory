@@ -2,14 +2,14 @@
 # Builds every Optimum package this host can produce, in one run.
 # Requires a successful build first (dotnet build VintageStory.slnx -c Release).
 #
-# Targets: linux-x64, osx-x64, osx-arm64, win-x64. The optimized DLLs are
-# platform-agnostic IL, so any host can target any platform (quality varies).
-# Vintage Story ships native ARM only for macOS, so Linux/Windows packages are
-# x64-only; ARM runs x64 via emulation (box64 / Windows-on-ARM).
+# Targets: linux-x64, win-x64. The optimized DLLs are platform-agnostic IL, so
+# either host can target either platform (quality varies). Vintage Story ships
+# no native ARM client for Linux or Windows, so packages are x64-only; ARM runs
+# x64 via emulation (box64 / Windows-on-ARM).
 #
 # Usage:
 #   ./scripts/package-all.sh
-#   ./scripts/package-all.sh --targets linux-x64,osx-arm64
+#   ./scripts/package-all.sh --targets linux-x64
 #   ./scripts/package-all.sh --output ~/releases
 
 set -euo pipefail
@@ -35,8 +35,8 @@ done
 OS_TYPE="$(uname -s)"
 
 # Host capability detection (mirrors _hostcaps.ps1 logic)
-# macOS ships bash 3.2, which has no associative arrays, so the three maps
-# (CAP_QUALITY, CAP_NOTE, RESULTS) live in dynamic variable names instead.
+# The three maps (CAP_QUALITY, CAP_NOTE, RESULTS) live in dynamic variable
+# names rather than associative arrays.
 _map_var() { printf '%s_%s' "$1" "$(printf '%s' "$2" | tr - _)"; }
 map_set() { printf -v "$(_map_var "$1" "$2")" '%s' "$3"; }
 map_get() { local v; v="$(_map_var "$1" "$2")"; printf '%s' "${!v:-${3:-}}"; }
@@ -50,19 +50,6 @@ else
     map_set CAP_NOTE linux-x64 "tar not found"
 fi
 
-# macOS targets
-for arch in x64 arm64; do
-    if [[ "$OS_TYPE" == "Darwin" ]] && command -v hdiutil &>/dev/null; then
-        map_set CAP_QUALITY "osx-$arch" "Full"
-        map_set CAP_NOTE "osx-$arch" "hdiutil .dmg (notarizable)"
-    elif [[ "$OS_TYPE" == "Linux" ]] && { command -v mkisofs &>/dev/null || command -v genisoimage &>/dev/null; } && command -v cmake &>/dev/null && command -v git &>/dev/null; then
-        map_set CAP_QUALITY "osx-$arch" "Degraded"
-        map_set CAP_NOTE "osx-$arch" "unsigned .dmg via libdmg-hfsplus"
-    else
-        map_set CAP_QUALITY "osx-$arch" "Degraded"
-        map_set CAP_NOTE "osx-$arch" ".app assembled, .tar.gz fallback (no .dmg toolchain)"
-    fi
-done
 
 # Windows target. The distro package on older systems is often innoextract 1.9,
 # which cannot parse the official Inno Setup 6.4.3 installer. Require the
@@ -119,7 +106,7 @@ fi
 # Print capability report
 echo ""
 echo "Host: $OS_TYPE - packaging capability"
-ALL_TARGETS=(linux-x64 osx-x64 osx-arm64 win-x64)
+ALL_TARGETS=(linux-x64 win-x64)
 for t in "${ALL_TARGETS[@]}"; do
     printf "  %-12s %-9s %s\n" "$t" "$(map_get CAP_QUALITY "$t")" "$(map_get CAP_NOTE "$t")"
 done
@@ -157,14 +144,6 @@ for target in "${RUNNABLE[@]}"; do
     case "$target" in
         linux-x64)
             if bash "$SCRIPT_DIR/package-linux.sh" --output "$OUTPUT_DIR" --version "$VERSION"; then
-                map_set RESULTS "$target" "OK"
-            else
-                map_set RESULTS "$target" "FAILED"; FAILED=1
-            fi
-            ;;
-        osx-x64|osx-arm64)
-            arch="${target#osx-}"
-            if bash "$SCRIPT_DIR/package-macos.sh" --arch "$arch" --output "$OUTPUT_DIR" --version "$VERSION"; then
                 map_set RESULTS "$target" "OK"
             else
                 map_set RESULTS "$target" "FAILED"; FAILED=1

@@ -20,7 +20,6 @@ build/
 .tools/
 *.zip
 *.tar.gz
-*.dmg
 pkg-log.txt
 Optimum-v*-win-x64/
 Optimum-v*-linux-x64/
@@ -91,7 +90,6 @@ docs/*
 # ...and the modder documentation for Vulkan-native mod support (passes, motion writers, shaders).
 !docs/vulkan.md
 build-linux.sh
-build-macos.sh
 build-windows.ps1
 
 # Working notes for assistants and the local plan and status files: kept beside the checkout, never in it.
