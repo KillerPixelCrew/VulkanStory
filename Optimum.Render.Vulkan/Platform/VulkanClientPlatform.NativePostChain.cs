@@ -78,7 +78,14 @@ public partial class VulkanClientPlatform
 
     private bool UseNativePostChain => NativePostChainEnabled && device != null;
 
-    private void NotePostStep(NativePostStep step) => NativePostStepLog?.Add(step);
+    private static readonly string[] postStepGpuLabels =
+        Array.ConvertAll(Enum.GetNames<NativePostStep>(), name => "post_" + name);
+
+    private void NotePostStep(NativePostStep step)
+    {
+        NativePostStepLog?.Add(step);
+        device?.GpuMark(postStepGpuLabels[(int)step]);
+    }
 
     /// <summary>
     /// Test seam: one chain step on whichever route <see cref="NativePostChainEnabled" /> selects,

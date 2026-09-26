@@ -137,10 +137,6 @@ public static partial class InstallPathGuard
                         yield return Path.Combine(value, "Vintagestory");
                 }
                 break;
-            case OsKind.MacOs:
-                yield return Path.Combine(home, "Library", "Application Support", "vintagestory");
-                yield return "/Applications/Vintagestory.app";
-                break;
             default:
                 yield return Path.Combine(home, ".local", "share", "vintagestory");
                 yield return Path.Combine(home, "ApplicationData", "vintagestory");
@@ -185,7 +181,6 @@ public static partial class InstallPathGuard
     private static bool ProbeMatchesHost(ISystemProbe probe) => probe.Os switch
     {
         OsKind.Windows => RuntimeInformation.IsOSPlatform(OSPlatform.Windows),
-        OsKind.MacOs => RuntimeInformation.IsOSPlatform(OSPlatform.OSX),
         _ => RuntimeInformation.IsOSPlatform(OSPlatform.Linux),
     };
 

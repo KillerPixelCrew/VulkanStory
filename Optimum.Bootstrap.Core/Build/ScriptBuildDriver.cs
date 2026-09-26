@@ -140,12 +140,6 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                 List<string> win = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ScriptPath(request.RepoRoot, "package.ps1"), "-OutputDir", output];
                 if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
                 return (PwshExecutable(), win);
-            case OsKind.MacOs:
-                string arch = probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64";
-                List<string> mac = ["scripts/package-macos.sh", "--output", output, "--arch", arch];
-                if (request.ClientArchive is not null) mac.AddRange(["--client-archive", request.ClientArchive]);
-                if (request.Version is not null) mac.AddRange(["--version", request.Version]);
-                return ("bash", mac);
             default:
                 List<string> linux = ["scripts/package-linux.sh", "--output", output];
                 if (request.ClientArchive is not null) linux.AddRange(["--client-archive", request.ClientArchive]);
@@ -168,19 +162,12 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 
     /// <summary>
     /// The package artifact the platform's packaging script produces: a
-    /// <c>Optimum-v*</c> directory on Windows and Linux, an <c>Optimum.app</c>
-    /// bundle on macOS.
+    /// <c>Optimum-v*</c> directory on Windows and Linux.
     /// </summary>
     private string? LocatePackage(string outputDirectory)
     {
         if (!Directory.Exists(outputDirectory))
             return null;
-
-        if (probe.Os == OsKind.MacOs)
-        {
-            string app = Path.Combine(outputDirectory, "Optimum.app");
-            return Directory.Exists(app) ? app : null;
-        }
 
         return Directory.EnumerateDirectories(outputDirectory, "Optimum-v*")
             .Where(d => !Path.GetFileName(d).StartsWith('.'))

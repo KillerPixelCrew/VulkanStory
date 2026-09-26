@@ -69,9 +69,7 @@ public class IssueTrackerBugfixBatchCoverageTests
 
     [Theory]
     [InlineData("scripts/package-linux.ps1")]
-    [InlineData("scripts/package-macos.ps1")]
     [InlineData("scripts/package-linux.sh")]
-    [InlineData("scripts/package-macos.sh")]
     public void PackageScriptsPatchFromPristineVanillaLib(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));

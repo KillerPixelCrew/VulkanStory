@@ -12,6 +12,7 @@ public sealed unsafe partial class VulkanDevice
 
     internal int EvaluateXess(XessNative api, nint context, int motionRg, in UpscalerFrame frame, bool firstFrame)
     {
+        using GpuSection gpuSection = BeginGpuSection("upscale_xess");
         if (!_frameActive) return -3;
         VulkanTexture? color = _textures.Get(frame.Color), depth = _textures.Get(frame.Depth),
             sourceMotion = _textures.Get(frame.Motion), motion = _textures.Get(motionRg),
@@ -42,6 +43,7 @@ public sealed unsafe partial class VulkanDevice
     private bool PrepareUpscalerMotion(VulkanTexture sourceMotion, VulkanTexture motion,
         uint width, uint height, CommandBuffer commands)
     {
+        using GpuSection gpuSection = BeginGpuSection("upscale_motion_convert");
         if (sourceMotion.Format != Format.R16G16B16A16Sfloat || motion.Format != Format.R16G16Sfloat ||
             sourceMotion.Width != width || sourceMotion.Height != height ||
             motion.Width != width || motion.Height != height) return false;

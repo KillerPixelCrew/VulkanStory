@@ -12,9 +12,6 @@ public enum PrerequisiteId
     Pwsh,
     Unzip,
     Ilspycmd,
-    Make,
-    Cmake,
-    Mkisofs,
     Innoextract,
     Appimagetool,
 }

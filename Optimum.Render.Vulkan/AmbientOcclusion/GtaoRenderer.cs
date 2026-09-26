@@ -106,7 +106,8 @@ internal sealed class GtaoRenderer : IDisposable
             Name = "gtao-prefilter",
             ProgramId = _prefilter,
             Bindings = prefilterBindings,
-            Dispatches = new[] { ComputeDispatch.Explicit((blocksX + 7) / 8, (blocksY + 7) / 8, 1, push) },
+            // One 8x8 group per 16x16 block of level 0 (prefilter.comp).
+            Dispatches = new[] { ComputeDispatch.Explicit(blocksX, blocksY, 1, push) },
         })) return Fail(_device.GetError());
 
         if (!_device.RecordComputePass(new ComputePassDeclaration

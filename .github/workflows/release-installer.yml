@@ -1,6 +1,6 @@
 name: Release installer
 
-# Packages the Avalonia installer for Windows, Linux (AppImage, deb, rpm), and macOS,
+# Packages the Avalonia installer for Windows and Linux (AppImage, deb, rpm),
 # publishing feeds and installer packages to GitHub releases upon a release or manual dispatch.
 on:
   release:
@@ -31,11 +31,9 @@ jobs:
       matrix:
         include:
           # `label` is only the artifact name; vpk picks the Velopack channel
-          # from the RID (win / linux / osx).
+          # from the RID (win / linux).
           - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
           - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
-          - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
-          - { os: macos-14, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -80,12 +78,11 @@ jobs:
           # Bundle the Optimum logo into every generated installer so the Setup
           # window, the AppImage/desktop entry, and the app shortcut all show the
           # Optimum icon instead of the Velopack default. Velopack wants a
-          # platform-native icon: an .ico on Windows, an .icns on macOS, and a
-          # .png on Linux (where --icon is required for the AppImage).
+          # platform-native icon: an .ico on Windows and a .png on Linux (where
+          # --icon is required for the AppImage).
           rid="${{ matrix.rid }}"
           case "$rid" in
             win-x64) icon="Optimum.Launcher/optimum.ico" ;;
-            osx-*)   icon="logo.icns" ;;
             *)       icon="Optimum.Installer/Assets/optimum-logo.png" ;;
           esac
           if [ ! -f "$icon" ]; then
@@ -99,9 +96,8 @@ jobs:
             extra_args+=(--splashImage Optimum.Installer/Assets/optimum-logo.png)
           fi
 
-          # macOS runners ship bash 3.2, where "${arr[@]}" on an empty array is an
-          # unbound-variable error under set -u. Expand with the +alternate form so
-          # an empty extra_args disappears instead of aborting the pack.
+          # Expand with the +alternate form so an empty extra_args disappears
+          # instead of tripping set -u on older bash releases.
           dotnet vpk pack \
             --packId Optimum.Installer \
             --packTitle Optimum \
@@ -113,7 +109,7 @@ jobs:
             --outputDir releases
 
       # vpk has no name-override flag. Rename the user-facing artifacts (setup,
-      # portable, AppImage, pkg) to Optimum-v<version>-<rid>-Installer.<ext> and fix
+      # portable, AppImage) to Optimum-v<version>-<rid>-Installer.<ext> and fix
       # the reference in assets.<channel>.json so `vpk upload` still finds them.
       - name: Rename artifacts to the Optimum scheme
         shell: bash
@@ -124,7 +120,6 @@ jobs:
           case "$rid" in
             win-x64)   channel=win ;;
             linux-x64) channel=linux ;;
-            osx-*)     channel=osx ;;
             *) echo "unknown rid: $rid" >&2; exit 1 ;;
           esac
           cd releases
@@ -151,10 +146,6 @@ jobs:
               ;;
             linux)
               rename "Optimum.Installer.AppImage"        "Optimum-v$v-$rid-Installer.AppImage"
-              ;;
-            osx)
-              rename "Optimum.Installer-osx-Setup.pkg"   "Optimum-v$v-$rid-Installer.pkg"
-              rename "Optimum.Installer-osx-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
               ;;
           esac
 

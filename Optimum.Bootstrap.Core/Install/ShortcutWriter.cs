@@ -5,7 +5,7 @@ namespace Optimum.Bootstrap.Core.Install;
 /// <summary>
 /// Writes and removes the application-menu and desktop shortcuts for an install.
 /// Every operation is best effort: a shortcut that will not write is logged, not
-/// fatal. Ports the shortcut handling from all three current installers.
+/// fatal. Ports the shortcut handling from the Windows and Linux installers.
 /// </summary>
 public sealed class ShortcutWriter(ISystemProbe probe)
 {
@@ -18,7 +18,6 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         return probe.Os switch
         {
             OsKind.Windows => CreateWindows(installDirectory, launcherPath, kinds),
-            OsKind.MacOs => CreateMac(installDirectory, kinds),
             _ => CreateLinux(installDirectory, launcherPath, kinds),
         };
     }
@@ -65,28 +64,6 @@ public sealed class ShortcutWriter(ISystemProbe probe)
     /// </summary>
     private static string Posix(string root, params string[] parts) =>
         root.TrimEnd('/', '\\') + "/" + string.Join('/', parts);
-
-    private List<string> CreateMac(string installDirectory, ShortcutKinds kinds)
-    {
-        var written = new List<string>();
-        string home = probe.HomeDirectory;
-
-        // The link target is a real .app bundle: a nested Optimum.app, or the
-        // install directory itself when the bundle contents were laid there.
-        string nested = Path.Combine(installDirectory, "Optimum.app");
-        string target = File.Exists(Path.Combine(nested, "Contents", "Info.plist"))
-            ? nested
-            : installDirectory;
-        bool isBundle = File.Exists(Path.Combine(target, "Contents", "Info.plist"));
-        string linkName = isBundle ? "Optimum.app" : "Optimum";
-
-        if (kinds.HasFlag(ShortcutKinds.Menu))
-            written.AddRange(Symlink(Path.Combine(home, "Applications", linkName), target));
-        if (kinds.HasFlag(ShortcutKinds.Desktop))
-            written.AddRange(Symlink(Path.Combine(home, "Desktop", linkName), target));
-
-        return written;
-    }
 
     private List<string> CreateWindows(string installDirectory, string launcherPath, ShortcutKinds kinds)
     {
@@ -175,20 +152,6 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             if (executable && !OperatingSystem.IsWindows())
                 File.SetUnixFileMode(path, File.GetUnixFileMode(path) | UnixFileMode.UserExecute);
             return [path];
-        }
-        catch (IOException) { return []; }
-        catch (UnauthorizedAccessException) { return []; }
-    }
-
-    private static IEnumerable<string> Symlink(string link, string target)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(link)!);
-            if (File.Exists(link) || Directory.Exists(link))
-                File.Delete(link);
-            File.CreateSymbolicLink(link, target);
-            return [link];
         }
         catch (IOException) { return []; }
         catch (UnauthorizedAccessException) { return []; }

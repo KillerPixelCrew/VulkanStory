@@ -25,7 +25,6 @@ public class SplashScreenPackagingTests
         Assert.Contains("PackageReference Include=\"SkiaSharp\"", csproj);
         Assert.Contains("PackageReference Include=\"SkiaSharp.NativeAssets.Win32\"", csproj);
         Assert.Contains("PackageReference Include=\"SkiaSharp.NativeAssets.Linux\"", csproj);
-        Assert.Contains("PackageReference Include=\"SkiaSharp.NativeAssets.macOS\"", csproj);
     }
 
     [Fact]

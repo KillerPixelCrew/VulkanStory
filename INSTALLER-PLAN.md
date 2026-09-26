@@ -1,11 +1,14 @@
 # Avalonia installer: implementation plan
 
-Optimum ships three installers that have drifted apart. `scripts/install-linux.sh`
+> **Platform scope (2026-09-26).** This fork supports Windows and Linux only.
+> macOS support was dropped entirely: its installer, packaging scripts, CI jobs
+> and code paths were removed, and the macOS parts of this plan with them.
+
+Optimum ships two installers that have drifted apart. `scripts/install-linux.sh`
 (921 lines) is an interactive terminal wizard with prerequisite auto-install and
 path guards. `scripts/install-windows.ps1` (2195 lines) is a WinForms wizard with
 a transactional install, a runtime preflight, a registered uninstaller, and an
-EULA. `scripts/install-macos.sh` (282 lines) is a plain prompt loop with none of
-that. This plan replaces all three with one C# codebase on .NET 10: a reusable
+EULA. This plan replaces both with one C# codebase on .NET 10: a reusable
 library (`Optimum.Bootstrap.Core`), a machine-readable command line front end
 (`Optimum.Cli`), and an Avalonia GUI (`Optimum.Installer`). The licensing
 constraint recorded in `README.md:260` and `NOTICE:11-14` means Optimum can never
@@ -17,30 +20,29 @@ a stable NDJSON stream.
 
 ## 1. Background and problem statement
 
-### The three installers do not do the same things
+### The two installers do not do the same things
 
-Every capability below exists in at least one installer and is missing from at
-least one other. The gaps are not stylistic. They are the difference between a
+Every capability below exists in one installer and is missing from the other. The gaps are not stylistic. They are the difference between a
 failed install that rolls back and a failed install that leaves the user with an
 empty directory where their game used to be.
 
-| Capability | Linux | Windows | macOS |
-| --- | --- | --- | --- |
-| Graphical UI | terminal TUI | WinForms wizard | none |
-| Prerequisite detection | yes | yes | none |
-| Prerequisite auto-install | dotnet, ilspycmd, distro packages | ilspycmd only | none |
-| NixOS / non-FHS routing | yes | not applicable | no |
-| Version selection | yes, when a bridge patch set exists | `-Version` parameter | none |
-| Install-directory guard | `guard_install_dir` | `Assert-SafeInstallerPaths` | none |
-| Session-aware data-path detection | yes | no | no |
-| Transactional install with rollback | no | yes | no |
-| Runtime preflight before commit | no | yes | no |
-| Registered uninstaller | no | yes, `Optimum_is1` | no |
-| Upgrade detection and version compare | no | yes | partial and broken |
-| EULA | no | yes | no |
-| Persistent install log | no | yes | no |
-| Shortcuts and menu entries | yes | yes | none |
-| Install model | standalone package | standalone package | overlay onto a copy |
+| Capability | Linux | Windows |
+| --- | --- | --- |
+| Graphical UI | terminal TUI | WinForms wizard |
+| Prerequisite detection | yes | yes |
+| Prerequisite auto-install | dotnet, ilspycmd, distro packages | ilspycmd only |
+| NixOS / non-FHS routing | yes | not applicable |
+| Version selection | yes, when a bridge patch set exists | `-Version` parameter |
+| Install-directory guard | `guard_install_dir` | `Assert-SafeInstallerPaths` |
+| Session-aware data-path detection | yes | no |
+| Transactional install with rollback | no | yes |
+| Runtime preflight before commit | no | yes |
+| Registered uninstaller | no | yes, `Optimum_is1` |
+| Upgrade detection and version compare | no | yes |
+| EULA | no | yes |
+| Persistent install log | no | yes |
+| Shortcuts and menu entries | yes | yes |
+| Install model | standalone package | standalone package |
 
 `scripts/install-linux.sh:732` calls `rm -rf "$INSTALL_DIR"` and then copies the
 staged package in. If the copy fails halfway (disk full, a permission change, a
@@ -50,7 +52,7 @@ not have that problem: it copies to `.optimum-stage-<token>`, moves the existing
 target to `.optimum-backup-<token>`, moves the stage into place, and only then
 deletes the backup, with a rollback in the `catch` block. That function is the
 one piece of installer code in the repository worth porting verbatim, and it
-exists on exactly one of three platforms.
+exists on exactly one of the two platforms.
 
 ### The decision already made
 
@@ -104,7 +106,7 @@ safe to retry.
 
 ### Decisions taken 2026-08-27
 
-Four open questions from an earlier draft are now settled and the sections below
+The open questions from an earlier draft are now settled and the sections below
 reflect them.
 
 - **The EULA text is rewritten to match `LICENSE-SCOPE.md`.** The current text in
@@ -121,15 +123,6 @@ reflect them.
   when it spawns the engine. The consent covers the license terms and the fact
   that Optimum decompiles a proprietary game on the user's machine to build the
   patch.
-- **macOS distribution is deferred.** The project is not obtaining an Apple
-  Developer Program account yet, so no signed macOS installer ships. `Optimum.Cli`
-  and `Optimum.Installer` still build and run on macOS from source for anyone who
-  wants them, and `scripts/install-macos.sh` and `scripts/package-macos.sh` stay
-  as the macOS path until an account exists and a signed build ships. Revisit when
-  macOS demand justifies the 99 USD per year and the D-U-N-S lead time.
-- **macOS packaging, when it does ship, is a Velopack `.pkg`.** Not Avalonia
-  Parcel. A recurring Avalonia subscription is not justified for the current macOS
-  audience, and Velopack does macOS signing and notarization at no license cost.
 - **Velopack is confirmed on .NET 10.** A local spike on 2026-08-27 packed a
   net10.0 self-contained console app with Velopack 1.2.0 for `linux-x64` (AppImage
   plus a 44 KB delta from 1.0.0 to 1.0.1 against a 37 MB full package) and
@@ -185,7 +178,7 @@ against a build that takes twenty minutes and allocates gigabytes.
 - A build driver that runs `make`, `scripts/bootstrap.*`, and `scripts/package-*`
   through CliWrap with streamed stdout and stderr and a cancellation token.
 - The staged-package transactional installer, ported from `Install-StagedPackage`
-  and made to work on all three operating systems.
+  and made to work on both operating systems.
 - Path guards that consolidate `guard_install_dir`
   (`scripts/install-linux.sh:661`) and `Assert-SafeInstallerPaths`
   (`scripts/install-windows.ps1:152`). The guard rejects a symlinked install or
@@ -199,7 +192,7 @@ against a build that takes twenty minutes and allocates gigabytes.
 - Session-aware data-path detection, generalized from
   `scripts/install-linux.sh:580-633`.
 - Shortcut writers: Windows `.lnk` and Start Menu, Linux `.desktop` plus a hicolor
-  icon, macOS `.app` registration.
+  icon.
 - Uninstaller generation and registration, plus an install manifest.
 - One EULA text resource.
 - The `IProgress<BootstrapProgress>` model and the NDJSON emitter.
@@ -498,7 +491,7 @@ Progress starts, because the build is already writing to disk.
 | NixOS / non-FHS routing | `scripts/install-linux.sh:95-124` | Core detection, surfaced as a different action on the SDK row |
 | Bridge version prompt | `scripts/install-linux.sh:532-552` | Options screen version selector |
 | `guard_install_dir` | `scripts/install-linux.sh:661` | Core path guards |
-| Session-aware data-path detection | `scripts/install-linux.sh:580-633` | Core, on all three operating systems |
+| Session-aware data-path detection | `scripts/install-linux.sh:580-633` | Core, on both operating systems |
 | `optimum-launch.sh` and `datapath.cfg` | `scripts/install-linux.sh:742-764` | Core shortcut and launcher writers |
 | `.desktop` entry and hicolor icon | `scripts/install-linux.sh:766-790, 876-886` | Core shortcut writers |
 | WinForms wizard sections and dark/light detection | `scripts/install-windows.ps1` GUI block | Avalonia views with theme-aware resources |
@@ -513,53 +506,18 @@ Progress starts, because the build is already writing to disk.
 | `Install-StagedPackage` | `scripts/install-windows.ps1:718` | Core transactional installer, all platforms |
 | Uninstaller registry registration | `scripts/install-windows.ps1:1142` | Core uninstaller registration, all platforms |
 | Detached log tail and saved raw log | `scripts/install-windows.ps1:1265-1301, 1912` | Core streamed output, Installer log pane, saved log on all platforms |
-| macOS VS candidate paths and picker | `scripts/install-macos.sh:66-132` | Core detection |
-| macOS version-mismatch guard | `scripts/install-macos.sh:179-199` | Core, generalized as a pre-build check on all platforms |
 
 ## 6. Cross-OS unification
 
 | Gap | Resolution |
 | --- | --- |
-| macOS has no GUI, no prerequisites, no shortcuts, no version selection, no data-path prompt | `Optimum.Installer` runs on macOS with the same screens and the same Core |
 | Windows lacks session-aware data-path detection | Core implements it once; the Windows candidate list adds `%APPDATA%\VintagestoryData` and `%APPDATA%\OptimumData` |
-| Linux and macOS have no transactional install | Core's ported `Install-StagedPackage` runs everywhere |
-| Linux and macOS have no runtime preflight | See section 7; this one is not free |
-| Linux and macOS have no registered uninstaller | Core writes an install manifest at the install root and registers it: Windows registry under `HKCU:\...\Uninstall\Optimum_is1`, Linux a `.desktop` action plus the manifest, macOS the manifest inside the bundle |
-| Linux and macOS have no upgrade detection | Core reads the manifest, compares versions, and the Options screen offers upgrade, reinstall, or cancel |
+| Linux has no transactional install | Core's ported `Install-StagedPackage` runs everywhere |
+| Linux has no runtime preflight | See section 7; this one is not free |
+| Linux has no registered uninstaller | Core writes an install manifest at the install root and registers it: Windows registry under `HKCU:\...\Uninstall\Optimum_is1`, Linux a `.desktop` action plus the manifest |
+| Linux has no upgrade detection | Core reads the manifest, compares versions, and the Options screen offers upgrade, reinstall, or cancel |
 | Only Windows shows an EULA | One EULA resource in Core, shown by the Installer on every platform |
 | Only Windows persists an install log | Core writes the raw log to a per-platform application data directory on every platform |
-| macOS uses an overlay model, the others use standalone packages | macOS moves to the standalone-package model |
-
-### The macOS overlay retirement
-
-`scripts/install-macos.sh` currently copies the user's whole vanilla install to a
-sibling `Optimum/` directory (`:277`, `:205`) and overlays Cecil-patched engine
-DLLs onto the copy. The file's own header at `:4-5` claims it "Installs Optimum
-INTO the Vintage Story directory" and does not modify vanilla files, which no
-longer describes what the script does. Worse, `--uninstall` at `:262-266` operates
-on `$VS_DIR`, not on `$INSTALL_DIR`, so it cannot remove a sibling install at all,
-and the upgrade branch at `:269-275` deletes files from `$VS_DIR` while the
-install writes to `$INSTALL_DIR`. The script also requires build outputs from a
-`make dist` target that does not exist in the `Makefile`.
-
-`scripts/package-macos.sh:138` already assembles `Optimum.app` and `:275-323`
-already produces a `.dmg` or a `.tar.gz` fallback. The new installer consumes that
-`.app` and installs it transactionally, which makes macOS structurally identical to
-Linux and Windows. What migrates from the old script: the five VS candidate paths
-at `:68-74`, the numbered picker at `:117-131`, and the version-mismatch guard at
-`:179-199`, which caught a real shader `KeyNotFoundException` during 1.22.6
-verification and is worth generalizing to every platform. What is retired: the
-overlay copy, the eleven-name `OPTIMUM_FILES` list, and the `--uninstall` branch.
-
-This retirement lands when macOS gets a signed release, which is deferred (see the
-decisions block in section 2). Until then `scripts/install-macos.sh` stays and the
-new installer runs on macOS only from a source build.
-
-Users of the old overlay model need a migration path. Section 12 records this as a
-risk, and the concrete answer is that `Optimum.Cli uninstall` detects a legacy
-overlay by the presence of `Optimum.dll` and `.optimum/version` next to a
-`VintagestoryLib.dll` and removes it using the old file list before the new
-install proceeds.
 
 ## 7. Prerequisite handling
 
@@ -567,12 +525,11 @@ install proceeds.
 
 `scripts/check-prereqs.sh:15-30` is the authoritative list and Core ports it
 directly. Required: `dotnet`, `git`, `perl`, `python3`, `curl`, `tar`, `pwsh`,
-`chmod`. Optional: `unzip`, `ilspycmd`, `make`, `cmake`, `mkisofs`, `innoextract`
-at 1.11 or newer.
+`chmod`. Optional: `unzip`, `ilspycmd`, `innoextract` at 1.11 or newer.
 
 Two notes on that list, because it is easy to get wrong. `pwsh` is marked required
-at `scripts/check-prereqs.sh:23`, not optional, because `package-linux.ps1`,
-`package-macos.ps1`, and `package.ps1` need it. That is stricter than a Linux user
+at `scripts/check-prereqs.sh:23`, not optional, because `package-linux.ps1` and
+`package.ps1` need it. That is stricter than a Linux user
 building only a Linux package actually needs, and Core should model `pwsh` as
 required-for-packaging rather than required-for-everything so a Linux user is not
 told to install PowerShell to produce a `tar.gz`. And `appimagetool` is not in
@@ -582,7 +539,7 @@ that detection into the same model rather than leaving it in one packaging scrip
 
 ### Detection per platform
 
-Linux and macOS use `command -v` equivalents plus the version probes already in
+Linux uses `command -v` equivalents plus the version probes already in
 the shell scripts. Windows cannot rely on `PATH` alone: `Resolve-DotNetPath`
 (`scripts/install-windows.ps1:336`) probes Visual Studio's bundled `dotnet\`
 directory, Scoop, and Chocolatey, and `Find-AllVintageStory` (`:204`) walks Inno
@@ -638,25 +595,25 @@ cost is roughly 55 to 60 MB on disk per RID for an untrimmed self-contained
 Avalonia application, about 25 MB compressed, which is negligible next to the
 570 MB client download the user is about to make anyway.
 
-### Runtime validation on Linux and macOS
+### Runtime validation on Linux
 
 This gap needs its own paragraph, because the plan cannot close it by porting
 code. `Invoke-RuntimePreflight` (`scripts/install-windows.ps1:669`) runs
 `Optimum.exe --validate-only` from the staged package and requires a
 `.optimum/package-complete` marker at `:680`. Neither the marker nor the managed
-launcher exists in a Linux or macOS package. `scripts/package.ps1:298` and `:401`
+launcher exists in a Linux package. `scripts/package.ps1:298` and `:401`
 write `.optimum/standalone-install` and `.optimum/package-complete`;
-`scripts/package-linux.sh` and `scripts/package-macos.sh` write neither. More
-fundamentally, `scripts/package-linux.sh:341` produces the `Optimum` binary by
-copying the vanilla apphost, and neither Linux nor macOS packaging stages
-`Optimum.dll`, `Optimum.Patcher.dll`, or the `Mono.Cecil` assemblies. Those
-packages ship pre-patched DLLs and never run the Cecil transplant at launch, which
-means the `.optimum/donors/` directory that `scripts/package-linux.sh:267-274`
-carefully populates has no consumer on those platforms.
+`scripts/package-linux.sh` writes neither. More fundamentally,
+`scripts/package-linux.sh:341` produces the `Optimum` binary by copying the
+vanilla apphost, and Linux packaging does not stage `Optimum.dll`,
+`Optimum.Patcher.dll`, or the `Mono.Cecil` assemblies. Those packages ship
+pre-patched DLLs and never run the Cecil transplant at launch, which means the
+`.optimum/donors/` directory that `scripts/package-linux.sh:267-274` carefully
+populates has no consumer on that platform.
 
 Two options were on the table:
 
-1. Ship `Optimum.Launcher` in the Linux and macOS packages, add the two markers,
+1. Ship `Optimum.Launcher` in the Linux package, add the two markers,
    and get true parity plus a real `--validate-only`. This is the larger change and
    it alters what those packages contain.
 2. Implement `validate` in Core over the staged DLLs, without the launcher.
@@ -668,7 +625,7 @@ confirms `Vintagestory.Client.ClientProgram` still has a static `Main`. That
 catches a patch that removed the entry point without the risk of loading game
 code into the installer process. The full JIT probe from `Optimum.exe
 --validate-only` stays available for a later proposal that changes what the
-Linux and macOS packages contain.
+Linux package contains.
 
 ## 8. Packaging and distribution of the installer
 
@@ -683,24 +640,6 @@ path has no auto-update. This plan does not propose `.deb` or `.rpm` for the fir
 release: AppImage matches what `scripts/package-linux.sh --format appimage`
 already produces for the game package, so the installer and the thing it installs
 use the same Linux distribution format.
-
-macOS is not part of the first distributed release. Signing and notarizing a
-macOS bundle requires a paid Apple Developer Program membership, and the project
-has decided not to obtain one yet. An unsigned installer is not an acceptable
-artifact: `README.md:254` records that an unsigned bundle makes Gatekeeper warn,
-and an installer is exactly the kind of binary a user should refuse to run when
-the operating system warns about it. So `Optimum.Installer` and `Optimum.Cli`
-build for `osx-arm64` and `osx-x64` and run for anyone who builds them, but the
-release workflow publishes nothing for macOS. `scripts/install-macos.sh` and
-`scripts/package-macos.sh` stay as the macOS path in the meantime.
-
-When macOS does ship, the format is a Velopack `.pkg`. Velopack handles
-`codesign` and notarization at no license cost. Avalonia Parcel, which would
-produce a `.dmg` and automate the `Info.plist` and bundle assembly, is rejected:
-its full signing feature sits behind a recurring Avalonia subscription that the
-current macOS audience does not justify. The cost of the `.pkg` choice is that
-macOS users get a guided installer where some expect a drag-to-Applications
-window, which is a reasonable trade for a tool that then runs a long build.
 
 Ship untrimmed. Avalonia's XAML loader uses reflection heavily and trimming
 removes types the loader resolves by name, which fails at runtime rather than at
@@ -780,9 +719,7 @@ of the gate scripts move to `Optimum.Bootstrap.Core.Tests`.
 
 1. A real end-to-end install on Linux and Windows from a clean machine that
    finishes and launches the game into a world, verified by a person, not by a
-   script. On macOS the same run from a source build of `Optimum.Installer`,
-   unsigned, accepted through the Gatekeeper right-click bypass, since macOS has
-   no signed release yet.
+   script.
 2. `Optimum.Cli build --json` green on every job of the extended
    `.github/workflows/ci-platform-bootstrap.yml`, with the NDJSON conformance
    assertion running against the real stream.
@@ -792,9 +729,8 @@ of the gate scripts move to `Optimum.Bootstrap.Core.Tests`.
 ## 10. CI changes
 
 Today `.github/workflows/ci-platform-bootstrap.yml` is the only workflow, it is
-`workflow_dispatch` only, and it has five jobs: `bootstrap-windows`
-(`windows-latest`), `bootstrap-macos-intel` (`macos-15-intel`),
-`bootstrap-macos-arm` (`macos-14`), `bootstrap-linux` (`ubuntu-24.04`), and
+`workflow_dispatch` only, and it has three jobs: `bootstrap-windows`
+(`windows-latest`), `bootstrap-linux` (`ubuntu-24.04`), and
 `bootstrap-linux-arm` (`ubuntu-24.04-arm`). Each sets up .NET `10.0.x`, resolves
 and caches the client archive, bootstraps with `--client-archive`, builds
 `VintageStory.slnx -c Release`, runs `check-patches.sh --strict-unavailable`, and
@@ -819,14 +755,12 @@ package. It keeps the manual bootstrap and build steps as well, so a driver bug
 is a distinct signal from a pipeline bug; the job timeout moved to 60 minutes to
 cover the second pipeline run. The cached archive is already resolved by the
 existing `Resolve client archive` and `Cache client archive` steps, so this adds
-compute time and no new download. The other four platform jobs get the same step
+compute time and no new download. The other two platform jobs get the same step
 once the driver has proven itself on Linux.
 
 **A release workflow.** Runs `vpk pack` for `win-x64` and `linux-x64` and
 publishes the Velopack feed. Signing credentials for Windows come from repository
-secrets. This workflow is the only one that touches signing. It builds the
-`osx-arm64` and `osx-x64` binaries for archival but publishes nothing for macOS
-until an Apple Developer Program account and a signing certificate exist. The
+secrets. This workflow is the only one that touches signing. The
 `velopack-smoke` job in `ci-installer.yml` already packs two versions and checks
 the delta builds; Phase 5 adds the runtime apply check once there is an app to run
 it against.
@@ -876,8 +810,7 @@ package, mapping each step to a `ProgressPhase` and a `FailureReason`
 (`BootstrapFailureClassifier` splits a failed bootstrap into `patch-conflict` and
 `decompile-failed`). It forwards `--client-archive` to both bootstrap and
 packaging so neither half re-downloads the client, locates the package per
-platform (an `Optimum-v*` directory on Windows and Linux, `Optimum.app` on
-macOS), and on cancellation removes only what it wrote. `build` requires
+platform (an `Optimum-v*` directory on Windows and Linux), and on cancellation removes only what it wrote. `build` requires
 `--acknowledge-decompile`. `install` runs the Phase 1 path guard then a copy into
 an empty directory plus an `InstallManifest` (it refuses a non-empty target;
 in-place replace with rollback is Phase 4); `uninstall` reverses it by that
@@ -889,13 +822,13 @@ conformance check, the twin of `Optimum.Cli.Tests/NdjsonStream.cs`.
 *Verification:* `Optimum.Cli.Tests` has 13 tests including the NDJSON contract
 against a scripted driver, the `patch-conflict` and `cancelled` reasons, the
 no-flag gate, and a clean run with no progress anomalies. An adversarial pass
-against the shell scripts drove the client-archive forwarding, the macOS package
+against the shell scripts drove the client-archive forwarding, the package
 location, the empty-output guard and the scoped cancellation cleanup, the
 manifest-entry containment in `uninstall`, and `install` refusing to overwrite.
 `ci-installer.yml` gained a `cli-contract` job. The `bootstrap-linux` job in
 `ci-platform-bootstrap.yml` now runs `Optimum.Cli build --json
 --acknowledge-decompile --client-archive` end to end through
-`check-ndjson-stream.py`, then `Optimum.Cli validate`. The other four platform
+`check-ndjson-stream.py`, then `Optimum.Cli validate`. The other two platform
 jobs get the same step incrementally.
 
 **Phase 3: the GUI.** Done. `Optimum.Installer` is an Avalonia 12 MVVM app that
@@ -955,7 +888,7 @@ swaps the stage in, and deletes the backup; any failure rolls back to the
 previous install and the `finally` clears the stage and backup directories. A
 `FailAtStep` hook drives the rollback tests. `ShortcutWriter` writes the
 menu and desktop shortcuts per platform (Linux `.desktop` plus a hicolor icon,
-Windows `.lnk` through `WScript.Shell`, macOS a symlink into `~/Applications`),
+Windows `.lnk` through `WScript.Shell`),
 records their paths in the manifest, and removes them on uninstall.
 `UninstallRegistration` writes and removes the Windows `Optimum_is1` uninstall
 key, a no-op elsewhere. `RuntimeValidator` took option 2 from section 7:
@@ -970,8 +903,8 @@ install and downgrades the cleanup error to a warning; a rollback that itself
 cannot restore the backup is reported as such with the backup path, not as a
 success. `uninstall` runs the shortcut, registry, and `.optimum` cleanup even
 when a listed entry will not delete. `RuntimeValidator` never fails a build it
-cannot inspect. Windows `.lnk` and registry paths and the macOS bundle symlink
-are covered by construction and need a manual check on those platforms.
+cannot inspect. Windows `.lnk` and registry paths are covered by construction
+and need a manual check on Windows.
 
 **Phase 5: distribution.** Done for `win-x64` and `linux-x64`. `Optimum.Installer`
 calls `VelopackApp.Build().Run()` first thing in `Main` and carries a thin
@@ -982,11 +915,11 @@ Prerequisites and Options screens (restarting for an update once the build is
 running would abandon a half-written install). The check is a no-op when the app
 is not running from a Velopack install. `vpk` is a repo-local tool
 (`.config/dotnet-tools.json`). `make installer-pack INSTALLER_RID=<rid>` publishes
-self-contained and packs. `.github/workflows/release-installer.yml` packs Windows,
-Linux, and macOS in a matrix, renames the user-facing assets to
+self-contained and packs. `.github/workflows/release-installer.yml` packs Windows
+and Linux in a matrix, renames the user-facing assets to
 `Optimum-v<version>-<rid>-Installer.<ext>` (`vpk` has no name-override flag, so a
 post-pack step renames them and patches `assets.<channel>.json`; the `.nupkg` and
-`releases.<channel>.json` feed files keep their Velopack names), uploads all four
+`releases.<channel>.json` feed files keep their Velopack names), uploads both
 as artifacts, and a separate `publish` job that `needs` the matrix uploads one
 channel at a time to a single `installer-v<version>` tag, so the platform jobs
 never race the GitHub API.
@@ -996,9 +929,8 @@ The `ci-installer.yml` `velopack-smoke` job packs the real `Optimum.Installer` f
 *Verification:* the local spike packed the real app (48 MB AppImage, 51 KB delta).
 `Optimum.Installer.Tests` covers the banner appearing for an available update, the
 update command applying it, no banner otherwise, and the banner hiding once the
-build starts (`FakeUpdateService`). A signed Windows installer, the
-Gatekeeper-free first run, and a runtime delta-apply still need a clean Windows
-and Linux machine.
+build starts (`FakeUpdateService`). A signed Windows installer and a runtime
+delta-apply still need a clean Windows and Linux machine.
 
 Open risk: installer releases land in the game repository's release list on the
 `installer-v<version>` tag, and the installer version tracks the shared `VERSION`
@@ -1019,8 +951,8 @@ Deferred: turning `install-linux.sh` and `install-windows.ps1` into thin shims
 over `Optimum.Cli`. Replacing a working installer with an unverified shim is
 exactly what section 13's own risk notes warn against; the swap waits for a green
 `Optimum.Cli build` end to end on every platform CI job (the `bootstrap-linux`
-job runs it today; the other four are pending). `scripts/install-macos.sh` and
-the legacy `install-*-legacy` files also stay until then.
+job runs it today; the other two are pending). The legacy `install-*-legacy`
+files also stay until then.
 *Verification:* a fresh clone's `README.md` documents the installer and CLI first;
 `scripts/uninstall.sh` removes a manifest-based install by delegating to
 `optimum uninstall` and a legacy install by its file list.
@@ -1059,19 +991,8 @@ runtime; that check waits for Phase 5 and a running app. If Velopack proves
 unworkable, the fallback is per-platform packaging with no auto-update, which is
 what the project has today.
 
-**macOS is deferred.** The project has decided not to obtain an Apple Developer
-Program account yet, so there is no signed macOS release. The risk is that a macOS
-user finds `scripts/install-macos.sh`, which is broken in the ways section 6
-lists. Mitigation: `Optimum.Installer` builds and runs on macOS from source and
-uses the standalone-package model, so a macOS user who builds it gets a working
-install; the broken script stays only because removing it before a replacement
-ships would leave macOS with nothing. Revisit the account when downloads or issues
-show macOS demand.
-
-**Parcel versus Velopack for macOS.** Decided: Velopack `.pkg`. See section 8.
-
 **The scripts remain a dependency.** After Phase 6 the installer still needs bash
-on Linux and macOS and PowerShell on Windows, because `scripts/bootstrap.sh` and
+on Linux and PowerShell on Windows, because `scripts/bootstrap.sh` and
 `scripts/bootstrap.ps1` are the execution layer. That is acceptable: both are
 present on their platforms by default, and Windows already needs Windows
 PowerShell 5.1 for other reasons (`Test-WindowsPowerShell51`,
@@ -1092,10 +1013,6 @@ cache in `.vanilla/archives/` (`scripts/bootstrap.sh:321`) needs to survive a
 cancelled install so a retry does not re-download. The Windows bootstrap already
 writes to a `.partial` file and moves it into place on completion
 (`scripts/bootstrap.ps1:559`, `:568`); the same discipline should apply everywhere.
-
-**Legacy macOS overlay users.** Migration path described in section 6. The risk is
-that a user who installed with the old script and then installs with the new one
-ends up with two copies of the game and no obvious way to tell which is which.
 
 **The EULA is legally load-bearing.** Resolved: local decompilation needs the
 user's explicit consent, so posture C applies. The GUI gates on a checkbox,
@@ -1132,8 +1049,8 @@ The new modal should either gate on scroll properly or drop the pretense.
 - `.github/workflows/ci-installer.yml` (push and pull request: the test job, the
   `cli-contract` job, and the `velopack-smoke` job)
 - `scripts/check-ndjson-stream.py` (the reusable NDJSON conformance check)
-- `.github/workflows/release-installer.yml` (Velopack pack for Windows, Linux,
-  macOS; publishes Windows and Linux)
+- `.github/workflows/release-installer.yml` (Velopack pack and publish for
+  Windows and Linux)
 - `INSTALLER-PLAN.md` (this file)
 
 ### Modified
@@ -1146,7 +1063,7 @@ The new modal should either gate on scroll properly or drop the pretense.
   CLIENT_ARCHIVE=...` and `make refresh CLIENT_ARCHIVE=...` silently drop the
   archive and re-download 570 MB.
 - `.github/workflows/ci-platform-bootstrap.yml`: an `Optimum.Cli build --json`
-  step plus a conformance assertion in each of the five jobs.
+  step plus a conformance assertion in each of the three jobs.
 - `README.md`: one documented install path per platform.
 - `LICENSE-SCOPE.md`: add `Optimum.Bootstrap.Core/**`,
   `Optimum.Bootstrap.Core.Tests/**`, `Optimum.Cli/**`, `Optimum.Cli.Tests/**`,
@@ -1156,7 +1073,7 @@ The new modal should either gate on scroll properly or drop the pretense.
 ### Kept as the execution layer
 
 `scripts/bootstrap.sh`, `scripts/bootstrap.ps1`, `scripts/package-linux.sh`,
-`scripts/package-macos.sh`, `scripts/package.ps1`, `scripts/package-all.sh`,
+`scripts/package.ps1`, `scripts/package-all.sh`,
 `scripts/prepare-runtime-donors.ps1`, `scripts/prepare-runtime-donors.sh`,
 `scripts/check-prereqs.sh`, `scripts/check-patches.sh`,
 `scripts/validate-patch-syntax.sh`, `scripts/runtime-donor-patch-gate.sh`, and the
@@ -1170,8 +1087,6 @@ fixup scripts `scripts/fix-base-ctor-calls.py`, `scripts/fix-closure-class.pl`, 
 - `scripts/install-linux.sh` and `scripts/install-windows.ps1` carry a notice but
   stay functional. They become shims over `Optimum.Cli` once `Optimum.Cli build`
   is green end to end on every platform CI job.
-- `scripts/install-macos.sh` stays until a signed macOS release exists; its
-  removal and the overlay-model retirement wait for the Apple Developer account.
 - `scripts/uninstall.ps1` stays as long as it is byte-identical to the copy the
   Windows package ships. Core's uninstaller generation should produce that file
   rather than keeping two copies in sync by hand.

@@ -21,21 +21,18 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 # script only ever talks to repositories it names explicitly.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
-# macOS ships Bash 3.2 (2007) and BSD coreutils; this script needs features
-# present only in Bash 4+ (associative arrays are unused, but `read -d ''`
-# edge-case behavior and `[[ =~ ]]` quoting rules differ) and GNU-style
-# null-delimited sort. The CI installs Bash 5 via Homebrew on macOS runners;
-# warn local users who forgot that step so the error points at the real cause
-# instead of at cryptic patch-application failures dozens of minutes later.
+# This script needs features present only in Bash 4+ (`read -d ''` edge-case
+# behavior and `[[ =~ ]]` quoting rules differ in older releases). Warn early so
+# the error points at the real cause instead of at cryptic patch-application
+# failures dozens of minutes later.
 if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
   echo "WARNING: Bash ${BASH_VERSION} detected. This script is tested with" >&2
-  echo "  Bash 4+. On macOS, install a modern Bash and ensure it comes first" >&2
-  echo "  in PATH:  brew install bash" >&2
-  echo "  Then re-run:  \$(brew --prefix)/bin/bash scripts/bootstrap.sh ..." >&2
+  echo "  Bash 4+. Install a modern Bash and ensure it comes first in PATH." >&2
 fi
 
-# Portable null-delimited sort. GNU sort supports -z; BSD sort (macOS default)
-# does not. Detect once at startup and define a function the patch loops use.
+# Portable null-delimited sort. GNU sort supports -z; minimal sort
+# implementations may not. Detect once at startup and define a function the
+# patch loops use.
 if printf '\0' | sort -z >/dev/null 2>&1; then
   sort_null() { sort -z; }
 else
@@ -205,12 +202,9 @@ extract_archive() {
       if [[ -z "$innoextract_bin" ]]; then
         echo "Downloading innoextract 1.13.0 (crazy-max fork)..." >&2
         mkdir -p "$repo_root/.tools"
-        local os_type="$(uname -s)"
         local machine="$(uname -m)"
         local arch="linux-amd64"
-        if [[ "$os_type" == "Darwin" ]]; then
-          if [[ "$machine" == "arm64" ]]; then arch="darwin-arm64"; else arch="darwin-amd64"; fi
-        elif [[ "$machine" == "aarch64" || "$machine" == "arm64" ]]; then
+        if [[ "$machine" == "aarch64" || "$machine" == "arm64" ]]; then
           arch="linux-arm64"
         fi
         local inno_url="https://github.com/crazy-max/innoextract/releases/download/v1.13.0/innoextract-$arch"
@@ -238,10 +232,9 @@ extract_archive() {
 
   # Normalise the archive's own root to "vintagestory".
   #
-  # Every caller below reads $dest/vintagestory, and only the Windows zip roots
-  # there: the macOS tarball roots at "Vintage Story.app" and the Linux tarball
-  # at "vintagestory" already. Without this, a macOS bootstrap downloads the
-  # right client, extracts it, and then fails on the very next line with
+  # Every caller below reads $dest/vintagestory. The Linux tarball already roots
+  # there; an archive with a single differently named root would otherwise be
+  # extracted and then fail on the very next line with
   #   cp: .vanilla/win-x64/vintagestory/VintagestoryLib.dll: No such file
   # having done the 607MB download first.
   #
@@ -331,8 +324,6 @@ download_client_archive() {
   case "$(uname -s)-$(uname -m)" in
     Linux-x86_64)  os_arch="linux-x64" ;;
     Linux-aarch64) os_arch="linux-arm64" ;;
-    Darwin-x86_64) os_arch="osx-x64" ;;
-    Darwin-arm64)  os_arch="osx-arm64" ;;
     *)             os_arch="linux-x64" ;;
   esac
 
@@ -604,8 +595,8 @@ echo "Applying post-decompile fixups..."
 
 # Normalize CRLF across all decompiled .cs files FIRST (ilspycmd on Windows emits CRLF).
 # Anchored fixup patterns fail on lines that end with \r, so this must run before any fixup.
-# perl -pi instead of sed -i: macOS BSD sed reads GNU-style -i arguments as the backup
-# suffix and then parses the target path as its script, which aborts the bootstrap.
+# perl -pi instead of sed -i: sed's -i argument syntax is not portable across sed
+# implementations, while perl -pi behaves the same everywhere.
 normalize_lf "$repo_root/build"
 
 vanilla_lib="$repo_root/.vanilla/win-x64/vintagestory/Lib"

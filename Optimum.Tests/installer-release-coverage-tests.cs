@@ -111,7 +111,6 @@ public class InstallerReleaseCoverageTests
 
     [Theory]
     [InlineData("scripts/package-linux.sh")]
-    [InlineData("scripts/package-macos.sh")]
     public void BashPackagesShipExactPatchedDllPdbPairs(string relativePath)
     {
         string script = Read(relativePath);
@@ -129,7 +128,7 @@ public class InstallerReleaseCoverageTests
     }
 
     [Theory]
-    [InlineData("scripts/package-macos.ps1")]
+    [InlineData("scripts/package-linux.ps1")]
     public void PowerShellPackagesShipExactPatchedDllPdbPairs(string relativePath)
     {
         string script = Read(relativePath);

@@ -199,8 +199,7 @@ public static class Program
     /// this method at all.
     ///
     /// GLFW requires the window that owns a GL context to be created,
-    /// pumped, and destroyed on the same thread (strictly enforced on
-    /// macOS), so the actual patch work (file IO, Cecil IL rewriting) runs
+    /// pumped, and destroyed on the same thread, so the actual patch work (file IO, Cecil IL rewriting) runs
     /// on a background thread while this one pumps the splash's window
     /// loop. Returns null on success or a nonzero exit code after a failure.
     /// </summary>

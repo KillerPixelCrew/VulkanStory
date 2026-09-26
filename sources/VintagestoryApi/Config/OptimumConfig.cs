@@ -186,7 +186,7 @@ public static class OptimumConfig
     public static bool IndirectDrawEnabled = false;
 
     /// <summary>
-    /// Set at startup after OpenGL capability probe. False on macOS (OpenGL 4.1) and legacy drivers.
+    /// Set at startup after OpenGL capability probe. False on drivers without OpenGL 4.3 multi-draw-indirect.
     /// </summary>
     public static bool IndirectDrawSupported = false;
 
@@ -548,6 +548,12 @@ public static class OptimumConfig
     public static string Upscaler = "off";
     /// <summary>Frame generation provider. The Vulkan renderer applies changes at a frame boundary.</summary>
     public static string FrameGeneration = "off";
+    /// <summary>Requested presents per rendered frame. Each SDK clamps to its device limit.</summary>
+    public static int FrameGenerationMultiplier = 2;
+    public static readonly string[] FrameGenerationMultiplierNames = { "2", "3", "4", "5", "6" };
+    public static string[] FrameGenerationMultiplierNamesFor(string provider) =>
+        string.Equals(provider, "fsr3", StringComparison.OrdinalIgnoreCase)
+            ? ["2"] : FrameGenerationMultiplierNames;
     /// <summary>Show rendered and vendor-reported displayed frame rates in the game HUD.</summary>
     public static bool ShowFpsCounter;
     private static long realPresentedFrames;
@@ -566,7 +572,7 @@ public static class OptimumConfig
         Array.Exists(FrameGenerationUiNames, name => string.Equals(name, FrameGeneration, StringComparison.OrdinalIgnoreCase))
             ? FrameGeneration.ToLowerInvariant() : "off";
     public static string UpscalerQuality = "quality";
-    public static readonly string[] UpscalerNames = { "off", "dlss", "xess", "fsr3" };
+    public static readonly string[] UpscalerNames = { "off", "dlss", "xess", "fsr3", "fsr4" };
     public static readonly string[] UpscalerQualityNames =
         { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
     public static readonly string[] XessQualityNames =
@@ -1150,6 +1156,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
         (nameof(OptimumConfigData.Upscaler), Upscaler),
         (nameof(OptimumConfigData.FrameGeneration), FrameGeneration),
+        (nameof(OptimumConfigData.FrameGenerationMultiplier), FrameGenerationMultiplier.ToString()),
         (nameof(OptimumConfigData.ShowFpsCounter), ShowFpsCounter.ToString()),
         (nameof(OptimumConfigData.LowLatencyMode), LowLatencyMode),
         (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
@@ -1282,6 +1289,7 @@ public static class OptimumConfig
             FrameGeneration = Array.Exists(FrameGenerationNames,
                 name => string.Equals(name, fgName, StringComparison.OrdinalIgnoreCase))
                 ? fgName.ToLowerInvariant() : "off";
+            FrameGenerationMultiplier = Math.Clamp(data.FrameGenerationMultiplier, 2, 6);
             ShowFpsCounter = data.ShowFpsCounter;
             string latencyMode = data.LowLatencyMode?.Trim() ?? "";
             LowLatencyMode = Array.Exists(LowLatencyModeNames,
@@ -1381,6 +1389,7 @@ public static class OptimumConfig
             TaaJitterDev = TaaJitterDev,
             Upscaler = Upscaler,
             FrameGeneration = FrameGeneration,
+            FrameGenerationMultiplier = FrameGenerationMultiplier,
             ShowFpsCounter = ShowFpsCounter,
             LowLatencyMode = LowLatencyMode,
             UpscalerQuality = UpscalerQuality,
@@ -1481,6 +1490,7 @@ internal sealed class OptimumConfigData
     public bool TaaJitterDev { get; set; } = false;
     public string Upscaler { get; set; } = "off";
     public string FrameGeneration { get; set; } = "off";
+    public int FrameGenerationMultiplier { get; set; } = 2;
     public bool ShowFpsCounter { get; set; }
     public string LowLatencyMode { get; set; } = "on";
     public string UpscalerQuality { get; set; } = "quality";

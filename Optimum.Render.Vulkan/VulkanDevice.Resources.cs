@@ -762,6 +762,12 @@ public sealed unsafe partial class VulkanDevice
         }
 
         _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
+        if (_gpuTimestamps != null)
+        {
+            long indices = 0;
+            for (int i = 0; i < groupCount; i++) indices += indicesSizes[i];
+            _gpuTimestamps.AddIndices(indices);
+        }
         NoteNativeDraw(NativeDrawKind.Indirect);
         return true;
     }

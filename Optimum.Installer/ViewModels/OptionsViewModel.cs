@@ -121,7 +121,6 @@ public sealed partial class OptionsViewModel : ViewModelBase
     {
         OsKind.Windows => Path.Combine(
             probe.GetEnvironmentVariable("LOCALAPPDATA") ?? probe.HomeDirectory, "Programs", "Optimum"),
-        OsKind.MacOs => Path.Combine(probe.HomeDirectory, "Applications", "Optimum"),
         _ => Path.Combine(
             probe.GetEnvironmentVariable("XDG_DATA_HOME") ?? Path.Combine(probe.HomeDirectory, ".local", "share"),
             "optimum"),

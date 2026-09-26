@@ -15,6 +15,7 @@
 #elif defined(OPTIMUM_FRAGMENT)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_demote_to_helper_invocation : require
 // Native port of chunkopaque.fsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: GREEDYMESH (tile varyings), GBUFFER (G-buffer outputs; the motion output moves from 2 to 4 with it),
 // TAAMOTION (motion output, written through include/motion.glsl). GREEDYMESH_GRAD, NORMALVIEW and
@@ -412,6 +413,14 @@ void main()
 		if (psychedelicStrength > Epsilon) texColor = applyPsychedelicEffect(texColor, vertexPosition*2, 0);
 		if (glitchStrength > Epsilon) texColor = applyRustEffect(texColor, normal, vertexPosition, 1);
 
+		// The alpha test, ahead of the shadow taps and fog it used to follow: none of those
+		// change alpha, so outColor.a there equals texColor.a here. demote (not discard)
+		// keeps implicit derivatives defined for the lookups after it.
+		if (OPTIMUM_NORMALVIEW == 0) {
+		float aTest = texColor.a + max(0.0, 1 - rgba.a) * min(1, texColor.a * 10) - lod0Fade;
+		if (aTest < alphaTest || rgba.a < 0.005) demote;
+		}
+
 		float b = getBrightnessFromShadowMap();
 		float murkiness = getUnderwaterMurkiness();
 		outColor = applyFogAndShadowFromBrightness(texColor, clamp(fogAmount - 50*murkiness, 0, 1), min(b, nb), worldPos.xyz);
@@ -431,11 +440,6 @@ void main()
 		}
 
 		outColor.rgb = applyUnderwaterEffects(outColor.rgb, murkiness);
-
-		if (OPTIMUM_NORMALVIEW == 0) {
-		float aTest = outColor.a + max(0.0, 1 - rgba.a) * min(1, outColor.a * 10) - lod0Fade;
-		if (aTest < alphaTest || rgba.a < 0.005) discard;
-		}
 
 		if (OPTIMUM_SHINYEFFECT > 0) {
 		if ((renderFlags & ReflectiveBitMask) != 0) {
@@ -472,6 +476,15 @@ void main()
 	if (psychedelicStrength > Epsilon) texColor = applyPsychedelicEffect(texColor, vertexPosition*2, 0);
 	if (glitchStrength > Epsilon) texColor = applyRustEffect(texColor, normal, vertexPosition, 1);
 
+	// The alpha test, ahead of the shadow taps and fog (see the tiled path above).
+	if (OPTIMUM_NORMALVIEW == 0) {
+	float aTest = texColor.a + max(0.0, 1 - rgba.a) * min(1, texColor.a * 10) - lod0Fade;
+
+	if ((renderFlags & WindModeBitMask) == WindModeWeakLowAlphaTest) aTest *= 4;
+
+	if (aTest < alphaTest || rgba.a < 0.005) demote;
+	}
+
 	float b = getBrightnessFromShadowMap();
 
 	float murkiness=getUnderwaterMurkiness();
@@ -493,15 +506,6 @@ void main()
 	}
 
 	outColor.rgb = applyUnderwaterEffects(outColor.rgb, murkiness);
-
-
-	if (OPTIMUM_NORMALVIEW == 0) {
-	float aTest = outColor.a + max(0.0, 1 - rgba.a) * min(1, outColor.a * 10) - lod0Fade;
-
-	if ((renderFlags & WindModeBitMask) == WindModeWeakLowAlphaTest) aTest *= 4;
-
-	if (aTest < alphaTest || rgba.a < 0.005) discard;
-	}
 
 
 	if (OPTIMUM_SHINYEFFECT > 0) {

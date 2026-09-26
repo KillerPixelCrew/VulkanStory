@@ -339,6 +339,14 @@ try {
             Copy-Item -LiteralPath (Join-Path $apiOut $fsrFile) -Destination $stageDir -Force -ErrorAction Stop
         }
     }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'amd_fidelityfx_upscaler_dx12.dll')) {
+        foreach ($fsr4File in @('amd_fidelityfx_upscaler_dx12.dll', 'OptimumFsr4.dll')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $fsr4File) -Destination $stageDir -Force -ErrorAction Stop
+        }
+        if (Test-Path -LiteralPath (Join-Path $apiOut 'Fsr4-LICENSE.md')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut 'Fsr4-LICENSE.md') -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
     Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
 

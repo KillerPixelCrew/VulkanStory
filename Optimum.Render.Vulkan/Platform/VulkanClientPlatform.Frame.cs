@@ -35,11 +35,17 @@ public partial class VulkanClientPlatform
         // world pass draws to the targets it names under the factors it states.
         CloseUiScope();
         SceneNoHudCaptured = false;
-        if (rebuildUpscalerTargetsPending)
+        // The loading screen can render frames before ShaderRegistry.Load has
+        // installed the terrain samplers. Rebuilding or reloading here would
+        // invalidate the loading shaders and make the later initial Load add
+        // duplicate samplers. The first frame after Load performs both steps.
+        if (rebuildUpscalerTargetsPending &&
+            ShaderPrograms.Chunkopaque?.customSamplers.ContainsKey("terrainTex") == true)
         {
             rebuildUpscalerTargetsPending = false;
             RebuildFrameBuffers();
-            ShaderRegistry.ReloadShaders();
+            if (reloadUpscalerShadersPending) ShaderRegistry.ReloadShaders();
+            reloadUpscalerShadersPending = false;
         }
         upscaledThisFrame = false;
         upscaledCompositeReady = false;
@@ -137,6 +143,7 @@ public partial class VulkanClientPlatform
         ActiveLatencyStageListener()?.OnFrameRenderStart();
         CurrentRenderStage = stage;
         InRenderStage = true;
+        device?.GpuMark(StageGpuLabel(stage, begin: true));
         RenderStageListener?.OnBeginRenderStage(stage);
     }
 
@@ -147,6 +154,23 @@ public partial class VulkanClientPlatform
         RunModPasses(stage);
         InRenderStage = false;
         RenderStageListener?.OnEndRenderStage(stage);
+        // Work between stages (the post chain, UI separation) is its own section
+        // unless something inside it marks a narrower one.
+        device?.GpuMark(StageGpuLabel(stage, begin: false));
+    }
+
+    private static readonly System.Collections.Generic.Dictionary<EnumRenderStage, (string Begin, string After)> stageGpuLabels = new();
+
+    /// <summary>GPU timestamp labels (stats log only), cached so a mark never allocates.</summary>
+    private static string StageGpuLabel(EnumRenderStage stage, bool begin)
+    {
+        if (!stageGpuLabels.TryGetValue(stage, out var labels))
+        {
+            string name = stage.ToString();
+            labels = ("stage_" + name, "after_" + name);
+            stageGpuLabels[stage] = labels;
+        }
+        return begin ? labels.Begin : labels.After;
     }
 }
 

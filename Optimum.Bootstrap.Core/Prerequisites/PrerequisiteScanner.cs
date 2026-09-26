@@ -5,7 +5,7 @@ namespace Optimum.Bootstrap.Core.Prerequisites;
 /// <summary>
 /// Detects every tool the bootstrap and packaging scripts need.
 ///
-/// On Linux and macOS the tool list is the one in <c>scripts/check-prereqs.sh</c>
+/// On Linux the tool list is the one in <c>scripts/check-prereqs.sh</c>
 /// (a bash script describing what the <em>shell</em> pipeline needs). On Windows
 /// that list does not apply: <c>scripts/bootstrap.ps1</c> reimplements every
 /// fixup natively in PowerShell with "no perl/python3 dependency", and
@@ -28,12 +28,9 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         new(PrerequisiteId.Curl, "curl", "curl", RequirementLevel.Required, "bootstrap, packaging"),
         new(PrerequisiteId.Tar, "tar", "tar", RequirementLevel.Required, "bootstrap, packaging"),
         new(PrerequisiteId.Chmod, "chmod", "chmod (coreutils)", RequirementLevel.Required, "packaging"),
-        new(PrerequisiteId.Pwsh, "pwsh", "PowerShell", RequirementLevel.RequiredForPackaging, "package-linux.ps1, package-macos.ps1, package.ps1"),
+        new(PrerequisiteId.Pwsh, "pwsh", "PowerShell", RequirementLevel.RequiredForPackaging, "package-linux.ps1, package.ps1"),
         new(PrerequisiteId.Unzip, "unzip", "unzip", RequirementLevel.Optional, "bootstrap (zip archives; a python3 fallback exists)"),
         new(PrerequisiteId.Ilspycmd, "ilspycmd", "ilspycmd (decompiler)", RequirementLevel.Optional, "bootstrap (auto-installs via dotnet tool)"),
-        new(PrerequisiteId.Make, "make", "make", RequirementLevel.Optional, "package-macos (.dmg on Linux via libdmg-hfsplus)"),
-        new(PrerequisiteId.Cmake, "cmake", "cmake", RequirementLevel.Optional, "package-macos (.dmg on Linux via libdmg-hfsplus)"),
-        new(PrerequisiteId.Mkisofs, "mkisofs", "mkisofs or genisoimage", RequirementLevel.Optional, "package-macos (.dmg on Linux)"),
         new(PrerequisiteId.Innoextract, "innoextract", "innoextract 1.11 or newer", RequirementLevel.Optional, "package.ps1 (off-platform Windows package)"),
         new(PrerequisiteId.Appimagetool, "appimagetool", "appimagetool", RequirementLevel.Optional, "package-linux.sh --format appimage (auto-downloads)"),
     ];
@@ -58,7 +55,6 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         PrerequisiteId.Dotnet => DetectDotnet(def),
         PrerequisiteId.Ilspycmd => DetectIlspycmd(def),
         PrerequisiteId.Innoextract => DetectInnoextract(def),
-        PrerequisiteId.Mkisofs => DetectEither(def, "mkisofs", "genisoimage"),
         PrerequisiteId.Appimagetool => DetectAppimagetool(def),
         PrerequisiteId.Pwsh => DetectPowerShell(def),
         PrerequisiteId.Git when probe.Os == OsKind.Windows => DetectGitOnWindows(def),
@@ -100,12 +96,6 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
 
         return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
             AcquisitionKind.DownloadPage, null, GitForWindowsUrl);
-    }
-
-    private PrerequisiteResult DetectEither(PrerequisiteDefinition def, string first, string second)
-    {
-        string? path = CommandSearch.Which(probe, first) ?? CommandSearch.Which(probe, second);
-        return path is not null ? Ok(def, path, null) : Missing(def, DistroAcquisition(first));
     }
 
     private PrerequisiteResult DetectDotnet(PrerequisiteDefinition def)

@@ -1,13 +1,16 @@
 # Vulkan renderer
 
 Optimum's Vulkan backend delivers native rendering and shaders, TAA and GTAO, with
-separate scene/UI images and frame timing. It also supports Optimum's existing FSR 1
-render-scale option through the native final blit. New upscaler integrations, frame
-generation and Vulkan-to-DX12 interop are outside this PR.
+separate scene/UI images and frame timing. Its renderer contract now drives DLSS,
+XeSS, FSR 3.1 and FSR 4 upscaling; DLSS, XeSS and FSR 3 frame generation; and the
+corresponding Reflex, XeLL and AMD Anti-Lag latency paths. See the current
+[`ROADMAP.md`](ROADMAP.md), [`upscaler.md`](upscaler.md), and
+[`frame-generation.md`](frame-generation.md) for product status.
 
-Final acceptance of the refactor is pending. Historical test totals and captures do
-not establish correctness of the current build. Select hardware by queried identity
-and capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
+The native refactor is complete. Current hardware-specific validation and tuning gaps
+are tracked separately in the roadmap; historical test totals and captures still do
+not establish correctness of a later build. Select hardware by queried identity and
+capabilities: Intel UHD Graphics 770 is Xe-LP integrated graphics, not Arc.
 
 On 2026-09-24, the current Release solution passed 1,554 tests with zero failures:
 504 Vulkan tests on Intel UHD 770, 744 core tests (plus 34 existing skips),

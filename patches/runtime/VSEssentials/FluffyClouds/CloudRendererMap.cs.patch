@@ -1,0 +1,142 @@
+diff --git a/VSEssentials/FluffyClouds/CloudRendererMap.cs b/VSEssentials/FluffyClouds/CloudRendererMap.cs
+--- a/VSEssentials/FluffyClouds/CloudRendererMap.cs
++++ b/VSEssentials/FluffyClouds/CloudRendererMap.cs
+@@ -171,6 +171,18 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 
+ 	private void FreeGlResources()
+ 	{
++		// Optimum: the device owns these on its own backend, where the GL
++		// binding does not exist and the raw calls throw.
++		Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++		if (optimumGraphics != null)
++		{
++			optimumGraphics.DeleteTexture(TextureData1);
++			optimumGraphics.DeleteTexture(TextureData2);
++			optimumGraphics.DeleteTexture(TextureMap);
++			optimumGraphics.DeleteTexture(TextureCol);
++			optimumGraphics.DeleteFramebuffer(Framebuffer);
++			return;
++		}
+ 		GL.DeleteTexture(TextureData1);
+ 		GL.DeleteTexture(TextureData2);
+ 		GL.DeleteTexture(TextureMap);
+@@ -255,9 +267,21 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 			offset.Z = (float)((double)(committedState.CenterTilePos.Z * base.CloudTileSize) - capi.World.Player.Entity.Pos.Z + windOffsetZ);
+ 			Vec2f value = new Vec2f((float)(((double)committedState.CenterTilePos.X * (double)base.CloudTileSize - capi.World.DefaultSpawnPosition.X + windOffsetX) / (double)base.CloudTileSize), (float)(((double)committedState.CenterTilePos.Z * (double)base.CloudTileSize - capi.World.DefaultSpawnPosition.Z + windOffsetZ) / (double)base.CloudTileSize));
+ 			matrix.Set(capi.Render.CameraMatrixOriginf);
+-			GL.GetInteger(GetPName.DrawFramebufferBinding, out var data);
++			// Optimum: the device keeps no queryable binding to read back, so the
++			// target the API considers current is what gets restored afterwards.
++			Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++			FrameBufferRef optimumSavedTarget = null;
++			int data = 0;
+ 			int[] array = new int[4];
+-			GL.GetInteger(GetPName.Viewport, array);
++			if (optimumGraphics != null)
++			{
++				optimumSavedTarget = capi.Render.CurrentFrameBuffer;
++			}
++			else
++			{
++				GL.GetInteger(GetPName.DrawFramebufferBinding, out data);
++				GL.GetInteger(GetPName.Viewport, array);
++			}
+ 			prog.Use();
+ 			prog.Uniform("dayLight", Math.Max(0f, capi.World.Calendar.DayLightStrength - capi.World.Calendar.MoonLightStrength * 0.95f));
+ 			prog.Uniform("globalCloudBrightness", capi.Ambient.BlendedCloudBrightness);
+@@ -277,8 +301,38 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 			prog.Uniform("pointLightQuantity", capi.Render.ShaderUniforms.PointLightsCount);
+ 			if (capi.Render.ShaderUniforms.PointLightsCount > 0)
+ 			{
+-				GL.Uniform3(GL.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
+-				GL.Uniform3(GL.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++				if (optimumGraphics != null)
++				{
++					optimumGraphics.SetUniformArray3(programId, optimumGraphics.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
++					optimumGraphics.SetUniformArray3(programId, optimumGraphics.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++				}
++				else
++				{
++					GL.Uniform3(GL.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
++					GL.Uniform3(GL.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++				}
++			}
++			if (optimumGraphics != null)
++			{
++				optimumGraphics.BindFramebuffer(Framebuffer);
++				optimumGraphics.SetViewport(0, 0, CloudTileLength, CloudTileLength);
++				optimumGraphics.SetBlendEnabled(false);
++				optimumGraphics.SetDepthTest(false);
++				capi.Render.RenderMesh(quad);
++				optimumGraphics.SetDepthTest(true);
++				optimumGraphics.SetBlendEnabled(true);
++				if (optimumSavedTarget != null)
++				{
++					optimumGraphics.BindFramebuffer(optimumSavedTarget.FboId);
++					optimumGraphics.SetViewport(0, 0, optimumSavedTarget.Width, optimumSavedTarget.Height);
++				}
++				else
++				{
++					optimumGraphics.BindDefaultFramebuffer();
++					optimumGraphics.SetViewport(0, 0, capi.Render.FrameWidth, capi.Render.FrameHeight);
++				}
++				prog.Stop();
++				return;
+ 			}
+ 			GL.BindFramebuffer(FramebufferTarget.Framebuffer, Framebuffer);
+ 			GL.Viewport(0, 0, CloudTileLength, CloudTileLength);
+@@ -306,6 +360,15 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 			TextureDataBuffer1[num2 * 4 + 3] = cloudTile.Brightness;
+ 			TextureDataBuffer2[num2 * 4] = cloudTile.UndulatingCloudMode;
+ 		}
++		// GL converts the signed-short source to normalized RGBA16 storage.
++		// Copying the bits directly would turn full density (32767) into 0.5.
++		Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++		if (optimumGraphics != null)
++		{
++			optimumGraphics.UploadTexture2DNormalizedShorts(TextureData1, 0, 0, 0, CloudTileLength, CloudTileLength, TextureDataBuffer1);
++			optimumGraphics.UploadTexture2DNormalizedShorts(TextureData2, 0, 0, 0, CloudTileLength, CloudTileLength, TextureDataBuffer2);
++			return;
++		}
+ 		GL.BindTexture(TextureTarget.Texture2D, TextureData1);
+ 		GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, CloudTileLength, CloudTileLength, PixelFormat.Rgba, PixelType.Short, TextureDataBuffer1);
+ 		GL.BindTexture(TextureTarget.Texture2D, TextureData2);
+@@ -314,6 +377,18 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 
+ 	private int makeTexture(int width, PixelInternalFormat internalFormat, PixelFormat format, PixelType type)
+ 	{
++		// Optimum: the device takes the GL internal-format token directly and
++		// maps it; the sampling parameters are the GL tokens as well.
++		Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++		if (optimumGraphics != null)
++		{
++			int optimumTexture = optimumGraphics.CreateTexture2DRaw(width, width, (int)internalFormat, IntPtr.Zero, 0);
++			optimumGraphics.SetTextureParameter(optimumTexture, 10241, 9728);
++			optimumGraphics.SetTextureParameter(optimumTexture, 10240, 9728);
++			optimumGraphics.SetTextureParameter(optimumTexture, 10242, 33071);
++			optimumGraphics.SetTextureParameter(optimumTexture, 10243, 33071);
++			return optimumTexture;
++		}
+ 		int num = GL.GenTexture();
+ 		GL.BindTexture(TextureTarget.Texture2D, num);
+ 		GL.TexImage2D(TextureTarget.Texture2D, 0, internalFormat, width, width, 0, format, type, 0);
+@@ -348,6 +423,19 @@ public class CloudRendererMap : CloudRendererBase, IRenderer, IDisposable
+ 		TextureData2 = makeTexture(CloudTileLength, PixelInternalFormat.Rgba16, PixelFormat.Rgba, PixelType.Short);
+ 		TextureDataBuffer1 = new short[CloudTileLength * CloudTileLength * 4];
+ 		TextureDataBuffer2 = new short[CloudTileLength * CloudTileLength * 4];
++		// Optimum: the device's framebuffer objects are created and attached
++		// without binding anything, so nothing needs saving or restoring.
++		Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++		if (optimumGraphics != null)
++		{
++			TextureMap = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
++			TextureCol = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
++			Framebuffer = optimumGraphics.CreateFramebuffer(CloudTileLength, CloudTileLength);
++			optimumGraphics.AttachTexture(Framebuffer, EnumFramebufferAttachment.ColorAttachment0, TextureMap, 0);
++			optimumGraphics.AttachTexture(Framebuffer, EnumFramebufferAttachment.ColorAttachment1, TextureCol, 0);
++			optimumGraphics.SetDrawBuffers(Framebuffer, 3);
++			return;
++		}
+ 		GL.GetInteger(GetPName.DrawFramebufferBinding, out var data);
+ 		TextureMap = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
+ 		TextureCol = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);

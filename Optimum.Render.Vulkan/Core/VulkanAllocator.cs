@@ -813,6 +813,29 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         throw new InvalidOperationException($"no memory type with {properties}");
     }
 
+    /// <summary>
+    /// Whether a device-local, host-visible, host-coherent type sits on a heap of at
+    /// least <paramref name="minimumHeapBytes" />: resizable BAR (or unified memory)
+    /// rather than the 256 MiB window, so long-lived mapped buffers can live in VRAM
+    /// without starving the per-frame ReBAR class.
+    /// </summary>
+    public bool HasLargeHostVisibleDeviceMemory(ulong minimumHeapBytes)
+    {
+        const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
+        lock (_gate)
+        {
+            for (int i = 0; i < _memoryProperties.MemoryTypeCount; i++)
+            {
+                MemoryType type = _memoryProperties.MemoryTypes[i];
+                if ((type.PropertyFlags & wanted) == wanted &&
+                    _memoryProperties.MemoryHeaps[(int)type.HeapIndex].Size >= minimumHeapBytes)
+                    return true;
+            }
+            return false;
+        }
+    }
+
     /// <summary>The property flags of a memory type. Tests and diagnostics.</summary>
     public MemoryPropertyFlags FlagsOf(uint typeIndex) => _memoryProperties.MemoryTypes[(int)typeIndex].PropertyFlags;
 

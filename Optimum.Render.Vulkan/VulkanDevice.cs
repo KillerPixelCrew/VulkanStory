@@ -46,6 +46,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         _vendorFrameCap = Math.Max(0, maxFps);
         if (_xessPresenter is { } intel)
         {
+            // XeLL requires GPU work to be finished before its mode changes.
+            intel.WaitForPresentIdle();
             intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0);
             return;
         }
@@ -61,6 +63,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             if (_appliedLatencyMode != latencyMode)
             {
                 _appliedLatencyMode = latencyMode;
+                intel.WaitForPresentIdle();
                 intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0);
             }
             ReserveFramePresentIds(mayGenerate);
@@ -673,6 +676,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         _indirectRing = new IndirectRing(_frames.FramesInFlight);
         _indirectBuffers = new VulkanBuffer?[_frames.FramesInFlight];
         _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
+        if (GpuTimestamps.EnabledByEnvironment(StatsLogPath))
+        {
+            _gpuTimestamps = GpuTimestamps.TryCreate(_context, _frames.FramesInFlight);
+            if (_gpuTimestamps != null)
+                _frames.SetCommandHooks(_gpuTimestamps.OnCommandsStarted, _gpuTimestamps.OnCommandsEnding);
+        }
         _readbacks = new ReadbackManager(_context, _textures, _frames);
         // A GL query counts across scope ends; a Vulkan one must not be active
         // across vkCmdEndRendering, so the ring suspends and resumes it.
@@ -973,6 +982,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // The slot's previous frame has finished: its query results move to the
         // host buffer before the pools reset, and its readback arena is free again.
         _queryRing.BeginSlot(slot.Index, slot.CommandBuffer);
+        _gpuTimestamps?.BeginSlot(slot.Index, slot.CommandBuffer);
         _readbacks.BeginSlot(slot.Index);
 
         // Sets naming resources deleted since last frame leave the cache now and
@@ -988,6 +998,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             try
             {
                 // One sample is several lines (see VulkanStats); the first keeps the original format.
+                if (_gpuTimestamps != null) sample += "\n" + _gpuTimestamps.TakeLine();
                 System.IO.File.AppendAllText(StatsLogPath, sample + "\n");
             }
             catch (System.IO.IOException)
@@ -1085,6 +1096,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     internal bool RecordComputePass(Graph.ComputePassDeclaration pass)
     {
         if (!_frameActive) return false;
+        using GpuSection gpuSection = BeginGpuSection(pass.Name);
 
         ComputeProgram? program = _compute.Get(pass.ProgramId);
         string? error = program == null
@@ -1418,6 +1430,46 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     private CommandBuffer Commands => _frames.Current.CommandBuffer;
 
+    private GpuTimestamps? _gpuTimestamps;
+
+    /// <summary>
+    /// Opens a GPU timestamp section on the current frame command buffer (stats
+    /// log only; see <see cref="GpuTimestamps" />). The section runs to the next mark.
+    /// </summary>
+    internal void GpuMark(string label)
+    {
+        if (_gpuTimestamps != null && _frameActive) _gpuTimestamps.Mark(Commands, label);
+    }
+
+    /// <summary>
+    /// Opens <paramref name="label" /> until disposal, then reopens the enclosing section,
+    /// so a helper's work is split out of whatever section called it.
+    /// </summary>
+    internal GpuSection BeginGpuSection(string label)
+    {
+        if (_gpuTimestamps == null || !_frameActive) return default;
+        string enclosing = _gpuTimestamps.OpenLabel;
+        _gpuTimestamps.Mark(Commands, label);
+        return new GpuSection(this, enclosing);
+    }
+
+    internal readonly struct GpuSection : IDisposable
+    {
+        private readonly VulkanDevice? _device;
+        private readonly string? _enclosing;
+
+        public GpuSection(VulkanDevice device, string enclosing)
+        {
+            _device = device;
+            _enclosing = enclosing;
+        }
+
+        public void Dispose()
+        {
+            if (_device != null && _enclosing != null) _device.GpuMark(_enclosing);
+        }
+    }
+
     // ------------------------------------------------------------------- teardown
 
     /// <summary>
@@ -1458,6 +1510,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         _uniformBuffers.Clear();
 
         _queryRing?.Dispose();
+        _gpuTimestamps?.Dispose();
         _readbacks?.Dispose();
 
         foreach (VulkanBuffer? indirect in _indirectBuffers) indirect?.Dispose();

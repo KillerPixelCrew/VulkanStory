@@ -967,8 +967,6 @@ function Invoke-OptimumBuild {
             (Join-Path $srcRoot '.vanilla/archives'),
             (Join-Path $srcRoot '.vanilla/win-x64'),
             (Join-Path $srcRoot '.vanilla/linux-x64'),
-            (Join-Path $srcRoot '.vanilla/osx-x64'),
-            (Join-Path $srcRoot '.vanilla/osx-arm64'),
             (Join-Path $srcRoot '.baseline'),
             (Join-Path $srcRoot 'baseline'),
             (Join-Path $srcRoot 'Vintagestory'),
@@ -1016,7 +1014,7 @@ function Invoke-OptimumBuild {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            robocopy "$srcRoot" "$buildRoot" /E /NFL /NDL /NJH /NJS /NP /R:3 /W:2 /XD $excludeDirs /XF '*.zip' '*.tar.gz' '*.dmg' *>&1 | Out-Null
+            robocopy "$srcRoot" "$buildRoot" /E /NFL /NDL /NJH /NJS /NP /R:3 /W:2 /XD $excludeDirs /XF '*.zip' '*.tar.gz' *>&1 | Out-Null
         } finally { $ErrorActionPreference = $prevEAP }
         # Without /R:/W:, robocopy's defaults are 1,000,000 retries at 30s apart per
         # locked/inaccessible file - a single OneDrive placeholder or AV-locked file

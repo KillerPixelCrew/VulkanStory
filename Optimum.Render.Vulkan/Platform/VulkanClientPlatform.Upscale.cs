@@ -16,6 +16,7 @@ public partial class VulkanClientPlatform
     private bool upscaledCompositeReady;
     private bool depthUpscaleRefusalLogged;
     private bool rebuildUpscalerTargetsPending;
+    private bool reloadUpscalerShadersPending;
     private UpscalerPlan lastEvaluatedUpscalePlan;
 
     internal bool UpscaledThisFrame => upscaledThisFrame;
@@ -63,6 +64,7 @@ public partial class VulkanClientPlatform
         if (dlss != null) upscalers.Add("dlss", new DlssBackend(dlss));
         upscalers.Add("xess", new XessBackend(LogUpscaler));
         upscalers.Add("fsr3", new Fsr3Backend(LogUpscaler));
+        upscalers.Add("fsr4", new Fsr4Backend(LogUpscaler));
         Action<VulkanContextOptions>? previous = target.ConfigureContextOptions;
         target.ConfigureContextOptions = options =>
         {
@@ -145,6 +147,8 @@ public partial class VulkanClientPlatform
         upscaledThisFrame = false;
         OptimumConfig.ClearUpscalerPlan();
         rebuildUpscalerTargetsPending = true;
+        reloadUpscalerShadersPending |=
+            ShaderPrograms.Chunkopaque?.customSamplers.ContainsKey("terrainTex") == true;
     }
 
     /// <summary>Returns the scene target only when this frame actually wrote it.</summary>

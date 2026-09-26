@@ -117,6 +117,18 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// </summary>
     public ulong RecordingSerial { get; private set; }
 
+    /// <summary>
+    /// A wait every slot shares: the next submission of frame commands waits on it
+    /// at ALL_COMMANDS, then clears it. See <see cref="FrameRing.GateNextFrameSubmit" />.
+    /// </summary>
+    internal SubmitGate? Gate { get; set; }
+
+    /// <summary>A later command buffer of this slot's frame began recording (slot index, buffer, frame commands).</summary>
+    public Action<int, CommandBuffer, bool>? CommandsStarted { get; set; }
+
+    /// <summary>The current command buffer is about to end for submission (slot index, buffer).</summary>
+    public Action<int, CommandBuffer>? CommandsEnding { get; set; }
+
     private void StartCommandBuffer(bool frameCommands = true)
     {
         Vk api = _context.Api;
@@ -149,6 +161,8 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
             "vkBeginCommandBuffer for a frame slot");
         CommandBuffer = commandBuffer;
+        // The frame's first buffer is marked by the caller once the slot is its own.
+        if (_commandBuffersUsed > 1) CommandsStarted?.Invoke(Index, commandBuffer, frameCommands);
         // The present command buffer is not the frame's: an upload recorded while
         // it is open goes into the batch, which rides the present submission.
         if (frameCommands) _uploads.OnFrameCommandsStarted(commandBuffer);
@@ -185,6 +199,18 @@ internal sealed unsafe class FrameSlot : IDisposable
     {
         ulong submitted = FrameValue;
         Submit(default, default, default, 0);
+        PartialSubmits++;
+        FrameValue = _timeline.ReserveFrame();
+        StartCommandBuffer();
+        return submitted;
+    }
+
+    /// <summary>Ends one part of a frame with a DX12 fence handoff and continues
+    /// recording. The wait is consumed at TRANSFER before shared images are used.</summary>
+    public ulong SubmitExternalPartial(Semaphore sharedFence, ulong waitValue, ulong signalValue)
+    {
+        ulong submitted = FrameValue;
+        Submit(default, default, default, 0, sharedFence, waitValue, signalValue);
         PartialSubmits++;
         FrameValue = _timeline.ReserveFrame();
         StartCommandBuffer();
@@ -262,12 +288,23 @@ internal sealed unsafe class FrameSlot : IDisposable
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
+        CommandsEnding?.Invoke(Index, commandBuffer);
         api.EndCommandBuffer(commandBuffer);
 
-        Semaphore* waits = stackalloc Semaphore[3];
-        ulong* waitValues = stackalloc ulong[3];
-        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[3];
+        Semaphore* waits = stackalloc Semaphore[4];
+        ulong* waitValues = stackalloc ulong[4];
+        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[4];
         uint waitCount = 0;
+        // A present submission is not frame work: the gate waits for the frame's own
+        // first submission, which the present copies already follow on this queue.
+        if (externalSignalValue == 0 && signalSemaphore.Handle == 0 && Gate is { } gate &&
+            gate.TryTake(out Semaphore gateSemaphore, out ulong gateValue))
+        {
+            waits[waitCount] = gateSemaphore;
+            waitValues[waitCount] = gateValue;
+            waitStages[waitCount] = PipelineStageFlags.AllCommandsBit;
+            waitCount++;
+        }
         if (waitSemaphore.Handle != 0)
         {
             waits[waitCount] = waitSemaphore;
@@ -445,6 +482,7 @@ internal sealed class FrameRing : IDisposable
         {
             _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i,
                 _latency);
+            _slots[i].Gate = _gate;
         }
     }
 
@@ -465,6 +503,29 @@ internal sealed class FrameRing : IDisposable
 
     /// <summary>The Frame and Transfer timelines every submission signals.</summary>
     public FrameTimeline Timeline => _timeline;
+
+    private readonly SubmitGate _gate = new();
+
+    /// <summary>
+    /// Makes the next frame submission wait on the GPU until <paramref name="semaphore" />
+    /// reaches <paramref name="value" />. Used to keep another API's work on this GPU from
+    /// running concurrently with the next frame (XeSS-FG's DX12 interpolation). The value
+    /// must be signalled eventually, or the queue stalls.
+    /// </summary>
+    public void GateNextFrameSubmit(Semaphore semaphore, ulong value) => _gate.Set(semaphore, value);
+
+    /// <summary>Drops a gate no submission has taken yet.</summary>
+    public void ClearSubmitGate() => _gate.Clear();
+
+    /// <summary>Installs command-buffer start and end hooks on every slot (GPU timestamps).</summary>
+    public void SetCommandHooks(Action<int, CommandBuffer, bool>? started, Action<int, CommandBuffer>? ending)
+    {
+        foreach (FrameSlot slot in _slots)
+        {
+            slot.CommandsStarted = started;
+            slot.CommandsEnding = ending;
+        }
+    }
 
     /// <summary>The upload batches every submission of this ring carries first.</summary>
     public UploadManager Uploads => _uploads;
@@ -502,6 +563,9 @@ internal sealed class FrameRing : IDisposable
     /// slot; see <see cref="FrameSlot.SubmitPartial" />.
     /// </summary>
     public ulong SubmitPartial() => Current.SubmitPartial();
+
+    public ulong SubmitExternalPartial(Semaphore sharedFence, ulong waitValue,
+        ulong signalValue) => Current.SubmitExternalPartial(sharedFence, waitValue, signalValue);
 
     /// <summary>Ends and submits the current frame (Submit A). Pairs with every BeginFrame. Returns its last Frame value.</summary>
     public ulong EndFrame() => Current.EndFrameAndSubmit();
@@ -561,5 +625,28 @@ internal sealed class FrameRing : IDisposable
         foreach (FrameSlot slot in _slots) slot.Dispose();
         _uniformRing.Dispose();
         _timeline.Dispose();
+    }
+}
+
+/// <summary>One pending external wait for the next frame submission (FrameRing.GateNextFrameSubmit).</summary>
+internal sealed class SubmitGate
+{
+    private Semaphore _semaphore;
+    private ulong _value;
+
+    public void Set(Semaphore semaphore, ulong value)
+    {
+        _semaphore = semaphore;
+        _value = value;
+    }
+
+    public void Clear() => _value = 0;
+
+    public bool TryTake(out Semaphore semaphore, out ulong value)
+    {
+        semaphore = _semaphore;
+        value = _value;
+        _value = 0;
+        return value != 0;
     }
 }

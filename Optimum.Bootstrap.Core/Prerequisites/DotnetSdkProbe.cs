@@ -83,7 +83,5 @@ public static class DotnetSdkProbe
         yield return "/usr/share/dotnet/dotnet";
         yield return "/usr/lib/dotnet/dotnet";
         yield return "/snap/dotnet-sdk/current/dotnet";
-        if (probe.Os == OsKind.MacOs)
-            yield return "/usr/local/share/dotnet/dotnet";
     }
 }

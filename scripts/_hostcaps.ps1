@@ -3,17 +3,14 @@ Shared host-capability detection for the packaging scripts.
 Dot-source it:  . "$PSScriptRoot/_hostcaps.ps1"
 
 Vintage Story only ships x64 native clients for Windows and Linux (the Windows
-one as an Inno installer .exe), and both x64+arm64 for macOS. So:
-  - Linux/Windows packages are x64-only; ARM there runs x64 via emulation
-    (box64 on Linux, Windows-on-ARM x64 emulation).
-  - macOS is the only target with a real arm64 client.
+one as an Inno installer .exe). So Linux/Windows packages are x64-only; ARM
+there runs x64 via emulation (box64 on Linux, Windows-on-ARM x64 emulation).
 This file reports what the CURRENT host can actually produce, without installing
 anything.
 #>
 
 function Get-HostOS {
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'Windows' }
-    elseif ($IsMacOS) { 'macOS' }
     elseif ($IsLinux) { 'Linux' }
     else { 'Unknown' }
 }
@@ -76,16 +73,6 @@ function Get-HostCaps {
         $caps += [pscustomobject]@{ Target='linux-x64'; Quality='Blocked'; Note='tar not found' }
     }
 
-    # --- macOS target (.app + .dmg) ---
-    foreach ($arch in 'x64','arm64') {
-        if ($os -eq 'macOS' -and (Test-Cmd hdiutil)) {
-            $caps += [pscustomobject]@{ Target="osx-$arch"; Quality='Full'; Note='hdiutil .dmg (notarizable)' }
-        } elseif (($os -eq 'Linux') -and ((Test-Cmd mkisofs) -or (Test-Cmd genisoimage)) -and (Test-Cmd cmake) -and (Test-Cmd git)) {
-            $caps += [pscustomobject]@{ Target="osx-$arch"; Quality='Degraded'; Note='unsigned .dmg via libdmg-hfsplus' }
-        } else {
-            $caps += [pscustomobject]@{ Target="osx-$arch"; Quality='Degraded'; Note='.app assembled, .tar.gz fallback (no .dmg toolchain)' }
-        }
-    }
 
     # --- Windows target (folder + zip, Optimum.exe) ---
     if ($os -eq 'Windows') {

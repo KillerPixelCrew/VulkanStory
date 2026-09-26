@@ -14,19 +14,16 @@ missing_optional=0
 # name | required(1/0) | used by | hint
 checks=(
   "dotnet|1|bootstrap.sh, build|.NET SDK 10 - https://dotnet.microsoft.com/download"
-  "git|1|bootstrap.sh, extract-patches.sh, package-macos.ps1|apt-get install git"
+  "git|1|bootstrap.sh, extract-patches.sh|apt-get install git"
   "perl|1|bootstrap.sh, extract-patches.sh|apt-get install perl"
   "python3|1|bootstrap.sh|apt-get install python3"
   "numpy|0|scripts/dev/ssim.py, taa-rejection.py and their Optimum.Tests self-tests|apt-get install python3-numpy  (or: python3 -m pip install numpy)"
   "curl|1|bootstrap.sh, package-*.ps1|apt-get install curl"
   "tar|1|bootstrap.sh, package-*.ps1|apt-get install tar"
   "unzip|0|bootstrap.sh (zip archives; python3 fallback exists)|apt-get install unzip"
-  "pwsh|1|package-linux.ps1, package-macos.ps1, package.ps1|apt-get install powershell  (or: snap install powershell --classic)"
+  "pwsh|1|package-linux.ps1, package.ps1|apt-get install powershell  (or: snap install powershell --classic)"
   "ilspycmd|0|bootstrap.sh (auto-installs via dotnet tool if missing)|dotnet tool install -g ilspycmd"
   "chmod|1|package-linux.ps1|coreutils"
-  "make|0|package-macos.ps1 (.dmg on Linux via libdmg-hfsplus)|apt-get install make"
-  "cmake|0|package-macos.ps1 (.dmg on Linux via libdmg-hfsplus)|apt-get install cmake"
-  "mkisofs|0|package-macos.ps1 (.dmg on Linux; genisoimage also works)|apt-get install cdrtools  (or genisoimage)"
   "innoextract|0|package.ps1 (off-platform Windows package; requires >= 1.11)|use a current release from https://github.com/crazy-max/innoextract/releases (distro 1.9 is too old)"
 )
 

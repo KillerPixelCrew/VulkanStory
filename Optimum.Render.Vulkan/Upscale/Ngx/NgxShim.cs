@@ -28,8 +28,8 @@ internal static unsafe class NgxShim
 {
     /// <summary>
     /// The base name passed to <c>DllImport</c>. The runtime probes
-    /// <c>libOptimumNgx.so</c>, <c>OptimumNgx.dll</c> and <c>libOptimumNgx.dylib</c>
-    /// around it, all of which is what the build drops beside the renderer.
+    /// <c>libOptimumNgx.so</c> and <c>OptimumNgx.dll</c> around it, which is what
+    /// the build drops beside the renderer.
     /// </summary>
     public const string LibraryName = "OptimumNgx";
 
@@ -72,7 +72,7 @@ internal static unsafe class NgxShim
     }
 
     private static readonly string[] FileNames =
-        { "libOptimumNgx.so", "OptimumNgx.dll", "libOptimumNgx.dylib" };
+        { "libOptimumNgx.so", "OptimumNgx.dll" };
 
     private static bool _probed;
     private static uint _version;

@@ -6,8 +6,8 @@ public sealed record DataPathDetection(string? Path, bool HasActiveSession);
 
 /// <summary>
 /// Session-aware detection of an existing Vintage Story data folder. Ports
-/// <c>prompt_data_path</c> from <c>scripts/install-linux.sh</c> (which Windows and
-/// macOS never had) and widens the candidate list per platform: a folder whose
+/// <c>prompt_data_path</c> from <c>scripts/install-linux.sh</c> (which Windows
+/// never had) and widens the candidate list per platform: a folder whose
 /// <c>clientsettings.json</c> carries a <c>playeruid</c> wins over one that merely
 /// exists.
 /// </summary>
@@ -44,12 +44,6 @@ public static class DataPathProbe
                 WinCombine(probe.GetEnvironmentVariable("APPDATA"), "VintagestoryData"),
                 WinCombine(probe.GetEnvironmentVariable("APPDATA"), "OptimumData"),
             ],
-            OsKind.MacOs =>
-            [
-                Posix(home, "Library", "Application Support", "VintagestoryData"),
-                Posix(home, "Library", "Application Support", "OptimumVintagestoryData"),
-                Posix(home, ".config", "VintagestoryData"),
-            ],
             _ =>
             [
                 Posix(home, ".config", "VintagestoryData"),
@@ -58,7 +52,7 @@ public static class DataPathProbe
             ],
         };
 
-        // The macOS and Linux data folders follow POSIX '/' convention regardless
+        // The Linux data folders follow POSIX '/' convention regardless
         // of the host the installer binary happens to run on, so join with '/'
         // rather than System.IO.Path.Combine (which would emit '\' on Windows).
         static string Posix(params string[] parts) => string.Join('/', parts);

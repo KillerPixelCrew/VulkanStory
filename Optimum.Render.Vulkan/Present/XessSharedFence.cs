@@ -10,7 +10,7 @@ namespace Optimum.Render.Vulkan.Core;
 /// <summary>
 /// A D3D12 shared fence permanently imported as a Vulkan timeline semaphore.
 /// Queue submissions use monotonically increasing values to transfer ownership
-/// of XeSS-FG's shared images without a per-frame CPU wait.
+/// of shared DX12 images without a per-frame CPU wait.
 /// </summary>
 internal sealed unsafe class XessSharedFence : IDisposable
 {
@@ -30,7 +30,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
 
     public Semaphore Semaphore { get; }
 
-    public static bool TryCreate(VulkanContext context, XessFgRuntime runtime,
+    public static bool TryCreate(VulkanContext context, IDx12SharedRuntime runtime,
         out XessSharedFence? result, out string reason)
     {
         result = null;
@@ -78,7 +78,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
                 PNext = &timeline,
             };
             VulkanResult.Check(context.Api.CreateSemaphore(context.Device, &createInfo,
-                null, out semaphore), "vkCreateSemaphore for XeSS-FG shared fence");
+                null, out semaphore), "vkCreateSemaphore for DX12 shared fence");
             var import = new ImportSemaphoreWin32HandleInfoKHR
             {
                 SType = StructureType.ImportSemaphoreWin32HandleInfoKhr,
@@ -87,7 +87,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
                 Handle = handle,
             };
             VulkanResult.Check(external.ImportSemaphoreWin32Handle(context.Device, &import),
-                "vkImportSemaphoreWin32HandleKHR for XeSS-FG shared fence");
+                "vkImportSemaphoreWin32HandleKHR for DX12 shared fence");
             CloseHandle(handle);
             handle = 0;
             result = new XessSharedFence(context, external, semaphore);

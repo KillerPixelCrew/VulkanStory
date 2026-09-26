@@ -90,7 +90,7 @@ xml_escape() {
 
 # Converts a path to the platform-native form MSBuild can resolve.
 # On Git Bash / MINGW (cygpath available), converts /d/a/... to D:\a\...
-# On Linux/macOS, returns the input unchanged.
+# On Linux, returns the input unchanged.
 native_path() {
     if command -v cygpath >/dev/null 2>&1; then
         cygpath -w "$1"
@@ -204,7 +204,7 @@ decompile_mod() {
     VANILLA_DIR_ESC="$(xml_escape "$vanilla_dir/")" \
     VANILLA_WIN_PATH="$(xml_escape "$vanilla_win_path")" perl -0pi -e '
         my $root = $ENV{RUNTIME_DONOR_HINT_ROOT};
-        # Relative path produced by ilspycmd on Linux/macOS
+        # Relative path produced by ilspycmd on Linux
         s#<HintPath>\.vanilla/win-x64/vintagestory/#<HintPath>${root}#g;
         # Unix-style absolute path (Git Bash MINGW)
         (my $vanilla_fwd = $ENV{VANILLA_DIR_ESC}) =~ s/\\/\//g;

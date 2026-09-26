@@ -137,6 +137,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private void NativeVanillaSsaoPass(float[] projectMatrix, float ssaa)
     {
+        using VulkanDevice.GpuSection gpuSection = device.BeginGpuSection("ao_vanilla_ssao");
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef primary = buffers[0];
         FrameBufferRef transparent = buffers[1];
@@ -192,6 +193,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private void NativeBilateralBlurPasses()
     {
+        using VulkanDevice.GpuSection gpuSection = device.BeginGpuSection("ao_bilateral_blur");
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef primary = buffers[0];
         FrameBufferRef horizontal = buffers[NativeSsaoBlurHorizontalIndex];
@@ -247,6 +249,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     private void NativeSceneSsaoPass()
     {
+        using VulkanDevice.GpuSection gpuSection = device.BeginGpuSection("ao_scene_composite");
         ShaderProgram composite = ShaderPrograms.SceneSsao;
         if (composite == null || composite.LoadError || composite.Disposed) return;
 

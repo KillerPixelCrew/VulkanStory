@@ -137,6 +137,7 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal bool UpscaleDepthNearest(int sourceTexture, int destinationTexture)
     {
+        using GpuSection gpuSection = BeginGpuSection("upscale_depth_blit");
         if (!_frameActive) return false;
         VulkanTexture? source = _textures.Get(sourceTexture);
         VulkanTexture? destination = _textures.Get(destinationTexture);
@@ -245,6 +246,7 @@ public sealed unsafe partial class VulkanDevice
         int colorTexture, int depthTexture, int motionTexture, int outputTexture,
         in NgxDlssEvaluation frame)
     {
+        using GpuSection gpuSection = BeginGpuSection("upscale_dlss");
         if (feature == null || !feature.IsValid) return NgxResult.FailFeatureNotFound;
         if (!_frameActive) return NgxResult.FailNotInitialized;
 

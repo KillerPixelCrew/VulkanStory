@@ -215,9 +215,7 @@ public sealed class ChunkReadPoolLifecycleTests
             ];
         string[] nativeNames = OperatingSystem.IsWindows()
             ? ["e_sqlite3.dll"]
-            : OperatingSystem.IsMacOS()
-                ? ["libe_sqlite3.dylib", "libe_sqlite3.so"]
-                : ["libe_sqlite3.so"];
+            : ["libe_sqlite3.so"];
 
         foreach (string relativeDirectory in providerDirectories)
         {

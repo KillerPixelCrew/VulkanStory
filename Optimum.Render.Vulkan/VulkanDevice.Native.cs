@@ -262,6 +262,8 @@ public sealed unsafe partial class VulkanDevice
     private long _nativeMeshDraws;
     private long _nativeInstancedDraws;
     private long _nativeIndirectDraws;
+    private ulong _nativeBoundPipelineSerial;
+    private ulong _nativeBoundPipelineHandle;
 
     /// <summary>
     /// The identity of a native pipeline: every field of its description that changes what a draw
@@ -531,6 +533,28 @@ public sealed unsafe partial class VulkanDevice
     /// Opens a native pass on an explicit target: its colour slots, the textures it samples
     /// and the viewport its draws use. The draw-buffer mask is not consulted.
     /// </summary>
+    private readonly Dictionary<string, string> _nativePassGpuLabels = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// GPU timestamps (stats log only): a native pass opened under a stage-level section
+    /// gets its own "np_" section, so work no renderer labels still shows up by pass name.
+    /// A narrower section a renderer already opened (a chunk pass, an upscaler) is kept.
+    /// </summary>
+    private void MarkNativePassSection(string name)
+    {
+        if (_gpuTimestamps == null) return;
+        string open = _gpuTimestamps.OpenLabel;
+        if (!open.StartsWith("stage_", StringComparison.Ordinal) &&
+            !open.StartsWith("after_", StringComparison.Ordinal) &&
+            !open.StartsWith("np_", StringComparison.Ordinal)) return;
+        if (!_nativePassGpuLabels.TryGetValue(name, out string? label))
+        {
+            label = "np_" + name;
+            _nativePassGpuLabels[name] = label;
+        }
+        GpuMark(label);
+    }
+
     internal bool BeginNativePass(NativePassDescription pass)
     {
         EndNativePass();
@@ -545,6 +569,7 @@ public sealed unsafe partial class VulkanDevice
         }
 
         CommandBuffer commandBuffer = Commands;
+        MarkNativePassSection(pass.Name);
         _targets.DeclarePass(commandBuffer, new PassDeclaration
         {
             Name = pass.Name,
@@ -801,7 +826,15 @@ public sealed unsafe partial class VulkanDevice
         }
 
         Vk api = _context.Api;
-        api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, handle);
+        FrameSlot frameSlot = _frames.Current;
+        ulong recordingSerial = frameSlot.CommandBuffer.Handle == commandBuffer.Handle ? frameSlot.RecordingSerial : 0;
+        if (recordingSerial == 0 || _nativeBoundPipelineSerial != recordingSerial ||
+            _nativeBoundPipelineHandle != handle.Handle)
+        {
+            api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, handle);
+            _nativeBoundPipelineSerial = recordingSerial;
+            _nativeBoundPipelineHandle = handle.Handle;
+        }
 
         VertexLayoutDescription vertexLayout = pipeline.Request.VertexLayout;
         if (vertexLayout.Bindings.Length > 0 &&

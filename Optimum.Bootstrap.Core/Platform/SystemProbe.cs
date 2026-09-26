@@ -3,11 +3,14 @@ using System.Runtime.InteropServices;
 
 namespace Optimum.Bootstrap.Core.Platform;
 
+/// <summary>
+/// The platforms Optimum supports. macOS is not supported; like any other
+/// non-Windows host it is probed as <see cref="Linux"/>.
+/// </summary>
 public enum OsKind
 {
     Windows,
     Linux,
-    MacOs,
 }
 
 /// <summary>The outcome of a short probe command such as <c>dotnet --list-sdks</c>.</summary>
@@ -68,7 +71,6 @@ public sealed class SystemProbe : ISystemProbe
 
     public OsKind Os { get; } =
         RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? OsKind.Windows
-        : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? OsKind.MacOs
         : OsKind.Linux;
 
     public Architecture Arch => RuntimeInformation.OSArchitecture;

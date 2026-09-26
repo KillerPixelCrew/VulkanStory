@@ -17,6 +17,7 @@ public partial class VulkanClientPlatform
     private Fsr3FrameGeneration? fsr3FrameGeneration;
     private ulong dlssFrameCount;
     private uint dlssActuallyPresented;
+    private uint dlssConfiguredCount;
     private int frameGenerationMotion;
     private int fsr3UprightScene;
     private int fsr3UprightUi;
@@ -57,6 +58,9 @@ public partial class VulkanClientPlatform
             frameGenerationWaitsLogged.Clear();
             OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
             Logger.Notification("Optimum: frame generation provider selected: {0}", provider);
+            if (provider == "fsr3" && OptimumConfig.FrameGenerationMultiplier > 2)
+                Logger.Notification("Optimum: FSR 3 Vulkan supports 2×; requested {0}× applies when a multi-frame provider is selected",
+                    OptimumConfig.FrameGenerationMultiplier);
         }
         if (provider == "off" || failedFrameGenerationProviders.Contains(provider) || device == null) return;
         if (provider == "dlss" && !device.StreamlineFrameGenerationAvailable)
@@ -221,10 +225,13 @@ public partial class VulkanClientPlatform
             DisableFrameGeneration("dlss", "Streamline present failed with Vulkan result " + presentError);
             return;
         }
+        // The first frame has not yet tagged constants/resources, so the SDK
+        // may report an invalid state until it has seen a complete frame.
+        uint maxGenerated = 1;
         if (dlssFrameCount > 0)
         {
             int stateResult = device.GetStreamlineFrameGenerationState(
-                out uint status, out uint presented);
+                out uint status, out uint presented, out maxGenerated);
             if (stateResult != 0)
             {
                 DisableFrameGeneration("dlss", "Streamline state query failed (" + stateResult + ")");
@@ -232,9 +239,13 @@ public partial class VulkanClientPlatform
             }
             if (status != 0)
             {
-                DisableFrameGeneration("dlss", "Streamline DLSS-G status " + status);
+                DisableFrameGeneration("dlss", "Streamline DLSS-G status " + status +
+                    ", maximum generated frames " + maxGenerated);
                 return;
             }
+            // Older DLSS-G runtimes report zero for the new MFG limit while
+            // still supporting one generated frame. Preserve their 2× path.
+            if (maxGenerated == 0) maxGenerated = 1;
             dlssActuallyPresented += presented;
             VulkanStats.NoteSdkActualPresents(presented);
             if (dlssFrameCount % 120 == 0)
@@ -251,12 +262,18 @@ public partial class VulkanClientPlatform
             DisableFrameGeneration("dlss", "Streamline frame tagging failed (" + result + ")");
             return;
         }
-        result = device.SetStreamlineFrameGeneration(true);
+        uint generatedCount = Math.Min((uint)Math.Clamp(OptimumConfig.FrameGenerationMultiplier - 1,
+            1, 5), maxGenerated);
+        if (generatedCount != dlssConfiguredCount)
+            Logger.Notification("Optimum: DLSS-G requested {0}×, effective {1}× (SDK maximum {2}×)",
+                OptimumConfig.FrameGenerationMultiplier, generatedCount + 1, maxGenerated + 1);
+        result = device.SetStreamlineFrameGeneration(true, generatedCount);
         if (result != 0)
         {
             DisableFrameGeneration("dlss", "Streamline DLSS-G options failed (" + result + ")");
             return;
         }
+        dlssConfiguredCount = generatedCount;
         dlssFrameCount++;
     }
 
@@ -379,6 +396,7 @@ public partial class VulkanClientPlatform
         device?.ResetGeneratedFramePresent();
         dlssFrameCount = 0;
         dlssActuallyPresented = 0;
+        dlssConfiguredCount = 0;
         if (fsr3FrameGeneration != null)
         {
             int disabled = fsr3FrameGeneration.Disable(device?.Fsr3ProxyContext ?? 0);

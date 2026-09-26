@@ -133,7 +133,9 @@ public sealed class OptimumMapPageRenderer : IDisposable
             GL.ActiveTexture(TextureUnit.Texture0);
             GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, _texArray.TextureId);
         }
-        _shader.Uniform("mapPages", 0);
+        // Vulkan binds sampler descriptors from BindTexture; sampler uniforms are
+        // absent from its scalar-uniform table. OpenGL still needs the unit index.
+        if (optimumGraphics == null) _shader.Uniform("mapPages", 0);
 
         // Upload this frame's instances.
         _instanceUpdate.CustomFloats.Count = _instanceCount * FloatsPerInstance;

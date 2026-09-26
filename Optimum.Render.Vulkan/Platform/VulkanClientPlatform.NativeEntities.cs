@@ -109,6 +109,7 @@ public partial class VulkanClientPlatform
             base.RenderEntityMesh(mesh!, samplerName, textureId);
             return;
         }
+        device.GpuMark("entities");
 
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         FrameBufferRef target = CurrentFrameBuffer;

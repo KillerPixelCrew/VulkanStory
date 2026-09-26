@@ -1,7 +1,6 @@
 using Optimum.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
 using System;
-using System.Runtime.InteropServices;
 using Cairo;
 using OpenTK.Audio.OpenAL;
 using Vintagestory.API.Client;
@@ -72,12 +71,10 @@ public partial class VulkanClientPlatform
         Logger.Notification("Graphics Card Renderer: " + device.RendererString);
         Logger.Notification("Graphics Card ShadingLanguageVersion: " + device.ShaderVersionString);
         Logger.Notification("Max texture size: " + device.MaxTextureSize);
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-        {
-            // ClientPlatformWindows.LogFrameworkVersions, which is private.
-            Logger.Notification("C# Framework: " + GetFrameworkInfos());
-            Logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
-        }
+        // ClientPlatformWindows.LogFrameworkVersions, which is private. Vanilla
+        // skips it only on a platform Optimum does not support.
+        Logger.Notification("C# Framework: " + GetFrameworkInfos());
+        Logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
         Logger.Notification("OpenAL Version: " + AL.Get((ALGetString)45058));
         Logger.Notification("Zstd Version: " + ZstdNative.Version);
         CheckGlError("loghwinfo");

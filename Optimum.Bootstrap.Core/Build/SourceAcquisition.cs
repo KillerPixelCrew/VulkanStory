@@ -58,7 +58,6 @@ public static class SourceCache
     {
         OsKind.Windows => probe.GetEnvironmentVariable("LOCALAPPDATA")
             ?? Join(probe, probe.HomeDirectory, "AppData", "Local"),
-        OsKind.MacOs => Join(probe, probe.HomeDirectory, "Library", "Caches"),
         _ => probe.GetEnvironmentVariable("XDG_CACHE_HOME")
             ?? Join(probe, probe.HomeDirectory, ".cache"),
     };
@@ -66,7 +65,7 @@ public static class SourceCache
     /// <summary>
     /// Joins path parts with the separator of the <em>probed</em> platform. In
     /// production probe.Os matches the host, so a Windows install gets native
-    /// backslash paths and a Linux/macOS install gets '/'. The FakeSystemProbe
+    /// backslash paths and a Linux install gets '/'. The FakeSystemProbe
     /// normalises separators, so cross-platform tests match either form.
     /// </summary>
     private static string Join(ISystemProbe probe, string root, params string[] parts)

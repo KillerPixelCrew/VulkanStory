@@ -1,0 +1,23 @@
+diff --git a/VSEssentials/FluffyClouds/CloudRendererVolumetric.cs b/VSEssentials/FluffyClouds/CloudRendererVolumetric.cs
+--- a/VSEssentials/FluffyClouds/CloudRendererVolumetric.cs
++++ b/VSEssentials/FluffyClouds/CloudRendererVolumetric.cs
+@@ -72,6 +72,19 @@ public class CloudRendererVolumetric : IRenderer, IDisposable
+ 		program.BindTexture2D("depthTex", capi.Render.FrameBuffers[0].DepthTextureId, 0);
+ 		program.BindTexture2D("cloudMap", map.TextureMap, 8);
+ 		program.BindTexture2D("cloudCol", map.TextureCol, 9);
++		// Optimum: state goes through the device on its own backend, where
++		// the GL binding does not exist.
++		Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++		if (optimumGraphics != null)
++		{
++			optimumGraphics.SetDepthTest(false);
++			optimumGraphics.SetBlendEnabled(true);
++			capi.Render.RenderMesh(quad);
++			// GL leaves blending enabled for the remaining OIT draws.
++			optimumGraphics.SetDepthTest(true);
++			program.Stop();
++			return;
++		}
+ 		GL.Disable(EnableCap.DepthTest);
+ 		GL.Enable(EnableCap.Blend);
+ 		capi.Render.RenderMesh(quad);
