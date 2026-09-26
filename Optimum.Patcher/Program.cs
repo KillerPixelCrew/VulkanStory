@@ -71,6 +71,8 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        "OptimumUpscalerUnavailableFor",
+        "ApplyOptimumUpscalerSettings",
         // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
         // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
         "MotionAttachmentIndex",
@@ -442,13 +444,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumSsaoInScene",
         "ApplyOptimumSceneSsao",
         // Optimum AO: this frame's GTAO visibility texture (0 = vanilla SSAO), composed through
-        // ApplyOptimumSceneSsao, and the slots of its opt-in debug outputs in the parity dump.
+        // ApplyOptimumSceneSsao, and the slots of its opt-in debug outputs in the parity dump and
+        // the headless harness.
         "optimumAmbientOcclusionTexture",
         "OptimumAoWorkingSlot",
         "OptimumAoEdgesSlot",
         "OptimumAoDepthSlot",
         "OptimumAoOutputSlot",
         "OptimumAoOutputCount",
+        "OptimumHeadlessWriteAmbientOcclusion",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -458,6 +462,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Headless render harness: the per-frame hook window_RenderFrame calls next
+        // to the parity dump, its own in-world frame counter, the chat-command
+        // script dispatch, the presented-frame readback and the clean close from
+        // the render thread once the run's artefacts are written.
+        "optimumHeadlessWorldFrames",
+        "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone",
+        "optimumHeadlessFramesWritten",
+        "optimumHeadlessExitRequested",
+        "OptimumHeadlessTick",
+        "OptimumHeadlessExitIfDone",
+        "OptimumHeadlessRunCommands",
+        "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame",
         // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
         // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
         // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.
@@ -545,6 +563,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "OnOptimumOptions",
         "OnVulkanOptions",
         "_AddOptimumTab",
+        "onOptimumFpsCounterChanged",
+        "onOptimumFrameGenerationChanged",
+        "onOptimumLowLatencyChanged",
         "onOptimumBackgroundFpsChanged",
         "onOptimumFramePacingChanged",
         "onOptimumShadowCullChanged",
@@ -561,6 +582,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumOcclusionScaleChanged",
         "onOptimumDynLightCacheChanged",
         "onOptimumRendererChanged",
+        "onOptimumUpscalerChanged",
+        "onOptimumUpscalerQualityChanged",
         "onOptimumEntityLightBatchChanged",
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",
@@ -576,6 +599,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumGreedyLightTolChanged",
         "onOptimumGreedyFarDistChanged",
 #endif
+    },
+    ["Vintagestory.Client.NoObf.HudDebugScreen"] = new()
+    {
+        "optimumFpsComposer", "optimumFpsText", "optimumFpsSampleTicks",
+        "optimumLastRealPresents", "optimumLastSdkPresents", "optimumLoopFrames",
+        "optimumLastProvider", "UpdateOptimumFpsCounter",
     },
     // GuiManager: reusable scratch buffers replacing per-call .ToList() snapshots
     ["Vintagestory.Client.NoObf.GuiManager"] = new()
@@ -853,6 +882,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "Compose", 0),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "OnFinalizeFrame", 1),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "OnRenderGUI", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
@@ -953,6 +985,9 @@ var targets = new List<MethodTarget>
     // Vulkan backend: the mod-facing uniform and texture-binding surface. A
     // uniform location here is a byte offset into the generated block rather than
     // a GL location, which callers never see.
+    // The map page shader declares sampler2DArray; vanilla's uniform parser
+    // omits that type and otherwise leaves mapPages absent at draw time.
+    new("Vintagestory.Client.NoObf.ShaderProgram", "collectUniformNames", 2),
     // Uniform has seven two-parameter overloads, so each needs its signature.
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
         new[] { "System.String", "System.Single" }),

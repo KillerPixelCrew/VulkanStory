@@ -18,3 +18,5 @@
 *.comp text eol=lf
 *.vsh text eol=lf
 *.fsh text eol=lf
+# This legacy shader is stored with CRLF in the repository; preserve its bytes.
+sources/shaders/chunkliquid.fsh -text

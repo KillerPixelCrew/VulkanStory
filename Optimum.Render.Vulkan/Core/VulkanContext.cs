@@ -26,6 +26,9 @@ internal sealed class VulkanContextOptions
     /// <summary>Instance extensions the window system needs (from GLFW).</summary>
     public string[] RequiredInstanceExtensions = Array.Empty<string>();
 
+    /// <summary>Optional vendor backends can request extensions and Vulkan features before creation.</summary>
+    public List<IDeviceRequirementContributor> RequirementContributors { get; } = new();
+
     /// <summary>Called with each validation message when validation is on.</summary>
     public Action<string>? DebugCallback;
 
@@ -47,6 +50,12 @@ internal sealed class VulkanContextOptions
     /// in for a compositor that holds images back (PresentDecouplingTests).
     /// </summary>
     public TimeSpan AcquireDelayForTests;
+
+    /// <summary>Initialized before Vulkan calls; owned by the created context.</summary>
+    public StreamlineRuntime? Streamline;
+
+    /// <summary>Reserve the four distinct queues required by the FidelityFX Vulkan FG proxy.</summary>
+    public bool PrepareFrameGenerationQueues;
 }
 
 /// <summary>What the chosen device can do, once it is up.</summary>
@@ -150,6 +159,10 @@ internal sealed unsafe class VulkanContext : IDisposable
     public Device Device { get; private set; }
     public Queue GraphicsQueue { get; private set; }
     public uint GraphicsQueueFamily { get; private set; }
+    public Queue Fsr3AsyncQueue { get; private set; }
+    public Queue Fsr3PresentQueue { get; private set; }
+    public Queue Fsr3AcquireQueue { get; private set; }
+    public bool Fsr3SwapchainQueuesAvailable { get; private set; }
 
     /// <summary>
     /// Guards every submission to <see cref="GraphicsQueue" />.
@@ -241,6 +254,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     private Action<string>? _debugCallback;
     private PfnDebugUtilsMessengerCallbackEXT _debugDelegate;
     private bool _disposed;
+    internal StreamlineRuntime? Streamline { get; private set; }
 
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
 
@@ -255,6 +269,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         var created = new VulkanContext();
+        created.Streamline = options.Streamline;
         created.AcquireDelayForTests = options.AcquireDelayForTests;
         created.PoisonFreshResources = options.Poison
             ?? PoisonRequested(Environment.GetEnvironmentVariable(PoisonVariable));
@@ -265,6 +280,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         catch (Exception error)
         {
             failureReason = "no Vulkan loader: " + error.Message;
+            created.Dispose();
             return false;
         }
 
@@ -305,6 +321,24 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
+        if (options.RequirementContributors.Count != 0)
+        {
+            var available = new HashSet<string>(StringComparer.Ordinal);
+            uint availableCount = 0;
+            if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, null) == Result.Success && availableCount != 0)
+            {
+                var properties = new ExtensionProperties[availableCount];
+                fixed (ExtensionProperties* pointer = properties)
+                {
+                    if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, pointer) == Result.Success)
+                        for (int i = 0; i < availableCount; i++)
+                            available.Add(SilkMarshal.PtrToString((nint)pointer[i].ExtensionName) ?? "");
+                }
+            }
+            var requests = new InstanceRequirements(available, extensions);
+            foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+                contributor.ContributeInstanceExtensions(requests);
+        }
         // Surface maintenance dependencies are instance extensions; enable them before
         // choosing a device, then query that device's optional maintenance feature.
         if (!options.Headless && extensions.Contains("VK_KHR_surface")
@@ -437,7 +471,9 @@ internal sealed unsafe class VulkanContext : IDisposable
                 PpEnabledLayerNames = validation ? (byte**)layersPtr : null,
             };
 
-            Result result = Api.CreateInstance(&createInfo, null, out Instance instance);
+            Result result = Streamline != null
+                ? Streamline.CreateInstance(&createInfo, out Instance instance)
+                : Api.CreateInstance(&createInfo, null, out instance);
             if (result != Result.Success)
             {
                 failureReason = "vkCreateInstance failed: " + result;
@@ -690,7 +726,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         uint count = 0;
-        Api.EnumeratePhysicalDevices(Instance, ref count, null);
+        if (Streamline != null) Streamline.EnumeratePhysicalDevices(Instance, ref count, null);
+        else Api.EnumeratePhysicalDevices(Instance, ref count, null);
         if (count == 0)
         {
             failureReason = "no Vulkan physical devices";
@@ -700,7 +737,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         var devices = new PhysicalDevice[count];
         fixed (PhysicalDevice* devicesPtr = devices)
         {
-            Api.EnumeratePhysicalDevices(Instance, ref count, devicesPtr);
+            if (Streamline != null) Streamline.EnumeratePhysicalDevices(Instance, ref count, devicesPtr);
+            else Api.EnumeratePhysicalDevices(Instance, ref count, devicesPtr);
         }
 
         if (options.PreferredDeviceIndex >= 0)
@@ -778,7 +816,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             return false;
         }
 
-        if (!TryFindGraphicsQueue(device, out _))
+        if (!TryFindGraphicsQueue(device, out _, out _, out _))
         {
             reason = $"{name} has no graphics queue family";
             return false;
@@ -854,9 +892,12 @@ internal sealed unsafe class VulkanContext : IDisposable
             MaxPushConstantsSize: properties.Properties.Limits.MaxPushConstantsSize);
     }
 
-    private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family)
+    private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family,
+        out uint queueCount, out bool supportsCompute)
     {
         family = 0;
+        queueCount = 0;
+        supportsCompute = false;
         uint count = 0;
         Api.GetPhysicalDeviceQueueFamilyProperties(device, ref count, null);
         if (count == 0) return false;
@@ -872,6 +913,8 @@ internal sealed unsafe class VulkanContext : IDisposable
             if (families[i].QueueFlags.HasFlag(QueueFlags.GraphicsBit))
             {
                 family = i;
+                queueCount = families[i].QueueCount;
+                supportsCompute = families[i].QueueFlags.HasFlag(QueueFlags.ComputeBit);
                 return true;
             }
         }
@@ -884,20 +927,24 @@ internal sealed unsafe class VulkanContext : IDisposable
     {
         failureReason = null;
 
-        if (!TryFindGraphicsQueue(PhysicalDevice, out uint family))
+        if (!TryFindGraphicsQueue(PhysicalDevice, out uint family,
+            out uint availableQueues, out bool supportsCompute))
         {
             failureReason = "graphics queue family disappeared between selection and creation";
             return false;
         }
         GraphicsQueueFamily = family;
 
-        float priority = 1.0f;
+        uint requestedQueues = options.PrepareFrameGenerationQueues && supportsCompute
+            ? Math.Min(4u, availableQueues) : 1u;
+        float* priorities = stackalloc float[(int)requestedQueues];
+        for (uint i = 0; i < requestedQueues; i++) priorities[i] = 1.0f;
         var queueCreateInfo = new DeviceQueueCreateInfo
         {
             SType = StructureType.DeviceQueueCreateInfo,
             QueueFamilyIndex = family,
-            QueueCount = 1,
-            PQueuePriorities = &priority,
+            QueueCount = requestedQueues,
+            PQueuePriorities = priorities,
         };
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
@@ -1084,6 +1131,12 @@ internal sealed unsafe class VulkanContext : IDisposable
         bool enablePresentFences = maintenanceFeatures.SwapchainMaintenance1;
         if (enablePresentFences) deviceExtensions.Add(maintenanceExtension!);
 
+        using var vendorRequirements = new DeviceRequirements(
+            Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
+        { Vulkan12 = &vulkan12 };
+        foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+            contributor.ContributeDeviceRequirements(vendorRequirements);
+
         void* optionalFeatures = null;
         if (wantDeviceFault) { faultFeatures.PNext = optionalFeatures; optionalFeatures = &faultFeatures; }
         if (colorWriteTier == ColorWriteTier.DynamicEnable)
@@ -1092,7 +1145,21 @@ internal sealed unsafe class VulkanContext : IDisposable
         { dynamicState3Features.PNext = optionalFeatures; optionalFeatures = &dynamicState3Features; }
         if (enablePresentId) { presentId.PNext = optionalFeatures; optionalFeatures = &presentId; }
         if (enablePresentFences) { maintenanceFeatures.PNext = optionalFeatures; optionalFeatures = &maintenanceFeatures; }
+        if (vendorRequirements.Chain != null)
+        {
+            // The contributor chain is owned through vkCreateDevice. Append the native optional
+            // features after it, preserving both sets of requests.
+            void* tail = vendorRequirements.Chain;
+            while (*(void**)((byte*)tail + IntPtr.Size) != null)
+                tail = *(void**)((byte*)tail + IntPtr.Size);
+            *(void**)((byte*)tail + IntPtr.Size) = optionalFeatures;
+            optionalFeatures = vendorRequirements.Chain;
+        }
         vulkan13.PNext = optionalFeatures;
+
+        void* deviceFeatureChain = &features2;
+        foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
+            contributor.FinalizeDeviceFeatures(vendorRequirements, &deviceFeatureChain);
 
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
@@ -1103,14 +1170,16 @@ internal sealed unsafe class VulkanContext : IDisposable
             var createInfo = new DeviceCreateInfo
             {
                 SType = StructureType.DeviceCreateInfo,
-                PNext = &features2,
+                PNext = deviceFeatureChain,
                 QueueCreateInfoCount = 1,
                 PQueueCreateInfos = &queueCreateInfo,
                 EnabledExtensionCount = (uint)deviceExtensions.Count,
                 PpEnabledExtensionNames = extensionsPtr == 0 ? null : (byte**)extensionsPtr,
             };
 
-            Result result = Api.CreateDevice(PhysicalDevice, &createInfo, null, out Device device);
+            Result result = Streamline != null
+                ? Streamline.CreateDevice(Instance, PhysicalDevice, &createInfo, out Device device)
+                : Api.CreateDevice(PhysicalDevice, &createInfo, null, out device);
             if (result != Result.Success)
             {
                 failureReason = "vkCreateDevice failed: " + result;
@@ -1124,6 +1193,14 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
+        if (requestedQueues == 4)
+        {
+            Fsr3AsyncQueue = Api.GetDeviceQueue(Device, family, 1);
+            Fsr3PresentQueue = Api.GetDeviceQueue(Device, family, 2);
+            Fsr3AcquireQueue = Api.GetDeviceQueue(Device, family, 3);
+            Fsr3SwapchainQueuesAvailable = Fsr3AsyncQueue.Handle != 0 &&
+                Fsr3PresentQueue.Handle != 0 && Fsr3AcquireQueue.Handle != 0;
+        }
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
         Capabilities.ColorWriteTier = colorWriteTier;
@@ -1342,12 +1419,19 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         if (Device.Handle != 0)
         {
-            VulkanStats.WaitDeviceIdle(Api, Device);
+            WaitDeviceIdle();
 
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
             Allocator?.Dispose();
+            Streamline?.Dispose();
+            Streamline = null;
             Api.DestroyDevice(Device, null);
+        }
+        else
+        {
+            Streamline?.Dispose();
+            Streamline = null;
         }
 
         if (_debugUtils != null && _debugMessenger.Handle != 0)
@@ -1362,5 +1446,13 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         Api?.Dispose();
+    }
+
+    internal Result WaitDeviceIdle()
+    {
+        long start = VulkanStats.WaitStart();
+        Result result = Streamline != null ? Streamline.DeviceWaitIdle(Device) : Api.DeviceWaitIdle(Device);
+        VulkanStats.NoteWait(WaitSite.DeviceWaitIdle, start);
+        return result;
     }
 }

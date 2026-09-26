@@ -1,6 +1,7 @@
 #version 330 core
 uniform sampler2D ssaoScene;
 uniform float invRenderHeight;
+uniform int optimumAoDebugInScene;
 #if OPTIMUMAO > 0
 // Optimum AO (docs/vulkan.md#ambient-occlusion C.9, C.11): with GTAO the AO texture is the
 // pure visibility at render resolution, so the water, fog and OIT attenuation vanilla SSAO
@@ -50,6 +51,12 @@ void main()
     #if SSAOLEVEL > 1
         ao = min(ao, texture(ssaoScene, texCoord - vec2(0.0, invRenderHeight)).r);
     #endif
+    }
+    // In the AO debug view, put the same attenuated term into the scene before
+    // TAA or the selected upscaler. Final then displays that resolved channel.
+    if (optimumAoDebugInScene != 0) {
+        outColor = vec4(vec3(clamp(ao, 0.0, 1.0)), 1.0);
+        return;
     }
     // EnumBlendMode.Multiply: dstRGB * (1 - srcAlpha). RGB is not read.
     outColor = vec4(0.0, 0.0, 0.0, 1.0 - clamp(ao, 0.0, 1.0));

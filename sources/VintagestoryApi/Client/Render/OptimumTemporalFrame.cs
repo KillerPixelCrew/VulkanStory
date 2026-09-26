@@ -200,6 +200,10 @@ namespace Vintagestory.API.Client
         private readonly Vec2f appliedJitterPx = new Vec2f();
         private bool cameraCapturedThisFrame;
 
+        // FG alone opens the motion-write window without a temporal resolve.
+        // Its projection must remain unjittered; TAA and upscalers opt in.
+        public bool JitterMagnitudeEnabled { get; set; } = true;
+
         public OptimumTemporalFrame()
         {
             for (int i = 0; i < ViewCount; i++)
@@ -227,8 +231,8 @@ namespace Vintagestory.API.Client
             set
             {
                 jitterActive = value;
-                JitterPx.X = value ? JitterSequencePx.X : 0f;
-                JitterPx.Y = value ? JitterSequencePx.Y : 0f;
+                JitterPx.X = value && JitterMagnitudeEnabled ? JitterSequencePx.X : 0f;
+                JitterPx.Y = value && JitterMagnitudeEnabled ? JitterSequencePx.Y : 0f;
                 if (value) { appliedJitterPx.X = JitterPx.X; appliedJitterPx.Y = JitterPx.Y; }
             }
         }
@@ -375,8 +379,8 @@ namespace Vintagestory.API.Client
             if (jx == 0.0 && jy == 0.0) jx = 0.25;
             JitterSequencePx.X = (float)jx;
             JitterSequencePx.Y = (float)jy;
-            JitterPx.X = jitterActive ? JitterSequencePx.X : 0f;
-            JitterPx.Y = jitterActive ? JitterSequencePx.Y : 0f;
+            JitterPx.X = jitterActive && JitterMagnitudeEnabled ? JitterSequencePx.X : 0f;
+            JitterPx.Y = jitterActive && JitterMagnitudeEnabled ? JitterSequencePx.Y : 0f;
             if (jitterActive) { appliedJitterPx.X = JitterPx.X; appliedJitterPx.Y = JitterPx.Y; }
         }
 

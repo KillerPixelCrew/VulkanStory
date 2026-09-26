@@ -171,8 +171,8 @@ public class UiSeparationTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// The snapshot is the composited scene texel for texel: Primary colour 0 copied into slot 23
-    /// at the end of the composition, and flagged as captured for that frame only.
+    /// The snapshot is the display-sized scene texel for texel: Default copied into slot 23
+    /// after the final blit, before the UI, and flagged as captured for that frame only.
     /// </summary>
     [SkippableFact]
     public void TheSnapshotIsTheCompositedScene()
@@ -180,7 +180,6 @@ public class UiSeparationTests(ITestOutputHelper output)
         using Session session = Open();
         SeparationPlatform platform = session.Platform;
         VulkanDevice seam = session.Seam;
-        FrameBufferRef primary = platform.FrameBuffers[0];
         FrameBufferRef snapshot = platform.SceneNoHudFrameBuffer!;
         Assert.Equal(VulkanClientPlatform.OptimumSceneNoHudIndex, platform.SceneNoHudFrameBufferIndex);
 
@@ -190,7 +189,8 @@ public class UiSeparationTests(ITestOutputHelper output)
             platform.BeginFrame();
             // A different scene every frame, so a copy of an earlier one cannot pass.
             float phase = frame / 4f;
-            seam.ClearNativeColor(primary.FboId, 0, 0.1f + phase * 0.5f, 0.7f - phase * 0.4f, 0.3f, 1f);
+            seam.ClearNativeColor(PassDeclaration.DefaultFramebuffer, 0,
+                0.1f + phase * 0.5f, 0.7f - phase * 0.4f, 0.3f, 1f);
             platform.CaptureSceneNoHud();
             Assert.True(platform.SceneNoHudCaptured);
             if (frame == 3) captured = seam.ReadBackLevel0ForTests(snapshot.ColorTextureIds[0]);

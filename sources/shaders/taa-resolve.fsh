@@ -105,6 +105,8 @@ void main(void)
 	// drive the reprojection and the disocclusion test, so a sub-pixel leaf in front
 	// of a far background keeps one consistent answer across jitter phases.
 	float closestDepth = 2.0;
+	float farthestDepth = 0.0;
+	float neighbourhoodDepth[9];
 	ivec2 closestPixel = pixel;
 	vec4 filtered = vec4(0.0);
 	float filteredWeight = 0.0;
@@ -118,7 +120,9 @@ void main(void)
 		ivec2 p = clamp(pixel + ivec2(x, y), ivec2(0), ivec2(renderSize) - ivec2(1));
 		vec4 c = texelFetch(sceneTex, p, 0);
 		float tapDepth = texelFetch(depthTex, p, 0).r;
+		neighbourhoodDepth[(y + 1) * 3 + x + 1] = tapDepth;
 		if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }
+		farthestDepth = max(farthestDepth, tapDepth);
 		vec3 ycc = rgbToYCoCg(c.rgb);
 		m1 += ycc; m2 += ycc * ycc;
 		boxMin = min(boxMin, ycc); boxMax = max(boxMax, ycc);
@@ -268,7 +272,18 @@ void main(void)
 		if (!isnan(h) && !isinf(h)) historyNearest = min(historyNearest, h);
 	}
 	float depthTolerance = 0.5 + 0.08 * closestLinearDepth;
-	if (abs(historyNearest - closestLinearDepth) > depthTolerance) { alpha = 1.0; rejected = true; }
+	// Keep clipped history only for sparse distant coverage, such as a subpixel
+	// leaf. A solid silhouette has three or more foreground taps and must reset
+	// when its old depth no longer matches; otherwise it leaves a smear trail.
+	int nearDepthTaps = 0;
+	for (int i = 0; i < 9; i++)
+		if (abs(neighbourhoodDepth[i] - closestDepth) <= 2e-4) nearDepthTaps++;
+	bool distantDepthEdge = closestLinearDepth > 20.0 &&
+		farthestDepth - closestDepth > 2e-4 && nearDepthTaps <= 2;
+	bool depthMismatch = abs(historyNearest - closestLinearDepth) > depthTolerance;
+	if (depthMismatch && !distantDepthEdge)
+	{ alpha = 1.0; rejected = true; }
+	else if (depthMismatch) historyGlowSample = glow;
 
 	// ---- rectify and blend in YCoCg with luminance weighting
 	float clipKeep = 1.0;

@@ -189,6 +189,26 @@ internal static class GpuTest
         }
         Assert.True(remaining.Count == 0, "device diagnostics:\n" + string.Join("\n", remaining));
     }
+
+    public static void AssertCleanSince(VulkanDevice seam, int mark,
+        [CallerFilePath] string callerFile = "")
+    {
+        List<string> all = MessagesOf(seam);
+        List<string> messages;
+        lock (all)
+        {
+            messages = mark >= all.Count ? new List<string>() : all.GetRange(Math.Max(mark, 0), all.Count - Math.Max(mark, 0));
+        }
+        ValidationAssert.NoErrors(messages);
+        ValidationAssert.NoSyncHazards(messages, callerFile);
+
+        string? diagnostics = seam.GetError();
+        if (string.IsNullOrEmpty(diagnostics)) return;
+        string residual = diagnostics;
+        foreach (string message in ValidationAssert.Snapshot(all))
+            residual = residual.Replace(message.Replace('{', '[').Replace('}', ']'), "");
+        Assert.True(string.IsNullOrWhiteSpace(residual), "device diagnostics:\n" + residual);
+    }
     /// <summary>
     /// A minimal shader stand-in. The client passes its own IShader and
     /// IShaderProgram implementations across the seam, so the device must work

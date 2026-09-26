@@ -51,6 +51,13 @@ public partial class VulkanClientPlatform
         return device.RendererString;
     }
 
+    public override void SetVSync(bool enabled)
+    {
+        // The Vulkan window has ContextAPI.NoAPI; OpenTK's VSync setter throws
+        // for that window. Present mode belongs to the Vulkan swapchain.
+        device?.SetVSync(enabled);
+    }
+
     /// <summary>
     /// The same facts the GL body logs, from the device. The GL extension test has no
     /// meaning here: the device already refused to initialize if it lacked what it needs,

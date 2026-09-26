@@ -49,6 +49,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         new(true, "InitializeGraphics", new[] { "IntPtr", "Int32", "Int32", "String&" }),
         new(true, "ShutdownGraphics", Array.Empty<string>()),
+        new(true, "OptimumUpscalerUnavailableFor", new[] { "String" }),
+        new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
+        new(false, "OptimumPostSceneTexture", Array.Empty<string>()),
         new(false, "SetupDefaultFrameBuffers", Array.Empty<string>()),
         new(false, "DisposeFrameBuffers", new[] { "List`1" }),
         new(false, "RenderFullscreenTriangle", new[] { "MeshRef" }),
@@ -309,6 +312,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         try
         {
             device = DeviceFactory();
+            device.SetVSync(ClientSettings.VsyncMode != 0);
+            PrepareUpscaler(device);
 
             // The marker goes down before the driver is touched: a crash inside
             // device creation is exactly the kind the next start must see. A
@@ -318,6 +323,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
 
             if (!device.Initialize(windowHandle, width, height, out string failureReason))
             {
+                ShutDownUpscaler();
                 device.Dispose();
                 OptimumRenderBootstrap.ClearCrashMarker();
                 reason = failureReason;
@@ -326,6 +332,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
 
             this.device = device;
             device.OwnerPlatform = this;
+            BringUpUpscaler(device);
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
             RenderStageListener = new FrameGraphStageListener(this);
             // Phase 5: registered mod motion writers reach this platform's motion window.
@@ -338,6 +345,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         {
             try
             {
+                ShutDownUpscaler();
                 device?.Dispose();
             }
             catch (Exception)
@@ -356,9 +364,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// </summary>
     public override void ShutdownGraphics()
     {
+        ResetFrameGeneration();
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
         RemoveModPassHooks();
+        ShutDownUpscaler();
         try
         {
             ReleaseAmbientOcclusion();

@@ -116,7 +116,7 @@ internal readonly struct PresentTarget
 internal sealed unsafe class SwapchainSlot : IDisposable
 {
     private readonly VulkanContext _context;
-    private readonly KhrSwapchain _api;
+    private readonly ISwapchainDispatch _api;
     private readonly Semaphore[] _acquireSemaphores;
     private readonly Semaphore[] _presentSemaphores;
     private readonly AcquireSemaphoreFreeList _freeAcquire;
@@ -124,7 +124,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     private readonly Stack<Fence> _freePresentFences = new();
     private bool _disposed;
 
-    public SwapchainSlot(VulkanContext context, KhrSwapchain api, SwapchainKHR handle,
+    public SwapchainSlot(VulkanContext context, ISwapchainDispatch api, SwapchainKHR handle,
         Extent2D extent, Format format, PresentModeKHR presentMode)
     {
         _context = context;
@@ -135,11 +135,11 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         PresentMode = presentMode;
 
         uint count = 0;
-        api.GetSwapchainImages(context.Device, handle, ref count, null);
+        VulkanResult.Check(api.GetImages(context.Device, handle, ref count, null), "vkGetSwapchainImagesKHR count");
         Images = new Image[count];
         fixed (Image* imagesPtr = Images)
         {
-            api.GetSwapchainImages(context.Device, handle, ref count, imagesPtr);
+            VulkanResult.Check(api.GetImages(context.Device, handle, ref count, imagesPtr), "vkGetSwapchainImagesKHR");
         }
 
         Views = new ImageView[count];
@@ -223,7 +223,9 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 
     public Fence PreparePresentFence()
     {
-        if (!_context.Capabilities.PresentFencesEnabled) return default;
+        // Streamline owns presentation completion. Its proxy does not signal
+        // VK_EXT_swapchain_maintenance1 present fences for the application.
+        if (!_context.Capabilities.PresentFencesEnabled || _context.Streamline != null) return default;
         PresentsComplete();
         if (_freePresentFences.TryPop(out Fence fence))
             VulkanResult.Check(_context.Api.ResetFences(_context.Device, 1, &fence), "vkResetFences for presentation");
@@ -281,7 +283,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         {
             if (view.Handle != 0) _context.Api.DestroyImageView(_context.Device, view, null);
         }
-        if (Handle.Handle != 0) _api.DestroySwapchain(_context.Device, Handle, null);
+        if (Handle.Handle != 0) _api.Destroy(_context.Device, Handle);
         foreach (Semaphore semaphore in _acquireSemaphores)
         {
             if (semaphore.Handle != 0) _context.Api.DestroySemaphore(_context.Device, semaphore, null);
@@ -296,9 +298,9 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 /// <summary>
 /// The presentation chain.
 ///
-/// Recreation follows the Khronos swapchain_recreation sample: the current
-/// swapchain is always passed as <c>oldSwapchain</c>, nothing waits for the
-/// device to go idle, and the replaced <see cref="SwapchainSlot" /> is retired on
+/// Native and Streamline recreation follows the Khronos swapchain_recreation
+/// sample: the current swapchain is passed as <c>oldSwapchain</c>, and the
+/// replaced <see cref="SwapchainSlot" /> is retired on
 /// the Frame timeline after the last present submission that used it. SUBOPTIMAL
 /// (from acquire or present) rebuilds before the next acquire; OUT_OF_DATE
 /// rebuilds and acquires once more; a zero extent (a minimised window) parks
@@ -314,7 +316,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
     private readonly VulkanContext _context;
     private readonly KhrSurface _surfaceApi;
-    private readonly KhrSwapchain _swapchainApi;
+    private ISwapchainDispatch _swapchainApi;
     private readonly SurfaceKHR _surface;
     private readonly SwapchainRetirement _retirement;
     private readonly ITimelineClock _clock;
@@ -324,6 +326,8 @@ internal sealed unsafe class Swapchain : IDisposable
     private uint _width;
     private uint _height;
     private bool _vsync;
+    private bool _frameGeneration;
+    private string _frameGenerationProvider = "off";
     private bool _relaxedPromoted;
     private bool _disposed;
 
@@ -347,6 +351,14 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>Why the last rebuild failed; null after a successful one.</summary>
     public string? RebuildFailure { get; private set; }
 
+    public bool Fsr3ProxyActive => _swapchainApi is Fsr3SwapchainDispatch &&
+        _current != null && !NeedsRecreation;
+    public nint Fsr3ProxyContext => Fsr3ProxyActive && _swapchainApi is Fsr3SwapchainDispatch fsr3 ?
+        fsr3.NativeContext : 0;
+    public ulong Fsr3ProxyPresentCount => Fsr3ProxyActive && _swapchainApi is Fsr3SwapchainDispatch fsr3 ?
+        fsr3.LastPresentCount(_current!.Handle) : 0;
+    public string? Fsr3ProxyFailure { get; private set; }
+
     /// <summary>The slot being acquired from. Tests only.</summary>
     internal SwapchainSlot? CurrentSlotForTests => _current;
 
@@ -359,10 +371,12 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     internal bool PresentIdEnabled { get; set; }
 
+    private VendorLatency? _vendorLatency;
+
     /// <summary>The frame id of each of the last presents, by present id (seam S2).</summary>
     internal PresentIdMap PresentIds { get; } = new();
 
-    private Swapchain(VulkanContext context, KhrSurface surfaceApi, KhrSwapchain swapchainApi, SurfaceKHR surface,
+    private Swapchain(VulkanContext context, KhrSurface surfaceApi, ISwapchainDispatch swapchainApi, SurfaceKHR surface,
         ITimelineClock clock)
     {
         _context = context;
@@ -381,7 +395,7 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </remarks>
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync, ITimelineClock clock,
-        out Swapchain? swapchain, out string? failureReason)
+        out Swapchain? swapchain, out string? failureReason, VendorLatency? vendorLatency = null)
     {
         swapchain = null;
         failureReason = null;
@@ -395,7 +409,7 @@ internal sealed unsafe class Swapchain : IDisposable
         if (!context.Api.TryGetDeviceExtension(context.Instance, context.Device, out KhrSwapchain swapchainApi))
         {
             failureReason = "VK_KHR_swapchain unavailable";
-            surfaceApi.DestroySurface(context.Instance, surface, null);
+            WindowSurface.Destroy(context, surface);
             surfaceApi.Dispose();
             return false;
         }
@@ -409,13 +423,21 @@ internal sealed unsafe class Swapchain : IDisposable
         if (!supported)
         {
             failureReason = "the graphics queue family cannot present to this surface";
-            surfaceApi.DestroySurface(context.Instance, surface, null);
+            WindowSurface.Destroy(context, surface);
             surfaceApi.Dispose();
             swapchainApi.Dispose();
             return false;
         }
 
-        var created = new Swapchain(context, surfaceApi, swapchainApi, surface, clock);
+        ISwapchainDispatch dispatch;
+        if (context.Streamline != null)
+        {
+            swapchainApi.Dispose();
+            dispatch = new StreamlineSwapchainDispatch(context.Streamline, context.Device);
+        }
+        else dispatch = new NativeSwapchainDispatch(swapchainApi);
+        var created = new Swapchain(context, surfaceApi, dispatch, surface, clock);
+        created._vendorLatency = vendorLatency;
         created._width = width;
         created._height = height;
         created._vsync = vsync;
@@ -432,9 +454,10 @@ internal sealed unsafe class Swapchain : IDisposable
     }
 
     /// <summary>
-    /// Builds a new slot from the current surface state, passing the current one
-    /// as oldSwapchain and retiring it. Never waits. Returns false when parked (the
-    /// current slot is kept for the rebuild that unparks) or when creation failed.
+    /// Builds a new slot from the current surface state. The FFX proxy requires
+    /// its previous chain destroyed before replacement, so that path waits for
+    /// in-flight presents; the native and Streamline paths retire asynchronously.
+    /// Returns false when parked or when creation failed.
     /// </summary>
     private bool Build(out string? failureReason)
     {
@@ -454,11 +477,43 @@ internal sealed unsafe class Swapchain : IDisposable
 
         Format = ChooseFormat(out ColorSpaceKHR colorSpace);
         PresentModeKHR presentMode = SwapchainPolicy.ChoosePresentMode(
-            _vsync, _relaxedPromoted && _relaxedAllowed, SupportedPresentModes());
+            _vsync, _relaxedPromoted && _relaxedAllowed, SupportedPresentModes(), _frameGeneration);
         uint imageCount = SwapchainPolicy.ChooseImageCount(
             capabilities.MinImageCount, capabilities.MaxImageCount, presentMode);
 
         SwapchainSlot? old = _current;
+        bool wantFsr3 = _frameGenerationProvider == "fsr3" && Fsr3ProxyFailure == null;
+        bool haveFsr3 = _swapchainApi is Fsr3SwapchainDispatch;
+        if (wantFsr3 != haveFsr3 || haveFsr3)
+        {
+            // FFX's replacement create function refuses a live proxy chain.
+            // Finish its asynchronous presents, destroy the old chain, and then
+            // create the successor through the same context. Switching owner
+            // follows this path too, so acquire/present never mix providers.
+            if (old != null)
+            {
+                if (_context.Streamline != null)
+                    _context.Streamline.SetFrameGeneration(false, old.Extent.Width,
+                        old.Extent.Height, old.Format, old.ImageCount);
+                VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before FG proxy transition");
+                _retirement.DisposeAll();
+                _vendorLatency?.OnSwapchainRetired();
+                old.Dispose();
+                _current = null;
+                old = null;
+            }
+            if (wantFsr3 != haveFsr3)
+            {
+                _swapchainApi.Dispose();
+                _swapchainApi = wantFsr3 ? new Fsr3SwapchainDispatch(_context) :
+                    CreateDefaultDispatch();
+            }
+        }
+        // The DLSS-G guide requires generation to be off before a resize or
+        // present-mode change. The next valid world frame turns it back on.
+        if (old != null && _context.Streamline != null)
+            _context.Streamline.SetFrameGeneration(false, old.Extent.Width, old.Extent.Height,
+                old.Format, old.ImageCount);
         var createInfo = new SwapchainCreateInfoKHR
         {
             SType = StructureType.SwapchainCreateInfoKhr,
@@ -482,13 +537,30 @@ internal sealed unsafe class Swapchain : IDisposable
             OldSwapchain = old?.Handle ?? default,
         };
 
-        Result result = _swapchainApi.CreateSwapchain(_context.Device, &createInfo, null, out SwapchainKHR handle);
+        // FidelityFX owns the replacement swapchain and does not accept the
+        // NVIDIA low-latency swapchain creation pNext used by the native path.
+        if (_vendorLatency != null && !wantFsr3)
+            createInfo.PNext = _vendorLatency.ChainSwapchainCreateInfo(createInfo.PNext);
+
+        Result result = _swapchainApi.Create(_context.Device, &createInfo, out SwapchainKHR handle);
+
+        if (result != Result.Success && _swapchainApi is Fsr3SwapchainDispatch failedFsr3)
+        {
+            Fsr3ProxyFailure = failedFsr3.FailureReason ?? "FidelityFX proxy creation failed: " + result;
+            _swapchainApi.Dispose();
+            _swapchainApi = CreateDefaultDispatch();
+            if (_vendorLatency != null)
+                createInfo.PNext = _vendorLatency.ChainSwapchainCreateInfo(createInfo.PNext);
+            result = _swapchainApi.Create(_context.Device, &createInfo, out handle);
+        }
 
         // Passing oldSwapchain retires it even when creation fails.
         if (old != null)
         {
+            _vendorLatency?.OnSwapchainRetired();
             _retirement.Retire(old, old.LastPresentValue,
-                _context.Capabilities.PresentFencesEnabled ? old.PresentsComplete : null);
+                _context.Capabilities.PresentFencesEnabled && _context.Streamline == null
+                    ? old.PresentsComplete : null);
             _current = null;
         }
 
@@ -501,6 +573,8 @@ internal sealed unsafe class Swapchain : IDisposable
         }
 
         _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode);
+        if (_swapchainApi is not Fsr3SwapchainDispatch)
+            _vendorLatency?.OnSwapchainCreated(handle);
         Extent = extent;
         PresentMode = presentMode;
         Creations++;
@@ -584,6 +658,25 @@ internal sealed unsafe class Swapchain : IDisposable
         NeedsRecreation = true;
     }
 
+    public void SetFrameGenerationProvider(string provider)
+    {
+        if (_frameGenerationProvider == provider) return;
+        _frameGenerationProvider = provider;
+        Fsr3ProxyFailure = null;
+        _frameGeneration = provider != "off";
+        NeedsRecreation = true;
+    }
+
+    private ISwapchainDispatch CreateDefaultDispatch()
+    {
+        if (_context.Streamline != null)
+            return new StreamlineSwapchainDispatch(_context.Streamline, _context.Device);
+        if (!_context.Api.TryGetDeviceExtension(_context.Instance, _context.Device,
+            out KhrSwapchain swapchainApi))
+            throw new InvalidOperationException("VK_KHR_swapchain unavailable during proxy transition");
+        return new NativeSwapchainDispatch(swapchainApi);
+    }
+
     /// <summary>
     /// Sustained missed vsyncs under FIFO: rebuild as FIFO_RELAXED when the
     /// surface has it and the override allows it. Returns whether a rebuild was requested.
@@ -623,8 +716,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
             long waitStart = VulkanStats.WaitStart();
             if (_context.AcquireDelayForTests > TimeSpan.Zero) System.Threading.Thread.Sleep(_context.AcquireDelayForTests);
-            Result result = _swapchainApi.AcquireNextImage(
-                _context.Device, slot.Handle, ulong.MaxValue, acquire, default, ref imageIndex);
+            Result result = _swapchainApi.Acquire(_context.Device, slot.Handle, acquire, ref imageIndex);
             VulkanStats.NoteWait(WaitSite.SwapchainAcquire, waitStart);
 
             switch (SwapchainPolicy.OnAcquire(result, attempt))
@@ -684,7 +776,7 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <paramref name="frameId" /> is the latency frame id that produced it, kept
     /// in <see cref="PresentIds" />.
     /// </summary>
-    public ulong Present(in PresentTarget target, ulong frameId = 0)
+    public ulong Present(in PresentTarget target, ulong frameId = 0, ulong reservedPresentId = 0)
     {
         SwapchainKHR handle = target.Slot.Handle;
         Semaphore wait = target.PresentSemaphore;
@@ -692,7 +784,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
         // Allocated for every present, whether or not the extension carries it,
         // so the frame to present mapping is the same on every driver.
-        ulong presentId = PresentIdCounter.Next();
+        ulong presentId = reservedPresentId != 0 ? reservedPresentId : PresentIdCounter.Next();
         PresentIds.Record(presentId, frameId);
 
         var presentIdInfo = new PresentIdKHR
@@ -702,11 +794,15 @@ internal sealed unsafe class Swapchain : IDisposable
             PPresentIds = &presentId,
         };
 
-        Fence presentFence = target.Slot.PreparePresentFence();
+        // The FidelityFX proxy owns presentation and pacing. Its replacement
+        // vkQueuePresentKHR does not consume the native present-fence/present-id
+        // pNext chain, and the FFX rebuild path waits for the device explicitly.
+        bool fsr3Proxy = _swapchainApi is Fsr3SwapchainDispatch;
+        Fence presentFence = fsr3Proxy ? default : target.Slot.PreparePresentFence();
         var fenceInfo = new SwapchainPresentFenceInfoEXT
         {
             SType = StructureType.SwapchainPresentFenceInfoExt,
-            PNext = PresentIdEnabled ? &presentIdInfo : null,
+            PNext = !fsr3Proxy && PresentIdEnabled ? &presentIdInfo : null,
             SwapchainCount = 1,
             PFences = &presentFence,
         };
@@ -714,7 +810,8 @@ internal sealed unsafe class Swapchain : IDisposable
         var presentInfo = new PresentInfoKHR
         {
             SType = StructureType.PresentInfoKhr,
-            PNext = presentFence.Handle != 0 ? &fenceInfo : PresentIdEnabled ? &presentIdInfo : null,
+            PNext = presentFence.Handle != 0 ? &fenceInfo :
+                !fsr3Proxy && PresentIdEnabled ? &presentIdInfo : null,
             WaitSemaphoreCount = 1,
             PWaitSemaphores = &wait,
             SwapchainCount = 1,
@@ -728,7 +825,7 @@ internal sealed unsafe class Swapchain : IDisposable
         long waitStart = VulkanStats.WaitStart();
         lock (_context.QueueLock)
         {
-            result = _swapchainApi.QueuePresent(_context.GraphicsQueue, &presentInfo);
+            result = _swapchainApi.Present(_context.GraphicsQueue, &presentInfo);
         }
         target.Slot.FinishPresentFence(presentFence, result);
         VulkanStats.NoteWait(WaitSite.Present, waitStart);
@@ -752,8 +849,9 @@ internal sealed unsafe class Swapchain : IDisposable
 
         // Teardown, not recreation: everything this chain ever presented must be
         // finished before its slots go.
-        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
+        _context.WaitDeviceIdle();
         _retirement.DisposeAll();
+        _vendorLatency?.OnSwapchainRetired();
         _current?.Dispose();
         _current = null;
         // Nothing may be called against these handles again; the backend outlives
@@ -761,7 +859,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
         if (_surface.Handle != 0)
         {
-            _surfaceApi.DestroySurface(_context.Instance, _surface, null);
+            WindowSurface.Destroy(_context, _surface);
         }
 
         _swapchainApi.Dispose();
@@ -781,7 +879,10 @@ internal sealed unsafe class Swapchain : IDisposable
 /// </summary>
 internal static class PresentWaitStages
 {
-    public const PipelineStageFlags FrameWait = PipelineStageFlags.ColorAttachmentOutputBit;
+    // The present blit reads the submitted color image at TRANSFER. Waiting only
+    // at COLOR_ATTACHMENT_OUTPUT would let that read run ahead of the frame.
+    public const PipelineStageFlags FrameWait =
+        PipelineStageFlags.TransferBit | PipelineStageFlags.ColorAttachmentOutputBit;
     public const PipelineStageFlags BlitAcquireWait = PipelineStageFlags.TransferBit;
     public const PipelineStageFlags RasterAcquireWait = PipelineStageFlags.ColorAttachmentOutputBit;
 
@@ -811,23 +912,21 @@ internal sealed unsafe class BlitPresentPath
 {
     private readonly VulkanContext _context;
     private readonly TextureManager _textures;
-    private readonly Func<VulkanTexture?> _source;
     /// <summary>Created at the first record, so a path built for its stage table alone needs no texture table.</summary>
     private BarrierBatcher? _barriers;
 
     /// <summary>The acquired image's state; reset per frame, since its contents are discarded.</summary>
     private readonly ResourceStateTracker _swapchainImage = new(1, 1, depth: false);
 
-    public BlitPresentPath(VulkanContext context, TextureManager textures, Func<VulkanTexture?> source)
+    public BlitPresentPath(VulkanContext context, TextureManager textures)
     {
         _context = context;
         _textures = textures;
-        _source = source;
     }
 
     public PipelineStageFlags AcquireWaitStage => PresentWaitStages.BlitAcquireWait;
 
-    public void Record(CommandBuffer commandBuffer, in PresentTarget target)
+    public void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source)
     {
         Image destination = target.Image;
 
@@ -840,7 +939,6 @@ internal sealed unsafe class BlitPresentPath
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
             ResourceUsage.TransferDst, discard: true);
 
-        VulkanTexture? source = _source();
         if (source != null) _textures.Require(barriers, commandBuffer, source, ResourceUsage.TransferSrc);
         barriers.Flush(commandBuffer);
 

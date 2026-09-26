@@ -890,14 +890,57 @@ public class TaaResolveTests
 
     /// <summary>The disocclusion line the shipped resolve carries, and the per-sample line it replaced.</summary>
     private const string NearestDepthRejection =
-        "if (abs(historyNearest - closestLinearDepth) > depthTolerance) { alpha = 1.0; rejected = true; }";
+        "bool depthMismatch = abs(historyNearest - closestLinearDepth) > depthTolerance;";
     private const string PerSampleRejection =
-        "if (abs(historyLinear - linearDepth) > 0.5 + 0.08 * linearDepth) { alpha = 1.0; rejected = true; }";
+        "bool depthMismatch = abs(historyLinear - linearDepth) > 0.5 + 0.08 * linearDepth;";
 
     private static string WithPerSampleDisocclusion(string fragment)
     {
         Assert.Contains(NearestDepthRejection, fragment);
         return fragment.Replace(NearestDepthRejection, PerSampleRejection, StringComparison.Ordinal);
+    }
+
+    /// <summary>A sparse distant leaf keeps clipped history, while a solid
+    /// silhouette and a flat-depth disocclusion reset it.</summary>
+    [SkippableFact]
+    public void SparseDistantEdgeKeepsHistoryWhileSolidDisocclusionResets()
+    {
+        PerspectiveCamera camera = CreatePerspective();
+        float nearDepth = camera.WindowDepth(80f);
+        float farDepth = camera.WindowDepth(120f);
+
+        TemporalRun? Run(bool edge, bool solid = false) => RunTemporal(1, camera.Uniforms(0.1f),
+            (textures, history) =>
+            {
+                UploadFlatRgba16F(textures, history.Color, 0.5f, 0.5f, 0.5f, 1f);
+                UploadFlatRgba8(textures, history.Glow, 255, 0, 0, 255);
+                UploadFlatR32F(textures, history.Depth, 120f);
+            },
+            (_, textures, inputs) =>
+            {
+                Func<int, int, float> colour = (x, y) => x == LeafX && y == LeafY ? 0.9f : 0.5f;
+                UploadRgba16F(textures, inputs.SceneTex, colour, colour, colour, (_, _) => 1f);
+                UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+                UploadR32F(textures, inputs.DepthTex,
+                    (x, y) => !edge || (x == LeafX && y == LeafY) || (solid && x <= LeafX)
+                        ? nearDepth : farDepth);
+                UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, nearDepth);
+            });
+
+        TemporalRun? silhouette = Run(edge: true);
+        TemporalRun? solid = Run(edge: true, solid: true);
+        TemporalRun? flat = Run(edge: false);
+        Skip.If(silhouette == null || solid == null || flat == null, "No usable Vulkan device.");
+        float retained = ReadHalf(silhouette!.Color, LeafX, LeafY, 0, 8);
+        float solidReset = ReadHalf(solid!.Color, LeafX, LeafY, 0, 8);
+        float reset = ReadHalf(flat!.Color, LeafX, LeafY, 0, 8);
+        Assert.True(retained < 0.75f, $"distant edge discarded clipped colour history ({retained:F3})");
+        Assert.True(solidReset > 0.85f, $"solid distant edge kept stale colour history ({solidReset:F3})");
+        Assert.True(reset > 0.85f, $"flat-depth disocclusion kept colour history ({reset:F3})");
+        Assert.True(ReadByteChannel(silhouette.Glow, LeafX, LeafY, 0) < 0.05f,
+            "distant edge carried stale glow into a new surface");
+        Assert.True(ReadByteChannel(flat.Glow, LeafX, LeafY, 0) < 0.05f,
+            "flat-depth disocclusion carried stale glow");
     }
 
     private TemporalRun? RunLeafFlip(Func<string, string>? fragmentTransform)

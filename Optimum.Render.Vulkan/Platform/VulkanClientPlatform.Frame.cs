@@ -2,6 +2,7 @@ using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Config;
 using Optimum.Render.Vulkan.Graph;
 using Vintagestory.API.Client;
+using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
@@ -12,16 +13,18 @@ namespace Optimum.Render.Vulkan.Platform;
 // the parity dump itself.
 public partial class VulkanClientPlatform
 {
-    /// <summary>The client retains ownership of its FPS limiter.</summary>
-    public override bool LatencyOwnsFrameCap => false;
+    public override bool LatencyOwnsFrameCap => device?.VendorLatencyOwnsFrameCap == true;
+
+    public override void SetLatencyFrameCap(int maxFps) => device?.SetVendorLatencyFrameCap(maxFps);
 
     /// <summary>The existing pre-input hook starts frame identity and CPU timing.</summary>
     public override void LatencySleep()
     {
         if (device == null) return;
         ulong frameId = device.BeginLatencyFrame();
-        device.Latency.Marker(frameId, LatencyMarker.InputSample);
-        device.Latency.Marker(frameId, LatencyMarker.SimulationStart);
+        device.SleepVendorLatency(frameId, OptimumConfig.EffectiveFrameGeneration != "off");
+        device.MarkLatency(frameId, LatencyMarker.InputSample);
+        device.MarkLatency(frameId, LatencyMarker.SimulationStart);
     }
 
     /// <summary>Recycles the frame slot and opens a command buffer.</summary>
@@ -31,6 +34,15 @@ public partial class VulkanClientPlatform
         // unwound past both compose call sites; the new frame starts with the scope closed, so the
         // world pass draws to the targets it names under the factors it states.
         CloseUiScope();
+        SceneNoHudCaptured = false;
+        if (rebuildUpscalerTargetsPending)
+        {
+            rebuildUpscalerTargetsPending = false;
+            RebuildFrameBuffers();
+            ShaderRegistry.ReloadShaders();
+        }
+        upscaledThisFrame = false;
+        upscaledCompositeReady = false;
         device.BeginFrame();
         // Until a stage or a post method says otherwise, passes are named after the frame.
         passContext = "Frame";
@@ -43,6 +55,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void EndFrame()
     {
+        TryGenerateFrame();
         device.Present();
     }
 

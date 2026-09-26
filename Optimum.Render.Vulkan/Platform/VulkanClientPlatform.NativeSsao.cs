@@ -19,7 +19,8 @@ namespace Optimum.Render.Vulkan.Platform;
 //
 // The step is the OpenGL body's (ClientPlatformWindows.OptimumPostAmbientOcclusion and the
 // private ApplyOptimumSceneSsao it calls), value for value: the same guards, the same order, the
-// same uniform expressions, the same textures. What changes is how each draw reaches the GPU -
+// same textures. Uniform sizes use the allocated render targets, which can differ from
+// window size when a vendor upscaler is active. What changes is how each draw reaches the GPU -
 // a pipeline built for stated fixed state (per-attachment blend, depth test/write/compare, cull,
 // topology and the target's formats) instead of whatever the GL state tracker happens to hold,
 // a pass that names its target, its written colour slots and the textures it samples instead of
@@ -33,6 +34,11 @@ namespace Optimum.Render.Vulkan.Platform;
 // what keeps the final composition from applying it a second time.
 public partial class VulkanClientPlatform
 {
+    // Vendor upscalers consume the motion attachment but do not allocate TAA history targets.
+    // Both routes still need AO in scene color before their temporal reconstruction.
+    private bool NativeAoTemporalActive => OptimumConfig.EffectiveTemporalPipeline &&
+        (TaaTargetsReady || (OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0));
+
     private readonly NativeFullscreenPass nativeSsao = new("ssao",
         new[] { "screenSize", "projection", "samples", "temporalFrameIndex" },
         new[] { "gPosition", "gNormal", "texNoise", "revealage" });
@@ -42,7 +48,7 @@ public partial class VulkanClientPlatform
         new[] { "inputTexture", "depthTexture" });
 
     private readonly NativeFullscreenPass nativeSceneSsao = new("scene-ssao",
-        new[] { "invRenderHeight", "optimumAoMode" },
+        new[] { "invRenderHeight", "optimumAoMode", "optimumAoDebugInScene" },
         new[] { "ssaoScene", "gPositionScene", "revealageScene" });
 
     /// <summary>The frame buffer indices this step draws into and reads back, as the base indexes them.</summary>
@@ -54,7 +60,7 @@ public partial class VulkanClientPlatform
     /// The AO step, natively. Reproduces
     /// <see cref="ClientPlatformWindows.OptimumPostAmbientOcclusion" /> exactly: the platform's own
     /// AO first, vanilla SSAO and its blur when that stood down, then the composite - under the
-    /// vanilla branch only while TAA is actually running, under the GTAO branch always.
+    /// vanilla branch while TAA or an upscaler is active, under the GTAO branch always.
     /// </summary>
     private void NativeAmbientOcclusion(float[] projectMatrix)
     {
@@ -67,20 +73,20 @@ public partial class VulkanClientPlatform
 
         if (OptimumPostAmbientOcclusionTexture == 0 && OptimumRenderSsao && projectMatrix != null)
         {
-            Size2i client = OptimumWindowClientSize();
             float ssaa = OptimumPostSsaaLevel;
+            FrameBufferRef primary = FrameBuffers[0];
 
             // Outside every native pass, exactly where the OpenGL body puts them: this is the
             // GL-shaped state the steps after this one inherit.
             GlToggleBlend(on: false);
-            NativeVanillaSsaoPass(projectMatrix, client, ssaa);
+            NativeVanillaSsaoPass(projectMatrix, ssaa);
             NativeBilateralBlurPasses();
             // The body's tail: the blur's last target is what it leaves bound, with the viewport
             // back at full render resolution - the Luma step inherits that viewport.
             LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
             GlToggleBlend(on: true);
-            GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
-            if (OptimumTaaRequested && TaaTargetsReady)
+            GlViewport(0, 0, primary.Width, primary.Height);
+            if (NativeAoTemporalActive)
             {
                 NativeSceneSsaoPass();
             }
@@ -126,10 +132,10 @@ public partial class VulkanClientPlatform
     /// The raw SSAO pass. One colour slot on frameBuffers[13], cleared white at pass entry the
     /// way the body's ClearSsaoTarget clears it, no blend, no depth, and the viewport the body's
     /// LoadFrameBuffer(SSAO) case sets - the target's own size. The four samplers and the four
-    /// uniform values are the body's, including the half-resolution screenSize fudge and the
-    /// temporal dither index, which is written under exactly the condition that compiles it in.
+    /// uniform values follow the body's half-resolution screenSize rule using the actual
+    /// render targets. The temporal dither index uses the same compile condition.
     /// </summary>
-    private void NativeVanillaSsaoPass(float[] projectMatrix, Size2i client, float ssaa)
+    private void NativeVanillaSsaoPass(float[] projectMatrix, float ssaa)
     {
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef primary = buffers[0];
@@ -150,11 +156,12 @@ public partial class VulkanClientPlatform
         {
             // screenSize: the body's num is 0.5 at SSAA 1 and 1 otherwise, so the value is the
             // SSAO target's resolution at SSAA 1 and the full render resolution above it.
-            float half = ssaa == 1f ? 0.5f : 1f;
-            device.WriteNative(pipeline, nativeSsao.Uniforms[0], ssaa * client.Width * half, ssaa * client.Height * half);
+            device.WriteNative(pipeline, nativeSsao.Uniforms[0],
+                ssaa == 1f ? target.Width : primary.Width,
+                ssaa == 1f ? target.Height : primary.Height);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[1], projectMatrix);
             WriteNativeFloats(pipeline, nativeSsao.Uniforms[2], OptimumSsaoKernel);
-            if (OptimumConfig.EffectiveTaa)
+            if (OptimumConfig.EffectiveTemporalPipeline)
             {
                 device.WriteNative(pipeline, nativeSsao.Uniforms[3],
                     (float)(OptimumTemporal.Frame.FrameIndex & 1023L));
@@ -259,8 +266,10 @@ public partial class VulkanClientPlatform
         int gPosition = gtao ? primary.ColorTextureIds[3] : 0;
         int revealage = gtao ? transparent.ColorTextureIds[1] : 0;
 
+        bool debugInScene = OptimumConfig.AmbientOcclusionDebugView;
         NativePipeline? pipeline = NativePostPipeline(nativeSceneSsao, composite, primary.FboId, 1u,
-            NativeMultiplySlotZeroBlend(), depthTest: false, depthWrite: false, CompareOp.Less);
+            debugInScene ? NativeOpaqueSlotZeroBlend() : NativeMultiplySlotZeroBlend(),
+            depthTest: false, depthWrite: false, CompareOp.Less);
         if (pipeline == null) return;
 
         // The body binds Primary through LoadFrameBuffer here, which is also what puts the
@@ -286,6 +295,7 @@ public partial class VulkanClientPlatform
                     OptimumPostAmbientOcclusionTexture != 0 ? 1 : 0);
             }
             device.WriteNative(pipeline, nativeSceneSsao.Uniforms[0], 1f / primary.Height);
+            device.WriteNative(pipeline, nativeSceneSsao.Uniforms[2], debugInScene ? 1 : 0);
             device.DrawNativeFullscreen(pipeline, textures.ToArray());
         }
         device.EndNativePass();
@@ -359,7 +369,7 @@ public partial class VulkanClientPlatform
 
     private bool ambientOcclusionToneRefusalLogged;
 
-    private (string Preset, bool Temporal, GtaoSettings Settings)? ambientOcclusionSettingsCache;
+    private (string Preset, bool Temporal, bool Upscaler, GtaoSettings Settings)? ambientOcclusionSettingsCache;
 
     /// <summary>
     /// Runs GTAO when the live shaders were built for it (OPTIMUMAO, stamped from
@@ -374,9 +384,11 @@ public partial class VulkanClientPlatform
         FrameBufferRef? primary = FrameBuffers is { Count: > 0 } buffers ? buffers[0] : null;
         if (primary?.ColorTextureIds == null || primary.ColorTextureIds.Length < 4 || primary.DepthTextureId == 0) return 0;
 
-        // The noise advances with the temporal clock only while TAA accumulates (C.7).
+        // Vendor upscalers receive AO in scene color, not as a denoising input.
+        // Use spatially stable AO there; the game's own TAA can accumulate
+        // XeGTAO's rotating noise instead.
         bool temporal = OptimumConfig.EffectiveTaa && TaaTargetsReady;
-        GtaoSettings settings = AmbientOcclusionSettings(temporal);
+        GtaoSettings settings = AmbientOcclusionSettings(temporal, OptimumConfig.UpscalerReplacesTaa);
         if (!ambientOcclusionToneRefusalLogged && settings.EffectiveTone(0, out string? refusal) != settings.Tone)
         {
             ambientOcclusionToneRefusalLogged = true;
@@ -419,17 +431,21 @@ public partial class VulkanClientPlatform
         };
     }
 
-    /// <summary>The preset with the measurement overrides from the environment, rebuilt only when the preset or TAA changes.</summary>
-    private GtaoSettings AmbientOcclusionSettings(bool temporal)
+    /// <summary>The preset with measurement overrides, rebuilt when the temporal path changes.</summary>
+    private GtaoSettings AmbientOcclusionSettings(bool temporal, bool upscaler)
     {
         string preset = OptimumConfig.AmbientOcclusionPreset ?? "";
-        if (ambientOcclusionSettingsCache is { } cached && cached.Preset == preset && cached.Temporal == temporal)
+        if (ambientOcclusionSettingsCache is { } cached && cached.Preset == preset &&
+            cached.Temporal == temporal && cached.Upscaler == upscaler)
         {
             return cached.Settings;
         }
-        GtaoSettings settings = GtaoSettings.ForPreset(GtaoSettings.ParsePreset(preset), temporal)
+        GtaoPreset parsed = GtaoSettings.ParsePreset(preset);
+        GtaoSettings settings = (upscaler
+                ? GtaoSettings.ForUpscaler(parsed)
+                : GtaoSettings.ForPreset(parsed, temporal))
             .WithEnvironment(Environment.GetEnvironmentVariable);
-        ambientOcclusionSettingsCache = (preset, temporal, settings);
+        ambientOcclusionSettingsCache = (preset, temporal, upscaler, settings);
         return settings;
     }
 

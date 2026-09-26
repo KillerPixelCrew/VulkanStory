@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using System.Threading;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Config;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -112,6 +113,9 @@ internal static class VulkanStats
     private static long _texturesCreated;
     private static long _texturesDeleted;
     private static long _frames;
+    private static long _realPresents;
+    private static long _generatedPresents;
+    private static long _sdkActualPresents;
     private static long _droppedMeshWrites;
     private static long _uniformOverflows;
 
@@ -144,6 +148,22 @@ internal static class VulkanStats
     public static void NoteTextureCreated() => Interlocked.Increment(ref _texturesCreated);
     public static void NoteTextureDeleted() => Interlocked.Increment(ref _texturesDeleted);
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
+    public static void NotePresent(bool generated)
+    {
+        if (generated) Interlocked.Increment(ref _generatedPresents);
+        else
+        {
+            Interlocked.Increment(ref _realPresents);
+            OptimumConfig.NoteRealPresentedFrame();
+        }
+    }
+
+    /// <summary>Display presents reported by a vendor frame-generation runtime.</summary>
+    public static void NoteSdkActualPresents(uint count)
+    {
+        Interlocked.Add(ref _sdkActualPresents, count);
+        OptimumConfig.NoteSdkPresentedFrames(count);
+    }
 
     /// <summary>Textures deleted since the last <see cref="SampleIfDue" />.</summary>
     public static long TexturesDeleted => Interlocked.Read(ref _texturesDeleted);
@@ -510,6 +530,9 @@ internal static class VulkanStats
         if (Interlocked.CompareExchange(ref _lastSample, now, last) != last) return null;
 
         long frames = Interlocked.Exchange(ref _frames, 0);
+        long realPresents = Interlocked.Exchange(ref _realPresents, 0);
+        long generatedPresents = Interlocked.Exchange(ref _generatedPresents, 0);
+        long sdkActualPresents = Interlocked.Exchange(ref _sdkActualPresents, 0);
         long allocations = Interlocked.Exchange(ref _allocations, 0);
         long uploads = Interlocked.Exchange(ref _uploads, 0);
         long uploadTicks = Interlocked.Exchange(ref _uploadWaitTicks, 0);
@@ -569,6 +592,10 @@ internal static class VulkanStats
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
                FormatCountersLine(counters) + "\n" +
+               string.Format(CultureInfo.InvariantCulture,
+                   "stats.presentation rendered_submitted={0} generated_submitted={1} present_submit_fps={2:F1} render_submit_fps={3:F1} sdk_actual_presented={4} sdk_display_fps={5:F1}",
+                   realPresents, generatedPresents, (realPresents + generatedPresents) / elapsed,
+                   realPresents / elapsed, sdkActualPresents, sdkActualPresents / elapsed) + "\n" +
                LatencyLine() + "\n" +
                VulkanAllocator.FormatMemoryLine(memorySnapshot) + "\n" +
                FormatTransientsLine(new TransientSample(

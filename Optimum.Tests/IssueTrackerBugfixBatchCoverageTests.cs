@@ -99,12 +99,13 @@ public class IssueTrackerBugfixBatchCoverageTests
     }
 
     [Fact]
-    public void OptimumSettingsTabMovesBackButtonAfterInjectedTab()
+    public void OptimumSettingsTabsMoveBackButtonAfterVulkanTab()
     {
         string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
 
         Assert.Contains("oButtonBounds.WithFixedWidth(w);", source);
-        Assert.Contains("backButtonBounds.FixedRightOf(oButtonBounds, 15.0);", source);
+        Assert.Contains("vButtonBounds.WithFixedWidth(vulkanWidth).FixedRightOf(oButtonBounds, 10.0);", source);
+        Assert.Contains("backButtonBounds.FixedRightOf(vButtonBounds, 15.0);", source);
         // oButtonBounds.ParentBounds (elementBounds on the main menu,
         // elementBounds3 in-game) is what the tab buttons are actually
         // parented to and must widen to fit the shifted Back button.

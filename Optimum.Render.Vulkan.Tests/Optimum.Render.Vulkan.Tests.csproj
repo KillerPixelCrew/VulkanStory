@@ -31,6 +31,26 @@
       <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="OpenTK.Mathematics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Mathematics.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Desktop">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Desktop.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
+
+  <Target Name="CopyFsr3ProbeRuntimes" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/OptimumXessFg.dll"
+          DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/OptimumXessFg.dll')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/OptimumFsr3.dll"
+          DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/OptimumFsr3.dll')" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/amd_fidelityfx_vk.dll"
+          DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildProjectDirectory)/../bin/$(Configuration)/net10.0/amd_fidelityfx_vk.dll')" />
+  </Target>
 
 </Project>

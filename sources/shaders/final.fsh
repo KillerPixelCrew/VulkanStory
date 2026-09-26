@@ -128,7 +128,8 @@ void main(void)
 	// SSAO target, or the platform's own visibility texture), so white is fully lit and dark is
 	// fully occluded - the picture of what AO contributes, with nothing else in it.
 	if (optimumAoDebug != 0) {
-		float aoDebugTerm = texture(ssaoScene, texCoord).r;
+		float aoDebugTerm = optimumAoDebug == 2
+			? texture(primaryScene, texCoord).r : texture(ssaoScene, texCoord).r;
 		outColor = vec4(vec3(aoDebugTerm), 1.0);
 		return;
 	}

@@ -1,8 +1,26 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index 8667d95..de64b82 100644
+index 8667d95..0b8b4d4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,791 @@ public abstract class ClientPlatformAbstract
+@@ -297,10 +297,17 @@ public abstract class ClientPlatformAbstract
+ 
+ 	public abstract void UnloadFrameBuffer(EnumFrameBuffer framebuffer);
+ 
+ 	public abstract void RebuildFrameBuffers();
+ 
++	/// <summary>Availability of a named temporal upscaler on this live renderer.</summary>
++	public virtual string OptimumUpscalerUnavailableFor(string provider) =>
++		"requires the native Vulkan renderer";
++
++	/// <summary>Apply an upscaler choice after the settings tab changes it.</summary>
++	public virtual void ApplyOptimumUpscalerSettings() => RebuildFrameBuffers();
++
+ 	public abstract FrameBufferRef CreateFramebuffer(FramebufferAttrs framebuffer);
+ 
+ 	public abstract void DisposeFrameBuffer(FrameBufferRef frameBuffer, bool disposeTextures = true);
+ 
+ 	public abstract void ClearFrameBuffer(FrameBufferRef frameBuffer, bool clearDepth = true);
+@@ -327,14 +334,791 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  

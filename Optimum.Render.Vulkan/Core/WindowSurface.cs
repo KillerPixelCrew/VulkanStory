@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
@@ -16,6 +17,11 @@ namespace Optimum.Render.Vulkan.Core;
 /// </summary>
 internal static unsafe class WindowSurface
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint GetModuleHandleW(string? moduleName);
+    public static nint Win32Handle(IntPtr glfwWindow) =>
+        OperatingSystem.IsWindows() && glfwWindow != IntPtr.Zero
+            ? GLFW.GetWin32Window((Window*)glfwWindow) : 0;
     /// <summary>Whether a Vulkan loader is reachable at all.</summary>
     public static bool VulkanSupported()
     {
@@ -59,6 +65,11 @@ internal static unsafe class WindowSurface
     public static void Destroy(VulkanContext context, SurfaceKHR surface)
     {
         if (surface.Handle == 0) return;
+        if (context.Streamline != null)
+        {
+            context.Streamline.DestroySurface(context.Instance, surface);
+            return;
+        }
         if (!context.Api.TryGetInstanceExtension(context.Instance, out KhrSurface surfaceApi)) return;
         surfaceApi.DestroySurface(context.Instance, surface, null);
         surfaceApi.Dispose();
@@ -78,6 +89,22 @@ internal static unsafe class WindowSurface
 
         try
         {
+            if (context.Streamline != null && OperatingSystem.IsWindows())
+            {
+                var info = new Win32SurfaceCreateInfoKHR
+                {
+                    SType = StructureType.Win32SurfaceCreateInfoKhr,
+                    Hinstance = GetModuleHandleW(null),
+                    Hwnd = GLFW.GetWin32Window((Window*)windowHandle),
+                };
+                Result surfaceResult = context.Streamline.CreateSurface(context.Instance, &info, out surface);
+                if (surfaceResult != Result.Success)
+                {
+                    failureReason = "Streamline vkCreateWin32SurfaceKHR failed: " + surfaceResult;
+                    return false;
+                }
+                return true;
+            }
             var instanceHandle = new VkHandle(context.Instance.Handle);
             int result = GLFW.CreateWindowSurface(
                 instanceHandle, (Window*)windowHandle, null, out VkHandle surfaceHandle);

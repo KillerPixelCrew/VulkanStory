@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..28930bd 100644
+index 4d08f849..e0df7b93 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -48,6 +48,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -84,7 +84,7 @@ index 4d08f84..28930bd 100644
  	}
  
  	internal bool OpenSettingsMenu()
-@@ -1742,6 +1764,298 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1742,6 +1764,384 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -176,6 +176,35 @@ index 4d08f84..28930bd 100644
 +			.AddInset(panelBounds)
 +			.BeginClip(clippingBounds);
 +		AddOptimumDropdownRow("optimum-renderer", "optimum-renderer-tooltip", new string[] { "auto", "vulkan", "opengl" }, new string[] { Lang.Get("optimum-renderer-auto"), Lang.Get("optimum-renderer-vulkan"), Lang.Get("optimum-renderer-opengl") }, 0, onOptimumRendererChanged, "optRenderer");
++        string[] providers = Vintagestory.API.Config.OptimumConfig.UpscalerNames;
++        string[] providerLabels = new string[providers.Length];
++        for (int i = 0; i < providers.Length; i++) {
++            string provider = providers[i];
++            string unavailable = ScreenManager.Platform.OptimumUpscalerUnavailableFor(provider);
++            providerLabels[i] = Lang.Get("optimum-upscaler-" + provider) + (unavailable == null ? "" : " (" + unavailable + ")");
++        }
++        AddOptimumDropdownRow("optimum-upscaler", "optimum-upscaler-tooltip", providers,
++            providerLabels, 0, onOptimumUpscalerChanged, "optUpscaler");
++        string[] qualities = Vintagestory.API.Config.OptimumConfig.QualityNamesFor(Vintagestory.API.Config.OptimumConfig.Upscaler);
++        string[] qualityLabels = new string[qualities.Length];
++        for (int i = 0; i < qualities.Length; i++) qualityLabels[i] = Lang.Get("optimum-upscaler-preset-" + qualities[i]);
++        AddOptimumDropdownRow("optimum-upscaler-quality", "optimum-upscaler-quality-tooltip", qualities,
++            qualityLabels,
++            0, onOptimumUpscalerQualityChanged, "optUpscalerQuality");
++        string[] frameGenerators = Vintagestory.API.Config.OptimumConfig.FrameGenerationUiNames;
++        string[] frameGeneratorLabels = new string[frameGenerators.Length];
++        for (int i = 0; i < frameGenerators.Length; i++)
++            frameGeneratorLabels[i] = Lang.Get("optimum-frame-generation-" + frameGenerators[i]);
++        AddOptimumDropdownRow("optimum-frame-generation", "optimum-frame-generation-tooltip",
++            frameGenerators, frameGeneratorLabels, 0, onOptimumFrameGenerationChanged, "optFrameGeneration");
++        AddOptimumSwitchRow("optimum-fps-counter", "optimum-fps-counter-tooltip",
++            onOptimumFpsCounterChanged, "optFpsCounter");
++        string[] latencyModes = Vintagestory.API.Config.OptimumConfig.LowLatencyModeNames;
++        string[] latencyLabels = new string[latencyModes.Length];
++        for (int i = 0; i < latencyModes.Length; i++)
++            latencyLabels[i] = Lang.Get("optimum-low-latency-" + latencyModes[i]);
++        AddOptimumDropdownRow("optimum-low-latency", "optimum-low-latency-tooltip",
++            latencyModes, latencyLabels, 0, onOptimumLowLatencyChanged, "optLowLatency");
 +		AddOptimumSwitchRow("optimum-taa", "optimum-taa-tooltip", onOptimumTaaChanged, "optTaa");
 +		AddOptimumSliderRow("optimum-taasharpness", onOptimumTaaSharpnessChanged, "optTaaSharpness");
 +		AddOptimumSliderRow("optimum-taamipbias", onOptimumTaaMipBiasChanged, "optTaaMipBias");
@@ -191,6 +220,15 @@ index 4d08f84..28930bd 100644
 +		composer.GetToggleButton("vulkan")?.SetValue(true);
 +		string renderer = Vintagestory.API.Config.OptimumConfig.Renderer;
 +		composer.GetDropDown("optRenderer").SetSelectedIndex(renderer == "vulkan" ? 1 : renderer == "opengl" ? 2 : 0);
++		composer.GetDropDown("optUpscaler").SetSelectedIndex(Math.Max(0, Array.IndexOf(providers, Vintagestory.API.Config.OptimumConfig.Upscaler)));
++		int upscalerQualityIndex = Array.IndexOf(qualities,
++			Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
++		composer.GetDropDown("optUpscalerQuality").SetSelectedIndex(Math.Max(0, upscalerQualityIndex));
++        composer.GetDropDown("optFrameGeneration").SetSelectedIndex(Math.Max(0,
++            Array.IndexOf(frameGenerators, Vintagestory.API.Config.OptimumConfig.FrameGeneration)));
++        composer.GetSwitch("optFpsCounter").SetValue(Vintagestory.API.Config.OptimumConfig.ShowFpsCounter);
++        composer.GetDropDown("optLowLatency").SetSelectedIndex(Math.Max(0,
++            Array.IndexOf(latencyModes, Vintagestory.API.Config.OptimumConfig.LowLatencyMode)));
 +		composer.GetSwitch("optTaa").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
 +		composer.GetSlider("optTaaSharpness").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaSharpness * 100f), 0, 100, 5, "%");
 +		composer.GetSlider("optTaaMipBias").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaMipBias * 100f), -100, 0, 5, "/100");
@@ -296,6 +334,54 @@ index 4d08f84..28930bd 100644
 +		ScreenManager.Platform.RebuildFrameBuffers();
 +		handler.ReloadShaders();
 +	}
++	private void onOptimumUpscalerChanged(string code, bool selected)
++	{
++		if (code != "off" && ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) != null)
++		{
++			composer?.GetDropDown("optUpscaler")?.SetSelectedIndex(Math.Max(0, Array.IndexOf(Vintagestory.API.Config.OptimumConfig.UpscalerNames, Vintagestory.API.Config.OptimumConfig.Upscaler)));
++			return;
++		}
++		if (Vintagestory.API.Config.OptimumConfig.Upscaler == code) return;
++		Vintagestory.API.Config.OptimumConfig.Upscaler = code;
++        if (Array.IndexOf(Vintagestory.API.Config.OptimumConfig.QualityNamesFor(code), Vintagestory.API.Config.OptimumConfig.UpscalerQuality) < 0)
++            Vintagestory.API.Config.OptimumConfig.UpscalerQuality = "quality";
++		Vintagestory.API.Config.OptimumConfig.Save();
++		ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		handler.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++        OnVulkanOptions(true);
++	}
++	private void onOptimumUpscalerQualityChanged(string code, bool selected)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerQuality == code) return;
++		Vintagestory.API.Config.OptimumConfig.UpscalerQuality = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (Vintagestory.API.Config.OptimumConfig.Upscaler != "off")
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++			OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		}
++	}
++    private void onOptimumFrameGenerationChanged(string code, bool selected)
++    {
++        if (Vintagestory.API.Config.OptimumConfig.FrameGeneration == code) return;
++        Vintagestory.API.Config.OptimumConfig.FrameGeneration = code;
++        Vintagestory.API.Config.OptimumConfig.Save();
++        ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++        handler.ReloadShaders();
++        OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++    }
++    private void onOptimumFpsCounterChanged(bool on)
++    {
++        Vintagestory.API.Config.OptimumConfig.ShowFpsCounter = on;
++        Vintagestory.API.Config.OptimumConfig.Save();
++    }
++    private void onOptimumLowLatencyChanged(string code, bool selected)
++    {
++        if (Vintagestory.API.Config.OptimumConfig.LowLatencyMode == code) return;
++        Vintagestory.API.Config.OptimumConfig.LowLatencyMode = code;
++        Vintagestory.API.Config.OptimumConfig.Save();
++    }
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumTaaChanged(bool on)
 +	{
@@ -383,7 +469,7 @@ index 4d08f84..28930bd 100644
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
-@@ -1820,4 +2134,81 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1820,4 +2220,81 @@ public class GuiCompositeSettings : GuiComposite
  		OnDeveloperOptions(on: true);
  		return true;
  	}

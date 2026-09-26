@@ -292,6 +292,7 @@ cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
 # absence costs nothing on the OpenGL path - but a missing dependency would make
 # the backend unselectable with a load error rather than a clear reason.
 cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$STAGE_DIR/"
+[[ ! -f "$MOD_OUT/libOptimumNgx.so" ]] || cp -f "$MOD_OUT/libOptimumNgx.so" "$STAGE_DIR/"
 for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
     [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$STAGE_DIR/"
 done

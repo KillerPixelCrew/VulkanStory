@@ -101,4 +101,101 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <Target Name="BuildNgxShim" BeforeTargets="AssignTargetPaths">
+    <PropertyGroup>
+      <NgxShimDir>$(MSBuildThisFileDirectory)../native/optimum-ngx</NgxShimDir>
+      <NgxShimOut>$(MSBuildThisFileDirectory)../bin/native</NgxShimOut>
+    </PropertyGroup>
+    <Exec Condition="'$(OS)' != 'Windows_NT'"
+          Command="bash &quot;$(NgxShimDir)/build.sh&quot; &quot;$(NgxShimOut)&quot;"
+          ContinueOnError="true" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(NgxShimDir)/build.ps1&quot; -OutputDirectory &quot;$(NgxShimOut)&quot;"
+          ContinueOnError="true" />
+    <ItemGroup>
+      <None Include="$(NgxShimOut)/libOptimumNgx.so" Condition="Exists('$(NgxShimOut)/libOptimumNgx.so')">
+        <Link>libOptimumNgx.so</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Include="$(NgxShimOut)/OptimumNgx.dll" Condition="Exists('$(NgxShimOut)/OptimumNgx.dll')">
+        <Link>OptimumNgx.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
+
+  <PropertyGroup>
+    <OptimumSdkReferenceRoot Condition="'$(OptimumSdkReferenceRoot)' == '' and Exists('D:/Coding/VulkanStory/_ref')">D:/Coding/VulkanStory/_ref</OptimumSdkReferenceRoot>
+    <DlssSdkDir Condition="'$(DlssSdkDir)' == '' and Exists('$(MSBuildProjectDirectory)/../_ref/dlss')">$(MSBuildProjectDirectory)/../_ref/dlss</DlssSdkDir>
+    <DlssSdkDir Condition="'$(DlssSdkDir)' == '' and Exists('$(OptimumSdkReferenceRoot)/dlss')">$(OptimumSdkReferenceRoot)/dlss</DlssSdkDir>
+    <DlssSdkDir Condition="'$(DlssSdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/dlss</DlssSdkDir>
+    <StreamlineSdkDir Condition="'$(StreamlineSdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/streamline-sdk-v2.14.1</StreamlineSdkDir>
+    <DlssFgRuntime Condition="'$(DlssFgRuntime)' == '' and Exists('$(StreamlineSdkDir)/bin/x64/nvngx_dlssg.dll')">$(StreamlineSdkDir)/bin/x64/nvngx_dlssg.dll</DlssFgRuntime>
+    <DlssFgRuntime Condition="'$(DlssFgRuntime)' == ''">$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlssg.dll</DlssFgRuntime>
+    <XessSdkDir Condition="'$(XessSdkDir)' == '' and Exists('$(MSBuildProjectDirectory)/../_ref/xess')">$(MSBuildProjectDirectory)/../_ref/xess</XessSdkDir>
+    <XessSdkDir Condition="'$(XessSdkDir)' == '' and Exists('$(OptimumSdkReferenceRoot)/xess')">$(OptimumSdkReferenceRoot)/xess</XessSdkDir>
+    <XessSdkDir Condition="'$(XessSdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/xess</XessSdkDir>
+    <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == '' and Exists('$(MSBuildProjectDirectory)/../_ref/fsr-vulkan')">$(MSBuildProjectDirectory)/../_ref/fsr-vulkan</Fsr3SdkDir>
+    <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == '' and Exists('$(OptimumSdkReferenceRoot)/fsr-vulkan')">$(OptimumSdkReferenceRoot)/fsr-vulkan</Fsr3SdkDir>
+    <Fsr3SdkDir Condition="'$(Fsr3SdkDir)' == ''">$(MSBuildProjectDirectory)/../_ref/fsr-vulkan</Fsr3SdkDir>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlss.dll')">
+    <None Include="$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlss.dll" Link="nvngx_dlss.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(DlssSdkDir)/LICENSE.txt" Link="Dlss-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(DlssFgRuntime)')">
+    <None Include="$(DlssFgRuntime)" Link="nvngx_dlssg.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(DlssSdkDir)/LICENSE.txt" Link="Dlss-LICENSE.txt" CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('$(DlssSdkDir)/LICENSE.txt') and !Exists('$(DlssSdkDir)/lib/Windows_x86_64/rel/nvngx_dlss.dll')" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/nvngx_dlss.license.txt" Link="Dlss-LICENSE.txt" CopyToOutputDirectory="PreserveNewest"
+          Condition="!Exists('$(DlssSdkDir)/LICENSE.txt') and Exists('$(StreamlineSdkDir)/bin/x64/nvngx_dlss.license.txt')" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(StreamlineSdkDir)/bin/x64/sl.interposer.dll')">
+    <None Include="$(StreamlineSdkDir)/bin/x64/sl.interposer.dll" Link="sl.interposer.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/sl.common.dll" Link="sl.common.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/sl.dlss_g.dll" Link="sl.dlss_g.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/sl.reflex.dll" Link="sl.reflex.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/sl.pcl.dll" Link="sl.pcl.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/license.txt" Link="Streamline-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(StreamlineSdkDir)/bin/x64/reflex.license.txt" Link="Reflex-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildStreamlineBridge" BeforeTargets="AssignTargetPaths"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(StreamlineSdkDir)/include/sl.h') and '$(VULKAN_SDK)' != ''">
+    <PropertyGroup>
+      <StreamlineBridgeOut>$(MSBuildThisFileDirectory)../bin/native/OptimumStreamline.dll</StreamlineBridgeOut>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-streamline/build.ps1&quot; -SdkRoot &quot;$(StreamlineSdkDir)&quot; -Output &quot;$(StreamlineBridgeOut)&quot;" />
+    <ItemGroup>
+      <None Include="$(StreamlineBridgeOut)" Condition="Exists('$(StreamlineBridgeOut)')">
+        <Link>OptimumStreamline.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(XessSdkDir)/bin/libxess.dll')">
+    <None Include="$(XessSdkDir)/bin/libxess.dll" Link="libxess.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(XessSdkDir)/LICENSE.txt" Link="Xess-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(XessSdkDir)/third-party-programs.txt" Link="Xess-third-party-programs.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(XessSdkDir)/bin/libxess_fg.dll')">
+    <None Include="$(XessSdkDir)/bin/libxess_fg.dll" Link="libxess_fg.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and Exists('$(XessSdkDir)/bin/libxell.dll')">
+    <None Include="$(XessSdkDir)/bin/libxell.dll" Link="libxell.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(OS)' == 'Windows_NT' and !Exists('$(XessSdkDir)/bin/libxess.dll') and (Exists('$(XessSdkDir)/bin/libxess_fg.dll') or Exists('$(XessSdkDir)/bin/libxell.dll'))">
+    <None Include="$(XessSdkDir)/LICENSE.txt" Link="Xess-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(XessSdkDir)/LICENSE.txt')" />
+    <None Include="$(XessSdkDir)/third-party-programs.txt" Link="Xess-third-party-programs.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(XessSdkDir)/third-party-programs.txt')" />
+  </ItemGroup>
+  <Target Name="BuildXessFgBridge" BeforeTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and '$(VULKAN_SDK)' != '' and Exists('$(XessSdkDir)/inc/xess_fg/xefg_swapchain_d3d12.h') and Exists('$(XessSdkDir)/bin/libxess_fg.dll')">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-xess-fg/build.ps1&quot; -SdkRoot &quot;$(XessSdkDir)&quot; -Output &quot;$(TargetDir)OptimumXessFg.dll&quot;" />
+  </Target>
+  <Target Name="BuildFsr3Bridge" BeforeTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(Fsr3SdkDir)/PrebuiltSignedDLL/amd_fidelityfx_vk.dll') and '$(VULKAN_SDK)' != ''">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)/../native/optimum-fsr3/build.ps1&quot; -SdkRoot &quot;$(Fsr3SdkDir)&quot; -Output &quot;$(TargetDir)OptimumFsr3.dll&quot;" />
+    <Copy SourceFiles="$(Fsr3SdkDir)/PrebuiltSignedDLL/amd_fidelityfx_vk.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(Fsr3SdkDir)/sdk/LICENSE.txt" DestinationFiles="$(TargetDir)Fsr3-LICENSE.txt"
+          SkipUnchangedFiles="true" Condition="Exists('$(Fsr3SdkDir)/sdk/LICENSE.txt')" />
+  </Target>
 </Project>

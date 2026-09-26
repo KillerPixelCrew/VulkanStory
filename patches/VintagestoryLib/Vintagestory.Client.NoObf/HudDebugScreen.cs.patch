@@ -1,0 +1,96 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
+index 03e225a0..80f90d2b 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
+@@ -23,6 +23,13 @@ public class HudDebugScreen : HudElement
+ 	private GuiComposer systemInfoComposer;
+ 
+ 	private GuiElementDynamicText textElement;
++	private GuiComposer optimumFpsComposer;
++	private GuiElementDynamicText optimumFpsText;
++	private long optimumFpsSampleTicks;
++	private long optimumLastRealPresents;
++	private long optimumLastSdkPresents;
++	private int optimumLoopFrames;
++	private string optimumLastProvider;
+ 
+ 	private float[] dtHistory;
+ 
+@@ -103,6 +110,12 @@ public class HudDebugScreen : HudElement
+ 		systemInfoComposer = capi.Gui.CreateCompo("sysInfoText", ElementBounds.Percentual(EnumDialogArea.LeftTop, 0.5, 0.7).WithFixedAlignmentOffset(5.0, 5.0)).AddDynamicText("Game Version: " + GameVersion.LongGameVersion + "\n" + ScreenManager.Platform.GetGraphicCardInfos() + "\n" + ScreenManager.Platform.GetFrameworkInfos(), font2, ElementBounds.Fill).OnlyDynamic()
+ 			.Compose();
+ 		textElement = debugTextComposer.GetDynamicText("debugScreenTextElem");
++		CairoFont optimumFont = CairoFont.WhiteSmallishText().WithStroke(ColorUtil.BlackArgbDouble, 1.5);
++		optimumFpsComposer = capi.Gui.CreateCompo("optimumFpsCounter",
++			ElementBounds.Fixed(8.0, 8.0, 300.0, 28.0))
++			.AddDynamicText("Real: -- FPS  |  FG output: -- FPS", optimumFont,
++				ElementBounds.Fill, "optimumFpsText").OnlyDynamic().Compose();
++		optimumFpsText = optimumFpsComposer.GetDynamicText("optimumFpsText");
+ 		ScreenManager.hotkeyManager.SetHotKeyHandler("fpsgraph", OnKeyGraph);
+ 		ScreenManager.hotkeyManager.SetHotKeyHandler("debugscreenandgraph", OnKeyDebugScreenAndGraph);
+ 	}
+@@ -120,13 +133,16 @@ public class HudDebugScreen : HudElement
+ 
+ 	public override void OnFinalizeFrame(float dt)
+ 	{
++		UpdateOptimumFpsCounter();
+ 		UpdateGraph(dt);
+ 		UpdateText(dt);
+ 		debugTextComposer.PostRender(dt);
++		if (OptimumConfig.ShowFpsCounter) optimumFpsComposer.PostRender(dt);
+ 	}
+ 
+ 	public override void OnRenderGUI(float deltaTime)
+ 	{
++		if (OptimumConfig.ShowFpsCounter) optimumFpsComposer.Render(deltaTime);
+ 		if (displayOnlyFpsDebugInfo || displayFullDebugInfo || displayOnlyFpsDebugInfoTemporary)
+ 		{
+ 			DrawGraph();
+@@ -138,6 +154,47 @@ public class HudDebugScreen : HudElement
+ 		}
+ 	}
+ 
++	private void UpdateOptimumFpsCounter()
++	{
++		if (!OptimumConfig.ShowFpsCounter)
++		{
++			optimumFpsSampleTicks = 0L;
++			optimumLoopFrames = 0;
++			if (!displayFullDebugInfo && !displayOnlyFpsDebugInfo &&
++				!displayOnlyFpsDebugInfoTemporary && IsOpened()) DoClose();
++			return;
++		}
++		if (!IsOpened()) TryOpen();
++		optimumLoopFrames++;
++		string provider = OptimumConfig.EffectiveFrameGeneration;
++		long now = Stopwatch.GetTimestamp();
++		long real = OptimumConfig.RealPresentedFrames;
++		long displayed = OptimumConfig.SdkPresentedFrames;
++		if (optimumFpsSampleTicks == 0L || optimumLastProvider != provider)
++		{
++			optimumFpsSampleTicks = now;
++			optimumLastRealPresents = real;
++			optimumLastSdkPresents = displayed;
++			optimumLoopFrames = 0;
++			optimumLastProvider = provider;
++			optimumFpsText.SetNewTextAsync(provider == "off"
++				? "Real: -- FPS  |  FG: Off"
++				: "Real: -- FPS  |  FG output: -- FPS");
++			return;
++		}
++		double seconds = (now - optimumFpsSampleTicks) / (double)Stopwatch.Frequency;
++		if (seconds < 1.0) return;
++		double realFps = (OptimumRender.IsVulkan ? real - optimumLastRealPresents : optimumLoopFrames) / seconds;
++		double displayFps = (displayed - optimumLastSdkPresents) / seconds;
++		optimumFpsText.SetNewTextAsync(provider == "off"
++			? $"Real: {realFps:0} FPS  |  FG: Off"
++			: $"Real: {realFps:0} FPS  |  FG output: {displayFps:0} FPS");
++		optimumFpsSampleTicks = now;
++		optimumLastRealPresents = real;
++		optimumLastSdkPresents = displayed;
++		optimumLoopFrames = 0;
++	}
++
+ 	private void UpdateText(float dt)
+ 	{
+ 		frameCount++;

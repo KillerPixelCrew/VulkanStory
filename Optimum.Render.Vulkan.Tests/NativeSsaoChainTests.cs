@@ -104,33 +104,29 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
     }
 
     /// <summary>
-    /// A render scale below 1. The SSAO pass's screenSize is the body's
-    /// <c>ssaaLevel * client * (ssaaLevel == 1 ? 0.5 : 1)</c>, which the dither's Bayer lattice is
-    /// laid out on, so it changes every occlusion value - except at exactly 0.5, where the
-    /// half-resolution fudge cancels and the value is the one render scale 1 produces. Both scales
-    /// are here: 0.5 because it is the shipped setting, and 0.75 because it is a scale where the
-    /// value really differs, which is what proves it reaches the pass at all.
+    /// The test targets stay at one allocated resolution while ssaaLevel changes.
+    /// The native route must use the actual primary target for screenSize at both
+    /// sub-1 values. The legacy body still derives it from the stale ssaaLevel,
+    /// so its result changes even though the render targets have not changed.
     /// </summary>
     [SkippableFact]
-    public void TheVanillaSsaoStepMatchesTheOpenGlBodyBelowRenderScaleOne()
+    public void TheVanillaSsaoStepUsesAllocatedResolutionBelowRenderScaleOne()
     {
         using Session session = Open("taa-with-ssao", taa: true);
 
         session.SsaaLevel = 0.5f;
         Frame statedHalf = session.Run(native: false);
         Frame nativeHalf = session.Run(native: true);
-        Assert.Equal(statedHalf.Raw, nativeHalf.Raw);
-        Assert.Equal(statedHalf.Blurred, nativeHalf.Blurred);
-        Assert.Equal(statedHalf.Scene, nativeHalf.Scene);
+        Assert.NotEqual(statedHalf.Raw, nativeHalf.Raw);
 
         session.SsaaLevel = 0.75f;
         Frame stated = session.Run(native: false);
         Frame nativeRoute = session.Run(native: true);
-        Assert.Equal(stated.Raw, nativeRoute.Raw);
-        Assert.Equal(stated.Blurred, nativeRoute.Blurred);
-        Assert.Equal(stated.Scene, nativeRoute.Scene);
+        Assert.NotEqual(stated.Raw, nativeRoute.Raw);
 
-        Assert.NotEqual(nativeHalf.Raw, nativeRoute.Raw);
+        Assert.Equal(nativeHalf.Raw, nativeRoute.Raw);
+        Assert.Equal(nativeHalf.Blurred, nativeRoute.Blurred);
+        Assert.Equal(nativeHalf.Scene, nativeRoute.Scene);
         Assert.NotEqual(statedHalf.Raw, stated.Raw);
 
         GpuTest.AssertClean(session.Seam);
@@ -192,6 +188,83 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
         Assert.NotEqual(session.SceneSeed, nativeRoute.Scene);
 
         GpuTest.AssertClean(session.Seam);
+    }
+
+    [SkippableTheory]
+    [InlineData(false, "dlss")]
+    [InlineData(true, "dlss")]
+    [InlineData(false, "xess")]
+    [InlineData(true, "xess")]
+    [InlineData(false, "fsr3")]
+    [InlineData(true, "fsr3")]
+    public void TheAoDebugViewWritesTheComposedVisibilityBeforeAnUpscaler(bool gtao, string upscaler)
+    {
+        string upscalerBefore = OptimumConfig.Upscaler;
+        bool debugBefore = OptimumConfig.AmbientOcclusionDebugView;
+        EnumRenderBackend backendBefore = OptimumRender.ActiveBackend;
+        try
+        {
+            using Session session = Open(gtao ? "taa-with-gtao" : "taa-with-ssao",
+                taa: false, gtao: gtao);
+            if (gtao) session.AmbientOcclusionTexture = session.GtaoVisibility;
+            session.Platform.SetOptimumMotionAttachmentIndex(4);
+            OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
+            OptimumConfig.Upscaler = upscaler;
+            OptimumConfig.AmbientOcclusionDebugView = true;
+
+            Assert.True(OptimumConfig.UpscalerReplacesTaa);
+            Assert.False(session.Platform.TaaTargetsReady);
+            Frame stated = session.Run(native: false);
+            Frame nativeRoute = session.Run(native: true);
+
+            Assert.True(nativeRoute.SsaoInScene);
+            Assert.Equal(stated.Scene, nativeRoute.Scene);
+            Assert.NotEqual(session.SceneSeed, nativeRoute.Scene);
+            for (int pixel = 0; pixel < nativeRoute.Scene.Length; pixel += 4)
+            {
+                Assert.Equal(nativeRoute.Scene[pixel], nativeRoute.Scene[pixel + 1]);
+                Assert.Equal(nativeRoute.Scene[pixel], nativeRoute.Scene[pixel + 2]);
+            }
+            GpuTest.AssertClean(session.Seam);
+        }
+        finally
+        {
+            OptimumConfig.Upscaler = upscalerBefore;
+            OptimumConfig.AmbientOcclusionDebugView = debugBefore;
+            OptimumRender.ActiveBackend = backendBefore;
+        }
+    }
+
+    [SkippableFact]
+    public void TheAoDebugViewShowsTheComposedGtaoWithoutTemporalReconstruction()
+    {
+        bool debugBefore = OptimumConfig.AmbientOcclusionDebugView;
+        string upscalerBefore = OptimumConfig.Upscaler;
+        try
+        {
+            using Session session = Open("taa-with-gtao", taa: false, gtao: true);
+            session.AmbientOcclusionTexture = session.GtaoVisibility;
+            OptimumConfig.AmbientOcclusionDebugView = true;
+            OptimumConfig.Upscaler = "off";
+
+            Frame stated = session.Run(native: false);
+            Frame nativeRoute = session.Run(native: true);
+
+            Assert.True(nativeRoute.SsaoInScene);
+            Assert.Equal(stated.Scene, nativeRoute.Scene);
+            Assert.NotEqual(session.SceneSeed, nativeRoute.Scene);
+            for (int pixel = 0; pixel < nativeRoute.Scene.Length; pixel += 4)
+            {
+                Assert.Equal(nativeRoute.Scene[pixel], nativeRoute.Scene[pixel + 1]);
+                Assert.Equal(nativeRoute.Scene[pixel], nativeRoute.Scene[pixel + 2]);
+            }
+            GpuTest.AssertClean(session.Seam);
+        }
+        finally
+        {
+            OptimumConfig.AmbientOcclusionDebugView = debugBefore;
+            OptimumConfig.Upscaler = upscalerBefore;
+        }
     }
 
     /// <summary>
@@ -656,7 +729,8 @@ public class NativeSsaoChainTests(ITestOutputHelper output)
             Link(seam, blurProgram, "bilateralblur", variant, new[] { "frameSize", "isVertical" },
                 new[] { "inputTexture", "depthTexture" }, Array.Empty<string>());
             var composite = new ShaderProgram { PassName = "scene-ssao" };
-            Link(seam, composite, "scene-ssao", variant, new[] { "invRenderHeight" },
+            Link(seam, composite, "scene-ssao", variant,
+                new[] { "invRenderHeight", "optimumAoDebugInScene" },
                 variant.OptimumAo == 1
                     ? new[] { "ssaoScene", "gPositionScene", "revealageScene" }
                     : new[] { "ssaoScene" },

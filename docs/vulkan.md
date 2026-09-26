@@ -137,6 +137,11 @@ view depth. Color/glow use linear filtering, depth nearest. Reject nonfinite his
 reset on invalid/missing resources or discontinuities, and preserve world/hand history
 ownership. Resolve uses nearest-depth disocclusion over 3x3 with motion from the same
 tap, reactive handling and luminance anti-flicker weighting.
+At sparse distant depth edges (at most two foreground taps in the 3x3), retain
+colour-clipped scene history when a subpixel leaf leaves the previous window,
+while taking current glow to avoid bloom ghosts. Solid silhouettes, flat regions
+and near geometry still take a hard depth reset. The headless parity
+gate measures both raw depth mismatches and the remaining hard resets.
 
 AO composition precedes resolve. Bloom and god rays consume the unsharpened scene.
 Sharpening writes slot 21 after final composition and late scene overlays; zero
@@ -153,8 +158,15 @@ edge-aware denoising; `GtaoSettings.cs` owns settings. Compute sources live in
 The visibility-bitmask method handles thin occluders; projection reconstruction and
 sampling must follow the same coordinate/depth conventions as the scene.
 
-Composite visibility into scene color before TAA, preserving glow and the intended
-water/fog/OIT attenuation. Keep vanilla SSAO and AO-disabled behavior available.
+Composite visibility into scene color before TAA or a vendor upscaler, preserving glow
+and the intended water/fog/OIT attenuation. The AO debug view puts that composed
+visibility on the scene path and displays it after temporal reconstruction when active.
+When AO is applied in Final instead, it displays the AO texture there. Keep vanilla
+SSAO and AO-disabled behavior available.
+Vendor upscalers consume a spatially denoised AO signal: the default Medium preset
+uses the 18-sample High kernel and two edge-aware passes with a fixed sampling phase.
+The explicit Low preset remains available for slower GPUs. The game's own TAA path
+retains rotating AO samples and its preset-specific denoise count.
 Cross-quad and wind geometry is thin; snow layers remain solid. Blocks can declare
 `optimumAoThin` for other thin chunk geometry. Classification travels with the chunk
 metadata; do not infer a whole block's class from unrelated geometry.

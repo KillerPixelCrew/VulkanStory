@@ -16,10 +16,9 @@ namespace Optimum.Render.Vulkan.Platform;
 ///
 /// Two images, both published by slot the way <c>MotionAttachmentIndex</c> is:
 /// <list type="bullet">
-/// <item><description><b>SceneNoHud</b> (slot 23, render size, RGBA8): a copy of Primary colour 0
-/// taken at the end of <see cref="RenderFinalComposition" /> - the one moment the composited image
-/// holds the scene alone. RenderAfterFinalComposition draws selection boxes and work-item guides onto
-/// that image next, and the GUI follows after the blit.</description></item>
+/// <item><description><b>SceneNoHud</b> (slot 23, display size, RGBA8): a copy of the final
+/// world image taken before the blit opens the UI scope. It includes late world overlays
+/// and excludes the GUI.</description></item>
 /// <item><description><b>UI image</b> (slot 24, window size, RGBA8 + depth): everything after the
 /// blit - the AfterBlit stage, the main-menu background and the whole Ortho stage - draws into it
 /// instead of onto the window, over transparent black, with real coverage in alpha (see
@@ -92,7 +91,9 @@ public partial class VulkanClientPlatform
 
         try
         {
-            FrameBufferRef snapshot = CreateOptimumOwnedTarget(renderWidth, renderHeight, withDepth: false);
+            // Default already contains the upscaled world at display resolution.
+            Size2i display = OptimumWindowClientSize();
+            FrameBufferRef snapshot = CreateOptimumOwnedTarget(display.Width, display.Height, withDepth: false);
             list[OptimumSceneNoHudIndex] = snapshot;
             sceneNoHudIndex = OptimumSceneNoHudIndex;
         }
@@ -121,19 +122,23 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// A persistent single-colour target (RGBA8, nearest, clamped: both images are read one texel for
-    /// one), with a depth attachment when asked. Not a transient: its contents outlive the pass that
-    /// wrote them.
+    /// A persistent single-colour target. The UI and snapshot use RGBA8; an upscaler output
+    /// requests storage-capable linear RGBA16F. Not a transient: its contents outlive the pass.
     /// </summary>
-    private FrameBufferRef CreateOptimumOwnedTarget(int width, int height, bool withDepth)
+    private FrameBufferRef CreateOptimumOwnedTarget(int width, int height, bool withDepth,
+        bool storage = false, bool frameGenerationStorage = false)
     {
         FrameBufferRef target = new FrameBufferRef();
         target.Width = width;
         target.Height = height;
         target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
-        target.ColorTextureIds[0] = device.CreateTexture2D(width, height,
-            EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        target.ColorTextureIds[0] = storage
+            ? device.CreateUpscaleTexture(width, height,
+                frameGenerationStorage ? Silk.NET.Vulkan.Format.R8G8B8A8Unorm :
+                    Silk.NET.Vulkan.Format.R16G16B16A16Sfloat, storage: true)
+            : device.CreateTexture2D(width, height,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9728, 33071);
         device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
         if (withDepth)
@@ -152,8 +157,7 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// Takes the HUD-less snapshot: Primary colour 0 copied texel for texel into slot 23, one native
-    /// pass. Called at the very end of <see cref="RenderFinalComposition" />, whichever route drew it.
+    /// Takes the HUD-less snapshot after world overlays and before the blit opens the UI scope.
     /// </summary>
     internal void CaptureSceneNoHud()
     {
@@ -161,12 +165,11 @@ public partial class VulkanClientPlatform
         List<FrameBufferRef> buffers = FrameBuffers;
         if (sceneNoHudIndex < 0 || buffers == null || buffers.Count <= sceneNoHudIndex) return;
         FrameBufferRef snapshot = buffers[sceneNoHudIndex];
-        FrameBufferRef primary = buffers[0];
-        if (snapshot == null || primary?.ColorTextureIds == null || primary.ColorTextureIds.Length == 0) return;
+        if (snapshot == null || device.DefaultColorTextureId <= 0) return;
         ShaderProgram copy = ShaderPrograms.UiCompose;
         if (copy == null || copy.LoadError || copy.ProgramId <= 0) return;
 
-        int scene = primary.ColorTextureIds[0];
+        int scene = device.DefaultColorTextureId;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
         NativePipeline? pipeline = NativePipelineFor(nativeSceneNoHudCopy, copy, snapshot.FboId);

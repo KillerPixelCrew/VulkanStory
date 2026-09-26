@@ -221,7 +221,7 @@ internal sealed unsafe class FrameSlot : IDisposable
 
     /// <summary>
     /// Submits the present command buffer (Submit B): waits on the Frame timeline
-    /// at <paramref name="renderValue" /> (COLOR_ATTACHMENT_OUTPUT) and on the
+    /// at <paramref name="renderValue" /> (TRANSFER and COLOR_ATTACHMENT_OUTPUT) and on the
     /// acquire semaphore at <paramref name="acquireStage" /> (TRANSFER or
     /// COLOR_ATTACHMENT_OUTPUT, never ALL_COMMANDS); signals the binary present
     /// semaphore and the Frame timeline. Returns the Frame value signalled.
@@ -235,20 +235,38 @@ internal sealed unsafe class FrameSlot : IDisposable
         return submitted;
     }
 
+    /// <summary>
+    /// Submits a Vulkan-to-DX12 handoff. The previous DX12 completion is waited
+    /// on before touching imported images; the new fence value is signalled once
+    /// all image copies and external ownership releases have completed.
+    /// </summary>
+    public ulong SubmitExternalPresent(ulong renderValue, Semaphore sharedFence,
+        ulong previousDx12Value, ulong readyForDx12Value)
+    {
+        if (sharedFence.Handle == 0 || readyForDx12Value == 0 ||
+            readyForDx12Value <= previousDx12Value)
+            throw new ArgumentOutOfRangeException(nameof(readyForDx12Value));
+        ulong submitted = FrameValue;
+        Submit(default, default, default, renderValue, sharedFence,
+            previousDx12Value, readyForDx12Value);
+        return submitted;
+    }
+
     /// <param name="waitSemaphore">A binary semaphore to wait on (the acquire semaphore), or none.</param>
     /// <param name="waitStage">The stage <paramref name="waitSemaphore" /> is waited on at.</param>
     /// <param name="signalSemaphore">A binary semaphore to signal (the present semaphore), or none.</param>
     /// <param name="frameWaitValue">A Frame timeline value to wait on at COLOR_ATTACHMENT_OUTPUT, or 0.</param>
     private void Submit(Semaphore waitSemaphore, PipelineStageFlags waitStage, Semaphore signalSemaphore,
-        ulong frameWaitValue)
+        ulong frameWaitValue, Semaphore externalSemaphore = default,
+        ulong externalWaitValue = 0, ulong externalSignalValue = 0)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         api.EndCommandBuffer(commandBuffer);
 
-        Semaphore* waits = stackalloc Semaphore[2];
-        ulong* waitValues = stackalloc ulong[2];
-        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[2];
+        Semaphore* waits = stackalloc Semaphore[3];
+        ulong* waitValues = stackalloc ulong[3];
+        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[3];
         uint waitCount = 0;
         if (waitSemaphore.Handle != 0)
         {
@@ -264,11 +282,18 @@ internal sealed unsafe class FrameSlot : IDisposable
             waitStages[waitCount] = PresentWaitStages.FrameWait;
             waitCount++;
         }
+        if (externalWaitValue != 0)
+        {
+            waits[waitCount] = externalSemaphore;
+            waitValues[waitCount] = externalWaitValue;
+            waitStages[waitCount] = PipelineStageFlags.TransferBit;
+            waitCount++;
+        }
 
         // Binary present semaphore first (its value is ignored), then the Frame
         // timeline, then the Transfer timeline when an upload batch rides along.
-        Semaphore* signals = stackalloc Semaphore[3];
-        ulong* signalValues = stackalloc ulong[3];
+        Semaphore* signals = stackalloc Semaphore[4];
+        ulong* signalValues = stackalloc ulong[4];
         CommandBuffer* commandBuffers = stackalloc CommandBuffer[2];
 
         // The queue is shared with the swapchain's present and between-frames
@@ -290,6 +315,12 @@ internal sealed unsafe class FrameSlot : IDisposable
             signals[signalCount] = _timeline.Frame;
             signalValues[signalCount] = FrameValue;
             signalCount++;
+            if (externalSignalValue != 0)
+            {
+                signals[signalCount] = externalSemaphore;
+                signalValues[signalCount] = externalSignalValue;
+                signalCount++;
+            }
 
             uint commandBufferCount = 0;
             bool uploads = _uploads.TakeOpenBatchLocked(out CommandBuffer uploadCommands, out ulong transferValue);
@@ -483,6 +514,12 @@ internal sealed class FrameRing : IDisposable
         ulong renderValue, Semaphore presentSemaphore) =>
         Current.SubmitPresent(acquireSemaphore, acquireStage, renderValue, presentSemaphore);
 
+    /// <summary>Submits copied images to the DX12 fence timeline.</summary>
+    public ulong SubmitExternalPresent(ulong renderValue, Semaphore sharedFence,
+        ulong previousDx12Value, ulong readyForDx12Value) =>
+        Current.SubmitExternalPresent(renderValue, sharedFence,
+            previousDx12Value, readyForDx12Value);
+
     /// <summary>
     /// Queues a resource for destruction once the GPU is done with it.
     ///
@@ -497,6 +534,18 @@ internal sealed class FrameRing : IDisposable
     public void DeferDeletion(IDisposable resource) => _retired.Retire(resource);
 
     public int PendingDeletionCount => _retired.PendingCount;
+
+    /// <summary>Teardown only: release vendor handles before their runtime is shut down.</summary>
+    public int DrainRetirements()
+    {
+        // Device idle covers every submitted frame. A command buffer still being recorded
+        // cannot reach the GPU, so its retired resources may be destroyed as well.
+        _timeline.WaitForSignalledFramesAtTeardown();
+        _timeline.WaitForSignalledTransfersAtTeardown();
+        int pending = _retired.PendingCount;
+        _retired.DisposeAll();
+        return pending;
+    }
 
     public void Dispose()
     {

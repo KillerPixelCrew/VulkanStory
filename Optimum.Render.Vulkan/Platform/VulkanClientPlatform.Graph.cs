@@ -350,9 +350,6 @@ public partial class VulkanClientPlatform
         {
             LegacyFinalComposition();
         }
-        // World/UI separation: the composited image holds the scene alone for exactly this long -
-        // RenderAfterFinalComposition draws the world-space overlays onto it next.
-        CaptureSceneNoHud();
     }
 
     /// <summary>
@@ -374,6 +371,9 @@ public partial class VulkanClientPlatform
             base.BlitPrimaryToDefault();
             SetPassContext("Frame", PassFlags.AllowSplit);
         }
+        // Snapshot the display-sized, fully upscaled world image after the blit,
+        // before the UI scope redirects Default to the separate UI target.
+        CaptureSceneNoHud();
         // World/UI separation: the boundary. Everything ScreenManager draws after this call - the
         // AfterBlit stage, the menu background, the Ortho stage - goes into the UI image, on every
         // route out of the blit (debug view, FSR, plain, no offscreen buffer).

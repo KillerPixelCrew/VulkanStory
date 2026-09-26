@@ -117,6 +117,14 @@ internal sealed record GtaoSettings
         return new GtaoSettings { SliceCount = slices, StepsPerSlice = steps, DenoisePasses = passes };
     }
 
+    /// <summary>
+    /// Temporal upscalers do not denoise the AO buffer. Keep an explicit Low choice,
+    /// but give the default Medium setting XeGTAO's 18-sample quality and use two
+    /// spatial denoise passes before AO enters the scene color.
+    /// </summary>
+    public static GtaoSettings ForUpscaler(GtaoPreset preset) =>
+        ForPreset(preset == GtaoPreset.Medium ? GtaoPreset.High : preset, temporal: false);
+
     /// <summary>The persisted preset name ("low", "medium", "high", "ultra"); anything else is Medium.</summary>
     public static GtaoPreset ParsePreset(string? name) => (name ?? "").Trim().ToLowerInvariant() switch
     {

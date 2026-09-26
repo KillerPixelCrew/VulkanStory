@@ -91,8 +91,8 @@ public partial class VulkanClientPlatform
             return;
         }
 
-        Size2i client = OptimumWindowClientSize();
-        float ssaa = OptimumSsaaLevel;
+        int postWidth = findBrightTarget.Width;
+        int postHeight = findBrightTarget.Height;
 
         // The block's blend state, left where the OpenGL body leaves it, outside the passes.
         GlToggleBlend(on: false);
@@ -112,8 +112,8 @@ public partial class VulkanClientPlatform
 
         // frameSize is the full-resolution value the OpenGL body sets once here and reuses for
         // all four blur draws, including the two that write a quarter-resolution target.
-        float blurWidth = client.Width * ssaa;
-        float blurHeight = client.Height * ssaa;
+        float blurWidth = postWidth;
+        float blurHeight = postHeight;
 
         NativeBlurStep(medH, nativeBlurMedHorizontal, "Post/" + BlurHorizontalMedResIndex,
             medHorizontal.FboId, findBrightTarget.ColorTextureIds[0], vertical: 0, blurWidth, blurHeight);
@@ -125,7 +125,7 @@ public partial class VulkanClientPlatform
             lowVertical.FboId, lowHorizontal.ColorTextureIds[0], vertical: 1, blurWidth, blurHeight);
 
         // What the rest of the frame inherits from this block on the OpenGL body.
-        GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
+        GlViewport(0, 0, postWidth, postHeight);
         GlToggleBlend(on: true);
     }
 
@@ -184,15 +184,14 @@ public partial class VulkanClientPlatform
             return;
         }
 
-        Size2i client = OptimumWindowClientSize();
-        float ssaa = OptimumSsaaLevel;
+        FrameBufferRef postTarget = buffers[FindBrightIndex];
 
         if (BeginNativePostPass("Post/" + GodRaysIndex, target.FboId, new[] { scene, glow }, transient: false))
         {
             // The input texel size is the full-resolution one, describing the texture the pass
             // samples and not the half-resolution target it writes.
             device.WriteNative(pipeline, nativeGodRays.Uniforms[0],
-                1f / (client.Width * ssaa), 1f / (client.Height * ssaa));
+                1f / postTarget.Width, 1f / postTarget.Height);
             device.WriteNative(pipeline, nativeGodRays.Uniforms[1], OptimumConfig.GodRaysSampleLimit);
             WriteNativeVec3(pipeline, nativeGodRays.Uniforms[2], ShaderUniforms.SunPositionScreen);
             WriteNativeVec3(pipeline, nativeGodRays.Uniforms[3], ShaderUniforms.LightPosition3D);
@@ -207,7 +206,7 @@ public partial class VulkanClientPlatform
         }
         device.EndNativePass();
 
-        GlViewport(0, 0, (int)(ssaa * client.Width), (int)(ssaa * client.Height));
+        GlViewport(0, 0, postTarget.Width, postTarget.Height);
     }
 
     // -------------------------------------------------------- pass 8: FXAA luma or blit
@@ -231,7 +230,7 @@ public partial class VulkanClientPlatform
         List<FrameBufferRef> buffers = FrameBuffers;
         FrameBufferRef? target = NativePostTarget(buffers, LumaIndex);
         FrameBufferRef? primary = NativePostTarget(buffers, PrimaryIndex);
-        bool fxaa = OptimumRenderFxaa && !TaaResolvedThisFrame;
+        bool fxaa = OptimumRenderFxaa && !TaaResolvedThisFrame && !upscaledThisFrame;
         if (fxaa && (primary == null || primary.ColorTextureIds == null || primary.ColorTextureIds.Length < 1))
         {
             LegacyPostLuma(scene);
@@ -295,12 +294,14 @@ public partial class VulkanClientPlatform
         List<FrameBufferRef> buffers = FrameBuffers;
         ShaderProgramFinal final = ShaderPrograms.Final;
         FrameBufferRef? primary = NativePostTarget(buffers, PrimaryIndex);
+        FrameBufferRef? composite = UpscaledSceneTarget ?? primary;
         FrameBufferRef? luma = NativePostTarget(buffers, LumaIndex);
         FrameBufferRef? bloom = NativePostTarget(buffers, BlurVerticalLowResIndex);
         FrameBufferRef? godRays = NativePostTarget(buffers, GodRaysIndex);
         if (!NativeProgramUsable(final) || primary == null || luma == null || bloom == null || godRays == null ||
             primary.ColorTextureIds == null || primary.ColorTextureIds.Length < 2)
         {
+            upscaledThisFrame = false;
             LegacyFinalComposition();
             return;
         }
@@ -320,17 +321,19 @@ public partial class VulkanClientPlatform
         }
 
         // Primary colour 1 stays out of the pass so the glow can be sampled from it.
-        const uint slots = ~(1u << 1);
+        uint slots = upscaledThisFrame ? 1u : ~(1u << 1);
 
         // The draw-buffer selection and the blend the OpenGL body sets around the pass: outside
         // it, so everything after the composition inherits what it always did.
+        if (upscaledThisFrame) CurrentFrameBuffer = composite;
         BeginFinalCompositionDrawBuffers();
         GlToggleBlend(on: true);
 
-        NativePipeline? pipeline = NativePostPipeline(nativeFinal, final, primary.FboId, slots,
+        NativePipeline? pipeline = NativePostPipeline(nativeFinal, final, composite.FboId, slots,
             NativeFinalBlend(slots), depthTest: false, depthWrite: false, CompareOp.Less);
         if (pipeline == null)
         {
+            upscaledThisFrame = false;
             RestoreWorldDrawBuffers(renderSsao);
             LegacyFinalComposition();
             return;
@@ -344,14 +347,11 @@ public partial class VulkanClientPlatform
         var reads = new List<int> { primaryScene, glow, bloomParts, godrayParts };
         if (ssaoScene > 0 && !reads.Contains(ssaoScene)) reads.Add(ssaoScene);
 
-        Size2i client = OptimumWindowClientSize();
-        float ssaa = OptimumSsaaLevel;
-
         SetPassContext("FinalComposition", PassFlags.None);
         if (device.BeginNativePass(new NativePassDescription
         {
             Name = "FinalComposition/0",
-            FramebufferId = primary.FboId,
+            FramebufferId = composite.FboId,
             ColorSlots = slots,
             Reads = reads.ToArray(),
             Flags = PassFlags.None,
@@ -360,8 +360,8 @@ public partial class VulkanClientPlatform
             NativeUniform[] u = nativeFinal.Uniforms;
             device.WriteNative(pipeline, u[0], NativeAmbientBloomLevel());
             device.WriteNative(pipeline, u[1], (OptimumSsaoInScene || !renderSsao) ? 1 : 0);
-            device.WriteNative(pipeline, u[2], aoDebugView ? 1 : 0);
-            device.WriteNative(pipeline, u[3], 1f / (client.Width * ssaa), 1f / (client.Height * ssaa));
+            device.WriteNative(pipeline, u[2], aoDebugView ? (OptimumSsaoInScene ? 2 : 1) : 0);
+            device.WriteNative(pipeline, u[3], 1f / composite.Width, 1f / composite.Height);
             device.WriteNative(pipeline, u[4], ClientSettings.GammaLevel);
             device.WriteNative(pipeline, u[5], ClientSettings.ExtraGammaLevel);
             device.WriteNative(pipeline, u[6], ShaderUniforms.ExtraContrastLevel);
@@ -392,6 +392,7 @@ public partial class VulkanClientPlatform
         device.EndNativePass();
 
         RestoreWorldDrawBuffers(renderSsao);
+        upscaledCompositeReady = upscaledThisFrame;
         SetPassContext("Frame", PassFlags.AllowSplit);
     }
 

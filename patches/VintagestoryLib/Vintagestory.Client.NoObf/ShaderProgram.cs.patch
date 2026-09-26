@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgram.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgram.cs
+index 610a0714..57f58618 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgram.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgram.cs
+@@ -54,11 +54,11 @@ public class ShaderProgram : ShaderProgramBase, IShaderProgram, IDisposable
+ 		return flag;
+ 	}
+ 
+ 	private void collectUniformNames(string code, HashSet<string> list)
+ 	{
+-		foreach (Match item in Regex.Matches(code, "(\\s|\\r\\n)uniform\\s*(?<type>float|int|ivec2|ivec3|ivec4|vec2|vec3|vec4|sampler2DShadow|sampler2D|samplerCube|mat3|mat4x3|mat4)\\s*(\\[[\\d\\w]+\\])?\\s*(?<var>[\\d\\w]+)", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture))
++		foreach (Match item in Regex.Matches(code, "(\\s|\\r\\n)uniform\\s*(?<type>float|int|ivec2|ivec3|ivec4|vec2|vec3|vec4|sampler2DArray|sampler2DShadow|sampler2D|samplerCube|mat3|mat4x3|mat4)\\s*(\\[[\\d\\w]+\\])?\\s*(?<var>[\\d\\w]+)", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture))
+ 		{
+ 			string value = item.Groups["var"].Value;
+ 			list.Add(value);
+ 			if (item.Groups["type"].ToString().Contains("sampler"))
+ 			{
