@@ -48,11 +48,27 @@ These are follow-up validation or tuning tasks, not missing feature integrations
 
 ## Next
 
+- **Retire the OpenGL renderer:** this fork runs Vulkan only; players who install it have
+  Vulkan-capable hardware.
+  - Make Vulkan the only renderer: `OptimumConfig.Renderer` still defaults to `"opengl"`.
+    Remove the renderer choice and its migration paths.
+  - Replace the silent fall back to OpenGL with a clear startup error that names the
+    missing Vulkan 1.3 feature, extension, or driver.
+  - Delete the OpenGL route in the platform: legacy post passes, GL state shims kept only
+    for parity, and the GL-vs-native differential tests. Keep the GLSL rewriter, which
+    still translates game and mod shaders to Vulkan.
+  - Drop OpenGL-only Cecil transplants and patches once nothing calls them, and give mods
+    a documented Vulkan path instead of raw GL.
+  - **Open decision: macOS.** A macOS package target exists. Without OpenGL it depends on
+    MoltenVK covering the required Vulkan 1.3 features (dynamic rendering,
+    synchronization2, timeline semaphores, update-after-bind descriptor indexing, scalar
+    block layout, demote-to-helper). Validate MoltenVK or drop macOS.
 - **SDL3 platform layer (window and all input):** replace OpenTK/GLFW windowing and input
   with SDL3, keyboard and mouse included, then build first-class controller play on top
   in the spirit of Minecraft Java's controller mods (Controlify, Controllable). SDL only
   delivers keyboard and mouse events for windows it owns, so SDL3 takes over the window
-  and the event loop. OpenTK stays where it is not windowing: OpenAL audio and GL bindings.
+  and the event loop. With OpenGL retired (below), the window only ever hosts Vulkan.
+  OpenTK remains only for OpenAL audio until that is replaced separately.
   - **Scope today:** window and input use is concentrated in `ClientPlatformWindows`
     (83 window references, 48 of them `ClientSize`), `GameWindowNative`, and
     `ClientProgram`'s `GameWindow.Run` loop. Every key reaches the game through one
@@ -82,9 +98,6 @@ These are follow-up validation or tuning tasks, not missing feature integrations
   - **Feedback and settings:** controller-specific button glyphs in hints and keybinding
     screens, rumble and DualSense trigger/haptic effects, per-controller profiles, and a
     remapping and sensitivity UI. Seamless switching between controller and keyboard/mouse.
-  - **Open decision:** whether the OpenGL renderer also moves to the SDL3 window (an SDL
-    GL context with OpenTK's GL bindings loaded through it), which keeps one platform path,
-    or stays on OpenTK until it is retired.
   - **Compatibility and validation:** mods that reach into OpenTK windowing or GLFW
     directly would break and need a list and shims where practical. Key-by-key parity for
     layouts (QWERTY/AZERTY/QWERTZ, dead keys), alt-tab, minimize/restore, multi-monitor,
