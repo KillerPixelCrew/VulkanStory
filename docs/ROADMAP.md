@@ -48,8 +48,13 @@ These are follow-up validation or tuning tasks, not missing feature integrations
 
 ## Next
 
-- **Retire the OpenGL renderer:** this fork runs Vulkan only; players who install it have
-  Vulkan-capable hardware.
+- **Retire the OpenGL renderer:** this fork renders with Vulkan only; players who install
+  it have Vulkan-capable hardware. DX12 is not retired with it. XeSS FG exists only as a
+  D3D12 swap-chain proxy (`xefg_swapchain_d3d12.h`) with D3D12-only XeLL, and FSR 4 also
+  runs through the same Vulkan↔DX12 shared-image and shared-fence interop
+  (`IDx12SharedRuntime`). That interop stays a supported Windows subsystem: optional at
+  runtime, falling back cleanly, and never a reason for Vulkan startup to fail. XeSS SR
+  stays native Vulkan (`xess_vk.h`).
   - Make Vulkan the only renderer: `OptimumConfig.Renderer` still defaults to `"opengl"`.
     Remove the renderer choice and its migration paths.
   - Replace the silent fall back to OpenGL with a clear startup error that names the
@@ -77,7 +82,10 @@ These are follow-up validation or tuning tasks, not missing feature integrations
     game and mod code unchanged.
   - **Window and loop:** an SDL3 window and our own frame loop replace `GameWindow.Run`.
     Vulkan gets its surface from SDL. DLSS-G, FSR3, and the XeSS-FG DXGI proxy get the
-    HWND from SDL's window properties. Fullscreen and display modes, DPI, window state,
+    HWND from SDL's window properties. While XeSS FG is active, Intel's DXGI proxy is the
+    only swap chain on that window, as it is today on GLFW, so SDL must create the window
+    without claiming a swap chain of its own, and resize and fullscreen changes must reach
+    the proxy. Fullscreen and display modes, DPI, window state,
     icon, cursors, clipboard, and file drop move to SDL.
   - **Keyboard, mouse, text:** relative mouse mode on raw input replaces the per-frame
     cursor-recentring in `UpdateMousePosition`. SDL text input and IME cover chat, signs,
