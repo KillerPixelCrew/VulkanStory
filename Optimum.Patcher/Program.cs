@@ -563,6 +563,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "OnOptimumOptions",
         "OnVulkanOptions",
         "_AddOptimumTab",
+        "onOptimumFpsCounterChanged",
+        "onOptimumFrameGenerationChanged",
+        "onOptimumLowLatencyChanged",
         "onOptimumBackgroundFpsChanged",
         "onOptimumFramePacingChanged",
         "onOptimumShadowCullChanged",
@@ -596,6 +599,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumGreedyLightTolChanged",
         "onOptimumGreedyFarDistChanged",
 #endif
+    },
+    ["Vintagestory.Client.NoObf.HudDebugScreen"] = new()
+    {
+        "optimumFpsComposer", "optimumFpsText", "optimumFpsSampleTicks",
+        "optimumLastRealPresents", "optimumLastSdkPresents", "optimumLoopFrames",
+        "optimumLastProvider", "UpdateOptimumFpsCounter",
     },
     // GuiManager: reusable scratch buffers replacing per-call .ToList() snapshots
     ["Vintagestory.Client.NoObf.GuiManager"] = new()
@@ -873,6 +882,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "Compose", 0),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "OnFinalizeFrame", 1),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "OnRenderGUI", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
@@ -973,6 +985,9 @@ var targets = new List<MethodTarget>
     // Vulkan backend: the mod-facing uniform and texture-binding surface. A
     // uniform location here is a byte offset into the generated block rather than
     // a GL location, which callers never see.
+    // The map page shader declares sampler2DArray; vanilla's uniform parser
+    // omits that type and otherwise leaves mapPages absent at draw time.
+    new("Vintagestory.Client.NoObf.ShaderProgram", "collectUniformNames", 2),
     // Uniform has seven two-parameter overloads, so each needs its signature.
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
         new[] { "System.String", "System.Single" }),

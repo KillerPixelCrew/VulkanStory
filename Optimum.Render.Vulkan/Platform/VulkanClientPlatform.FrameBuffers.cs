@@ -61,7 +61,7 @@ public partial class VulkanClientPlatform
         OptimumAdoptFrameBufferSettings();
         bool setupSsao = ClientSettings.SSAOQuality > 0;
         List<FrameBufferRef> list = new List<FrameBufferRef>(31);
-        for (int i = 0; i <= 24; i++)
+        for (int i = 0; i <= 25; i++)
         {
             list.Add(null);
         }
@@ -87,7 +87,7 @@ public partial class VulkanClientPlatform
         }
 
         bool taaRequested = OptimumTaaRequested && !upscaling;
-        bool temporalRequested = taaRequested || upscaling;
+        bool temporalRequested = taaRequested || upscaling || OptimumConfig.EffectiveFrameGeneration != "off";
         int motionAttachmentIndex = -1;
 
         // Primary: depth, colour, glow, and the SSAO position/normal G-buffer.
@@ -337,7 +337,8 @@ public partial class VulkanClientPlatform
         }
 
         // World/UI separation: the HUD-less scene snapshot and the UI image (UiSeparation.cs).
-        AllocateUiSeparationTargets(list, postWidth, postHeight);
+        AllocateUiSeparationTargets(list, displayWidth, displayHeight);
+        AllocateFrameGenerationTarget(list, displayWidth, displayHeight);
 
         OptimumFinishDeviceFrameBufferSetup(list);
         return list;
@@ -540,6 +541,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void DisposeFrameBuffers(List<FrameBufferRef> buffers)
     {
+        ResetFrameGeneration();
         // The UI image may be what Default resolves to; it is about to go.
         CloseUiScope();
         // The AO targets are sized to Primary and go with it.

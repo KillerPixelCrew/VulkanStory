@@ -33,6 +33,7 @@ obj/
 dist/
 publish/
 /releases/
+/tmp/
 
 # IDE
 .vs/

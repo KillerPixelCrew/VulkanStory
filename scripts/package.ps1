@@ -270,7 +270,25 @@ try {
     }
     Copy-Item -Force (Join-Path $repoRoot 'scripts/uninstall.ps1') (Join-Path $stageDir 'uninstall.ps1')
 
-    # Keep the engine and built-in mods vanilla. The launcher patches copies at startup.
+    # The 1.22.7 API runtime donor contains the exact IsVisible call shape used
+    # by PatchChiselLodHook. The stock installer API does not contain that call,
+    # so staging it makes a fresh standalone package patchable on first launch.
+    $apiRuntimeDonorDir = Join-Path $repoRoot '.vanilla/win-x64/runtime-donors'
+    $apiRuntimeDonor = Join-Path $apiRuntimeDonorDir 'VintagestoryAPI.dll'
+    $apiRuntimeVersion = Join-Path $apiRuntimeDonorDir 'runtime-donor-version.txt'
+    if (Test-WindowsHost) {
+        if (-not (Test-Path -LiteralPath $apiRuntimeDonor)) {
+            throw "VintagestoryAPI runtime donor missing at $apiRuntimeDonor"
+        }
+        $expectedMarker = "version-$Version.txt"
+        if (-not (Test-Path -LiteralPath $apiRuntimeVersion) -or
+            (Get-Content -LiteralPath $apiRuntimeVersion -Raw).Trim() -ne $expectedMarker) {
+            throw "VintagestoryAPI runtime donor does not match $expectedMarker"
+        }
+        Copy-Item -LiteralPath $apiRuntimeDonor -Destination (Join-Path $stageDir 'VintagestoryAPI.dll') -Force
+    }
+
+    # The launcher patches copies at startup.
     Write-Host 'Installing launcher, patcher, and runtime donors...'
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Api.Contracts.dll') $stageDir
@@ -283,14 +301,37 @@ try {
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir
     $ngxShim = Join-Path $apiOut 'OptimumNgx.dll'
     if (Test-Path -LiteralPath $ngxShim) { Copy-Item -Force $ngxShim $stageDir }
+    $streamlineBridge = Join-Path $apiOut 'OptimumStreamline.dll'
+    if (Test-Path -LiteralPath $streamlineBridge) { Copy-Item -Force $streamlineBridge $stageDir }
     if (Test-Path -LiteralPath (Join-Path $apiOut 'nvngx_dlss.dll')) {
         foreach ($dlssFile in @('nvngx_dlss.dll', 'Dlss-LICENSE.txt')) {
             Copy-Item -LiteralPath (Join-Path $apiOut $dlssFile) -Destination $stageDir -Force -ErrorAction Stop
         }
     }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'nvngx_dlssg.dll')) {
+        Copy-Item -LiteralPath (Join-Path $apiOut 'nvngx_dlssg.dll') -Destination $stageDir -Force -ErrorAction Stop
+        if (Test-Path -LiteralPath (Join-Path $apiOut 'Dlss-LICENSE.txt')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut 'Dlss-LICENSE.txt') -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'sl.interposer.dll')) {
+        foreach ($slFile in @('sl.interposer.dll', 'sl.common.dll', 'sl.dlss_g.dll', 'sl.reflex.dll', 'sl.pcl.dll', 'Streamline-LICENSE.txt', 'Reflex-LICENSE.txt')) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $slFile) -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
     if (Test-Path -LiteralPath (Join-Path $apiOut 'libxess.dll')) {
         foreach ($xessFile in @('libxess.dll', 'Xess-LICENSE.txt', 'Xess-third-party-programs.txt')) {
             Copy-Item -LiteralPath (Join-Path $apiOut $xessFile) -Destination $stageDir -Force -ErrorAction Stop
+        }
+    }
+    foreach ($intelFgFile in @('libxess_fg.dll', 'libxell.dll', 'OptimumXessFg.dll')) {
+        if (Test-Path -LiteralPath (Join-Path $apiOut $intelFgFile)) {
+            Copy-Item -LiteralPath (Join-Path $apiOut $intelFgFile) -Destination $stageDir -Force -ErrorAction Stop
+            foreach ($notice in @('Xess-LICENSE.txt', 'Xess-third-party-programs.txt')) {
+                if (Test-Path -LiteralPath (Join-Path $apiOut $notice)) {
+                    Copy-Item -LiteralPath (Join-Path $apiOut $notice) -Destination $stageDir -Force -ErrorAction Stop
+                }
+            }
         }
     }
     if (Test-Path -LiteralPath (Join-Path $apiOut 'amd_fidelityfx_vk.dll')) {
@@ -340,6 +381,10 @@ try {
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
+    # The launcher loads VintagestoryLib in its own process. It therefore needs
+    # the same Windows Desktop shared framework that Vintagestory.exe requests;
+    # the launcher's cross-platform build only requests Microsoft.NETCore.App.
+    Copy-Item -Force (Join-Path $stageDir 'Vintagestory.runtimeconfig.json') (Join-Path $stageDir 'Optimum.runtimeconfig.json')
     # Managers that launch the game executable by its vanilla name
     # (StoryForge launches Vintagestory.exe directly) must get the Optimum
     # launcher, not a vanilla start. The apphost embeds the managed entry

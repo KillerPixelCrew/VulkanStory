@@ -132,7 +132,8 @@ internal static class SwapchainPolicy
     /// a whole interval). Without vsync: MAILBOX (drops frames, never tears), then
     /// IMMEDIATE, then FIFO, the only mode every driver must have.
     /// </summary>
-    public static PresentModeKHR ChoosePresentMode(bool vsync, bool relaxedPromoted, IReadOnlyList<PresentModeKHR> supported)
+    public static PresentModeKHR ChoosePresentMode(bool vsync, bool relaxedPromoted, IReadOnlyList<PresentModeKHR> supported,
+        bool frameGeneration = false)
     {
         if (vsync)
         {
@@ -140,6 +141,13 @@ internal static class SwapchainPolicy
                 ? PresentModeKHR.FifoRelaxedKhr
                 : PresentModeKHR.FifoKhr;
         }
+        // MAILBOX replaces queued images, so it can discard the interpolated
+        // image before scanout. IMMEDIATE avoids that queue replacement with
+        // VSync off, but submitted presents alone cannot prove display cadence.
+        // FIFO is the fallback if IMMEDIATE is absent.
+        if (frameGeneration)
+            return Contains(supported, PresentModeKHR.ImmediateKhr)
+                ? PresentModeKHR.ImmediateKhr : PresentModeKHR.FifoKhr;
         if (Contains(supported, PresentModeKHR.MailboxKhr)) return PresentModeKHR.MailboxKhr;
         if (Contains(supported, PresentModeKHR.ImmediateKhr)) return PresentModeKHR.ImmediateKhr;
         return PresentModeKHR.FifoKhr;

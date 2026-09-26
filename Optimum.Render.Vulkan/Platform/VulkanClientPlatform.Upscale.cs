@@ -36,6 +36,8 @@ public partial class VulkanClientPlatform
 
     public override void ApplyOptimumUpscalerSettings()
     {
+        if (activeFrameGenerationProvider == "dlss") device?.SuspendStreamlineFrameGeneration();
+        ResetFrameGeneration();
         foreach (IUpscalerBackend backend in upscalers.Values) backend.RetireFeature();
         OptimumConfig.ClearUpscalerPlan();
         upscaledThisFrame = false;
@@ -44,7 +46,9 @@ public partial class VulkanClientPlatform
         ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(OptimumConfig.EffectiveTerrainLodBias);
     }
     public override bool TaaTargetsReady => base.TaaTargetsReady ||
-        (allocatedUpscalePlan.IsValid && OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0);
+        (MotionAttachmentIndex >= 0 &&
+         ((allocatedUpscalePlan.IsValid && OptimumConfig.UpscalerReplacesTaa) ||
+          OptimumConfig.EffectiveFrameGeneration != "off"));
 
     public override int OptimumPostSceneTexture() =>
         UpscaledSceneTarget?.ColorTextureIds?[0] ?? base.OptimumPostSceneTexture();
@@ -63,6 +67,7 @@ public partial class VulkanClientPlatform
         target.ConfigureContextOptions = options =>
         {
             previous?.Invoke(options);
+            options.RequirementContributors.Add(new XessFgInteropRequirements());
             foreach (IUpscalerBackend backend in upscalers.Values)
                 if (backend.Requirements != null)
                     options.RequirementContributors.Add(backend.Requirements);

@@ -312,6 +312,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         try
         {
             device = DeviceFactory();
+            device.SetVSync(ClientSettings.VsyncMode != 0);
             PrepareUpscaler(device);
 
             // The marker goes down before the driver is touched: a crash inside
@@ -363,6 +364,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// </summary>
     public override void ShutdownGraphics()
     {
+        ResetFrameGeneration();
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
         RemoveModPassHooks();

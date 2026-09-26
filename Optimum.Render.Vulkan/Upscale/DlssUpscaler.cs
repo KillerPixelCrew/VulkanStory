@@ -171,7 +171,8 @@ internal sealed class DlssUpscaler : IDisposable
         host._session = new NgxSession("1.0.0", dataPath, paths);
         host._ownsSession = true;
         host.Requirements = new NgxDeviceRequirements(
-            host._session, new[] { NgxFeature.SuperSampling }, line => host._log("[Optimum] DLSS: " + line));
+            host._session, new[] { NgxFeature.SuperSampling, NgxFeature.FrameGeneration },
+            line => host._log("[Optimum] NGX: " + line));
         host.Unavailable = "the device has not been brought up yet";
         return host;
     }

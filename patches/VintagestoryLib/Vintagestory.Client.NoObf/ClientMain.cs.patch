@@ -400,7 +400,7 @@ index 6d5300a..c8b996c 100644
  			timelapse = 0f;
  			timelapsedCurrent = 0f;
  			timelapseEnd = float.MaxValue;
-@@ -1122,10 +1326,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1122,10 +1326,18 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			Platform.ThreadSpinWait(10000000);
  		}
  		shUniforms.Update(dt, api);
@@ -411,6 +411,7 @@ index 6d5300a..c8b996c 100644
 +		// pass - including the LiquidDepth prepass in the Before stage - sees one
 +		// consistent snapshot and the same jitter.
 +		FrameBufferRef primaryFb = ((Platform.FrameBuffers != null && Platform.FrameBuffers.Count > 0) ? Platform.FrameBuffers[0] : null);
++		OptimumTemporal.Frame.JitterMagnitudeEnabled = OptimumConfig.TemporalJitterRequired;
 +		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveTemporalRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, shUniforms);
 +		OptimumTemporal.Frame.JitterActive = OptimumConfig.JitterWindowOpen;
  		TriggerRenderStage(EnumRenderStage.Before, dt);
@@ -418,7 +419,7 @@ index 6d5300a..c8b996c 100644
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
  		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
-@@ -1140,10 +1351,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1140,10 +1352,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
  		GlMatrixModeModelView();
@@ -443,7 +444,7 @@ index 6d5300a..c8b996c 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1176,14 +1401,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1402,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlDepthMask(flag: true);
  		Platform.GlEnableDepthTest();
  		Platform.GlCullFaceBack();
@@ -487,7 +488,7 @@ index 6d5300a..c8b996c 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1224,10 +1478,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1224,10 +1479,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			guiShaderProg.Stop();
  		}
  		ScreenManager.FrameProfiler.Mark("rendOrthoDone");
@@ -507,7 +508,7 @@ index 6d5300a..c8b996c 100644
  		tickSummary = ScreenManager.FrameProfiler.summary;
  	}
  
-@@ -1314,11 +1577,16 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1314,11 +1578,16 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			texture2texture.AlphaTest = alphaTest;
  			texture2texture.Xs = targetX / (float)fb.Width;
  			texture2texture.Ys = targetY / (float)fb.Height;
@@ -525,7 +526,7 @@ index 6d5300a..c8b996c 100644
  			texture2texture.Stop();
  			currentShaderProgram?.Use();
  		}
-@@ -1343,11 +1611,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1343,11 +1612,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		GlScale(width, height, 0.0);
  		GlScale(0.5, 0.5, 0.0);
  		GlTranslate(1.0, 1.0, 0.0);
@@ -539,7 +540,7 @@ index 6d5300a..c8b996c 100644
  
  	public void Render2DTexture(MultiTextureMeshRef meshRef, float x1, float y1, float width, float height, float z = 10f, Vec4f color = null)
  	{
-@@ -1366,11 +1635,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1366,11 +1636,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		guiShaderProg.ModelViewMatrix = CurrentModelViewMatrix;
  		for (int i = 0; i < meshRef.meshrefs.Length; i++)
  		{
@@ -552,7 +553,7 @@ index 6d5300a..c8b996c 100644
  	}
  
  	public void Render2DTexture(int textureid, ModelTransform transform, Vec4f color = null)
-@@ -1390,11 +1659,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1390,11 +1660,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		GlScale(transform.ScaleXYZ.X, transform.ScaleXYZ.Y, 0.0);
  		GlScale(0.5, 0.5, 0.0);
  		GlTranslate(1.0, 1.0, 0.0);
@@ -566,7 +567,7 @@ index 6d5300a..c8b996c 100644
  
  	public void Render2DTextureFlipped(int textureid, float x1, float y1, float width, float height, float z = 10f, Vec4f color = null)
  	{
-@@ -1410,20 +1680,25 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1410,20 +1681,25 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		GlScale(0.5, 0.5, 0.0);
  		GlTranslate(1.0, 1.0, 0.0);
  		GlRotate(180f, 1.0, 0.0, 0.0);
@@ -593,7 +594,7 @@ index 6d5300a..c8b996c 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1840,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1841,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -617,7 +618,7 @@ index 6d5300a..c8b996c 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2123,12 +2398,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2123,12 +2399,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -642,7 +643,7 @@ index 6d5300a..c8b996c 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2542,10 +2827,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2542,10 +2828,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -656,7 +657,7 @@ index 6d5300a..c8b996c 100644
  	}
  
  	public void DoReconnect()
-@@ -3530,6 +3818,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3530,6 +3819,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

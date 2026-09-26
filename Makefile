@@ -113,8 +113,14 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
 	@if [ -f "$(MOD_OUT)/libOptimumNgx.so" ]; then cp "$(MOD_OUT)/libOptimumNgx.so" "$(VANILLA_DIR)/"; fi
 	@if [ -f "$(MOD_OUT)/OptimumNgx.dll" ]; then cp "$(MOD_OUT)/OptimumNgx.dll" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/OptimumStreamline.dll" ]; then cp "$(MOD_OUT)/OptimumStreamline.dll" "$(VANILLA_DIR)/"; fi
 	@if [ -f "$(MOD_OUT)/nvngx_dlss.dll" ]; then cp "$(MOD_OUT)/nvngx_dlss.dll" "$(MOD_OUT)/Dlss-LICENSE.txt" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/nvngx_dlssg.dll" ]; then cp "$(MOD_OUT)/nvngx_dlssg.dll" "$(MOD_OUT)/Dlss-LICENSE.txt" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/sl.interposer.dll" ]; then cp "$(MOD_OUT)/sl.interposer.dll" "$(MOD_OUT)/sl.common.dll" "$(MOD_OUT)/sl.dlss_g.dll" "$(MOD_OUT)/sl.reflex.dll" "$(MOD_OUT)/sl.pcl.dll" "$(MOD_OUT)/Streamline-LICENSE.txt" "$(MOD_OUT)/Reflex-LICENSE.txt" "$(VANILLA_DIR)/"; fi
 	@if [ -f "$(MOD_OUT)/libxess.dll" ]; then cp "$(MOD_OUT)/libxess.dll" "$(MOD_OUT)/Xess-LICENSE.txt" "$(MOD_OUT)/Xess-third-party-programs.txt" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/libxess_fg.dll" ]; then cp "$(MOD_OUT)/libxess_fg.dll" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/libxell.dll" ]; then cp "$(MOD_OUT)/libxell.dll" "$(VANILLA_DIR)/"; fi
+	@if [ -f "$(MOD_OUT)/OptimumXessFg.dll" ]; then cp "$(MOD_OUT)/OptimumXessFg.dll" "$(VANILLA_DIR)/"; fi
 	@if [ -f "$(MOD_OUT)/amd_fidelityfx_vk.dll" ]; then cp "$(MOD_OUT)/amd_fidelityfx_vk.dll" "$(MOD_OUT)/OptimumFsr3.dll" "$(MOD_OUT)/Fsr3-LICENSE.txt" "$(VANILLA_DIR)/"; fi
 	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
 	@# shaderc goes into the application root: Silk.NET.Shaderc probes the application
@@ -161,8 +167,14 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
 		if [ -f "$(MOD_OUT)/libOptimumNgx.so" ]; then cp "$(MOD_OUT)/libOptimumNgx.so" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/OptimumNgx.dll" ]; then cp "$(MOD_OUT)/OptimumNgx.dll" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/OptimumStreamline.dll" ]; then cp "$(MOD_OUT)/OptimumStreamline.dll" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/nvngx_dlss.dll" ]; then cp "$(MOD_OUT)/nvngx_dlss.dll" "$(MOD_OUT)/Dlss-LICENSE.txt" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/nvngx_dlssg.dll" ]; then cp "$(MOD_OUT)/nvngx_dlssg.dll" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/sl.interposer.dll" ]; then cp "$(MOD_OUT)/sl.interposer.dll" "$(MOD_OUT)/sl.common.dll" "$(MOD_OUT)/sl.dlss_g.dll" "$(MOD_OUT)/sl.reflex.dll" "$(MOD_OUT)/sl.pcl.dll" "$(MOD_OUT)/Streamline-LICENSE.txt" "$(MOD_OUT)/Reflex-LICENSE.txt" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/libxess.dll" ]; then cp "$(MOD_OUT)/libxess.dll" "$(MOD_OUT)/Xess-LICENSE.txt" "$(MOD_OUT)/Xess-third-party-programs.txt" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/libxess_fg.dll" ]; then cp "$(MOD_OUT)/libxess_fg.dll" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/libxell.dll" ]; then cp "$(MOD_OUT)/libxell.dll" "$(INSTALL_DIR)/"; fi; \
+		if [ -f "$(MOD_OUT)/OptimumXessFg.dll" ]; then cp "$(MOD_OUT)/OptimumXessFg.dll" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/amd_fidelityfx_vk.dll" ]; then cp "$(MOD_OUT)/amd_fidelityfx_vk.dll" "$(MOD_OUT)/OptimumFsr3.dll" "$(MOD_OUT)/Fsr3-LICENSE.txt" "$(INSTALL_DIR)/"; fi; \
 		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/; fi; \
 		rm -rf "$(INSTALL_DIR)/shaders-vk" && mkdir -p "$(INSTALL_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(INSTALL_DIR)/shaders-vk/" || exit 1; \

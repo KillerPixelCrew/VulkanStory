@@ -150,7 +150,8 @@ public static class Program
             try
             {
                 patchExitCode = RunPatching(
-                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly);
+                    gameDir, donorDir, cacheDir, cache, sw,
+                    showSplash: !validateOnly && Environment.GetEnvironmentVariable("OPTIMUM_HEADLESS") != "1");
             }
             catch (Exception ex)
             {

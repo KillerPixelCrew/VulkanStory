@@ -546,6 +546,25 @@ public static class OptimumConfig
 
     /// <summary>Native Vulkan upscaler. The optional NGX runtime is used only for "dlss".</summary>
     public static string Upscaler = "off";
+    /// <summary>Frame generation provider. The Vulkan renderer applies changes at a frame boundary.</summary>
+    public static string FrameGeneration = "off";
+    /// <summary>Show rendered and vendor-reported displayed frame rates in the game HUD.</summary>
+    public static bool ShowFpsCounter;
+    private static long realPresentedFrames;
+    private static long sdkPresentedFrames;
+    public static long RealPresentedFrames => Interlocked.Read(ref realPresentedFrames);
+    public static long SdkPresentedFrames => Interlocked.Read(ref sdkPresentedFrames);
+    public static void NoteRealPresentedFrame() => Interlocked.Increment(ref realPresentedFrames);
+    public static void NoteSdkPresentedFrames(uint count) => Interlocked.Add(ref sdkPresentedFrames, count);
+    /// <summary>Low latency mode for the active Vulkan vendor runtime.</summary>
+    public static string LowLatencyMode = "on";
+    public static readonly string[] LowLatencyModeNames = { "off", "on", "boost" };
+    public static readonly string[] FrameGenerationNames = { "off", "dlss", "fsr3", "xess" };
+    /// <summary>Only providers with a live presentation path appear in settings.</summary>
+    public static readonly string[] FrameGenerationUiNames = { "off", "dlss", "fsr3", "xess" };
+    public static string EffectiveFrameGeneration => OptimumRender.IsVulkan &&
+        Array.Exists(FrameGenerationUiNames, name => string.Equals(name, FrameGeneration, StringComparison.OrdinalIgnoreCase))
+            ? FrameGeneration.ToLowerInvariant() : "off";
     public static string UpscalerQuality = "quality";
     public static readonly string[] UpscalerNames = { "off", "dlss", "xess", "fsr3" };
     public static readonly string[] UpscalerQualityNames =
@@ -595,7 +614,10 @@ public static class OptimumConfig
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
     public static bool UpscalerReplacesTaa => OptimumRender.IsVulkan &&
         !string.Equals(EffectiveUpscaler, "off", StringComparison.OrdinalIgnoreCase);
-    public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa;
+    // Frame generation needs world motion even when no temporal upscaler is selected.
+    public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa ||
+        EffectiveFrameGeneration != "off";
+    public static bool TemporalJitterRequired => TaaJitterDev || EffectiveTaa || UpscalerReplacesTaa;
     public static bool JitterWindowOpen => TaaJitterDev || EffectiveTemporalPipeline;
 
     public static float UpscalerRenderScale { get; private set; }
@@ -1127,6 +1149,9 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
         (nameof(OptimumConfigData.Upscaler), Upscaler),
+        (nameof(OptimumConfigData.FrameGeneration), FrameGeneration),
+        (nameof(OptimumConfigData.ShowFpsCounter), ShowFpsCounter.ToString()),
+        (nameof(OptimumConfigData.LowLatencyMode), LowLatencyMode),
         (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
         (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
         (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
@@ -1253,6 +1278,15 @@ public static class OptimumConfig
             Upscaler = Array.Exists(UpscalerNames,
                 name => string.Equals(name, upscalerName, StringComparison.OrdinalIgnoreCase))
                 ? upscalerName.ToLowerInvariant() : "off";
+            string fgName = data.FrameGeneration?.Trim() ?? "";
+            FrameGeneration = Array.Exists(FrameGenerationNames,
+                name => string.Equals(name, fgName, StringComparison.OrdinalIgnoreCase))
+                ? fgName.ToLowerInvariant() : "off";
+            ShowFpsCounter = data.ShowFpsCounter;
+            string latencyMode = data.LowLatencyMode?.Trim() ?? "";
+            LowLatencyMode = Array.Exists(LowLatencyModeNames,
+                name => string.Equals(name, latencyMode, StringComparison.OrdinalIgnoreCase))
+                ? latencyMode.ToLowerInvariant() : "on";
             string quality = data.UpscalerQuality?.Trim() ?? "";
             UpscalerQuality = Array.Exists(QualityNamesFor(Upscaler),
                 name => string.Equals(name, quality, StringComparison.OrdinalIgnoreCase))
@@ -1346,6 +1380,9 @@ public static class OptimumConfig
             TaaDebugView = TaaDebugView,
             TaaJitterDev = TaaJitterDev,
             Upscaler = Upscaler,
+            FrameGeneration = FrameGeneration,
+            ShowFpsCounter = ShowFpsCounter,
+            LowLatencyMode = LowLatencyMode,
             UpscalerQuality = UpscalerQuality,
             UpscalerLodBiasOffset = UpscalerLodBiasOffset,
             AmbientOcclusion = AmbientOcclusion,
@@ -1443,6 +1480,9 @@ internal sealed class OptimumConfigData
     public int TaaDebugView { get; set; } = 0;
     public bool TaaJitterDev { get; set; } = false;
     public string Upscaler { get; set; } = "off";
+    public string FrameGeneration { get; set; } = "off";
+    public bool ShowFpsCounter { get; set; }
+    public string LowLatencyMode { get; set; } = "on";
     public string UpscalerQuality { get; set; } = "quality";
     public float UpscalerLodBiasOffset { get; set; } = 1.0f;
     public string AmbientOcclusion { get; set; } = "auto";

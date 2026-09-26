@@ -27,6 +27,77 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     void Platform.ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
 
     internal FrameTimingRecorder Latency { get; private set; } = new();
+    private VendorLatency? _vendorLatency;
+    private bool _streamlineFeaturesReady;
+    private bool _streamlineFrameGenerationSupported;
+    private int _appliedLatencyMode = -1;
+    private int _vendorFrameCap;
+    private static int DesiredLatencyMode => OptimumConfig.LowLatencyMode switch
+    {
+        "off" when OptimumConfig.EffectiveFrameGeneration is not ("dlss" or "fsr3" or "xess") => 0,
+        "boost" => 2,
+        _ => 1,
+    };
+    internal bool VendorLatencyOwnsFrameCap => _frameGenerationProvider == "xess"
+        ? _xessPresenter != null
+        : _vendorLatency?.OwnsFrameCap == true || _streamlineFeaturesReady;
+    internal void SetVendorLatencyFrameCap(int maxFps)
+    {
+        _vendorFrameCap = Math.Max(0, maxFps);
+        if (_xessPresenter is { } intel)
+        {
+            intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0);
+            return;
+        }
+        if (_frameGenerationProvider == "xess") return;
+        _vendorLatency?.SetFrameCap(maxFps);
+        if (_streamlineFeaturesReady) _context.Streamline?.SetReflex(DesiredLatencyMode, _vendorFrameCap);
+    }
+    internal void SleepVendorLatency(ulong frameId, bool mayGenerate)
+    {
+        int latencyMode = DesiredLatencyMode;
+        if (_xessPresenter is { } intel)
+        {
+            if (_appliedLatencyMode != latencyMode)
+            {
+                _appliedLatencyMode = latencyMode;
+                intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0);
+            }
+            ReserveFramePresentIds(mayGenerate);
+            intel.Runtime.Sleep(frameId);
+            return;
+        }
+        if (_frameGenerationProvider == "xess")
+        {
+            ReserveFramePresentIds(mayGenerate);
+            return;
+        }
+        if (_appliedLatencyMode != latencyMode)
+        {
+            _appliedLatencyMode = latencyMode;
+            _vendorLatency?.SetMode(latencyMode);
+            if (_streamlineFeaturesReady) _context.Streamline?.SetReflex(latencyMode, _vendorFrameCap);
+        }
+        if (_swapchain != null) ReserveFramePresentIds(mayGenerate);
+        _vendorLatency?.Sleep(frameId, RealPresentId);
+        if (_streamlineFeaturesReady && _context.Streamline is { } streamline)
+        {
+            if (streamline.BeginFrame(frameId) == 0) streamline.ReflexSleep();
+        }
+    }
+    internal void MarkLatency(ulong frameId, LatencyMarker marker)
+    {
+        Latency.Marker(frameId, marker);
+        if (_xessPresenter is { } intel)
+        {
+            intel.Runtime.Marker(frameId, marker);
+            return;
+        }
+        if (_frameGenerationProvider == "xess") return;
+        _vendorLatency?.Marker(frameId, marker);
+        if (_streamlineFeaturesReady && _context.Streamline is { } streamline && marker != LatencyMarker.InputSample)
+            streamline.Marker((uint)marker);
+    }
     internal ulong LatencyFrameId => _latencyFrameId;
     private ulong _latencyFrameId;
     private bool _latencyFrameIdPending;
@@ -56,8 +127,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     {
         if (_latencyRenderStartFrame == _latencyFrameId) return;
         _latencyRenderStartFrame = _latencyFrameId;
-        Latency.Marker(_latencyFrameId, LatencyMarker.SimulationEnd);
-        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitStart);
+        MarkLatency(_latencyFrameId, LatencyMarker.SimulationEnd);
+        MarkLatency(_latencyFrameId, LatencyMarker.RenderSubmitStart);
     }
 
     private void DisposeLatency()
@@ -446,6 +517,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     public bool Initialize(IntPtr windowHandle, int width, int height, out string failureReason)
     {
+        _presentationWindow = windowHandle;
         bool headless = windowHandle == IntPtr.Zero;
 
         var options = new VulkanContextOptions
@@ -472,9 +544,20 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
                 : WindowSurface.RequiredInstanceExtensions(),
+            PrepareFrameGenerationQueues = !headless && OperatingSystem.IsWindows(),
         };
 
+        var vendorLatencyRequirements = new VendorLatencyRequirements(headless);
+        options.RequirementContributors.Add(vendorLatencyRequirements);
         ConfigureContextOptions?.Invoke(options);
+        // Streamline's signed 2.14.1 Vulkan proxy rejects extensions supplied
+        // only by a validation layer. Keep sync-validation acceptance on the
+        // native path; normal client runs use the proxy.
+        if (!headless && OperatingSystem.IsWindows() &&
+            !(options.EnableValidation && !string.IsNullOrWhiteSpace(options.ValidationFeatures)) &&
+            Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE")?.Trim() != "0" &&
+            StreamlineRuntime.TryCreate(out StreamlineRuntime? streamline, out _))
+            options.Streamline = streamline;
 
         if (!VulkanContext.TryCreate(options, out VulkanContext? context, out failureReason))
         {
@@ -482,6 +565,23 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         }
 
         _context = context!;
+        if (_context.Streamline != null)
+        {
+            int bindResult = _context.Streamline.BindFeatures();
+            int reflexResult = bindResult == 0 ? _context.Streamline.SetReflex(DesiredLatencyMode, 0) : -1;
+            _streamlineFeaturesReady = bindResult == 0 && reflexResult == 0;
+            if (!_streamlineFeaturesReady)
+                MirrorValidationMessage("Streamline features unavailable: bind=" + bindResult + ", Reflex=" + reflexResult);
+            if (_streamlineFeaturesReady)
+            {
+                int supportResult = _context.Streamline.IsFrameGenerationSupported(_context.PhysicalDevice);
+                _streamlineFrameGenerationSupported = supportResult == 0;
+                if (!_streamlineFrameGenerationSupported)
+                    MirrorValidationMessage("Streamline DLSS-G unsupported on selected Vulkan adapter: " + supportResult);
+            }
+        }
+        _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineFeaturesReady
+            ? null : VendorLatency.TryCreate(_context, vendorLatencyRequirements.Kind);
         // Any hard Vulkan failure now reaches the client's error channel and the
         // validation log instead of turning into a silent stall.
         VulkanResult.OnFailure = message =>
@@ -505,7 +605,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             _context.Capabilities.DescriptorIndexing.MaxPerStageDescriptorUpdateAfterBindSampledImages +
             " (needs " + DescriptorIndexingFloor.RequiredSampledImages + ")" +
             "; push constants " + _context.Capabilities.DescriptorIndexing.MaxPushConstantsSize + " B" +
-            "; " + _context.Capabilities.LatencySummary);
+            "; " + _context.Capabilities.LatencySummary +
+            "; vendor latency " + (_vendorLatency?.Kind.ToString() ?? "none"));
         // Seams S1-S5: the backend is installed before the frame ring and the first
         // swapchain exist, so nothing in the frame ever sees a different instance.
         InitializeFrameTiming();
@@ -609,7 +710,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             }
 
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError))
+                    out Swapchain? swapchain, out string? swapchainError, _vendorLatency))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
@@ -619,7 +720,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id and its
             // feature were actually enabled; chaining it otherwise is a validation error.
             _swapchain!.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
-            _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
+            _presentPath = new BlitPresentPath(_context, _textures);
         }
 
         failureReason = null!;
@@ -634,6 +735,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     private bool _vsync = true;
 
     private VulkanTexture? DefaultColorTexture() => _textures.Get(_defaultColor);
+    internal int DefaultColorTextureId => _defaultColor;
     private int _defaultFramebuffer;
     private int _defaultColor;
     private int _defaultDepth;
@@ -1210,11 +1312,21 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // Seam S4: the frame's work is queued (Submit A). Stamped before the acquire,
         // which is where the CPU may block, so the render-submit interval is recording
         // time and nothing else.
-        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
+        MarkLatency(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
+        if (PresentXessFrame(renderValue, presentEntry, frameSubmitted)) return;
+        RetrySwapchainRestoreIfNeeded();
+
         // Headless: nothing to present; the frame is submitted all the same.
-        if (_swapchain == null || _presentPath == null) return;
+        if (_swapchain == null || _presentPath == null)
+        {
+            _generatedFrameForPresent = 0;
+            _vendorLatency?.SkipPresent();
+            return;
+        }
+
+        bool generatedPresented = PresentGeneratedFrame(renderValue);
 
         bool acquired = _swapchain.TryAcquire(out PresentTarget target);
         long acquireReturned = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1222,6 +1334,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         ReportRebuildFailure();
         if (!acquired)
         {
+            _vendorLatency?.SkipPresent();
             LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, 0,
                 renderValue, 0, renderCompletedAtAcquire, false);
             return;
@@ -1229,7 +1342,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
         CommandBuffer presentCommands = _frames.BeginPresentCommands();
         Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
-        _presentPath.Record(presentCommands, target);
+        _presentPath.Record(presentCommands, target, DefaultColorTexture());
         ulong presentValue = _frames.SubmitPresent(
             target.AcquireSemaphore, _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
         _swapchain.NotePresentSubmitted(target, presentValue);
@@ -1237,15 +1350,20 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
         // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself, and the
         // present id the call was given closes the frame's report.
-        Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
-        ulong presentId = _swapchain.Present(target, _latencyFrameId);
-        Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
+        _generatedFramePacer.WaitForRealPresent();
+        MarkLatency(_latencyFrameId, LatencyMarker.PresentStart);
+        ulong presentId = _swapchain.Present(target, _latencyFrameId, _realPresentId);
+        VulkanStats.NotePresent(generated: false);
+        CountFsr3SdkPresents();
+        _realPresentId = 0;
+        _generatedPresentId = 0;
+        MarkLatency(_latencyFrameId, LatencyMarker.PresentEnd);
         Latency.OnPresent(_latencyFrameId, presentId);
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
 
         long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
-        if (_lastPresentReturn != 0 && _vsync &&
+        if (_lastPresentReturn != 0 && _vsync && !generatedPresented &&
             _missedVsyncs.NoteInterval((presentReturn - _lastPresentReturn) * 1000.0 / System.Diagnostics.Stopwatch.Frequency) &&
             _swapchain.PromoteToRelaxedFifo())
         {
@@ -1281,12 +1399,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     /// </summary>
     public void Resize(int width, int height)
     {
-        if (_swapchain == null || width <= 0 || height <= 0) return;
+        if (_presentationWindow == IntPtr.Zero || width <= 0 || height <= 0) return;
         if ((uint)width == _windowWidth && (uint)height == _windowHeight) return;
 
         DestroyDefaultFramebuffer();
         CreateDefaultFramebuffer((uint)width, (uint)height);
-        _swapchain.RequestRebuild(_windowWidth, _windowHeight, _vsync);
+        _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
+        if (_swapchain == null && _xessPresenter == null) RestoreVulkanSwapchain();
     }
 
     public void SetVSync(bool enabled)
@@ -1320,7 +1439,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
         if (_context != null)
         {
-            VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
+            _context.WaitDeviceIdle();
         }
 
         // Background compiles read program modules and layouts, and a background save
@@ -1348,9 +1467,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         foreach (ComputeDescriptorArena arena in _computeArenas) arena.Dispose();
         _defaultAttributes?.Dispose();
         _placeholderUniforms?.Dispose();
+        _xessPresenter?.Dispose();
+        _xessPresenter = null;
         _swapchain?.Dispose();
         _shaderCompiler?.Dispose();
         _frames?.Dispose();
+        _vendorLatency?.Dispose();
         _descriptors?.Dispose();
         SavePipelineCache();
         _pipelines?.Dispose();

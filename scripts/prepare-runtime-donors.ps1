@@ -126,7 +126,9 @@ foreach ($path in $required) {
 $manifestEntries = Get-Content -LiteralPath (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256')
 $manifestPaths = @()
 foreach ($entry in $manifestEntries) {
-    if ($entry -notmatch '^([0-9a-fA-F]{64})\s{2}(.+)$') {
+    # PowerShell writes two spaces; sha256sum -b writes a space and an asterisk.
+    # Both bootstrap paths can populate this shared donor cache.
+    if ($entry -notmatch '^([0-9a-fA-F]{64})(?: {2}| \*)(.+)$') {
         throw "Runtime donor manifest has an invalid entry: $entry"
     }
     $expectedHash = $Matches[1].ToLowerInvariant()

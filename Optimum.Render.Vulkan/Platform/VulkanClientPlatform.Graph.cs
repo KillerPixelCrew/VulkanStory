@@ -360,8 +360,6 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BlitPrimaryToDefault()
     {
-        // The final world image now includes AfterFinalComposition overlays and still excludes UI.
-        CaptureSceneNoHud();
         if (NativeBlitEnabled && UseNativePostChain)
         {
             RenderNativeBlit();
@@ -373,6 +371,9 @@ public partial class VulkanClientPlatform
             base.BlitPrimaryToDefault();
             SetPassContext("Frame", PassFlags.AllowSplit);
         }
+        // Snapshot the display-sized, fully upscaled world image after the blit,
+        // before the UI scope redirects Default to the separate UI target.
+        CaptureSceneNoHud();
         // World/UI separation: the boundary. Everything ScreenManager draws after this call - the
         // AfterBlit stage, the menu background, the Ortho stage - goes into the UI image, on every
         // route out of the blit (debug view, FSR, plain, no offscreen buffer).

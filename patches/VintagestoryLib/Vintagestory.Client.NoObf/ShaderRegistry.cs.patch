@@ -234,7 +234,7 @@ index d3edef9..024c77d 100644
  	{
  		Shader fragmentShader = program.FragmentShader;
 -		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
-+		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTemporalPipeline ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa && !OptimumConfig.UpscalerReplacesTaa ? 1 : 0) + "\r\n";
  		Shader fragmentShader2 = program.FragmentShader;
  		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
  		Shader fragmentShader3 = program.FragmentShader;

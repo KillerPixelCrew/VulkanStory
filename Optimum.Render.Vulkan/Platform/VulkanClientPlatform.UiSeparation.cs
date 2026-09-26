@@ -16,7 +16,7 @@ namespace Optimum.Render.Vulkan.Platform;
 ///
 /// Two images, both published by slot the way <c>MotionAttachmentIndex</c> is:
 /// <list type="bullet">
-/// <item><description><b>SceneNoHud</b> (slot 23, post size, RGBA8): a copy of the final
+/// <item><description><b>SceneNoHud</b> (slot 23, display size, RGBA8): a copy of the final
 /// world image taken before the blit opens the UI scope. It includes late world overlays
 /// and excludes the GUI.</description></item>
 /// <item><description><b>UI image</b> (slot 24, window size, RGBA8 + depth): everything after the
@@ -91,7 +91,9 @@ public partial class VulkanClientPlatform
 
         try
         {
-            FrameBufferRef snapshot = CreateOptimumOwnedTarget(renderWidth, renderHeight, withDepth: false);
+            // Default already contains the upscaled world at display resolution.
+            Size2i display = OptimumWindowClientSize();
+            FrameBufferRef snapshot = CreateOptimumOwnedTarget(display.Width, display.Height, withDepth: false);
             list[OptimumSceneNoHudIndex] = snapshot;
             sceneNoHudIndex = OptimumSceneNoHudIndex;
         }
@@ -123,7 +125,8 @@ public partial class VulkanClientPlatform
     /// A persistent single-colour target. The UI and snapshot use RGBA8; an upscaler output
     /// requests storage-capable linear RGBA16F. Not a transient: its contents outlive the pass.
     /// </summary>
-    private FrameBufferRef CreateOptimumOwnedTarget(int width, int height, bool withDepth, bool storage = false)
+    private FrameBufferRef CreateOptimumOwnedTarget(int width, int height, bool withDepth,
+        bool storage = false, bool frameGenerationStorage = false)
     {
         FrameBufferRef target = new FrameBufferRef();
         target.Width = width;
@@ -131,7 +134,9 @@ public partial class VulkanClientPlatform
         target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
         target.ColorTextureIds[0] = storage
-            ? device.CreateUpscaleTexture(width, height, Silk.NET.Vulkan.Format.R16G16B16A16Sfloat, storage: true)
+            ? device.CreateUpscaleTexture(width, height,
+                frameGenerationStorage ? Silk.NET.Vulkan.Format.R8G8B8A8Unorm :
+                    Silk.NET.Vulkan.Format.R16G16B16A16Sfloat, storage: true)
             : device.CreateTexture2D(width, height,
                 EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9728, 33071);
@@ -160,12 +165,11 @@ public partial class VulkanClientPlatform
         List<FrameBufferRef> buffers = FrameBuffers;
         if (sceneNoHudIndex < 0 || buffers == null || buffers.Count <= sceneNoHudIndex) return;
         FrameBufferRef snapshot = buffers[sceneNoHudIndex];
-        FrameBufferRef primary = UpscaledSceneTarget ?? buffers[0];
-        if (snapshot == null || primary?.ColorTextureIds == null || primary.ColorTextureIds.Length == 0) return;
+        if (snapshot == null || device.DefaultColorTextureId <= 0) return;
         ShaderProgram copy = ShaderPrograms.UiCompose;
         if (copy == null || copy.LoadError || copy.ProgramId <= 0) return;
 
-        int scene = primary.ColorTextureIds[0];
+        int scene = device.DefaultColorTextureId;
         string outer = passContext;
         PassFlags outerFlags = passContextFlags;
         NativePipeline? pipeline = NativePipelineFor(nativeSceneNoHudCopy, copy, snapshot.FboId);
