@@ -1,0 +1,46 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerThread.cs b/VintagestoryLib/Vintagestory.Server/ServerThread.cs
+index a59b192d..83dadbd5 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerThread.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerThread.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Diagnostics;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ 
+ namespace Vintagestory.Server;
+ 
+ public class ServerThread
+ {
+@@ -55,11 +56,28 @@ public class ServerThread
+ 					ServerMain.FrameProfiler.Mark("update");
+ 				}
+ 				UpdatePausedStatus(flag);
+ 				if (!flag2)
+ 				{
+-					Thread.Sleep(SleepMs);
++					int sleepMs = SleepMs;
++					if (OptimumConfig.IdleThreadWait)
++					{
++						int minimumMs = Math.Max(1, SleepMs);
++						sleepMs = Math.Max(minimumMs, 25);
++						if (!flag)
++						{
++							long elapsedMs = totalPassedTime.ElapsedMilliseconds;
++							for (int i = 0; i < serversystems.Length; i++)
++							{
++								ServerSystem system = serversystems[i];
++								sleepMs = Math.Min(sleepMs, OptimumConfig.IdleThreadDelayMs(elapsedMs,
++									system.millisecondsSinceStartSeperateThread, system.GetUpdateInterval(),
++									minimumMs, 25));
++							}
++						}
++					}
++					Thread.Sleep(sleepMs);
+ 					ServerMain.FrameProfiler.Mark("sleep");
+ 				}
+ 				if (shouldExit)
+ 				{
+ 					ShutDown();

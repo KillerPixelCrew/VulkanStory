@@ -37,8 +37,8 @@ public class RenderDiagnosticsTests(ITestOutputHelper output)
     public void PhaseDurationsBelongToThePresentedFrame()
     {
         var tracker = new LatencyPhaseTracker();
-        tracker.Mark(42, LatencyMarker.InputSample, 100);
-        tracker.Mark(42, LatencyMarker.SimulationStart, 105);
+        tracker.Mark(42, LatencyMarker.SimulationStart, 100);
+        tracker.Mark(42, LatencyMarker.InputSample, 105);
         tracker.Mark(42, LatencyMarker.SimulationEnd, 125);
         tracker.Mark(42, LatencyMarker.RenderSubmitStart, 130);
         tracker.Mark(42, LatencyMarker.RenderSubmitEnd, 160);
@@ -47,7 +47,7 @@ public class RenderDiagnosticsTests(ITestOutputHelper output)
 
         Assert.False(tracker.TryComplete(41, 900, out _));
         Assert.True(tracker.TryComplete(42, 901, out var report));
-        Assert.Equal(new LatencyFrameReport(42, 901, 5, 20, 30, 7, 72), report);
+        Assert.Equal(new LatencyFrameReport(42, 901, 5, 25, 30, 7, 72), report);
         Assert.False(tracker.TryComplete(42, 902, out _));
     }
 
@@ -125,6 +125,33 @@ public class RenderDiagnosticsTests(ITestOutputHelper output)
         VulkanStats.ReduceReports(Array.Empty<LatencyFrameReport>(), mean, p99);
         Assert.All(mean, value => Assert.Equal(0, value));
         Assert.All(p99, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public void SdlInputAgeReportsOnlyValidRecentEventsOnSdlClock()
+    {
+        var ages = new SdlInputAgeRecorder(capacity: 2);
+        ages.Record(0, 10_000_000);
+        ages.Record(20_000_000, 19_000_000);
+        ages.Record(1_000_000, 2_000_000); // dropped by the bounded ring
+        ages.Record(3_000_000, 5_000_000);
+        ages.Record(6_000_000, 11_000_000);
+        SdlInputAgeSample sample = ages.Take();
+        Assert.Equal(new SdlInputAgeSample(2, 3.5, 5, 5), sample);
+        Assert.Equal(default, ages.Take());
+    }
+
+    [Fact]
+    public void SdlInputAgeLineUsesInvariantMilliseconds()
+    {
+        CultureInfo previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+            Assert.Equal("stats.input_age events=2 mean_ms=3.50 p99_ms=5.00 max_ms=5.00",
+                VulkanStats.FormatSdlInputAgeLine(new SdlInputAgeSample(2, 3.5, 5, 5)));
+        }
+        finally { CultureInfo.CurrentCulture = previous; }
     }
 
     [Fact]

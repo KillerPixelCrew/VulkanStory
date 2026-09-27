@@ -1,0 +1,25 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
+index 9ad9eccb..4bcdfd67 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
+@@ -297,10 +297,20 @@ public class ClientSystemEntities : ClientSystem
+ 	}
+ 
+ 	private void HandleEntityPacket(Packet_Server serverpacket)
+ 	{
+ 		Packet_EntityPacket entityPacket = serverpacket.EntityPacket;
++		if (entityPacket.Packetid == Optimum.OptimumAnalogMovement.AckPacketId)
++		{
++			if (game.EntityPlayer != null && entityPacket.EntityId == game.EntityPlayer.EntityId &&
++				entityPacket.Data != null && entityPacket.Data.Length == 1 &&
++				entityPacket.Data[0] == Optimum.OptimumAnalogMovement.ProtocolVersion)
++			{
++				game.OptimumAnalogServerReady = true;
++			}
++			return;
++		}
+ 		game.LoadedEntities.TryGetValue(entityPacket.EntityId, out var value);
+ 		value?.OnReceivedServerPacket(entityPacket.Packetid, entityPacket.Data);
+ 	}
+ 
+ 	public override EnumClientSystemType GetSystemType()

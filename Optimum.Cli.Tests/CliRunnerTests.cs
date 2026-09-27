@@ -1,11 +1,13 @@
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Build;
+using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Tests;
 using Optimum.Cli;
 using Xunit;
 
 using Optimum.Bootstrap.Core.Patch;
+using System.Text.Json;
 
 namespace Optimum.Cli.Tests;
 
@@ -53,6 +55,87 @@ public class CliRunnerTests
         Assert.Equal(CliRunner.ExitOk, code);
         Assert.Equal(CoreInfo.Version, stdout.Trim());
         Assert.Equal(string.Empty, stderr);
+    }
+
+    [Fact]
+    public async Task DeltaRequiresExplicitCompatibilityAndDecoderArguments()
+    {
+        var (code, _, stderr) = await Run(["apply-delta"]);
+        Assert.NotEqual(CliRunner.ExitOk, code);
+        Assert.Contains("--decoder", stderr);
+    }
+
+    [Fact]
+    public async Task DeltaUninstallRejectsAnOrdinaryDirectory()
+    {
+        string directory = Directory.CreateTempSubdirectory("delta-cli-guard-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "keep.txt"), "keep");
+            var (code, _, stderr) = await Run(["uninstall-delta", "--install-dir", directory]);
+            Assert.NotEqual(CliRunner.ExitOk, code);
+            Assert.Contains("not a separate Optimum delta installation", stderr);
+            Assert.Equal("keep", File.ReadAllText(Path.Combine(directory, "keep.txt")));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task DeltaUninstallConfirmationRequiresTheExactResponse()
+    {
+        string root = Directory.CreateTempSubdirectory("delta-cli-confirm-").FullName;
+        string original = Path.Combine(root, "original");
+        string runtime = Path.Combine(root, "runtime");
+        Directory.CreateDirectory(original);
+        Directory.CreateDirectory(Path.Combine(runtime, ".optimum"));
+        File.WriteAllText(Path.Combine(original, "keep.txt"), "vanilla");
+        File.WriteAllText(Path.Combine(runtime, "Optimum"), "runtime");
+        var receipt = new DeltaRuntimeReceipt(original,
+            new BinaryDeltaManifest(BinaryDeltaPack.Format, "1.22.7", "0.3.17", "linux-x64", []));
+        File.WriteAllText(Path.Combine(runtime, DeltaRuntimeInstaller.ReceiptPath),
+            JsonSerializer.Serialize(receipt, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.17", InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = runtime, Entries = ["Optimum"],
+        };
+        File.WriteAllText(Path.Combine(runtime, InstallManifest.RelativePath), manifest.Serialize());
+        try
+        {
+            async Task<int> RunWith(string response)
+            {
+                var stdout = new StringWriter();
+                var stderr = new StringWriter();
+                return await CliRunner.RunAsync(["uninstall-delta", "--install-dir", runtime, "--confirm"],
+                    stdout, stderr, SystemProbe.Default, new FakeBuildDriver(), stdin: new StringReader(response));
+            }
+
+            Assert.NotEqual(CliRunner.ExitOk, await RunWith("YES\n"));
+            Assert.True(Directory.Exists(runtime));
+            Assert.Equal(CliRunner.ExitOk, await RunWith("REMOVE\n"));
+            Assert.False(Directory.Exists(runtime));
+            Assert.Equal("vanilla", File.ReadAllText(Path.Combine(original, "keep.txt")));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task DeltaManifestRejectionReturnsStructuredFailure()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "optimum-cli-delta-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "manifest.json"),
+                """{"format":"unknown","gameVersion":"1.22.7","optimumVersion":"0.3.17","rid":"linux-x64","files":[]}""");
+            var (code, stdout, _) = await Run(["apply-delta", "--json", "--game-dir", root,
+                "--pack", root, "--output", root + "-output", "--decoder", Path.Combine(root, "must-not-run"),
+                "--game-version", "1.22.7", "--optimum-version", "0.3.17", "--rid", "linux-x64"]);
+            Assert.NotEqual(CliRunner.ExitOk, code);
+            Assert.Contains("verification-failed", stdout);
+            Assert.False(Directory.Exists(root + "-output"));
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]

@@ -267,7 +267,9 @@ internal readonly record struct MemorySnapshot(
     bool BudgetExtension,
     ulong[] ClassBytes,
     ulong[] HeapUsed,
-    ulong[] HeapBudget);
+    ulong[] HeapBudget,
+    uint[] HeapFlags,
+    ulong[] HeapDriverUsage);
 
 /// <summary>
 /// Hands resources memory out of a few large blocks instead of giving each its
@@ -332,6 +334,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private readonly PhysicalDeviceMemoryProperties _memoryProperties;
     private readonly ulong[] _heapUsed;
     private readonly ulong[] _heapBudget;
+    private readonly ulong[] _heapDriverUsage;
     private readonly ulong[] _classBytes = new ulong[PoolClassCount];
     private ulong _reBarUsed;
     // Block bytes of the Transient class, dedicated ones included, and their peak since the last take.
@@ -349,6 +352,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         context.Api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice, out _memoryProperties);
         _heapUsed = new ulong[_memoryProperties.MemoryHeapCount];
         _heapBudget = new ulong[_memoryProperties.MemoryHeapCount];
+        _heapDriverUsage = new ulong[_memoryProperties.MemoryHeapCount];
         BudgetExtension = context.MemoryBudgetAvailable;
         RefreshBudgetLocked();
     }
@@ -738,6 +742,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
                 _heapBudget[i] = reported > 0
                     ? reported
                     : (ulong)(_memoryProperties.MemoryHeaps[i].Size * FallbackBudgetShare);
+                _heapDriverUsage[i] = budget.HeapUsage[i];
             }
             return;
         }
@@ -753,7 +758,10 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         lock (_gate)
         {
             var heapBudget = new ulong[_heapBudget.Length];
+            var heapFlags = new uint[_heapBudget.Length];
             for (int i = 0; i < heapBudget.Length; i++) heapBudget[i] = HeapBudgetLocked(i);
+            for (int i = 0; i < heapFlags.Length; i++)
+                heapFlags[i] = (uint)_memoryProperties.MemoryHeaps[i].Flags;
 
             ulong cap = 0;
             if (TryFindMemoryType(uint.MaxValue,
@@ -764,7 +772,8 @@ internal sealed unsafe class VulkanAllocator : IDisposable
 
             return new MemorySnapshot(
                 BlockCountLocked(), _dedicated.Count, _reBarUsed, cap, _reBarMisses, _emptyBlocksFreed,
-                BudgetExtension, (ulong[])_classBytes.Clone(), (ulong[])_heapUsed.Clone(), heapBudget);
+                BudgetExtension, (ulong[])_classBytes.Clone(), (ulong[])_heapUsed.Clone(), heapBudget,
+                heapFlags, (ulong[])_heapDriverUsage.Clone());
         }
     }
 
@@ -889,7 +898,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return requirements.MemoryRequirements;
     }
 
-    /// <summary>The <c>stats.memory</c> line: blocks, ReBAR use and misses, bytes per class, used/budget per heap.</summary>
+    /// <summary>The <c>stats.memory</c> line: blocks, ReBAR use, bytes and Vulkan flags per heap.</summary>
     public static string FormatMemoryLine(MemorySnapshot snapshot)
     {
         var line = new StringBuilder("stats.memory");
@@ -915,6 +924,26 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             line.Append(snapshot.HeapUsed![i].ToString(CultureInfo.InvariantCulture)).Append('/');
             ulong budget = snapshot.HeapBudget != null && i < snapshot.HeapBudget.Length ? snapshot.HeapBudget[i] : 0;
             line.Append(budget.ToString(CultureInfo.InvariantCulture));
+        }
+        line.Append(" heap_flags=");
+        for (int i = 0; i < heaps; i++)
+        {
+            if (i > 0) line.Append(',');
+            uint flags = snapshot.HeapFlags != null && i < snapshot.HeapFlags.Length
+                ? snapshot.HeapFlags[i] : 0;
+            line.Append("0x").Append(flags.ToString("X", CultureInfo.InvariantCulture));
+        }
+        line.Append(" driver_heap_usage=");
+        if (!snapshot.BudgetExtension) line.Append("unavailable");
+        else
+        {
+            for (int i = 0; i < heaps; i++)
+            {
+                if (i > 0) line.Append(',');
+                ulong usage = snapshot.HeapDriverUsage != null && i < snapshot.HeapDriverUsage.Length
+                    ? snapshot.HeapDriverUsage[i] : 0;
+                line.Append(usage.ToString(CultureInfo.InvariantCulture));
+            }
         }
         return line.ToString();
     }

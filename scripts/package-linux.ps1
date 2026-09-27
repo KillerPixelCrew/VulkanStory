@@ -115,6 +115,31 @@ try {
     Copy-Item -Force (Join-Path $modOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $modOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
 
+    # Keep the legacy PowerShell package path usable for the Vulkan handheld
+    # preset as well: the renderer loads SDL3 from the application directory.
+    foreach ($required in @('Optimum.Api.Contracts.dll', 'Optimum.GameContent.dll', 'Optimum.Render.Vulkan.dll')) {
+        $source = Join-Path $modOut $required
+        if (-not (Test-Path -LiteralPath $source)) { throw "Missing renderer output: $source" }
+        Copy-Item -LiteralPath $source -Destination $stageDir -Force
+    }
+    Get-ChildItem -Path $modOut -Filter 'Silk.NET.*.dll' -File |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stageDir -Force }
+    $sdlNative = Join-Path $modOut 'runtimes/linux-x64/native/libSDL3.so'
+    if (-not (Test-Path -LiteralPath $sdlNative)) { throw "SDL3 native library missing: $sdlNative" }
+    Copy-Item -LiteralPath $sdlNative -Destination (Join-Path $stageDir 'libSDL3.so') -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'sources/controller/gamecontrollerdb.txt') `
+        -Destination (Join-Path $stageDir 'gamecontrollerdb.txt') -Force -ErrorAction Stop
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'sources/controller/SDL_GameControllerDB-LICENSE.txt') `
+        -Destination (Join-Path $stageDir 'ControllerMappings-LICENSE.txt') -Force -ErrorAction Stop
+    $shadercNative = Join-Path $modOut 'runtimes/linux-x64/native/libshaderc_shared.so'
+    if (-not (Test-Path -LiteralPath $shadercNative)) { throw "shaderc native library missing: $shadercNative" }
+    Copy-Item -LiteralPath $shadercNative -Destination (Join-Path $stageDir 'libshaderc_shared.so') -Force
+    $nativeShaders = Join-Path $modOut 'shaders-vk'
+    if (-not (Test-Path -LiteralPath (Join-Path $nativeShaders 'shaders.manifest.json'))) {
+        throw "Native shader manifest missing: $nativeShaders"
+    }
+    Copy-Item -LiteralPath $nativeShaders -Destination $stageDir -Recurse -Force
+
     # 5b. Overlay optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'
     $shaderDst = Join-Path $stageDir 'assets/game/shaders'

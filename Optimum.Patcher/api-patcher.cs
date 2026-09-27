@@ -54,6 +54,10 @@ public static class ApiPatcher
             method.Name == "InFrustumAndRange" && method.Parameters.Count == 5);
         var optimumShadowCheck = bridge.Methods.Single(method =>
             method.Name == "InFrustumShadowPass" && method.Parameters.Count == 3);
+        var analogMovement = contracts.MainModule.GetType("Optimum.OptimumAnalogMovement")
+            ?? throw new InvalidOperationException("OptimumAnalogMovement is missing from the contracts assembly.");
+        var applyAnalogDirection = analogMovement.Methods.Single(method =>
+            method.Name == "ApplyDirection" && method.Parameters.Count == 3);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -76,6 +80,8 @@ public static class ApiPatcher
         int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
+        int analogVectorHooks = PatchAnalogMovementVector(vanilla.MainModule,
+            vanilla.MainModule.ImportReference(applyAnalogDirection));
 
         if (inventoryHooks != 2)
         {
@@ -121,6 +127,11 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 1 ICoreClientAPI.IsTesselationThread contract patch, applied {clientApiThreadContract}.");
+        }
+        if (analogVectorHooks != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 EntityControls analog-vector hook, applied {analogVectorHooks}.");
         }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
@@ -186,6 +197,27 @@ public static class ApiPatcher
         method.Parameters.Add(new ParameterDefinition("threadId", ParameterAttributes.None, module.TypeSystem.Int32));
         clientApi.Methods.Add(method);
         Console.WriteLine($"  API PATCHED: {typeName}.{methodName}(int)");
+        return 1;
+    }
+
+    private static int PatchAnalogMovementVector(ModuleDefinition module, MethodReference applyDirection)
+    {
+        var controls = module.GetType("Vintagestory.API.Common.EntityControls")
+            ?? throw new InvalidOperationException("EntityControls is missing from the vanilla API.");
+        var method = controls.Methods.Single(candidate => candidate.Name == "CalcMovementVectors" &&
+            candidate.Parameters.Count == 2);
+        if (!method.HasBody) throw new InvalidOperationException(method.FullName + " has no body.");
+        ClearDebugInformation(method);
+        var returns = method.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ret).ToArray();
+        if (returns.Length != 1)
+            throw new InvalidOperationException(method.FullName + " has " + returns.Length + " returns; expected one.");
+        var processor = method.Body.GetILProcessor();
+        Instruction result = returns[0];
+        processor.InsertBefore(result, Instruction.Create(OpCodes.Ldarg_0));
+        processor.InsertBefore(result, Instruction.Create(OpCodes.Ldarg_1));
+        processor.InsertBefore(result, Instruction.Create(OpCodes.Ldarg_2));
+        processor.InsertBefore(result, Instruction.Create(OpCodes.Call, applyDirection));
+        Console.WriteLine("  API HOOKED: " + method.FullName + " -> OptimumAnalogMovement.ApplyDirection");
         return 1;
     }
 

@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Optimum.Installer.ViewModels"
+        x:Class="Optimum.Installer.Views.DeltaUninstallWindow"
+        x:DataType="vm:DeltaUninstallViewModel"
+        Title="Remove Optimum" Width="650" Height="430" MinWidth="540" MinHeight="380"
+        WindowStartupLocation="CenterScreen">
+  <ScrollViewer>
+    <StackPanel Margin="32" Spacing="18">
+      <TextBlock Text="Remove Optimum" FontSize="28" FontWeight="SemiBold" />
+      <TextBlock Text="Remove only the separate Optimum copy and its shortcuts. Close the game first." TextWrapping="Wrap" />
+      <StackPanel Spacing="10" IsEnabled="{Binding CanEdit}">
+        <TextBlock Text="Optimum installation folder" />
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox Text="{Binding TargetDirectory}" PlaceholderText="Folder containing the Optimum launcher" />
+          <Button Grid.Column="1" Content="Browse…" Click="BrowseTarget" Margin="8,0,0,0" MinHeight="44" />
+        </Grid>
+        <TextBlock Text="The folder must contain a verified Optimum delta-install record. Your original Vintage Story files and separate settings/worlds folder are not selected for removal." TextWrapping="Wrap" />
+        <CheckBox IsChecked="{Binding LaunchOriginalAfterRemoval}" Content="Launch the original game after removal" />
+        <CheckBox IsChecked="{Binding Accepted}" Content="I want to remove this Optimum copy." />
+      </StackPanel>
+      <ProgressBar IsIndeterminate="True" IsVisible="{Binding Busy}" />
+      <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="Remove Optimum" Command="{Binding UninstallCommand}" MinHeight="44" MinWidth="150" />
+        <Button Content="Close" Click="CloseWindow" MinHeight="44" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</Window>

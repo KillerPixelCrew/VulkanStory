@@ -218,6 +218,45 @@ public class ShaderBindingTests(ITestOutputHelper output)
     }
 
     [SkippableFact]
+    public unsafe void D16ShadowMapCanBeAttachedAndComparisonSampled()
+    {
+        var device = Open();
+        try
+        {
+            Skip.IfNot(device.SupportsCompactShadowDepth(), "D16 attachment/sampling unavailable");
+            ushort depth = 32768;
+            int texture = device.CreateTexture2DRaw(1, 1, 0x81A5, (IntPtr)(&depth), 2);
+            int shadowTarget = device.CreateFramebuffer(1, 1);
+            device.AttachTexture(shadowTarget, EnumFramebufferAttachment.DepthAttachment, texture, 0);
+            device.SetDrawBuffers(shadowTarget, 0);
+            Assert.True(device.CheckFramebufferComplete(shadowTarget, out string status), status);
+
+            int program = GpuTest.LinkProgram(device, Triangle, """
+                #version 450 core
+                uniform sampler2DShadow probeDepth;
+                uniform float referenceDepth;
+                out vec4 color;
+                void main() { color = vec4(dot(textureGather(probeDepth, vec2(0.5), referenceDepth), vec4(0.25)), 0, 0, 1); }
+                """, "d16-shadow-slot");
+            device.SetSamplerUnit(program, "probeDepth", 0);
+            int reference = device.GetUniformLocation(program, "referenceDepth");
+            var lit = Target(device);
+            var shadowed = Target(device);
+            device.BeginFrame();
+            device.BindTexture(0, texture);
+            device.SetUniform(program, reference, 0.25f);
+            Draw(device, program, lit.Target);
+            device.SetUniform(program, reference, 0.75f);
+            Draw(device, program, shadowed.Target);
+            Pixels(device, lit.Image, 255, 0, 0);
+            Pixels(device, shadowed.Image, 0, 0, 0);
+            device.Present();
+        }
+        finally { device.Dispose(); }
+        GpuTest.AssertClean(device);
+    }
+
+    [SkippableFact]
     public void FrameGlobalsAreSharedOnlyByProgramsWithTheirOwningInclude()
     {
         var device = Open();

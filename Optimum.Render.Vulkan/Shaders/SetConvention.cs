@@ -158,5 +158,6 @@ internal static class SpecializationConvention
         // Optimum AO (docs/vulkan.md#ambient-occlusion C.5, C.11): gates the class-channel writes and
         // scene-ssao's GTAO compose branch, never an output or a varying.
         new(12, "OPTIMUM_OPTIMUMAO", "int", "0", "OPTIMUMAO"),
+        new(13, "OPTIMUM_HANDHELD_SHADOWS", "int", "0", "HANDHELDSHADOWS"),
     };
 }

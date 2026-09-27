@@ -738,6 +738,10 @@ public sealed unsafe partial class VulkanDevice
             return false;
         }
 
+        // Menu and loading-screen draws do not pass through a world render stage.
+        // Start their render bracket at the first recorded draw instead.
+        NoteRenderStageStarted();
+
         NativePassDescription pass = _nativePass;
         VulkanFramebuffer bound = _nativeTarget;
         if (!ReferenceEquals(_targets.Bound, bound))

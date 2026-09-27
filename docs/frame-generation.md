@@ -11,7 +11,7 @@ and pacing while its swapchain proxy is active.
 
 | Provider | Current path | Availability |
 | --- | --- | --- |
-| DLSS Frame Generation | Streamline 2.14.1 Vulkan swapchain proxy; depth, motion, HUD-free scene and UI are tagged for the SDK | Requires a supported NVIDIA device and Streamline FG runtime; a hidden headless window cannot verify displayed generated frames |
+| DLSS Frame Generation | Streamline 2.14.1 Vulkan swapchain proxy; depth, motion, HUD-free scene and UI are tagged for the SDK | On a focused visible Windows SDL world, the SDK reported 239 actual presents for 120 rendered frames at 2×; direct inspection of generated display frames remains open |
 | FSR 3 Frame Generation | FidelityFX Vulkan swapchain proxy calls the SDK generation callback on present and composes the separate UI resource | Requires `amd_fidelityfx_vk.dll` and `OptimumFsr3.dll`; after world load, 120 rendered frames added 240 SDK presents in a headless run |
 | XeSS Frame Generation | XeSS 3.0.2 DX12 proxy replaces Vulkan WSI on the same window; Vulkan blits the rendered color, depth, motion, HUD-free scene and UI into imported D3D12 resources and signals a shared fence | Selectable in the Vulkan options; a headless world run reported 239 SDK presents for 120 rendered frames with generation enabled |
 
@@ -37,13 +37,33 @@ displayed output still needs visible-window verification. The prior `testhost.ex
 came from the reversed sharing direction and has not recurred in the headless
 probe.
 
-Reflex uses Streamline and `VK_NV_low_latency2` where their respective
-presentation paths support them; AMD AntiLag uses `VK_AMD_anti_lag`. Both attach
-to the engine's existing frame markers. XeLL receives sleep, frame cap and
-markers while the Intel proxy is active; Reflex and AntiLag are suspended for
-that path.
+Reflex uses Streamline or `VK_NV_low_latency2` on the NVIDIA presentation path;
+AMD Anti-Lag uses `VK_AMD_anti_lag`. Each rendered frame starts after vendor
+sleep, marks simulation before SDL input collection, and stamps the completed
+SDL pump before dispatch. AMD's INPUT stage is immediately before that pump and
+its PRESENT stage uses the same frame ID at the actual Vulkan present. SDL refreshes
+gamepad state before the shared input-sample marker and before dispatching events.
+XeLL receives sleep, input, simulation, render and present markers while the Intel
+proxy is active. Its present markers and Streamline PCL's markers bracket the
+real DXGI Present on the present thread, using the frame's saved token. If
+Streamline Reflex is loaded, its sleep call still runs in Off mode before XeLL;
+XeLL owns active pacing on that path.
 
-Visible-window validation remains necessary for displayed FPS, history resets,
-resize/minimize, motion-vector sign and scale, and UI recomposition. The
+Streamline PCL loads independently of the NVIDIA plugins. On non-NVIDIA adapters
+the Reflex and DLSS-G plugins are skipped so their NVIDIA Vulkan extensions do
+not prevent device creation. A signed hidden-window test on Intel UHD Graphics
+770 delivered all six PCL phase markers across three frames; a separate NVIDIA
+test delivered those markers and one Reflex sleep per frame. XeLL and AMD
+Anti-Lag still need physical-device gameplay timing trials.
+
+Further visible-window validation remains necessary for displayed FPS, history
+resets, motion-vector sign and scale, and UI recomposition after transitions. The
 FidelityFX and XeSS SDK counts confirm generated presents during headless world runs,
 but a hidden window cannot establish what a monitor actually displayed.
+
+The packaged Windows SDL client now uses native runtimes beside the executable even
+when the managed renderer loads from the launcher's patched cache. A focused visible
+DLSS-G world continued generating at 2× after resize, fullscreen/windowed switches,
+and minimize/restore. A physical F12 hotkey saved an intact rendered gameplay image
+after those transitions. The SDK present count verifies generation; that screenshot
+captures the rendered frame rather than an interpolated display frame.

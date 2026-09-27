@@ -7,9 +7,18 @@ on:
       - 'Optimum.Render.Vulkan.Tests/**'
       - 'sources/shaders-vk/**'
       - 'sources/shaders/**'
+      - 'patches/**'
+      - 'Optimum.Patcher/**'
       - 'sources/VintagestoryApi/Config/OptimumConfig.cs'
       - 'native/optimum-ngx/**'
       - 'native/optimum-fsr3/**'
+      - 'scripts/acquire-delta-decoder.py'
+      - 'scripts/build-delta-pack.py'
+      - 'scripts/binary-delta-poc.py'
+      - 'scripts/test-sdl-gamepad.py'
+      - 'scripts/package-linux.sh'
+      - 'scripts/package-linux.ps1'
+      - 'scripts/release-inputs.json'
       - '.github/workflows/ci-platform-bootstrap.yml'
   workflow_dispatch:
     inputs:
@@ -80,6 +89,13 @@ jobs:
             "${{ steps.client.outputs.url }}"
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
+      - name: Verify pinned client and acquire decoder
+        shell: bash
+        run: |
+          python3 scripts/acquire-delta-decoder.py --rid win-x64 \
+            --client-archive "${{ steps.client.outputs.path }}" \
+            --output "$RUNNER_TEMP/delta-decoder"
+
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
@@ -101,6 +117,10 @@ jobs:
         shell: bash
         run: dotnet build VintageStory.slnx -c Release --nologo
 
+      - name: Probe SDL3 gamepad hot-plug and input
+        shell: bash
+        run: python3 scripts/test-sdl-gamepad.py bin/Release/net10.0/runtimes/win-x64/native/SDL3.dll
+
       - name: Check patches
         shell: bash
         run: bash scripts/check-patches.sh --strict-unavailable
@@ -109,6 +129,51 @@ jobs:
         timeout-minutes: 15
         shell: pwsh
         run: scripts/package.ps1
+
+      - name: Validate packaged launcher and patched runtime
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $package = Join-Path (Get-Location) "Optimum-v${version}-win-x64"
+          $dataPath = Join-Path $env:RUNNER_TEMP 'optimum-launcher-validation'
+          Push-Location $package
+          try {
+            dotnet Optimum.dll --validate-only --dataPath $dataPath
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged launcher validation failed.' }
+          }
+          finally { Pop-Location }
+
+      - name: Build and reconstruct the Windows delta pack
+        shell: bash
+        run: |
+          version="$(cat VERSION)"
+          python3 scripts/build-delta-pack.py --rid win-x64 \
+            --original .vanilla/win-x64/vintagestory \
+            --donors "Optimum-v${version}-win-x64/.optimum/donors" \
+            --patcher Optimum.Patcher/bin/Release/net10.0/Optimum.Patcher.dll \
+            --decoder "$RUNNER_TEMP/delta-decoder/xdelta3.exe" \
+            --output "$RUNNER_TEMP/delta-pack-win-x64"
+
+      - name: Apply the Windows pack through the shipped C# consumer
+        shell: pwsh
+        run: |
+          $gameVersion = (Get-Content scripts/release-inputs.json -Raw | ConvertFrom-Json).gameVersion
+          $optimumVersion = (Get-Content VERSION -Raw).Trim()
+          dotnet exec Optimum.Cli/bin/Release/net10.0/optimum.dll apply-delta `
+            --game-dir (Resolve-Path .vanilla/win-x64/vintagestory).Path `
+            --pack (Resolve-Path (Join-Path $env:RUNNER_TEMP 'delta-pack-win-x64')).Path `
+            --output (Join-Path $env:RUNNER_TEMP 'delta-csharp-win-x64') `
+            --decoder (Resolve-Path (Join-Path $env:RUNNER_TEMP 'delta-decoder/xdelta3.exe')).Path `
+            --game-version $gameVersion --optimum-version $optimumVersion --rid win-x64
+          if ($LASTEXITCODE -ne 0) { throw 'The C# decoder could not reconstruct the Windows pack.' }
+
+      - name: Upload verified Windows delta pack
+        uses: actions/upload-artifact@v7
+        with:
+          name: delta-pack-win-x64
+          path: ${{ runner.temp }}/delta-pack-win-x64/
+          if-no-files-found: error
 
       - name: Run tests
         shell: bash
@@ -184,6 +249,13 @@ jobs:
             "${{ steps.client.outputs.url }}"
           mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
 
+      - name: Verify pinned client and acquire decoder
+        shell: bash
+        run: |
+          python3 scripts/acquire-delta-decoder.py --rid linux-x64 \
+            --client-archive "${{ steps.client.outputs.path }}" \
+            --output "$RUNNER_TEMP/delta-decoder"
+
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
@@ -204,6 +276,10 @@ jobs:
       - name: Build
         shell: bash
         run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Probe SDL3 gamepad hot-plug and input
+        shell: bash
+        run: python3 scripts/test-sdl-gamepad.py bin/Release/net10.0/runtimes/linux-x64/native/libSDL3.so
 
       - name: Check patches
         shell: bash
@@ -230,6 +306,37 @@ jobs:
           python3 scripts/check-ndjson-stream.py < "$RUNNER_TEMP/build-stream.ndjson"
           pkg="$(ls -d "$out"/Optimum-v*/ | head -n1)"
           dotnet run --project Optimum.Cli -c Release -- validate --package "$pkg"
+          test -f "$pkg/libSDL3.so"
+          python3 scripts/test-sdl-gamepad.py "$pkg/libSDL3.so"
+
+      - name: Build and reconstruct the Linux delta pack
+        shell: bash
+        run: |
+          version="$(cat VERSION)"
+          python3 scripts/build-delta-pack.py --rid linux-x64 \
+            --original .vanilla/linux-x64/vintagestory \
+            --donors "$RUNNER_TEMP/optimum-package/Optimum-v${version}-linux-x64/.optimum/donors" \
+            --patcher Optimum.Patcher/bin/Release/net10.0/Optimum.Patcher.dll \
+            --decoder "$RUNNER_TEMP/delta-decoder/xdelta3" \
+            --output "$RUNNER_TEMP/delta-pack-linux-x64"
+
+      - name: Apply the Linux pack through the shipped C# consumer
+        shell: bash
+        run: |
+          game_version="$(python3 -c "import json; print(json.load(open('scripts/release-inputs.json'))['gameVersion'])")"
+          dotnet exec Optimum.Cli/bin/Release/net10.0/optimum.dll apply-delta \
+            --game-dir "$PWD/.vanilla/linux-x64/vintagestory" \
+            --pack "$RUNNER_TEMP/delta-pack-linux-x64" \
+            --output "$RUNNER_TEMP/delta-csharp-linux-x64" \
+            --decoder "$RUNNER_TEMP/delta-decoder/xdelta3" \
+            --game-version "$game_version" --optimum-version "$(cat VERSION)" --rid linux-x64
+
+      - name: Upload verified Linux delta pack
+        uses: actions/upload-artifact@v7
+        with:
+          name: delta-pack-linux-x64
+          path: ${{ runner.temp }}/delta-pack-linux-x64/
+          if-no-files-found: error
 
       - name: Upload logs on failure
         if: failure()

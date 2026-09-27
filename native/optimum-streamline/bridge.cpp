@@ -7,6 +7,7 @@
 #include <softpub.h>
 #include <wincrypt.h>
 #include <string>
+#include <cstdint>
 #include <atomic>
 #include <cstdio>
 #include <vulkan/vulkan.h>
@@ -28,7 +29,10 @@ PFN_vkGetInstanceProcAddr instanceProc{};
 PFN_vkGetDeviceProcAddr deviceProc{};
 PFun_slReflexSetOptions* reflexOptions{};
 PFun_slReflexSleep* reflexSleep{};
+PFun_slReflexGetState* reflexState{};
 PFun_slPCLSetMarker* pclMarker{};
+PFun_slPCLGetState* pclState{};
+PFun_slPCLSetOptions* pclOptions{};
 PFun_slDLSSGSetOptions* fgOptions{};
 PFun_slDLSSGGetState* fgState{};
 bool fgConfigured{};
@@ -151,7 +155,8 @@ void onStreamlineMessage(sl::LogType type, const char* message) {
 }
 
 extern "C" {
-__declspec(dllexport) int OptimumSlInitialize(const wchar_t* directory, const char* projectId) {
+__declspec(dllexport) int OptimumSlInitialize(const wchar_t* directory, const char* projectId,
+    uint32_t loadReflex, uint32_t loadDlssG) {
     if (module) return 0;
     if (!directory || !projectId) return -1;
     wchar_t path[MAX_PATH]{};
@@ -175,10 +180,14 @@ __declspec(dllexport) int OptimumSlInitialize(const wchar_t* directory, const ch
     pluginDirectory = directory;
     projectIdentity = projectId;
     pluginPath = pluginDirectory.c_str();
-    static const sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
+    static const sl::Feature pclOnly[] = { sl::kFeaturePCL };
+    static const sl::Feature latencyFeatures[] = { sl::kFeatureReflex, sl::kFeaturePCL };
+    static const sl::Feature frameGenerationFeatures[] = {
+        sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
     sl::Preferences preferences{};
-    preferences.featuresToLoad = features;
-    preferences.numFeaturesToLoad = 3;
+    preferences.featuresToLoad = loadDlssG ? frameGenerationFeatures :
+        loadReflex ? latencyFeatures : pclOnly;
+    preferences.numFeaturesToLoad = loadDlssG ? 3 : loadReflex ? 2 : 1;
     preferences.projectId = projectIdentity.c_str();
     preferences.engine = sl::EngineType::eCustom;
     preferences.engineVersion = "0.3";
@@ -200,7 +209,8 @@ __declspec(dllexport) void OptimumSlShutdown() {
     if (shutdown) shutdown();
     FreeLibrary(module);
     module = nullptr;
-    reflexOptions = nullptr; reflexSleep = nullptr; pclMarker = nullptr;
+    reflexOptions = nullptr; reflexSleep = nullptr; reflexState = nullptr; pclMarker = nullptr;
+    pclState = nullptr; pclOptions = nullptr;
     fgOptions = nullptr; fgState = nullptr; frameToken = nullptr;
     fgConfigured = false;
     lastPresentError.store(0, std::memory_order_relaxed);
@@ -267,19 +277,49 @@ __declspec(dllexport) int OptimumSlIsFrameGenerationSupported(VkPhysicalDevice p
     adapter.vkPhysicalDevice = physical;
     return static_cast<int>(isFeatureSupported(sl::kFeatureDLSS_G, adapter));
 }
-__declspec(dllexport) int OptimumSlBindFeatures() {
+__declspec(dllexport) int OptimumSlBindReflex() {
     void* function{};
     if (!loadFeature(sl::kFeatureReflex, "slReflexSetOptions", function)) return -1;
     reflexOptions = reinterpret_cast<PFun_slReflexSetOptions*>(function);
     if (!loadFeature(sl::kFeatureReflex, "slReflexSleep", function)) return -2;
     reflexSleep = reinterpret_cast<PFun_slReflexSleep*>(function);
-    if (!loadFeature(sl::kFeaturePCL, "slPCLSetMarker", function)) return -3;
-    pclMarker = reinterpret_cast<PFun_slPCLSetMarker*>(function);
+    if (!loadFeature(sl::kFeatureReflex, "slReflexGetState", function)) return -3;
+    reflexState = reinterpret_cast<PFun_slReflexGetState*>(function);
+    return 0;
+}
+__declspec(dllexport) int OptimumSlBindFrameGeneration() {
+    void* function{};
     if (!loadFeature(sl::kFeatureDLSS_G, "slDLSSGSetOptions", function)) return -4;
     fgOptions = reinterpret_cast<PFun_slDLSSGSetOptions*>(function);
     if (!loadFeature(sl::kFeatureDLSS_G, "slDLSSGGetState", function)) return -5;
     fgState = reinterpret_cast<PFun_slDLSSGGetState*>(function);
     return 0;
+}
+__declspec(dllexport) int OptimumSlGetReflexState(uint32_t* available, uint32_t* reports) {
+    if (!reflexState || !available || !reports) return -1;
+    sl::ReflexState state{};
+    auto result = reflexState(state);
+    if (result != sl::Result::eOk) return static_cast<int>(result);
+    *available = state.lowLatencyAvailable ? 1u : 0u;
+    *reports = state.latencyReportAvailable ? 1u : 0u;
+    return 0;
+}
+__declspec(dllexport) int OptimumSlBindPcl() {
+    void* function{};
+    if (!loadFeature(sl::kFeaturePCL, "slPCLSetMarker", function)) return -1;
+    pclMarker = reinterpret_cast<PFun_slPCLSetMarker*>(function);
+    if (!loadFeature(sl::kFeaturePCL, "slPCLGetState", function)) return -2;
+    pclState = reinterpret_cast<PFun_slPCLGetState*>(function);
+    if (!loadFeature(sl::kFeaturePCL, "slPCLSetOptions", function)) return -3;
+    pclOptions = reinterpret_cast<PFun_slPCLSetOptions*>(function);
+    sl::PCLOptions options{};
+    options.idThread = GetCurrentThreadId();
+    return static_cast<int>(pclOptions(options));
+}
+__declspec(dllexport) uint32_t OptimumSlPclWindowMessage() {
+    if (!pclState) return 0;
+    sl::PCLState state{};
+    return pclState(state) == sl::Result::eOk ? state.statsWindowMessage : 0;
 }
 __declspec(dllexport) int OptimumSlSetReflex(int mode, uint32_t maxFps) {
     if (!reflexOptions) return -1;
@@ -293,11 +333,18 @@ __declspec(dllexport) int OptimumSlBeginFrame(uint32_t frameIndex) {
     if (!newFrameToken) return -1;
     return static_cast<int>(newFrameToken(frameToken, &frameIndex));
 }
+__declspec(dllexport) uintptr_t OptimumSlCurrentFrameToken() {
+    return reinterpret_cast<uintptr_t>(frameToken);
+}
 __declspec(dllexport) int OptimumSlReflexSleep() {
     return reflexSleep && frameToken ? static_cast<int>(reflexSleep(*frameToken)) : -1;
 }
 __declspec(dllexport) int OptimumSlMarker(uint32_t marker) {
     return pclMarker && frameToken ? static_cast<int>(pclMarker(static_cast<sl::PCLMarker>(marker), *frameToken)) : -1;
+}
+__declspec(dllexport) int OptimumSlMarkerForToken(uintptr_t token, uint32_t marker) {
+    auto* frame = reinterpret_cast<sl::FrameToken*>(token);
+    return pclMarker && frame ? static_cast<int>(pclMarker(static_cast<sl::PCLMarker>(marker), *frame)) : -1;
 }
 __declspec(dllexport) int OptimumSlTagFrame(VkCommandBuffer commandBuffer,
     const TaggedImage* depth, const TaggedImage* motion, const TaggedImage* hudless,

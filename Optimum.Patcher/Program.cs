@@ -290,6 +290,31 @@ var membersToInject = new Dictionary<string, List<string>>
     },
     ["Vintagestory.Client.NoObf.ClientPlatformWindows"] = new()
     {
+        // SDL3 handheld input shares key/mouse state with physical devices.
+        "optimumPhysicalKeys",
+        "optimumControllerKeys",
+        "optimumPhysicalMouseButtons",
+        "optimumTouchMouseButtons",
+        "optimumControllerMouseButtons",
+        "InjectControllerKey",
+        "InjectControllerMouseButton",
+        "OptimumWindowMousePosition",
+        "OptimumControllerMoveFactor",
+        "OptimumControllerMoveAxes",
+        "OptimumPhysicalMovementHeld",
+        "InjectPhysicalKey",
+        "OptimumNotePhysicalInput",
+        "InjectPhysicalText",
+        "InjectPhysicalFocusChanged",
+        "InjectPhysicalMouseMotion",
+        "InjectControllerMouseMotion",
+        "InjectPhysicalMouseButton",
+        "InjectTouchMouseButton",
+        "InjectPhysicalMouseWheel",
+        "OptimumRunSdlFrame",
+        "optimumSdlFrameActive",
+        "OptimumSdlWindowActive",
+        "OptimumSdlCloseAllowed",
         "OptimumPostAmbientOcclusionTexture",
         "OptimumPostSsaaLevel",
         "OptimumPostSsaoInScene",
@@ -497,6 +522,21 @@ var membersToInject = new Dictionary<string, List<string>>
         "UpdateUBO",
         "DeleteUBO",
     },
+    ["Vintagestory.Client.NoObf.DrawWorldInteractionUtil"] = new()
+    {
+        "DrawControllerGlyph",
+    },
+    ["Vintagestory.Client.NoObf.SystemPlayerControl"] = new()
+    {
+        "optimumPreviousAnalogFactorCode",
+        "optimumPreviousBaseSpeed",
+        "optimumPreviousAnalogEntityId",
+        "optimumPreviousAnalogXCode",
+        "optimumPreviousAnalogYCode",
+        "optimumNextAnalogRefreshMs",
+        "optimumAnalogProbeAttempts",
+        "optimumNextAnalogProbeMs",
+    },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
     // the entity motion writer adds a second ("AnimationPrev") beside it, and
@@ -551,6 +591,8 @@ var membersToInject = new Dictionary<string, List<string>>
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
     {
+        "optimumControllerHintsChanged",
+        "OnControllerHintsChanged",
         "oButtonBounds",
         "vButtonBounds",
         "optimumContentBounds",
@@ -605,6 +647,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumFpsComposer", "optimumFpsText", "optimumFpsSampleTicks",
         "optimumLastRealPresents", "optimumLastSdkPresents", "optimumLoopFrames",
         "optimumLastProvider", "UpdateOptimumFpsCounter",
+    },
+    ["Vintagestory.Client.NoObf.HudHotbar"] = new()
+    {
+        "lastStabilityHoverElement", "lastStabilityHoverPercent",
     },
     // GuiManager: reusable scratch buffers replacing per-call .ToList() snapshots
     ["Vintagestory.Client.NoObf.GuiManager"] = new()
@@ -697,6 +743,7 @@ var membersToInject = new Dictionary<string, List<string>>
     },
     ["Vintagestory.Client.NoObf.ClientMain"] = new()
     {
+        "OptimumAnalogServerReady",
         "tesselationWorkers",
         "IsTesselationThread",
         "RegisterTesselationThread",
@@ -885,6 +932,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.HudDebugScreen", "Compose", 0),
     new("Vintagestory.Client.NoObf.HudDebugScreen", "OnFinalizeFrame", 1),
     new("Vintagestory.Client.NoObf.HudDebugScreen", "OnRenderGUI", 1),
+    // Avoid rebuilding the gear tooltip texture every render frame when its
+    // displayed percentage and hover element have not changed.
+    new("Vintagestory.Client.NoObf.HudHotbar", "renderGear", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
@@ -966,6 +1016,17 @@ var targets = new List<MethodTarget>
         new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    new("Vintagestory.Client.Gui.MainMenuRenderAPI", "Render2DTexture", 7),
+    // SDL3 controller/physical input arbitration at the shared event seam.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "game_KeyDown", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "game_KeyUp", 1),
+    // Handheld analog magnitude rides a bounded player-entity packet alongside
+    // the existing directional key packets; keyboard movement remains full speed.
+    new("Vintagestory.Client.NoObf.SystemPlayerControl", "OnGameTick", 1),
+    new("Vintagestory.Client.NoObf.ClientSystemEntities", "HandleEntityPacket", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Mouse_ButtonDown", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Mouse_ButtonUp", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_FocusChanged", 1),
     // The shared index buffer is freed at shutdown, after the GL binding is gone
     // on the device path; the raw call throws there instead of freeing it.
     new("Vintagestory.Client.NoObf.ClientPlatformAbstract", "DisposeIndexBuffer", 0),
@@ -1048,6 +1109,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnloadFrameBuffer", 1,
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
+    // SDL-owned startup skips the legacy GLFW monitor query in this constructor.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", ".ctor", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
     // Optimum (headless render harness): a capture runs silent, so the mixer is
     // created muted and every later attempt to restore the volume is answered with
@@ -1080,6 +1143,14 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientMain", "PerspectiveMode", 0),
     new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemStackToFrameBuffer", 3),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleLevelFinalize", 1),
+    new("Vintagestory.Client.NoObf.DrawWorldInteractionUtil", "DrawHotkey", 10),
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "LoadMouseCombinations", 0),
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "LoadKeyCombinations", 0),
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", ".ctor", 2),
+    // SDL-owned capture must size the default target through the platform seam,
+    // not through the absent GLFW window.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SaveScreenshot", 5),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GrabScreenshot", 2),
     new("Vintagestory.ClientNative.Screenshot", "GrabScreenshot", 4),
     // Vulkan backend: the GUI depth clear between the world and the interface,
     // the only raw GL left in the screen loop.
@@ -1094,6 +1165,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderParticles", "OnRenderFrame3D", 1),
     // Phase 3b stage 2: the pools' instanced draws go through the platform's particle seam.
     new("Vintagestory.Client.NoObf.SystemRenderParticles", "Render", 2),
+    // Handheld preset: avoid the timed full GC/LOH compaction in low-memory mode.
+    new("Vintagestory.Client.NoObf.SystemCompressChunks", "TryCompactLargeObjectHeap", 1),
+    // Handheld idle threads wait for their next scheduled tick instead of polling.
+    new("Vintagestory.Client.NoObf.ClientThread", "Process", 0),
+    new("Vintagestory.Server.ServerThread", "Process", 0),
     // Phase 3b stage 2: the star box and the moon draw through their own platform seams.
     new("Vintagestory.Client.NoObf.SystemRenderNightSky", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.SystemRenderSunMoon", "OnRenderFrame3D", 1),
@@ -1269,6 +1345,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerSystemRelight", "ProcessLightingTask", 2),
     new("Vintagestory.Server.ServerMain", "get_AllOnlinePlayers", 0),
     new("Vintagestory.Server.ServerMain", "get_AllPlayers", 0),
+    new("Vintagestory.Server.ServerMain", "HandleEntityPacket", 2),
     // Two BroadcastArbitraryPacket overloads share a name and param count -
     // ParameterTypes disambiguates which one each target binds to.
     new("Vintagestory.Server.ServerMain", "BroadcastArbitraryPacket", 2,

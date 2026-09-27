@@ -32,6 +32,7 @@ obj/
 dist/
 publish/
 /releases/
+/local-builds/
 /tmp/
 
 # IDE
@@ -70,6 +71,7 @@ __pycache__/
 # a negation inside a fully excluded directory is never reconsidered by git.)
 docs/*
 !docs/ROADMAP.md
+!docs/controller.md
 !docs/upscaler.md
 # ...except the TAA acceptance checklist: it is a deliverable the P5 coverage test
 # (Optimum.Tests/Temporal/AcceptanceTests.cs) reads, so it has to be tracked.
@@ -92,8 +94,8 @@ docs/*
 build-linux.sh
 build-windows.ps1
 
-# Working notes for assistants and the local plan and status files: kept beside the checkout, never in it.
-AGENTS.md
+# Local working notes and plan/status files stay outside Git. AGENTS.md is
+# tracked so the repository's agent workflow applies to future work.
 CLAUDE.md
 .claude/
 docs/vulkan-native-plan.md

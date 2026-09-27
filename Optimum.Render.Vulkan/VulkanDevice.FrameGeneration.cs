@@ -7,7 +7,8 @@ namespace Optimum.Render.Vulkan;
 
 public sealed unsafe partial class VulkanDevice
 {
-    internal bool StreamlineFrameGenerationAvailable => _streamlineFeaturesReady && _streamlineFrameGenerationSupported &&
+    internal bool StreamlineFrameGenerationAvailable => _streamlineReflexReady &&
+        _streamlineFrameGenerationReady && _streamlineFrameGenerationSupported &&
         _context.Streamline != null && _swapchain != null;
 
     internal bool StreamlineFrameGenerationReady => StreamlineFrameGenerationAvailable &&
@@ -149,7 +150,7 @@ public sealed unsafe partial class VulkanDevice
         if (provider == "xess")
         {
             _vendorLatency?.SetMode(0);
-            if (_streamlineFeaturesReady)
+            if (_streamlineReflexReady)
                 _context.Streamline?.SetReflex(0, _vendorFrameCap);
         }
         _appliedLatencyMode = -1;

@@ -962,7 +962,9 @@ internal sealed unsafe class BlitPresentPath
                 1, &blit, Filter.Linear);
         }
 
-        // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC (BOTTOM_OF_PIPE, no access).
+        // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC. With synchronization2,
+        // the release has no destination stage or access; the present semaphore
+        // orders the presentation engine after this transition.
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
             ResourceUsage.PresentSrc, discard: false);
         barriers.Flush(commandBuffer);

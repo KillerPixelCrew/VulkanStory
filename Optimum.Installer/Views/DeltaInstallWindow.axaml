@@ -1,0 +1,55 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Optimum.Installer.ViewModels"
+        x:Class="Optimum.Installer.Views.DeltaInstallWindow"
+        x:DataType="vm:DeltaInstallViewModel"
+        Title="Install Optimum" Width="760" Height="660" MinWidth="620" MinHeight="560"
+        WindowStartupLocation="CenterScreen">
+  <ScrollViewer>
+    <StackPanel Margin="32" Spacing="18">
+      <TextBlock Text="Install Optimum" FontSize="28" FontWeight="SemiBold" />
+      <TextBlock Text="Use your existing Vintage Story installation to create a separate Optimum copy. No build tools are needed." TextWrapping="Wrap" />
+      <TextBlock Text="The matching Optimum release is downloaded and checked before installation."
+                 IsVisible="{Binding UsesDownload}" TextWrapping="Wrap" />
+      <StackPanel Spacing="8" IsEnabled="{Binding CanEdit}">
+        <TextBlock Text="Vintage Story folder" />
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox Text="{Binding OriginalDirectory}" PlaceholderText="Folder containing Vintagestory.dll" />
+          <Button Grid.Column="1" Content="Browse…" Click="BrowseOriginal" Margin="8,0,0,0" MinHeight="44" />
+        </Grid>
+        <TextBlock Text="Optimum folder" Margin="0,8,0,0" />
+        <Grid ColumnDefinitions="*,Auto,Auto">
+          <TextBox Text="{Binding DestinationDirectory}" PlaceholderText="New folder for install, existing folder for repair" />
+          <Button Grid.Column="1" Content="Choose parent…" Click="BrowseDestination" Margin="8,0,0,0" MinHeight="44" />
+          <Button Grid.Column="2" Content="Choose existing…" Click="BrowseRepair" Margin="8,0,0,0" MinHeight="44" />
+        </Grid>
+        <TextBlock Text="Install needs a new folder. Repair needs an existing copy from this release and keeps the previous copy as a backup." TextWrapping="Wrap" />
+        <TextBlock Text="Settings preset" Margin="0,8,0,0" />
+        <ComboBox ItemsSource="{Binding Presets}" SelectedItem="{Binding Preset}" MinHeight="44" />
+        <TextBlock Text="Desktop uses Vulkan and TAA. Handheld starts with Vulkan, XeSS quality, a 0.75 render-scale fallback, a 60 FPS cap, greedy meshing, fewer particles, flat clouds and lighter effects. Presets require a new or empty separate data folder; device tuning remains in the Roadmap." TextWrapping="Wrap" />
+        <CheckBox IsChecked="{Binding UseCustomDataPath}" Content="Use a custom data folder" Margin="0,8,0,0" />
+        <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding UseCustomDataPath}">
+          <TextBox Text="{Binding DataPath}" PlaceholderText="Existing folder or new folder under an existing parent" />
+          <Button Grid.Column="1" Content="Browse…" Click="BrowseDataPath" Margin="8,0,0,0" MinHeight="44" />
+        </Grid>
+        <CheckBox IsChecked="{Binding CreateMenuShortcut}" Content="Create application-menu shortcut" Margin="0,8,0,0" />
+        <CheckBox IsChecked="{Binding CreateDesktopShortcut}" Content="Create desktop shortcut" />
+        <Border Padding="16" Margin="0,12,0,0" BorderThickness="1" BorderBrush="Gray" CornerRadius="6">
+          <StackPanel Spacing="10">
+            <TextBlock Text="Before installing" FontWeight="SemiBold" />
+            <TextBlock Text="Optimum modifies a copy of your game. Your Vintage Story license still applies. Unless you choose a custom folder, the copied runtime uses your normal Vintage Story data folder." TextWrapping="Wrap" />
+            <CheckBox IsChecked="{Binding Accepted}" Content="I understand and want to install the modified copy." />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+      <ProgressBar IsIndeterminate="True" IsVisible="{Binding Busy}" />
+      <TextBlock Text="{Binding Status}" TextWrapping="Wrap" />
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Content="Install" Command="{Binding InstallCommand}" MinHeight="44" MinWidth="120" />
+        <Button Content="Repair existing copy" Command="{Binding RepairCommand}" MinHeight="44" />
+        <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding Busy}" MinHeight="44" />
+        <Button Content="Remove existing copy…" Click="OpenUninstall" IsEnabled="{Binding CanEdit}" MinHeight="44" />
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</Window>

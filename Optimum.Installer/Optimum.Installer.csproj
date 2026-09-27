@@ -40,4 +40,5 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Optimum.Installer.Tests" />
   </ItemGroup>
+  <Import Project="../scripts/delta-decoder.targets" />
 </Project>

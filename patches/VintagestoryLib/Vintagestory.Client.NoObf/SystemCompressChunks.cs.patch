@@ -1,0 +1,32 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemCompressChunks.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemCompressChunks.cs
+index c9052a36..f0f86320 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemCompressChunks.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemCompressChunks.cs
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Runtime;
+ using Vintagestory.API.Client;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ internal class SystemCompressChunks : ClientSystem
+@@ -31,10 +32,16 @@ internal class SystemCompressChunks : ClientSystem
+ 		game.eventManager.RegisterRenderer(OnFinalizeFrame, EnumRenderStage.Done, "cc", 0.999);
+ 	}
+ 
+ 	private void TryCompactLargeObjectHeap(float dt)
+ 	{
++		// Let the runtime collect naturally on the handheld preset. A timed full
++		// collection with LOH compaction can stall the shared client/server process.
++		if (OptimumConfig.AvoidForcedGc)
++		{
++			return;
++		}
+ 		if (ClientSettings.OptimizeRamMode != 2)
+ 		{
+ 			return;
+ 		}
+ 		int num = Environment.TickCount / 1000 - lastCompactionTime;

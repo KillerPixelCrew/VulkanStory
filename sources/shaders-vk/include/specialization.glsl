@@ -31,5 +31,7 @@ layout(constant_id = 11) const int OPTIMUM_DYNLIGHTS = 0;
 // Optimum AO: the class-channel writes and scene-ssao's GTAO compose branch. Gates no
 // output or varying, so it is a constant, not an axis.
 layout(constant_id = 12) const int OPTIMUM_OPTIMUMAO = 0;
+// Handheld shadow tier: one cascade and one four-comparison gather per pixel.
+layout(constant_id = 13) const int OPTIMUM_HANDHELD_SHADOWS = 0;
 
 #endif

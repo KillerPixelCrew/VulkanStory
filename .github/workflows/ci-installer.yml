@@ -9,6 +9,12 @@ on:
       - 'Optimum.Cli.Tests/**'
       - 'Optimum.Installer/**'
       - 'Optimum.Installer.Tests/**'
+      - 'scripts/package-delta-download.py'
+      - 'scripts/test-package-delta-download.py'
+      - 'scripts/acquire-delta-decoder.py'
+      - 'scripts/test-acquire-delta-decoder.py'
+      - 'scripts/bundle-delta-decoder.py'
+      - 'scripts/release-inputs.json'
       - 'Optimum.Installer.slnf'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
@@ -45,6 +51,12 @@ jobs:
 
       - name: Test
         run: dotnet test Optimum.Installer.slnf -c Release --nologo
+
+      - name: Test download archive contract
+        run: python3 scripts/test-package-delta-download.py
+
+      - name: Test pinned decoder acquisition
+        run: python3 scripts/test-acquire-delta-decoder.py
 
   cli-contract:
     name: CLI contract

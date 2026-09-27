@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using Optimum.Render.Vulkan.Core;
 using Vintagestory;
 using Vintagestory.API.Config;
 using Vintagestory.Client.NoObf;
@@ -22,7 +23,7 @@ namespace Optimum.Render.Vulkan.Platform;
 /// declares the virtuals this class relies on, and fails the install (OpenGL
 /// fallback) instead of letting a call bypass an override mid-frame.
 /// </summary>
-public partial class VulkanClientPlatform : ClientPlatformWindows
+public partial class VulkanClientPlatform : ClientPlatformWindows, Vintagestory.API.Client.IOptimumSdlClientPlatform
 {
     /// <summary>
     /// The device this platform brought up in <see cref="InitializeGraphics" />. Every
@@ -57,6 +58,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(false, "RenderFullscreenTriangle", new[] { "MeshRef" }),
         new(false, "GetGraphicsCardRenderer", Array.Empty<string>()),
         new(false, "LogAndTestHardwareInfosStage2", Array.Empty<string>()),
+        new(false, "OptimumControllerMoveFactor", Array.Empty<string>()),
+        new(false, "OptimumControllerMoveAxes", Array.Empty<string>()),
+        new(false, "OptimumWindowMousePosition", Array.Empty<string>()),
+        new(false, "OptimumWindowClientSize", Array.Empty<string>()),
         // Phase 1A step 3: program, uniform and UBO operations (overridden since step 4).
         new(true, "UseShaderProgram", new[] { "Int32" }),
         new(true, "DisposeShaderProgram", new[] { "ShaderProgramBase" }),
@@ -181,6 +186,21 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// </summary>
     internal static readonly string[] ExpectedWindowsMembers =
     {
+        "InjectControllerKey",
+        "InjectControllerMouseButton",
+        "OptimumWindowMousePosition",
+        "OptimumControllerMoveFactor",
+        "OptimumControllerMoveAxes",
+        "OptimumPhysicalMovementHeld",
+        "InjectPhysicalKey",
+        "InjectPhysicalText",
+        "InjectPhysicalFocusChanged",
+        "InjectPhysicalMouseMotion",
+        "InjectPhysicalMouseButton",
+        "InjectPhysicalMouseWheel",
+        "OptimumRunSdlFrame",
+        "OptimumSdlCloseAllowed",
+        "OptimumSdlWindowActive",
         "OptimumRenderSsao",
         "OptimumAdoptFrameBufferSettings",
         "OptimumTaaRequested",
@@ -284,6 +304,16 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// API, which it reopens for OpenGL with a base platform.
     /// </summary>
     public override bool InitializeGraphics(IntPtr windowHandle, int width, int height, out string reason)
+        => InitializeGraphicsWindow(windowHandle == IntPtr.Zero ? null : new GlfwVulkanWindowSurface(windowHandle),
+            width, height, out reason);
+
+    internal bool InitializeSdlGraphics(SdlVulkanWindowHost window, out string reason)
+    {
+        (int width, int height) = window.PixelSize;
+        return InitializeGraphicsWindow(window, width, height, out reason);
+    }
+
+    private bool InitializeGraphicsWindow(IVulkanWindowSurface? window, int width, int height, out string reason)
     {
         string? hostReason;
         if (!VerifyHost(typeof(ClientPlatformAbstract), typeof(ClientPlatformWindows), out hostReason))
@@ -321,7 +351,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             // OpenGL on its own.
             OptimumRenderBootstrap.WriteCrashMarker(CrashMarkerDataPath ?? GamePaths.DataPath);
 
-            if (!device.Initialize(windowHandle, width, height, out string failureReason))
+            if (!device.InitializeWindow(window, width, height, out string failureReason))
             {
                 ShutDownUpscaler();
                 device.Dispose();
@@ -331,6 +361,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            sdlWindowHost = window as SdlVulkanWindowHost;
+            if (sdlWindowHost != null && XPlatInterface != null)
+                XPlatInterface = new SdlXPlatformInterface(XPlatInterface, sdlWindowHost);
+            OptimumSdlWindowActive = sdlWindowHost != null;
+            SdlWindowId = window is SdlVulkanWindowHost sdl ? sdl.WindowId : 0;
             device.OwnerPlatform = this;
             BringUpUpscaler(device);
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
@@ -353,6 +388,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
                 // The install already failed; the reason below is the useful one.
             }
             OptimumRenderBootstrap.ClearCrashMarker();
+            this.device = null;
+            sdlWindowHost = null;
+            OptimumSdlWindowActive = false;
+            SdlWindowId = 0;
+            sdlCloseRequested = false;
             reason = error.Message;
             return false;
         }
@@ -364,9 +404,22 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// </summary>
     public override void ShutdownGraphics()
     {
+        try { StopSdlTextInput(); }
+        catch (Exception)
+        {
+            sdlTextInputActive = false;
+            sdlTextInputTarget = null;
+            sdlCompositionText = "";
+        }
+        try { sdlTouchMouse?.Cancel(); }
+        catch (Exception) { /* Continue graphics teardown after an input handler fails. */ }
+        sdlTouchMouse = null;
+        sdlGamepadInput?.Dispose();
+        sdlGamepadInput = null;
         ResetFrameGeneration();
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
+        sdlWindowHost?.RemovePclPingHook();
         RemoveModPassHooks();
         ShutDownUpscaler();
         try
@@ -387,6 +440,17 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         }
 
         device = null;
+        if (XPlatInterface is SdlXPlatformInterface sdlPlatformInterface)
+            XPlatInterface = sdlPlatformInterface.Inner;
+        if (ownsSdlWindow) sdlWindowHost?.Dispose();
+        ownsSdlWindow = false;
+        sdlWindowHost = null;
+        OptimumSdlWindowActive = false;
+        SdlWindowId = 0;
+        sdlCloseRequested = false;
+        pendingSdlPixelSize = null;
+        pendingSdlGuiRecompose = false;
+        pendingSdlControllerWarpPixels = null;
         RenderStageListener = null;
         OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
         OptimumRender.NoGraphicsApiWindow = false;

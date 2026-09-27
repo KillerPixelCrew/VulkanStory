@@ -37,6 +37,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
 
     private readonly VulkanContext _context;
     private readonly XessFgRuntime _runtime;
+    private readonly Action<ulong, nint, LatencyMarker>? _pclPresentMarker;
     private readonly XessSharedFence _fence;
     private readonly ImageSet[] _images;
     private ulong _nextFenceValue = 1;
@@ -55,14 +56,17 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private PreparedFrame _queuedFrame;
     private XessPresentationFrame _queuedConstants;
     private ulong _queuedLatencyFrame;
+    private nint _queuedPclToken;
     private PresentOutcome? _outcome;
     private ulong _lastQueuedDone;
 
     private XessFgPresenter(VulkanContext context, XessFgRuntime runtime,
-        XessSharedFence fence, ImageSet[] images, uint width, uint height)
+        XessSharedFence fence, ImageSet[] images, uint width, uint height,
+        Action<ulong, nint, LatencyMarker>? pclPresentMarker)
     {
         _context = context;
         _runtime = runtime;
+        _pclPresentMarker = pclPresentMarker;
         _fence = fence;
         _images = images;
         Width = width;
@@ -84,13 +88,14 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     /// Hands one prepared frame to the present thread. The previous present must
     /// have been taken with <see cref="TakePresentOutcome" />.
     /// </summary>
-    public void QueuePresent(in PreparedFrame prepared, in XessPresentationFrame constants, ulong latencyFrameId)
+    public void QueuePresent(in PreparedFrame prepared, in XessPresentationFrame constants,
+        ulong latencyFrameId, nint pclToken)
     {
         _lastQueuedDone = prepared.DoneByDx12;
         if (!PresentThreadEnabled)
         {
             // A/B and diagnostics: present on the render thread, as before the worker.
-            PresentOutcome inline = RunPresent(prepared, constants, latencyFrameId);
+            PresentOutcome inline = RunPresent(prepared, constants, latencyFrameId, pclToken);
             lock (_presentGate) _outcome = inline;
             return;
         }
@@ -100,6 +105,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             _queuedFrame = prepared;
             _queuedConstants = constants;
             _queuedLatencyFrame = latencyFrameId;
+            _queuedPclToken = pclToken;
             _presentPending = true;
             Monitor.PulseAll(_presentGate);
         }
@@ -133,6 +139,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             PreparedFrame prepared;
             XessPresentationFrame constants;
             ulong latencyFrame;
+            nint pclToken;
             lock (_presentGate)
             {
                 while (!_presentPending && !_presentStopping) Monitor.Wait(_presentGate);
@@ -140,9 +147,10 @@ internal sealed unsafe class XessFgPresenter : IDisposable
                 prepared = _queuedFrame;
                 constants = _queuedConstants;
                 latencyFrame = _queuedLatencyFrame;
+                pclToken = _queuedPclToken;
             }
 
-            PresentOutcome outcome = RunPresent(prepared, constants, latencyFrame);
+            PresentOutcome outcome = RunPresent(prepared, constants, latencyFrame, pclToken);
 
             lock (_presentGate)
             {
@@ -156,15 +164,25 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private static readonly bool PresentThreadEnabled =
         Environment.GetEnvironmentVariable("OPTIMUM_XESS_PRESENT_THREAD") != "0";
 
-    private PresentOutcome RunPresent(in PreparedFrame prepared, in XessPresentationFrame constants, ulong latencyFrame)
+    private PresentOutcome RunPresent(in PreparedFrame prepared, in XessPresentationFrame constants,
+        ulong latencyFrame, nint pclToken)
     {
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             // XeLL's present markers bracket the real Present.
             _runtime.Marker(latencyFrame, LatencyMarker.PresentStart);
-            int code = Present(prepared, constants, out uint presented, out int fgResult, out bool fgEnabled);
-            _runtime.Marker(latencyFrame, LatencyMarker.PresentEnd);
+            if (pclToken != 0) _pclPresentMarker?.Invoke(latencyFrame, pclToken, LatencyMarker.PresentStart);
+            int code;
+            uint presented;
+            int fgResult;
+            bool fgEnabled;
+            try { code = Present(prepared, constants, out presented, out fgResult, out fgEnabled); }
+            finally
+            {
+                _runtime.Marker(latencyFrame, LatencyMarker.PresentEnd);
+                if (pclToken != 0) _pclPresentMarker?.Invoke(latencyFrame, pclToken, LatencyMarker.PresentEnd);
+            }
             return new PresentOutcome(code, presented, fgResult, fgEnabled, null, start,
                 System.Diagnostics.Stopwatch.GetTimestamp());
         }
@@ -215,6 +233,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
 
     public static bool TryCreate(VulkanContext context, nint window, uint width,
         uint height, bool vsync, in XessSourceImages sources,
+        Action<ulong, nint, LatencyMarker>? pclPresentMarker,
         out XessFgPresenter? presenter, out string reason)
     {
         presenter = null;
@@ -255,7 +274,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             if (code < 0) throw new InvalidOperationException("Intel generated-frame count setup failed (" + code + ")");
             code = runtime.SetEnabled(true);
             if (code < 0) throw new InvalidOperationException("Intel proxy enable failed (" + code + ")");
-            presenter = new XessFgPresenter(context, runtime, fence!, sets, width, height);
+            presenter = new XessFgPresenter(context, runtime, fence!, sets, width, height,
+                pclPresentMarker);
             reason = "ready";
             return true;
         }

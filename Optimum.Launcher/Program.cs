@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using Optimum.Bootstrap.Core.Patch;
 
 [assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
 
@@ -18,6 +19,8 @@ namespace Optimum.Launcher;
 public static class Program
 {
     private const string ValidateOnlyArgument = "--validate-only";
+    private const string CheckVulkanArgument = "--check-vulkan";
+    private const string LaunchOriginalArgument = "--launch-original";
 
     private static readonly string Version =
         typeof(Program).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
@@ -62,6 +65,20 @@ public static class Program
         // launcher report and the runtime configuration use the same root.
         var dataPath = ResolveDataPath(args) ?? ResolveDefaultDataPath(gameDir);
         Logger.Init(dataPath);
+        if (HasArgument(args, LaunchOriginalArgument))
+            return DeltaLaunchRecovery.LaunchOriginal(gameDir) ? 0 : 1;
+        if (HasArgument(args, CheckVulkanArgument))
+        {
+            string? failure = VulkanLaunchPreflight.Check(gameDir);
+            if (failure is not null)
+            {
+                VulkanErrorDialog.Show(failure, dataPath);
+                return 1;
+            }
+            Logger.Log("[Optimum] Vulkan 1.3 preflight passed.");
+            return 0;
+        }
+        bool validateOnly = HasArgument(args, ValidateOnlyArgument);
 
         ShaderCompatibilityReport shaderCompatibility;
         try
@@ -108,12 +125,62 @@ public static class Program
             Logger.Log($"[Optimum] Shader feature disabled: {feature} ({reason})");
         }
         using var launchLock = AcquireLaunchLock(dataPath, gameDir);
+        if (File.Exists(Path.Combine(gameDir, DeltaRuntimeInstaller.ReceiptPath)))
+        {
+            // Prepared delta runtimes already contain their patched mods. Never run
+            // donor patching, mod deployment or vanilla restoration on this route.
+            try
+            {
+                DeltaRuntimeInstaller.VerifyAsync(gameDir, Version,
+                    System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                if (!validateOnly)
+                    return DeltaLaunchRecovery.OfferOriginal(gameDir, ex.Message) ? 0 : 1;
+                throw;
+            }
+            if (!validateOnly && !shaderCompatibility.OpenGlRequired &&
+                VulkanLaunchPreflight.IsExplicitlyRequested(dataPath))
+            {
+                string? failure = VulkanLaunchPreflight.Check(gameDir);
+                if (failure is not null)
+                {
+                    VulkanErrorDialog.Show(failure, dataPath);
+                    return 1;
+                }
+                Logger.Log("[Optimum] Vulkan 1.3 preflight passed.");
+            }
+            if (HasArgument(args, ValidateOnlyArgument))
+            {
+                ValidatePatchedRuntime(gameDir, gameDir);
+                Logger.Log("[Optimum] Delta runtime validation succeeded.");
+                return 0;
+            }
+            using var loader = new AssemblyLoader(gameDir, gameDir);
+            loader.Register();
+            var entry = LoadAllPatchedAssemblies(loader)[0].GetType("Vintagestory.Client.ClientProgram")
+                ?.GetMethod("Main", BindingFlags.Public | BindingFlags.Static)
+                ?? throw new InvalidDataException("Delta runtime has no ClientProgram.Main.");
+            Logger.Log("[Optimum] Verified delta runtime. Launching without donors.");
+            entry.Invoke(null, [args]);
+            return 0;
+        }
+        if (!validateOnly && !shaderCompatibility.OpenGlRequired &&
+            VulkanLaunchPreflight.IsExplicitlyRequested(dataPath))
+        {
+            string? failure = VulkanLaunchPreflight.Check(gameDir);
+            if (failure is not null)
+            {
+                VulkanErrorDialog.Show(failure, dataPath);
+                return 1;
+            }
+            Logger.Log("[Optimum] Vulkan 1.3 preflight passed.");
+        }
         var cacheDir = Path.Combine(dataPath, CacheDirName, CacheSubDir);
         var donorDir = Path.Combine(gameDir, CacheDirName, "donors");
 
         var cache = new CacheManager(gameDir, cacheDir, donorDir, Version);
-        bool validateOnly = HasArgument(args, ValidateOnlyArgument);
-
         // --- Cache validation ---
         var requiredAssemblies = PatchTargets.Select(target => target.AssemblyPath).ToArray();
         CacheManifest? manifest;

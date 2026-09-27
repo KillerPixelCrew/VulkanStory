@@ -8,6 +8,7 @@ namespace Optimum.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     private IntPtr _presentationWindow;
+    private IVulkanWindowSurface? _presentationSurfaceSource;
     private string _frameGenerationProvider = "off";
     private XessFgPresenter? _xessPresenter;
     private XessSourceImages? _xessSources;
@@ -57,7 +58,7 @@ public sealed unsafe partial class VulkanDevice
         _swapchain?.Dispose();
         _swapchain = null;
         nint hwnd;
-        try { hwnd = WindowSurface.Win32Handle(_presentationWindow); }
+        try { hwnd = _presentationSurfaceSource?.Win32Handle ?? 0; }
         catch (Exception error)
         {
             _xessFailure = "Win32 window lookup failed: " + error.Message;
@@ -67,6 +68,7 @@ public sealed unsafe partial class VulkanDevice
         string reason = "no Win32 window for XeSS-FG";
         if (hwnd == 0 || !XessFgPresenter.TryCreate(_context, hwnd,
                 sources.Color.Width, sources.Color.Height, _vsync, sources,
+                MarkAsyncPclPresent,
                 out _xessPresenter, out reason))
         {
             _xessFailure = hwnd == 0 ? "no Win32 window for XeSS-FG" : reason;
@@ -88,9 +90,9 @@ public sealed unsafe partial class VulkanDevice
 
     private void RestoreVulkanSwapchain()
     {
-        if (_swapchain != null || _presentationWindow == IntPtr.Zero) return;
+        if (_swapchain != null || _presentationSurfaceSource == null) return;
         _lastSwapchainRestoreAttempt = System.Diagnostics.Stopwatch.GetTimestamp();
-        if (!WindowSurface.TryCreate(_context, _presentationWindow,
+        if (!_presentationSurfaceSource.TryCreate(_context,
                 out SurfaceKHR surface, out string? failure))
         {
             ReportSwapchainRestoreFailure("Vulkan surface restore failed: " + failure);
@@ -178,11 +180,20 @@ public sealed unsafe partial class VulkanDevice
                 _textures, _barriers, sources);
             ulong presentValue = _frames.SubmitExternalPresent(renderValue,
                 presenter.SharedSemaphore, prepared.WaitForDx12, prepared.ReadyForDx12);
+            // XeLL's sleep/markers and XeSS-FG's DXGI present must carry the
+            // same frame key, even if the constants were staged earlier.
+            uint presentFrameId = (uint)_latencyFrameId;
+            if (_xessConstants.FrameId != presentFrameId)
+                TraceLatency("XeSS-FG frame key corrected: staged=" +
+                    _xessConstants.FrameId + " current=" + presentFrameId);
+            _xessConstants.FrameId = presentFrameId;
             _xessConstants.Vsync = _vsync ? 1u : 0u;
-            // XeLL's present markers come from the present thread around the real
-            // Present; the frame-timing recorder marks the hand-off.
+            // XeLL and PCL present markers come from the present thread around
+            // the real Present; the CPU timing recorder marks this hand-off.
             Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
-            presenter.QueuePresent(prepared, _xessConstants, _latencyFrameId);
+            nint pclToken = _streamlinePclReady && _streamlineTokenFrameId == _latencyFrameId
+                ? _streamlineTokenPointer : 0;
+            presenter.QueuePresent(prepared, _xessConstants, _latencyFrameId, pclToken);
             // The DX12 and Vulkan contexts time-slice the GPU: run concurrently, XeSS-FG's
             // ~2 ms of interpolation took ~5.4 ms and both queues idled at the switches.
             // The next frame's GPU work waits for this frame's DX12 work instead; the CPU

@@ -442,14 +442,20 @@ public class ResourceLifetimeTests(ITestOutputHelper output)
             context.Api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice, out var memory);
             Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapUsed.Length);
             Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapBudget.Length);
+            Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapFlags.Length);
+            Assert.Equal((int)memory.MemoryHeapCount, snapshot.HeapDriverUsage.Length);
             Assert.True(snapshot.HeapUsed[first.Allocation.Block.HeapIndex] >= first.Allocation.Block.Size);
             Assert.True(snapshot.ClassBytes[(int)MemoryPoolClass.DeviceBuffers] >= first.Allocation.Block.Size);
             for (int heap = 0; heap < memory.MemoryHeapCount; heap++)
             {
                 Assert.True(snapshot.HeapBudget[heap] > 0);
+                Assert.Equal((uint)memory.MemoryHeaps[heap].Flags, snapshot.HeapFlags[heap]);
                 if (!allocator.BudgetExtension)
                     Assert.Equal((ulong)(memory.MemoryHeaps[heap].Size * VulkanAllocator.FallbackBudgetShare), snapshot.HeapBudget[heap]);
             }
+            string line = VulkanAllocator.FormatMemoryLine(snapshot);
+            Assert.Contains(" heap_flags=", line);
+            Assert.Contains(snapshot.BudgetExtension ? " driver_heap_usage=" : " driver_heap_usage=unavailable", line);
             first.Dispose();
             for (int i = 0; i < 60; i++) allocator.AdvanceFrame();
             using (var refill = new VulkanBuffer(context, MiB, BufferUsageFlags.VertexBufferBit, HostMemory))

@@ -43,7 +43,7 @@ internal sealed unsafe class XessNative
             if (!OperatingSystem.IsWindows() || IntPtr.Size != 8)
             { error = "XeSS-SR requires the Windows x64 runtime"; return null; }
             string path = Environment.GetEnvironmentVariable("OPTIMUM_XESS_LIBRARY") ??
-                Path.Combine(Path.GetDirectoryName(typeof(XessNative).Assembly.Location)!, "libxess.dll");
+                Path.Combine(NativeRuntimePaths.DirectoryContaining("libxess.dll"), "libxess.dll");
             nint handle = 0;
             try { handle = NativeLibrary.Load(Path.GetFullPath(path)); return loaded = new XessNative(handle); }
             catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)

@@ -28,10 +28,32 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     internal FrameTimingRecorder Latency { get; private set; } = new();
     private VendorLatency? _vendorLatency;
-    private bool _streamlineFeaturesReady;
+    private bool _streamlineReflexReady;
+    private bool _streamlineFrameGenerationReady;
+    private bool _streamlinePclReady;
+    private bool _streamlineFrameTokenReady;
+    private ulong _streamlineTokenFrameId;
+    private nint _streamlineTokenPointer;
+    private bool _streamlineTokenMismatchLogged;
+    private bool _pclAsyncPresentFailureLogged;
+    private bool _pclPingFailureLogged;
+    private int _pclPingSuccessCount;
+    internal int PclPingSuccessCountForTests => _pclPingSuccessCount;
+    private int _pclMarkerSuccessCount;
+    internal int PclMarkerSuccessCountForTests => _pclMarkerSuccessCount;
+    private int _reflexSleepSuccessCount;
+    internal int ReflexSleepSuccessCountForTests => _reflexSleepSuccessCount;
+    internal bool StreamlineReflexReadyForTests => _streamlineReflexReady;
+    internal bool StreamlinePclReadyForTests => _streamlinePclReady;
     private bool _streamlineFrameGenerationSupported;
     private int _appliedLatencyMode = -1;
     private int _vendorFrameCap;
+    private static readonly bool LatencyTraceEnabled =
+        Environment.GetEnvironmentVariable("OPTIMUM_LATENCY_TRACE") == "1";
+    private static void TraceLatency(string message)
+    {
+        if (LatencyTraceEnabled) Console.Error.WriteLine("[Optimum latency] " + message);
+    }
     private static int DesiredLatencyMode => OptimumConfig.LowLatencyMode switch
     {
         "off" when OptimumConfig.EffectiveFrameGeneration is not ("dlss" or "fsr3" or "xess") => 0,
@@ -40,7 +62,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     };
     internal bool VendorLatencyOwnsFrameCap => _frameGenerationProvider == "xess"
         ? _xessPresenter != null
-        : _vendorLatency?.OwnsFrameCap == true || _streamlineFeaturesReady;
+        : _vendorLatency?.OwnsFrameCap == true || _streamlineReflexReady;
     internal void SetVendorLatencyFrameCap(int maxFps)
     {
         _vendorFrameCap = Math.Max(0, maxFps);
@@ -53,11 +75,36 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         }
         if (_frameGenerationProvider == "xess") return;
         _vendorLatency?.SetFrameCap(maxFps);
-        if (_streamlineFeaturesReady) _context.Streamline?.SetReflex(DesiredLatencyMode, _vendorFrameCap);
+        if (_streamlineReflexReady) _context.Streamline?.SetReflex(DesiredLatencyMode, _vendorFrameCap);
     }
     internal void SleepVendorLatency(ulong frameId, bool mayGenerate)
     {
+        // PCL needs a frame token even when another vendor owns low-latency sleep.
+        StreamlineRuntime? streamline = _context.Streamline;
+        int tokenResult = (_streamlinePclReady || _streamlineReflexReady ||
+            _streamlineFrameGenerationReady) && streamline != null
+            ? streamline.BeginFrame(frameId) : -1;
+        bool streamlineFrameBegun = tokenResult == 0;
+        _streamlineFrameTokenReady = streamlineFrameBegun;
+        _streamlineTokenFrameId = streamlineFrameBegun ? frameId : 0;
+        _streamlineTokenPointer = streamlineFrameBegun ? streamline!.CurrentFrameToken() : 0;
+        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " token=" + tokenResult);
         int latencyMode = DesiredLatencyMode;
+        if (_frameGenerationProvider != "xess" && _appliedLatencyMode != latencyMode)
+        {
+            _appliedLatencyMode = latencyMode;
+            _vendorLatency?.SetMode(latencyMode);
+            if (_streamlineReflexReady) streamline?.SetReflex(latencyMode, _vendorFrameCap);
+        }
+        // Streamline requires one sleep call per frame even with Reflex Off. Keep
+        // it before XeLL or Anti-Lag so their input pacing follows the final sleep.
+        if (_streamlineReflexReady && streamlineFrameBegun)
+        {
+            int result = streamline!.ReflexSleep();
+            if (result == 0) _reflexSleepSuccessCount++;
+            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " reflexSleep=" + result +
+                " mode=" + (_frameGenerationProvider == "xess" ? 0 : latencyMode));
+        }
         if (_xessPresenter is { } intel)
         {
             if (_appliedLatencyMode != latencyMode)
@@ -67,7 +114,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
                 intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0);
             }
             ReserveFramePresentIds(mayGenerate);
-            intel.Runtime.Sleep(frameId);
+            int sleepResult = intel.Runtime.Sleep(frameId);
+            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xellSleep=" + sleepResult);
             return;
         }
         if (_frameGenerationProvider == "xess")
@@ -75,31 +123,72 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             ReserveFramePresentIds(mayGenerate);
             return;
         }
-        if (_appliedLatencyMode != latencyMode)
-        {
-            _appliedLatencyMode = latencyMode;
-            _vendorLatency?.SetMode(latencyMode);
-            if (_streamlineFeaturesReady) _context.Streamline?.SetReflex(latencyMode, _vendorFrameCap);
-        }
         if (_swapchain != null) ReserveFramePresentIds(mayGenerate);
         _vendorLatency?.Sleep(frameId, RealPresentId);
-        if (_streamlineFeaturesReady && _context.Streamline is { } streamline)
-        {
-            if (streamline.BeginFrame(frameId) == 0) streamline.ReflexSleep();
-        }
+    }
+    internal void MarkVendorInputStart(ulong frameId)
+    {
+        _vendorLatency?.InputStart(frameId);
+        if (LatencyTraceEnabled && _vendorLatency?.Kind == VendorLatencyKind.AntiLag)
+            TraceLatency("frame=" + frameId + " amdInputStart");
     }
     internal void MarkLatency(ulong frameId, LatencyMarker marker)
     {
         Latency.Marker(frameId, marker);
+        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " boundary=" + marker);
+        if (_streamlinePclReady && _streamlineFrameTokenReady &&
+            frameId != _streamlineTokenFrameId && !_streamlineTokenMismatchLogged)
+        {
+            _streamlineTokenMismatchLogged = true;
+            MirrorValidationMessage("Streamline PCL frame-token mismatch: marker frame=" +
+                frameId + ", token frame=" + _streamlineTokenFrameId);
+        }
+        if (_streamlinePclReady && _streamlineFrameTokenReady &&
+            frameId == _streamlineTokenFrameId && marker != LatencyMarker.InputSample)
+        {
+            int result = _context.Streamline!.Marker((uint)marker);
+            if (result == 0) System.Threading.Interlocked.Increment(ref _pclMarkerSuccessCount);
+            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " pcl=" + marker + " result=" + result);
+        }
+        if (marker == LatencyMarker.PresentEnd && frameId == _streamlineTokenFrameId)
+            _streamlineFrameTokenReady = false;
         if (_xessPresenter is { } intel)
         {
-            intel.Runtime.Marker(frameId, marker);
+            int result = intel.Runtime.Marker(frameId, marker);
+            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xell=" + marker + " result=" + result);
             return;
         }
         if (_frameGenerationProvider == "xess") return;
         _vendorLatency?.Marker(frameId, marker);
-        if (_streamlineFeaturesReady && _context.Streamline is { } streamline && marker != LatencyMarker.InputSample)
-            streamline.Marker((uint)marker);
+    }
+    internal uint PclWindowMessage => _streamlinePclReady ? _context.Streamline?.PclWindowMessage() ?? 0 : 0;
+    internal void MarkPclLatencyPing()
+    {
+        if (!_streamlinePclReady || !_streamlineFrameTokenReady ||
+            _context.Streamline is not { } streamline) return;
+        int result = streamline.Marker(8); // sl::PCLMarker::ePCLatencyPing
+        if (result == 0) _pclPingSuccessCount++;
+        if (LatencyTraceEnabled) TraceLatency("frame=" + _streamlineTokenFrameId +
+            " pcl=PCLatencyPing result=" + result);
+        if (result != 0 && !_pclPingFailureLogged)
+        {
+            _pclPingFailureLogged = true;
+            MirrorValidationMessage("Streamline PCL ping marker failed: " + result);
+        }
+    }
+    private void MarkAsyncPclPresent(ulong frameId, nint token, LatencyMarker marker)
+    {
+        if (!_streamlinePclReady || token == 0 || _context.Streamline is not { } streamline) return;
+        int result = streamline.MarkerForToken(token, (uint)marker);
+        if (result == 0) System.Threading.Interlocked.Increment(ref _pclMarkerSuccessCount);
+        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " pclAsync=" + marker +
+            " result=" + result);
+        if (result != 0 && !_pclAsyncPresentFailureLogged)
+        {
+            _pclAsyncPresentFailureLogged = true;
+            MirrorValidationMessage("Streamline PCL async present marker failed: frame=" +
+                frameId + ", marker=" + marker + ", result=" + result);
+        }
     }
     internal ulong LatencyFrameId => _latencyFrameId;
     private ulong _latencyFrameId;
@@ -519,9 +608,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     }
 
     public bool Initialize(IntPtr windowHandle, int width, int height, out string failureReason)
+        => InitializeWindow(windowHandle == IntPtr.Zero ? null : new GlfwVulkanWindowSurface(windowHandle),
+            width, height, out failureReason);
+
+    internal bool InitializeWindow(IVulkanWindowSurface? window, int width, int height, out string failureReason)
     {
-        _presentationWindow = windowHandle;
-        bool headless = windowHandle == IntPtr.Zero;
+        _presentationSurfaceSource = window;
+        _presentationWindow = window?.NativeHandle ?? IntPtr.Zero;
+        bool headless = window == null;
 
         var options = new VulkanContextOptions
         {
@@ -546,7 +640,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             // any surface can exist, so the window system is asked first.
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
-                : WindowSurface.RequiredInstanceExtensions(),
+                : window!.RequiredInstanceExtensions(),
             PrepareFrameGenerationQueues = !headless && OperatingSystem.IsWindows(),
         };
 
@@ -556,11 +650,19 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         // Streamline's signed 2.14.1 Vulkan proxy rejects extensions supplied
         // only by a validation layer. Keep sync-validation acceptance on the
         // native path; normal client runs use the proxy.
-        if (!headless && OperatingSystem.IsWindows() &&
+        if (EnableStreamline && !headless && OperatingSystem.IsWindows() &&
             !(options.EnableValidation && !string.IsNullOrWhiteSpace(options.ValidationFeatures)) &&
-            Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE")?.Trim() != "0" &&
-            StreamlineRuntime.TryCreate(out StreamlineRuntime? streamline, out _))
-            options.Streamline = streamline;
+            Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE")?.Trim() != "0")
+        {
+            if (StreamlineRuntime.TryCreate(options.PreferredDeviceIndex,
+                out StreamlineRuntime? streamline, out string streamlineReason))
+                options.Streamline = streamline;
+            else
+            {
+                Console.Error.WriteLine("[Optimum] Streamline unavailable: " + streamlineReason);
+                MirrorValidationMessage("Streamline unavailable: " + streamlineReason);
+            }
+        }
 
         if (!VulkanContext.TryCreate(options, out VulkanContext? context, out failureReason))
         {
@@ -570,12 +672,29 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         _context = context!;
         if (_context.Streamline != null)
         {
-            int bindResult = _context.Streamline.BindFeatures();
-            int reflexResult = bindResult == 0 ? _context.Streamline.SetReflex(DesiredLatencyMode, 0) : -1;
-            _streamlineFeaturesReady = bindResult == 0 && reflexResult == 0;
-            if (!_streamlineFeaturesReady)
-                MirrorValidationMessage("Streamline features unavailable: bind=" + bindResult + ", Reflex=" + reflexResult);
-            if (_streamlineFeaturesReady)
+            int reflexBind = _context.Streamline.BindReflex();
+            int fgBind = _context.Streamline.BindFrameGeneration();
+            int pclResult = _context.Streamline.BindPcl();
+            _streamlinePclReady = pclResult == 0;
+            if (!_streamlinePclReady)
+                MirrorValidationMessage("Streamline PCL unavailable: bind=" + pclResult);
+            int reflexResult = reflexBind == 0 ? _context.Streamline.SetReflex(DesiredLatencyMode, 0) : -1;
+            _streamlineReflexReady = reflexBind == 0 && reflexResult == 0;
+            if (!_streamlineReflexReady)
+                MirrorValidationMessage("Streamline Reflex unavailable: bind=" + reflexBind + ", options=" + reflexResult);
+            else
+            {
+                int stateResult = _context.Streamline.GetReflexState(out bool available, out bool reports);
+                MirrorValidationMessage("Streamline Reflex state: query=" + stateResult +
+                    ", lowLatencyAvailable=" + available + ", latencyReportAvailable=" + reports);
+                Console.Error.WriteLine("[Optimum] Streamline Reflex: mode=" + DesiredLatencyMode +
+                    ", state=" + stateResult + ", available=" + available +
+                    ", latencyReports=" + reports);
+            }
+            _streamlineFrameGenerationReady = fgBind == 0;
+            if (!_streamlineFrameGenerationReady)
+                MirrorValidationMessage("Streamline DLSS-G unavailable: bind=" + fgBind);
+            if (_streamlineFrameGenerationReady)
             {
                 int supportResult = _context.Streamline.IsFrameGenerationSupported(_context.PhysicalDevice);
                 _streamlineFrameGenerationSupported = supportResult == 0;
@@ -583,7 +702,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
                     MirrorValidationMessage("Streamline DLSS-G unsupported on selected Vulkan adapter: " + supportResult);
             }
         }
-        _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineFeaturesReady
+        _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineReflexReady
             ? null : VendorLatency.TryCreate(_context, vendorLatencyRequirements.Kind);
         // Any hard Vulkan failure now reaches the client's error channel and the
         // validation log instead of turning into a silent stall.
@@ -712,7 +831,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
         if (!headless)
         {
-            if (!WindowSurface.TryCreate(_context, windowHandle, out SurfaceKHR surface, out string? surfaceError))
+            if (!window!.TryCreate(_context, out SurfaceKHR surface, out string? surfaceError))
             {
                 failureReason = surfaceError ?? "could not create a presentation surface";
                 return false;
@@ -875,6 +994,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     /// recorder, poison mode). Null in the client.
     /// </summary>
     internal Action<VulkanContextOptions>? ConfigureContextOptions { get; set; }
+
+    /// <summary>
+    /// Test seam for native Vulkan acceptance. Streamline's interposer and NGX
+    /// have process-wide lifetimes, so ordinary GPU tests leave them to the
+    /// dedicated, isolated Streamline probe. The client keeps the default on.
+    /// </summary>
+    internal bool EnableStreamline { get; set; } = true;
 
     /// <summary>
     /// Drains queued diagnostics, reporting only what the layers called an
@@ -1304,6 +1430,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     public void Present()
     {
         if (!_frameActive) return;
+
+        // A frame with no world stage or native draw still submits a clear and
+        // presents. Keep its simulation/render markers paired on that path.
+        NoteRenderStageStarted();
 
         TextureDump.NoteFrame();
         if (TextureDump.Wanted) DumpRequestedTextures();

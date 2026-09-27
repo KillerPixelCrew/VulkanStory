@@ -79,10 +79,21 @@ internal enum WaitSite
 /// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ... queue_submit_n=60 queue_submit_ms=1.9
 /// stats.counters blocking_uploads=0 uploads=0 scopes=900 barriers=12 rebar_fallbacks=0 dynamic_state=12600 uniform_ring_used=412800 uniform_ring_capacity=16777216
 /// stats.latency frames=60 input_mean_ms=0.02 input_p99_ms=0.04 ... total_mean_ms=16.60 total_p99_ms=18.20
+/// stats.input_age events=120 mean_ms=1.20 p99_ms=3.40 max_ms=5.60
 /// </code>
 /// </summary>
 internal static class VulkanStats
 {
+    private static readonly SdlInputAgeRecorder SdlInputAges = new();
+
+    public static void RecordSdlInputAge(ulong eventTimestampNanoseconds, ulong dispatchTimestampNanoseconds) =>
+        SdlInputAges.Record(eventTimestampNanoseconds, dispatchTimestampNanoseconds);
+
+    public static string FormatSdlInputAgeLine(SdlInputAgeSample sample) =>
+        string.Format(CultureInfo.InvariantCulture,
+            "stats.input_age events={0} mean_ms={1:F2} p99_ms={2:F2} max_ms={3:F2}",
+            sample.Events, sample.MeanMs, sample.P99Ms, sample.MaxMs);
+
     /// <summary>Token stems of <see cref="WaitSite" />, indexed by its value.</summary>
     public static readonly string[] WaitSiteTokens =
     {
@@ -597,6 +608,7 @@ internal static class VulkanStats
                    realPresents, generatedPresents, (realPresents + generatedPresents) / elapsed,
                    realPresents / elapsed, sdkActualPresents, sdkActualPresents / elapsed) + "\n" +
                LatencyLine() + "\n" +
+               FormatSdlInputAgeLine(SdlInputAges.Take()) + "\n" +
                VulkanAllocator.FormatMemoryLine(memorySnapshot) + "\n" +
                FormatTransientsLine(new TransientSample(
                    TransientBytes: (ulong)Interlocked.Read(ref _transientBytes),

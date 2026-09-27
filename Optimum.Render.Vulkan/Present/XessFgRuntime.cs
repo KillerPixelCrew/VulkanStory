@@ -75,7 +75,7 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
     {
         runtime = null;
         if (!OperatingSystem.IsWindows()) { reason = "XeSS-FG requires Windows DX12"; return false; }
-        string path = Path.Combine(Path.GetDirectoryName(typeof(XessFgRuntime).Assembly.Location)!,
+        string path = Path.Combine(NativeRuntimePaths.DirectoryContaining("OptimumXessFg.dll"),
             "OptimumXessFg.dll");
         if (!File.Exists(path)) { reason = "XeSS-FG DX12 bridge is not installed"; return false; }
         nint module = 0;

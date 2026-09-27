@@ -42,6 +42,50 @@ internal unsafe struct StreamlineFrameCamera
 /// </summary>
 internal sealed unsafe class StreamlineRuntime : IDisposable
 {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DisplayDevice
+    {
+        public uint Size;
+        public fixed char Name[32];
+        public fixed char Description[128];
+        public uint StateFlags;
+        public fixed char DeviceId[128];
+        public fixed char DeviceKey[128];
+    }
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplayDevicesW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplayDevices(char* deviceName, uint index,
+        DisplayDevice* device, uint flags);
+
+    private static bool HasNvidiaDisplayAdapter()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        for (uint index = 0; index < 32; index++)
+        {
+            DisplayDevice device = default;
+            device.Size = (uint)sizeof(DisplayDevice);
+            if (!EnumDisplayDevices(null, index, &device, 0)) break;
+            if (new string(device.Description).Contains("NVIDIA", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    internal static bool ShouldLoadDlssG(int preferredDeviceIndex, bool hasNvidiaAdapter,
+        string? setting) => setting switch
+    {
+        "1" => true,
+        "0" => false,
+        // An explicit Vulkan device pin may select a non-NVIDIA adapter in a
+        // hybrid system. Its optional DLSS-G plugin must not inject NVIDIA-only
+        // Vulkan extensions before Reflex and PCL can start.
+        _ => preferredDeviceIndex < 0 && hasNvidiaAdapter,
+    };
+
+    internal static bool ShouldLoadReflex(int preferredDeviceIndex, bool hasNvidiaAdapter,
+        string? setting) => ShouldLoadDlssG(preferredDeviceIndex, hasNvidiaAdapter, setting);
+
     private readonly nint _library;
     private readonly delegate* unmanaged[Cdecl]<void> _shutdown;
     private readonly delegate* unmanaged[Cdecl]<InstanceCreateInfo*, Instance*, Result> _createInstance;
@@ -55,12 +99,18 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     private readonly delegate* unmanaged[Cdecl]<Instance, Win32SurfaceCreateInfoKHR*, SurfaceKHR*, Result> _createSurface;
     private readonly delegate* unmanaged[Cdecl]<Instance, SurfaceKHR, void> _destroySurface;
     private readonly delegate* unmanaged[Cdecl]<Device, Result> _deviceWaitIdle;
-    private readonly delegate* unmanaged[Cdecl]<int> _bindFeatures;
+    private readonly delegate* unmanaged[Cdecl]<int> _bindReflex;
+    private readonly delegate* unmanaged[Cdecl]<int> _bindFrameGeneration;
+    private readonly delegate* unmanaged[Cdecl]<int> _bindPcl;
+    private readonly delegate* unmanaged[Cdecl]<uint*, uint*, int> _getReflexState;
+    private readonly delegate* unmanaged[Cdecl]<uint> _pclWindowMessage;
     private readonly delegate* unmanaged[Cdecl]<PhysicalDevice, int> _isFrameGenerationSupported;
     private readonly delegate* unmanaged[Cdecl]<int, uint, int> _setReflex;
     private readonly delegate* unmanaged[Cdecl]<uint, int> _beginFrame;
+    private readonly delegate* unmanaged[Cdecl]<nint> _currentFrameToken;
     private readonly delegate* unmanaged[Cdecl]<int> _reflexSleep;
     private readonly delegate* unmanaged[Cdecl]<uint, int> _marker;
+    private readonly delegate* unmanaged[Cdecl]<nint, uint, int> _markerForToken;
     private readonly delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int> _setFg;
     private readonly delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int> _getFgState;
     private readonly delegate* unmanaged[Cdecl]<int> _invalidateFrameTags;
@@ -85,12 +135,20 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         _createSurface = (delegate* unmanaged[Cdecl]<Instance, Win32SurfaceCreateInfoKHR*, SurfaceKHR*, Result>)Export("OptimumSlCreateWin32Surface");
         _destroySurface = (delegate* unmanaged[Cdecl]<Instance, SurfaceKHR, void>)Export("OptimumSlDestroySurface");
         _deviceWaitIdle = (delegate* unmanaged[Cdecl]<Device, Result>)Export("OptimumSlDeviceWaitIdle");
-        _bindFeatures = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlBindFeatures");
+        _bindReflex = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlBindReflex");
+        _bindFrameGeneration = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlBindFrameGeneration");
+        _bindPcl = NativeLibrary.TryGetExport(library, "OptimumSlBindPcl", out nint bindPcl)
+            ? (delegate* unmanaged[Cdecl]<int>)bindPcl : null;
+        _getReflexState = (delegate* unmanaged[Cdecl]<uint*, uint*, int>)Export("OptimumSlGetReflexState");
+        _pclWindowMessage = NativeLibrary.TryGetExport(library, "OptimumSlPclWindowMessage", out nint pclMessage)
+            ? (delegate* unmanaged[Cdecl]<uint>)pclMessage : null;
         _isFrameGenerationSupported = (delegate* unmanaged[Cdecl]<PhysicalDevice, int>)Export("OptimumSlIsFrameGenerationSupported");
         _setReflex = (delegate* unmanaged[Cdecl]<int, uint, int>)Export("OptimumSlSetReflex");
         _beginFrame = (delegate* unmanaged[Cdecl]<uint, int>)Export("OptimumSlBeginFrame");
+        _currentFrameToken = (delegate* unmanaged[Cdecl]<nint>)Export("OptimumSlCurrentFrameToken");
         _reflexSleep = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlReflexSleep");
         _marker = (delegate* unmanaged[Cdecl]<uint, int>)Export("OptimumSlMarker");
+        _markerForToken = (delegate* unmanaged[Cdecl]<nint, uint, int>)Export("OptimumSlMarkerForToken");
         _setFg = (delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int>)Export("OptimumSlSetFrameGeneration");
         _getFgState = (delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int>)Export("OptimumSlGetFrameGenerationState");
         _invalidateFrameTags = (delegate* unmanaged[Cdecl]<int>)Export("OptimumSlInvalidateFrameTags");
@@ -99,10 +157,12 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
             StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, uint, uint, int>)Export("OptimumSlTagFrame");
     }
 
-    internal static bool TryCreate(out StreamlineRuntime? runtime, out string reason)
+    internal static bool TryCreate(int preferredDeviceIndex,
+        out StreamlineRuntime? runtime, out string reason)
     {
         runtime = null;
-        string directory = Path.GetDirectoryName(typeof(StreamlineRuntime).Assembly.Location) ?? AppContext.BaseDirectory;
+        string directory = NativeRuntimePaths.DirectoryContaining(
+            "OptimumStreamline.dll", "sl.interposer.dll");
         string bridge = Path.Combine(directory, "OptimumStreamline.dll");
         if (!File.Exists(bridge) || !File.Exists(Path.Combine(directory, "sl.interposer.dll")))
         {
@@ -117,12 +177,21 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         try
         {
             var instance = new StreamlineRuntime(library);
-            var initialize = (delegate* unmanaged[Cdecl]<char*, byte*, int>)NativeLibrary.GetExport(library, "OptimumSlInitialize");
+            var initialize = (delegate* unmanaged[Cdecl]<char*, byte*, uint, uint, int>)
+                NativeLibrary.GetExport(library, "OptimumSlInitialize");
+            bool nvidia = HasNvidiaDisplayAdapter();
+            bool loadReflex = ShouldLoadReflex(preferredDeviceIndex, nvidia,
+                Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE_REFLEX"));
+            bool loadDlssG = loadReflex && ShouldLoadDlssG(preferredDeviceIndex, nvidia,
+                Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE_DLSS_G"));
+            Console.Error.WriteLine("[Optimum] Streamline features: PCL" +
+                (loadReflex ? " + Reflex" : "") + (loadDlssG ? " + DLSS-G" : ""));
             byte[] project = Encoding.UTF8.GetBytes(NgxSession.ProjectId + "\0");
             fixed (char* directoryPtr = directory)
             fixed (byte* projectPtr = project)
             {
-                int result = initialize(directoryPtr, projectPtr);
+                int result = initialize(directoryPtr, projectPtr,
+                    loadReflex ? 1u : 0u, loadDlssG ? 1u : 0u);
                 if (result != 0)
                 {
                     reason = "slInit failed (" + result + ")";
@@ -178,12 +247,25 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     }
     internal void DestroySurface(Instance instance, SurfaceKHR surface) => _destroySurface(instance, surface);
     internal Result DeviceWaitIdle(Device device) => _deviceWaitIdle(device);
-    internal int BindFeatures() => _bindFeatures();
+    internal int BindReflex() => _bindReflex();
+    internal int BindFrameGeneration() => _bindFrameGeneration();
+    internal int BindPcl() => _bindPcl == null ? -1 : _bindPcl();
+    internal int GetReflexState(out bool lowLatencyAvailable, out bool latencyReportAvailable)
+    {
+        uint available = 0, reports = 0;
+        int result = _getReflexState(&available, &reports);
+        lowLatencyAvailable = available != 0;
+        latencyReportAvailable = reports != 0;
+        return result;
+    }
+    internal uint PclWindowMessage() => _pclWindowMessage == null ? 0 : _pclWindowMessage();
     internal int IsFrameGenerationSupported(PhysicalDevice physical) => _isFrameGenerationSupported(physical);
     internal int SetReflex(int mode, int maxFps) => _setReflex(mode, (uint)Math.Max(maxFps, 0));
     internal int BeginFrame(ulong id) => _beginFrame((uint)id);
+    internal nint CurrentFrameToken() => _currentFrameToken();
     internal int ReflexSleep() => _reflexSleep();
     internal int Marker(uint marker) => _marker(marker);
+    internal int MarkerForToken(nint token, uint marker) => _markerForToken(token, marker);
     internal int SetFrameGeneration(bool enabled, uint generatedFrames, uint width,
         uint height, Format colorFormat, uint buffers) =>
         _setFg(enabled ? 1 : 0, generatedFrames, width, height, (uint)colorFormat, buffers);

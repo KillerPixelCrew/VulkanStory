@@ -7,6 +7,38 @@ namespace Optimum.Render.Vulkan.Core;
 
 internal enum VendorLatencyKind { None, Reflex, AntiLag }
 
+/// <summary>Pairs one AMD INPUT mark with the same frame's PRESENT mark.</summary>
+internal sealed class AmdAntiLagFrameKey
+{
+    private ulong _frameId;
+    private bool _inputMarked;
+    private bool _presentOwed;
+
+    public void BeginFrame(ulong frameId)
+    {
+        _frameId = frameId;
+        _inputMarked = false;
+        _presentOwed = false;
+    }
+
+    public bool InputStart(ulong frameId)
+    {
+        if (frameId == 0 || frameId != _frameId || _inputMarked) return false;
+        _inputMarked = true;
+        _presentOwed = true;
+        return true;
+    }
+
+    public bool PresentStart(ulong frameId)
+    {
+        if (frameId != _frameId || !_presentOwed) return false;
+        _presentOwed = false;
+        return true;
+    }
+
+    public void Cancel() => _presentOwed = false;
+}
+
 /// <summary>Enables the supported vendor extension before vkCreateDevice.</summary>
 internal sealed unsafe class VendorLatencyRequirements : IDeviceRequirementContributor
 {
@@ -67,8 +99,7 @@ internal sealed unsafe class VendorLatency : IDisposable
     private ulong _sleepValue;
     private ulong _frameId;
     private ulong _presentId;
-    private ulong _amdPendingFrame;
-    private bool _amdPresentOwed;
+    private readonly AmdAntiLagFrameKey _amdFrameKey = new();
     private int _maxFps;
     private int _mode = 1;
     private int _appliedMaxFps = -1;
@@ -117,7 +148,7 @@ internal sealed unsafe class VendorLatency : IDisposable
         if (_nv != null) ApplyReflexMode();
         if (_amd != null)
         {
-            _amdPresentOwed = false;
+            _amdFrameKey.Cancel();
             AntiLagUpdate(AntiLagStageAMD.InputAmd, 0, modeOnly: true);
         }
     }
@@ -158,6 +189,7 @@ internal sealed unsafe class VendorLatency : IDisposable
     {
         _swapchain = default;
         _reflexReady = false;
+        _amdFrameKey.Cancel();
     }
 
     private void ApplyReflexMode()
@@ -180,17 +212,14 @@ internal sealed unsafe class VendorLatency : IDisposable
         _presentId = presentId;
         if (_amd != null)
         {
-            // Mode is applied only when the cap changes. INPUT and PRESENT carry
-            // the same frame index, including when the FPS cap is uncapped.
+            _amdFrameKey.BeginFrame(frameId);
+            // Mode is applied only when the cap changes. The INPUT marker is
+            // issued separately at the actual SDL input-poll boundary.
             if (_appliedMaxFps != _maxFps)
             {
                 _appliedMaxFps = _maxFps;
                 AntiLagUpdate(AntiLagStageAMD.InputAmd, 0, modeOnly: true);
             }
-            if (_mode == 0) return;
-            _amdPresentOwed = true;
-            _amdPendingFrame = frameId;
-            AntiLagUpdate(AntiLagStageAMD.InputAmd, frameId, modeOnly: false);
             return;
         }
         if (_nv == null || !_reflexReady || _mode == 0 || _swapchain.Handle == 0) return;
@@ -215,15 +244,20 @@ internal sealed unsafe class VendorLatency : IDisposable
         _context.Api.WaitSemaphores(_context.Device, &wait, 1_000_000_000UL);
     }
 
+    public void InputStart(ulong frameId)
+    {
+        if (_disposed || _amd == null || _mode == 0 || !_amdFrameKey.InputStart(frameId)) return;
+        AntiLagUpdate(AntiLagStageAMD.InputAmd, frameId, modeOnly: false);
+    }
+
     public void Marker(ulong frameId, LatencyMarker marker)
     {
         if (_disposed) return;
         if (_amd != null)
         {
-            if (marker == LatencyMarker.PresentStart && _amdPresentOwed && frameId == _amdPendingFrame)
+            if (marker == LatencyMarker.PresentStart && _amdFrameKey.PresentStart(frameId))
             {
                 AntiLagUpdate(AntiLagStageAMD.PresentAmd, frameId, modeOnly: false);
-                _amdPresentOwed = false;
             }
             return;
         }
@@ -237,7 +271,7 @@ internal sealed unsafe class VendorLatency : IDisposable
         _nv.SetLatencyMarker(_context.Device, _swapchain, ref info);
     }
 
-    public void SkipPresent() => _amdPresentOwed = false;
+    public void SkipPresent() => _amdFrameKey.Cancel();
 
     private void AntiLagUpdate(AntiLagStageAMD stage, ulong frameId, bool modeOnly)
     {

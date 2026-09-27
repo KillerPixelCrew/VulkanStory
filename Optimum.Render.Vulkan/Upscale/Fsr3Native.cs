@@ -70,7 +70,8 @@ internal sealed unsafe class Fsr3Native
             if (loaded != null) return loaded;
             if (!OperatingSystem.IsWindows() || IntPtr.Size != 8)
             { error = "the FSR 3.1 Vulkan runtime is available on Windows x64 in this build"; return null; }
-            string directory = Path.GetDirectoryName(typeof(Fsr3Native).Assembly.Location)!;
+            string directory = NativeRuntimePaths.DirectoryContaining(
+                "amd_fidelityfx_vk.dll", "OptimumFsr3.dll");
             string sdkPath = Environment.GetEnvironmentVariable("OPTIMUM_FSR3_LIBRARY") ??
                 Path.Combine(directory, "amd_fidelityfx_vk.dll");
             string bridgePath = Environment.GetEnvironmentVariable("OPTIMUM_FSR3_BRIDGE") ??

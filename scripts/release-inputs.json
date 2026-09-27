@@ -1,0 +1,31 @@
+{
+  "gameVersion": "1.22.7",
+  "clients": {
+    "win-x64": {
+      "archive": "vs_install_win-x64_1.22.7.exe",
+      "sha256": "ebacde36b0610f1aa03cd96a2520f42dbb307e143aca25a000540fc90ec8f106"
+    },
+    "linux-x64": {
+      "archive": "vs_client_linux-x64_1.22.7.tar.gz",
+      "sha256": "483cc6827a50c08c5c41ccd0262c6f1223c104e54ca7135c46605278d89f5de1"
+    }
+  },
+  "decoder": {
+    "version": "3.2.0",
+    "repository": "jmacd/xdelta",
+    "sourceArchive": {
+      "name": "xdelta3-3.2.0.tar.gz",
+      "sha256": "89c368ac627fd89b96a7ecb555d9dd63f455a8c524103c8117f64787a78e5709"
+    },
+    "win-x64": {
+      "name": "xdelta3-3.2.0-windows-x86_64.zip",
+      "sha256": "af8ef036cb077a48df080c9a8ac1be4a6e7511c32d11f8bec89b6803a9e52576",
+      "binarySha256": "53d90226615f217d3380c39892833311b4e24acd863e1ca01f14b5e772e2e6d0"
+    },
+    "linux-x64": {
+      "name": "xdelta3-3.2.0-linux-x86_64.tar.gz",
+      "sha256": "480295c7a41fea6503659f19ddc61676c0df4834e2292846ba97de30c68c2397",
+      "binarySha256": "0d38d86de5ab6bbc1adae531331d64585b5a09ce3604a5f090c27f71b6a64b23"
+    }
+  }
+}

@@ -1,0 +1,103 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemPlayerControl.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemPlayerControl.cs
+index f83d90c9..deb40157 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemPlayerControl.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemPlayerControl.cs
+@@ -28,10 +28,26 @@ public class SystemPlayerControl : ClientSystem
+ 
+ 	private bool nowFloorSitting;
+ 
+ 	private EntityControls prevControls;
+ 
++	private int optimumPreviousAnalogFactorCode;
++
++	private float optimumPreviousBaseSpeed;
++
++	private long optimumPreviousAnalogEntityId;
++
++	private int optimumPreviousAnalogXCode;
++
++	private int optimumPreviousAnalogYCode;
++
++	private long optimumNextAnalogRefreshMs;
++
++	private int optimumAnalogProbeAttempts;
++
++	private long optimumNextAnalogProbeMs;
++
+ 	public override string Name => "plco";
+ 
+ 	public SystemPlayerControl(ClientMain game)
+ 		: base(game)
+ 	{
+@@ -74,10 +90,30 @@ public class SystemPlayerControl : ClientSystem
+ 	public void OnGameTick(float dt)
+ 	{
+ 		EntityControls entityControls = ((game.EntityPlayer.MountedOn == null) ? game.EntityPlayer.Controls : game.EntityPlayer.MountedOn.Controls);
+ 		if (entityControls != null)
+ 		{
++			if (!game.OptimumAnalogServerReady && optimumAnalogProbeAttempts < 3 &&
++				game.ElapsedMilliseconds >= optimumNextAnalogProbeMs)
++			{
++				game.SendEntityPacket(game.EntityPlayer.EntityId, Optimum.OptimumAnalogMovement.ProbePacketId,
++					new byte[1] { Optimum.OptimumAnalogMovement.ProtocolVersion });
++				optimumAnalogProbeAttempts++;
++				optimumNextAnalogProbeMs = game.ElapsedMilliseconds + 2000;
++			}
++			ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++			bool optimumPhysicalMovementHeld = optimumPlatform?.OptimumPhysicalMovementHeld(
++				forwardKey, backwardKey, leftKey, rightKey) ?? false;
++			bool optimumAnalogWalking = game.OptimumAnalogServerReady && game.EntityPlayer.MountedOn == null;
++			OpenTK.Mathematics.Vector2 optimumAnalogAxes = optimumAnalogWalking && !optimumPhysicalMovementHeld
++				? (optimumPlatform?.OptimumControllerMoveAxes() ?? OpenTK.Mathematics.Vector2.Zero)
++				: OpenTK.Mathematics.Vector2.Zero;
++			float optimumAnalogFactor = Optimum.OptimumAnalogMovement.EffectiveFactor(
++				optimumPlatform?.OptimumControllerMoveFactor() ?? 1f,
++				optimumPhysicalMovementHeld,
++				optimumAnalogWalking);
++			Optimum.OptimumAnalogMovement.SetAxes(entityControls, optimumAnalogAxes.X, optimumAnalogAxes.Y);
+ 			game.EntityPlayer.Controls.OnAction = game.api.inputapi.TriggerInWorldAction;
+ 			bool flag = game.MouseGrabbed || (game.api.Settings.Bool["immersiveMouseMode"] && game.OpenedGuis.All((GuiDialog gui) => !gui.PrefersUngrabbedMouse));
+ 			entityControls.Forward = game.KeyboardState[forwardKey];
+ 			entityControls.Backward = game.KeyboardState[backwardKey];
+ 			entityControls.Left = game.KeyboardState[leftKey];
+@@ -90,17 +126,39 @@ public class SystemPlayerControl : ClientSystem
+ 			entityControls.ShiftKey = game.KeyboardState[shiftKey];
+ 			entityControls.DetachedMode = game.player.worlddata.FreeMove || game.EntityPlayer.IsEyesSubmerged();
+ 			entityControls.FlyPlaneLock = game.player.worlddata.FreeMovePlaneLock;
+ 			entityControls.Up = entityControls.DetachedMode && entityControls.Jump;
+ 			entityControls.Down = entityControls.DetachedMode && entityControls.Sneak;
+-			entityControls.MovespeedMultiplier = game.player.worlddata.MoveSpeedMultiplier;
++			entityControls.MovespeedMultiplier = game.player.worlddata.MoveSpeedMultiplier * optimumAnalogFactor;
+ 			entityControls.IsFlying = game.player.worlddata.FreeMove;
+ 			entityControls.NoClip = game.player.worlddata.NoClip;
+ 			entityControls.LeftMouseDown = game.InWorldMouseState.Left;
+ 			entityControls.RightMouseDown = game.InWorldMouseState.Right;
+ 			entityControls.FloorSitting = nowFloorSitting;
+ 			SendServerPackets(prevControls, entityControls);
++			if (game.OptimumAnalogServerReady)
++			{
++				byte factorByte = Optimum.OptimumAnalogMovement.Encode(optimumAnalogFactor);
++				byte axisX = Optimum.OptimumAnalogMovement.EncodeAxis(optimumAnalogAxes.X);
++				byte axisY = Optimum.OptimumAnalogMovement.EncodeAxis(optimumAnalogAxes.Y);
++				int factorCode = factorByte + 1;
++				if (optimumPreviousAnalogFactorCode != factorCode ||
++					optimumPreviousAnalogXCode != axisX + 1 || optimumPreviousAnalogYCode != axisY + 1 ||
++					optimumPreviousAnalogEntityId != game.EntityPlayer.EntityId ||
++					optimumPreviousBaseSpeed != game.player.worlddata.MoveSpeedMultiplier ||
++					((axisX != 0 || axisY != 0) && game.ElapsedMilliseconds >= optimumNextAnalogRefreshMs))
++				{
++					game.SendEntityPacket(game.EntityPlayer.EntityId, Optimum.OptimumAnalogMovement.PacketId,
++						new byte[3] { factorByte, axisX, axisY });
++					optimumPreviousAnalogFactorCode = factorCode;
++					optimumPreviousAnalogXCode = axisX + 1;
++					optimumPreviousAnalogYCode = axisY + 1;
++					optimumPreviousAnalogEntityId = game.EntityPlayer.EntityId;
++					optimumPreviousBaseSpeed = game.player.worlddata.MoveSpeedMultiplier;
++					optimumNextAnalogRefreshMs = game.ElapsedMilliseconds + 250;
++				}
++			}
+ 		}
+ 	}
+ 
+ 	private void SendServerPackets(EntityControls before, EntityControls now)
+ 	{

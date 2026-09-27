@@ -395,8 +395,20 @@ internal sealed unsafe class FrameSlot : IDisposable
 
             lock (_context.QueueLock)
             {
-                VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, default(Fence)),
-                    "vkQueueSubmit for a frame");
+                if (signalSemaphore.Handle != 0)
+                {
+                    // Submit B releases the swapchain image to PRESENT_SRC with a
+                    // synchronization-2 barrier. Name the present semaphore's
+                    // ALL_COMMANDS signal scope explicitly so it includes that
+                    // layout transition before vkQueuePresentKHR waits on it.
+                    SubmitPresentWithSynchronization2(api, waits, waitValues, waitStages, waitCount,
+                        commandBuffers, commandBufferCount, signals, signalValues, signalCount);
+                }
+                else
+                {
+                    VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, default(Fence)),
+                        "vkQueueSubmit for a frame");
+                }
             }
             if (uploads) _timeline.NoteTransferSubmitted(transferValue);
             _uploads.OnFrameCommandsSubmittedLocked();
@@ -409,6 +421,58 @@ internal sealed unsafe class FrameSlot : IDisposable
         _timeline.NoteFrameSubmitted(FrameValue);
         LastSignalledValue = FrameValue;
         LastSubmittedFrameId = _latency.FrameId;
+    }
+
+    private void SubmitPresentWithSynchronization2(Vk api, Semaphore* waits, ulong* waitValues,
+        PipelineStageFlags* waitStages, uint waitCount, CommandBuffer* commandBuffers,
+        uint commandBufferCount, Semaphore* signals, ulong* signalValues, uint signalCount)
+    {
+        SemaphoreSubmitInfo* waitInfos = stackalloc SemaphoreSubmitInfo[(int)waitCount];
+        for (uint i = 0; i < waitCount; i++)
+        {
+            waitInfos[i] = new SemaphoreSubmitInfo
+            {
+                SType = StructureType.SemaphoreSubmitInfo,
+                Semaphore = waits[i],
+                Value = waitValues[i],
+                StageMask = (PipelineStageFlags2)(ulong)waitStages[i],
+            };
+        }
+
+        CommandBufferSubmitInfo* commandInfos = stackalloc CommandBufferSubmitInfo[(int)commandBufferCount];
+        for (uint i = 0; i < commandBufferCount; i++)
+        {
+            commandInfos[i] = new CommandBufferSubmitInfo
+            {
+                SType = StructureType.CommandBufferSubmitInfo,
+                CommandBuffer = commandBuffers[i],
+            };
+        }
+
+        SemaphoreSubmitInfo* signalInfos = stackalloc SemaphoreSubmitInfo[(int)signalCount];
+        for (uint i = 0; i < signalCount; i++)
+        {
+            signalInfos[i] = new SemaphoreSubmitInfo
+            {
+                SType = StructureType.SemaphoreSubmitInfo,
+                Semaphore = signals[i],
+                Value = signalValues[i],
+                StageMask = PipelineStageFlags2.AllCommandsBit,
+            };
+        }
+
+        var submit = new SubmitInfo2
+        {
+            SType = StructureType.SubmitInfo2,
+            WaitSemaphoreInfoCount = waitCount,
+            PWaitSemaphoreInfos = waitCount == 0 ? null : waitInfos,
+            CommandBufferInfoCount = commandBufferCount,
+            PCommandBufferInfos = commandInfos,
+            SignalSemaphoreInfoCount = signalCount,
+            PSignalSemaphoreInfos = signalInfos,
+        };
+        VulkanResult.Check(api.QueueSubmit2(_context.GraphicsQueue, 1, &submit, default(Fence)),
+            "vkQueueSubmit2 for a present frame");
     }
 
     /// <summary>The frame associated with LastSignalledValue, including partial submits.</summary>

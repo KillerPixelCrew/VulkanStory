@@ -49,7 +49,8 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
             reason = "FSR 4 requires Windows DX12";
             return false;
         }
-        string directory = Path.GetDirectoryName(typeof(Fsr4Runtime).Assembly.Location)!;
+        string directory = NativeRuntimePaths.DirectoryContaining(
+            "amd_fidelityfx_upscaler_dx12.dll", "OptimumFsr4.dll");
         if (!File.Exists(Path.Combine(directory, "amd_fidelityfx_upscaler_dx12.dll")) ||
             !File.Exists(Path.Combine(directory, "OptimumFsr4.dll")))
         {

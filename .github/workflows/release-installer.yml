@@ -59,16 +59,30 @@ jobs:
             version="$tag_clean"
           fi
           [ -n "$version" ] || version="$(cat VERSION)"
+          if [ "$version" != "$(cat VERSION)" ]; then
+            echo "Release version must match VERSION so the installer selects the matching delta asset." >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Restore local tools
         run: dotnet tool restore
 
+      - name: Acquire pinned decoder bundle
+        shell: bash
+        run: |
+          python3 scripts/acquire-delta-decoder.py --rid "${{ matrix.rid }}" \
+            --output "$RUNNER_TEMP/delta-decoder"
+
       - name: Publish self-contained
-        run: >
-          dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release
-          -r ${{ matrix.rid }} --self-contained
-          -o publish/${{ matrix.rid }} --nologo
+        shell: bash
+        run: |
+          dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release \
+            -r "${{ matrix.rid }}" --self-contained \
+            -o "publish/${{ matrix.rid }}" --nologo \
+            "-p:DeltaDecoderDirectory=$RUNNER_TEMP/delta-decoder"
+          test -f "publish/${{ matrix.rid }}/delta-decoder/decoder.json"
+          test -f "publish/${{ matrix.rid }}/delta-decoder/LICENSE-xdelta.txt"
 
       - name: Pack with Velopack
         shell: bash

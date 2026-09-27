@@ -30,6 +30,20 @@ public sealed class Uninstaller(ISystemProbe probe)
         if (InstallManifest.Deserialize(json) is not { } manifest)
             return UninstallResult.Failure(FailureReason.BadInput, $"the install manifest is unreadable: {manifestPath}");
 
+        if (manifest.Entries is null || manifest.Shortcuts is null ||
+            string.IsNullOrWhiteSpace(manifest.InstallDirectory) ||
+            !Path.IsPathFullyQualified(manifest.InstallDirectory) ||
+            !string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifest.InstallDirectory)),
+                Path.TrimEndingDirectorySeparator(installDir),
+                probe.Os == OsKind.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            return UninstallResult.Failure(FailureReason.BadInput,
+                "the install manifest belongs to a different directory");
+
+        if (manifest.Entries.Any(e => string.IsNullOrWhiteSpace(e) || e is "." or ".." ||
+                                      e.Contains('/') || e.Contains('\\') || e.Contains(':')))
+            return UninstallResult.Failure(FailureReason.BadInput,
+                "the install manifest must name only top-level entries");
+
         string prefix = installDir + Path.DirectorySeparatorChar;
 
         string[] escaping = manifest.Entries
@@ -62,7 +76,7 @@ public sealed class Uninstaller(ISystemProbe probe)
             removed += manifest.Shortcuts.Count;
         }
 
-        UninstallRegistration.Unregister(manifest.UninstallRegistryKey);
+        UninstallRegistration.Unregister(manifest.UninstallRegistryKey, installDir);
 
         if (TryRemove(Path.Combine(installDir, ".optimum")))
             removed++;

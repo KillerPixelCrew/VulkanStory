@@ -1,0 +1,20 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.Gui/MainMenuRenderAPI.cs b/VintagestoryLib/Vintagestory.Client.Gui/MainMenuRenderAPI.cs
+index 526d24ff..fe61f1c2 100644
+--- a/VintagestoryLib/Vintagestory.Client.Gui/MainMenuRenderAPI.cs
++++ b/VintagestoryLib/Vintagestory.Client.Gui/MainMenuRenderAPI.cs
+@@ -81,11 +81,14 @@ public class MainMenuRenderAPI : RenderAPIBase
+ 		ShaderProgramGui gui = ShaderPrograms.Gui;
+ 		if (quadModel == null)
+ 		{
+ 			quadModel = plat.UploadMesh(QuadMeshUtilExt.GetQuadModelData());
+ 		}
+-		if (gui != null)
++		// ShaderRegistry registers Gui before the loading screen compiles it.
++		// Keep using the already compiled minimal GUI shader until the full
++		// program has its uniforms, including during an SDL-owned first frame.
++		if (gui != null && gui.HasUniform("rgbaIn"))
+ 		{
+ 			gui.Use();
+ 			gui.RgbaIn = ((color == null) ? ColorUtil.WhiteArgbVec : color);
+ 			gui.ExtraGlow = 0;
+ 			gui.ApplyColor = ((color != null) ? 1 : 0);

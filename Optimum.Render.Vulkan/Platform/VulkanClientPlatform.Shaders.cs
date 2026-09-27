@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using OpenTK.Mathematics;
 using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
@@ -225,6 +226,11 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override bool CompileShader(Shader shader)
     {
+        if (OptimumConfig.HandheldShadowTier &&
+            shader.PrefixCode?.Contains("#define HANDHELDSHADOWS", StringComparison.Ordinal) != true)
+        {
+            shader.PrefixCode = (shader.PrefixCode ?? "") + "\n#define HANDHELDSHADOWS 1\n";
+        }
         return device.CompileShader(shader);
     }
 

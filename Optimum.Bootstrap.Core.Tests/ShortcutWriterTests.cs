@@ -52,6 +52,18 @@ public sealed class ShortcutWriterTests : IDisposable
     }
 
     [Fact]
+    public void RemoveNeverRecursivelyDeletesAManifestShortcutDirectory()
+    {
+        string directory = Path.Combine(_home, "Desktop", "Optimum.lnk");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "keep.txt"), "keep");
+
+        new ShortcutWriter(LinuxProbe()).Remove([directory]);
+
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(directory, "keep.txt")));
+    }
+
+    [Fact]
     public void CopiesTheHicolorIconWhenThePackageHasOne()
     {
         FakeSystemProbe probe = LinuxProbe();
@@ -59,8 +71,13 @@ public sealed class ShortcutWriterTests : IDisposable
         Directory.CreateDirectory(Path.Combine(installDir, "assets"));
         File.WriteAllText(Path.Combine(installDir, "assets", "gameicon.png"), "PNG");
 
-        new ShortcutWriter(probe).Create(installDir, Path.Combine(installDir, "optimum-launch.sh"), ShortcutKinds.Menu);
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, Path.Combine(installDir, "optimum-launch.sh"), ShortcutKinds.Menu);
 
-        Assert.True(File.Exists(Path.Combine(_home, ".local", "share", "icons", "hicolor", "256x256", "apps", "optimum.png")));
+        string icon = Path.Combine(_home, ".local", "share", "icons", "hicolor", "256x256", "apps", "optimum.png");
+        Assert.Contains(icon.Replace('\\', '/'), created);
+        Assert.True(File.Exists(icon));
+        writer.Remove(created);
+        Assert.False(File.Exists(icon));
     }
 }

@@ -215,6 +215,29 @@ public sealed class DeployRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void UninstallRefusesManifestForAnotherDirectory()
+    {
+        string installDir = Path.Combine(_root, "install", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
+        string keep = Path.Combine(installDir, "keep.txt");
+        File.WriteAllText(keep, "keep me");
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.14",
+            InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = Path.Combine(_root, "other"),
+            Entries = ["keep.txt"],
+        };
+        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
+
+        UninstallResult result = new Uninstaller(SystemProbe.Default).Uninstall(installDir);
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.BadInput, result.Reason);
+        Assert.True(File.Exists(keep));
+    }
+
+    [Fact]
     public void MenuShortcutIsRecordedInTheManifestAndRemovedByUninstall()
     {
         if (OperatingSystem.IsWindows())

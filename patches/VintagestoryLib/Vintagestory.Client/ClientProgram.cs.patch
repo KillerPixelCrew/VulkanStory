@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index 4536b4c..9bdf3f7 100644
+index 4536b4cc..c025a849 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -146,17 +146,52 @@ index 4536b4c..9bdf3f7 100644
  			3 => 3, 
  			2 => 2, 
  			1 => 3, 
-@@ -296,37 +369,101 @@ public class ClientProgram
+@@ -278,74 +351,249 @@ public class ClientProgram
+ 		}
+ 		if (ClientSettings.ScreenHeight < 10)
+ 		{
+ 			ClientSettings.ScreenHeight = 10;
+ 		}
+-		string[] array = ClientSettings.GlContextVersion.Split('.');
+-		int num3 = array[0].ToInt(4);
+-		int num4 = array[1].ToInt(3);
+-		GameWindowSettings gameWindowSettings = GameWindowSettings.Default;
+-		NativeWindowSettings val2 = new NativeWindowSettings
+-		{
++	string[] array = ClientSettings.GlContextVersion.Split('.');
++	int num3 = array[0].ToInt(4);
++	int num4 = array[1].ToInt(3);
++	bool optimumSdlWindow = optimumUseVulkan &&
++		clientPlatformWindows is IOptimumSdlClientPlatform &&
++		Environment.GetEnvironmentVariable("OPTIMUM_SDL_WINDOW") != "0";
++	bool optimumSdlNoGlfw = optimumSdlWindow &&
++		Environment.GetEnvironmentVariable("OPTIMUM_SDL_COMPAT_GLFW") != "1";
++	// NativeWindowSettings itself initializes GLFW, before a window is opened.
++	// Construct it only for the GLFW route or if SDL setup later falls back to GL.
++	GameWindowSettings gameWindowSettings = optimumSdlNoGlfw ? null : GameWindowSettings.Default;
++	NativeWindowSettings val2 = optimumSdlNoGlfw ? null : new NativeWindowSettings
++	{
+ 			Title = "Vintage Story",
+ 			APIVersion = new Version(num3, num4),
+ 			ClientSize = new Vector2i(ClientSettings.ScreenWidth, ClientSettings.ScreenHeight),
+ 			Flags = (ContextFlags)0,
+ 			Vsync = ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off,
+ 			WindowState = val,
+ 			WindowBorder = (WindowBorder)ClientSettings.WindowBorder
  		};
- 		if (RuntimeEnv.OS == OS.Mac)
+-		if (RuntimeEnv.OS == OS.Mac)
++	if (val2 != null && RuntimeEnv.OS == OS.Mac)
  		{
  			val2.Flags = (ContextFlags)2;
  		}
+-		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
+-		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
+-		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
 +		// Optimum: the renderer was chosen before the platform was constructed;
 +		// a Vulkan platform needs a window without a GL context.
-+		if (optimumUseVulkan)
-+		{
-+			val2.API = ContextAPI.NoAPI;
++	if (optimumUseVulkan)
++	{
++		if (val2 != null) val2.API = ContextAPI.NoAPI;
 +			OptimumRender.NoGraphicsApiWindow = true;
 +		}
 +		// Optimum (headless render harness): OPTIMUM_HEADLESS asks for the real
@@ -165,15 +200,27 @@ index 4536b4c..9bdf3f7 100644
 +		// GL path in this client, so this is the only offscreen mode that is
 +		// symmetric across both backends - it simply never appears and never takes
 +		// focus, which also puts the run under the existing background FPS cap.
-+		if (Vintagestory.API.Config.OptimumHeadless.Enabled)
++	if (Vintagestory.API.Config.OptimumHeadless.Enabled)
++	{
++		if (val2 != null)
+ 		{
+-			try
++			val2.StartVisible = false;
++			val2.StartFocused = false;
++		}
++		Console.WriteLine("[Optimum] headless: the window stays hidden");
++	}
++	// SDL owns the visible Vulkan window. The explicit compatibility route keeps
++	// a hidden GameWindowNative for older window consumers.
++	if (optimumSdlWindow && val2 != null)
 +		{
 +			val2.StartVisible = false;
 +			val2.StartFocused = false;
-+			Console.WriteLine("[Optimum] headless: the window stays hidden");
++			val2.WindowState = (WindowState)0;
 +		}
- 		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
- 		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
--		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
++		if (!optimumSdlNoGlfw) GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
++		GameWindowNative gameWindowNative = optimumSdlNoGlfw ? null :
++			AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
 +		if (optimumUseVulkan)
 +		{
 +			string optimumInstallReason;
@@ -182,11 +229,39 @@ index 4536b4c..9bdf3f7 100644
 +			// and the device sizes its default render target from this. A target
 +			// smaller than the window clips every draw to its top-left corner,
 +			// because the viewport comes from the window instead.
-+			bool optimumInstalled = clientPlatformWindows.InitializeGraphics(
-+				(IntPtr)((NativeWindow)gameWindowNative).WindowPtr,
-+				((NativeWindow)gameWindowNative).ClientSize.X,
-+				((NativeWindow)gameWindowNative).ClientSize.Y,
-+				out optimumInstallReason);
++			bool optimumInstalled;
++			if (optimumSdlWindow)
+ 			{
+-				((NativeWindow)gameWindowNative).CenterWindow();
++				IOptimumSdlClientPlatform sdl = (IOptimumSdlClientPlatform)clientPlatformWindows;
++				optimumInstalled = sdl.TryInitializeSdlWindow("Vintage Story",
++					ClientSettings.ScreenWidth, ClientSettings.ScreenHeight,
++					Vintagestory.API.Config.OptimumHeadless.Enabled,
++					ClientSettings.GameWindowMode == 1 || ClientSettings.GameWindowMode == 3,
++					out optimumInstallReason);
++				if (optimumInstalled)
++				{
++					// The hidden legacy object still supplies sizes to APIs that have
++					// not moved to the SDL platform yet.
++					if (gameWindowNative != null)
++						((NativeWindow)gameWindowNative).ClientSize =
++							new Vector2i(sdl.SdlPixelWidth, sdl.SdlPixelHeight);
++					Console.WriteLine(optimumSdlNoGlfw
++						? "[Optimum] SDL3 Vulkan window active; no GLFW window"
++						: "[Optimum] SDL3 Vulkan window active; GLFW compatibility window hidden");
++				}
+ 			}
+-			catch (Exception e)
++			else
+ 			{
+-				ScreenManager.Platform.Logger.Warning("Error trying to center the window");
+-				ScreenManager.Platform.Logger.Warning(e);
++				optimumInstalled = clientPlatformWindows.InitializeGraphics(
++					(IntPtr)((NativeWindow)gameWindowNative).WindowPtr,
++					((NativeWindow)gameWindowNative).ClientSize.X,
++					((NativeWindow)gameWindowNative).ClientSize.Y,
++					out optimumInstallReason);
++			}
 +
 +			if (!optimumInstalled)
 +			{
@@ -196,53 +271,34 @@ index 4536b4c..9bdf3f7 100644
 +				// screenManager.Start has not run yet, so nothing else holds it.
 +				OptimumRender.FallBackToOpenGL(optimumInstallReason);
 +				Console.WriteLine("[Optimum] Vulkan unavailable, reopening for OpenGL: " + optimumInstallReason);
-+				((NativeWindow)gameWindowNative).Close();
++				if (gameWindowNative != null) ((NativeWindow)gameWindowNative).Close();
++				optimumSdlWindow = false;
++				optimumSdlNoGlfw = false;
 +				OptimumRender.NoGraphicsApiWindow = false;
++				if (val2 == null)
++				{
++					gameWindowSettings = GameWindowSettings.Default;
++					val2 = new NativeWindowSettings
++					{
++						Title = "Vintage Story",
++						APIVersion = new Version(num3, num4),
++						ClientSize = new Vector2i(ClientSettings.ScreenWidth, ClientSettings.ScreenHeight),
++						Flags = RuntimeEnv.OS == OS.Mac ? (ContextFlags)2 : (ContextFlags)0,
++						Vsync = ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off,
++						WindowBorder = (WindowBorder)ClientSettings.WindowBorder
++					};
++					GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
++				}
 +				val2.API = ContextAPI.OpenGL;
++				val2.StartVisible = !Vintagestory.API.Config.OptimumHeadless.Enabled;
++				val2.StartFocused = !Vintagestory.API.Config.OptimumHeadless.Enabled;
++				val2.WindowState = val;
 +				gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
 +				clientPlatformWindows = new ClientPlatformWindows(logger);
 +				ConfigureClientPlatform(clientPlatformWindows);
 +				WireClientPlatform(clientPlatformWindows);
 +				ScreenManager.Platform = clientPlatformWindows;
-+			}
-+		}
-+		// Optimum: the Run block's teardown only covers Run itself. A throw between
-+		// the graphics bring-up above and Run (window setup, screenManager.Start, the
-+		// platform's Start) would skip it, keeping the device alive and leaving the
-+		// Vulkan crash marker for the next start to misread, so graphics shut down on
-+		// that path too before the exception carries on. Empty on the OpenGL platform.
-+		try
- 		{
--			try
-+			if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
- 			{
--				((NativeWindow)gameWindowNative).CenterWindow();
-+				try
-+				{
-+					((NativeWindow)gameWindowNative).CenterWindow();
-+				}
-+				catch (Exception e)
-+				{
-+					ScreenManager.Platform.Logger.Warning("Error trying to center the window");
-+					ScreenManager.Platform.Logger.Warning(e);
-+				}
  			}
--			catch (Exception e)
-+			clientPlatformWindows.StartAudio();
-+			clientPlatformWindows.LogAndTestHardwareInfosStage2();
-+			clientPlatformWindows.window = gameWindowNative;
-+			clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
-+			clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
-+			clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
-+			clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
-+			if (ClientSettings.GameWindowMode == 3)
- 			{
--				ScreenManager.Platform.Logger.Warning("Error trying to center the window");
--				ScreenManager.Platform.Logger.Warning(e);
-+				clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
- 			}
-+			screenManager.Start(args, rawArgs);
-+			clientPlatformWindows.Start();
  		}
 -		clientPlatformWindows.StartAudio();
 -		clientPlatformWindows.LogAndTestHardwareInfosStage2();
@@ -252,9 +308,47 @@ index 4536b4c..9bdf3f7 100644
 -		clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
 -		clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
 -		if (ClientSettings.GameWindowMode == 3)
-+		catch (Exception)
++		// Optimum: the Run block's teardown only covers Run itself. A throw between
++		// the graphics bring-up above and Run (window setup, screenManager.Start, the
++		// platform's Start) would skip it, keeping the device alive and leaving the
++		// Vulkan crash marker for the next start to misread, so graphics shut down on
++		// that path too before the exception carries on. Empty on the OpenGL platform.
++		try
  		{
 -			clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
++			if (!optimumSdlWindow && (int)val == 0 && !RuntimeEnv.IsWaylandSession)
++			{
++				try
++				{
++					((NativeWindow)gameWindowNative).CenterWindow();
++				}
++				catch (Exception e)
++				{
++					ScreenManager.Platform.Logger.Warning("Error trying to center the window");
++					ScreenManager.Platform.Logger.Warning(e);
++				}
++			}
++			clientPlatformWindows.StartAudio();
++			clientPlatformWindows.LogAndTestHardwareInfosStage2();
++			clientPlatformWindows.window = gameWindowNative;
++			if (gameWindowNative != null)
++				clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
++			clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
++			clientPlatformWindows.WindowSize.Width = optimumSdlNoGlfw
++				? ((IOptimumSdlClientPlatform)clientPlatformWindows).SdlPixelWidth
++				: ((NativeWindow)gameWindowNative).ClientSize.X;
++			clientPlatformWindows.WindowSize.Height = optimumSdlNoGlfw
++				? ((IOptimumSdlClientPlatform)clientPlatformWindows).SdlPixelHeight
++				: ((NativeWindow)gameWindowNative).ClientSize.Y;
++			if (!optimumSdlWindow && ClientSettings.GameWindowMode == 3)
++			{
++				clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
++			}
++			screenManager.Start(args, rawArgs);
++			clientPlatformWindows.Start();
++		}
++		catch (Exception)
++		{
 +			clientPlatformWindows.ShutdownGraphics();
 +			throw;
  		}
@@ -263,19 +357,29 @@ index 4536b4c..9bdf3f7 100644
  		Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
  		try
  		{
- 			((GameWindow)gameWindowNative).Run();
+-			((GameWindow)gameWindowNative).Run();
++			if (optimumSdlWindow)
++				((IOptimumSdlClientPlatform)clientPlatformWindows).RunSdlWindow();
++			else
++				((GameWindow)gameWindowNative).Run();
  		}
-@@ -338,14 +475,55 @@ public class ClientProgram
+ 		finally
+ 		{
+-			if (RuntimeEnv.OS == OS.Windows)
++			if (!optimumSdlWindow && RuntimeEnv.OS == OS.Windows)
+ 			{
+ 				GLFW.IconifyWindow(((NativeWindow)gameWindowNative).WindowPtr);
  			}
  			Thread.CurrentThread.Priority = ThreadPriority.Normal;
  			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");
  			clientPlatformWindows.DisposeFrameBuffers(clientPlatformWindows.FrameBuffers);
  			clientPlatformWindows.StopAudio();
+-			((NativeWindow)gameWindowNative).Dispose();
 +			// Tear the graphics backend down before its window goes; the Vulkan
 +			// platform also clears the crash marker so the next start does not
 +			// read this exit as a crash. Empty on the OpenGL platform.
 +			clientPlatformWindows.ShutdownGraphics();
- 			((NativeWindow)gameWindowNative).Dispose();
++			if (gameWindowNative != null) ((NativeWindow)gameWindowNative).Dispose();
  		}
  	}
  

@@ -283,6 +283,7 @@ for symbols in "VintagestoryLib:$LIB_OUT/VintagestoryLib-patched.pdb" \
     fi
 done
 cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$STAGE_DIR/"
+cp -f "$MOD_OUT/Optimum.GameContent.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
@@ -296,6 +297,17 @@ cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$STAGE_DIR/"
 for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
     [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$STAGE_DIR/"
 done
+
+# Controller input uses SDL3 even while the window still belongs to GLFW.
+# Keep the native library beside the renderer for its direct P/Invoke calls.
+SDL3_NATIVE="$MOD_OUT/runtimes/linux-x64/native/libSDL3.so"
+if [[ ! -f "$SDL3_NATIVE" ]]; then
+    echo "Error: SDL3 native library missing at $SDL3_NATIVE" >&2
+    exit 1
+fi
+cp -f "$SDL3_NATIVE" "$STAGE_DIR/libSDL3.so"
+cp -f "$REPO_ROOT/sources/controller/gamecontrollerdb.txt" "$STAGE_DIR/gamecontrollerdb.txt"
+cp -f "$REPO_ROOT/sources/controller/SDL_GameControllerDB-LICENSE.txt" "$STAGE_DIR/ControllerMappings-LICENSE.txt"
 
 # shaderc is a native library loaded by Silk.NET.Shaderc, which probes the
 # application directory and LD_LIBRARY_PATH, not Lib/ - a copy it cannot find

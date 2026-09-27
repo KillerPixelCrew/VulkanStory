@@ -49,13 +49,13 @@ Some optimizations in this repository do not yet reach the shipped game. The per
 
 ## Getting Started
 
-Optimum supports Windows and Linux; macOS is not supported. Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
+Optimum supports Windows and Linux; macOS is not supported. The player installer uses an existing Vintage Story installation and a version-matched Optimum delta release to create a separate copy. Release delivery and in-game validation are tracked in the [roadmap](docs/ROADMAP.md).
 
 ### Graphical installer
 
-`Optimum.Installer` is a cross-platform Avalonia wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build.
+`Optimum.Installer` is a cross-platform Avalonia wizard. A publish with the pinned decoder bundle opens the release download route by default: choose an existing matching game folder, select a separate Optimum folder, and install or repair. It checks the downloaded archive and reconstructed files before activating the copy. A locally staged release beside the installer takes priority. Developer builds without a decoder bundle retain the source-build wizard; `--developer-build` selects it explicitly.
 
-The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.17-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.17-linux-x64-Installer.AppImage`). Nothing is code-signed yet, so Windows SmartScreen warns on first run.
+The `release-installer.yml` workflow packs the Windows and Linux installer builds with Velopack and includes the pinned decoder bundle. Installer assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.17-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.17-linux-x64-Installer.AppImage`). Matching delta archives use `Optimum-v<optimum-version>-VS<game-version>-<rid>-Delta.zip`.
 
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
@@ -78,7 +78,7 @@ optimum uninstall --install-dir ~/.local/share/optimum
 
 `build` decompiles your copy of Vintage Story locally and requires `--acknowledge-decompile`. `--acquire-source` performs a shallow HTTPS clone at the matching release tag and caches it under the platform's user cache directory. Pass `--source-cache <absolute-path>` to override the cache root.
 
-The sections below are the original per-platform scripts. They still work.
+The sections below describe the original source-build scripts for developers. They still work, but require build tools and do not use the player release route.
 
 ### Linux
 
@@ -189,13 +189,25 @@ after editing it. When troubleshooting world-generation problems, the four
 relevant keys are `ChunkReadPoolEnabled`, `ChunkReadPoolWorkers`,
 `ChunkDeserializeParallel`, and `ChunkDeserializeParallelMinY`.
 
+On the Vulkan path, connecting an SDL3 controller creates
+`ModConfig/optimum-controllers.json` with a separate editable device profile.
+See [controller controls and settings](docs/controller.md) for the current
+handheld bindings and profile fields.
+
 ### Experimental Vulkan renderer
 
 The Vulkan backend is opt-in on this branch. Set `"Renderer": "vulkan"` in the
-active data path's `ModConfig/optimum.json` and restart the client. The startup
-log must contain `[Optimum] Vulkan renderer`; if Vulkan initialization fails,
-the client may reopen with OpenGL. Set `"Renderer": "opengl"` to return to the
+active data path's `ModConfig/optimum.json` and restart the client. The launcher
+checks the renderer's Vulkan 1.3 device requirements first and reports a failure
+before game startup. `Optimum --check-vulkan` runs that check on its own. The
+startup log must contain `[Optimum] Vulkan renderer`; a later window or swapchain
+failure may still reopen with OpenGL. Set `"Renderer": "opengl"` to return to the
 default backend.
+
+Vulkan now uses an SDL3 window and input loop by default, including keyboard,
+mouse, touch, controller and native IME text input. The startup log reports
+`SDL3 Vulkan window active; no GLFW window`. Set `OPTIMUM_SDL_WINDOW=0` to use
+the GLFW Vulkan route for troubleshooting; OpenGL still uses GLFW.
 
 `"Taa": true` enables temporal antialiasing. With `"AmbientOcclusion": "auto"`,
 Vulkan selects GTAO while TAA is active and uses the game's SSAO otherwise;

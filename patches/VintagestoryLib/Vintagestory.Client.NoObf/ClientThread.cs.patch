@@ -1,0 +1,40 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientThread.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientThread.cs
+index 73b2989b..ddfb7a9d 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientThread.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientThread.cs
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Diagnostics;
+ using System.Threading;
+ using System.Threading.Tasks;
++using Vintagestory.API.Config;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ internal class ClientThread
+ {
+@@ -36,11 +37,23 @@ internal class ClientThread
+ 		{
+ 			while (!_token.IsCancellationRequested)
+ 			{
+ 				if (!Update())
+ 				{
+-					Thread.Sleep(5);
++					int sleepMs = 5;
++					if (OptimumConfig.IdleThreadWait)
++					{
++						sleepMs = 25;
++						long elapsedMs = totalPassedTime.ElapsedMilliseconds;
++						for (int i = 0; i < clientsystems.Length; i++)
++						{
++							ClientSystem system = clientsystems[i];
++							sleepMs = Math.Min(sleepMs, OptimumConfig.IdleThreadDelayMs(elapsedMs,
++								system.threadMillisecondsSinceStart, system.SeperateThreadTickIntervalMs(), 5, 25));
++						}
++					}
++					Thread.Sleep(sleepMs);
+ 				}
+ 				if (game.threadsShouldExit)
+ 				{
+ 					ShutDown();
+ 					break;

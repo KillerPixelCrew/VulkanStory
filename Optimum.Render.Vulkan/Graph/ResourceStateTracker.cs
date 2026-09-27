@@ -392,7 +392,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.TransferDst => new(ImageLayout.TransferDstOptimal,
             PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
         ResourceUsage.PresentSrc => new(ImageLayout.PresentSrcKhr,
-            PipelineStageFlags2.BottomOfPipeBit, AccessFlags2.None),
+            PipelineStageFlags2.None, AccessFlags2.None),
         _ => throw new System.ArgumentOutOfRangeException(nameof(usage), usage, null),
     };
 

@@ -1,5 +1,20 @@
 # Avalonia installer: implementation plan
 
+> **Distribution update (2026-09-26).** The player build-appliance premise below
+> is superseded by [roadmap milestone 0](docs/ROADMAP.md): binary-delta packs
+> reconstruct patched copies from the player's exact official DLLs. Decompilation
+> and donor compilation stay on the build machine. `BinaryDeltaPack` now provides
+> verified, staged application in Bootstrap.Core, exposed through the developer
+> `apply-delta` CLI verb. Decoder bundling is available through the
+> `DeltaDecoderDirectory` publish property. `install-delta` stages a separate runtime,
+> and the launcher verifies and activates it without donors or writes to vanilla.
+> A local bundle containing `delta-release.json` now opens a dedicated install window,
+> bypassing prerequisites and source acquisition. It verifies the payload inventory and
+> requires staged startup validation before activation. The decoder still runs as a bundled
+> subprocess. In-process decoding, release authentication/acquisition, complete runtime
+> packaging, shortcuts/uninstall and full-game validation remain open for this route.
+> Existing build commands and GUI behavior below still describe the current legacy flow.
+
 > **Platform scope (2026-09-26).** This fork supports Windows and Linux only.
 > macOS support was dropped entirely: its installer, packaging scripts, CI jobs
 > and code paths were removed, and the macOS parts of this plan with them.

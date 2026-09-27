@@ -2,8 +2,8 @@ using System;
 using System.Runtime.CompilerServices;
 using Xunit;
 
-// These tests drive a real GPU driver, and three of them additionally drive
-// GLFW's process-global init and terminate. Neither is safe to do from several
+// These tests drive a real GPU driver; some also drive SDL or GLFW's
+// process-global windowing state. Neither is safe to do from several
 // threads at once: xunit's default of running collections in parallel crashed
 // the test host outright once the windowing tests joined the suite.
 //

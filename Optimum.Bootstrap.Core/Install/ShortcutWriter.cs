@@ -1,4 +1,6 @@
 using Optimum.Bootstrap.Core.Platform;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Optimum.Bootstrap.Core.Install;
 
@@ -30,12 +32,33 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             {
                 if (File.Exists(path))
                     File.Delete(path);
-                else if (Directory.Exists(path))
-                    Directory.Delete(path, recursive: true);
             }
             catch (IOException) { /* best effort */ }
             catch (UnauthorizedAccessException) { /* best effort */ }
         }
+    }
+
+    /// <summary>Creates a per-install Linux menu entry for the guarded, confirming removal command.</summary>
+    public string? CreateLinuxUninstallEntry(string installDirectory, string uninstallerPath)
+    {
+        if (probe.Os != OsKind.Linux) return null;
+        string dataHome = probe.GetEnvironmentVariable("XDG_DATA_HOME") is { Length: > 0 } x
+            ? x : Posix(probe.HomeDirectory, ".local", "share");
+        string id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installDirectory)))[..16]
+            .ToLowerInvariant();
+        string path = Posix(dataHome, "applications", $"optimum-uninstall-{id}.desktop");
+        string entry = $"""
+            [Desktop Entry]
+            Type=Application
+            Name=Uninstall Optimum
+            Comment=Remove this separate Optimum installation
+            Exec="{EscapeExec(uninstallerPath)}" uninstall-delta --install-dir "{EscapeExec(installDirectory)}" --confirm
+            Terminal=true
+            Icon=optimum
+            Categories=Game;Settings;
+
+            """;
+        return WriteText(path, entry, executable: true).FirstOrDefault();
     }
 
     private List<string> CreateLinux(string installDirectory, string launcherPath, ShortcutKinds kinds)
@@ -47,6 +70,7 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             : Posix(home, ".local", "share");
 
         string? icon = InstallIcon(installDirectory, Posix(dataHome, "icons", "hicolor", "256x256", "apps", "optimum.png"));
+        if (icon is not null) written.Add(icon);
         string entry = DesktopEntry(launcherPath, installDirectory, icon);
 
         if (kinds.HasFlag(ShortcutKinds.Menu))
@@ -111,6 +135,11 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         var sb = new System.Text.StringBuilder(value.Length + 8);
         foreach (char c in value)
         {
+            if (c == '%')
+            {
+                sb.Append("%%");
+                continue;
+            }
             if (c is '\\' or '"' or '`' or '$')
                 sb.Append('\\');
             sb.Append(c);

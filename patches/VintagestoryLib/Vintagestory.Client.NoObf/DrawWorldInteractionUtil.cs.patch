@@ -1,0 +1,72 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+index 1bbe3443..30e69002 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+@@ -1,7 +1,9 @@
++using System;
+ using System.Collections.Generic;
+ using Cairo;
++using Optimum;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+@@ -197,10 +199,15 @@ public class DrawWorldInteractionUtil
+ 		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-2.3");
+ 	}
+ 
+ 	private double DrawHotkey(HotKey hk, double x, double y, Context ctx, CairoFont font, double lineheight, double textHeight, double pluswdith, double symbolspacing, double[] color)
+ 	{
++		string glyph = OptimumControllerHints.GlyphFor(hk.Code);
++		if (glyph != null)
++		{
++			return DrawControllerGlyph(glyph, x, y, ctx, font, lineheight, textHeight, pluswdith, symbolspacing, color);
++		}
+ 		KeyCombination currentMapping = hk.CurrentMapping;
+ 		if (currentMapping.IsMouseButton(currentMapping.KeyCode))
+ 		{
+ 			return DrawMouseButton(currentMapping.KeyCode - 240, x, y, ctx, font, lineheight, textHeight, pluswdith, symbolspacing, color);
+ 		}
+@@ -214,10 +221,41 @@ public class DrawWorldInteractionUtil
+ 		}
+ 		x = HotkeyComponent.DrawHotkey(capi, currentMapping.PrimaryAsString(), x, y, ctx, font, lineheight, textHeight, pluswdith, symbolspacing, 10.0, color);
+ 		return x;
+ 	}
+ 
++	private double DrawControllerGlyph(string glyph, double x, double y, Context ctx, CairoFont font,
++		double lineheight, double textHeight, double pluswdith, double symbolspacing, double[] color)
++	{
++		if (x > 0.0)
++		{
++			capi.Gui.Text.DrawTextLine(ctx, font, "+", x + symbolspacing,
++				y + (lineheight - textHeight) / 2.0 + 2.0);
++			x += pluswdith + 2.0 * symbolspacing;
++		}
++		double textWidth = font.GetTextExtents(glyph).Width;
++		double glyphWidth = Math.Max(lineheight, textWidth + GuiElement.scaled(12.0));
++		if (glyph.Length == 1)
++		{
++			ctx.Arc(x + glyphWidth / 2.0, y + lineheight / 2.0, lineheight / 2.0 - 1.0,
++				0.0, Math.PI * 2.0);
++		}
++		else
++		{
++			GuiElement.RoundRectangle(ctx, x + 1.0, y + 1.0, glyphWidth - 2.0,
++				lineheight - 2.0, 5.0);
++		}
++		ctx.SetSourceRGBA(color);
++		ctx.LineWidth = 1.5;
++		ctx.StrokePreserve();
++		ctx.SetSourceRGBA(color[0], color[1], color[2], color[3] * 0.45);
++		ctx.Fill();
++		capi.Gui.Text.DrawTextLine(ctx, font, glyph,
++			x + (glyphWidth - textWidth) / 2.0, y + (lineheight - textHeight) / 2.0 + 2.0);
++		return x + glyphWidth + symbolspacing + 1.0;
++	}
++
+ 	private double DrawMouseButton(int button, double x, double y, Context ctx, CairoFont font, double lineheight, double textHeight, double pluswdith, double symbolspacing, double[] color)
+ 	{
+ 		object obj;
+ 		switch (button)
+ 		{

@@ -1,0 +1,16 @@
+<Project>
+  <!-- Opt-in until the release workflow supplies an authenticated decoder bundle. -->
+  <ItemGroup Condition="'$(DeltaDecoderDirectory)' != ''">
+    <Content Include="$(DeltaDecoderDirectory)/*">
+      <Link>delta-decoder/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+  <Target Name="ValidateDeltaDecoderBundle" BeforeTargets="PrepareForBuild" Condition="'$(DeltaDecoderDirectory)' != ''">
+    <Error Condition="!Exists('$(DeltaDecoderDirectory)/decoder.json') Or !Exists('$(DeltaDecoderDirectory)/LICENSE-xdelta.txt')"
+           Text="DeltaDecoderDirectory must contain decoder.json and LICENSE-xdelta.txt." />
+    <Error Condition="!Exists('$(DeltaDecoderDirectory)/xdelta3.exe') And !Exists('$(DeltaDecoderDirectory)/xdelta3')"
+           Text="DeltaDecoderDirectory must contain the xdelta3 executable." />
+  </Target>
+</Project>

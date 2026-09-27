@@ -320,7 +320,24 @@ public static class OptimumConfig
     public static int ShadowCullDistance = 80;
     public static bool DynamicLightScale = true;
     public static bool BackgroundFpsLimit = true;
+    /// <summary>Skip the client's timed full GC/LOH compaction in low-memory mode.</summary>
+    public static bool AvoidForcedGc = false;
+    /// <summary>Sleep toward the next scheduled client/server tick instead of polling at a fixed rate.</summary>
+    public static volatile bool IdleThreadWait = false;
     public static bool PreciseFramePacing = true;
+    /// <summary>Use a Windows high-resolution waitable timer for capped frames.</summary>
+    public static bool HighResolutionFrameWait = false;
+    /// <summary>Use smaller Vulkan shadow maps and four comparison taps per pixel.</summary>
+    public static bool HandheldShadowTier = false;
+
+    public static int IdleThreadDelayMs(long elapsedMs, long lastTickMs, int intervalMs,
+        int minimumMs, int maximumMs)
+    {
+        int minimum = Math.Max(1, minimumMs);
+        int maximum = Math.Max(minimum, maximumMs);
+        long remaining = (long)intervalMs + 1 - (elapsedMs - lastTickMs);
+        return (int)Math.Clamp(remaining, minimum, maximum);
+    }
     public static bool ShadowFarVegetation = true;
 
     /// <summary>
@@ -1119,7 +1136,11 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ShadowCullDistance), ShadowCullDistance.ToString()),
         (nameof(OptimumConfigData.DynamicLightScale), DynamicLightScale.ToString()),
         (nameof(OptimumConfigData.BackgroundFpsLimit), BackgroundFpsLimit.ToString()),
+        (nameof(OptimumConfigData.AvoidForcedGc), AvoidForcedGc.ToString()),
+        (nameof(OptimumConfigData.IdleThreadWait), IdleThreadWait.ToString()),
         (nameof(OptimumConfigData.PreciseFramePacing), PreciseFramePacing.ToString()),
+        (nameof(OptimumConfigData.HighResolutionFrameWait), HighResolutionFrameWait.ToString()),
+        (nameof(OptimumConfigData.HandheldShadowTier), HandheldShadowTier.ToString()),
         (nameof(OptimumConfigData.RepulsionGate), RepulsionGateEnabled.ToString()),
         (nameof(OptimumConfigData.RepulsionDistance), RepulsionDistance.ToString()),
         (nameof(OptimumConfigData.AnimBlockLod), AnimBlockLodEnabled.ToString()),
@@ -1234,7 +1255,11 @@ public static class OptimumConfig
             ShadowCullDistance = data.ShadowCullDistance;
             DynamicLightScale = data.DynamicLightScale;
             BackgroundFpsLimit = data.BackgroundFpsLimit;
+            AvoidForcedGc = data.AvoidForcedGc;
+            IdleThreadWait = data.IdleThreadWait;
             PreciseFramePacing = data.PreciseFramePacing;
+            HighResolutionFrameWait = data.HighResolutionFrameWait;
+            HandheldShadowTier = data.HandheldShadowTier;
             RepulsionGateEnabled = data.RepulsionGate;
             RepulsionDistance = data.RepulsionDistance;
             RepulsionDistanceSq = (double)data.RepulsionDistance * data.RepulsionDistance;
@@ -1352,7 +1377,11 @@ public static class OptimumConfig
             ShadowCullDistance = ShadowCullDistance,
             DynamicLightScale = DynamicLightScale,
             BackgroundFpsLimit = BackgroundFpsLimit,
+            AvoidForcedGc = AvoidForcedGc,
+            IdleThreadWait = IdleThreadWait,
             PreciseFramePacing = PreciseFramePacing,
+            HighResolutionFrameWait = HighResolutionFrameWait,
+            HandheldShadowTier = HandheldShadowTier,
             RepulsionGate = RepulsionGateEnabled,
             RepulsionDistance = RepulsionDistance,
             AnimBlockLod = AnimBlockLodEnabled,
@@ -1453,7 +1482,11 @@ internal sealed class OptimumConfigData
     public int ShadowCullDistance { get; set; } = 80;
     public bool DynamicLightScale { get; set; } = true;
     public bool BackgroundFpsLimit { get; set; } = true;
+    public bool AvoidForcedGc { get; set; } = false;
+    public bool IdleThreadWait { get; set; } = false;
     public bool PreciseFramePacing { get; set; } = true;
+    public bool HighResolutionFrameWait { get; set; } = false;
+    public bool HandheldShadowTier { get; set; } = false;
     public bool RepulsionGate { get; set; } = true;
     public int RepulsionDistance { get; set; } = 64;
     public bool AnimBlockLod { get; set; } = true;

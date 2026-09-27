@@ -23,7 +23,7 @@ internal sealed class VulkanContextOptions
     /// <summary>Pins a physical device by index; -1 picks automatically.</summary>
     public int PreferredDeviceIndex = -1;
 
-    /// <summary>Instance extensions the window system needs (from GLFW).</summary>
+    /// <summary>Instance extensions the selected window system needs.</summary>
     public string[] RequiredInstanceExtensions = Array.Empty<string>();
 
     /// <summary>Optional vendor backends can request extensions and Vulkan features before creation.</summary>

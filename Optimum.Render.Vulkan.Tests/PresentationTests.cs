@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using Optimum.Render.Vulkan.Core;
+using Optimum.Render.Vulkan.Platform;
 using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Xunit;
@@ -110,21 +111,36 @@ public class PresentationTests(ITestOutputHelper output)
     [InlineData(30)]
     public unsafe void RealWindowSurvivesResizeVsyncChangesAndResourceRetirement(int acquireDelayMs)
     {
-        // A loader can advertise Vulkan to GLFW even when the host has no
-        // compatible driver. The headless probe uses the suite's normal skip
-        // rule, while an actual windowed failure remains an assertion below.
+        // A loader can advertise Vulkan before the window system proves that
+        // a compatible driver exists. The headless probe uses the suite's
+        // normal skip rule; a windowed failure remains an assertion below.
         using (GpuTest.CreateContext(output)) { }
-        Window* window = null;
+        Window* glfwWindow = null;
+        SdlVulkanWindowHost? sdlWindow = null;
         VulkanDevice? device = null;
         try
         {
-            Skip.IfNot(GLFW.Init(), "GLFW initialization unavailable.");
-            Skip.IfNot(GLFW.VulkanSupported(), "Window system has no Vulkan support.");
-            GLFW.WindowHint(WindowHintClientApi.ClientApi, ClientApi.NoApi);
-            GLFW.WindowHint(WindowHintBool.Visible, false);
-            window = GLFW.CreateWindow(128, 96, "Optimum presentation acceptance", null, null);
-            Skip.If(window == null, "Window creation unavailable.");
-            GLFW.GetFramebufferSize(window, out int initialWidth, out int initialHeight);
+            int initialWidth, initialHeight;
+            if (OperatingSystem.IsWindows())
+            {
+                // Windows production presentation is SDL-owned; the acceptance
+                // test must exercise that surface and its resize events too.
+                sdlWindow = SdlVulkanWindowHost.Create(
+                    "Optimum SDL presentation acceptance", 128, 96);
+                sdlWindow.Sync();
+                SdlEventPump.Drain();
+                (initialWidth, initialHeight) = sdlWindow.PixelSize;
+            }
+            else
+            {
+                Skip.IfNot(GLFW.Init(), "GLFW initialization unavailable.");
+                Skip.IfNot(GLFW.VulkanSupported(), "Window system has no Vulkan support.");
+                GLFW.WindowHint(WindowHintClientApi.ClientApi, ClientApi.NoApi);
+                GLFW.WindowHint(WindowHintBool.Visible, false);
+                glfwWindow = GLFW.CreateWindow(128, 96, "Optimum presentation acceptance", null, null);
+                Skip.If(glfwWindow == null, "Window creation unavailable.");
+                GLFW.GetFramebufferSize(glfwWindow, out initialWidth, out initialHeight);
+            }
             device = GpuTest.NewDevice();
             var configure = device.ConfigureContextOptions;
             device.ConfigureContextOptions = options =>
@@ -133,7 +149,11 @@ public class PresentationTests(ITestOutputHelper output)
                 options.ValidationFeatures = "sync,best";
                 options.AcquireDelayForTests = TimeSpan.FromMilliseconds(acquireDelayMs);
             };
-            Assert.True(device.Initialize((IntPtr)window, initialWidth, initialHeight, out string reason), reason);
+            string reason;
+            bool initialized = sdlWindow != null
+                ? device.InitializeWindow(sdlWindow, initialWidth, initialHeight, out reason)
+                : device.Initialize((IntPtr)glfwWindow, initialWidth, initialHeight, out reason);
+            Assert.True(initialized, reason);
             output.WriteLine(device.RendererString);
             var context = device.ContextForTests;
             Assert.True(context.ValidationEnabled);
@@ -146,9 +166,20 @@ public class PresentationTests(ITestOutputHelper output)
             for (int step = 0; step < sizes.Length; step++)
             {
                 var (width, height) = sizes[step];
-                GLFW.SetWindowSize(window, width, height);
-                GLFW.PollEvents();
-                GLFW.GetFramebufferSize(window, out int pixelWidth, out int pixelHeight);
+                int pixelWidth, pixelHeight;
+                if (sdlWindow != null)
+                {
+                    sdlWindow.SetSize(width, height);
+                    sdlWindow.Sync();
+                    SdlEventPump.Drain();
+                    (pixelWidth, pixelHeight) = sdlWindow.PixelSize;
+                }
+                else
+                {
+                    GLFW.SetWindowSize(glfwWindow, width, height);
+                    GLFW.PollEvents();
+                    GLFW.GetFramebufferSize(glfwWindow, out pixelWidth, out pixelHeight);
+                }
                 Assert.True(pixelWidth > 0 && pixelHeight > 0);
                 device.Resize(pixelWidth, pixelHeight);
                 device.SetVSync(step % 2 == 0);
@@ -202,8 +233,9 @@ public class PresentationTests(ITestOutputHelper output)
         finally
         {
             device?.Dispose();
-            if (window != null) GLFW.DestroyWindow(window);
-            GLFW.Terminate();
+            sdlWindow?.Dispose();
+            if (glfwWindow != null) GLFW.DestroyWindow(glfwWindow);
+            if (!OperatingSystem.IsWindows()) GLFW.Terminate();
         }
         if (device != null) GpuTest.AssertClean(device); // Includes teardown diagnostics.
     }

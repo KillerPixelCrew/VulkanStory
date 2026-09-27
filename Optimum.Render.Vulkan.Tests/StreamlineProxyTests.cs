@@ -29,6 +29,9 @@ public class StreamlineProxyTests(ITestOutputHelper output)
 
         Window* window = null;
         VulkanDevice? device = null;
+        int preferredDevice = int.TryParse(
+            Environment.GetEnvironmentVariable("OPTIMUM_STREAMLINE_PROBE_DEVICE_INDEX"),
+            out int pinnedDevice) ? pinnedDevice : -1;
         uint previousErrorMode = SetErrorMode(0x0002);
         try
         {
@@ -38,29 +41,45 @@ public class StreamlineProxyTests(ITestOutputHelper output)
             window = GLFW.CreateWindow(128, 96, "Streamline hidden probe", null, null);
             Skip.If(window == null, "Hidden window unavailable.");
             device = GpuTest.NewDevice();
+            device.EnableStreamline = true;
             var previous = device.ConfigureContextOptions;
             device.ConfigureContextOptions = options =>
             {
                 previous?.Invoke(options);
                 options.EnableValidation = false;
                 options.ValidationFeatures = "";
+                if (preferredDevice >= 0) options.PreferredDeviceIndex = preferredDevice;
             };
             Assert.True(device.Initialize((nint)window, 128, 96, out string reason), reason);
-            Skip.If(device.ContextForTests.Capabilities.VendorId != 0x10DE,
-                "Streamline DLSS-G needs an NVIDIA GPU.");
             Assert.NotNull(device.ContextForTests.Streamline);
-            Assert.True(device.StreamlineFrameGenerationReady);
+            Assert.True(device.StreamlinePclReadyForTests);
+            Assert.Equal(device.ContextForTests.Capabilities.VendorId == 0x10DE && preferredDevice < 0,
+                device.StreamlineReflexReadyForTests);
+            bool frameGenerationReady = device.ContextForTests.Capabilities.VendorId == 0x10DE &&
+                device.StreamlineFrameGenerationReady;
             for (int i = 0; i < 3; i++)
             {
-                device.BeginLatencyFrame();
+                ulong frame = device.BeginLatencyFrame();
+                device.SleepVendorLatency(frame, mayGenerate: false);
+                device.MarkLatency(frame, LatencyMarker.SimulationStart);
+                device.MarkLatency(frame, LatencyMarker.InputSample);
                 device.BeginFrame();
+                device.NoteRenderStageStarted();
                 device.BindDefaultFramebuffer();
                 device.ClearColor(0, 0.1f, 0.2f, 0.3f, 1);
                 device.Present();
                 Assert.True(device.LastPresentTimingsForTests.Presented);
             }
+            Assert.Equal(18, device.PclMarkerSuccessCountForTests);
+            Assert.Equal(device.StreamlineReflexReadyForTests ? 3 : 0,
+                device.ReflexSleepSuccessCountForTests);
             // The menu changes the presentation policy while the client stays
             // alive. Rebuild both ways through the same hidden proxy surface.
+            if (!frameGenerationReady)
+            {
+                output.WriteLine("DLSS-G unavailable; selected Streamline latency features passed.");
+                return;
+            }
             foreach (string provider in new[] { "dlss", "fsr3", "off" })
             {
                 device.SetFrameGenerationPresentation(provider);

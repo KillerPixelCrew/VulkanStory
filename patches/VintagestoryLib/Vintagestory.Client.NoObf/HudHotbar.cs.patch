@@ -1,0 +1,30 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
+index 9d2afcb0..2e7f75e4 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
+@@ -60,6 +60,10 @@ public class HudHotbar : HudElement
+ 
+ 	private double gearPosition;
+ 
++	private GuiElementHoverText lastStabilityHoverElement;
++
++	private int lastStabilityHoverPercent;
++
+ 	public override double InputOrder => 1.0;
+ 
+ 	public override string ToggleKeyCombinationCode => null;
+@@ -603,7 +607,13 @@ public class HudHotbar : HudElement
+ 		GuiElementHoverText hoverText = Composers["hotbar"].GetHoverText("tempStabHoverText");
+ 		if (hoverText.IsNowShown)
+ 		{
+-			hoverText.SetNewText((int)GameMath.Clamp(num4 * 100f, 0f, 100f) + "%");
++			int percent = (int)GameMath.Clamp(num4 * 100f, 0f, 100f);
++			if (hoverText != lastStabilityHoverElement || percent != lastStabilityHoverPercent)
++			{
++				hoverText.SetNewText(percent + "%");
++				lastStabilityHoverElement = hoverText;
++				lastStabilityHoverPercent = percent;
++			}
+ 		}
+ 		ShaderProgramGuigear guigear = ShaderPrograms.Guigear;
+ 		guigear.Use();

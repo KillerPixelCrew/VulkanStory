@@ -1,3 +1,4 @@
+using System;
 using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Config;
 using Optimum.Render.Vulkan.Graph;
@@ -13,6 +14,17 @@ namespace Optimum.Render.Vulkan.Platform;
 // the parity dump itself.
 public partial class VulkanClientPlatform
 {
+    private SdlGamepadInput? sdlGamepadInput;
+    private Action? sdlInputSampleCallback;
+    private ulong sdlInputSampleFrameId;
+    private bool sdlInputSampleMarked;
+
+    private void MarkSdlInputSample()
+    {
+        device.MarkLatency(sdlInputSampleFrameId, LatencyMarker.InputSample);
+        sdlInputSampleMarked = true;
+    }
+
     public override bool LatencyOwnsFrameCap => device?.VendorLatencyOwnsFrameCap == true;
 
     public override void SetLatencyFrameCap(int maxFps) => device?.SetVendorLatencyFrameCap(maxFps);
@@ -23,8 +35,25 @@ public partial class VulkanClientPlatform
         if (device == null) return;
         ulong frameId = device.BeginLatencyFrame();
         device.SleepVendorLatency(frameId, OptimumConfig.EffectiveFrameGeneration != "off");
-        device.MarkLatency(frameId, LatencyMarker.InputSample);
+        // XeLL expects SimulationStart as the first marker after sleep; the
+        // simulation includes collecting and dispatching this frame's input.
         device.MarkLatency(frameId, LatencyMarker.SimulationStart);
+        SyncSdlTextInput();
+        sdlInputSampleFrameId = frameId;
+        sdlInputSampleMarked = false;
+        sdlInputSampleCallback ??= MarkSdlInputSample;
+        SdlGamepadInput input = sdlGamepadInput ??= new SdlGamepadInput(this);
+        input.Prepare();
+        // VK_AMD_anti_lag requires INPUT immediately before processing input.
+        // Keep IME setup and every vendor sleep on the earlier side of this mark.
+        device.MarkVendorInputStart(frameId);
+        input.Poll(
+            SdlWindowId == 0 ? null : DispatchSdlInput,
+            SdlWindowId == 0 ? null : sdlInputSampleCallback);
+        if (sdlTouchMouse != null) sdlTouchMouse.Tick(SdlEventPump.TicksNanoseconds());
+        ApplyPendingSdlResize();
+        // Keep a marker when SDL is unavailable and the gamepad pump did not run.
+        if (!sdlInputSampleMarked) device.MarkLatency(frameId, LatencyMarker.InputSample);
     }
 
     /// <summary>Recycles the frame slot and opens a command buffer.</summary>

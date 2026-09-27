@@ -136,6 +136,7 @@ public sealed class NativeShaderRuntimeTests
                 ["OPTIMUM_WAVINGSTUFF"] = corpus.WavingStuff, ["OPTIMUM_MINBRIGHT"] = corpus.MinBright,
                 ["OPTIMUM_GREEDYMESH_GRAD"] = 0, ["OPTIMUM_DYNLIGHTS"] = corpus.DynLights,
                 ["OPTIMUM_OPTIMUMAO"] = corpus.OptimumAo,
+                ["OPTIMUM_HANDHELD_SHADOWS"] = 0,
             };
             foreach (NativeSpecialization.Entry entry in specialization.Entries)
             {
@@ -148,6 +149,20 @@ public sealed class NativeShaderRuntimeTests
             }
             Assert.Equal(SpecializationConvention.Constants.Length, specialization.Entries.Length);
         }
+    }
+
+    [Fact]
+    public void HandheldShadowDefineSelectsTheNativeSpecialization()
+    {
+        var variant = new NativeVariant();
+        SpecializationConvention.Constant constant = SpecializationConvention.Constants.Single(
+            c => c.Name == "OPTIMUM_HANDHELD_SHADOWS");
+        variant.SpecializationConstants.Add(new NativeSpecConstant
+            { Id = (int)constant.Id, Name = constant.Name, Type = constant.GlslType });
+        var defines = NativeShaderLibrary.ParseDefines(new[] { "#define HANDHELDSHADOWS 1\n" });
+        Assert.True(NativeShaderLibrary.TryBuildSpecialization(variant, defines,
+            out NativeSpecialization specialization, out string error), error);
+        Assert.Equal(1, BitConverter.ToInt32(specialization.Data, 0));
     }
 
     // ------------------------------------------------------------------ loading

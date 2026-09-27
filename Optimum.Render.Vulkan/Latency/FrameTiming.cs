@@ -32,11 +32,13 @@ internal readonly record struct LatencyFrameReport(
         long presentStartUs,
         long presentEndUs)
     {
-        long start = inputSampleUs != 0 ? inputSampleUs : simulationStartUs;
+        // Simulation begins before input collection. The input stamp records the
+        // completed SDL pump, so this span is the input-poll portion of simulation.
+        long start = simulationStartUs != 0 ? simulationStartUs : inputSampleUs;
         return new LatencyFrameReport(
             frameId,
             presentId,
-            Span(inputSampleUs, simulationStartUs),
+            Span(simulationStartUs, inputSampleUs),
             Span(simulationStartUs, simulationEndUs),
             Span(renderSubmitStartUs, renderSubmitEndUs),
             Span(presentStartUs, presentEndUs),

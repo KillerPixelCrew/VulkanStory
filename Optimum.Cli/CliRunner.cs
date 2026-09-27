@@ -34,7 +34,8 @@ public static class CliRunner
         IBuildDriver buildDriver,
         CancellationToken externalCancellation = default,
         ISourceProvider? sourceProvider = null,
-        IGamePatcher? gamePatcher = null)
+        IGamePatcher? gamePatcher = null,
+        TextReader? stdin = null)
     {
         if (args.Count == 1 && args[0] == "--version")
         {
@@ -70,10 +71,47 @@ public static class CliRunner
             "build" => await Build(rest, probe, buildDriver, sourceProvider ?? new GitSourceProvider(probe), output, cancellation.Token),
             "install" => Install(rest, probe, output),
             "patch" => await Patch(rest, probe, gamePatcher ?? new GamePatcher(probe), output, cancellation.Token),
+            "apply-delta" => await ApplyDelta(rest, output, cancellation.Token),
+            "install-delta" => await ApplyDelta(rest, output, cancellation.Token, installRuntime: true),
             "validate" => Validate(rest, probe, output),
             "uninstall" => Uninstall(rest, probe, output),
+            "uninstall-delta" => Uninstall(rest, probe, output, deltaOnly: true,
+                stdin: stdin ?? Console.In, stderr: stderr),
             _ => Unknown(verb, stderr),
         };
+    }
+
+    private static async Task<int> ApplyDelta(IReadOnlyList<string> args, EngineOutput output, CancellationToken token, bool installRuntime = false)
+    {
+        var flags = new HashSet<string> { "--game-dir", "--pack", "--output", "--decoder", "--game-version", "--optimum-version", "--rid" };
+        if (installRuntime) flags.Add("--payload");
+        var parsed = new CliArgs(args, flags);
+        if (parsed.Errors.Count > 0 || flags.Where(flag => flag != "--decoder").Any(flag => string.IsNullOrWhiteSpace(parsed.Get(flag))))
+            return output.Failure(FailureReason.BadInput, "Delta commands require --game-dir, --pack, --output, --game-version, --optimum-version and --rid; install-delta also requires --payload. Optional --decoder overrides the bundled decoder.");
+        try
+        {
+            var decoder = parsed.Get("--decoder") is string executable
+                ? new XdeltaProcessDecoder(executable) : BundledDeltaDecoder.Create(AppContext.BaseDirectory);
+            if (installRuntime)
+            {
+                await new DeltaRuntimeInstaller(decoder).InstallAsync(parsed.Get("--game-dir")!, parsed.Get("--pack")!,
+                    parsed.Get("--payload")!, parsed.Get("--output")!, parsed.Get("--game-version")!,
+                    parsed.Get("--optimum-version")!, parsed.Get("--rid")!, token,
+                    DeltaRuntimeValidator.ValidateAsync);
+                output.Answer(JsonSerializer.Serialize(new { runtime = parsed.Get("--output") }, Json), $"Verified delta runtime installed at {parsed.Get("--output")}");
+                return ExitOk;
+            }
+            var manifest = await new BinaryDeltaPack(decoder).ApplyAsync(
+                parsed.Get("--game-dir")!, parsed.Get("--pack")!, parsed.Get("--output")!,
+                parsed.Get("--game-version")!, parsed.Get("--optimum-version")!, parsed.Get("--rid")!, token);
+            output.Answer(JsonSerializer.Serialize(manifest, Json), $"Verified {manifest.Files.Count} delta outputs at {parsed.Get("--output")}");
+            return ExitOk;
+        }
+        catch (OperationCanceledException) { return output.Failure(FailureReason.Cancelled, "Delta application cancelled."); }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or ArgumentException or TimeoutException or System.ComponentModel.Win32Exception)
+        {
+            return output.Failure(FailureReason.VerificationFailed, ex.Message);
+        }
     }
 
     private static int Preflight(IReadOnlyList<string> args, ISystemProbe probe, EngineOutput output)
@@ -318,7 +356,8 @@ public static class CliRunner
             : output.Failure(FailureReason.VerificationFailed, result.Detail ?? "runtime validation failed");
     }
 
-    private static int Uninstall(IReadOnlyList<string> args, ISystemProbe probe, EngineOutput output)
+    private static int Uninstall(IReadOnlyList<string> args, ISystemProbe probe, EngineOutput output,
+        bool deltaOnly = false, TextReader? stdin = null, TextWriter? stderr = null)
     {
         var parsed = new CliArgs(args, new HashSet<string> { "--install-dir" });
         if (parsed.Errors.Count > 0)
@@ -327,6 +366,18 @@ public static class CliRunner
         string? installDir = RequireAbsolute(parsed.Get("--install-dir"), "--install-dir", output, out int installError);
         if (installDir is null)
             return installError;
+
+        if (deltaOnly && !DeltaRuntimeGuard.IsSeparateRuntime(installDir))
+            return output.Failure(FailureReason.BadInput,
+                "This folder is not a separate Optimum delta installation.");
+
+        if (deltaOnly && parsed.Has("--confirm"))
+        {
+            stderr?.WriteLine($"Remove the separate Optimum installation at {installDir}?");
+            stderr?.Write("Type REMOVE to continue: ");
+            if (stdin?.ReadLine() != "REMOVE")
+                return output.Failure(FailureReason.BadInput, "Removal cancelled.");
+        }
 
         UninstallResult result = new Uninstaller(probe).Uninstall(installDir);
         return result.Ok
@@ -384,8 +435,11 @@ public static class CliRunner
         stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
         stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop]");
         stderr.WriteLine("  patch         --game-dir <abs> [--overlay <abs>] [--backup|--no-backup] [--rollback]");
+        stderr.WriteLine("  apply-delta   --game-dir <abs> --pack <abs> --output <new-abs> [--decoder <abs>] --game-version <v> --optimum-version <v> --rid <rid>");
+        stderr.WriteLine("  install-delta (apply-delta flags) --payload <absolute-published-runtime-payload>");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");
+        stderr.WriteLine("  uninstall-delta --install-dir <abs> [--confirm]");
         stderr.WriteLine("  capabilities  [--repo-root <dir>]");
         stderr.WriteLine("  --version");
     }

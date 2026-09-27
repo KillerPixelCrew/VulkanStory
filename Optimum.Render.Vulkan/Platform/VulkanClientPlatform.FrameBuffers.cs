@@ -68,8 +68,9 @@ public partial class VulkanClientPlatform
         int shadowMapQuality = ClientSettings.ShadowMapQuality;
         float ssaaLevel = ClientSettings.SSAA;
 
-        int displayWidth = ((NativeWindow)window).ClientSize.X;
-        int displayHeight = ((NativeWindow)window).ClientSize.Y;
+        Size2i clientSize = OptimumWindowClientSize();
+        int displayWidth = clientSize.Width;
+        int displayHeight = clientSize.Height;
         int width = (int)(displayWidth * ssaaLevel);
         int height = (int)(displayHeight * ssaaLevel);
         bool upscaling = TryPlanUpscale(displayWidth, displayHeight, out int plannedWidth, out int plannedHeight);
@@ -281,7 +282,7 @@ public partial class VulkanClientPlatform
         if (!upscaling && ClientSettings.OptimumRenderScale < 1.0f)
         {
             list[OptimumFsrFramebufferIndex] = CreateOptimumColorTarget(
-                ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y,
+                displayWidth, displayHeight,
                 EnumTextureInternalFormat.Rgba8);
         }
 
@@ -310,13 +311,17 @@ public partial class VulkanClientPlatform
         // and every shader including fogandlight.fsh - sky.fsh among them - takes
         // that branch. Leaving slot 12 null at quality 1 is a null reference on
         // the first sky draw, which is what it was.
+        bool handheldShadows = OptimumConfig.HandheldShadowTier;
         int shadowSize = Math.Max(4, shadowMapQuality + 2) * 1024;
+        int farShadowSize = handheldShadows ? 1024 : shadowSize;
+        int nearShadowSize = handheldShadows ? 2048 : shadowSize;
+        bool compactShadowDepth = handheldShadows && device.SupportsCompactShadowDepth();
         list[11] = shadowMapQuality > 0
-            ? CreateOptimumDepthTarget(shadowSize, shadowSize)
-            : CreateOptimumPlaceholderTarget(shadowSize, shadowSize);
+            ? CreateOptimumDepthTarget(farShadowSize, farShadowSize, compactShadowDepth)
+            : CreateOptimumPlaceholderTarget(farShadowSize, farShadowSize);
         list[12] = shadowMapQuality > 1
-            ? CreateOptimumDepthTarget(shadowSize, shadowSize)
-            : CreateOptimumPlaceholderTarget(shadowSize, shadowSize);
+            ? CreateOptimumDepthTarget(nearShadowSize, nearShadowSize, compactShadowDepth)
+            : CreateOptimumPlaceholderTarget(nearShadowSize, nearShadowSize);
 
         for (int shadow = 11; shadow <= 12; shadow++)
         {
@@ -435,15 +440,17 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>A depth-only target, as the shadow maps and liquid depth use.</summary>
-    private FrameBufferRef CreateOptimumDepthTarget(int width, int height)
+    private FrameBufferRef CreateOptimumDepthTarget(int width, int height, bool useD16 = false)
     {
         FrameBufferRef target = new FrameBufferRef();
         target.Width = width;
         target.Height = height;
         target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[0];
-        target.DepthTextureId = device.CreateTexture2D(width, height,
-            EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+        target.DepthTextureId = useD16
+            ? device.CreateTexture2DRaw(width, height, 0x81A5, IntPtr.Zero, 2)
+            : device.CreateTexture2D(width, height, EnumTextureInternalFormat.DepthComponent32,
+                EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
         SetupOptimumTextureSampler(target.DepthTextureId, 9729, 33071);
         device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
         StateDrawBuffers(target.FboId, 0);

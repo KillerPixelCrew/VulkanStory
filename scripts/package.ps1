@@ -23,6 +23,10 @@ archive is downloaded and extracted with innoextract >= 1.11. A matching
 package-client cache avoids the extractor. Windows hosts continue to use a
 native installation or -VanillaDir.
 
+.PARAMETER StreamlineSdkRoot
+Optional Streamline SDK checkout. Rebuilds the native bridge before staging it;
+otherwise an already built bridge in bin/Release/net10.0 is used when present.
+
 .EXAMPLE
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory -Zip
@@ -36,7 +40,8 @@ param(
     [switch]$Zip,
     [string]$Version,
     [string]$VanillaDir,
-    [string]$ClientArchive
+    [string]$ClientArchive,
+    [string]$StreamlineSdkRoot = $env:OPTIMUM_STREAMLINE_SDK_ROOT
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +58,42 @@ if (-not $Version) {
 
 function Test-WindowsHost {
     ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
+}
+
+function Assert-StreamlineBridgeExports {
+    param([string]$BridgePath)
+    if (-not (Test-WindowsHost)) { return }
+    if (-not ('Optimum.StreamlineBridgeExports' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace Optimum {
+    public static class StreamlineBridgeExports {
+        [DllImport("kernel32.dll", EntryPoint = "LoadLibraryW", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern IntPtr Load(string path);
+        [DllImport("kernel32.dll", EntryPoint = "GetProcAddress", CharSet = CharSet.Ansi)]
+        public static extern IntPtr Find(IntPtr module, string name);
+        [DllImport("kernel32.dll", EntryPoint = "FreeLibrary")]
+        public static extern bool Free(IntPtr module);
+    }
+}
+'@
+    }
+    $module = [Optimum.StreamlineBridgeExports]::Load([IO.Path]::GetFullPath($BridgePath))
+    if ($module -eq [IntPtr]::Zero) {
+        throw "Streamline bridge could not load: $BridgePath (Win32 $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))"
+    }
+    try {
+        foreach ($symbol in @('OptimumSlInitialize', 'OptimumSlBindReflex',
+                'OptimumSlBindPcl', 'OptimumSlBeginFrame', 'OptimumSlReflexSleep',
+                'OptimumSlMarker', 'OptimumSlMarkerForToken')) {
+            if ([Optimum.StreamlineBridgeExports]::Find($module, $symbol) -eq [IntPtr]::Zero) {
+                throw "Streamline bridge lacks $symbol; rebuild with -StreamlineSdkRoot: $BridgePath"
+            }
+        }
+    } finally {
+        [void][Optimum.StreamlineBridgeExports]::Free($module)
+    }
 }
 
 function Get-WindowsClientVersion {
@@ -227,7 +268,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Could not build the win-x64 Optimum launcher.' }
         }
     }
-    foreach ($requiredLauncherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
+    foreach ($requiredLauncherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json', 'Optimum.Bootstrap.Core.dll')) {
         if (-not (Test-Path (Join-Path $launcherOut $requiredLauncherFile))) {
             throw "Launcher output not found: $requiredLauncherFile"
         }
@@ -302,6 +343,15 @@ try {
     $ngxShim = Join-Path $apiOut 'OptimumNgx.dll'
     if (Test-Path -LiteralPath $ngxShim) { Copy-Item -Force $ngxShim $stageDir }
     $streamlineBridge = Join-Path $apiOut 'OptimumStreamline.dll'
+    if ($StreamlineSdkRoot) {
+        & (Join-Path $repoRoot 'native/optimum-streamline/build.ps1') -SdkRoot $StreamlineSdkRoot -Output $streamlineBridge
+    }
+    if (Test-Path -LiteralPath (Join-Path $apiOut 'sl.interposer.dll')) {
+        if (-not (Test-Path -LiteralPath $streamlineBridge)) {
+            throw 'Streamline runtime is present but OptimumStreamline.dll is missing. Pass -StreamlineSdkRoot to build it.'
+        }
+        Assert-StreamlineBridgeExports -BridgePath $streamlineBridge
+    }
     if (Test-Path -LiteralPath $streamlineBridge) { Copy-Item -Force $streamlineBridge $stageDir }
     if (Test-Path -LiteralPath (Join-Path $apiOut 'nvngx_dlss.dll')) {
         foreach ($dlssFile in @('nvngx_dlss.dll', 'Dlss-LICENSE.txt')) {
@@ -350,6 +400,18 @@ try {
     Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
 
+    # The Vulkan platform polls SDL3 gamepads before the SDL window migration.
+    # Its P/Invoke resolver needs the native binary beside the launcher.
+    $sdlNative = Join-Path $apiOut 'runtimes/win-x64/native/SDL3.dll'
+    if (-not (Test-Path -LiteralPath $sdlNative)) {
+        throw "SDL3 native library missing at $sdlNative"
+    }
+    Copy-Item -LiteralPath $sdlNative -Destination (Join-Path $stageDir 'SDL3.dll') -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'sources/controller/gamecontrollerdb.txt') `
+        -Destination (Join-Path $stageDir 'gamecontrollerdb.txt') -Force -ErrorAction Stop
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'sources/controller/SDL_GameControllerDB-LICENSE.txt') `
+        -Destination (Join-Path $stageDir 'ControllerMappings-LICENSE.txt') -Force -ErrorAction Stop
+
     # shaderc is a native library loaded by Silk.NET.Shaderc, which probes the
     # application directory, not Lib\ - a copy it cannot find makes the renderer
     # fall back to OpenGL silently.
@@ -389,6 +451,21 @@ try {
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
+    # The launcher runs from the package root before it loads game assemblies.
+    # Its project output contains managed dependencies that the vanilla Lib/
+    # directory cannot satisfy through Optimum.deps.json (including the patch
+    # core). Add the ones absent from the staged root without replacing game DLLs.
+    Get-ChildItem -LiteralPath $launcherOut -Filter '*.dll' -File | ForEach-Object {
+        $destination = Join-Path $stageDir $_.Name
+        if (-not (Test-Path -LiteralPath $destination)) {
+            Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+        }
+    }
+    # OpenTK's OpenAL resolver loads the native Windows DLL by name from the
+    # launcher's process directory; the game's Lib/ copy is not in that search path.
+    $openAlNative = Join-Path $stageDir 'Lib/OpenAL32.dll'
+    if (-not (Test-Path -LiteralPath $openAlNative)) { throw "OpenAL native library missing: $openAlNative" }
+    Copy-Item -LiteralPath $openAlNative -Destination (Join-Path $stageDir 'OpenAL32.dll') -Force
     # The launcher loads VintagestoryLib in its own process. It therefore needs
     # the same Windows Desktop shared framework that Vintagestory.exe requests;
     # the launcher's cross-platform build only requests Microsoft.NETCore.App.
@@ -542,6 +619,13 @@ try {
         'Optimum.Patcher.dll',
         'uninstall.ps1',
         'Vintagestory.exe',
+        'Optimum.Bootstrap.Core.dll',
+        'CliWrap.dll',
+        'System.Reflection.MetadataLoadContext.dll',
+        'OpenAL32.dll',
+        'SDL3.dll',
+        'gamecontrollerdb.txt',
+        'ControllerMappings-LICENSE.txt',
         'shaders-vk/shaders.manifest.json',
         '.optimum/donors/VintagestoryLib.Donor.dll',
         '.optimum/donors/VintagestoryAPI.Contracts.dll',

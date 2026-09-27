@@ -242,6 +242,22 @@ vec4 applyFog(vec4 rgbaPixel, float fogWeight) {
 
 
 float getBrightnessFromShadowMap() {
+	if (OPTIMUM_HANDHELD_SHADOWS != 0 && OPTIMUM_SHADOWQUALITY > 0) {
+		float nearWeight = OPTIMUM_SHADOWQUALITY > 1 ? shadowCoordsNear.w : 0.0;
+		float farWeight = shadowCoordsFar.w;
+		float weight = clamp(nearWeight + farWeight, 0.0, 1.0);
+		if (weight <= 0.0) return clamp(1.0 + blockBrightness, 0.0, 1.0);
+
+		// Both cascades can overlap at their transition. Pick the stronger one
+		// and keep their combined fade weight, avoiding a second depth lookup.
+		vec4 visibility = nearWeight >= farWeight && nearWeight > 0.0
+			? textureGather(shadowMapNear, shadowCoordsNear.xy, shadowCoordsNear.z - 0.0005)
+			: textureGather(shadowMapFar, shadowCoordsFar.xy, shadowCoordsFar.z - 0.0009);
+		float occlusion = 1.0 - dot(visibility, vec4(0.25));
+		return clamp(1.0 - shadowIntensity * occlusion * weight * 0.5 + blockBrightness,
+			0.0, 1.0);
+	}
+
 	// b was declared inside the SHADOWQUALITY > 0 block; the > 1 block only ever ran
 	// after it, so declaring it up front changes no value that is read.
 	float b = 1.0;

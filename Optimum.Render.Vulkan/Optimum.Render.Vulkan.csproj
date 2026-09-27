@@ -39,9 +39,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The client already creates its window through OpenTK's GLFW bindings, so
-         the surface is created the same way rather than through a second
-         windowing stack. -->
+    <!-- GLFW remains available for the default client path during the SDL3
+         window migration. -->
     <PackageReference Include="OpenTK.Windowing.GraphicsLibraryFramework" Version="4.9.4" />
     <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
@@ -50,6 +49,7 @@
          at runtime, so an offline compile step could never cover them. -->
     <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.722.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -62,6 +62,10 @@
          OpenTK PrimitiveType/Matrix4). Compile-time only: the client already loads them. -->
     <Reference Include="cairo-sharp">
       <HintPath>..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SkiaSharp">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\SkiaSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="OpenTK.Audio.OpenAL">
