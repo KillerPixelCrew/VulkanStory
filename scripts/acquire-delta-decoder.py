@@ -99,7 +99,7 @@ def main() -> None:
         stage = Path(temporary)
         binary_archive = verified_asset(decoder[args.rid], repository, version, asset_dir, stage)
         source_archive = verified_asset(decoder["sourceArchive"], repository, version, asset_dir, stage)
-        license_bytes = selected_tar_member(source_archive, f"xdelta3-{version}/xdelta3/LICENSE")
+        license_bytes = selected_tar_member(source_archive, f"xdelta3-{version}/LICENSE")
         if args.rid == "win-x64":
             with zipfile.ZipFile(binary_archive) as source:
                 member = source.getinfo(f"xdelta3-{version}-windows-x86_64/xdelta3.exe")

@@ -151,6 +151,7 @@ jobs:
           python3 scripts/build-delta-pack.py --rid win-x64 \
             --original .vanilla/win-x64/vintagestory \
             --donors "Optimum-v${version}-win-x64/.optimum/donors" \
+            --api-runtime-donor .vanilla/win-x64/runtime-donors/VintagestoryAPI.dll \
             --patcher Optimum.Patcher/bin/Release/net10.0/Optimum.Patcher.dll \
             --decoder "$RUNNER_TEMP/delta-decoder/xdelta3.exe" \
             --output "$RUNNER_TEMP/delta-pack-win-x64"

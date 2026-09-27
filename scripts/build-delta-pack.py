@@ -38,6 +38,8 @@ def main():
     parser.add_argument("--original", type=Path, required=True)
     parser.add_argument("--donors", type=Path, required=True,
                         help="the staged package's .optimum/donors directory")
+    parser.add_argument("--api-runtime-donor", type=Path,
+                        help="version-matched API runtime donor used for patching; the stock API remains the delta base")
     parser.add_argument("--patcher", type=Path, required=True,
                         help="freshly built Optimum.Patcher.dll")
     parser.add_argument("--decoder", type=Path, required=True,
@@ -54,6 +56,15 @@ def main():
         parser.error("VERSION is empty")
     for relative in TARGETS:
         require_file(args.original / relative)
+    if args.rid == "win-x64":
+        if args.api_runtime_donor is None:
+            parser.error("win-x64 requires --api-runtime-donor for the stock 1.22.7 API")
+        require_file(args.api_runtime_donor)
+        marker = args.api_runtime_donor.parent / "runtime-donor-version.txt"
+        if not marker.is_file() or marker.read_text(encoding="utf-8").strip() != f"version-{game_version}.txt":
+            parser.error("API runtime donor version marker does not match the pinned game")
+    elif args.api_runtime_donor is not None:
+        require_file(args.api_runtime_donor)
     for donor in DONORS:
         require_file(args.donors / donor)
     for path in (args.patcher, args.decoder):
@@ -64,7 +75,10 @@ def main():
     output = args.output.resolve()
     if output.exists():
         parser.error("Output must be a new directory")
-    for source in (args.original, args.donors, args.patcher.parent, args.decoder.parent):
+    inputs = (args.original, args.donors, args.patcher.parent, args.decoder.parent)
+    if args.api_runtime_donor is not None:
+        inputs += (args.api_runtime_donor.parent,)
+    for source in inputs:
         if output.is_relative_to(source.resolve()):
             parser.error("Output must be outside all inputs")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +90,8 @@ def main():
         donors = [args.donors / name for name in DONORS]
         targets = [patched / name for name in TARGETS]
         run("dotnet", "exec", args.patcher, originals[0], donors[0], targets[0])
-        run("dotnet", "exec", args.patcher, "--api", originals[1], donors[1], targets[1])
+        run("dotnet", "exec", args.patcher, "--api",
+            args.api_runtime_donor or originals[1], donors[1], targets[1])
         for name, index in (("VSEssentials", 2), ("VSSurvivalMod", 3)):
             run("dotnet", "exec", args.patcher, "--mod", name,
                 originals[index], donors[index], targets[index])

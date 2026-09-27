@@ -62,6 +62,13 @@ for name in (launcher, "Optimum.dll", "Optimum.deps.json", "Optimum.runtimeconfi
              "ControllerMappings-LICENSE.txt", "shaders-vk/shaders.manifest.json"):
     if not (args.payload / name).is_file():
         parser.error("Incomplete runtime payload: " + name)
+if rid == "win-x64" and not (args.payload / "OpenAL32.dll").is_file():
+    parser.error("Incomplete Windows runtime payload: OpenAL32.dll")
+if (args.payload / "sl.interposer.dll").is_file():
+    for name in ("OptimumStreamline.dll", "sl.common.dll", "sl.dlss_g.dll",
+                 "sl.reflex.dll", "sl.pcl.dll"):
+        if not (args.payload / name).is_file():
+            parser.error("Incomplete Streamline runtime payload: " + name)
 if not (args.installer / "delta-decoder/decoder.json").is_file():
     parser.error("Publish the installer with DeltaDecoderDirectory first")
 inventory = []

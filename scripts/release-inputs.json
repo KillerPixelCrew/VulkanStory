@@ -15,16 +15,16 @@
     "repository": "jmacd/xdelta",
     "sourceArchive": {
       "name": "xdelta3-3.2.0.tar.gz",
-      "sha256": "89c368ac627fd89b96a7ecb555d9dd63f455a8c524103c8117f64787a78e5709"
+      "sha256": "628cfa920fb5cf9f0c61b2c91a036b713fc08c7858fc53f1cc87e0921d74ffa1"
     },
     "win-x64": {
       "name": "xdelta3-3.2.0-windows-x86_64.zip",
-      "sha256": "af8ef036cb077a48df080c9a8ac1be4a6e7511c32d11f8bec89b6803a9e52576",
-      "binarySha256": "53d90226615f217d3380c39892833311b4e24acd863e1ca01f14b5e772e2e6d0"
+      "sha256": "8aca331c3d49ec4465ee8f3f7e3afb92e06d36e32fdec422c3252aaa813a7d2a",
+      "binarySha256": "6e812b38484d0c764291779fadee83ffbe2eceaccb4e3a21f8a043a02654a01e"
     },
     "linux-x64": {
       "name": "xdelta3-3.2.0-linux-x86_64.tar.gz",
-      "sha256": "480295c7a41fea6503659f19ddc61676c0df4834e2292846ba97de30c68c2397",
+      "sha256": "ef65aafaa6daaf1f04ebe0028609f4eddf470cc1f7588fcf8298b65e1cfd5fd8",
       "binarySha256": "0d38d86de5ab6bbc1adae531331d64585b5a09ce3604a5f090c27f71b6a64b23"
     }
   }

@@ -14,6 +14,8 @@ parser.add_argument("--launcher", required=True, type=Path, help="self-contained
 parser.add_argument("--rid", required=True, choices=("win-x64", "linux-x64"))
 parser.add_argument("--compiled", required=True, type=Path, help="Optimum compiled net10.0 directory")
 parser.add_argument("--native-shaders", required=True, type=Path, help="compiled shaders-vk directory")
+parser.add_argument("--native-runtime-dir", type=Path,
+                    help="staged package root with Windows audio and optional graphics runtime DLLs")
 parser.add_argument("--output", required=True, type=Path)
 args = parser.parse_args()
 if args.output.exists():
@@ -40,6 +42,9 @@ sdl_name = "SDL3.dll" if args.rid == "win-x64" else "libSDL3.so"
 sdl = args.compiled / "runtimes" / args.rid / "native" / sdl_name
 if not sdl.is_file():
     parser.error(f"Missing {args.rid} SDL3 native library")
+if args.rid == "win-x64":
+    if args.native_runtime_dir is None or not (args.native_runtime_dir / "OpenAL32.dll").is_file():
+        parser.error("Windows payload needs --native-runtime-dir with root-level OpenAL32.dll")
 controller_sources = Path(__file__).resolve().parent.parent / "sources" / "controller"
 for name in ("gamecontrollerdb.txt", "SDL_GameControllerDB-LICENSE.txt"):
     if not (controller_sources / name).is_file():
@@ -54,6 +59,23 @@ with tempfile.TemporaryDirectory(prefix="payload-stage-", dir=args.output.parent
         source = args.compiled / name
         if source.is_file():
             shutil.copy2(source, stage / name)
+    if args.rid == "win-x64":
+        # The game resolves OpenAL from the process directory. Keep the optional
+        # graphics runtimes alongside the renderer, as in the Windows source package.
+        windows_runtimes = (
+            "OpenAL32.dll", "OptimumStreamline.dll", "sl.interposer.dll", "sl.common.dll",
+            "sl.dlss_g.dll", "sl.reflex.dll", "sl.pcl.dll", "Streamline-LICENSE.txt",
+            "Reflex-LICENSE.txt", "nvngx_dlss.dll", "nvngx_dlssg.dll", "Dlss-LICENSE.txt",
+            "libxess.dll", "libxess_fg.dll", "libxell.dll", "Xess-LICENSE.txt",
+            "Xess-third-party-programs.txt", "amd_fidelityfx_vk.dll",
+            "amd_fidelityfx_upscaler_dx12.dll", "Fsr3-LICENSE.txt", "Fsr4-LICENSE.md",
+        )
+        for name in windows_runtimes:
+            source = args.compiled / name
+            if not source.is_file():
+                source = args.native_runtime_dir / name
+            if source.is_file():
+                shutil.copy2(source, stage / name)
     shutil.copy2(shaderc, stage / native_name)
     shutil.copy2(sdl, stage / sdl_name)
     shutil.copy2(controller_sources / "gamecontrollerdb.txt", stage / "gamecontrollerdb.txt")

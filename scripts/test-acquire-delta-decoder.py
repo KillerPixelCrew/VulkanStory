@@ -40,7 +40,7 @@ class AcquireDecoderTests(unittest.TestCase):
 
         source = self.assets / f"xdelta3-{VERSION}.tar.gz"
         with tarfile.open(source, "w:gz") as archive:
-            add_tar_member(archive, f"xdelta3-{VERSION}/xdelta3/LICENSE", b"Test license\n")
+            add_tar_member(archive, f"xdelta3-{VERSION}/LICENSE", b"Test license\n")
         windows = self.assets / f"xdelta3-{VERSION}-windows-x86_64.zip"
         with zipfile.ZipFile(windows, "w") as archive:
             archive.writestr(f"xdelta3-{VERSION}-windows-x86_64/xdelta3.exe", self.binary)
