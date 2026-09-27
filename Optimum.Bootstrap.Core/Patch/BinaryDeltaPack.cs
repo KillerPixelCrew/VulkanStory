@@ -102,13 +102,14 @@ public sealed class BinaryDeltaPack(IBinaryDeltaDecoder decoder)
             manifest.Files.Any(f => f is null) ||
             manifest.Files.Select(f => f.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != manifest.Files.Count ||
             !Targets.All(target => manifest.Files.Any(f => f.Path == target)) ||
-            manifest.Files.Any(f => !Targets.Contains(f.Path, StringComparer.Ordinal) && !IsShaderPath(f.Path)))
+            manifest.Files.Any(f => !Targets.Contains(f.Path, StringComparer.Ordinal) &&
+                !IsShaderPath(f.Path) && !IsLanguagePath(f.Path)))
             throw new InvalidDataException("Delta pack has missing, duplicate or unsupported targets.");
         foreach (var file in manifest.Files)
         {
             string source = file.SourcePath ?? file.Path;
             if (file.Delta != file.Path + ".vcdiff" ||
-                (file.SourcePath is not null && (Targets.Contains(file.Path, StringComparer.Ordinal) || !IsShaderPath(source))) ||
+                (file.SourcePath is not null && (!IsShaderPath(file.Path) || !IsShaderPath(source))) ||
                 !ValidSize(file.InputSize) || !ValidSize(file.OutputSize) || !ValidSize(file.DeltaSize) ||
                 !ValidHash(file.InputSha256) || !ValidHash(file.OutputSha256) || !ValidHash(file.DeltaSha256))
                 throw new InvalidDataException($"Invalid delta entry: {file.Path}");
@@ -126,6 +127,15 @@ public sealed class BinaryDeltaPack(IBinaryDeltaDecoder decoder)
             (leaf.EndsWith(".vsh", StringComparison.Ordinal) || leaf.EndsWith(".fsh", StringComparison.Ordinal) ||
              leaf.EndsWith(".gsh", StringComparison.Ordinal)) &&
             leaf.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
+    }
+
+    private static bool IsLanguagePath(string? path)
+    {
+        const string prefix = "assets/game/lang/";
+        if (path is null || !path.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        string leaf = path[prefix.Length..];
+        return leaf.Length > 5 && leaf.Length <= 32 && leaf.EndsWith(".json", StringComparison.Ordinal) &&
+            leaf[..^5].All(c => char.IsAsciiLetter(c) || char.IsAsciiDigit(c) || c == '-');
     }
 
     private static bool ValidSize(long size) => size > 0 && size <= MaximumFileSize;

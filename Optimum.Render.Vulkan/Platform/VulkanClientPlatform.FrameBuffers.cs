@@ -28,6 +28,24 @@ public partial class VulkanClientPlatform
             return;
         }
         base.LoadFrameBuffer(framebuffer);
+        if (framebuffer == EnumFrameBuffer.Transparent && CurrentFrameBuffer is FrameBufferRef transparent)
+        {
+            // Transparency shares Primary's render resolution, which can differ
+            // from the window resolution when a vendor upscaler is active.
+            GlViewport(0, 0, transparent.Width, transparent.Height);
+        }
+    }
+
+    public override void UnloadFrameBuffer(EnumFrameBuffer framebuffer)
+    {
+        // Preserve the base's depth-mask and target transitions, but restore the
+        // viewport from the bound target. Window size * ssaaLevel does not include
+        // the vendor upscaler's render scale and misprojects subsequent OIT draws.
+        base.UnloadFrameBuffer(framebuffer);
+        if (CurrentFrameBuffer is FrameBufferRef target)
+        {
+            GlViewport(0, 0, target.Width, target.Height);
+        }
     }
 
     // ClientPlatformWindows' private slot constants; the parity dump and the post chain

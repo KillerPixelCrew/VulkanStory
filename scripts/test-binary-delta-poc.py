@@ -101,6 +101,31 @@ class DeltaTests(unittest.TestCase):
         self.invoke("apply", "--pack", second, "--output", self.root / "shader-restored")
         self.assertEqual("optimum shader\n", (self.root / "shader-restored/assets/game/shaders/taa-resolve.vsh").read_text())
 
+    def test_language_delta_merges_localized_strings_and_english_fallback(self):
+        source = self.original / "assets/game/lang/de.json"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text('{"vanilla": "Grüße"}\n', encoding="utf-8")
+        overlays = self.root / "overlays"
+        (overlays / "shaders").mkdir(parents=True)
+        (overlays / "shaderincludes").mkdir()
+        (overlays / "lang").mkdir()
+        (overlays / "lang/en.json").write_text(
+            '{"optimum-tab-header":"Optimum", "optimum-vulkan-tab-header":"Vulkan"}', encoding="utf-8")
+        (overlays / "lang/de.json").write_text(
+            '{"optimum-tab-header":"Zusatz"}', encoding="utf-8")
+        (self.original / "assets/game/lang/en.json").write_text('{"vanilla":"Hello"}', encoding="utf-8")
+        pack = self.root / "language-pack"
+        self.invoke("build", "--patched", self.patched, "--output", pack,
+                    "--game-version", "1.22.7", "--optimum-version", "0.3.17",
+                    "--rid", "linux-x64", "--asset-overlays", overlays)
+        self.assertFalse((pack / "merged-lang").exists())
+        restored = self.root / "language-restored"
+        self.invoke("apply", "--pack", pack, "--output", restored)
+        strings = json.loads((restored / "assets/game/lang/de.json").read_text(encoding="utf-8"))
+        self.assertEqual("Grüße", strings["vanilla"])
+        self.assertEqual("Zusatz", strings["optimum-tab-header"])
+        self.assertEqual("Vulkan", strings["optimum-vulkan-tab-header"])
+
 
 if __name__ == "__main__":
     unittest.main()

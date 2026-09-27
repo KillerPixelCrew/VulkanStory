@@ -69,9 +69,9 @@ def main():
         require_file(args.donors / donor)
     for path in (args.patcher, args.decoder):
         require_file(path)
-    for kind in ("shaders", "shaderincludes"):
+    for kind in ("shaders", "shaderincludes", "lang"):
         if not (root / "sources" / kind).is_dir():
-            parser.error("Missing shader overlay directory: " + kind)
+            parser.error("Missing asset overlay directory: " + kind)
     output = args.output.resolve()
     if output.exists():
         parser.error("Output must be a new directory")
@@ -102,8 +102,9 @@ def main():
             "--asset-overlays", root / "sources", "--game-version", game_version,
             "--optimum-version", optimum_version, "--rid", args.rid, "--output", pack)
         manifest = json.loads((pack / "manifest.json").read_text(encoding="utf-8"))
-        if len(manifest["files"]) != 46 or manifest["rid"] != args.rid:
-            raise ValueError("Expected four DLLs and 42 shader deltas for this release")
+        expected = 46 + len(list((root / "sources/lang").glob("*.json")))
+        if len(manifest["files"]) != expected or manifest["rid"] != args.rid:
+            raise ValueError(f"Expected four DLLs, 42 shaders and {expected - 46} language deltas")
         run(sys.executable, delta_script, "apply", "--xdelta", args.decoder,
             "--original", args.original, "--pack", pack,
             "--output", temporary / "reconstructed")

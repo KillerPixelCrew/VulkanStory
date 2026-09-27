@@ -12,13 +12,20 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import tempfile
 import time
+from importlib.util import module_from_spec, spec_from_file_location
 
 
 TARGETS = ("VintagestoryLib.dll", "VintagestoryAPI.dll",
            "Mods/VSEssentials.dll", "Mods/VSSurvivalMod.dll")
+_lang_spec = spec_from_file_location("merge_optimum_lang", Path(__file__).with_name("merge-optimum-lang.py"))
+_lang_module = module_from_spec(_lang_spec)
+_lang_spec.loader.exec_module(_lang_module)
+merge_language = _lang_module.merge
 
 
 def shader_source(kind, name, original):
@@ -44,7 +51,7 @@ def shader_source(kind, name, original):
     return reference
 
 
-def inputs(args):
+def inputs(args, stage):
     for relative in TARGETS:
         yield relative, relative, args.patched / relative
     if args.asset_overlays:
@@ -56,6 +63,16 @@ def inputs(args):
                     raise ValueError(f"Unsupported asset override: {path}")
                 relative = f"assets/game/{kind}/{path.name}"
                 yield relative, shader_source(kind, path.name, args.original), path
+        english = args.asset_overlays / "lang/en.json"
+        for localized in sorted((args.asset_overlays / "lang").glob("*.json")):
+            relative = f"assets/game/lang/{localized.name}"
+            original = args.original / relative
+            if not original.is_file():
+                raise ValueError(f"Missing official language source: {relative}")
+            target = stage / "merged-lang" / localized.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(merge_language(original, english, localized))
+            yield relative, relative, target
 
 
 def digest(path):
@@ -80,7 +97,7 @@ def run_delta(executable, *args):
 
 def build(args, stage):
     entries = []
-    for relative, source_relative, target in inputs(args):
+    for relative, source_relative, target in inputs(args, stage):
         source = args.original / source_relative
         delta_name = relative + ".vcdiff"
         delta = stage / delta_name
@@ -99,6 +116,8 @@ def build(args, stage):
             check(reconstructed, entry["outputSize"], entry["outputSha256"])
         check(source, entry["inputSize"], entry["inputSha256"])
         entries.append(entry)
+    if (stage / "merged-lang").exists():
+        shutil.rmtree(stage / "merged-lang")
     manifest = {"format": "optimum-vcdiff-1", "gameVersion": args.game_version,
                 "optimumVersion": args.optimum_version, "rid": args.rid, "files": entries}
     (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -117,12 +136,19 @@ def apply(args, stage):
     for entry in entries:
         if entry["delta"] != entry["path"] + ".vcdiff":
             raise ValueError("Unexpected delta path")
+        shader = False
         if entry["path"] not in TARGETS:
             parts = Path(entry["path"]).parts
-            if len(parts) != 4 or parts[:3] not in (("assets", "game", "shaders"), ("assets", "game", "shaderincludes")) or Path(entry["path"]).suffix not in (".vsh", ".fsh", ".gsh"):
+            shader = (len(parts) == 4 and parts[:3] in (("assets", "game", "shaders"), ("assets", "game", "shaderincludes"))
+                      and Path(entry["path"]).suffix in (".vsh", ".fsh", ".gsh"))
+            language = (len(parts) == 4 and parts[:3] == ("assets", "game", "lang")
+                        and re.fullmatch(r"[A-Za-z0-9-]+\.json", parts[3]) is not None)
+            if not shader and not language:
                 raise ValueError("Unexpected asset target")
         source = entry.get("sourcePath", entry["path"])
-        if source not in TARGETS and (not source.startswith(("assets/game/shaders/", "assets/game/shaderincludes/")) or ".." in Path(source).parts):
+        if entry.get("sourcePath") and not shader:
+            raise ValueError("Only shaders may use an alternate source")
+        if source not in TARGETS and (not source.startswith(("assets/game/shaders/", "assets/game/shaderincludes/", "assets/game/lang/")) or ".." in Path(source).parts):
             raise ValueError("Unexpected source path")
         check(args.original / source, entry["inputSize"], entry["inputSha256"])
         check(args.pack / entry["delta"], entry["deltaSize"], entry["deltaSha256"])
@@ -149,7 +175,7 @@ def main():
             sub.add_argument("--optimum-version", required=True)
             sub.add_argument("--rid", choices=("win-x64", "linux-x64"), required=True)
             sub.add_argument("--asset-overlays", type=Path,
-                             help="directory with shaders/ and shaderincludes/ override files")
+                             help="directory with shaders/, shaderincludes/ and lang/ override files")
     args = parser.parse_args()
     output = args.output.resolve()
     if output.exists():

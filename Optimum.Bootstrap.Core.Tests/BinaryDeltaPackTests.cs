@@ -307,6 +307,25 @@ public sealed class BinaryDeltaPackTests : IDisposable
     }
 
     [Fact]
+    public async Task LanguageDeltaIsInstalledAndVerified()
+    {
+        string target = "assets/game/lang/en.json";
+        string original = Path.Combine(Original, target), delta = Path.Combine(Pack, target + ".vcdiff");
+        Directory.CreateDirectory(Path.GetDirectoryName(original)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(delta)!);
+        File.WriteAllText(original, "{\"vanilla\":\"Hello\"}");
+        File.WriteAllText(delta, "{\"vanilla\":\"Hello\",\"optimum-tab-header\":\"Optimum\"}");
+        manifest = manifest with { Files = [.. manifest.Files, new BinaryDeltaFile(
+            target, target + ".vcdiff", new FileInfo(original).Length, Hash(original),
+            new FileInfo(delta).Length, Hash(delta), new FileInfo(delta).Length, Hash(delta))] };
+        WriteManifest();
+        await new DeltaRuntimeInstaller(new Decoder()).InstallAsync(Original, Pack, CreatePayload(), Output,
+            "1.22.7", "0.3.17", "linux-x64");
+        Assert.Contains("optimum-tab-header", File.ReadAllText(Path.Combine(Output, target)));
+        await DeltaRuntimeInstaller.VerifyAsync(Output, "0.3.17", "linux-x64");
+    }
+
+    [Fact]
     public async Task RejectsShaderSourceTraversalBeforeInvokingDecoder()
     {
         string target = "assets/game/shaders/taa-resolve.vsh";
