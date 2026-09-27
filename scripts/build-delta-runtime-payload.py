@@ -53,6 +53,10 @@ args.output.parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory(prefix="payload-stage-", dir=args.output.parent) as temporary:
     stage = Path(temporary) / "payload"
     shutil.copytree(args.launcher, stage)
+    # Velopack omits the .NET crash-dump helper from its app package. It is not
+    # needed to launch the game, and listing it in delta-release.json would make
+    # an installed GUI release fail payload verification before reconstruction.
+    (stage / "createdump.exe").unlink(missing_ok=True)
     for name in compiled:
         shutil.copy2(args.compiled / name, stage / name)
     for name in ("OptimumFsr3.dll", "OptimumFsr4.dll", "OptimumNgx.dll", "OptimumXessFg.dll"):
