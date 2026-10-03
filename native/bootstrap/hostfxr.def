@@ -1,0 +1,6 @@
+LIBRARY hostfxr
+EXPORTS
+    hostfxr_main
+    hostfxr_main_startupinfo
+    hostfxr_main_bundle_startupinfo
+    hostfxr_set_error_writer

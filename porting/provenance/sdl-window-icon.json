@@ -1,0 +1,7 @@
+{
+  "baseline": "386e0d05386d0b228b439d09aeca851428f7bbf3",
+  "adaptation": "Move original SetSdlWindowIcon to the session sidecar; retain visible startup timing, optional failure behavior and game asset lookup. SDL receives only RGBA bytes. Hidden harness skips icon loading.",
+  "files": {
+    "src/VulkanStory.Game/GameRenderSession.Window.cs": "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.SdlInput.cs"
+  }
+}

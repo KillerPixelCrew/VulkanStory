@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "vulkanstoryinput",
+  "name": "VulkanStory Input Companion",
+  "authors": ["N1GHT"],
+  "description": "Optional server support for negotiated VulkanStory controller movement.",
+  "version": "0.1.0",
+  "side": "Server",
+  "requiredOnClient": false,
+  "requiredOnServer": false,
+  "dependencies": { "game": "1.22.7" }
+}

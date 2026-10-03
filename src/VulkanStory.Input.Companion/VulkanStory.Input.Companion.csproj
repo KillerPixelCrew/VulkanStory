@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../VulkanStory.Input/VulkanStory.Input.csproj" />
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(VintageStoryPath)/Lib/0Harmony.dll" Private="false" />
+    <None Update="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="RequireOfficialReference" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(VintageStoryPath)/VintagestoryAPI.dll') Or !Exists('$(VintageStoryPath)/Lib/0Harmony.dll')" Text="Set VintageStoryPath to the official game installation." />
+  </Target>
+</Project>

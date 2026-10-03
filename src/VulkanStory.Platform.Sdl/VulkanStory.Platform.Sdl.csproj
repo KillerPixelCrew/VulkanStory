@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" Version="2026.722.0" />
+    <Compile Include="SdlWindowHost.cs" />
+    <Compile Include="SdlEventPump.cs" />
+    <Compile Include="SdlWindowCoordinates.cs" />
+    <Compile Include="SdlNativeLibrary.cs" />
+  </ItemGroup>
+</Project>

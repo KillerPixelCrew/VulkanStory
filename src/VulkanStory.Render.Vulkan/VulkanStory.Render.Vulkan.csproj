@@ -1,0 +1,153 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
+    <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
+    <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
+    <InternalsVisibleTo Include="VulkanStory.Render.Vulkan.Tests" />
+    <InternalsVisibleTo Include="VulkanStory.Game" />
+  </ItemGroup>
+  <!-- Retained backend and facade. Game types stay in the integration project. -->
+  <ItemGroup>
+    <Compile Include="VulkanDevice.cs" />
+    <Compile Include="VulkanDevice.Binding.cs" />
+    <Compile Include="VulkanDevice.Dlss.cs" />
+    <Compile Include="VulkanDevice.FrameGeneration.cs" />
+    <Compile Include="VulkanDevice.Fsr3.cs" />
+    <Compile Include="VulkanDevice.Fsr4.cs" />
+    <Compile Include="VulkanDevice.Native.cs" />
+    <Compile Include="VulkanDevice.Programs.cs" />
+    <Compile Include="VulkanDevice.Readback.cs" />
+    <Compile Include="VulkanDevice.Resources.cs" />
+    <Compile Include="VulkanDevice.Shadows.cs" />
+    <Compile Include="VulkanDevice.UpscalerHost.cs" />
+    <Compile Include="VulkanDevice.Xess.cs" />
+    <Compile Include="VulkanDevice.XessFg.cs" />
+    <Compile Include="AmbientOcclusion/GtaoRenderer.cs" />
+    <Compile Include="AmbientOcclusion/GtaoSettings.cs" />
+    <Compile Include="Core/GpuCheckpoints.cs" />
+    <Compile Include="Core/DescriptorCache.cs" />
+    <Compile Include="Core/DescriptorArena.cs" />
+    <Compile Include="Core/DescriptorBindingTypes.cs" />
+    <Compile Include="Core/BindlessTextureTable.cs" />
+    <Compile Include="Core/CacheFileWriter.cs" />
+    <Compile Include="Core/IDeviceRequirementContributor.cs" />
+    <Compile Include="Core/NativeRuntimePaths.cs" />
+    <Compile Include="Core/VulkanCapabilities.cs" />
+    <Compile Include="Core/VulkanContext.cs" />
+    <Compile Include="Core/VulkanAllocator.cs" />
+    <Compile Include="Core/VulkanResources.cs" />
+    <Compile Include="Core/FrameRing.cs" />
+    <Compile Include="Core/TextureManager.cs" />
+    <Compile Include="Core/TextureReadbackFormats.cs" />
+    <Compile Include="Core/TextureDump.cs" />
+    <Compile Include="Core/FramebufferCapture.cs" />
+    <Compile Include="Core/GlEnums.cs" />
+    <Compile Include="Core/PipelineState.cs" />
+    <Compile Include="Core/VertexLayout.cs" />
+    <Compile Include="Core/MeshManager.cs" />
+    <Compile Include="Core/MeshUploads.cs" />
+    <Compile Include="Core/VulkanMeshPreflight.cs" />
+    <Compile Include="Core/ShaderProgramResources.cs" />
+    <Compile Include="Core/NativeRenderDeclarations.cs" />
+    <Compile Include="Core/ClientUniformBuffer.cs" />
+    <Compile Include="Core/PipelineCache.cs" />
+    <Compile Include="Core/PipelineKeyLog.cs" />
+    <Compile Include="Core/PipelineCachePersistence.cs" />
+    <Compile Include="Core/ComputePipelineCache.cs" />
+    <Compile Include="Core/SharedPipelineLayout.cs" />
+    <Compile Include="Core/RenderTargetManager.cs" />
+    <Compile Include="Core/RenderTrace.cs" />
+    <Compile Include="Core/RenderTrace.Shaders.cs" />
+    <Compile Include="Core/VulkanStats.cs" />
+    <Compile Include="Core/VulkanPreflight.cs" />
+    <Compile Include="Core/VulkanWindowPreflight.cs" />
+    <Compile Include="Core/VulkanSwapchainPreflight.cs" />
+    <Compile Include="Core/VulkanPresentPreflight.cs" />
+    <Compile Include="Core/VulkanDevicePreflight.cs" />
+    <Compile Include="Core/WindowSurface.cs" />
+    <Compile Include="Core/VulkanNativeLibrary.cs" />
+    <Compile Include="Graph/ComputePass.cs" />
+    <Compile Include="Graph/FramePlan.cs" />
+    <Compile Include="Graph/FrameGraph.cs" />
+    <Compile Include="Graph/TransientAllocator.cs" />
+    <Compile Include="Graph/FeedbackCopyPool.cs" />
+    <Compile Include="Graph/PassRecorder.cs" />
+    <Compile Include="Graph/ResourceStateTracker.cs" />
+    <Compile Include="Graph/BarrierBatcher.cs" />
+    <Compile Include="Frame/FrameTimeline.cs" />
+    <Compile Include="Frame/GpuTimestamps.cs" />
+    <Compile Include="Frame/QueryRing.cs" />
+    <Compile Include="Frame/IndirectRing.cs" />
+    <Compile Include="Latency/FrameTiming.cs" />
+    <Compile Include="Latency/AmdAntiLagFunctions.cs" />
+    <Compile Include="Latency/NvLowLatency2Functions.cs" />
+    <Compile Include="Latency/SdlInputAgeRecorder.cs" />
+    <Compile Include="Latency/VendorLatency.cs" />
+    <Compile Include="Latency/XellNative.cs" />
+    <Compile Include="Present/GeneratedFramePacer.cs" />
+    <Compile Include="Present/Fsr3SwapchainRuntime.cs" />
+    <Compile Include="Present/Swapchain.cs" />
+    <Compile Include="Present/BlitPresentPath.cs" />
+    <Compile Include="Present/SwapchainDispatch.cs" />
+    <Compile Include="Present/SwapchainRetirement.cs" />
+    <Compile Include="Present/StreamlineRuntime.cs" />
+    <Compile Include="Present/StreamlineTaggedImage.Texture.cs" />
+    <Compile Include="Present/IDx12SharedRuntime.cs" />
+    <Compile Include="Present/VulkanSharedImage.cs" />
+    <Compile Include="Present/XessSharedFence.cs" />
+    <Compile Include="Present/XessFgInteropRequirements.cs" />
+    <Compile Include="Present/XessFgRuntime.cs" />
+    <Compile Include="Present/XessFgPresenter.cs" />
+    <Compile Include="Shaders/GlslParser.cs" />
+    <Compile Include="Shaders/FrameGlobals.cs" />
+    <Compile Include="Shaders/ShaderStageKind.cs" />
+    <Compile Include="Shaders/ProgramInterfaceLayout.cs" />
+    <Compile Include="Shaders/ShaderRewriter.cs" />
+    <Compile Include="Shaders/ShaderCompiler.cs" />
+    <Compile Include="Shaders/ShaderBinaryCache.cs" />
+    <Compile Include="Shaders/ShaderTranslator.cs" />
+    <Compile Include="Shaders/NativeShaderBuilder.cs" />
+    <Compile Include="Shaders/NativeShaderLibrary.cs" />
+    <Compile Include="Shaders/NativeShaderManifest.cs" />
+    <Compile Include="Shaders/SetConvention.cs" />
+    <Compile Include="Shaders/SpirvReflection.cs" />
+    <Compile Include="Upscale/Ngx/NgxDeviceRequirements.cs" />
+    <Compile Include="Upscale/Ngx/NgxDlssFeature.cs" />
+    <Compile Include="Upscale/Ngx/NgxFrameGenerationFeature.cs" />
+    <Compile Include="Upscale/Ngx/NgxInterop.cs" />
+    <Compile Include="Upscale/Ngx/NgxLifetime.cs" />
+    <Compile Include="Upscale/Ngx/NgxParameters.cs" />
+    <Compile Include="Upscale/Ngx/NgxResourceVk.cs" />
+    <Compile Include="Upscale/Ngx/NgxResourceVk.Texture.cs" />
+    <Compile Include="Upscale/Ngx/NgxSession.cs" />
+    <Compile Include="Upscale/Ngx/NgxShim.cs" />
+    <Compile Include="Upscale/Fsr3Native.cs" />
+    <Compile Include="Upscale/Fsr3Image.Texture.cs" />
+    <Compile Include="Upscale/IUpscalerDevice.cs" />
+    <Compile Include="Upscale/IUpscalerBackend.cs" />
+    <Compile Include="Upscale/DlssUpscaler.cs" />
+    <Compile Include="Upscale/Fsr3Backend.cs" />
+    <Compile Include="Upscale/Fsr3FrameGeneration.cs" />
+    <Compile Include="Upscale/XessNative.cs" />
+    <Compile Include="Upscale/XessBackend.cs" />
+    <Compile Include="Upscale/Fsr4Runtime.cs" />
+    <Compile Include="Upscale/Fsr4SharedFrames.cs" />
+    <Compile Include="Upscale/Fsr4Backend.cs" />
+    <Compile Include="Transfer/UploadManager.cs" />
+    <Compile Include="Transfer/ReadbackManager.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../shaders/native/gtao/*.comp;../../shaders/native/gtao/*.glsl">
+      <LogicalName>shaders-vk/gtao/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

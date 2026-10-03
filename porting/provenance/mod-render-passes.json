@@ -1,0 +1,8 @@
+{
+  "baseline": "386e0d05386d0b228b439d09aeca851428f7bbf3",
+  "adaptation": "Rename API into mod-owned VulkanStory.Game.ModRendering namespace; migrate declared-pass host to graphics sidecar, use original stage Harmony hooks and existing motion window/framebuffer ownership. Keep declarations, validation, registry order, optional attachments and failure reporting. No game API injection.",
+  "files": {
+    "src/VulkanStory.Game/ModRendering/VulkanStoryModPasses.cs": "sources/VintagestoryApi/Client/Render/OptimumModPasses.cs",
+    "src/VulkanStory.Game/GameGraphicsAdapter.ModPasses.cs": "Optimum.Render.Vulkan/Platform/VulkanClientPlatform.ModPasses.cs"
+  }
+}

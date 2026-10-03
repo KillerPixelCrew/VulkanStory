@@ -1,0 +1,15 @@
+# Original-platform SDL sidecar
+
+Date: 2026-09-29. Implementation turn: no builds, tests, probes, packaging, or game runs.
+
+`GamePlatformAdapter` composes the official `ClientPlatformWindows` with the retained SDL host and extracted input bridge. A conditional weak table associates one adapter with the original platform. The original game type remains sealed and unmodified; its OpenTK window field is never assigned an SDL pointer or fake window.
+
+Event dispatch and resize behavior are adapted from `porting/old-platform/VulkanClientPlatform.SdlInput.cs` at baseline `386e0d05386d0b228b439d09aeca851428f7bbf3`. The sidecar retains window-ID filtering, focused app-level drops, synthetic touch-mouse suppression, physical scancode/modifier conversion, separate committed text versus native IME preedit, Escape composition dismissal, touch tap/drag/hold, physical versus controller cursor-warp arbitration, natural wheel direction, focus transitions, original close cancellation, and coalesced logical/pixel/display/fullscreen changes. Input age is reported through a supplied diagnostics callback.
+
+One frame performs pacing/boundary work, one `SdlEventPump.Drain` with controller refresh and input marker callbacks, touch ticking, pending resize, GUI text-target synchronization, and one bound original frame callback. The complete startup routing transaction must be active before dispatch, cursor mutation, or frame execution. Owner-thread and recursion checks protect the SDL path. Actual startup patch groups and a session factory are still absent, so no live bootstrap caller can activate this implementation.
+
+The session supplies callbacks for pacing/markers, controller state/activity/hotplug/focus, physical input hints, GUI text-target ownership, text synchronization/stop, renderer resize, GUI recomposition, diagnostics, and graphics shutdown. These are required integration dependencies, not default no-op implementations. In particular, the GUI coordinator must preserve the original stale-target/IME rules, and graphics resizing must perform retained render-target/framebuffer reconstruction. Provider-specific marker order remains the session's responsibility.
+
+Attachment borrows an already-created window; the session factory remains responsible for resources if attachment fails. Once attached, disposal stops/drains graphics before destroying the SDL window, clears input and controller state, removes the association, and releases strong references. A failed graphics drain retains the host for error reporting. The transaction must be removed after successful session teardown. These lifecycle paths are not yet validated.
+
+Next steps: compile this increment and verify sidecar behavior with retained input/window fixtures; migrate the actual GUI/IME and controller coordinators; implement checked window-consumer/startup substitutions and the complete graphics route; attach a real renderer session, then validate visible first-window and game-frame ownership. G0/G3 remain open.

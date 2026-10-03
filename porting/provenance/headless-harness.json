@@ -1,0 +1,10 @@
+{
+  "baseline": "386e0d05386d0b228b439d09aeca851428f7bbf3",
+  "adaptation": "Session ownership, official API references, namespace/environment names, isolated Windows runner; no donor assembly deployment.",
+  "files": {
+    "GameRenderSession.Headless.cs": "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs",
+    "HeadlessParityDump.cs": "sources/VintagestoryApi/Client/optimum-render-device.cs",
+    "scripts/dev/ssim.py": "scripts/dev/ssim.py",
+    "HeadlessHarnessOptions.cs": "sources/VintagestoryApi/Client/optimum-render-device.cs"
+  }
+}

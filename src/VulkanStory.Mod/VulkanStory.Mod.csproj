@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Compile Include="../Shared/RendererSettingsPanel.cs" Link="Settings/RendererSettingsPanel.cs" />
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
+    <None Update="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="RequireOfficialReference" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(VintageStoryPath)/VintagestoryAPI.dll')" Text="Set VintageStoryPath to the official game installation." />
+  </Target>
+</Project>

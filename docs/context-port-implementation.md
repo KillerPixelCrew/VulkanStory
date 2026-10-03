@@ -1,0 +1,9 @@
+# Vulkan context and Streamline source boundary
+
+Date: 2026-09-29. **Source-only implementation; not built or run in this turn.** The backend project now includes the retained Vulkan context, allocator, buffer/image resources, statistics, headless preflight, and Streamline proxy wrapper. The retained algorithms and resource lifetime order remain in their original files.
+
+The context is game-neutral. `VulkanStats` now sends present counts to optional callbacks instead of calling injected `OptimumConfig` members. The allocator keeps its existing log callback and exposes a separate optional trace callback instead of depending on shader-heavy `RenderTrace`. Core `OPTIMUM_*` diagnostic variables became `VULKANSTORY_*` variables. The game adapter must register and clear the callbacks when it owns the session.
+
+`StreamlineTaggedImage` keeps its native tag ABI. Its `VulkanTexture` conversion moved to a second partial source file excluded until the texture manager joins the project. `StreamlineRuntime` and the new `native/streamline/` bridge use matching `VulkanStorySl*` exports and `VulkanStoryStreamline.dll`; the existing proxy creation, acquire/present, frame-token, tag and state calls are otherwise unchanged. The original C++ bridge remains under `native/migrated/optimum-streamline/` for provenance. The Windows build recipe requires explicit Streamline/Vulkan SDK roots and fails visibly when its toolchain is absent.
+
+`tools/VulkanStory.Preflight` calls `VulkanPreflight.Check()` to create and release a headless Vulkan device without the game. The next bounded validation can build the backend tests and Streamline C++ bridge, then run this preflight if compilation succeeds. A headless success would not prove SDL surface creation, swapchain ownership, tagged real-scene frames, DLSS-G state, visible output, or game integration. Those remain separate G0/G3 gates, along with the other renderer managers and the normal-shortcut live check.

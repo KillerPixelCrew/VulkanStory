@@ -1,0 +1,11 @@
+# Vulkan render-target and frame-graph source boundary
+
+Date: 2026-09-29. **Implementation turn: source changed; no build, test, package, or game run was launched.** The [previous present batch](validation-p0-present-2026-09-29-02.md) proved one hidden transfer-clear/blit/present frame and 26 backend tests.
+
+The backend compile list now includes the retained `RenderTargetManager`, `FrameGraph`, `PassRecorder`, and `PipelineState` sources as one group. Their attachment selection, dynamic rendering scopes, clear promotion, frame-plan reuse, barrier recording, and blend-factor table remain in the renderer. The original GL-shaped framebuffer IDs and texture IDs remain intact while the game bridge is built.
+
+Two game-owned pieces were separated from that group. `FrameGraph` no longer declares the Vintage Story render-stage listener; its original signature is staged under `porting/game-adapter/IRenderStageListener.cs`. `PipelineState` takes `RenderBlendMode`, a small neutral contract, while `porting/game-adapter/GameAttachmentBlend.cs` maps the game's `EnumBlendMode` to it. The backend factor table and UI alpha correction keep their original values. The frame-graph environment override is now `VULKANSTORY_VULKAN_FRAMEGRAPH`.
+
+The existing `--sdl-present` preflight now creates a framebuffer, attaches its RGBA8 texture, opens a dynamic rendering scope, clears the color attachment, closes the scope, and passes the texture through the previously validated frame-ring/blit/swapchain path. This replaces the direct transfer clear in the preflight. The window remains hidden, so successful execution will prove command submission and presentation, not visible pixels.
+
+Two focused tests carry existing source expectations: alternating temporal-history pass shapes reuse their two frame plans until a target changes, and only Standard blending into the UI image changes source alpha to the over operator. The next validation turn should run the backend tests, build the preflight, and run `--sdl-present` once with a short timeout. The game-facing blend conversion and render-stage listener are staged, not compiled into the game adapter yet. Other draw state, shader pipelines, mesh data, menus, providers, and SDL game input remain open.

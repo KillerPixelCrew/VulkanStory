@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Point to an official, unmodified installation. This file is developer-local. -->
+    <VintageStoryPath>C:\Users\YOUR_USER\AppData\Roaming\Vintagestory</VintageStoryPath>
+  </PropertyGroup>
+</Project>

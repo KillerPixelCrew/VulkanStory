@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />
+    <ProjectReference Include="../../src/VulkanStory.Game/VulkanStory.Game.csproj" />
+    <Reference Include="0Harmony" HintPath="$(VintageStoryPath)/Lib/0Harmony.dll" Private="false" />
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
+    <Reference Include="VintagestoryLib" HintPath="$(VintageStoryPath)/VintagestoryLib.dll" Private="false" />
+    <Reference Include="OpenTK.Windowing.Common" HintPath="$(VintageStoryPath)/Lib/OpenTK.Windowing.Common.dll" Private="false" />
+    <Reference Include="OpenTK.Graphics" HintPath="$(VintageStoryPath)/Lib/OpenTK.Graphics.dll" Private="false" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>OfficialGameDirectory</_Parameter1>
+      <_Parameter2>$(VintageStoryPath)</_Parameter2>
+    </AssemblyAttribute>
+    <None Include="../../profiles/vs-1.22.7-win-x64.json" Link="official-profile.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

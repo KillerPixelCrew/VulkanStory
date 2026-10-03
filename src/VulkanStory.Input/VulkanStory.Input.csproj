@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
+  </ItemGroup>
+  <Target Name="RequireOfficialReference" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(VintageStoryPath)/VintagestoryAPI.dll')" Text="Set VintageStoryPath to the official game installation." />
+  </Target>
+</Project>

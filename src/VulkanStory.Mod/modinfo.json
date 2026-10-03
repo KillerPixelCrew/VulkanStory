@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "vulkanstory",
+  "name": "VulkanStory",
+  "authors": ["N1GHT"],
+  "description": "Vulkan rendering and SDL window/input integration through the VulkanStory early runtime.",
+  "version": "0.1.0",
+  "side": "Client",
+  "requiredOnClient": false,
+  "requiredOnServer": false,
+  "dependencies": { "game": "1.22.7" }
+}

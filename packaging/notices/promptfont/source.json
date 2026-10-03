@@ -1,0 +1,20 @@
+{
+  "product": "PromptFont",
+  "version": "1.15.0",
+  "author": "Shinmera (Yukari Hafner)",
+  "homepage": "https://shinmera.com/promptfont",
+  "files": {
+    "promptfont.ttf": {
+      "source": "https://cdnjs.cloudflare.com/ajax/libs/promptfont/1.15.0/promptfont.ttf",
+      "sha256": "0F18380AB8063645B8AB22769AD81B2F5CE51D09FA02F2B8EB84CD76375FF195"
+    },
+    "glyphs.json": {
+      "source": "https://cdnjs.cloudflare.com/ajax/libs/promptfont/1.15.0/glyphs.json",
+      "sha256": "1819EDA8E0AF7E9FE22BBADCA9C931C31598417286ACE727BBCEA1ACC6A917D1"
+    },
+    "LICENSE.txt": {
+      "source": "https://raw.githubusercontent.com/Shinmera/promptfont/45ed10b1fe3dc79f1a80d2a147524dffb5078cc7/LICENSE.txt",
+      "sha256": "6C18AD8456572E565054D86E8BC5F444E760F77624AED710B7BA828C03AF51AE"
+    }
+  }
+}

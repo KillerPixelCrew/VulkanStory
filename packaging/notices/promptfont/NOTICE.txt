@@ -1,0 +1,7 @@
+PromptFont by Shinmera (Yukari Hafner), available at https://shinmera.com/promptfont
+Based on Xolonium by Severin Meyer.
+Distributed under the SIL Open Font License, Version 1.1. See LICENSE.txt.
+
+Bundled unmodified PromptFont TTF and glyph metadata version 1.15.0 from the
+author-documented CDNJS distribution. No system font installation is required.
+Included trademarks belong to their respective owners.

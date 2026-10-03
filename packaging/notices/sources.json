@@ -1,0 +1,62 @@
+[
+  {
+    "file": "native/SDL-LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/libsdl-org/SDL/a8591d943b7079b17fdd018dc04ec9c71dc94ae4/LICENSE.txt",
+    "sha256": "1C040B8271B37E5076359F8FD54240E371114112924D2DF81EF87C7D6A1DFDFD"
+  },
+  {
+    "file": "native/shaderc/AUTHORS",
+    "source": "https://raw.githubusercontent.com/google/shaderc/8c2e602ce440b7739c95ff3d69cecb1adf6becda/AUTHORS",
+    "sha256": "9FB4B067E4C9A1F91EA1C26465B3D1C6B515CB24860E0DBB719879925A5A1248"
+  },
+  {
+    "file": "native/shaderc/LICENSE",
+    "source": "https://raw.githubusercontent.com/google/shaderc/8c2e602ce440b7739c95ff3d69cecb1adf6becda/LICENSE",
+    "sha256": "C71D239DF91726FC519C6EB72D318EC65820627232B2F796219E87DCF35D0AB4"
+  },
+  {
+    "file": "native/glslang/LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/glslang/efd24d75bcbc55620e759f6bf42c45a32abac5f8/LICENSE.txt",
+    "sha256": "ADB783E734E906D1F46DB5DF29991DBDE84BDB0CEAB502AC2FEBB44FE3C2B5F4"
+  },
+  {
+    "file": "native/SPIRV-Tools/LICENSE",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/SPIRV-Tools/33e02568181e3312f49a3cf33df470bf96ef293a/LICENSE",
+    "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30"
+  },
+  {
+    "file": "native/SPIRV-Headers/LICENSE",
+    "source": "https://raw.githubusercontent.com/KhronosGroup/SPIRV-Headers/2a611a970fdbc41ac2e3e328802aed9985352dca/LICENSE",
+    "sha256": "EA43B1DE38A6F90C488800D66DEC1ED671E68CDA530266BC96951FB5B6307613"
+  },
+  {
+    "file": "managed/Silk.NET-LICENSE.md",
+    "source": "https://raw.githubusercontent.com/dotnet/Silk.NET/94605142f7b7bd6e69c9201e8e721d245c69eb7e/LICENSE.md",
+    "sha256": "725919AE6DD430F6302BD4E84958AE5B99F4F231B164382F6197DF1413D4A9C1"
+  },
+  {
+    "file": "managed/SDL3-CS-LICENCE.txt",
+    "source": "https://raw.githubusercontent.com/ppy/SDL3-CS/7f836c9f21dad8ee68e70432e5b7d38ceae47eaa/LICENCE",
+    "sha256": "45E6D072AA8B425080DBCD6A96208FEAF8F7DAD0180CCC54FC0C97DB6F5D86E0"
+  },
+  {
+    "file": "managed/microsoft.extensions.dependencymodel/LICENSE.TXT",
+    "source": "NuGet:microsoft.extensions.dependencymodel/9.0.9/LICENSE.TXT",
+    "sha256": "D7A68596AB69B06F51CA278A6545148E4269A9381C26D597C13DF5D88E08CF5B"
+  },
+  {
+    "file": "managed/microsoft.extensions.dependencymodel/THIRD-PARTY-NOTICES.TXT",
+    "source": "NuGet:microsoft.extensions.dependencymodel/9.0.9/THIRD-PARTY-NOTICES.TXT",
+    "sha256": "40686C6447A7D5B5D3693068E4571B5F483D7ED335AEEE773EF662440DE4C5D5"
+  },
+  {
+    "file": "managed/microsoft.dotnet.platformabstractions/LICENSE.TXT",
+    "source": "NuGet:microsoft.dotnet.platformabstractions/3.1.6/LICENSE.TXT",
+    "sha256": "D7A68596AB69B06F51CA278A6545148E4269A9381C26D597C13DF5D88E08CF5B"
+  },
+  {
+    "file": "managed/microsoft.dotnet.platformabstractions/THIRD-PARTY-NOTICES.TXT",
+    "source": "NuGet:microsoft.dotnet.platformabstractions/3.1.6/THIRD-PARTY-NOTICES.TXT",
+    "sha256": "2E3B2CB5CB57FF44310801DD46E51DAB1D35D9CFE196A9709EE8CB9C6F8E4D4A"
+  }
+]

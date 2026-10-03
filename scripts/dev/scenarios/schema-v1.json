@@ -1,0 +1,626 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VulkanStory bounded headless scenario schema version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "actions"
+  ],
+  "properties": {
+    "schema": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/settings"
+          },
+          {
+            "$ref": "#/$defs/capture"
+          },
+          {
+            "$ref": "#/$defs/checkpoint"
+          },
+          {
+            "$ref": "#/$defs/assert"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": [
+        "id",
+        "tick",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "kind": {
+          "type": "string"
+        }
+      }
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![\\s\\S])"
+    },
+    "settings": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "settings"
+            },
+            "values": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "Enabled": {
+                  "type": "boolean"
+                },
+                "RenderScale": {
+                  "type": "number"
+                },
+                "Taa": {
+                  "type": "boolean"
+                },
+                "TaaSharpness": {
+                  "type": "number"
+                },
+                "TaaMipBias": {
+                  "type": "number"
+                },
+                "TaaDebugView": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                },
+                "TaaJitterDev": {
+                  "type": "boolean"
+                },
+                "Upscaler": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[oO][fF][fF]|[dD][lL][sS][sS]|[xX][eE][sS][sS]|[fF][sS][rR]3|[fF][sS][rR]4)[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "UpscalerQuality": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[dD][lL][aA][aA]|[uU][lL][tT][rR][aA][qQ][uU][aA][lL][iI][tT][yY]|[uU][lL][tT][rR][aA][qQ][uU][aA][lL][iI][tT][yY][pP][lL][uU][sS]|[qQ][uU][aA][lL][iI][tT][yY]|[bB][aA][lL][aA][nN][cC][eE][dD]|[pP][eE][rR][fF][oO][rR][mM][aA][nN][cC][eE]|[uU][lL][tT][rR][aA][pP][eE][rR][fF][oO][rR][mM][aA][nN][cC][eE])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "UpscalerLodBiasOffset": {
+                  "type": "number"
+                },
+                "FrameGeneration": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[oO][fF][fF]|[dD][lL][sS][sS]|[fF][sS][rR]3|[xX][eE][sS][sS])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "FrameGenerationMultiplier": {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                },
+                "ShowFpsCounter": {
+                  "type": "boolean"
+                },
+                "LowLatencyMode": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[oO][fF][fF]|[oO][nN]|[bB][oO][oO][sS][tT])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "AmbientOcclusion": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[aA][uU][tT][oO]|[vV][aA][nN][iI][lL][lL][aA]|[gG][tT][aA][oO])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "AmbientOcclusionPreset": {
+                  "type": "string",
+                  "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[lL][oO][wW]|[mM][eE][dD][iI][uU][mM]|[hH][iI][gG][hH]|[uU][lL][tT][rR][aA])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                },
+                "AmbientOcclusionDebugView": {
+                  "type": "boolean"
+                },
+                "GodRaysSampleCap": {
+                  "type": "boolean"
+                },
+                "HandheldShadowTier": {
+                  "type": "boolean"
+                },
+                "NativeShaders": {
+                  "type": "boolean"
+                },
+                "Streamline": {
+                  "type": "boolean"
+                },
+                "ControllerEnabled": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "TouchEnabled": {
+                  "type": "boolean",
+                  "const": false
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "required": [
+                      "Upscaler"
+                    ],
+                    "properties": {
+                      "Upscaler": {
+                        "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[oO][fF][fF]|[dD][lL][sS][sS]|[fF][sS][rR]3|[fF][sS][rR]4)[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "UpscalerQuality": {
+                        "type": "string",
+                        "pattern": "^[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?:[dD][lL][aA][aA]|[qQ][uU][aA][lL][iI][tT][yY]|[bB][aA][lL][aA][nN][cC][eE][dD]|[pP][eE][rR][fF][oO][rR][mM][aA][nN][cC][eE]|[uU][lL][tT][rR][aA][pP][eE][rR][fF][oO][rR][mM][aA][nN][cC][eE])[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]*(?![\\s\\S])"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "values"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "capture": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "capture"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            },
+            "attachments": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "name",
+            "attachments"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "checkpoint": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "checkpoint"
+            },
+            "name": {
+              "$ref": "#/$defs/name"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "assert": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "assert"
+            },
+            "field": {
+              "enum": [
+                "hidden",
+                "focused",
+                "stagedModLoaded",
+                "worldReady",
+                "hasCurrentWorldSample",
+                "WorldCaptured",
+                "MotionValid",
+                "HasCamera",
+                "temporalReset",
+                "temporalFrameId",
+                "requestedUpscaler",
+                "effectiveUpscaler",
+                "requestedFrameGeneration",
+                "effectiveFrameGeneration",
+                "inputsPreparedThisFrame",
+                "preparationStatus",
+                "renderWidth",
+                "renderHeight",
+                "displayWidth",
+                "displayHeight",
+                "configuredDlssGeneratedFrames",
+                "dlssStateQueryFrameId",
+                "dlssStateQueryResult",
+                "dlssMaximumGenerated",
+                "dlssDynamicMfgSupport",
+                "successfulUpscaleFrames",
+                "preparedFrames",
+                "realPresents",
+                "sdkReportedPresents",
+                "sdkReportedDlssPresents",
+                "cpuRenderCycleSucceeded",
+                "presentCallReturned",
+                "scenarioTick",
+                "worldFrame",
+                "sampledAtFrameId",
+                "completedFrameId",
+                "sessionId",
+                "phase"
+              ]
+            },
+            "op": {
+              "enum": [
+                "eq",
+                "gte",
+                "deltaGte"
+              ]
+            },
+            "expected": {
+              "type": [
+                "boolean",
+                "number",
+                "string",
+                "null"
+              ]
+            },
+            "baseline": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "field",
+            "op",
+            "expected"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "op": {
+                    "const": "deltaGte"
+                  }
+                },
+                "required": [
+                  "op"
+                ]
+              },
+              "then": {
+                "required": [
+                  "baseline"
+                ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "baseline"
+                  ]
+                }
+              }
+            },
+            {
+              "oneOf": [
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "hidden",
+                        "focused",
+                        "stagedModLoaded",
+                        "worldReady",
+                        "hasCurrentWorldSample",
+                        "inputsPreparedThisFrame",
+                        "cpuRenderCycleSucceeded",
+                        "presentCallReturned"
+                      ]
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "WorldCaptured",
+                        "MotionValid",
+                        "HasCamera",
+                        "temporalReset"
+                      ]
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "displayWidth",
+                        "displayHeight",
+                        "realPresents",
+                        "sdkReportedPresents",
+                        "sdkReportedDlssPresents",
+                        "scenarioTick",
+                        "worldFrame",
+                        "sampledAtFrameId",
+                        "completedFrameId"
+                      ]
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "temporalFrameId",
+                        "renderWidth",
+                        "renderHeight",
+                        "configuredDlssGeneratedFrames",
+                        "dlssStateQueryFrameId",
+                        "dlssStateQueryResult",
+                        "dlssMaximumGenerated",
+                        "dlssDynamicMfgSupport",
+                        "successfulUpscaleFrames",
+                        "preparedFrames"
+                      ]
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "requestedUpscaler"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "dlss",
+                        "xess",
+                        "fsr3",
+                        "fsr4"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "effectiveUpscaler"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "dlss",
+                        "xess",
+                        "fsr3",
+                        "fsr4"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "requestedFrameGeneration"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "dlss",
+                        "fsr3",
+                        "xess"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "effectiveFrameGeneration"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "dlss",
+                        "fsr3",
+                        "xess"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "preparationStatus"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "sessionId"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "const": "phase"
+                    },
+                    "op": {
+                      "const": "eq"
+                    },
+                    "expected": {
+                      "type": "string",
+                      "enum": [
+                        "completedFrame"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "temporalFrameId",
+                        "renderWidth",
+                        "renderHeight",
+                        "displayWidth",
+                        "displayHeight",
+                        "configuredDlssGeneratedFrames",
+                        "dlssStateQueryFrameId",
+                        "dlssStateQueryResult",
+                        "dlssMaximumGenerated",
+                        "dlssDynamicMfgSupport",
+                        "successfulUpscaleFrames",
+                        "preparedFrames",
+                        "realPresents",
+                        "sdkReportedPresents",
+                        "sdkReportedDlssPresents",
+                        "scenarioTick",
+                        "worldFrame",
+                        "sampledAtFrameId",
+                        "completedFrameId"
+                      ]
+                    },
+                    "op": {
+                      "const": "gte"
+                    },
+                    "expected": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "successfulUpscaleFrames",
+                        "preparedFrames",
+                        "realPresents",
+                        "sdkReportedPresents"
+                      ]
+                    },
+                    "op": {
+                      "const": "deltaGte"
+                    },
+                    "expected": {
+                      "type": "number"
+                    },
+                    "baseline": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "baseline"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  },
+  "$comment": "Structural core schema only. Both runtime parsers remain authoritative for duplicate properties/IDs/names, nondecreasing ticks, prior checkpoint/session relations, lexical integer and finite CLR numeric representation, and provider-quality state inherited across settings actions. Settings choice strings preserve Normalize trim/case behavior; asserted output choice strings are exact canonical values. No input profile is approved by this schema."
+}

@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
+    <Project Path="src/VulkanStory.Bootstrap/VulkanStory.Bootstrap.csproj" />
+    <Project Path="src/VulkanStory.Game/VulkanStory.Game.csproj" />
+    <Project Path="src/VulkanStory.Input/VulkanStory.Input.csproj" />
+    <Project Path="src/VulkanStory.Input.Companion/VulkanStory.Input.Companion.csproj" />
+    <Project Path="src/VulkanStory.Mod/VulkanStory.Mod.csproj" />
+    <Project Path="src/VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
+    <Project Path="src/VulkanStory.Render.Vulkan/VulkanStory.Render.Vulkan.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VulkanStory.Contracts.Tests/VulkanStory.Contracts.Tests.csproj" />
+    <Project Path="tests/VulkanStory.Bootstrap.Tests/VulkanStory.Bootstrap.Tests.csproj" />
+    <Project Path="tests/VulkanStory.Game.Tests/VulkanStory.Game.Tests.csproj" />
+    <Project Path="tests/VulkanStory.Platform.Sdl.Tests/VulkanStory.Platform.Sdl.Tests.csproj" />
+    <Project Path="tests/VulkanStory.Render.Vulkan.Tests/VulkanStory.Render.Vulkan.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/VulkanStory.GameProfile/VulkanStory.GameProfile.csproj" />
+    <Project Path="tools/VulkanStory.Preflight/VulkanStory.Preflight.csproj" />
+    <Project Path="tools/VulkanStory.Shaders.Compiler/VulkanStory.Shaders.Compiler.csproj" />
+  </Folder>
+</Solution>

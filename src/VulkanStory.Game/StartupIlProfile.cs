@@ -1,0 +1,66 @@
+using System.Text.Json;
+
+namespace VulkanStory.Game;
+
+/// <summary>The original startup member operands pinned to the official 1.22.7 assembly.</summary>
+public static class StartupIlProfile
+{
+    private sealed record Document(string ProfileId, string GameAssemblySha256, StartupMethodInventory[] Methods);
+    private static readonly Document Expected = Load();
+
+    public static string Id => Expected.ProfileId;
+    public static string GameAssemblySha256 => Expected.GameAssemblySha256;
+
+    /// <summary>
+    /// Checks original-body anchors before patch binding. A later transpiler must
+    /// also check its incoming instructions, since another Harmony owner may alter them.
+    /// </summary>
+    public static void VerifyProfile1227(IReadOnlyList<StartupMethodInventory> actual) =>
+        Verify(Expected.Methods, actual);
+
+    internal static void Verify(IReadOnlyList<StartupMethodInventory> expected,
+        IReadOnlyList<StartupMethodInventory> actual)
+    {
+        if (actual.Count != expected.Count)
+            throw new InvalidOperationException($"Startup IL profile expected {expected.Count} methods; found {actual.Count}.");
+
+        var byEvent = new Dictionary<string, StartupMethodInventory>(StringComparer.Ordinal);
+        foreach (StartupMethodInventory method in actual)
+            if (!byEvent.TryAdd(method.Event, method))
+                throw new InvalidOperationException("Duplicate startup IL target: " + method.Event);
+
+        foreach (StartupMethodInventory required in expected)
+        {
+            if (!byEvent.TryGetValue(required.Event, out StartupMethodInventory? found))
+                throw new InvalidOperationException("Missing startup IL target: " + required.Event);
+            if (found.Target != required.Target || found.IlLength != required.IlLength)
+                throw new InvalidOperationException($"Startup IL shape changed for {required.Event}: " +
+                    $"expected {required.Target} with {required.IlLength} bytes; found {found.Target} with {found.IlLength} bytes.");
+            if (found.Uses.Count != required.Uses.Count)
+                throw new InvalidOperationException($"Startup IL member count changed for {required.Event}: " +
+                    $"expected {required.Uses.Count}; found {found.Uses.Count}.");
+
+            for (int index = 0; index < required.Uses.Count; index++)
+            {
+                StartupIlUse anchor = required.Uses[index];
+                if (found.Uses[index] != anchor)
+                    throw new InvalidOperationException($"Startup IL anchor changed for {required.Event} at 0x{anchor.Offset:x}: " +
+                        $"expected {anchor.Opcode} {anchor.Member}; found {found.Uses[index].Opcode} {found.Uses[index].Member} " +
+                        $"at 0x{found.Uses[index].Offset:x}.");
+            }
+        }
+    }
+
+    private static Document Load()
+    {
+        using Stream stream = typeof(StartupIlProfile).Assembly.GetManifestResourceStream(
+            "VulkanStory.Game.Profiles.Startup1227.json") ??
+            throw new InvalidOperationException("Embedded startup IL profile is missing.");
+        Document document = JsonSerializer.Deserialize<Document>(stream,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ??
+            throw new InvalidDataException("Embedded startup IL profile is empty.");
+        if (document.ProfileId != "vs-1.22.7-win-x64" || document.Methods.Length != StartupTargets.Profile1227.Length)
+            throw new InvalidDataException("Embedded startup IL profile identity is invalid.");
+        return document;
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "native-baseline-v1",
+  "actions": [
+    { "id": "cp0", "tick": 0, "kind": "checkpoint", "name": "start" },
+    { "id": "cap240", "tick": 240, "kind": "capture", "name": "native240", "attachments": true },
+    { "id": "assert-hidden", "tick": 240, "kind": "assert", "field": "hidden", "op": "eq", "expected": true },
+    { "id": "assert-focused", "tick": 240, "kind": "assert", "field": "focused", "op": "eq", "expected": false },
+    { "id": "assert-mod", "tick": 240, "kind": "assert", "field": "stagedModLoaded", "op": "eq", "expected": true },
+    { "id": "assert-world", "tick": 240, "kind": "assert", "field": "worldReady", "op": "eq", "expected": true },
+    { "id": "assert-cycle", "tick": 240, "kind": "assert", "field": "cpuRenderCycleSucceeded", "op": "eq", "expected": true }
+  ]
+}
