@@ -42,10 +42,12 @@ public sealed unsafe partial class VulkanDevice
     internal int EvaluateFsr3FrameGeneration(Fsr3Native api, nint context,
         int backbufferId, int depthId, int motionId, int motionRgId, int hudlessId,
         int uiId, int uprightSceneId, int uprightUiId, int uprightDepthId,
-        int uprightMotionId, in TemporalProviderFrame temporal, ulong frameId)
+        int uprightMotionId, int uprightOutputId, int outputId,
+        in TemporalProviderFrame temporal, ulong frameId)
     {
         using GpuSection gpuSection = BeginGpuSection("fg_fsr3_dispatch");
-        if (!_frameActive || Fsr3ProxyContext == 0) return -3;
+        bool direct = Fsr3DirectPresentation;
+        if (!_frameActive || (!direct && Fsr3ProxyContext == 0)) return -3;
         VulkanTexture? backbuffer = _textures.Get(backbufferId);
         VulkanTexture? depth = _textures.Get(depthId);
         VulkanTexture? sourceMotion = _textures.Get(motionId);
@@ -56,9 +58,13 @@ public sealed unsafe partial class VulkanDevice
         VulkanTexture? uprightUi = _textures.Get(uprightUiId);
         VulkanTexture? uprightDepth = _textures.Get(uprightDepthId);
         VulkanTexture? uprightMotion = _textures.Get(uprightMotionId);
+        VulkanTexture? uprightOutput = direct ? _textures.Get(uprightOutputId) : null;
+        VulkanTexture? output = direct ? _textures.Get(outputId) : null;
         if (backbuffer == null || depth == null || sourceMotion == null || motion == null || ui == null ||
             hudless == null || uprightScene == null || uprightUi == null ||
             uprightDepth == null || uprightMotion == null) return -4;
+        if (direct && (uprightOutput == null || output == null ||
+            uprightOutput.Format != Format.R8G8B8A8Unorm)) return -4;
         if (backbuffer.Format != Format.R8G8B8A8Unorm || ui.Format != Format.R8G8B8A8Unorm ||
             backbuffer.Width != ui.Width || backbuffer.Height != ui.Height) return -4;
         if (!temporal.HasInverseView) return -4;
@@ -81,14 +87,16 @@ public sealed unsafe partial class VulkanDevice
         _textures.Require(_barriers, commands, uprightUi, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, uprightDepth, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, uprightMotion, ResourceUsage.SampleExternal);
+        if (direct) _textures.Require(_barriers, commands, uprightOutput!, ResourceUsage.StorageWriteExternal);
         _barriers.Flush(commands);
 
         var frame = new Fsr3FgFrame
         {
             Commands = (nint)commands.Handle,
-            Color = Fsr3Image.From(backbuffer), Depth = Fsr3Image.From(uprightDepth),
+            Color = Fsr3Image.From(direct ? uprightScene : backbuffer), Depth = Fsr3Image.From(uprightDepth),
             Motion = Fsr3Image.From(uprightMotion), Ui = Fsr3Image.From(uprightUi),
             Hudless = Fsr3Image.From(uprightScene),
+            Output = direct ? Fsr3Image.From(uprightOutput!) : default,
             SwapchainContext = Fsr3ProxyContext,
             JitterX = temporal.JitterX, JitterY = -temporal.JitterY,
             DeltaMs = temporal.DeltaTimeMs, NearPlane = temporal.NearPlane,
@@ -101,8 +109,13 @@ public sealed unsafe partial class VulkanDevice
             CameraForwardX = -inverseView[8], CameraForwardY = -inverseView[9],
             CameraForwardZ = -inverseView[10],
         };
-        int result = api.EvaluateFrameGeneration(context, &frame);
+        int result = direct ? api.EvaluateDirectFrameGeneration(context, &frame) :
+            api.EvaluateFrameGeneration(context, &frame);
         _dynamicState.Invalidate();
+        // Return interpolation to the renderer's GL-oriented offscreen space.
+        // The ordinary present blit then performs the same single Y flip as it
+        // does for real frames. UI is composed by the host before enqueueing.
+        if (result == 0 && direct && !FlipFrameGenerationInput(commands, uprightOutput!, output!)) return -5;
         return result;
     }
 

@@ -35,13 +35,27 @@ internal static class ControllerGuiTargets
         ClientMain? game = screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
         if (game?.api?.OpenedGuis != null)
         {
+            double frontOrder = double.PositiveInfinity;
+            foreach (object item in game.api.OpenedGuis)
+                if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.Dialog) frontOrder = Math.Min(frontOrder, dialog.InputOrder);
             foreach (object item in game.api.OpenedGuis)
             {
                 if (item is not GuiDialog dialog || !dialog.IsOpened() ||
-                    dialog.DialogType != EnumDialogType.Dialog) continue;
+                    dialog.DialogType != EnumDialogType.Dialog || dialog.InputOrder > frontOrder) continue;
                 foreach (GuiComposer composer in dialog.Composers.Values)
                     if (composer.Enabled) composers.Add(composer);
             }
+            // The hotbar remains a HUD dialog while inventory is open. Include
+            // its grids only when the foreground UI is itself an inventory,
+            // so a modal settings page cannot operate on slots behind it.
+            bool inventory = composers.Any(composer => InteractiveElementsField?.GetValue(composer) is
+                Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase));
+            if (inventory)
+                foreach (object item in game.api.OpenedGuis)
+                    if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.HUD)
+                        foreach (GuiComposer composer in dialog.Composers.Values)
+                            if (composer.Enabled && InteractiveElementsField?.GetValue(composer) is
+                                Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase)) composers.Add(composer);
         }
         return composers;
     }
@@ -51,6 +65,47 @@ internal static class ControllerGuiTargets
         ScreenManager? manager = platform.Original.keyEventHandlers.OfType<ScreenManager>().FirstOrDefault();
         GuiScreen? screen = manager != null ? CurrentScreenField?.GetValue(manager) as GuiScreen : null;
         return screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
+    }
+
+    internal static object? ForegroundOwner(IControllerPlatformHost platform)
+    {
+        if (!platform.IsFocused) return platform;
+        if (ActiveGame(platform)?.api?.OpenedGuis is { } guis)
+        {
+            GuiDialog? foreground = null;
+            foreach (object item in guis)
+                if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.Dialog &&
+                    (foreground == null || dialog.InputOrder <= foreground.InputOrder)) foreground = dialog;
+            if (foreground != null) return foreground;
+        }
+        return platform.ControllerCurrentScreen();
+    }
+
+    internal static List<ControllerSlotTarget> SlotTargets(IReadOnlyList<GuiComposer> composers)
+    {
+        var targets = new List<ControllerSlotTarget>();
+        if (InteractiveElementsField == null) return targets;
+        for (int c = composers.Count - 1; c >= 0; c--)
+        {
+            GuiComposer composer = composers[c];
+            if (!composer.Enabled || !composer.Composed ||
+                InteractiveElementsField.GetValue(composer) is not Dictionary<string, GuiElement> elements) continue;
+            foreach (GuiElement element in elements.Values)
+            {
+                if (element is not GuiElementItemSlotGridBase grid || grid.SlotBounds == null) continue;
+                int count = Math.Min(grid.SlotBounds.Length, grid.renderedSlots.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    ElementBounds bounds = grid.SlotBounds[i];
+                    var center = new Vector2((float)(bounds.absX + bounds.OuterWidth / 2),
+                        (float)(bounds.absY + bounds.OuterHeight / 2));
+                    if (bounds.OuterWidth <= 0 || bounds.OuterHeight <= 0 ||
+                        grid.InsideClipBounds?.PointInside(center.X, center.Y) == false) continue;
+                    targets.Add(new ControllerSlotTarget(grid, i, grid.renderedSlots.GetKeyAtIndex(i), bounds, center));
+                }
+            }
+        }
+        return targets;
     }
 
     public static List<Vector2> Collect(IControllerPlatformHost platform, IReadOnlyList<GuiComposer> composers)
@@ -91,3 +146,6 @@ internal static class ControllerGuiTargets
         targets.Add(new Vector2((float)x, (float)y));
     }
 }
+
+internal readonly record struct ControllerSlotTarget(GuiElementItemSlotGridBase Grid, int Index,
+    int SlotId, ElementBounds Bounds, Vector2 Center);

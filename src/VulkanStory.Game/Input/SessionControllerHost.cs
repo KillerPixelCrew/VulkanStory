@@ -54,4 +54,5 @@ internal sealed class SessionControllerHost(GameRenderSession session, ClientPla
     public GuiElementEditableTextBase? ControllerFocusedEditableText() => text.FocusedEditableText();
     public void InjectControllerKey(KeyEvent key, bool down) => session.Input.Input.InjectControllerKey(key, down);
     public void InjectControllerMouseButton(EnumMouseButton button, bool down) => session.Input.Input.InjectControllerMouseButton(button, down);
+    public void InjectControllerMouseWheel(int direction) => session.Input.Input.InjectControllerMouseWheel(direction);
 }

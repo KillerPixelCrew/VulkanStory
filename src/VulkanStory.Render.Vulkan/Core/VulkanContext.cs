@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Core;
+using Silk.NET.Core.Contexts;
 using Silk.NET.Core.Native;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.EXT;
+using Silk.NET.Vulkan.Extensions.KHR;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
@@ -22,6 +24,8 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Pins a physical device by index; -1 picks automatically.</summary>
     public int PreferredDeviceIndex = -1;
+    /// <summary>Restricts selection to a Vulkan vendor ID; null keeps automatic selection.</summary>
+    public uint? PreferredVendorId;
 
     /// <summary>Instance extensions the selected window system needs.</summary>
     public string[] RequiredInstanceExtensions = Array.Empty<string>();
@@ -163,6 +167,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     public Queue Fsr3PresentQueue { get; private set; }
     public Queue Fsr3AcquireQueue { get; private set; }
     public bool Fsr3SwapchainQueuesAvailable { get; private set; }
+    internal string Fsr3QueueTopology { get; private set; } = "queue topology not sampled";
 
     /// <summary>
     /// Guards every submission to <see cref="GraphicsQueue" />.
@@ -275,7 +280,13 @@ internal sealed unsafe class VulkanContext : IDisposable
             ?? PoisonRequested(Environment.GetEnvironmentVariable(PoisonVariable));
         try
         {
-            created.Api = Vk.GetApi();
+            // Resolve all renderer and extension entry points through Streamline
+            // when active, including image/barrier/command-state interception.
+            // The resolver borrows the verified bridge's interposer lifetime.
+            created.Api = created.Streamline is { } streamline
+                ? new Vk(new LamdaNativeContext(name =>
+                    streamline.GetVulkanProcAddress(created.Instance, created.Device, name)))
+                : Vk.GetApi();
         }
         catch (Exception error)
         {
@@ -482,6 +493,7 @@ internal sealed unsafe class VulkanContext : IDisposable
                 return false;
             }
             Instance = instance;
+            if (Streamline != null) Api.CurrentInstance = instance;
         }
         finally
         {
@@ -752,6 +764,12 @@ internal sealed unsafe class VulkanContext : IDisposable
             }
 
             PhysicalDevice pinned = devices[options.PreferredDeviceIndex];
+            if (options.PreferredVendorId is { } pinnedVendor &&
+                Api.GetPhysicalDeviceProperties(pinned).VendorID != pinnedVendor)
+            {
+                failureReason = $"pinned device does not match requested vendor 0x{pinnedVendor:X}";
+                return false;
+            }
             if (!IsUsable(pinned, out string? why))
             {
                 failureReason = $"pinned device is unusable: {why}";
@@ -767,9 +785,13 @@ internal sealed unsafe class VulkanContext : IDisposable
         var rejections = new List<string>();
         PhysicalDevice best = default;
         int bestScore = -1;
+        int matchingVendors = 0;
 
         foreach (PhysicalDevice candidate in devices)
         {
+            if (options.PreferredVendorId is { } vendor &&
+                Api.GetPhysicalDeviceProperties(candidate).VendorID != vendor) continue;
+            matchingVendors++;
             if (!IsUsable(candidate, out string? why))
             {
                 rejections.Add(why!);
@@ -794,7 +816,10 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         if (bestScore < 0)
         {
-            failureReason = "no usable Vulkan device: " + string.Join("; ", rejections);
+            failureReason = options.PreferredVendorId is { } vendor
+                ? matchingVendors == 0 ? $"no Vulkan adapter matches vendor 0x{vendor:X}"
+                    : $"no usable Vulkan device for vendor 0x{vendor:X}: " + string.Join("; ", rejections)
+                : "no usable Vulkan device: " + string.Join("; ", rejections);
             return false;
         }
 
@@ -897,7 +922,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     }
 
     private bool TryFindGraphicsQueue(PhysicalDevice device, out uint family,
-        out uint queueCount, out bool supportsCompute)
+        out uint queueCount, out bool supportsCompute, bool describeWin32Present = false)
     {
         family = 0;
         queueCount = 0;
@@ -910,6 +935,23 @@ internal sealed unsafe class VulkanContext : IDisposable
         fixed (QueueFamilyProperties* familiesPtr = families)
         {
             Api.GetPhysicalDeviceQueueFamilyProperties(device, ref count, familiesPtr);
+        }
+
+        if (device.Handle == PhysicalDevice.Handle)
+        {
+            var topology = new List<string>();
+            KhrWin32Surface? win32 = null;
+            if (describeWin32Present && OperatingSystem.IsWindows() &&
+                Api.TryGetInstanceExtension(Instance, out KhrWin32Surface surface)) win32 = surface;
+            try
+            {
+                for (uint i = 0; i < count; i++)
+                    topology.Add("family " + i + ": count=" + families[i].QueueCount + ", flags=" + families[i].QueueFlags +
+                        ", win32Present=" + (win32 == null ? "not sampled" : ((bool)win32.GetPhysicalDeviceWin32PresentationSupport(device, i)).ToString()));
+            }
+            finally { win32?.Dispose(); }
+            Fsr3QueueTopology = string.Join("; ", topology);
+            Console.Error.WriteLine("[VulkanStory] Selected Vulkan queue topology: " + Fsr3QueueTopology);
         }
 
         for (uint i = 0; i < count; i++)
@@ -932,7 +974,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         if (!TryFindGraphicsQueue(PhysicalDevice, out uint family,
-            out uint availableQueues, out bool supportsCompute))
+            out uint availableQueues, out bool supportsCompute,
+            describeWin32Present: options.PrepareFrameGenerationQueues && !options.Headless &&
+                Array.IndexOf(options.RequiredInstanceExtensions, "VK_KHR_win32_surface") >= 0))
         {
             failureReason = "graphics queue family disappeared between selection and creation";
             return false;
@@ -1191,6 +1235,7 @@ internal sealed unsafe class VulkanContext : IDisposable
                 return false;
             }
             Device = device;
+            if (Streamline != null) Api.CurrentDevice = device;
         }
         finally
         {
@@ -1429,14 +1474,16 @@ internal sealed unsafe class VulkanContext : IDisposable
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
             Allocator?.Dispose();
-            Streamline?.Dispose();
-            Streamline = null;
+            Streamline?.Shutdown();
             Api.DestroyDevice(Device, null);
+            // Further instance/global symbol lookups must not consult a device
+            // that has already been destroyed, including lazy Silk table loads.
+            Device = default;
+            Api.CurrentDevice = null;
         }
         else
         {
-            Streamline?.Dispose();
-            Streamline = null;
+            Streamline?.Shutdown();
         }
 
         if (_debugUtils != null && _debugMessenger.Handle != 0)
@@ -1448,9 +1495,13 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (Instance.Handle != 0)
         {
             Api.DestroyInstance(Instance, null);
+            Instance = default;
+            Api.CurrentInstance = null;
         }
 
         Api?.Dispose();
+        Streamline?.Dispose();
+        Streamline = null;
     }
 
     internal Result WaitDeviceIdle()

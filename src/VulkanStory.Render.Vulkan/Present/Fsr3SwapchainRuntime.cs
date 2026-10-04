@@ -29,7 +29,7 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
         runtime = null;
         if (!vk.Fsr3SwapchainQueuesAvailable)
         {
-            reason = "FidelityFX Vulkan proxy requires four graphics and compute queues";
+            reason = "Current FSR3 integration needs four distinct queues in the graphics/compute family; " + vk.Fsr3QueueTopology;
             return false;
         }
         Fsr3Native? api = Fsr3Native.TryLoad(out string? loadError);

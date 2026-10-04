@@ -61,7 +61,7 @@ internal sealed partial class GameGraphicsAdapter
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         if (program == null || !program.HasUniform("taaHistoryValid")) return;
         int? binding = renderer.ClientUniformBlockBinding(program.ProgramId, "AnimationPrev");
-        if (!binding.HasValue) { RejectSceneDraw(); return; }
+        if (!binding.HasValue) { RejectSceneDraw("previous animation block binding is absent"); return; }
         if (!previousAnimations.TryGetValue(program.ProgramId, out var previous) || previous.Buffer.Disposed)
         {
             UBO previousBuffer;

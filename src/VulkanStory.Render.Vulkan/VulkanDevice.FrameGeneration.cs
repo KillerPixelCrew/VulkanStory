@@ -15,8 +15,10 @@ public sealed unsafe partial class VulkanDevice
         !_swapchain!.NeedsRecreation && !_swapchain.Parked && !_swapchain.Fsr3ProxyActive;
 
     internal bool Fsr3ProxyReady => _swapchain is { Fsr3ProxyActive: true };
+    internal bool Fsr3DirectPresentation => !_context.Fsr3SwapchainQueuesAvailable;
     internal nint Fsr3ProxyContext => _swapchain?.Fsr3ProxyContext ?? 0;
-    internal Format Fsr3ProxyFormat => _swapchain?.Format ?? Format.Undefined;
+    internal Format Fsr3ProxyFormat => Fsr3DirectPresentation ? Format.R8G8B8A8Unorm :
+        _swapchain?.Format ?? Format.Undefined;
     internal string? Fsr3ProxyFailure => _swapchain?.Fsr3ProxyFailure;
 
     internal int TagStreamlineFrame(int depthId, int motionId, int hudlessId, int uiId,
@@ -110,16 +112,30 @@ public sealed unsafe partial class VulkanDevice
         if (_swapchain != null)
         {
             int options = SetStreamlineFrameGeneration(false);
-            if (options != 0) throw new InvalidOperationException("Suspending DLSS-G failed (" + options + ").");
+            CheckStreamlineDisable(options);
         }
+    }
+
+    private void CheckStreamlineDisable(int result)
+    {
+        if (result == 0) return;
+        const int outOfVramWarning = 39; // sl::Result::eWarnOutOfVRAM, Streamline 2.14.1.
+        if (result != outOfVramWarning)
+            throw new InvalidOperationException("Disabling DLSS-G failed (" + result + ").");
+        // A warning is not proof that the consumer released its inputs. Drain
+        // and explicitly free the feature before allowing framebuffer disposal.
+        VulkanResult.Check(_context.WaitDeviceIdle(), "draining DLSS-G after VRAM warning");
+        int release = _context.Streamline!.FreeFrameGenerationResources();
+        if (release != 0)
+            throw new InvalidOperationException("Releasing DLSS-G after VRAM warning failed (" + release + ").");
     }
 
     internal void ReleaseStreamlineFrameGenerationResources()
     {
+        RequireFrameRelease();
         if (_context == null || _context.Streamline == null || !_streamlineFrameGenerationReady) return;
-        if (_frameActive) throw new InvalidOperationException("Release Streamline resources outside the current render frame.");
         int options = _context.Streamline.DisableFrameGenerationForRelease();
-        if (options != 0) throw new InvalidOperationException("Disabling DLSS-G for release failed (" + options + ").");
+        CheckStreamlineDisable(options);
         var wait = _context.WaitDeviceIdle();
         if (wait != Result.Success) throw new InvalidOperationException("Draining Streamline presentation failed: " + wait);
         int result = _context.Streamline.FreeFrameGenerationResources();
@@ -134,8 +150,7 @@ public sealed unsafe partial class VulkanDevice
         // Generate may supply fresh scene inputs later; an initial menu present
         // still needs its backbuffer extent even when no provider was selected.
         int result = _context.Streamline.InvalidateFrameTags(_swapchain.Extent.Width, _swapchain.Extent.Height);
-        if (result != 0)
-            AddDiagnostic(VulkanContext.ErrorPrefix + "Streamline frame tag initialization failed (" + result + ").");
+        RequireStreamlineProtocol(result, "current-frame tag initialization");
     }
 
     private int _generatedFrameForPresent;

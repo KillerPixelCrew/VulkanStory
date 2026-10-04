@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
@@ -36,6 +37,8 @@ internal sealed class OptionsSettingsOwner
     private bool returnRequested;
     private bool? savedShowMainMenu;
     private float scrollOffset;
+    private long shownErrorRevision;
+    private string? composedPage;
     private (int Width, int Height, double Scale)? lastGeometry;
     private (int Width, int Height, double Scale)? failedGeometry;
 
@@ -126,7 +129,7 @@ internal sealed class OptionsSettingsOwner
             }, editingActive: () => weakState.TryGetTarget(out var state) && state.EditingLive(generation),
             controllerOpened: () => weakState.TryGetTarget(out var state)
                 ? state.ControllerOpened(generation) : "The Options owner closed.");
-        scrollOffset = 0; failedGeometry = null; TryCompose(owner);
+        scrollOffset = 0; shownErrorRevision = 0; failedGeometry = null; TryCompose(owner);
     }
     private string? ControllerOpened(long generation)
     {
@@ -149,7 +152,7 @@ internal sealed class OptionsSettingsOwner
                 !ReferenceEquals(RuntimeBootstrap.Current.Session.Temporal.CurrentClient, originalWorld) ||
                 !RuntimeBootstrap.Current.Session.OwnsControllerSettings(originalWorld, actualChild) ||
                 !weakParent.TryGetTarget(out var originalParent) || !weakTarget.TryGetTarget(out var originalTarget)) return;
-            if (originalParent.TryOpen()) Graphics.Invoke(originalTarget, [true]);
+            if (originalParent.TryOpen()) InvokeGraphics(originalTarget);
         };
         child.OnClosed += closed;
         if (!parent.TryClose())
@@ -180,7 +183,6 @@ internal sealed class OptionsSettingsOwner
         if (current == null || !ReferenceEquals(Shown(owner), current)) { Clear(); return; }
         if (returnRequested)
         {
-            if (composite.TryGetTarget(out var target)) Graphics.Invoke(target, [true]);
             return;
         }
         var geometry = Geometry();
@@ -193,6 +195,7 @@ internal sealed class OptionsSettingsOwner
         string key = cachePrefix + ++composition;
         var manager = Manager(owner);
         float savedOffset = scrollOffset;
+        float requestedOffset = panel?.CurrentPageName == composedPage ? savedOffset : 0;
         string? oldKey = null;
         try
         {
@@ -206,7 +209,6 @@ internal sealed class OptionsSettingsOwner
             if (width < 300 || height < 180)
                 throw new InvalidOperationException("Resize the window or lower GUI scale to open VulkanStory Options.");
             double contentWidth = width - 30;
-            double visibleHeight = height - 95;
             var background = ElementBounds.Fixed(0, 0, width, height).WithFixedPadding(padding);
             var root = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed);
             // Main-menu host normally centers to the right of its sidebar.
@@ -219,7 +221,12 @@ internal sealed class OptionsSettingsOwner
                 .BeginChildElements(background)
                 .AddSmallButton("Graphics", () => { if (LiveComposition()) returnRequested = true; return true; }, ElementBounds.Fixed(0, 0, 120, 28))
                 .AddToggleButton("VulkanStory", CairoFont.ButtonText().WithFontSize(18), _ => { }, ElementBounds.Fixed(135, 0, 145, 28), "vulkanstory");
-            var clip = ElementBounds.Fixed(0, 45, contentWidth, visibleHeight);
+            double navigationHeight = panel!.AddPageNavigation(replacement, contentWidth, 45, LiveComposition);
+            double contentTop = 45 + navigationHeight;
+            double visibleHeight = height - 95 - navigationHeight;
+            if (visibleHeight < 40)
+                throw new InvalidOperationException("Resize the window or lower GUI scale to show Options navigation and content.");
+            var clip = ElementBounds.Fixed(0, contentTop, contentWidth, visibleHeight);
             var body = ElementBounds.Fixed(0, 0, contentWidth, 1).WithParent(clip);
             replacement.AddVerticalScrollbar(value =>
             {
@@ -228,10 +235,10 @@ internal sealed class OptionsSettingsOwner
                 if (published && !LiveComposition()) return;
                 scrollOffset = value; body.fixedY = -value;
                 body.MarkDirtyRecursive(); body.CalcWorldBounds();
-            }, ElementBounds.Fixed(width - 20, 45, 20, visibleHeight), "vulkanstory-scroll")
+            }, ElementBounds.Fixed(width - 20, contentTop, 20, visibleHeight), "vulkanstory-scroll")
                 .BeginClip(clip).BeginChildElements(body);
             Action initialize = panel!.AddContent(replacement, contentWidth, out double contentHeight,
-                canInteract: LiveComposition, includeFooter: false);
+                canInteract: LiveComposition, includeFooter: false, includePages: false);
             body.fixedHeight = contentHeight;
             replacement.EndChildElements().EndClip();
             panel.AddFooter(replacement, contentWidth, height - 30, LiveComposition);
@@ -239,13 +246,17 @@ internal sealed class OptionsSettingsOwner
             initialize(); replacement.GetToggleButton("vulkanstory").SetValue(true);
             var scrollbar = replacement.GetScrollbar("vulkanstory-scroll");
             scrollbar.SetHeights((float)visibleHeight, (float)Math.Max(visibleHeight, contentHeight));
-            scrollbar.CurrentYPosition = Math.Clamp(savedOffset, 0, (float)Math.Max(0, contentHeight - visibleHeight));
+            if (panel.ErrorRevision != shownErrorRevision && panel.ErrorContentY is double errorY)
+                requestedOffset = (float)errorY;
+            scrollbar.CurrentYPosition = Math.Clamp(requestedOffset, 0, (float)Math.Max(0, contentHeight - visibleHeight));
             scrollbar.TriggerChanged();
             // Publish a complete replacement with fresh bounds and cache name.
             Load.Invoke(owner, [replacement]);
             if (composite.TryGetTarget(out var target)) Composer.SetValue(target, replacement);
             oldKey = cacheKey;
             current = replacement; cacheKey = key; lastGeometry = geometry; failedGeometry = null;
+            composedPage = panel.CurrentPageName;
+            shownErrorRevision = panel.ErrorRevision;
             published = true;
         }
         catch (Exception error)
@@ -265,6 +276,8 @@ internal sealed class OptionsSettingsOwner
     }
     private void Clear()
     {
+        if (panel?.EndPreview() is string error && host.TryGetTarget(out var previewOwner))
+            Api(previewOwner).Logger.Warning("VulkanStory: could not restore preview settings: {0}", error);
         editingGeneration++;
         if (current != null && composite.TryGetTarget(out var target) && ReferenceEquals(Composer.GetValue(target), current))
             Composer.SetValue(target, null);
@@ -277,11 +290,12 @@ internal sealed class OptionsSettingsOwner
             if (current != null && owner is GuiScreen screen && ReferenceEquals(screen.ElementComposer, current))
                 screen.ElementComposer = null!;
             if (current != null && owner is GuiDialog dialog && ReferenceEquals(dialog.SingleComposer, current))
-                dialog.SingleComposer = null!;
+                dialog.Composers.Remove("single");
             if (cacheKey != null) Manager(owner).Dispose(cacheKey);
         }
         panel = null; current = null; cacheKey = null; returnRequested = false;
-        scrollOffset = 0; lastGeometry = null; failedGeometry = null;
+        scrollOffset = 0; shownErrorRevision = 0; lastGeometry = null; failedGeometry = null;
+        composedPage = null;
     }
     private static IEnumerable<OptionsSettingsOwner> Live()
     {
@@ -294,10 +308,33 @@ internal sealed class OptionsSettingsOwner
         foreach (var state in Live())
             if (state.host.TryGetTarget(out var target) && ReferenceEquals(owner, target) && state.panel != null) state.Tick(owner);
     }
+    internal static void ApplyPendingReturns()
+    {
+        foreach (var state in Live())
+        {
+            if (!state.returnRequested) continue;
+            if (state.current == null || !state.host.TryGetTarget(out var owner) ||
+                !ReferenceEquals(state.Shown(owner), state.current) || !state.composite.TryGetTarget(out var target))
+            { state.Clear(); continue; }
+            state.returnRequested = false;
+            InvokeGraphics(target);
+        }
+    }
+    private static void InvokeGraphics(GuiCompositeSettings target)
+    {
+        try { Graphics.Invoke(target, [true]); }
+        catch (TargetInvocationException error) when (error.InnerException != null)
+        {
+            ExceptionDispatchInfo.Capture(error.InnerException).Throw();
+            throw;
+        }
+    }
     internal static void CloseHost(object owner)
     {
         foreach (var state in Live())
             if (state.host.TryGetTarget(out var target) && ReferenceEquals(owner, target)) state.Clear();
     }
     internal static void ClearAll() { foreach (var state in Live()) state.Clear(); }
+    internal static string? DiagnosticPage(GuiComposer composer) =>
+        Live().FirstOrDefault(state => ReferenceEquals(state.current, composer))?.panel?.CurrentPageName;
 }

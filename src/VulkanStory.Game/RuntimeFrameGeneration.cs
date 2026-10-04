@@ -21,8 +21,9 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     private Fsr3FrameGeneration? fsr3;
     private ulong renderedFrames;
     private uint actualDlssPresents, configuredDlssCount;
+    private uint? lastReportedDlssGeneratedLimit;
     private int motionRg, motionWidth, motionHeight;
-    private int fsrScene, fsrUi, fsrDepth, fsrMotion;
+    private int fsrScene, fsrUi, fsrDepth, fsrMotion, fsrGenerated;
     private int dlssScene, dlssUi, dlssDepth, dlssMotion;
     private int dlssWidth, dlssHeight, dlssRenderWidth, dlssRenderHeight;
     private readonly Dictionary<string, string> failed = new(StringComparer.OrdinalIgnoreCase);
@@ -36,7 +37,22 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     internal bool PreparedThisFrame { get; private set; }
     internal string PreparationStatus => PreparedThisFrame ? "current inputs prepared" : preparationStatus;
     internal uint ConfiguredDlssGeneratedFrames => configuredDlssCount;
+    // Configuration after this frame's preparation/presentation handoff;
+    // this does not report how many images reached the display.
+    internal uint ConfiguredGeneratedFrames => !PreparedThisFrame ? 0 : EffectiveProvider switch
+    {
+        "dlss" => configuredDlssCount,
+        "fsr3" => 1,
+        "xess" => device.XessConfiguredGeneratedFrames,
+        _ => 0,
+    };
     internal uint ActualDlssPresents => actualDlssPresents;
+    internal uint? LastReportedSdkGeneratedLimit => RequestedProvider switch
+    {
+        "dlss" => lastReportedDlssGeneratedLimit,
+        "xess" => device.XessLastReportedGeneratedLimit,
+        _ => null,
+    };
     internal StreamlineFrameGenerationState? LastDlssState { get; private set; }
     internal int? LastDlssStateResult { get; private set; }
     internal DlssQueryObservation? HeadlessDlssQueryObservation { get; private set; }
@@ -76,7 +92,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         { Wait("the Streamline swapchain rebuild"); return; }
         if (provider == "fsr3" && device.Fsr3ProxyFailure is string fsrFailure)
         { Disable(provider, fsrFailure); return; }
-        if (provider == "fsr3" && !device.Fsr3ProxyReady)
+        if (provider == "fsr3" && !device.Fsr3DirectPresentation && !device.Fsr3ProxyReady)
         { Wait("the FidelityFX swapchain rebuild"); return; }
         if (provider == "xess" && device.XessProxyFailure is string xessFailure)
         { Disable(provider, xessFailure); return; }
@@ -105,12 +121,12 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         {
             if (provider == "dlss") GenerateDlss(primary, scene, ui, output, motion, frame, camera);
             else if (provider == "xess") GenerateXess(primary, scene, ui, motion, frame);
-            else GenerateFsr3(primary, scene, ui, output, motion, frame);
+            else GenerateFsr3(graphics, primary, scene, ui, output, motion, frame);
         }
         catch (Exception failure) { Disable(provider, "frame preparation threw: " + failure.Message); }
     }
 
-    private void GenerateFsr3(FrameBufferRef primary, FrameBufferRef scene, FrameBufferRef ui,
+    private void GenerateFsr3(GameGraphicsAdapter graphics, FrameBufferRef primary, FrameBufferRef scene, FrameBufferRef ui,
         FrameBufferRef output, int motion, in GameTemporalFrame frame)
     {
         if (fsr3 == null || fsr3.Width != (uint)output.Width || fsr3.Height != (uint)output.Height ||
@@ -126,13 +142,21 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             fsrUi = device.CreateUpscaleTexture(output.Width, output.Height, Format.R8G8B8A8Unorm, storage: false);
             fsrDepth = device.CreateUpscaleTexture(primary.Width, primary.Height, Format.D32Sfloat, storage: false);
             fsrMotion = device.CreateUpscaleTexture(primary.Width, primary.Height, Format.R16G16Sfloat, storage: false);
+            if (device.Fsr3DirectPresentation)
+                fsrGenerated = device.CreateUpscaleTexture(output.Width, output.Height, Format.R8G8B8A8Unorm, storage: true);
         }
         int hudless = scene.ColorTextureIds[0];
         int result = fsr3.Evaluate(device, hudless, primary.DepthTextureId, primary.ColorTextureIds[motion],
-            motionRg, hudless, ui.ColorTextureIds[0], fsrScene, fsrUi, fsrDepth, fsrMotion, frame.Provider);
+            motionRg, hudless, ui.ColorTextureIds[0], fsrScene, fsrUi, fsrDepth, fsrMotion,
+            fsrGenerated, output.ColorTextureIds[0], frame.Provider);
         if (result != 0)
         { Disable("fsr3", "FidelityFX frame interpolation preparation failed (" + result + ")"); return; }
-        // The SDK proxy owns interpolation and UI composition at the real Present.
+        if (device.Fsr3DirectPresentation &&
+            (!graphics.ComposeGeneratedFrameUi(output, ui) ||
+             !device.QueueGeneratedFrameForPresent(output.ColorTextureIds[0])))
+        { Wait("generated-frame UI composition and presentation"); return; }
+        // Multi-queue devices retain SDK-owned interpolation/UI at Present;
+        // single-queue devices use host composition and the existing timeline.
         PreparedThisFrame = true;
     }
 
@@ -165,8 +189,13 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             LastDlssStateResult = stateResult;
             LastDlssState = stateResult == 0 ? state : null;
             if (stateResult != 0 || state.Status != 0)
-            { Disable("dlss", "Streamline state query/status: " + stateResult + "/" + state.Status); return; }
+            {
+                Disable("dlss", stateResult == 39 ? "Streamline reported an out-of-VRAM warning"
+                    : "Streamline state query/status: " + stateResult + "/" + state.Status);
+                return;
+            }
             maxGenerated = state.MaximumGenerated;
+            lastReportedDlssGeneratedLimit = maxGenerated;
             uint presented = state.Presents;
             actualDlssPresents += presented;
             VulkanStats.NoteSdkActualPresents(presented);
@@ -297,9 +326,9 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             device.RetireUpscalerResource(fsr3);
             fsr3 = null;
         }
-        foreach (int texture in new[] { motionRg, fsrScene, fsrUi, fsrDepth, fsrMotion, dlssScene, dlssUi, dlssDepth, dlssMotion })
+        foreach (int texture in new[] { motionRg, fsrScene, fsrUi, fsrDepth, fsrMotion, fsrGenerated, dlssScene, dlssUi, dlssDepth, dlssMotion })
             if (texture > 0) device.DeleteTexture(texture);
-        motionRg = fsrScene = fsrUi = fsrDepth = fsrMotion = dlssScene = dlssUi = dlssDepth = dlssMotion = 0;
+        motionRg = fsrScene = fsrUi = fsrDepth = fsrMotion = fsrGenerated = dlssScene = dlssUi = dlssDepth = dlssMotion = 0;
         motionWidth = motionHeight = dlssWidth = dlssHeight = dlssRenderWidth = dlssRenderHeight = 0;
     }
     private void RequireOwner()

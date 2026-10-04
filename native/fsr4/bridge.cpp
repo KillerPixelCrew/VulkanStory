@@ -50,6 +50,7 @@ struct VulkanStoryFsr4 {
     PfnFfxDestroyContext destroy{};
     PfnFfxDispatch dispatch{};
     PfnFfxQuery query{};
+    int releaseFailure{};
 };
 
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Probe(VkPhysicalDevice physical) {
@@ -86,10 +87,24 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4WaitIdle(VulkanStoryFsr4* va
     return WaitForSingleObject(value->completionEvent, 10000) == WAIT_OBJECT_0 ? 0 : -2;
 }
 
-extern "C" __declspec(dllexport) void VulkanStoryFsr4Destroy(VulkanStoryFsr4* value) {
-    if (!value) return;
-    VulkanStoryFsr4WaitIdle(value);
-    if (value->effect && value->destroy) value->destroy(&value->effect, nullptr);
+extern "C" __declspec(dllexport) int VulkanStoryFsr4PrepareDestroy(VulkanStoryFsr4* value) {
+    if (!value) return 0;
+    if (value->releaseFailure != 0) return value->releaseFailure;
+    int idle = VulkanStoryFsr4WaitIdle(value);
+    if (idle != 0) return value->releaseFailure = idle;
+    if (value->effect) {
+        if (!value->destroy) return value->releaseFailure = -1;
+        ffxContext owned = value->effect;
+        int result = static_cast<int>(value->destroy(&owned, nullptr));
+        if (result != 0) return value->releaseFailure = result;
+        value->effect = nullptr;
+    }
+    return 0;
+}
+extern "C" __declspec(dllexport) int VulkanStoryFsr4DestroyChecked(VulkanStoryFsr4* value) {
+    if (!value) return 0;
+    int prepared = VulkanStoryFsr4PrepareDestroy(value);
+    if (prepared != 0) return prepared;
     Release(value->commands);
     for (auto*& allocator : value->allocators) Release(allocator);
     Release(value->completionFence);
@@ -101,6 +116,10 @@ extern "C" __declspec(dllexport) void VulkanStoryFsr4Destroy(VulkanStoryFsr4* va
     if (value->completionEvent) CloseHandle(value->completionEvent);
     if (value->module) FreeLibrary(value->module);
     delete value;
+    return 0;
+}
+extern "C" __declspec(dllexport) void VulkanStoryFsr4Destroy(VulkanStoryFsr4* value) {
+    VulkanStoryFsr4DestroyChecked(value);
 }
 
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
@@ -198,7 +217,10 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         hr = value->commands->Close();
         if (FAILED(hr)) { error = static_cast<int>(hr); break; }
     } while (false);
-    if (error) { VulkanStoryFsr4Destroy(value); return error; }
+    if (error) {
+        if (VulkanStoryFsr4DestroyChecked(value) != 0) *output = value;
+        return error;
+    }
     *output = value;
     return 0;
 }

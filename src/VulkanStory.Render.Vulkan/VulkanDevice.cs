@@ -36,6 +36,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     private bool _streamlineTokenMismatchLogged;
     private bool _pclAsyncPresentFailureLogged;
     private bool _pclPingFailureLogged;
+    private bool _pclMarkerFailureLogged;
+    private bool _xellMarkerFailureLogged;
     private int _pclPingSuccessCount;
     internal int PclPingSuccessCountForTests => _pclPingSuccessCount;
     private int _pclMarkerSuccessCount;
@@ -74,7 +76,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             // XeLL requires GPU work to be finished before its mode changes.
             intel.WaitForPresentIdle();
-            intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0);
+            RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0),
+                "frame-cap options");
             return;
         }
         if (_frameGenerationProvider == "xess") return;
@@ -125,12 +128,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             if (_appliedLatencyMode != latencyMode)
             {
-                _appliedLatencyMode = latencyMode;
                 intel.WaitForPresentIdle();
-                intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0);
+                RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0),
+                    "mode options");
+                _appliedLatencyMode = latencyMode;
             }
             ReserveFramePresentIds(mayGenerate);
             int sleepResult = intel.Runtime.Sleep(frameId);
+            RequireXellProtocol(sleepResult, "sleep");
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xellSleep=" + sleepResult);
             return;
         }
@@ -146,6 +151,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     {
         if (result != 0)
             throw new InvalidOperationException("Streamline " + operation + " failed (" + result +
+                ") at frame " + _latencyFrameId + ".");
+    }
+    private void RequireXellProtocol(int result, string operation)
+    {
+        if (result != 0)
+            throw new InvalidOperationException("XeLL " + operation + " failed (" + result +
                 ") at frame " + _latencyFrameId + ".");
     }
     internal void MarkVendorInputStart(ulong frameId)
@@ -170,6 +181,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             int result = _context.Streamline!.Marker((uint)marker);
             if (result == 0) System.Threading.Interlocked.Increment(ref _pclMarkerSuccessCount);
+            if (result != 0 && !_pclMarkerFailureLogged)
+            {
+                _pclMarkerFailureLogged = true;
+                MirrorValidationMessage("Streamline PCL marker failed: frame=" + frameId +
+                    ", marker=" + marker + ", result=" + result);
+            }
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " pcl=" + marker + " result=" + result);
         }
         if (marker == LatencyMarker.PresentEnd && frameId == _streamlineTokenFrameId)
@@ -177,6 +194,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (_xessPresenter is { } intel)
         {
             int result = intel.Runtime.Marker(frameId, marker);
+            if (result != 0 && !_xellMarkerFailureLogged)
+            {
+                _xellMarkerFailureLogged = true;
+                MirrorValidationMessage("XeLL marker failed: frame=" + frameId +
+                    ", marker=" + marker + ", result=" + result);
+            }
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xell=" + marker + " result=" + result);
             return;
         }
@@ -668,6 +691,18 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         };
 
         var vendorLatencyRequirements = new VendorLatencyRequirements(headless);
+        string? vendorSetting = Environment.GetEnvironmentVariable("VULKANSTORY_VK_VENDOR")?.Trim();
+        if (!string.IsNullOrEmpty(vendorSetting))
+        {
+            if (vendorSetting.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) vendorSetting = vendorSetting[2..];
+            if (!uint.TryParse(vendorSetting, System.Globalization.NumberStyles.AllowHexSpecifier,
+                System.Globalization.CultureInfo.InvariantCulture, out uint vendor))
+            {
+                failureReason = "VULKANSTORY_VK_VENDOR must be a hexadecimal Vulkan vendor ID (for example 8086).";
+                return false;
+            }
+            options.PreferredVendorId = vendor;
+        }
         options.RequirementContributors.Add(vendorLatencyRequirements);
         ConfigureContextOptions?.Invoke(options);
         // Streamline's signed 2.14.1 Vulkan proxy rejects extensions supplied
@@ -678,7 +713,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             Environment.GetEnvironmentVariable("VULKANSTORY_STREAMLINE")?.Trim() != "0")
         {
             if (StreamlineRuntime.TryCreate(options.PreferredDeviceIndex,
-                out StreamlineRuntime? streamline, out string streamlineReason))
+                out StreamlineRuntime? streamline, out string streamlineReason, options.PreferredVendorId))
                 options.Streamline = streamline;
             else
             {
@@ -1081,6 +1116,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     public void BeginFrame()
     {
+        RequireFrameLifetime();
+        if (_frameActive)
+        {
+            var failure = new InvalidOperationException("Previous Vulkan frame is unfinished; recording owners retained.");
+            RetainFailedFrame(failure);
+            throw failure;
+        }
+        _xessPresenter?.RequireResourceLifetime();
         // A native pass never spans a frame boundary.
         _nativePass = null;
         _nativeTarget = null;
@@ -1165,6 +1208,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// <summary>Deferred destructions still waiting on the timelines. Tests only.</summary>
     /// <summary>The frame ring's timelines. Tests only.</summary>
     internal FrameTimeline TimelineForTests => _frames.Timeline;
+
+    internal string ResourceMemoryDiagnostics()
+    {
+        var timeline = _frames.Timeline;
+        return $"textures={_textures.Count} texture_bytes={_textures.LiveImageBytes} " +
+            $"mesh_bytes={_meshes.LiveBufferBytes} mesh_headroom_spills={_meshes.PersistentMeshHeadroomMisses} mesh_vram_reserve={_context.Allocator.PersistentMeshReserveBytes} pending_deletions={_frames.PendingDeletionCount} " +
+            $"frame_recorded={timeline.FrameRecorded} frame_submitted={timeline.FrameSignalled} frame_completed={timeline.FrameCompleted} " +
+            $"transfer_recorded={timeline.TransferRecorded} transfer_submitted={timeline.TransferSignalled} transfer_completed={timeline.TransferCompleted}; " +
+            _context.Allocator.DiagnosticMemoryLine();
+    }
 
     /// <summary>The frame ring's upload manager. Tests only.</summary>
     /// <summary>Decision 9's set 1. Tests only.</summary>
@@ -1455,6 +1508,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// </summary>
     public void Present()
     {
+        RequireFrameLifetime();
         if (!_frameActive) return;
 
         // A frame with no world stage or native draw still submits a clear and
@@ -1584,7 +1638,27 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
     }
 
-    private CommandBuffer Commands => _frames.Current.CommandBuffer;
+    private Exception? _frameFailure;
+    internal void RetainFailedFrame(Exception failure) => _frameFailure ??= failure;
+    private void RequireFrameLifetime()
+    {
+        if (_frameFailure != null)
+            throw new InvalidOperationException("Vulkan frame failed; recording and resource owners remain retained.", _frameFailure);
+    }
+    internal void RequireFrameRelease()
+    {
+        RequireFrameLifetime();
+        if (_frameActive)
+        {
+            var failure = new InvalidOperationException("Cannot release an unfinished Vulkan frame; owners retained.");
+            RetainFailedFrame(failure);
+            throw failure;
+        }
+    }
+    private CommandBuffer Commands
+    {
+        get { RequireFrameLifetime(); return _frames.Current.CommandBuffer; }
+    }
 
     private GpuTimestamps? _gpuTimestamps;
 
@@ -1642,10 +1716,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     public void Dispose()
     {
+        RequireFrameRelease();
         if (_disposalFailure != null)
             throw new InvalidOperationException("Vulkan device release failed; cleanup is terminal.", _disposalFailure);
         _frames?.RequireResourceLifetime();
         _swapchain?.RequireLifetime();
+        _xessPresenter?.RequireResourceLifetime();
         if (_disposed) return;
         try { DisposeCore(); _disposed = true; }
         catch (Exception failure) { _disposalFailure = failure; throw; }

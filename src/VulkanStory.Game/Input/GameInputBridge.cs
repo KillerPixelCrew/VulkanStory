@@ -143,6 +143,13 @@ internal sealed class GameInputBridge
 		bindings.SetMousePosition(x, y);
 		float amount = verticalAmount * wheelSensitivity();
 
+		InjectMouseWheel(amount);
+	}
+
+	public void InjectControllerMouseWheel(int direction) => InjectMouseWheel(direction);
+
+	private void InjectMouseWheel(float amount)
+	{
 		bindings.Wheel += amount;
 		foreach (MouseEventHandler handler in platform.mouseEventHandlers)
 			handler.OnMouseWheel(new Vintagestory.API.Client.MouseWheelEventArgs

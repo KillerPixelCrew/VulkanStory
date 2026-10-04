@@ -27,6 +27,7 @@ internal sealed partial class GameRenderSession
         if (!HeadlessHarnessOptions.Active) return;
         if (HeadlessHarnessOptions.Enabled && headlessDeadline.Elapsed.TotalSeconds >= headlessTimeout)
         { FailHeadlessRun("timeout", "renderCycle"); return; }
+        if (HeadlessHarnessOptions.MainMenuOptions) { PrepareMainOptionsDiagnostic(); return; }
         if (HeadlessGameBindings.CurrentRunningClient() is not { BlocksReceivedAndLoaded: true } game) return;
         if (HeadlessHarnessOptions.FixedDeltaTime > 0)
         { delta = HeadlessHarnessOptions.FixedDeltaTime; game.DeltaTimeLimiter = delta; }
@@ -53,6 +54,7 @@ internal sealed partial class GameRenderSession
 
     private void CaptureHeadlessFrame()
     {
+        if (HeadlessHarnessOptions.MainMenuOptions) { CaptureMainOptionsDiagnostic(); return; }
         if (headlessDone || headlessLegacyReady || headlessWorldFrame < 0) return;
         if (HeadlessParityDump.Enabled && !headlessParityDone && headlessWorldFrame == HeadlessParityDump.Frame)
         { DumpHeadlessAttachments(HeadlessParityDump.Directory!); headlessParityDone = true; }
@@ -177,6 +179,11 @@ internal sealed partial class GameRenderSession
             return;
         }
         if (headlessDone || headlessLegacyReady) return;
+        if (MultiplierDiagnosticRequested && !multiplierDiagnosticComplete)
+        {
+            FailHeadlessRun("Multiplier drag/Save acknowledgement is missing.", "optionsDiagnostic");
+            return;
+        }
         headlessCompletionReason = reason;
         headlessLegacyReady = true;
     }

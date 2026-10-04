@@ -23,4 +23,5 @@ internal interface IControllerPlatformHost
     GuiElementEditableTextBase? ControllerFocusedEditableText();
     void InjectControllerKey(KeyEvent key, bool down);
     void InjectControllerMouseButton(EnumMouseButton button, bool down);
+    void InjectControllerMouseWheel(int direction);
 }

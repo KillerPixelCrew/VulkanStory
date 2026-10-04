@@ -25,6 +25,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
     internal ClientMain? CurrentClient => client;
     private bool inScene, motionValid;
     private bool motionFailed, opaqueEntered, afterOitEntered;
+    private string? motionDrawFailure;
     private float previousFov;
     private int? dimension;
     internal bool InScene => inScene;
@@ -52,6 +53,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         motionValid = false;
         MotionReadiness = "scene producers pending";
         motionFailed = opaqueEntered = afterOitEntered = false;
+        motionDrawFailure = null;
     }
     internal void Begin(float dt)
     {
@@ -121,11 +123,13 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (stage == EnumRenderStage.Opaque) opaqueEntered = true;
         if (stage == EnumRenderStage.AfterOIT) afterOitEntered = true;
     }
-    internal void RejectMotionDraw()
+    internal void RejectMotionDraw(string? reason = null)
     {
         if (!inScene) return;
         motionFailed = true; motionValid = false;
-        MotionReadiness = "scene producer rejected a motion draw";
+        motionDrawFailure ??= reason == null ? "scene producer rejected a motion draw" :
+            "scene producer rejected a motion draw: " + reason;
+        MotionReadiness = motionDrawFailure;
     }
     internal void CompleteSceneMotion(bool producerTailComplete, string? tailFailure = null)
     {
@@ -133,7 +137,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
             !motionFailed && producerTailComplete;
         MotionReadiness = motionValid ? "ready" : !settings.EffectiveTemporalPipeline ? "temporal pipeline off" :
             SceneSampleFailure ?? (!EntityMotion.Enabled ? "compiled scene motion disabled" :
-                motionFailed ? "scene producer rejected a motion draw" :
+                motionFailed ? motionDrawFailure ?? "scene producer rejected a motion draw" :
                 tailFailure ?? "motion producer tail incomplete");
     }
     internal void RequestReset()

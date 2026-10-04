@@ -16,6 +16,7 @@ internal static class RuntimeControlBridge
         AppContext.SetData("VulkanStory.Runtime.ShowFpsCounter", (Func<bool>)(() => runtime.IsActive && runtime.Session.ShowFpsCounter));
         AppContext.SetData("VulkanStory.Runtime.Presentation", (Func<string>)(() => runtime.IsActive ? runtime.Session.Presentation : "Renderer inactive: " + runtime.Status));
         AppContext.SetData("VulkanStory.Runtime.ApplySettings", (Func<string, string?>)runtime.SaveSettings);
+        AppContext.SetData("VulkanStory.Runtime.PreviewSettings", (Func<string, string?>)runtime.PreviewSettings);
         AppContext.SetData("VulkanStory.Runtime.ReloadSettings", (Func<string?>)runtime.ReloadSettings);
         AppContext.SetData("VulkanStory.Runtime.WorldReady", (Action<object>)runtime.QueueWorldReady);
         AppContext.SetData("VulkanStory.Runtime.WorldLeft", (Action<object>)runtime.QueueWorldLeft);
@@ -23,11 +24,11 @@ internal static class RuntimeControlBridge
         AppContext.SetData("VulkanStory.Runtime.ControllerSettingsAfterSave",
             (Func<string, Func<bool>, Action<string?>, string?>)runtime.RequestControllerSettingsAfterSave);
         if (HeadlessHarnessOptions.Enabled)
-            AppContext.SetData("VulkanStory.Runtime.DiagnosticOptions", (Func<string?>)runtime.RequestDiagnosticOptions);
+            AppContext.SetData("VulkanStory.Runtime.DiagnosticOptions", (Func<string, string?>)runtime.RequestDiagnosticOptions);
     }
     internal static void Remove()
     {
-        foreach (string key in new[] { "ReadSettings", "FpsText", "ShowFpsCounter", "Presentation", "ApplySettings", "ReloadSettings", "WorldReady", "WorldLeft", "ControllerSettings", "ControllerSettingsAfterSave", "DiagnosticOptions" })
+        foreach (string key in new[] { "ReadSettings", "FpsText", "ShowFpsCounter", "Presentation", "ApplySettings", "PreviewSettings", "ReloadSettings", "WorldReady", "WorldLeft", "ControllerSettings", "ControllerSettingsAfterSave", "DiagnosticOptions" })
             AppContext.SetData("VulkanStory.Runtime." + key, null);
     }
 }
@@ -47,13 +48,15 @@ internal sealed partial class ProcessRuntime
         return null;
     }
     internal string ReadSettings() => JsonSerializer.Serialize(Volatile.Read(ref requestedSettings) ?? ControlServices.RendererSettings.Settings, SettingsJson);
-    internal string? RequestDiagnosticOptions()
+    internal string? RequestDiagnosticOptions(string action)
     {
+        action = string.IsNullOrWhiteSpace(action) ? "open" : action.Trim().ToLowerInvariant();
+        if (action is not ("open" or "save" or "cancel" or "inventory" or "inventory-cycles" or "controller-inventory" or "controller-radial" or "controller-gestures" or "controller-modifier")) return "Unknown inventory/options diagnostic action.";
         if (!HeadlessHarnessOptions.Enabled || !IsActive || Session.Temporal.CurrentClient is not { } world)
             return "Options diagnostics require an isolated harness world.";
         pendingControls.Enqueue(() =>
         {
-            if (IsActive && ReferenceEquals(Session.Temporal.CurrentClient, world)) Session.OpenDiagnosticOptions(world);
+            if (IsActive && ReferenceEquals(Session.Temporal.CurrentClient, world)) Session.OpenDiagnosticOptions(world, action);
         });
         return null;
     }
@@ -101,6 +104,27 @@ internal sealed partial class ProcessRuntime
             return null;
         }
         catch (Exception error) when (error is JsonException or ArgumentException or IOException or UnauthorizedAccessException)
+        { return error.Message; }
+    }
+    internal string? PreviewSettings(string json)
+    {
+        try
+        {
+            RendererSettings next = (JsonSerializer.Deserialize<RendererSettings>(json, SettingsJson) ??
+                throw new ArgumentException("Settings are empty.")).Normalize();
+            var services = ControlServices;
+            Volatile.Write(ref requestedSettings, next);
+            pendingControls.Enqueue(() =>
+            {
+                // Slider events can arrive faster than frame boundaries. Apply only
+                // the latest request, not every intermediate resource rebuild.
+                if (!ReferenceEquals(Volatile.Read(ref requestedSettings), next)) return;
+                if (IsActive) Session.ApplyRendererSettings(next);
+                else services.RendererSettings.Apply(next);
+            });
+            return null;
+        }
+        catch (Exception error) when (error is JsonException or ArgumentException)
         { return error.Message; }
     }
     internal string? SaveSettings(string json)

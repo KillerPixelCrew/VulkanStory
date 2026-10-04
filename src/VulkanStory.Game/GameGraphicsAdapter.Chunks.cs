@@ -92,13 +92,13 @@ internal sealed partial class GameGraphicsAdapter
         }
         if (renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups, chunkTextures.AsSpan(0, names.Length)))
             RuntimeStats.drawCallsCount++;
-        else RejectSceneDraw();
+        else RejectSceneDraw("chunk native multi-draw rejected");
         // Once opened, this scope owns the pool even if a later pipeline/draw is skipped.
         return true;
     }
     private bool RefuseOpenChunkDraw()
     {
-        if (chunkPassOpen) RejectSceneDraw();
+        if (chunkPassOpen) RejectSceneDraw("chunk scope refused a subsequent draw");
         return chunkPassOpen;
     }
 }

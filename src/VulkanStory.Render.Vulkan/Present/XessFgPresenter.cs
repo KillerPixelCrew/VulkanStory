@@ -55,6 +55,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private ulong _nextFenceValue = 1;
     private int _nextImageSet;
     private bool _disposed;
+    private Exception? _releaseFailure;
 
     // The proxy's Present blocks while the SDK paces presentation. Called on the
     // render thread, it kept the next frame from being recorded, so the GPU ran
@@ -74,7 +75,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
 
     private XessFgPresenter(VulkanContext context, XessFgRuntime runtime,
         XessSharedFence fence, ImageSet[] images, uint width, uint height,
-        Action<ulong, nint, LatencyMarker>? pclPresentMarker, in XessSourceImages sources)
+        Action<ulong, nint, LatencyMarker>? pclPresentMarker, in XessSourceImages sources,
+        Exception? setupReleaseFailure = null)
     {
         _context = context;
         _runtime = runtime;
@@ -84,6 +86,12 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         _sourceLayout = SourceLayout.Of(sources);
         Width = width;
         Height = height;
+        if (setupReleaseFailure != null)
+        {
+            _releaseFailure = setupReleaseFailure;
+            _presentThread = null!;
+            return;
+        }
         _presentThread = new Thread(PresentLoop)
         {
             IsBackground = true,
@@ -104,6 +112,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     public void QueuePresent(in PreparedFrame prepared, in XessPresentationFrame constants,
         ulong latencyFrameId, nint pclToken)
     {
+        RequireLive();
         _lastQueuedDone = prepared.DoneByDx12;
         if (!PresentThreadEnabled)
         {
@@ -139,6 +148,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     /// <summary>Waits for the in-flight present without taking its outcome.</summary>
     public void WaitForPresentIdle()
     {
+        RequireLive();
         lock (_presentGate)
         {
             while (_presentPending) Monitor.Wait(_presentGate);
@@ -218,15 +228,17 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         ulong issued = _lastQueuedDone;
         if (issued == 0) return;
         Vk api = _context.Api;
-        if (api.GetSemaphoreCounterValue(_context.Device, _fence.Semaphore, out ulong current) != Result.Success ||
-            current >= issued) return;
+        VulkanResult.Check(api.GetSemaphoreCounterValue(_context.Device, _fence.Semaphore, out ulong current),
+            "reading XeSS-FG queue gate before release");
+        if (current >= issued) return;
         var signal = new SemaphoreSignalInfo
         {
             SType = StructureType.SemaphoreSignalInfo,
             Semaphore = _fence.Semaphore,
             Value = issued,
         };
-        api.SignalSemaphore(_context.Device, &signal);
+        VulkanResult.Check(api.SignalSemaphore(_context.Device, &signal),
+            "releasing XeSS-FG queue gate");
     }
 
     private void StopPresentThread()
@@ -241,9 +253,10 @@ internal sealed unsafe class XessFgPresenter : IDisposable
 
     public uint Width { get; }
     public uint Height { get; }
-    internal bool MatchesSources(in XessSourceImages sources) => !_disposed && _sourceLayout == SourceLayout.Of(sources);
-    public Silk.NET.Vulkan.Semaphore SharedSemaphore => _fence.Semaphore;
-    public XessFgRuntime Runtime => _runtime;
+    internal bool MatchesSources(in XessSourceImages sources) => !_disposed && _releaseFailure == null &&
+        _sourceLayout == SourceLayout.Of(sources);
+    public Silk.NET.Vulkan.Semaphore SharedSemaphore { get { RequireLive(); return _fence.Semaphore; } }
+    public XessFgRuntime Runtime { get { RequireLive(); return _runtime; } }
 
     public static bool TryCreate(VulkanContext context, nint window, uint width,
         uint height, bool vsync, in XessSourceImages sources,
@@ -302,9 +315,21 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         {
             if (presenter == null)
             {
-                for (int i = sets.Length - 1; i >= 0; i--) sets[i]?.Dispose();
-                fence?.Dispose();
-                runtime?.Dispose();
+                try
+                {
+                    runtime!.PrepareRelease();
+                    for (int i = sets.Length - 1; i >= 0; i--) sets[i]?.Dispose();
+                    fence?.Dispose();
+                    runtime.Dispose();
+                }
+                catch (Exception cleanup)
+                {
+                    // Publish an inert failed owner through the out parameter;
+                    // the device retains it and must reject fallback/teardown.
+                    presenter = new XessFgPresenter(context, runtime!, fence!, sets,
+                        width, height, pclPresentMarker, sources, cleanup);
+                    throw new InvalidOperationException("XeSS-FG setup cleanup failed; remaining owners retained.", cleanup);
+                }
             }
         }
     }
@@ -329,6 +354,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     public PreparedFrame RecordCopies(CommandBuffer commands, TextureManager textures,
         BarrierBatcher barriers, in XessSourceImages sources)
     {
+        RequireLive();
         ImageSet set = _images[_nextImageSet];
         if (!set.Color.CanBlitFrom(sources.Color, out string reason) ||
             !set.Depth.CanBlitFrom(sources.Depth, out reason) ||
@@ -372,19 +398,38 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         return code;
     }
 
+    internal void RequireResourceLifetime()
+    {
+        if (_releaseFailure != null)
+            throw new InvalidOperationException("XeSS-FG release failed; presenter cannot be reused.", _releaseFailure);
+    }
+    private void RequireLive()
+    {
+        RequireResourceLifetime();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
     public void Dispose()
     {
+        if (_releaseFailure != null)
+            throw new InvalidOperationException("XeSS-FG release failed; cleanup is terminal and remaining owners are retained.", _releaseFailure);
         if (_disposed) return;
-        _disposed = true;
-        // The in-flight present finishes before anything it uses goes away.
-        StopPresentThread();
-        ReleaseGatedQueue();
-        _context.WaitDeviceIdle();
-        _runtime.SetEnabled(false);
-        if (_runtime.WaitIdle() != 0)
-            throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle");
-        for (int i = _images.Length - 1; i >= 0; i--) _images[i].Dispose();
-        _fence.Dispose();
-        _runtime.Dispose();
+        try
+        {
+            // The in-flight present finishes before anything it uses goes away.
+            StopPresentThread();
+            ReleaseGatedQueue();
+            VulkanResult.Check(_context.WaitDeviceIdle(), "draining Vulkan before XeSS-FG release");
+            int disable = _runtime.SetEnabled(false);
+            if (disable < 0)
+                throw new InvalidOperationException("Disabling XeSS-FG failed (" + disable + "); inputs retained.");
+            if (_runtime.WaitIdle() != 0)
+                throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle");
+            _runtime.PrepareRelease();
+            for (int i = _images.Length - 1; i >= 0; i--) _images[i].Dispose();
+            _fence.Dispose();
+            _runtime.Dispose();
+            _disposed = true;
+        }
+        catch (Exception failure) { _releaseFailure = failure; throw; }
     }
 }

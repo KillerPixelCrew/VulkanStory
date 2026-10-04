@@ -335,6 +335,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private readonly ulong[] _heapUsed;
     private readonly ulong[] _heapBudget;
     private readonly ulong[] _heapDriverUsage;
+    private readonly ulong[] _heapOwnedAtBudgetRefresh;
     private readonly ulong[] _classBytes = new ulong[PoolClassCount];
     private ulong _reBarUsed;
     // Block bytes of the Transient class, dedicated ones included, and their peak since the last take.
@@ -343,6 +344,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private long _reBarMisses;
     private long _emptyBlocksFreed;
     private long _frame;
+    private long _budgetRefreshFrame = -1;
     private int _emptyBlocks;
     private bool _disposed;
 
@@ -353,6 +355,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         _heapUsed = new ulong[_memoryProperties.MemoryHeapCount];
         _heapBudget = new ulong[_memoryProperties.MemoryHeapCount];
         _heapDriverUsage = new ulong[_memoryProperties.MemoryHeapCount];
+        _heapOwnedAtBudgetRefresh = new ulong[_memoryProperties.MemoryHeapCount];
         BudgetExtension = context.MemoryBudgetAvailable;
         RefreshBudgetLocked();
     }
@@ -461,7 +464,24 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             }
 
             uint typeIndex = FindMemoryType(requirements.MemoryTypeBits, properties, Avoided(properties));
-            return AllocateLocked(requirements, typeIndex, poolClass, linear, what, requiresDedicated, buffer, image);
+            try
+            {
+                return AllocateLocked(requirements, typeIndex, poolClass, linear, what, requiresDedicated, buffer, image);
+            }
+            catch (VulkanMemoryAllocationException error) when (
+                error.Result == Result.ErrorOutOfDeviceMemory && poolClass == MemoryPoolClass.DeviceImages &&
+                !linear && properties == MemoryPropertyFlags.DeviceLocalBit)
+            {
+                // Ordinary images need a compatible memory type, not necessarily
+                // the GPU-only heap. Keep inventory/UI allocation alive under VRAM
+                // pressure without rebinding or discarding any existing resource.
+                if (!TryFindMemoryType(requirements.MemoryTypeBits, MemoryPropertyFlags.HostVisibleBit,
+                    MemoryPropertyFlags.DeviceLocalBit, out uint systemType)) throw;
+                MemoryAllocation allocation = AllocateLocked(requirements, systemType, poolClass,
+                    linear, what, requiresDedicated, buffer, image);
+                Log?.Invoke($"Vulkan image VRAM allocation failed; allocated {what} on compatible system-memory type {systemType} instead of {typeIndex}");
+                return allocation;
+            }
         }
     }
 
@@ -543,6 +563,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
 
         if (AlwaysDedicated || requiresDedicated || requirements.Size >= blockSize / 4)
         {
+            PrepareBlockAllocationLocked(type.HeapIndex, requirements.Size);
             var block = new MemoryBlock(
                 _context, requirements.Size, typeIndex, type.HeapIndex, poolClass, linear, dedicated: true,
                 hostVisible, buffer, image);
@@ -572,6 +593,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             }
         }
 
+        PrepareBlockAllocationLocked(type.HeapIndex, blockSize);
         var fresh = new MemoryBlock(
             _context, blockSize, typeIndex, type.HeapIndex, poolClass, linear, dedicated: false, hostVisible,
             default, default);
@@ -693,7 +715,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             bool pressure = false;
             for (int heap = 0; heap < _heapUsed.Length; heap++)
             {
-                if (_heapUsed[heap] > HeapBudgetLocked(heap)) pressure = true;
+                if (HeapUsageLocked(heap) >= HeapBudgetLocked(heap)) pressure = true;
             }
 
             foreach (List<MemoryBlock> pool in _pools.Values)
@@ -716,6 +738,38 @@ internal sealed unsafe class VulkanAllocator : IDisposable
 
     private ulong HeapBudgetLocked(int heap) => HeapBudgetOverrideForTests ?? _heapBudget[heap];
 
+    private ulong HeapUsageLocked(int heap)
+    {
+        ulong added = _heapUsed[heap] > _heapOwnedAtBudgetRefresh[heap]
+            ? _heapUsed[heap] - _heapOwnedAtBudgetRefresh[heap] : 0;
+        ulong driver = _heapDriverUsage[heap];
+        return Math.Max(_heapUsed[heap], added > ulong.MaxValue - driver ? ulong.MaxValue : driver + added);
+    }
+
+    private void PrepareBlockAllocationLocked(uint heap, ulong requestedBytes)
+    {
+        // Provider allocations also consume this heap. Query at most once per
+        // frame before creating physical blocks, rather than ignoring their use
+        // until the sixty-frame budget refresh.
+        if (BudgetExtension && _budgetRefreshFrame != _frame) RefreshBudgetLocked();
+        ulong budget = HeapBudgetLocked((int)heap);
+        ulong used = HeapUsageLocked((int)heap);
+        if (_emptyBlocks == 0 || (used < budget && requestedBytes <= budget - used)) return;
+        foreach (List<MemoryBlock> pool in _pools.Values)
+        {
+            for (int i = pool.Count - 1; i >= 0; i--)
+            {
+                MemoryBlock block = pool[i];
+                if (block.HeapIndex != heap || !block.IsEmpty || block.EmptySinceFrame < 0) continue;
+                pool.RemoveAt(i);
+                _emptyBlocks--;
+                _emptyBlocksFreed++;
+                NoteBlockReleased(block);
+                block.Dispose();
+            }
+        }
+    }
+
     private ulong ReBarCapLocked(uint typeIndex)
     {
         if (ReBarCapOverrideForTests is { } forced) return forced;
@@ -725,6 +779,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
 
     private void RefreshBudgetLocked()
     {
+        _budgetRefreshFrame = _frame;
         int heaps = (int)_memoryProperties.MemoryHeapCount;
         if (BudgetExtension)
         {
@@ -745,6 +800,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
                     ? reported
                     : (ulong)(_memoryProperties.MemoryHeaps[i].Size * FallbackBudgetShare);
                 _heapDriverUsage[i] = budget.HeapUsage[i];
+                _heapOwnedAtBudgetRefresh[i] = _heapUsed[i];
             }
             return;
         }
@@ -776,6 +832,15 @@ internal sealed unsafe class VulkanAllocator : IDisposable
                 BlockCountLocked(), _dedicated.Count, _reBarUsed, cap, _reBarMisses, _emptyBlocksFreed,
                 BudgetExtension, (ulong[])_classBytes.Clone(), (ulong[])_heapUsed.Clone(), heapBudget,
                 heapFlags, (ulong[])_heapDriverUsage.Clone());
+        }
+    }
+
+    internal string DiagnosticMemoryLine()
+    {
+        lock (_gate)
+        {
+            RefreshBudgetLocked();
+            return FormatMemoryLine(Snapshot());
         }
     }
 
@@ -846,6 +911,39 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             return false;
         }
     }
+
+    internal bool HasPersistentMeshHeadroom(ulong bytes)
+    {
+        const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
+        lock (_gate)
+        {
+            if (!TryFindMemoryType(uint.MaxValue, wanted, 0, out uint typeIndex)) return false;
+            if (BudgetExtension && _budgetRefreshFrame != _frame) RefreshBudgetLocked();
+            uint heap = _memoryProperties.MemoryTypes[(int)typeIndex].HeapIndex;
+            ulong budget = HeapBudgetLocked((int)heap);
+            ulong used = HeapUsageLocked((int)heap);
+            // Leave room for image/provider working-set transitions. A single
+            // image-pool block was insufficient: DLSS-G reported VRAM pressure
+            // while mesh pools kept consuming the rest of the heap's budget.
+            ulong imageBytes = 0;
+            foreach (List<MemoryBlock> pool in _pools.Values)
+                foreach (MemoryBlock block in pool)
+                    if (block.HeapIndex == heap && block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
+                        imageBytes += block.Size;
+            foreach (MemoryBlock block in _dedicated)
+                if (block.HeapIndex == heap && block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
+                    imageBytes += block.Size;
+            ulong externalBytes = _heapDriverUsage[heap] > _heapOwnedAtBudgetRefresh[heap]
+                ? _heapDriverUsage[heap] - _heapOwnedAtBudgetRefresh[heap] : 0;
+            ulong reserve = Math.Max(BlockSizeOf(MemoryPoolClass.DeviceImages), imageBytes + externalBytes);
+            PersistentMeshReserveBytes = reserve;
+            ulong meshBlock = Math.Max(bytes, BlockSizeOf(MemoryPoolClass.DeviceBuffers));
+            return used < budget && reserve < budget - used && meshBlock <= budget - used - reserve;
+        }
+    }
+
+    internal ulong PersistentMeshReserveBytes { get; private set; }
 
     /// <summary>The property flags of a memory type. Tests and diagnostics.</summary>
     public MemoryPropertyFlags FlagsOf(uint typeIndex) => _memoryProperties.MemoryTypes[(int)typeIndex].PropertyFlags;

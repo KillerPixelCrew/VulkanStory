@@ -24,6 +24,9 @@ public sealed unsafe partial class VulkanDevice
     private ulong _xessRenderedFrames;
     private ulong _xessPresentedFrames;
     private uint _xessEffectiveGeneratedFrames;
+    internal uint XessConfiguredGeneratedFrames => _xessEffectiveGeneratedFrames;
+    // Historical SDK report for this device owner, including while FG is suspended.
+    internal uint? XessLastReportedGeneratedLimit { get; private set; }
     private long _lastSwapchainRestoreAttempt;
     private string? _lastSwapchainRestoreFailure;
 
@@ -80,6 +83,7 @@ public sealed unsafe partial class VulkanDevice
                 out _xessPresenter, out reason))
         {
             _xessFailure = hwnd == 0 ? "no Win32 window for XeSS-FG" : reason;
+            _xessPresenter?.RequireResourceLifetime();
             RestoreVulkanSwapchain();
             return false;
         }
@@ -87,11 +91,10 @@ public sealed unsafe partial class VulkanDevice
         _xessRenderedFrames = 0;
         _xessPresentedFrames = 0;
         _xessEffectiveGeneratedFrames = 0;
-        int latencyResult = _xessPresenter!.Runtime.SetLatencyMode(_vendorFrameCap,
-            DesiredLatencyMode != 0);
-        if (latencyResult != 0)
-            AddDiagnostic("XeLL mode returned " + latencyResult);
-        _appliedLatencyMode = -1;
+        int latencyMode = DesiredLatencyMode;
+        RequireXellProtocol(_xessPresenter!.Runtime.SetLatencyMode(_vendorFrameCap,
+            latencyMode != 0), "initial mode options");
+        _appliedLatencyMode = latencyMode;
         MirrorValidationMessage("--- XeSS-FG DX12 proxy active on the Vulkan window");
         return true;
     }
@@ -148,10 +151,10 @@ public sealed unsafe partial class VulkanDevice
         _xessSources = null;
         _frames.ClearSubmitGate();
         XessFgPresenter? active = _xessPresenter;
-        _xessPresenter = null;
         if (active != null)
         {
             active.Dispose();
+            _xessPresenter = null;
             _appliedLatencyMode = -1;
             RestoreVulkanSwapchain();
         }
@@ -176,6 +179,7 @@ public sealed unsafe partial class VulkanDevice
             if (countResult < 0)
                 throw new InvalidOperationException("XeSS-FG generated-frame count failed (" +
                     countResult + ")");
+            XessLastReportedGeneratedLimit = maximum;
             if (effective != _xessEffectiveGeneratedFrames)
             {
                 RenderLogger?.Notification("VulkanStory: XeSS-FG requested {0}×, effective {1}× (SDK maximum {2}×)",

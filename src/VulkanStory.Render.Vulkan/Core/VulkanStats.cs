@@ -130,12 +130,15 @@ internal static class VulkanStats
     private static long _uniformOverflows;
     private static Action? _realPresentObserver;
     private static Action<uint>? _sdkPresentObserver;
+    private static Action? _generatedPresentObserver;
 
     /// <summary>The game adapter can mirror present counts without backend game dependencies.</summary>
-    internal static void ConfigurePresentationObserver(Action? realPresent, Action<uint>? sdkPresents)
+    internal static void ConfigurePresentationObserver(Action? realPresent, Action<uint>? sdkPresents,
+        Action? generatedPresent = null)
     {
         Volatile.Write(ref _realPresentObserver, realPresent);
         Volatile.Write(ref _sdkPresentObserver, sdkPresents);
+        Volatile.Write(ref _generatedPresentObserver, generatedPresent);
     }
 
     private static long _blockingUploads;
@@ -169,7 +172,12 @@ internal static class VulkanStats
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
     public static void NotePresent(bool generated)
     {
-        if (generated) Interlocked.Increment(ref _generatedPresents);
+        if (generated)
+        {
+            Interlocked.Increment(ref _generatedPresents);
+            try { Volatile.Read(ref _generatedPresentObserver)?.Invoke(); }
+            catch { /* Observation must not break the present path. */ }
+        }
         else
         {
             Interlocked.Increment(ref _realPresents);

@@ -29,6 +29,7 @@ internal sealed class Fsr4SharedFrames : IDisposable
     private ulong nextFenceValue = 1;
     private int nextSet;
     private bool disposed;
+    private Exception? releaseFailure;
 
     private Fsr4SharedFrames(VulkanContext context, Fsr4Runtime runtime,
         XessSharedFence fence, ImageSet[] sets)
@@ -106,6 +107,8 @@ internal sealed class Fsr4SharedFrames : IDisposable
 
     public PreparedFrame Next()
     {
+        RequireLifetime();
+        ObjectDisposedException.ThrowIf(disposed, this);
         ImageSet set = sets[nextSet];
         nextSet = (nextSet + 1) % sets.Length;
         return new PreparedFrame(set, set.LastDx12Done,
@@ -115,14 +118,26 @@ internal sealed class Fsr4SharedFrames : IDisposable
     public void MarkDispatched(in PreparedFrame prepared) =>
         prepared.Images.LastDx12Done = prepared.DoneByDx12;
 
+    private void RequireLifetime()
+    {
+        if (releaseFailure != null)
+            throw new InvalidOperationException("FSR 4 shared resource release failed; remaining owners are retained.", releaseFailure);
+    }
     public void Dispose()
     {
+        RequireLifetime();
         if (disposed) return;
-        disposed = true;
-        context.WaitDeviceIdle();
-        if (runtime.WaitIdle() != 0)
-            throw new InvalidOperationException("FSR 4 DX12 queue did not become idle");
-        for (int i = sets.Length - 1; i >= 0; i--) sets[i].Dispose();
-        fence.Dispose();
+        try
+        {
+            VulkanResult.Check(context.WaitDeviceIdle(), "draining Vulkan before FSR 4 shared resource release");
+            int idle = runtime.WaitIdle();
+            if (idle != 0)
+                throw new InvalidOperationException("FSR 4 DX12 queue did not become idle (" + idle + ").");
+            runtime.PrepareRelease();
+            for (int i = sets.Length - 1; i >= 0; i--) sets[i].Dispose();
+            fence.Dispose();
+            disposed = true;
+        }
+        catch (Exception failure) { releaseFailure = failure; throw; }
     }
 }

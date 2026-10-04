@@ -75,6 +75,9 @@ public sealed unsafe partial class VulkanDevice
         _targets.EndRendering(Commands);
         _bindless?.Flush();
         ulong submitted = _frames.SubmitPartial();
+        // Partial readback starts a fresh command buffer. Dynamic graphics state
+        // recorded in the previous buffer must be emitted again before drawing.
+        _dynamicState.Invalidate();
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
         return submitted;
     }

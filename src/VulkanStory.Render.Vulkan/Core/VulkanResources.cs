@@ -82,32 +82,30 @@ internal sealed unsafe class VulkanBuffer : IDisposable
         };
 
         Vk api = context.Api;
-        if (api.CreateBuffer(context.Device, &createInfo, null, out Buffer buffer) != Result.Success)
-        {
-            throw new InvalidOperationException("vkCreateBuffer failed");
-        }
+        VulkanResult.Check(api.CreateBuffer(context.Device, &createInfo, null, out Buffer buffer),
+            "vkCreateBuffer");
         Handle = buffer;
-
-        MemoryRequirements requirements = VulkanAllocator.BufferRequirements(context, buffer, out bool dedicated);
 
         // A buffer is linear, so it shares blocks only with other buffers.
         try
         {
+            MemoryRequirements requirements = VulkanAllocator.BufferRequirements(context, buffer, out bool dedicated);
             _allocation = context.Allocator.Allocate(
                 requirements, properties, linear: true, $"a {size} byte buffer", poolClass, dedicated, buffer, default);
+            VulkanResult.Check(api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset),
+                "vkBindBufferMemory");
+            Mapped = _allocation.Mapped;
+            if (context.PoisonFreshResources && Mapped != IntPtr.Zero)
+                VulkanPoison.FillHostMemory(Mapped, size);
         }
         catch
         {
             // A caller may retry with other memory properties; the handle must not leak.
+            Mapped = IntPtr.Zero;
             api.DestroyBuffer(context.Device, buffer, null);
+            // Free tolerates a default allocation when requirements/allocation failed.
+            context.Allocator.Free(_allocation);
             throw;
-        }
-
-        api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset);
-        Mapped = _allocation.Mapped;
-        if (context.PoisonFreshResources && Mapped != IntPtr.Zero)
-        {
-            VulkanPoison.FillHostMemory(Mapped, size);
         }
     }
 
@@ -169,33 +167,36 @@ internal sealed unsafe class VulkanImage : IDisposable
         };
 
         Vk api = context.Api;
-        if (api.CreateImage(context.Device, &createInfo, null, out Image image) != Result.Success)
-        {
-            throw new InvalidOperationException("vkCreateImage failed");
-        }
+        VulkanResult.Check(api.CreateImage(context.Device, &createInfo, null, out Image image),
+            "vkCreateImage");
         Handle = image;
-
-        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(context, image, out bool dedicated);
-
-        // Optimally tiled, so it never shares a block with a buffer.
-        _allocation = context.Allocator.Allocate(
-            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false, "an image",
-            MemoryPoolClass.DeviceImages, dedicated, default, image);
-        api.BindImageMemory(context.Device, image, _allocation.Memory, _allocation.Offset);
-
-        var viewInfo = new ImageViewCreateInfo
+        try
         {
-            SType = StructureType.ImageViewCreateInfo,
-            Image = image,
-            ViewType = ImageViewType.Type2D,
-            Format = format,
-            SubresourceRange = new ImageSubresourceRange(aspect, 0, 1, 0, 1),
-        };
-        if (api.CreateImageView(context.Device, &viewInfo, null, out ImageView view) != Result.Success)
-        {
-            throw new InvalidOperationException("vkCreateImageView failed");
+            MemoryRequirements requirements = VulkanAllocator.ImageRequirements(context, image, out bool dedicated);
+            // Optimally tiled, so it never shares a block with a buffer.
+            _allocation = context.Allocator.Allocate(
+                requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false, "an image",
+                MemoryPoolClass.DeviceImages, dedicated, default, image);
+            VulkanResult.Check(api.BindImageMemory(context.Device, image, _allocation.Memory, _allocation.Offset),
+                "vkBindImageMemory");
+            var viewInfo = new ImageViewCreateInfo
+            {
+                SType = StructureType.ImageViewCreateInfo,
+                Image = image,
+                ViewType = ImageViewType.Type2D,
+                Format = format,
+                SubresourceRange = new ImageSubresourceRange(aspect, 0, 1, 0, 1),
+            };
+            VulkanResult.Check(api.CreateImageView(context.Device, &viewInfo, null, out ImageView view),
+                "vkCreateImageView");
+            View = view;
         }
-        View = view;
+        catch
+        {
+            api.DestroyImage(context.Device, image, null);
+            context.Allocator.Free(_allocation);
+            throw;
+        }
     }
 
     public void Dispose()
@@ -241,7 +242,7 @@ internal static class VulkanResult
         if (result == Result.Success || result == Result.SuboptimalKhr) return;
 
         bool lost = result is Result.ErrorDeviceLost;
-        if (lost && DeviceLost) return;
+        bool alreadyReportedLoss = lost && DeviceLost;
         if (lost) DeviceLost = true;
 
         string message = lost
@@ -249,7 +250,7 @@ internal static class VulkanResult
               "backend submitted; the session cannot continue."
             : operation + " failed with " + result;
 
-        if (lost)
+        if (lost && !alreadyReportedLoss)
         {
             string? detail;
             try
@@ -264,9 +265,16 @@ internal static class VulkanResult
             message += " (" + VulkanMemory.LiveAllocations + " live device allocations.)";
         }
 
-        OnFailure?.Invoke(message);
+        // Suppress duplicate diagnostics, never the failure itself. Constructors
+        // and submissions must not treat a second device-loss result as success.
+        if (!alreadyReportedLoss) OnFailure?.Invoke(message);
         throw new InvalidOperationException(message);
     }
+}
+
+internal sealed class VulkanMemoryAllocationException(Result result, string message) : InvalidOperationException(message)
+{
+    internal Result Result { get; } = result;
 }
 
 internal static unsafe class VulkanMemory
@@ -296,9 +304,10 @@ internal static unsafe class VulkanMemory
         Result result = context.Api.AllocateMemory(context.Device, &allocateInfo, null, out DeviceMemory memory);
         if (result != Result.Success)
         {
-            throw new InvalidOperationException(
+            throw new VulkanMemoryAllocationException(result,
                 $"vkAllocateMemory failed for {what} with {result} after {LiveAllocations} live allocations " +
-                $"({allocateInfo.AllocationSize} bytes requested)");
+                $"({allocateInfo.AllocationSize} bytes requested; memory type {allocateInfo.MemoryTypeIndex}); " +
+                (context.Allocator?.DiagnosticMemoryLine() ?? "allocator not initialized"));
         }
 
         NoteAllocation();

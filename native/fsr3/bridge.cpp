@@ -411,11 +411,16 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr3FgEvaluate(
     VulkanStoryFsr3FgContext* context, const VulkanStoryFsr3FgFrame* frame) {
     if (!context || !frame || !dispatch || !configure) return -1;
     auto* swapchain = static_cast<VulkanStoryFsr3Swapchain*>(frame->swapchainContext);
+    const bool directInterpolation = frame->swapchainContext == nullptr;
     if (frame->color.format != VK_FORMAT_R8G8B8A8_UNORM ||
         frame->ui.format != VK_FORMAT_R8G8B8A8_UNORM ||
         frame->depth.format != VK_FORMAT_D32_SFLOAT ||
         frame->motion.format != VK_FORMAT_R16G16_SFLOAT ||
-        !frame->commands || !swapchain || !swapchain->context || !swapchain->chain) return -2;
+        !frame->commands ||
+        (directInterpolation ? (!frame->output.image ||
+            frame->output.format != VK_FORMAT_R8G8B8A8_UNORM ||
+            frame->output.width != context->width || frame->output.height != context->height) :
+            (!swapchain->context || !swapchain->chain))) return -2;
 
     if (context->swapchain && context->swapchain != swapchain) {
         int disabled = VulkanStoryFsr3FgDisable(context, context->swapchain);
@@ -424,18 +429,27 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr3FgEvaluate(
 
     ffxConfigureDescFrameGeneration config{};
     config.header.type = FFX_API_CONFIGURE_DESC_TYPE_FRAMEGENERATION;
-    config.swapChain = reinterpret_cast<void*>(swapchain->chain);
-    config.frameGenerationCallback = Fsr3GenerateOnPresent;
-    config.frameGenerationCallbackUserContext = context;
+    // The interpolation effect is independent of the SDK's multi-queue
+    // swapchain proxy. A host-owned presentation path can dispatch it on its
+    // existing command buffer without fabricating additional VkQueue handles.
+    if (directInterpolation) {
+        config.flags = FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY;
+    } else {
+        config.swapChain = reinterpret_cast<void*>(swapchain->chain);
+        config.frameGenerationCallback = Fsr3GenerateOnPresent;
+        config.frameGenerationCallbackUserContext = context;
+    }
     config.frameGenerationEnabled = true;
     config.HUDLessColor = frame->hudless.image ? Resource(frame->hudless) : FfxApiResource{};
     config.generationRect = {0, 0, static_cast<int32_t>(context->width), static_cast<int32_t>(context->height)};
     config.frameID = frame->frameId;
     int code = static_cast<int>(configure(&context->effect, &config.header));
     if (code != 0) return code;
-    context->chain = swapchain->chain;
-    context->swapchain = swapchain;
-    swapchain->activeFg = context;
+    if (!directInterpolation) {
+        context->chain = swapchain->chain;
+        context->swapchain = swapchain;
+        swapchain->activeFg = context;
+    }
 
     ffxDispatchDescFrameGenerationPrepare prepare{};
     prepare.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE;
@@ -471,12 +485,35 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr3FgEvaluate(
     code = static_cast<int>(dispatch(&context->effect, &prepare.header));
     if (code != 0) return code;
 
+    if (directInterpolation) {
+        ffxDispatchDescFrameGeneration generate{};
+        generate.header.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION;
+        generate.commandList = frame->commands;
+        generate.presentColor = Resource(frame->color);
+        generate.outputs[0] = Resource(frame->output, true);
+        generate.numGeneratedFrames = 1;
+        generate.reset = frame->reset != 0;
+        generate.backbufferTransferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+        generate.minMaxLuminance[0] = 0.0f;
+        generate.minMaxLuminance[1] = 1.0f;
+        generate.generationRect = config.generationRect;
+        generate.frameID = frame->frameId;
+        return static_cast<int>(dispatch(&context->effect, &generate.header));
+    }
+
     ffxConfigureDescFrameGenerationSwapChainRegisterUiResourceVK ui{};
     ui.header.type = FFX_API_CONFIGURE_DESC_TYPE_FGSWAPCHAIN_REGISTERUIRESOURCE_VK;
     ui.uiResource = Resource(frame->ui);
     ui.flags = FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_USE_PREMUL_ALPHA |
         FFX_FRAMEGENERATION_UI_COMPOSITION_FLAG_ENABLE_INTERNAL_UI_DOUBLE_BUFFERING;
     return static_cast<int>(configure(&swapchain->context, &ui.header));
+}
+
+// Explicit ABI capability prevents pairing a direct-present host with an older bridge.
+extern "C" __declspec(dllexport) int VulkanStoryFsr3FgEvaluateDirect(
+    VulkanStoryFsr3FgContext* context, const VulkanStoryFsr3FgFrame* frame) {
+    if (!frame || frame->swapchainContext) return -1;
+    return VulkanStoryFsr3FgEvaluate(context, frame);
 }
 
 extern "C" __declspec(dllexport) int VulkanStoryFsr3FgDestroy(VulkanStoryFsr3FgContext* context) {

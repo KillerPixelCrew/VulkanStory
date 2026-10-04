@@ -211,8 +211,6 @@ __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, cons
 __declspec(dllexport) void VulkanStorySlShutdown() {
     if (!module) return;
     if (shutdown) shutdown();
-    FreeLibrary(module);
-    module = nullptr;
     reflexOptions = nullptr; reflexSleep = nullptr; reflexState = nullptr; pclMarker = nullptr;
     pclState = nullptr; pclOptions = nullptr;
     fgOptions = nullptr; fgState = nullptr; frameToken = nullptr;
@@ -222,6 +220,24 @@ __declspec(dllexport) void VulkanStorySlShutdown() {
     fgEnabled = false;
     currentSwapchain = VK_NULL_HANDLE;
     lastPresentError.store(0, std::memory_order_relaxed);
+}
+
+// Vulkan dispatch pointers can still point into the interposer after slShutdown.
+// Release its code only after the host has destroyed Vulkan and its API tables.
+__declspec(dllexport) void VulkanStorySlUnload() {
+    if (module) FreeLibrary(module);
+    module = nullptr;
+    instanceProc = nullptr;
+    deviceProc = nullptr;
+}
+
+__declspec(dllexport) PFN_vkVoidFunction VulkanStorySlGetInstanceProcAddr(
+    VkInstance instance, const char* name) {
+    return module && instanceProc ? instanceProc(instance, name) : nullptr;
+}
+__declspec(dllexport) PFN_vkVoidFunction VulkanStorySlGetDeviceProcAddr(
+    VkDevice device, const char* name) {
+    return module && deviceProc ? deviceProc(device, name) : nullptr;
 }
 
 __declspec(dllexport) VkResult VulkanStorySlCreateInstance(const VkInstanceCreateInfo* info, VkInstance* instance) {
@@ -451,6 +467,13 @@ __declspec(dllexport) int VulkanStorySlSetFrameGeneration(int enabled, uint32_t 
     options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
     options.onErrorCallback = onPresentError;
     int result = static_cast<int>(fgOptions(viewport, options));
+    if (!enabled && result == static_cast<int>(sl::Result::eWarnOutOfVRAM)) {
+        // Do not cache Off as a successful configuration. Allow the host's
+        // checked device drain + explicit slFreeResources path to release the
+        // feature instead of throwing while disposing framebuffer inputs.
+        fgEnabled = false;
+        fgConfigured = false;
+    }
     if (result == 0) {
         fgConfigured = true;
         fgEnabled = enabled != 0;

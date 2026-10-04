@@ -359,6 +359,17 @@ internal sealed unsafe class TextureManager : IDisposable
     public VulkanTexture? Get(int id) =>
         id > 0 && id < _textures.Count ? _textures[id] : null;
 
+    internal ulong LiveImageBytes
+    {
+        get
+        {
+            ulong bytes = 0;
+            foreach (VulkanTexture? texture in _textures)
+                if (texture != null) bytes += texture.Allocation.Size;
+            return bytes;
+        }
+    }
+
     private int Register(VulkanTexture texture)
     {
         // Under the upload lock, like Delete: an upload from another thread
@@ -472,9 +483,20 @@ internal sealed unsafe class TextureManager : IDisposable
         }
 
         MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
-        MemoryAllocation allocation = _context.Allocator.Allocate(
-            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height} {format} image", poolClass, dedicated, default, image);
+        MemoryAllocation allocation;
+        try
+        {
+            allocation = _context.Allocator.Allocate(
+                requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
+                $"a {width}x{height} {format} image", poolClass, dedicated, default, image);
+        }
+        catch (InvalidOperationException error)
+        {
+            api.DestroyImage(_context.Device, image, null);
+            throw new InvalidOperationException(
+                $"Texture allocation failed: {width}x{height}, format={format}, mipLevels={mipLevels}, " +
+                $"layers={imageInfo.ArrayLayers}, liveTextures={Count}, usage={usage}", error);
+        }
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);

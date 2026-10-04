@@ -104,6 +104,8 @@ internal sealed class Fsr4Backend : IUpscalerBackend
     {
         // A shared DX12 image can still be used by either GPU queue. Wait for
         // both before releasing the imported Vulkan memory and the SDK context.
+        // Shared disposal drains Vulkan as well before preparing SDK release.
+        if (shared == null) runtime?.PrepareRelease();
         shared?.Dispose(); shared = null;
         runtime?.Dispose(); runtime = null;
         if (motion != 0) { device!.DeleteTexture(motion); motion = 0; }

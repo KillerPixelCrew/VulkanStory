@@ -25,6 +25,7 @@ internal sealed class ControllerSettingsDialog : GuiDialog
     public override double InputOrder => 0.05;
 
     public void RequestRefresh() => refreshRequested = true;
+    internal void ShowDiagnosticPage(int index) { page = index; ComposePanel(); }
 
     public void ApplyPendingRefresh()
     {
@@ -45,32 +46,117 @@ internal sealed class ControllerSettingsDialog : GuiDialog
             .BeginChildElements(background);
         var initialize = new List<Action>();
 
-        composer.AddSmallButton("Tuning", ShowTuning, ElementBounds.Fixed(0, 0, 115, 28))
-            .AddSmallButton("Actions", ShowActions, ElementBounds.Fixed(125, 0, 115, 28))
-            .AddSmallButton("More", ShowMore, ElementBounds.Fixed(250, 0, 115, 28))
-            .AddSmallButton("Axes", ShowAxes, ElementBounds.Fixed(375, 0, 115, 28));
-        double y = 46;
+        composer.AddSmallButton("Tuning", ShowTuning, ElementBounds.Fixed(0, 0, 90, 28))
+            .AddSmallButton("Actions", ShowActions, ElementBounds.Fixed(100, 0, 90, 28))
+            .AddSmallButton("More", ShowMore, ElementBounds.Fixed(200, 0, 90, 28))
+            .AddSmallButton("Axes", ShowAxes, ElementBounds.Fixed(300, 0, 90, 28))
+            .AddSmallButton("Inventory", () => { page = 4; RequestRefresh(); return true; }, ElementBounds.Fixed(400, 0, 90, 28));
+        composer.AddSmallButton("Radial menu", () => { page = 5; RequestRefresh(); return true; }, ElementBounds.Fixed(0, 36, 160, 28));
+        composer.AddSmallButton("Gestures", () => { page = 6; RequestRefresh(); return true; }, ElementBounds.Fixed(170, 36, 160, 28));
+        composer.AddSmallButton("Modifier", () => { page = 8; RequestRefresh(); return true; }, ElementBounds.Fixed(340, 36, 150, 28));
+        double y = 82;
         if (page == 0)
         {
             Slider("Movement deadzone", "moveDeadzone", OnMoveDeadzone, (int)MathF.Round(profile.MoveDeadzone * 100), 0, 80, 1);
+            Slider("Movement outer deadzone", "moveOuter", value => { input.UpdateProfile(p => p.MoveOuterDeadzone = value / 100f); return true; }, (int)MathF.Round(profile.MoveOuterDeadzone * 100), 0, 20, 1);
+            Slider("Movement response curve", "moveCurve", value => { input.UpdateProfile(p => p.MoveCurveExponent = value / 100f); return true; }, (int)MathF.Round(profile.MoveCurveExponent * 100), 50, 300, 10);
             Slider("Look deadzone", "lookDeadzone", OnLookDeadzone, (int)MathF.Round(profile.LookDeadzone * 100), 0, 80, 1);
+            Slider("Look outer deadzone", "lookOuter", value => { input.UpdateProfile(p => p.LookOuterDeadzone = value / 100f); return true; }, (int)MathF.Round(profile.LookOuterDeadzone * 100), 0, 20, 1);
+            Slider("Look response curve", "lookCurve", value => { input.UpdateProfile(p => p.LookCurveExponent = value / 100f); return true; }, (int)MathF.Round(profile.LookCurveExponent * 100), 100, 300, 10);
             Slider("Look sensitivity", "lookSensitivity", OnLookSensitivity, (int)profile.LookSensitivity, 20, 3000, 20);
             Slider("Menu cursor speed", "cursorSensitivity", OnCursorSensitivity, (int)profile.CursorSensitivity, 20, 3000, 20);
             Slider("Gyro sensitivity", "gyroSensitivity", OnGyroSensitivity, (int)profile.GyroSensitivity, 20, 3000, 20);
             Switch("Invert look Y", "invertLookY", profile.InvertLookY, value => input.UpdateProfile(p => p.InvertLookY = value));
+            Switch("Left stick moves menu cursor", "leftMenuCursor", profile.MenuCursorUsesLeftStick, value => input.UpdateProfile(p => p.MenuCursorUsesLeftStick = value));
             Switch("Gyro aiming", "gyroEnabled", profile.GyroEnabled, value => input.UpdateProfile(p => p.GyroEnabled = value));
-            Switch("Gyro only with right trigger", "gyroAimOnly", profile.GyroRequireSecondaryTrigger,
+            Switch("Gyro only with use trigger", "gyroAimOnly", profile.GyroRequireSecondaryTrigger,
                 value => input.UpdateProfile(p => p.GyroRequireSecondaryTrigger = value));
             Switch("Controller rumble", "rumbleEnabled", profile.RumbleEnabled, value => input.UpdateProfile(p => p.RumbleEnabled = value));
             Switch("Trigger rumble", "triggerRumbleEnabled", profile.TriggerRumbleEnabled,
                 value => input.UpdateProfile(p => p.TriggerRumbleEnabled = value));
         }
-        else if (page <= 2)
+        else if (page is 6 or 7)
         {
-            int first = (page - 1) * 5;
-            for (int i = first; i < Math.Min(first + 5, ControllerButtonBindings.All.Length); i++)
+            composer.AddSmallButton("Gameplay", () => { page = 6; RequestRefresh(); return true; }, ElementBounds.Fixed(0, y, 160, 28))
+                .AddSmallButton("Inventory", () => { page = 7; RequestRefresh(); return true; }, ElementBounds.Fixed(170, y, 160, 28));
+            y += 40;
+            Slider("Tap / double-press window", "tapWindow", value => { input.UpdateProfile(p => p.TapThresholdMs = value); return true; }, profile.TapThresholdMs, 100, 1000, 50);
+            Slider("Long-press duration", "longWindow", value => { input.UpdateProfile(p => p.LongPressThresholdMs = value); return true; }, profile.LongPressThresholdMs, 150, 2000, 50);
+            foreach (ControllerButtonBinding binding in page == 6 ? ControllerButtonBindings.All : ControllerButtonBindings.Inventory)
             {
-                ControllerButtonBinding binding = ControllerButtonBindings.All[i];
+                if (binding.Code is "radial" or "back") continue;
+                string action = page == 7 ? "gui:" + binding.Code : binding.Code;
+                ControllerGestureMode fallback = page == 7 || binding.Code is not ("accept" or "sneak" or "sprint")
+                    ? ControllerGestureMode.Press : ControllerGestureMode.Hold;
+                bool configured = profile.ActionModes.TryGetValue(action, out ControllerGestureMode mode);
+                if (!configured) mode = fallback;
+                composer.AddStaticText(binding.Label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, 205, 28))
+                    .AddSmallButton(configured ? mode.ToString() : "Default", () =>
+                    {
+                        input.UpdateProfile(p =>
+                        {
+                            if (configured && mode == ControllerGestureMode.DoubleToggle) p.ActionModes.Remove(action);
+                            else p.ActionModes[action] = configured ? (ControllerGestureMode)((int)mode + 1) : ControllerGestureMode.Hold;
+                        });
+                        RequestRefresh();
+                        return true;
+                    }, ElementBounds.Fixed(215, y, 270, 28));
+                y += 36;
+            }
+        }
+        else if (page == 8)
+        {
+            Switch("Enable modifier layer", "modifierEnabled", profile.ModifierEnabled, value => input.UpdateProfile(p => p.ModifierEnabled = value));
+            composer.AddStaticText("Hold modifier", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, 205, 28))
+                .AddSmallButton(input.ButtonName(profile.ModifierButton), () => { input.UpdateProfile(p => p.ModifierButton = (p.ModifierButton + 1) % 15); RequestRefresh(); return true; }, ElementBounds.Fixed(215, y, 270, 28));
+            y += 40;
+            foreach (ControllerButtonBinding binding in ControllerButtonBindings.All)
+            {
+                if (binding.Code is "back" or "radial" or "settings") continue;
+                string action = binding.Code;
+                int button = profile.ModifierBindings.GetValueOrDefault(action, -1);
+                composer.AddStaticText(binding.Label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, 205, 28))
+                    .AddSmallButton(button < 0 ? "Use main binding" : input.ButtonName(button), () =>
+                    {
+                        input.UpdateProfile(p =>
+                        {
+                            int next = button + 1;
+                            if (next == p.ModifierButton) next++;
+                            ControllerLayerBindings.Assign(p.ModifierBindings, action, next > 14 ? -1 : next);
+                        });
+                        RequestRefresh();
+                        return true;
+                    }, ElementBounds.Fixed(215, y, 270, 28));
+                y += 36;
+            }
+        }
+        else if (page == 5)
+        {
+            Switch("Enable radial action menu", "radialEnabled", profile.RadialEnabled, value => input.UpdateProfile(p => p.RadialEnabled = value));
+            Switch("Hold to open radial menu", "radialHold", profile.RadialHoldToOpen, value => input.UpdateProfile(p => p.RadialHoldToOpen = value));
+            for (int i = 0; i < 8; i++)
+            {
+                int slot = i;
+                string action = profile.RadialActions[slot];
+                composer.AddStaticText("Slot " + (slot + 1), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, 160, 28))
+                    .AddSmallButton(ControllerRadialDialog.Label(action), () =>
+                    {
+                        int next = (Array.IndexOf(ControllerRadialDialog.Actions, action) + 1) % ControllerRadialDialog.Actions.Length;
+                        input.UpdateProfile(p => p.RadialActions[slot] = ControllerRadialDialog.Actions[next]);
+                        RequestRefresh();
+                        return true;
+                    }, ElementBounds.Fixed(180, y, 250, 28));
+                y += 40;
+            }
+        }
+        else if (page <= 2 || page == 4)
+        {
+            ControllerButtonBinding[] bindings = page == 4 ? ControllerButtonBindings.Inventory : ControllerButtonBindings.All;
+            int first = page == 4 ? 0 : (page - 1) * 5;
+            int end = page == 1 ? Math.Min(first + 5, bindings.Length) : bindings.Length;
+            for (int i = first; i < end; i++)
+            {
+                ControllerButtonBinding binding = bindings[i];
                 string glyph = ControllerGlyphs.ButtonGlyph(binding.Get(profile), input.ButtonName);
                 composer.AddStaticText(binding.Label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, 205, 26))
                     .AddStaticCustomDraw(ElementBounds.Fixed(215, y, 48, 26),

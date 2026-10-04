@@ -13,6 +13,7 @@ internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeFullscreenPass nativeSceneNoHudCopy = new("ui-compose", [], ["uiTex"]);
     private readonly NativeFullscreenPass nativeUiCompose = new("ui-compose", [], ["uiTex"]);
+    private readonly NativeFullscreenPass nativeGeneratedUiCompose = new("ui-compose", [], ["uiTex"]);
     private int uiComposeProgram;
     private bool uiComposeFailed;
     internal bool UiScopeOpen => Stated.UiImageFramebuffer > 0;
@@ -103,6 +104,22 @@ internal sealed partial class GameGraphicsAdapter
         }
         finally { renderer.EndNativePass(); }
     }
+    internal bool ComposeGeneratedFrameUi(FrameBufferRef output, FrameBufferRef ui)
+    {
+        var renderer = RequireDevice();
+        int program = UiComposeProgram();
+        if (program <= 0) return false;
+        AttachmentBlend[] blend = [AttachmentBlend.For(true, RenderBlendMode.PremultipliedAlpha)];
+        var pipeline = NativePipelineFor(nativeGeneratedUiCompose, program, output.FboId, blend);
+        try
+        {
+            return pipeline != null && BeginNativeBlitPass("UiCompose/Generated", output.FboId,
+                output.Width, output.Height, [ui.ColorTextureIds[0]]) &&
+                renderer.DrawNativeFullscreen(pipeline,
+                    [new NativeTexture(nativeGeneratedUiCompose.Samplers[0], ui.ColorTextureIds[0])], requirePipeline: true);
+        }
+        finally { renderer.EndNativePass(); }
+    }
     internal void ClearUiOrDefaultDepth(float depth) =>
         RequireDevice().ClearNativeDepth(NativeDefaultTarget, depth);
     internal void AbortUiScope() { RequireDevice(); CloseUiScope(); }
@@ -112,6 +129,6 @@ internal sealed partial class GameGraphicsAdapter
         CloseUiScope();
         if (uiComposeProgram > 0) renderer.DeleteProgram(uiComposeProgram);
         uiComposeProgram = 0; uiComposeFailed = false;
-        nativeSceneNoHudCopy.Pipeline = nativeUiCompose.Pipeline = null;
+        nativeSceneNoHudCopy.Pipeline = nativeUiCompose.Pipeline = nativeGeneratedUiCompose.Pipeline = null;
     }
 }

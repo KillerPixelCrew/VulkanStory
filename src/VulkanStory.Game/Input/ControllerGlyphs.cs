@@ -7,12 +7,13 @@ namespace VulkanStory.Game.Input;
 
 internal static class ControllerGlyphs
 {
-    public static Dictionary<string, string> Build(ControllerProfile profile, Func<int, string> buttonName)
+    public static Dictionary<string, string> Build(ControllerProfile profile, Func<int, string> buttonName,
+        bool gui = false, bool modifier = false)
     {
         string Button(int index) => ButtonGlyph(index, buttonName);
         string Axis(int index, bool negative) => AxisGlyph(index, negative, buttonName);
 
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        var glyphs = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["jump"] = Button(profile.AcceptButton),
             ["sneak"] = Button(profile.SneakButton),
@@ -22,9 +23,39 @@ internal static class ControllerGlyphs
             ["inventorydialog"] = Button(profile.InventoryButton),
             ["escapemenudialog"] = Button(profile.MenuButton),
             ["dropitem"] = Button(profile.DropButton),
+            ["controller-select"] = Button(profile.GuiSelectButton),
+            ["controller-takehalf"] = Button(profile.TakeHalfButton),
+            ["controller-quickmove"] = Button(profile.QuickMoveButton),
+            ["controller-back"] = Button(profile.GuiBackButton),
             ["primarymouse"] = Axis(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative),
             ["secondarymouse"] = Axis(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative),
         };
+        if (gui)
+        {
+            glyphs["shift"] = Button(profile.QuickMoveButton);
+            glyphs["inventorydialog"] = Button(profile.GuiBackButton);
+            glyphs["escapemenudialog"] = Button(profile.GuiBackButton);
+            glyphs["primarymouse"] = Button(profile.GuiSelectButton);
+            glyphs["secondarymouse"] = Button(profile.TakeHalfButton);
+        }
+        else if (modifier)
+        {
+            void Effective(string hint, string action, int main)
+            {
+                int button = ControllerLayerBindings.Resolve(profile.ModifierBindings, action, main);
+                if (button < 0 || button == profile.ModifierButton) glyphs.Remove(hint);
+                else glyphs[hint] = Button(profile.ModifierButton) + "+" + Button(button);
+            }
+            Effective("jump", "accept", profile.AcceptButton);
+            Effective("sneak", "sneak", profile.SneakButton);
+            Effective("shift", "sneak", profile.SneakButton);
+            Effective("sprint", "sprint", profile.SprintButton);
+            Effective("ctrl", "sprint", profile.SprintButton);
+            Effective("inventorydialog", "inventory", profile.InventoryButton);
+            Effective("escapemenudialog", "menu", profile.MenuButton);
+            Effective("dropitem", "drop", profile.DropButton);
+        }
+        return glyphs;
     }
 
     public static string AxisGlyph(int index, bool negative, Func<int, string> buttonName)

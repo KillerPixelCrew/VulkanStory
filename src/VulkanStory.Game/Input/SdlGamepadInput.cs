@@ -28,6 +28,15 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private readonly Dictionary<string, HeldKey> heldKeys = new();
     private readonly HashSet<EnumMouseButton> heldMouse = new();
     private readonly ControllerToggleState sneakToggle = new();
+    private readonly ControllerContextTransition inputContext = new();
+    private readonly Dictionary<string, ControllerGesture> gestures = new(StringComparer.Ordinal);
+    private bool modifierActive;
+    private bool? publishedGuiContext, publishedModifierContext;
+    private uint layerBlockedButtons;
+    private readonly short[] sampledAxes = new short[6];
+    private uint sampledButtons, previousButtons;
+    private uint supportedButtons;
+    private bool sampleValid;
     private ControllerProfile profile = new();
     private string? profilePath;
     private string? profileKey;
@@ -36,6 +45,9 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private readonly List<PendingProfileWrite> pendingProfileWrites = new();
     private long pendingProfileRetryDue;
     private ControllerSettingsDialog? settingsDialog;
+    private ControllerRadialDialog? radialDialog;
+    private ClientMain? radialGame;
+    private bool radialButtonWasDown;
     private ClientMain? settingsGame;
     private ControllerKeyboardDialog? keyboardDialog;
     private ControllerKeyboardScreen? keyboardScreen;
@@ -56,10 +68,20 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     internal float PendingDamageRumbleForTests => Volatile.Read(ref pendingDamageRumble);
     private nint gamepad;
     private int gamepadId;
+    private string gamepadName = "none";
+    internal string Status { get; private set; } = "waiting for SDL gamepad detection";
+    internal bool InputActive { get; private set; }
+    internal List<ControllerSlotTarget> CurrentSlotTargets() =>
+        ControllerGuiTargets.SlotTargets(ControllerGuiTargets.ActiveComposers(platform));
+    private string? loggedRoutingState;
+    private bool firstInputLogged;
+    private int loggedGamepadCount = -1, failedOpenId;
     private int requestedGamepadId;
     private readonly Action<int> onGamepadActivity;
     private long lastPoll;
     private long nextGamepadScan;
+    private long nextStatusUpdate;
+    private long nextMenuScroll;
     private bool initialized;
     private bool unavailable;
     private bool leftShoulderHeld;
@@ -194,6 +216,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private void PollCore(Action<SdlInputEvent>? onWindowEvent, Action? onInputPumped,
         bool alreadyPumped, bool externalDeviceChanged)
     {
+        InputActive = false;
+        sampleValid = false;
         try
         {
             Prepare();
@@ -216,13 +240,82 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             }
             SyncDamageHaptics();
             ApplyDamageHaptics();
+            LogFirstInput();
+            sampledButtons = ReadButtonMask();
+            for (int axis = 0; axis < sampledAxes.Length; axis++) sampledAxes[axis] = gamepad == 0 ? (short)0 : SDL_GetGamepadAxis(gamepad, axis);
+            sampleValid = true;
+            bool inWorld = platform.IsFocused && platform.MouseGrabbed;
+            Vector2 rawMoveStick = ReadStick(profile.MoveXAxis, profile.MoveYAxis, profile.MoveDeadzone, profile.MoveOuterDeadzone);
+            rawMoveStick *= new Vector2(profile.InvertMoveX ? -1f : 1f, profile.InvertMoveY ? -1f : 1f);
+            Vector2 movementStick = ControllerStickProcessing.Process(rawMoveStick, 0f, 0f, profile.MoveCurveExponent);
+            Vector2 lookStick = ReadStick(profile.LookXAxis, profile.LookYAxis, profile.LookDeadzone, profile.LookOuterDeadzone);
+            object? foreground = inWorld ? null : ControllerGuiTargets.ForegroundOwner(platform);
+            if (inputContext.Update(inWorld, foreground, sampledButtons,
+                RawTrigger(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative),
+                RawTrigger(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative), movementStick, lookStick))
+            {
+                ReleaseAll();
+                nextMenuScroll = 0;
+            }
+            movementStick = inputContext.Movement(movementStick);
+            lookStick = inputContext.Look(lookStick);
+            bool modifier = profile.ModifierEnabled && inWorld &&
+                (inputContext.Buttons(sampledButtons) & (1u << profile.ModifierButton)) != 0;
+            if (modifier != modifierActive)
+            {
+                uint formerlyHeld = previousButtons;
+                ReleaseAll();
+                layerBlockedButtons |= formerlyHeld & sampledButtons & ~(1u << profile.ModifierButton);
+                modifierActive = modifier;
+            }
+            layerBlockedButtons &= sampledButtons;
+            if (publishedGuiContext != !inWorld || publishedModifierContext != modifierActive) PublishControllerHints();
             float dt = lastPoll == 0 ? 0f : Math.Clamp((now - lastPoll) / (float)Stopwatch.Frequency, 0f, 0.05f);
             lastPoll = now;
             settingsDialog?.ApplyPendingRefresh();
             if (gamepad == 0 || !platform.IsFocused || ScreenManager.hotkeyManager == null || platform.Original.keyEventHandlers.Count == 0)
             {
+                Status = gamepad == 0 ? "no SDL gamepad connected" : gamepadName + ": " +
+                    (!platform.IsFocused ? "window not focused" : ScreenManager.hotkeyManager == null
+                        ? "game hotkeys unavailable" : "game key handlers unavailable");
+                LogRoutingState(Status);
                 ReleaseAll();
                 return;
+            }
+            LogRoutingState(gamepadName + ": routing to " + (platform.MouseGrabbed ? "world" : "menu"));
+
+            if (radialDialog != null)
+            {
+                if (!radialDialog.IsOpened() || !ReferenceEquals(ControllerGuiTargets.ActiveGame(platform), radialGame))
+                {
+                    CloseRadial();
+                    ReleaseAll();
+                    return;
+                }
+                radialDialog.Select(ReadStick(profile.LookXAxis, profile.LookYAxis, profile.LookDeadzone, profile.LookOuterDeadzone));
+                bool rawDown = (sampledButtons & (1u << profile.RadialButton)) != 0;
+                bool cancel = Pressed(profile.GuiBackButton) || Button(profile.MenuButton);
+                bool confirm = Pressed(profile.GuiSelectButton) || (profile.RadialHoldToOpen ? !rawDown : rawDown && !radialButtonWasDown);
+                radialButtonWasDown = rawDown;
+                string? action = !cancel && confirm ? radialDialog.SelectedAction : null;
+                if (cancel || confirm)
+                {
+                    CloseRadial();
+                    ReleaseAll();
+                    if (action != null) ExecuteRadialAction(action);
+                }
+                else ReleaseAll();
+                return;
+            }
+            if (profile.RadialEnabled && inWorld && Pressed(profile.RadialButton) && !Button(profile.MenuButton))
+            {
+                if (ControllerGuiTargets.ActiveGame(platform)?.api is { } radialApi)
+                {
+                    OpenRadial(ControllerGuiTargets.ActiveGame(platform)!);
+                    NoteControllerActivity();
+                    ReleaseAll();
+                    return;
+                }
             }
 
             keyboardDialog?.ApplyPendingRefresh();
@@ -264,7 +357,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             }
             keyboardChordWasDown = keyboardChord;
             if (keyboardChord) { ReleaseAll(); return; }
-            bool backDown = Button(profile.BackButton);
+            bool backDown = Button(profile.GuiBackButton);
             if (keyboardBackConsumed)
             {
                 if (!backDown) keyboardBackConsumed = false;
@@ -278,33 +371,50 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 return;
             }
 
-            bool settingsDown = Button(profile.SettingsButton);
-            if (settingsDown && !settingsButtonWasDown)
+            bool settingsDown = ActionPulse("settings", profile.SettingsButton, ControllerGestureMode.Press);
+            if (settingsDown)
             {
                 NoteControllerActivity();
                 ToggleSettings();
+                ReleaseAll();
+                inputContext.Reset();
+                settingsButtonWasDown = true;
+                return;
             }
             settingsButtonWasDown = settingsDown;
 
-            float lx = Stick(profile.MoveXAxis, profile.MoveDeadzone) * (profile.InvertMoveX ? -1f : 1f);
-            float ly = Stick(profile.MoveYAxis, profile.MoveDeadzone) * (profile.InvertMoveY ? -1f : 1f);
-            platform.ControllerMoveAxes = platform.MouseGrabbed ? new Vector2(lx, ly) : Vector2.Zero;
-            platform.ControllerMoveFactor = platform.MouseGrabbed
+            float lx = movementStick.X, ly = movementStick.Y;
+            platform.ControllerMoveAxes = inWorld ? movementStick : Vector2.Zero;
+            platform.ControllerMoveFactor = inWorld
                 ? Math.Clamp(MathF.Sqrt(lx * lx + ly * ly), 0f, 1f) : 1f;
-            float rx = Stick(profile.LookXAxis, profile.LookDeadzone);
-            float ry = Stick(profile.LookYAxis, profile.LookDeadzone);
+            float rx = lookStick.X, ry = lookStick.Y;
             bool rightStickActive = MathF.Abs(rx) > 0.15f || MathF.Abs(ry) > 0.15f;
             if (rightStickActive && !rightStickWasActive) NoteControllerActivity();
             rightStickWasActive = rightStickActive;
-            bool analogWalking = platform.MouseGrabbed &&
+            bool analogWalking = inWorld &&
                 platform.AnalogServerReady;
-            SetKey("walkleft", Moving("walkleft", -lx, analogWalking), GlKeys.A);
-            SetKey("walkright", Moving("walkright", lx, analogWalking), GlKeys.D);
-            SetKey("walkforward", Moving("walkforward", -ly, analogWalking), GlKeys.W);
-            SetKey("walkbackward", Moving("walkbackward", ly, analogWalking), GlKeys.S);
-            bool south = Button(profile.AcceptButton);
-            bool menuNavigation = !platform.MouseGrabbed &&
-                (south || Button(11) || Button(12) || Button(13) || Button(14));
+            SetKey("walkleft", inWorld && Moving("walkleft", -lx, analogWalking), GlKeys.A);
+            SetKey("walkright", inWorld && Moving("walkright", lx, analogWalking), GlKeys.D);
+            SetKey("walkforward", inWorld && Moving("walkforward", -ly, analogWalking), GlKeys.W);
+            SetKey("walkbackward", inWorld && Moving("walkbackward", ly, analogWalking), GlKeys.S);
+            bool south = inWorld && ActionDown("accept", profile.AcceptButton);
+            bool guiSelect = !inWorld && ActionPulse("gui:select", profile.GuiSelectButton, ControllerGestureMode.Press);
+            bool guiHalf = !inWorld && ActionPulse("gui:takehalf", profile.TakeHalfButton, ControllerGestureMode.Press);
+            bool guiQuick = !inWorld && ActionPulse("gui:quickmove", profile.QuickMoveButton, ControllerGestureMode.Press);
+            bool guiCancel = !inWorld && ActionPulse("gui:cancel", profile.GuiBackButton, ControllerGestureMode.Press);
+            // Diagnostic text is read by the settings panel, not the input consumer.
+            // Avoid formatting four floats and allocating strings every render frame.
+            if (now >= nextStatusUpdate)
+            {
+                nextStatusUpdate = now + Stopwatch.Frequency / 4;
+                Status = gamepadName + ": SDL move " + lx.ToString("0.00") + ", " + ly.ToString("0.00") +
+                    "; look " + rx.ToString("0.00") + ", " + ry.ToString("0.00") +
+                    "; A " + (south ? "down" : "up") + "; routing " + (platform.MouseGrabbed ? "world" : "menu");
+            }
+            bool menuNavigation = !inWorld &&
+                (guiSelect || guiHalf || guiQuick || Button(profile.GuiSelectButton) ||
+                 Button(profile.TakeHalfButton) || Button(profile.QuickMoveButton) ||
+                 Button(11) || Button(12) || Button(13) || Button(14));
             List<GuiComposer>? composers = menuNavigation
                 ? keyboardScreen?.IsOpened == true
                     ? new List<GuiComposer> { keyboardScreen.ElementComposer }
@@ -314,32 +424,60 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 : null;
             GuiElementItemSlotGridBase? focusedGrid = menuNavigation ? FocusedSlotGrid(composers!) : null;
             GuiElementSlider? focusedSlider = menuNavigation && focusedGrid == null ? FocusedSlider(composers!) : null;
-            SetKey("jump", platform.MouseGrabbed && south, GlKeys.Space); // South / A
-            bool sneakPressed = Button(profile.SneakButton);
-            SetKey("sneak", sneakToggle.Update(sneakPressed, profile.ToggleSneak, platform.MouseGrabbed), GlKeys.LShift);
-            SetKey("sprint", platform.MouseGrabbed && Button(profile.SprintButton), GlKeys.LControl);
-            SetKey("controller-shift", !platform.MouseGrabbed && sneakPressed, GlKeys.ShiftLeft);
-            SetKey("controller-ctrl", !platform.MouseGrabbed && Button(profile.SprintButton), GlKeys.ControlLeft);
-            SetKey("inventorydialog", Button(profile.InventoryButton), GlKeys.E);
-            SetKey("escapemenudialog", Button(profile.MenuButton) || Button(profile.BackButton), GlKeys.Escape);
-            SetKey("dropitem", Button(profile.DropButton), GlKeys.Q);
-
-            SetMouse(EnumMouseButton.Left, Trigger(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative) ||
-                (!platform.MouseGrabbed && south));
-            SetMouse(EnumMouseButton.Right, Trigger(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative));
-            bool leftShoulder = Button(profile.PreviousHotbarButton), rightShoulder = Button(profile.NextHotbarButton);
-            if (platform.MouseGrabbed)
+            List<ControllerSlotTarget>? slotTargets = menuNavigation ? ControllerGuiTargets.SlotTargets(composers!) : null;
+            bool overSlot = slotTargets?.Exists(target => target.Bounds.PointInside(
+                platform.ControllerCursorPosition.X, platform.ControllerCursorPosition.Y)) == true;
+            SetKey("jump", inWorld && south, GlKeys.Space); // South / A
+            bool sneakPressed = inWorld && ActionDown("sneak", profile.SneakButton);
+            SetKey("sneak", profile.ActionModes.ContainsKey("sneak") ? sneakPressed :
+                sneakToggle.Update(sneakPressed, profile.ToggleSneak, inWorld), GlKeys.LShift);
+            SetKey("sprint", inWorld && ActionDown("sprint", profile.SprintButton), GlKeys.LControl);
+            // Vintage Story keeps crafting in the inventory, so X and Y open the same dialog.
+            bool inventoryAction = inWorld && ActionDown("inventory", profile.InventoryButton, ControllerGestureMode.Press);
+            bool craftingAction = inWorld && ActionDown("crafting", profile.CraftingButton, ControllerGestureMode.Press);
+            SetKey("inventorydialog", inventoryAction || craftingAction, GlKeys.E);
+            SetKey("escapemenudialog", ActionDown("menu", profile.MenuButton, ControllerGestureMode.Press) || guiCancel, GlKeys.Escape);
+            SetKey("dropitem", inWorld && ActionDown("drop", profile.DropButton, ControllerGestureMode.Press), GlKeys.Q);
+            // Opening/closing a dialog can change context synchronously inside
+            // key dispatch. Stop this sample before it becomes an action there.
+            if (platform.MouseGrabbed != inWorld || (!inWorld &&
+                !ReferenceEquals(foreground, ControllerGuiTargets.ForegroundOwner(platform))))
             {
-                if (leftShoulder && !leftShoulderHeld) Scroll(-1);
-                if (rightShoulder && !rightShoulderHeld) Scroll(1);
+                ReleaseAll();
+                return;
+            }
+
+            if (!inWorld && overSlot && ControllerGuiTargets.ActiveGame(platform)?.api is { } inventoryApi)
+            {
+                Vector2 cursor = platform.ControllerCursorPosition;
+                if (guiSelect) ControllerInventoryActions.TryClick(inventoryApi, slotTargets!, cursor, ControllerInventoryAction.Select);
+                else if (guiHalf) ControllerInventoryActions.TryClick(inventoryApi, slotTargets!, cursor, ControllerInventoryAction.TakeHalf);
+                else if (guiQuick) ControllerInventoryActions.TryClick(inventoryApi, slotTargets!, cursor, ControllerInventoryAction.QuickMove);
+            }
+
+            SetMouse(EnumMouseButton.Left, (inWorld && Trigger(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative)) ||
+                (!inWorld && !overSlot && (profile.ActionModes.ContainsKey("gui:select") ? guiSelect : Button(profile.GuiSelectButton))));
+            SetMouse(EnumMouseButton.Right, (inWorld && Trigger(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative)) ||
+                (!inWorld && !overSlot && (profile.ActionModes.ContainsKey("gui:takehalf") ? guiHalf : Button(profile.TakeHalfButton))));
+            bool leftShoulder = Button(profile.PreviousHotbarButton), rightShoulder = Button(profile.NextHotbarButton);
+            InputActive = lx != 0f || ly != 0f || rx != 0f || ry != 0f ||
+                heldKeys.Count != 0 || heldMouse.Count != 0 || leftShoulder || rightShoulder ||
+                Button(11) || Button(12) || Button(13) || Button(14);
+            if (inWorld)
+            {
+                // The game's wheel-up direction selects the previous hotbar slot.
+                if (ActionPulse("previous", profile.PreviousHotbarButton, ControllerGestureMode.Press)) Scroll(1);
+                if (ActionPulse("next", profile.NextHotbarButton, ControllerGestureMode.Press)) Scroll(-1);
             }
             leftShoulderHeld = leftShoulder;
             rightShoulderHeld = rightShoulder;
-            if (platform.MouseGrabbed)
+            if (inWorld)
             {
                 ResetDpad();
-                lookRemainderX += Curve(rx) * profile.LookSensitivity * dt * (profile.InvertLookX ? -1f : 1f);
-                lookRemainderY += Curve(ry) * profile.LookSensitivity * dt * (profile.InvertLookY ? -1f : 1f);
+                Vector2 curvedLook = ControllerStickProcessing.Process(lookStick, 0f, 0f,
+                    profile.LookCurveExponent);
+                lookRemainderX += curvedLook.X * profile.LookSensitivity * 1.5f * dt * (profile.InvertLookX ? -1f : 1f);
+                lookRemainderY += curvedLook.Y * profile.LookSensitivity * 1.5f * dt * (profile.InvertLookY ? -1f : 1f);
                 UpdateGyroState(profile.GyroEnabled && gyroAvailable &&
                     (!profile.GyroRequireSecondaryTrigger ||
                      Trigger(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative)));
@@ -367,23 +505,40 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             else if (platform.HasControllerWindow)
             {
                 UpdateGyroState(false);
+                if (Pressed(profile.PreviousHotbarButton) || Pressed(profile.NextHotbarButton))
+                {
+                    var tab = new HeldKey((int)GlKeys.Tab, false, false, Pressed(profile.PreviousHotbarButton));
+                    SendKey(tab, true);
+                    SendKey(tab, false);
+                }
                 // A focused inventory grid already understands arrows and Enter.
                 // Otherwise snap to the next active widget/slot, with a fixed
                 // step as a fallback for UIs without discoverable elements.
                 float step = Math.Max(1f, RuntimeEnv.GUIScale) *
                     (float)(GuiElementPassiveItemSlot.unscaledSlotSize + GuiElementItemSlotGridBase.unscaledSlotPadding);
                 Vector2 pos = platform.ControllerCursorPosition;
+                Vector2 originalPos = pos;
                 bool up = DpadPulse(11, now), down = DpadPulse(12, now);
                 bool left = DpadPulse(13, now), right = DpadPulse(14, now);
-                List<Vector2>? targets = (up || down || left || right) && focusedGrid == null
-                    ? ControllerGuiTargets.Collect(platform, composers ?? ControllerGuiTargets.ActiveComposers(platform)) : null;
+                List<Vector2>? targets = (up || down || left || right)
+                    ? focusedGrid != null && slotTargets is { Count: > 0 }
+                        ? slotTargets.Select(target => target.Center).ToList()
+                        : ControllerGuiTargets.Collect(platform, composers ?? ControllerGuiTargets.ActiveComposers(platform)) : null;
                 if (up) DpadMove(GlKeys.Up, new Vector2(0, -1), step, focusedGrid, focusedSlider, targets, ref pos);
                 if (down) DpadMove(GlKeys.Down, new Vector2(0, 1), step, focusedGrid, focusedSlider, targets, ref pos);
                 if (left) DpadMove(GlKeys.Left, new Vector2(-1, 0), step, focusedGrid, focusedSlider, targets, ref pos);
                 if (right) DpadMove(GlKeys.Right, new Vector2(1, 0), step, focusedGrid, focusedSlider, targets, ref pos);
                 (int width, int height) = platform.ControllerWindowSize;
-                pos.X = Math.Clamp(pos.X + Curve(rx) * profile.CursorSensitivity * dt, 0, Math.Max(0, width - 1));
-                pos.Y = Math.Clamp(pos.Y + Curve(ry) * profile.CursorSensitivity * dt, 0, Math.Max(0, height - 1));
+                Vector2 cursorStick = profile.MenuCursorUsesLeftStick ? inputContext.Movement(rawMoveStick) : lookStick;
+                Vector2 wheelStick = profile.MenuCursorUsesLeftStick ? lookStick : inputContext.Movement(rawMoveStick);
+                pos.X = Math.Clamp(pos.X + cursorStick.X * profile.CursorSensitivity * dt, 0, Math.Max(0, width - 1));
+                pos.Y = Math.Clamp(pos.Y + cursorStick.Y * profile.CursorSensitivity * dt, 0, Math.Max(0, height - 1));
+                if (Math.Abs(wheelStick.Y) < 0.5f) nextMenuScroll = 0;
+                else if (now >= nextMenuScroll)
+                {
+                    Scroll(wheelStick.Y < 0 ? 1 : -1);
+                    nextMenuScroll = now + Stopwatch.Frequency / 5;
+                }
                 ElementBounds? keyboardBounds = keyboardScreen?.IsOpened == true
                     ? keyboardScreen.ElementComposer.Bounds
                     : keyboardDialog?.IsOpened() == true ? keyboardDialog.SingleComposer.Bounds : null;
@@ -394,8 +549,11 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                     pos.Y = Math.Clamp(pos.Y, (float)keyboardBounds.absY + 8,
                         (float)(keyboardBounds.absY + keyboardBounds.OuterHeight - 8));
                 }
-                platform.ControllerCursorPosition = pos;
+                // SDL can emit mouse motion even for a warp to the same point.
+                // An idle controller must not drive GUI hover/texture work every frame.
+                if (pos != originalPos) platform.ControllerCursorPosition = pos;
             }
+            previousButtons = inputContext.Buttons(sampledButtons);
         }
         catch (DllNotFoundException error) { Disable(error.Message); }
         catch (EntryPointNotFoundException error) { Disable(error.Message); }
@@ -427,6 +585,28 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         return ids.IsEmpty ? 0 : ids[0];
     }
 
+    private void LogRoutingState(string state)
+    {
+        if (state == loggedRoutingState) return;
+        loggedRoutingState = state;
+        platform.Original.Logger.Notification("[VulkanStory] Controller input: {0}", state);
+    }
+
+    private void LogFirstInput()
+    {
+        if (gamepad == 0 || firstInputLogged) return;
+        uint buttons = PressedButtonMask();
+        short lx = SDL_GetGamepadAxis(gamepad, profile.MoveXAxis), ly = SDL_GetGamepadAxis(gamepad, profile.MoveYAxis);
+        short rx = SDL_GetGamepadAxis(gamepad, profile.LookXAxis), ry = SDL_GetGamepadAxis(gamepad, profile.LookYAxis);
+        if (buttons == 0 && Math.Abs((int)lx) < 8192 && Math.Abs((int)ly) < 8192 &&
+            Math.Abs((int)rx) < 8192 && Math.Abs((int)ry) < 8192 &&
+            SDL_GetGamepadAxis(gamepad, profile.PrimaryTriggerAxis) < 16384 &&
+            SDL_GetGamepadAxis(gamepad, profile.SecondaryTriggerAxis) < 16384) return;
+        firstInputLogged = true;
+        platform.Original.Logger.Notification("[VulkanStory] First SDL controller input: {0}; buttons=0x{1}; move={2},{3}; look={4},{5}; focused={6}",
+            gamepadName, buttons.ToString("X"), lx, ly, rx, ry, platform.IsFocused);
+    }
+
     private void RefreshGamepad(bool deviceChanged)
     {
         int count;
@@ -443,10 +623,16 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             }
         }
         finally { if (ids != 0) SDL_free(ids); }
+        if (count != loggedGamepadCount)
+        {
+            loggedGamepadCount = count;
+            platform.Original.Logger.Notification("[VulkanStory] SDL gamepad scan: {0} devices; selected ID {1}", count, chosen);
+        }
         if (chosen == gamepadId && (chosen == 0 || gamepad != 0))
         {
             if (deviceChanged && gamepad != 0)
             {
+                ReadSupportedButtons();
                 PublishControllerHints();
                 settingsDialog?.RequestRefresh();
             }
@@ -455,17 +641,27 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         FlushProfile(true);
         if (chosen != 0) RememberUnsavedProfile();
         ReleaseAll();
+        inputContext.Reset();
+        previousButtons = 0;
+        CloseRadial();
         CloseSettings();
         CloseKeyboard();
         buttonCapture.Cancel();
         if (gamepad != 0) SDL_CloseGamepad(gamepad);
         gamepad = 0;
         gamepadId = chosen;
-        if (chosen == 0) { PublishControllerHints(); return; }
+        supportedButtons = 0;
+        firstInputLogged = false;
+        nextStatusUpdate = 0;
+        if (chosen == 0) { gamepadName = "none"; Status = "no SDL gamepad connected"; PublishControllerHints(); return; }
         gamepad = SDL_OpenGamepad(chosen);
         if (gamepad != 0)
         {
+            failedOpenId = 0;
+            ReadSupportedButtons();
             string name = Marshal.PtrToStringUTF8(SDL_GetGamepadName(gamepad)) ?? chosen.ToString();
+            gamepadName = name;
+            Status = name + ": opened by SDL";
             string? serial = Marshal.PtrToStringUTF8(SDL_GetGamepadSerial(gamepad));
             string key = ControllerProfileStore.DeviceKey(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad), name, serial);
             profilePath = Path.Combine(GamePaths.ModConfig, "optimum-controllers.json");
@@ -492,12 +688,21 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 platform.Original.Logger.Warning("[VulkanStory] {0} has no SDL3 gyroscope; stick look remains active", name);
             platform.Original.Logger.Notification("[VulkanStory] SDL3 gamepad connected: {0} (profile {1})", name, key);
         }
+        else if (failedOpenId != chosen)
+        {
+            failedOpenId = chosen;
+            platform.Original.Logger.Warning("[VulkanStory] SDL_OpenGamepad failed for ID {0}: {1}", chosen, Error());
+        }
         PublishControllerHints();
     }
 
     private void PublishControllerHints()
     {
-        ControllerHints.Publish(gamepad == 0 ? null : ControllerGlyphs.Build(profile, ButtonName));
+        bool gui = !platform.IsFocused || !platform.MouseGrabbed;
+        bool modifier = !gui && modifierActive;
+        publishedGuiContext = gui;
+        publishedModifierContext = modifier;
+        ControllerHints.Publish(gamepad == 0 ? null : ControllerGlyphs.Build(profile, ButtonName, gui, modifier));
         ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
     }
 
@@ -507,29 +712,60 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
     }
 
-    private float Stick(int axis, float deadzone)
+    private Vector2 ReadStick(int xAxis, int yAxis, float inner, float outer)
     {
-        float value = Math.Clamp(SDL_GetGamepadAxis(gamepad, axis) / 32767f, -1f, 1f);
-        return MathF.Abs(value) < deadzone ? 0f : MathF.CopySign((MathF.Abs(value) - deadzone) / (1f - deadzone), value);
+        return ControllerStickProcessing.Process(new Vector2(Axis(xAxis) / 32767f, Axis(yAxis) / 32767f), inner, outer);
     }
+
+    private short Axis(int axis) => sampleValid ? sampledAxes[axis] : gamepad == 0 ? (short)0 : SDL_GetGamepadAxis(gamepad, axis);
 
     private bool Moving(string action, float magnitude, bool analogWalking) => magnitude >
         (heldKeys.ContainsKey(action)
             ? (analogWalking ? 0.01f : profile.MoveReleaseThreshold)
             : (analogWalking ? 0.02f : profile.MovePressThreshold));
 
-    private float Curve(float value) => MathF.CopySign(MathF.Pow(MathF.Abs(value), profile.LookCurveExponent), value);
-    private bool Button(int button) => SDL_GetGamepadButton(gamepad, button);
-    private uint PressedButtonMask()
+    private bool Button(int button) => button is >= 0 and < 32 &&
+        (inputContext.Buttons(sampleValid ? sampledButtons : ReadButtonMask()) & ~layerBlockedButtons &
+         ~(profile.ModifierEnabled && modifierActive ? 1u << profile.ModifierButton : 0u) & (1u << button)) != 0;
+
+    private bool ActionDown(string action, int button, ControllerGestureMode fallback = ControllerGestureMode.Hold)
+    {
+        if (modifierActive) button = ControllerLayerBindings.Resolve(profile.ModifierBindings, action, button);
+        if (!gestures.TryGetValue(action, out ControllerGesture? gesture)) gestures[action] = gesture = new ControllerGesture();
+        ControllerGestureMode mode = profile.ActionModes.GetValueOrDefault(action, fallback);
+        return gesture.Update(Button(button), mode, Environment.TickCount64, profile.TapThresholdMs, profile.LongPressThresholdMs);
+    }
+
+    private bool ActionPulse(string action, int button, ControllerGestureMode fallback)
+    {
+        bool previous = gestures.TryGetValue(action, out ControllerGesture? gesture) && gesture.Output;
+        return ActionDown(action, button, fallback) && !previous;
+    }
+    private bool Pressed(int button) => Button(button) && (previousButtons & (1u << button)) == 0;
+    private uint PressedButtonMask() => sampleValid ? sampledButtons : ReadButtonMask();
+    private uint ReadButtonMask()
     {
         if (gamepad == 0) return 0;
         uint mask = 0;
         for (int button = 0; button < 32; button++)
-            if (Button(button)) mask |= 1u << button;
+            if ((supportedButtons & (1u << button)) != 0 && SDL_GetGamepadButton(gamepad, button)) mask |= 1u << button;
         return mask;
     }
-    private bool Trigger(int axis, bool negative) => AxisThresholdPressed(
-        SDL_GetGamepadAxis(gamepad, axis), negative, profile.TriggerThreshold);
+
+    private void ReadSupportedButtons()
+    {
+        supportedButtons = 0;
+        for (int button = 0; button < 32; button++)
+            if (SDL_GamepadHasButton(gamepad, button)) supportedButtons |= 1u << button;
+    }
+    private bool RawTrigger(int axis, bool negative) => AxisThresholdPressed(Axis(axis), negative, profile.TriggerThreshold);
+    private bool Trigger(int axis, bool negative)
+    {
+        bool raw = RawTrigger(axis, negative);
+        if (axis == profile.PrimaryTriggerAxis && negative == profile.PrimaryTriggerNegative) return inputContext.Primary(raw);
+        if (axis == profile.SecondaryTriggerAxis && negative == profile.SecondaryTriggerNegative) return inputContext.Secondary(raw);
+        return raw;
+    }
 
     internal static bool AxisThresholdPressed(short value, bool negative, float threshold) =>
         (negative ? -(int)value : value) > threshold * 32767f;
@@ -655,14 +891,9 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private void Scroll(int direction)
     {
         NoteControllerActivity();
-        foreach (MouseEventHandler handler in platform.Original.mouseEventHandlers)
-            handler.OnMouseWheel(new MouseWheelEventArgs
-            {
-                delta = direction,
-                deltaPrecise = direction,
-                value = direction,
-                valuePrecise = direction
-            });
+        // Share the physical wheel's cumulative position; a fixed +/-1 value
+        // makes consumers comparing successive positions jump or stop stepping.
+        platform.InjectControllerMouseWheel(direction);
     }
 
     private void ToggleSettings()
@@ -675,17 +906,43 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     {
         CloseKeyboard();
         ClientMain? game = ControllerGuiTargets.ActiveGame(platform);
-        if (gamepad == 0 || game?.api == null) return false;
+        if (gamepad == 0 || game?.api == null)
+        {
+            platform.Original.Logger.Warning("[VulkanStory] Controller settings cannot open: {0}; current screen={1}",
+                gamepad == 0 ? "no open SDL gamepad" : "active game/API not found",
+                platform.ControllerCurrentScreen()?.GetType().Name ?? "none");
+            return false;
+        }
         if (settingsGame != game)
         {
             CloseSettings();
             settingsGame = game;
         }
-        settingsDialog ??= new ControllerSettingsDialog(game.api, this);
-        return settingsDialog.IsOpened() || settingsDialog.TryOpen();
+        try
+        {
+            settingsDialog ??= new ControllerSettingsDialog(game.api, this);
+            bool opened = settingsDialog.IsOpened() || settingsDialog.TryOpen();
+            platform.Original.Logger.Notification("[VulkanStory] Controller settings open: {0}", opened);
+            return opened;
+        }
+        catch (Exception error)
+        {
+            platform.Original.Logger.Warning("[VulkanStory] Controller settings open failed: {0}", error);
+            throw;
+        }
     }
     internal ControllerSettingsDialog? OpenedSettings(ClientMain owner) =>
         ReferenceEquals(settingsGame, owner) && settingsDialog?.IsOpened() == true ? settingsDialog : null;
+
+    internal void OpenDiagnosticSettings(ClientMain game, int page)
+    {
+        if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Controller UI diagnostics require the isolated harness.");
+        CloseSettings();
+        settingsGame = game;
+        settingsDialog = new ControllerSettingsDialog(game.api, this);
+        settingsDialog.ShowDiagnosticPage(page);
+        if (!settingsDialog.TryOpen()) throw new InvalidOperationException("Controller settings diagnostic could not open.");
+    }
     internal bool OwnsSettings(ClientMain owner, ControllerSettingsDialog dialog) =>
         ReferenceEquals(settingsGame, owner) && ReferenceEquals(settingsDialog, dialog);
 
@@ -748,8 +1005,60 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         }
     }
 
+    private void CloseRadial()
+    {
+        ControllerRadialDialog? dialog = radialDialog;
+        ClientMain? game = radialGame;
+        radialDialog = null;
+        radialGame = null;
+        radialButtonWasDown = false;
+        inputContext.Reset();
+        if (dialog == null) return;
+        try { dialog.TryClose(); }
+        finally { try { game?.UnregisterDialog(dialog); } finally { dialog.Dispose(); } }
+    }
+
+    internal bool OpenRadial(ClientMain game)
+    {
+        CloseRadial();
+        radialGame = game;
+        radialDialog = new ControllerRadialDialog(game.api, profile.RadialActions);
+        radialButtonWasDown = true;
+        if (radialDialog.TryOpen()) return true;
+        CloseRadial();
+        return false;
+    }
+
+    internal ControllerRadialDialog? OpenedRadial(ClientMain game) =>
+        ReferenceEquals(radialGame, game) && radialDialog?.IsOpened() == true ? radialDialog : null;
+
+    private void ExecuteRadialAction(string action)
+    {
+        switch (action)
+        {
+            case "inventory": PulseKey("inventorydialog", GlKeys.E); break;
+            case "menu": PulseKey("escapemenudialog", GlKeys.Escape); break;
+            case "settings": OpenSettings(); break;
+            case "drop": PulseKey("dropitem", GlKeys.Q); break;
+            case "previous": Scroll(1); break;
+            case "next": Scroll(-1); break;
+            case "firstslot":
+                if (ControllerGuiTargets.ActiveGame(platform)?.api?.World?.Player is { } player)
+                    player.InventoryManager.ActiveHotbarSlotNumber = 0;
+                break;
+            case "screenshot": PulseKey("screenshot", GlKeys.F12); break;
+        }
+    }
+
+    private void PulseKey(string action, GlKeys fallback)
+    {
+        SetKey(action, true, fallback);
+        SetKey(action, false, fallback);
+    }
+
     internal void WorldLeaving(ClientMain game)
     {
+        if (ReferenceEquals(radialGame, game)) CloseRadial();
         if (ReferenceEquals(settingsGame, game)) CloseSettings();
         if (ReferenceEquals(keyboardGame, game)) CloseKeyboard();
         if (ReferenceEquals(damageGame, game) || ReferenceEquals(damageAttributes, game.EntityPlayer?.WatchedAttributes))
@@ -759,6 +1068,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         if (ControllerGuiTargets.ActiveGame(platform) is { } current && !ReferenceEquals(current, game)) return;
         buttonCapture.Cancel();
         ReleaseAll();
+        inputContext.Reset();
     }
 
     private GuiElementItemSlotGridBase? FocusedSlotGrid(IReadOnlyList<GuiComposer> composers)
@@ -810,11 +1120,11 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         if (!dpadHeld[index])
         {
             dpadHeld[index] = true;
-            dpadNextRepeat[index] = now + Stopwatch.Frequency * 300 / 1000;
+            dpadNextRepeat[index] = now + Stopwatch.Frequency / 2;
             return true;
         }
         if (now < dpadNextRepeat[index]) return false;
-        dpadNextRepeat[index] = now + Stopwatch.Frequency * 90 / 1000;
+        dpadNextRepeat[index] = now + Stopwatch.Frequency / 10;
         return true;
     }
 
@@ -825,16 +1135,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         NoteControllerActivity();
         if (grid != null)
         {
-            var held = new HeldKey((int)key, false, false, false);
-            SendKey(held, true);
-            SendKey(held, false);
-            int index = grid.tabbedSlotId;
-            if (grid.SlotBounds != null && index >= 0 && index < grid.SlotBounds.Length)
-            {
-                ElementBounds bounds = grid.SlotBounds[index];
-                cursor = new Vector2((float)(bounds.absX + bounds.OuterWidth / 2),
-                    (float)(bounds.absY + bounds.OuterHeight / 2));
-            }
+            if (targets != null && ControllerCursorNavigation.TryNext(cursor, direction, targets, out Vector2 next)) cursor = next;
         }
         else if (slider != null && (key == GlKeys.Left || key == GlKeys.Right))
         {
@@ -872,17 +1173,23 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     // Retry pending profile writes while disabled without polling controller input.
     internal void PollSuspended()
     {
+        LogRoutingState("disabled in VulkanStory settings");
         FlushProfile(false);
         FlushPendingProfiles(false);
     }
     internal void OnFocusLost()
     {
+        CloseRadial();
         requestedGamepadId = 0;
         ReleaseAll();
+        inputContext.Reset();
     }
 
     private void ReleaseAll()
     {
+        gestures.Clear();
+        InputActive = false;
+        previousButtons = inputContext.Buttons(sampledButtons);
         platform.ControllerMoveFactor = 1f;
         platform.ControllerMoveAxes = Vector2.Zero;
         sneakToggle.Reset(gamepad != 0 && Button(profile.SneakButton));
@@ -929,6 +1236,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
 
     public void Dispose()
     {
+        CloseRadial();
         CloseSettings();
         CloseKeyboard();
         ControllerHints.Publish(null);
@@ -937,6 +1245,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         FlushPendingProfiles(true);
         buttonCapture.Cancel();
         ReleaseAll();
+        inputContext.Reset();
         if (gamepad != 0) SDL_CloseGamepad(gamepad);
         gamepad = 0;
         gamepadId = 0;
@@ -987,6 +1296,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private static extern short SDL_GetGamepadAxis(nint gamepad, int axis);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_GetGamepadButton(nint gamepad, int button);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_GamepadHasButton(nint gamepad, int button);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     private static extern int SDL_GetGamepadButtonLabel(nint gamepad, int button);
 }

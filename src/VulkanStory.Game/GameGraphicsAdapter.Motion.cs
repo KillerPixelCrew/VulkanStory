@@ -22,11 +22,12 @@ internal sealed partial class GameGraphicsAdapter
     private static string MotionProgramPrefix(int motion) =>
         "#define TAAMOTION 1\n#define TAAMOTIONLOCATION " + motion +
         "\n#define SSAOLEVEL " + (motion == 4 ? 1 : 0) + "\n";
-    private void RejectSceneDraw()
+    private void RejectSceneDraw(string reason = "native scene draw rejected")
     {
         if (aoTemporal?.InScene == true && currentFramebuffer != null &&
             platform!.FrameBuffers is { Count: > 0 } targets && ReferenceEquals(currentFramebuffer, targets[0]))
-            aoTemporal.RejectMotionDraw();
+            aoTemporal.RejectMotionDraw(reason + "; pass=" +
+                (ShaderProgramBase.CurrentShaderProgram?.PassName ?? "unknown") + "; program=" + StatedProgram);
     }
     internal bool BeginCameraMotionWrite()
     {

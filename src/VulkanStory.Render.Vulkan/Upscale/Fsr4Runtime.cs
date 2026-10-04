@@ -21,7 +21,9 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
 {
     private nint module;
     private nint context;
-    private readonly delegate* unmanaged[Cdecl]<nint, void> destroy;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> destroy;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> prepareDestroy;
+    private Exception? releaseFailure;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, uint, uint, uint, nint*, nint*, int> createImage;
     private readonly delegate* unmanaged[Cdecl]<nint, void> releaseImage;
     private readonly delegate* unmanaged[Cdecl]<nint, nint*, int> createFence;
@@ -32,7 +34,8 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
     {
         this.module = module;
         this.context = context;
-        destroy = (delegate* unmanaged[Cdecl]<nint, void>)Export("VulkanStoryFsr4Destroy");
+        destroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr4DestroyChecked");
+        prepareDestroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr4PrepareDestroy");
         createImage = (delegate* unmanaged[Cdecl]<nint, uint, uint, uint, uint, nint*, nint*, int>)Export("VulkanStoryFsr4CreateSharedImage");
         releaseImage = (delegate* unmanaged[Cdecl]<nint, void>)Export("VulkanStoryFsr4ReleaseImage");
         createFence = (delegate* unmanaged[Cdecl]<nint, nint*, int>)Export("VulkanStoryFsr4CreateSharedFence");
@@ -61,11 +64,14 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         try
         {
             bridge = NativeRuntimePaths.LoadLibrary(Path.Combine(directory, "VulkanStoryFsr4.dll"));
+            _ = NativeLibrary.GetExport(bridge, "VulkanStoryFsr4DestroyChecked");
+            _ = NativeLibrary.GetExport(bridge, "VulkanStoryFsr4PrepareDestroy");
             reason = "ready";
             return true;
         }
         catch (Exception error)
         {
+            if (bridge != 0) { NativeLibrary.Free(bridge); bridge = 0; }
             reason = "FSR 4 bridge failed to load: " + error.Message;
             return false;
         }
@@ -83,28 +89,36 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
     {
         runtime = null;
         nint context = 0;
+        Fsr4Runtime? instance = null;
         try
         {
+            instance = new Fsr4Runtime(bridge, 0);
             var create = (delegate* unmanaged[Cdecl]<nint, uint, uint, uint, uint, nint*, int>)
                 NativeLibrary.GetExport(bridge, "VulkanStoryFsr4Create");
             int code = create(physical, (uint)plan.RenderWidth, (uint)plan.RenderHeight,
                 (uint)plan.DisplayWidth, (uint)plan.DisplayHeight, &context);
+            instance.context = context;
             if (code != 0 || context == 0)
             {
                 reason = "FSR 4 DX12 context creation failed (" + code.ToString("X8") + ")";
+                instance.Dispose();
                 return false;
             }
-            runtime = new Fsr4Runtime(bridge, context);
+            runtime = instance;
             reason = "ready";
             return true;
         }
         catch (Exception error)
         {
-            if (context != 0)
+            if (instance != null)
             {
-                var destroyContext = (delegate* unmanaged[Cdecl]<nint, void>)
-                    NativeLibrary.GetExport(bridge, "VulkanStoryFsr4Destroy");
-                destroyContext(context);
+                try { instance.Dispose(); }
+                catch (Exception cleanup)
+                {
+                    runtime = instance;
+                    reason = "FSR 4 initialization cleanup failed; owner retained: " + cleanup.Message;
+                    return false;
+                }
             }
             reason = "FSR 4 DX12 context failed: " + error.Message;
             return false;
@@ -138,11 +152,31 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         return context != 0 ? evaluate(context, &copy) : -1;
     }
     public int WaitIdle() => context != 0 ? waitIdle(context) : -1;
+    internal void PrepareRelease()
+    {
+        if (releaseFailure != null)
+            throw new InvalidOperationException("FSR 4 native release failed; remaining owners retained.", releaseFailure);
+        if (context == 0) return;
+        try
+        {
+            int result = prepareDestroy(context);
+            if (result != 0) throw new InvalidOperationException("FSR 4 SDK release preparation failed (" + result + ").");
+        }
+        catch (Exception failure) { releaseFailure = failure; throw; }
+    }
     public void Dispose()
     {
-        nint owned = context;
-        context = 0;
-        if (owned != 0) destroy(owned);
+        PrepareRelease();
+        if (context != 0)
+        {
+            int result = destroy(context);
+            if (result != 0)
+            {
+                releaseFailure = new InvalidOperationException("FSR 4 native destruction failed (" + result + ").");
+                throw releaseFailure;
+            }
+            context = 0;
+        }
         // The bridge module stays loaded until backend shutdown, after every
         // imported Vulkan resource and DX12 context has been destroyed.
     }

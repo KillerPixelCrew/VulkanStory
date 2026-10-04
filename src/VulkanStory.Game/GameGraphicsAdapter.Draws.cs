@@ -18,7 +18,7 @@ internal sealed partial class GameGraphicsAdapter
         var renderer = RequireDevice();
         lastStatedDrawRefusal = null;
         if (mesh is not null && (mesh.VaoId == 0 || mesh.Disposed)) return false;
-        if (StatedProgram <= 0) { RejectSceneDraw(); return false; }
+        if (StatedProgram <= 0) { RejectSceneDraw("stated draw has no program"); return false; }
         int id = mesh is null ? 0 : MeshHandle(mesh);
         RuntimeStats.drawCallsCount++;
         PassDeclaration? declaration = StatedPass?.FramebufferId == CurrentTargetId ? StatedPass : StageDrawDeclaration();
@@ -27,7 +27,7 @@ internal sealed partial class GameGraphicsAdapter
         lastStatedDrawRefusal = refusal;
         if (drawn) { StatedDraws++; return true; }
         RuntimeStats.drawCallsCount--;
-        RejectSceneDraw();
+        RejectSceneDraw("stated draw: " + (refusal ?? "no refusal detail"));
         if (refusal != null && reportedDrawRefusals.Add(StatedProgram))
             Console.Error.WriteLine("VulkanStory: draw of program #" + StatedProgram + " dropped: " + refusal);
         return false;

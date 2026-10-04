@@ -63,7 +63,12 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
     {
         _context = context;
         Frame = CreateTimeline(context, "the Frame timeline semaphore");
-        Transfer = CreateTimeline(context, "the Transfer timeline semaphore");
+        try { Transfer = CreateTimeline(context, "the Transfer timeline semaphore"); }
+        catch
+        {
+            context.Api.DestroySemaphore(context.Device, Frame, null);
+            throw;
+        }
     }
 
     private static Semaphore CreateTimeline(VulkanContext context, string what)

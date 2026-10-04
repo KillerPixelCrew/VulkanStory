@@ -139,9 +139,10 @@ internal sealed partial class GameGraphicsAdapter
         ResolveNativeEntityTextures(pipeline, program.ProgramId, samplerName, textureId);
 
         bool drawn = false;
+        bool passOpened = false;
         try
         {
-            if (RequireDevice().BeginNativePass(new NativePassDescription
+            if (passOpened = RequireDevice().BeginNativePass(new NativePassDescription
             {
                 // The stage's own pass, so the declaration coalesces and the scope stays open across
                 // the whole loop. Closed with keepScope below for the same reason.
@@ -157,7 +158,7 @@ internal sealed partial class GameGraphicsAdapter
         }
         finally { RequireDevice().EndNativePass(keepScope: true); }
         if (drawn) RuntimeStats.drawCallsCount++;
-        else RejectSceneDraw();
+        else RejectSceneDraw(passOpened ? "entity native mesh draw rejected" : "entity native pass declined");
     }
 
     /// <summary>Whether the program in use is one this file draws natively.</summary>

@@ -89,7 +89,8 @@ internal sealed unsafe class FrameSlot : IDisposable
             QueueFamilyIndex = context.GraphicsQueueFamily,
             Flags = CommandPoolCreateFlags.TransientBit,
         };
-        context.Api.CreateCommandPool(context.Device, &poolInfo, null, out CommandPool commandPool);
+        VulkanResult.Check(context.Api.CreateCommandPool(context.Device, &poolInfo, null, out CommandPool commandPool),
+            "vkCreateCommandPool for a frame slot");
         CommandPool = commandPool;
     }
 
@@ -100,7 +101,8 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// </summary>
     public void Begin(ulong frameValue)
     {
-        _context.Api.ResetCommandPool(_context.Device, CommandPool, 0);
+        VulkanResult.Check(_context.Api.ResetCommandPool(_context.Device, CommandPool, 0),
+            "vkResetCommandPool for a frame slot");
         _cursor = 0;
         _commandBuffersUsed = 0;
         PartialSubmits = 0;
@@ -289,7 +291,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         CommandsEnding?.Invoke(Index, commandBuffer);
-        api.EndCommandBuffer(commandBuffer);
+        VulkanResult.Check(api.EndCommandBuffer(commandBuffer), "vkEndCommandBuffer for a frame submission");
 
         Semaphore* waits = stackalloc Semaphore[4];
         ulong* waitValues = stackalloc ulong[4];
@@ -524,29 +526,43 @@ internal sealed class FrameRing : IDisposable
     public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024,
         ulong stagingPerSlot = UploadManager.DefaultStagingPerSlot)
     {
-        _timeline = new FrameTimeline(context);
-        _retired = new RetireQueue(_timeline);
-        _uploads = new UploadManager(context, _timeline, _retired, framesInFlight, stagingPerSlot);
-        _allocator = context.Allocator;
-        // Per-frame dynamic data: the ReBAR class, falling through to host memory
-        // (counted and logged) when the cap or the device says no.
-        // Storage usage too: a rewritten program's named blocks read their per-draw
-        // snapshot from here as std140 storage buffers (shared layout, set 2).
-        _uniformRing = new VulkanBuffer(context, uniformRingSize,
-            BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit,
-            MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
-            MemoryPoolClass.ReBar);
-
-        // Each region must start on a uniform-offset boundary, otherwise every
-        // dynamic offset handed out from slot 1 onwards inherits the misalignment.
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(framesInFlight);
         ulong alignment = OffsetAlignment(context.Capabilities);
         ulong regionSize = uniformRingSize / (ulong)framesInFlight / alignment * alignment;
+        if (regionSize == 0) throw new ArgumentOutOfRangeException(nameof(uniformRingSize), "Each frame needs an aligned uniform region.");
+        _allocator = context.Allocator;
         _slots = new FrameSlot[framesInFlight];
-        for (int i = 0; i < framesInFlight; i++)
+        FrameTimeline? timeline = null;
+        UploadManager? uploads = null;
+        VulkanBuffer? uniformRing = null;
+        try
         {
-            _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i,
-                _latency);
-            _slots[i].Gate = _gate;
+            _timeline = timeline = new FrameTimeline(context);
+            _retired = new RetireQueue(_timeline);
+            _uploads = uploads = new UploadManager(context, _timeline, _retired, framesInFlight, stagingPerSlot);
+            // Per-frame dynamic data: the ReBAR class, falling through to host memory
+            // (counted and logged) when the cap or the device says no.
+            // Storage usage too: a rewritten program's named blocks read their per-draw
+            // snapshot from here as std140 storage buffers (shared layout, set 2).
+            _uniformRing = uniformRing = new VulkanBuffer(context, uniformRingSize,
+                BufferUsageFlags.UniformBufferBit | BufferUsageFlags.StorageBufferBit,
+                MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+                MemoryPoolClass.ReBar);
+            for (int i = 0; i < framesInFlight; i++)
+            {
+                _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i,
+                    _latency);
+                _slots[i].Gate = _gate;
+            }
+        }
+        catch
+        {
+            // No work has been submitted during construction.
+            for (int i = _slots.Length - 1; i >= 0; i--) _slots[i]?.Dispose();
+            uniformRing?.Dispose();
+            uploads?.Dispose();
+            timeline?.Dispose();
+            throw;
         }
     }
 

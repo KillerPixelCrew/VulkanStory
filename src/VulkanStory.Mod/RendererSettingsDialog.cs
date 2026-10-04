@@ -12,6 +12,11 @@ internal sealed class RendererSettingsDialog : GuiDialog
         ComposePanel();
     }
     public override bool DisableMouseGrab => true;
+    public override void OnGuiClosed()
+    {
+        if (panel.EndPreview() is string error) capi.ShowChatMessage("Could not restore settings: " + error);
+        base.OnGuiClosed();
+    }
     public override string ToggleKeyCombinationCode => null!;
     public override void OnRenderGUI(float deltaTime)
     {

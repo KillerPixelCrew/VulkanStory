@@ -54,9 +54,9 @@ public sealed class VulkanStoryModSystem : ModSystem
         string action = (args[0] as string ?? "settings").ToLowerInvariant();
         if (action == "diagnostic-options")
         {
-            if (AppContext.GetData("VulkanStory.Runtime.DiagnosticOptions") is not Func<string?> inspect)
+            if (AppContext.GetData("VulkanStory.Runtime.DiagnosticOptions") is not System.Func<string, string?> inspect)
                 return TextCommandResult.Error("Options diagnostics are available only in an isolated harness client.");
-            string? error = inspect();
+            string? error = inspect(args[1] as string ?? "open");
             return error == null ? TextCommandResult.Success("Options diagnostic queued.") : TextCommandResult.Error(error);
         }
         if (action == "controller")

@@ -8,6 +8,7 @@ public static class HeadlessHarnessOptions
     public static readonly bool Enabled = ResolveFlag("VULKANSTORY_HEADLESS");
     /// <summary>Explicit diagnostic launch only; routine harness windows stay hidden.</summary>
     public static readonly bool KeepWindowHidden = Enabled && !ResolveFlag("VULKANSTORY_HEADLESS_VISIBLE");
+    internal static readonly bool MainMenuOptions = Enabled && ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS");
 
     /// <summary>The chat-command script, or null when there is none.</summary>
     public static readonly string? CommandScriptPath = ResolveExistingFile("VULKANSTORY_HEADLESS_COMMANDS");

@@ -31,9 +31,15 @@ internal unsafe struct XessPresentationFrame
 /// </summary>
 internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
 {
+    // Failed bring-up has no presenter owner. Keep its native context/module
+    // reachable and pinned instead of unloading code after an unsuccessful release.
+    private static readonly System.Collections.Generic.List<XessFgRuntime> FailedCreates = new();
     private nint _module;
     private nint _context;
-    private readonly delegate* unmanaged[Cdecl]<nint, void> _destroy;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> _destroy;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> _prepareDestroy;
+    private Exception? _releaseFailure;
+    private readonly delegate* unmanaged[Cdecl]<nint> _lastCreateStage;
     private readonly delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, int> _start;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, int> _setEnabled;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, uint*, uint*, int> _setGeneratedFrames;
@@ -52,7 +58,10 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
     {
         _module = module;
         _context = context;
-        _destroy = (delegate* unmanaged[Cdecl]<nint, void>)Export("VulkanStoryXessFgDestroy");
+        _destroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryXessFgDestroyChecked");
+        _prepareDestroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryXessFgPrepareDestroy");
+        _lastCreateStage = NativeLibrary.TryGetExport(module, "VulkanStoryXessFgLastCreateStage", out nint stage)
+            ? (delegate* unmanaged[Cdecl]<nint>)stage : null;
         _start = (delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, int>)Export("VulkanStoryXessFgStart");
         _setEnabled = (delegate* unmanaged[Cdecl]<nint, uint, int>)Export("VulkanStoryXessFgSetEnabled");
         _setGeneratedFrames = (delegate* unmanaged[Cdecl]<nint, uint, uint*, uint*, int>)Export("VulkanStoryXessFgSetGeneratedFrames");
@@ -80,31 +89,45 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         if (!File.Exists(path)) { reason = "XeSS-FG DX12 bridge is not installed"; return false; }
         nint module = 0;
         nint context = 0;
+        XessFgRuntime? instance = null;
         try
         {
             module = NativeRuntimePaths.LoadLibrary(path);
+            // Bind required exports before creating a native owner. Old bridges
+            // cannot silently fall back to unchecked destruction.
+            instance = new XessFgRuntime(module, 0);
             var create = (delegate* unmanaged[Cdecl]<PhysicalDevice, nint*, int>)
                 NativeLibrary.GetExport(module, "VulkanStoryXessFgCreateFromVulkan");
             int result = create(vulkan.PhysicalDevice, &context);
+            instance._context = context;
             if (result != 0 || context == 0)
             {
-                reason = "XeSS-FG adapter, DX12, or XeLL initialization failed (" + result + ")";
-                NativeLibrary.Free(module);
+                string stage = instance._lastCreateStage != null
+                    ? Marshal.PtrToStringAnsi(instance._lastCreateStage()) ?? "unknown stage" : "adapter/DX12/XeLL";
+                reason = "XeSS-FG initialization failed at " + stage + " (" + result + ")";
+                if (stage == "xellD3D12CreateContext" && result == -2)
+                    reason += "; XeLL reports an unsupported driver; frame generation remains disabled.";
+                instance.Dispose();
                 return false;
             }
-            runtime = new XessFgRuntime(module, context);
+            runtime = instance;
             reason = "ready";
             return true;
         }
         catch (Exception error)
         {
-            if (context != 0 && module != 0)
+            if (instance != null)
             {
-                var destroy = (delegate* unmanaged[Cdecl]<nint, void>)
-                    NativeLibrary.GetExport(module, "VulkanStoryXessFgDestroy");
-                destroy(context);
+                try { instance.Dispose(); }
+                catch (Exception cleanup)
+                {
+                    lock (FailedCreates) FailedCreates.Add(instance);
+                    runtime = instance;
+                    reason = "XeSS-FG initialization/release failed; native owner retained: " + cleanup.Message;
+                    return false;
+                }
             }
-            if (module != 0) NativeLibrary.Free(module);
+            else if (module != 0) NativeLibrary.Free(module);
             reason = "XeSS-FG bridge unavailable: " + error.Message;
             return false;
         }
@@ -167,11 +190,31 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         return code;
     }
 
+    internal void PrepareRelease()
+    {
+        if (_releaseFailure != null)
+            throw new InvalidOperationException("XeSS-FG runtime release failed; remaining owners are retained.", _releaseFailure);
+        if (_context == 0) return;
+        try
+        {
+            int result = _prepareDestroy(_context);
+            if (result != 0) throw new InvalidOperationException("XeSS-FG native release preparation failed (" + result + ").");
+        }
+        catch (Exception failure) { _releaseFailure = failure; throw; }
+    }
     public void Dispose()
     {
-        nint context = _context;
-        _context = 0;
-        if (context != 0) _destroy(context);
+        PrepareRelease();
+        if (_context != 0)
+        {
+            int result = _destroy(_context);
+            if (result != 0)
+            {
+                _releaseFailure = new InvalidOperationException("XeSS-FG native destruction failed (" + result + ").");
+                throw _releaseFailure;
+            }
+            _context = 0;
+        }
         nint module = _module;
         _module = 0;
         if (module != 0) NativeLibrary.Free(module);

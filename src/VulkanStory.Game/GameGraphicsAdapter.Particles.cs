@@ -75,7 +75,7 @@ internal sealed partial class GameGraphicsAdapter
                 ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
                 ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
             }) && renderer.DrawNativeMeshInstanced(pipeline, handle, quantity, textures)) RuntimeStats.drawCallsCount++;
-            else RejectSceneDraw();
+            else RejectSceneDraw("particle native pass/instanced draw rejected");
         }
         finally { renderer.EndNativePass(); }
     }

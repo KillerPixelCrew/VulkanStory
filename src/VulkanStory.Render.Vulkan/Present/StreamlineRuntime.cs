@@ -83,6 +83,9 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
 
     private readonly nint _library;
     private readonly delegate* unmanaged[Cdecl]<void> _shutdown;
+    private readonly delegate* unmanaged[Cdecl]<void> _unload;
+    private readonly delegate* unmanaged[Cdecl]<Instance, byte*, nint> _instanceProc;
+    private readonly delegate* unmanaged[Cdecl]<Device, byte*, nint> _deviceProc;
     private readonly delegate* unmanaged[Cdecl]<InstanceCreateInfo*, Instance*, Result> _createInstance;
     private readonly delegate* unmanaged[Cdecl]<Instance, uint*, PhysicalDevice*, Result> _enumeratePhysicalDevices;
     private readonly delegate* unmanaged[Cdecl]<Instance, PhysicalDevice, DeviceCreateInfo*, Device*, Result> _createDevice;
@@ -116,12 +119,16 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     private readonly delegate* unmanaged[Cdecl]<CommandBuffer, StreamlineTaggedImage*, StreamlineTaggedImage*,
         StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, uint, uint, int> _tagFrame;
     private bool _disposed;
+    private bool _shutdownComplete;
 
     private StreamlineRuntime(nint library)
     {
         _library = library;
         nint Export(string name) => NativeLibrary.GetExport(library, name);
         _shutdown = (delegate* unmanaged[Cdecl]<void>)Export("VulkanStorySlShutdown");
+        _unload = (delegate* unmanaged[Cdecl]<void>)Export("VulkanStorySlUnload");
+        _instanceProc = (delegate* unmanaged[Cdecl]<Instance, byte*, nint>)Export("VulkanStorySlGetInstanceProcAddr");
+        _deviceProc = (delegate* unmanaged[Cdecl]<Device, byte*, nint>)Export("VulkanStorySlGetDeviceProcAddr");
         _createInstance = (delegate* unmanaged[Cdecl]<InstanceCreateInfo*, Instance*, Result>)Export("VulkanStorySlCreateInstance");
         _enumeratePhysicalDevices = (delegate* unmanaged[Cdecl]<Instance, uint*, PhysicalDevice*, Result>)Export("VulkanStorySlEnumeratePhysicalDevices");
         _createDevice = (delegate* unmanaged[Cdecl]<Instance, PhysicalDevice, DeviceCreateInfo*, Device*, Result>)Export("VulkanStorySlCreateDevice");
@@ -159,7 +166,7 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     }
 
     internal static bool TryCreate(int preferredDeviceIndex,
-        out StreamlineRuntime? runtime, out string reason)
+        out StreamlineRuntime? runtime, out string reason, uint? preferredVendorId = null)
     {
         runtime = null;
         string directory = NativeRuntimePaths.DirectoryContaining(
@@ -180,7 +187,10 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
             var instance = new StreamlineRuntime(library);
             var initialize = (delegate* unmanaged[Cdecl]<char*, byte*, uint, uint, int>)
                 NativeLibrary.GetExport(library, "VulkanStorySlInitialize");
-            bool nvidia = HasNvidiaDisplayAdapter();
+            // A different NVIDIA adapter in a hybrid system must not enable
+            // NVIDIA plugin extension injection on an explicitly selected Intel/AMD device.
+            bool nvidia = HasNvidiaDisplayAdapter() &&
+                (preferredVendorId == null || preferredVendorId == 0x10DE);
             bool loadReflex = ShouldLoadReflex(preferredDeviceIndex, nvidia,
                 Environment.GetEnvironmentVariable("VULKANSTORY_STREAMLINE_REFLEX"));
             bool loadDlssG = loadReflex && ShouldLoadDlssG(preferredDeviceIndex, nvidia,
@@ -212,6 +222,21 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         }
     }
 
+    internal nint GetVulkanProcAddress(Instance instance, Device device, string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        byte[] bytes = Encoding.UTF8.GetBytes(name + "\0");
+        fixed (byte* pointer = bytes)
+        {
+            // Global commands remain null-instance lookups even after Silk
+            // switches its table to the active instance/device.
+            if (name is "vkCreateInstance" or "vkEnumerateInstanceVersion" or
+                "vkEnumerateInstanceExtensionProperties" or "vkEnumerateInstanceLayerProperties")
+                return _instanceProc(default, pointer);
+            nint address = device.Handle != 0 ? _deviceProc(device, pointer) : 0;
+            return address != 0 ? address : _instanceProc(instance, pointer);
+        }
+    }
     internal Result CreateInstance(InstanceCreateInfo* info, out Instance instance)
     {
         instance = default;
@@ -293,11 +318,18 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         StreamlineTaggedImage* motion, StreamlineTaggedImage* hudless, StreamlineTaggedImage* ui,
         StreamlineFrameCamera* camera, uint width, uint height) =>
         _tagFrame(commands, depth, motion, hudless, ui, camera, width, height);
+    internal void Shutdown()
+    {
+        if (_shutdownComplete) return;
+        _shutdown();
+        _shutdownComplete = true;
+    }
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _shutdown();
+        Shutdown();
+        _unload();
         NativeLibrary.Free(_library);
     }
 }

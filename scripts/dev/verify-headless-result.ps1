@@ -5,7 +5,10 @@ param(
     [Parameter(Mandatory)][int]$ProcessExitCode,
     [Parameter(Mandatory)][bool]$TimedOut,
     [switch]$RequireScenario,
-    [switch]$Visible
+    [switch]$Visible,
+    [switch]$MainMenuOptions,
+    [ValidateSet('open','save','cancel')][string]$MainOptionsAction = 'open',
+    [string]$ExpectedGameAssembly
 )
 $ErrorActionPreference = 'Stop'
 $failures = [Collections.Generic.List[string]]::new()
@@ -86,6 +89,71 @@ function Assert-NullableResultInteger($Element) {
 
 $runRoot = [IO.Path]::GetFullPath($RunDirectory)
 $frameRoot = Join-Path $runRoot 'frames'
+$multiplierCheck = $env:VULKANSTORY_OPTIONS_MULTIPLIER_CHECK -eq '1'
+if ($multiplierCheck) {
+    try {
+        $multiplier = Read-ResultObject (Join-Path $frameRoot 'options-multiplier.json')
+        Require-ResultFields $multiplier @('success','context','before','sliderValue','requested','persisted','applied','returned')
+        $expectedContext = if ($MainMenuOptions) { 'main' } else { 'world' }
+        $valid = (Get-ResultBoolean $multiplier['success']) -and (Get-ResultString $multiplier['context']) -ceq $expectedContext
+        foreach ($field in @('sliderValue','requested','persisted','applied')) {
+            $valid = $valid -and (Get-ResultInteger $multiplier[$field]) -eq 6
+        }
+        $before = Get-ResultInteger $multiplier['before']
+        if (-not $valid -or $before -lt 2 -or $before -gt 6 -or
+            -not (Get-ResultString $multiplier['returned']).StartsWith('gamesettings-graphics',[StringComparison]::Ordinal)) {
+            $failures.Add('OptionsMultiplier')
+        }
+    } catch { $failures.Add('MalformedOrMissingOptionsMultiplier') }
+}
+if ($MainMenuOptions) {
+    try {
+        $menu = Read-ResultObject (Join-Path $frameRoot 'main-options-result.json')
+        Require-ResultFields $menu @('success','context','hidden','focused','hasWorld','host','displayed',
+            'gameAssembly','pid','menuFrame','requested','written')
+        if (-not (Get-ResultBoolean $menu['success'])) { $failures.Add('MainOptionsFailure') }
+        $hidden = Get-ResultBoolean $menu['hidden']
+        $focused = Get-ResultBoolean $menu['focused']
+        $expectedPrefix = if ($MainOptionsAction -eq 'open' -and -not $multiplierCheck) { 'gamesettings-vulkanstory-' } else { 'gamesettings-graphics' }
+        if ((Get-ResultString $menu['context']) -cne 'main' -or (Get-ResultBoolean $menu['hasWorld']) -or
+            $hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or
+            (Get-ResultString $menu['host']) -cne 'Vintagestory.Client.NoObf.GuiScreenSettings' -or
+            -not (Get-ResultString $menu['displayed']).StartsWith($expectedPrefix, [StringComparison]::Ordinal)) {
+            $failures.Add('MainOptionsInvariant')
+        }
+        if ($MainOptionsAction -ne 'open') {
+            Require-ResultFields $menu @('action')
+            $actionResult = Read-ResultObject (Join-Path $frameRoot 'main-options-action.json')
+            Require-ResultFields $actionResult @('success','action','before','expected','requested','persisted','applied','returned')
+            $before = Get-ResultBoolean $actionResult['before']
+            $expected = if ($MainOptionsAction -eq 'save') { -not $before } else { $before }
+            if ((Get-ResultString $menu['action']) -cne $MainOptionsAction -or
+                (Get-ResultString $actionResult['action']) -cne $MainOptionsAction -or
+                -not (Get-ResultBoolean $actionResult['success']) -or
+                (Get-ResultBoolean $actionResult['expected']) -ne $expected -or
+                (Get-ResultBoolean $actionResult['requested']) -ne $expected -or
+                (Get-ResultBoolean $actionResult['persisted']) -ne $expected -or
+                (Get-ResultBoolean $actionResult['applied']) -ne $expected -or
+                -not (Get-ResultString $actionResult['returned']).StartsWith('gamesettings-graphics',[StringComparison]::Ordinal)) {
+                $failures.Add('MainOptionsAction')
+            }
+        }
+        $actualAssembly = [IO.Path]::GetFullPath((Get-ResultString $menu['gameAssembly']))
+        if (-not $ExpectedGameAssembly -or $actualAssembly -ine [IO.Path]::GetFullPath($ExpectedGameAssembly)) {
+            $failures.Add('MainOptionsAssembly')
+        }
+        [void](Get-ResultInteger $menu['pid'])
+        [void](Get-ResultInteger $menu['menuFrame'])
+        if ((Get-ResultInteger $menu['requested']) -ne $ExpectedFrameCount -or
+            (Get-ResultInteger $menu['written']) -ne $ExpectedFrameCount -or
+            @(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.png' -File).Count -ne $ExpectedFrameCount -or
+            @(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.ppm' -File).Count -ne $ExpectedFrameCount) {
+            $failures.Add('MainOptionsFrameCount')
+        }
+        if ($RequireScenario) { $failures.Add('MainOptionsScenarioConflict') }
+    }
+    catch { $failures.Add('MalformedOrMissingMainOptionsResult') }
+} else {
 try {
     $legacy = Read-ResultObject (Join-Path $frameRoot 'headless-result.json')
     Require-ResultFields $legacy @('success','reason','hidden','focused','stagedModLoaded','modLocation',
@@ -108,6 +176,7 @@ try {
     if ($hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or -not $staged -or -not $worldReady) { $failures.Add('LegacyInvariant') }
 }
 catch { $failures.Add('MalformedOrMissingHeadlessResult') }
+}
 
 if ($RequireScenario) {
     try {
@@ -222,6 +291,7 @@ $pass = $failures.Count -eq 0
     timedOut = $TimedOut
     scenarioRequired = [bool]$RequireScenario
     visibleRequested = [bool]$Visible
+    mainMenuOptions = [bool]$MainMenuOptions
 } | ConvertTo-Json -Compress
 if (-not $pass) { exit 1 }
 exit 0

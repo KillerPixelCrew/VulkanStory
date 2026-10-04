@@ -24,6 +24,9 @@ internal sealed record GameSessionServices(RendererSettingsState RendererSetting
 
 internal sealed partial class GameRenderSession : IDisposable
 {
+    // A failed factory has no ProcessRuntime.session owner yet. If its cleanup
+    // also fails, preserve the complete dependency graph for process lifetime.
+    private static readonly List<GameRenderSession> FailedInitializationOwners = new();
     private readonly int ownerThread = Environment.CurrentManagedThreadId;
     private readonly ClientPlatformWindows platform;
     private readonly StartupRoutingTransaction routing;
@@ -39,6 +42,7 @@ internal sealed partial class GameRenderSession : IDisposable
     private bool rebuildTargetsPending, reloadTerrainPending;
     private bool rendering, stopping, coreDisposed;
     private Exception? graphicsReleaseFailure;
+    private Exception? renderCycleFailure;
     private bool? appliedVsync;
     private int? appliedFrameCap;
     private VulkanStory.Contracts.RendererLatencySelection? appliedLatency;
@@ -114,7 +118,11 @@ internal sealed partial class GameRenderSession : IDisposable
         catch (Exception failure)
         {
             try { session.ReleaseSessionResources(); }
-            catch (Exception cleanup) { throw new AggregateException("Session initialization and cleanup failed.", failure, cleanup); }
+            catch (Exception cleanup)
+            {
+                lock (FailedInitializationOwners) FailedInitializationOwners.Add(session);
+                throw new AggregateException("Session initialization and cleanup failed; remaining owners retained until process exit.", failure, cleanup);
+            }
             throw;
         }
     }
@@ -129,6 +137,7 @@ internal sealed partial class GameRenderSession : IDisposable
         RequireActive();
         if (rendering) throw new InvalidOperationException("Recursive game frame.");
         rendering = true;
+        bool gpuCycleStarted = false;
         try
         {
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
@@ -146,9 +155,11 @@ internal sealed partial class GameRenderSession : IDisposable
             Graphics.TaaResolvedThisFrame = false;
             Graphics.Stated.UiImageFramebuffer = 0;
             Device.RedirectDefaultFramebuffer(0);
+            gpuCycleStarted = true;
             Device.BeginFrame();
             GameFrameBindings.Dispatch(platform, delta);
             Graphics.ComposeUiTarget(); // Flush any still-open owned UI scope before provider presentation.
+            CompleteOptionsDiagnostic();
             CaptureDiagnosticWorldFrame();
             CaptureHeadlessFrame();
             CaptureScenarioReadbacks();
@@ -163,6 +174,8 @@ internal sealed partial class GameRenderSession : IDisposable
         }
         catch (Exception error)
         {
+            renderCycleFailure ??= error;
+            if (gpuCycleStarted) device?.RetainFailedFrame(error);
             RecordHeadlessRenderFailure(error);
             throw;
         }
@@ -187,7 +200,10 @@ internal sealed partial class GameRenderSession : IDisposable
         }
         pendingFrameSettings = settings;
         inputFrameId = Device.BeginLatencyFrame();
+        long sleepStarted = controllerPerformance?.Recording == true ? Stopwatch.GetTimestamp() : 0;
         Device.SleepVendorLatency(inputFrameId, services.RendererSettings.Settings.FrameGeneration != "off");
+        if (sleepStarted != 0)
+            controllerPerformance!.RecordVendorSleep(Stopwatch.GetTimestamp() - sleepStarted);
         // XeLL requires SimulationStart immediately after the final sleep.
         // IME/controller setup then precedes the Anti-Lag input-start marker.
         Device.MarkLatency(inputFrameId, LatencyMarker.SimulationStart);
@@ -216,7 +232,8 @@ internal sealed partial class GameRenderSession : IDisposable
         GameTemporalFrame temporal = Temporal.Snapshot();
         if (temporal.FrameId != Device.LatencyFrameId || !temporal.HasCamera || !temporal.MotionValid)
         { Graphics.UpscaledThisFrame = false; return false; }
-        return upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
+        bool evaluated = upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
+        return evaluated;
     }
     internal void RenderTemporalPostTail()
     {
@@ -237,6 +254,22 @@ internal sealed partial class GameRenderSession : IDisposable
     internal void ApplyRendererSettings(RendererSettings next)
     {
         RequireActive();
+        next = next.Normalize();
+        RendererSettings previous = services.RendererSettings.Settings;
+        // Pacing/input options are consumed at pre-input; the FPS overlay reads
+        // settings directly. These saves do not invalidate scene resources or
+        // temporal history. Any other changed property keeps the full reset path.
+        if ((previous with
+        {
+            LowLatencyMode = next.LowLatencyMode,
+            ShowFpsCounter = next.ShowFpsCounter,
+            ControllerEnabled = next.ControllerEnabled,
+            TouchEnabled = next.TouchEnabled,
+        }) == next)
+        {
+            services.RendererSettings.Apply(next);
+            return;
+        }
         frameGeneration!.Reset();
         services.RendererSettings.Apply(next);
         upscalers!.ApplySettings();
@@ -262,6 +295,10 @@ internal sealed partial class GameRenderSession : IDisposable
         var failures = new List<Exception>();
         try
         {
+            // Failed/unsubmitted recording can still own provider references and
+            // pending timeline retirements. Preserve the entire graph before
+            // clearing GUI owners or beginning any dependent release.
+            device?.RequireFrameRelease();
             // GUI LoadedTextures must be released while routed texture deletion
             // can still reach this live Vulkan adapter. Rollback is too late.
             OptionsSettingsOwner.ClearAll();
@@ -315,6 +352,8 @@ internal sealed partial class GameRenderSession : IDisposable
     private void RequireActive()
     {
         RequireOwner();
+        if (renderCycleFailure != null)
+            throw new InvalidOperationException("Session render cycle failed; further frame/control work is rejected.", renderCycleFailure);
         if (stopping || !routing.RoutingEnabled || input is null) throw new InvalidOperationException("Complete SDL/Vulkan session routing is not active.");
     }
     public void Dispose()

@@ -8,6 +8,7 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
 {
     private readonly Fsr3Native api;
     private nint handle;
+    private bool needsReset = true;
 
     private Fsr3FrameGeneration(Fsr3Native api, nint handle, uint width, uint height)
     {
@@ -42,17 +43,25 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
     public int Evaluate(VulkanDevice device, int backbufferId, int depthId, int motionId,
         int motionRgId, int hudlessId, int uiId,
         int uprightSceneId, int uprightUiId, int uprightDepthId, int uprightMotionId,
+        int uprightOutputId, int outputId,
         in TemporalProviderFrame temporal)
     {
         if (handle == 0) return -8;
         ulong frameId = ++FrameId;
-        return device.EvaluateFsr3FrameGeneration(api, handle, backbufferId, depthId,
+        TemporalProviderFrame current = temporal with { Reset = temporal.Reset || needsReset };
+        int result = device.EvaluateFsr3FrameGeneration(api, handle, backbufferId, depthId,
             motionId, motionRgId, hudlessId, uiId, uprightSceneId, uprightUiId,
-            uprightDepthId, uprightMotionId, temporal, frameId);
+            uprightDepthId, uprightMotionId, uprightOutputId, outputId, current, frameId);
+        if (result == 0) needsReset = false;
+        return result;
     }
 
-    public int Disable(nint swapchainContext) => handle != 0 ?
-        api.DisableFrameGeneration(handle, swapchainContext) : 0;
+    public int Disable(nint swapchainContext)
+    {
+        int result = handle != 0 ? api.DisableFrameGeneration(handle, swapchainContext) : 0;
+        if (result == 0) needsReset = true;
+        return result;
+    }
 
     public void Dispose()
     {

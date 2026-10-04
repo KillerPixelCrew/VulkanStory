@@ -507,7 +507,8 @@ internal sealed unsafe class Swapchain : IDisposable
             capabilities.MinImageCount, capabilities.MaxImageCount, presentMode);
 
         SwapchainSlot? old = _current;
-        bool wantFsr3 = _frameGenerationProvider == "fsr3" && Fsr3ProxyFailure == null;
+        bool wantFsr3 = _frameGenerationProvider == "fsr3" && Fsr3ProxyFailure == null &&
+            _context.Fsr3SwapchainQueuesAvailable;
         bool haveFsr3 = _swapchainApi is Fsr3SwapchainDispatch;
         if (wantFsr3 != haveFsr3 || haveFsr3)
         {

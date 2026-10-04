@@ -95,6 +95,7 @@ internal sealed partial class GameRenderSession
                 dlssVsyncSupport = frameGeneration.LastDlssState?.VsyncSupport,
                 dlssDynamicMfgSupport = frameGeneration.LastDlssState?.DynamicMfgSupport,
                 realPresents = Interlocked.Read(ref realPresents), sdkReportedPresents = Interlocked.Read(ref sdkPresents),
+                hostGeneratedPresents = Interlocked.Read(ref hostGeneratedPresents),
                 sdkPresentReports = Interlocked.Read(ref sdkReports),
                 fps = FpsText, presentation = Presentation,
                 composedFramebufferCapture = diagnosticCapture, captureFrameId = diagnosticCaptureFrame

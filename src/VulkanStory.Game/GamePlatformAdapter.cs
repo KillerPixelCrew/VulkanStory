@@ -17,6 +17,9 @@ internal sealed record GamePlatformCallbacks(
     Action StopTextInput, Action<int, int> ResizeGraphics, Action RecomposeGui,
     Action<ulong, ulong> RecordInputAge, Action StopAndDrainGraphics)
 {
+    internal ControllerPerformanceDiagnostics? ControllerPerformance { get; init; }
+    internal Func<bool>? ControllerDiagnosticsEnabled { get; init; }
+    internal Func<bool>? ControllerInputActive { get; init; }
     internal GamePlatformCallbacks WithTextInput(SdlGuiTextInput text) => this with
     {
         HasTextTarget = text.HasCurrentTarget, SyncTextInput = text.Sync,
@@ -150,11 +153,16 @@ internal sealed class GamePlatformAdapter : IDisposable
         {
             if (Interlocked.Exchange(ref externalCloseRequested, 0) != 0) RequestClose();
             if (closeRequested) return;
+            var performance = callbacks!.ControllerPerformance;
+            performance?.BeginFrame(callbacks.ControllerDiagnosticsEnabled?.Invoke() == true);
             callbacks!.BeforeInput();
+            performance?.EndPacing();
             if (SdlEventPump.Drain(Dispatch, callbacks.InputPumped,
                     callbacks.ControllerActivity, callbacks.UpdateControllers))
                 callbacks.RefreshControllers();
+            performance?.EndEvents();
             callbacks.ControllersPumped();
+            performance?.EndControllers(callbacks.ControllerInputActive?.Invoke() == true, Window.RelativeMouseMode);
             if (callbacks.TouchEnabled()) touch!.Tick(SdlEventPump.TicksNanoseconds());
             else touch!.Cancel();
             if (closeRequested) return;
@@ -163,6 +171,7 @@ internal sealed class GamePlatformAdapter : IDisposable
             // Active requires all startup, window and graphics groups installed.
             RequireActive();
             bindings!.RenderFrame();
+            performance?.EndFrame();
         }
         finally { pumping = false; }
     }

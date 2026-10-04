@@ -23,6 +23,7 @@ internal sealed unsafe class Fsr3Native
     public readonly delegate* unmanaged[Cdecl]<nint, int> Destroy;
     public readonly delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, nint*, int> CreateFrameGeneration;
     public readonly delegate* unmanaged[Cdecl]<nint, Fsr3FgFrame*, int> EvaluateFrameGeneration;
+    public readonly delegate* unmanaged[Cdecl]<nint, Fsr3FgFrame*, int> EvaluateDirectFrameGeneration;
     public readonly delegate* unmanaged[Cdecl]<nint, nint, int> DisableFrameGeneration;
     public readonly delegate* unmanaged[Cdecl]<nint, int> DestroyFrameGeneration;
     public readonly delegate* unmanaged[Cdecl]<PhysicalDevice, Device, Queue, Queue, Queue, Queue, uint,
@@ -48,6 +49,7 @@ internal sealed unsafe class Fsr3Native
         Destroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr3Destroy");
         CreateFrameGeneration = (delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, nint*, int>)Export("VulkanStoryFsr3FgCreate");
         EvaluateFrameGeneration = (delegate* unmanaged[Cdecl]<nint, Fsr3FgFrame*, int>)Export("VulkanStoryFsr3FgEvaluate");
+        EvaluateDirectFrameGeneration = (delegate* unmanaged[Cdecl]<nint, Fsr3FgFrame*, int>)Export("VulkanStoryFsr3FgEvaluateDirect");
         DisableFrameGeneration = (delegate* unmanaged[Cdecl]<nint, nint, int>)Export("VulkanStoryFsr3FgDisable");
         DestroyFrameGeneration = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr3FgDestroy");
         CreateSwapchain = (delegate* unmanaged[Cdecl]<PhysicalDevice, Device, Queue, Queue, Queue, Queue, uint,

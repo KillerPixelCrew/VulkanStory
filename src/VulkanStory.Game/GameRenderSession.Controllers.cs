@@ -8,6 +8,7 @@ namespace VulkanStory.Game;
 internal sealed partial class GameRenderSession
 {
     private SdlGamepadInput? controllers;
+    private ControllerPerformanceDiagnostics? controllerPerformance;
     private SdlGuiTextInput? guiText;
     internal ControllerMovementState ControllerMovement { get; } = new();
     internal void ReleaseControllerWorld(ClientMain client) => controllers?.WorldLeaving(client);
@@ -33,11 +34,32 @@ internal sealed partial class GameRenderSession
         controllers = new SdlGamepadInput(new SessionControllerHost(this, platform, Window, guiText, ControllerMovement));
         bool devicesChanged = false;
         bool controllerEnabled = services.RendererSettings.Settings.ControllerEnabled;
+        var performance = new ControllerPerformanceDiagnostics(message =>
+        {
+            var settings = services.RendererSettings.Settings;
+            GameFrameSettings frameSettings = CaptureFrameSettings();
+            platform.Logger.Notification("{0}; FG={1}; latency={2}; vsync={3}; maxFps={4}; controller={5}",
+                message, settings.FrameGeneration, settings.LowLatencyMode, frameSettings.Vsync, frameSettings.MaxFps, controllers?.Status ?? "disposed");
+            if (VulkanStats.MemorySource is { } memory)
+                platform.Logger.Notification("[VulkanStory] Controller performance GPU memory: {0}", memory.DiagnosticMemoryLine());
+        });
+        controllerPerformance = performance;
         return new GamePlatformCallbacks(
             BeforeInput: () =>
             {
+                RequireActive();
                 AdvanceHeadlessScenarioBeforeInput();
                 RuntimeBootstrap.Current.ApplyPendingControls();
+                try { OptionsSettingsOwner.ApplyPendingReturns(); }
+                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
+                try { DriveMultiplierDiagnosticBeforeInput(); }
+                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
+                try { DriveInventoryCyclesBeforeInput(); }
+                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
+                try { DriveControllerInventoryDiagnosticBeforeInput(); }
+                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
+                try { DriveControllerRadialDiagnosticBeforeInput(); }
+                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
                 bool enabled = services.RendererSettings.Settings.ControllerEnabled;
                 if (enabled != controllerEnabled)
                 {
@@ -55,7 +77,9 @@ internal sealed partial class GameRenderSession
             InputPumped: () => Device.MarkLatency(inputFrameId, LatencyMarker.InputSample),
             UpdateControllers: () =>
             {
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (controllerEnabled) controllers.PrepareForEventPump();
+                performance.RecordGamepadUpdate(System.Diagnostics.Stopwatch.GetTimestamp() - started);
                 Device.MarkVendorInputStart(inputFrameId);
             },
             ControllersPumped: () =>
@@ -69,6 +93,7 @@ internal sealed partial class GameRenderSession
             ControllerFocusLost: controllers.OnFocusLost,
             PhysicalInput: () =>
             {
+                performance.PhysicalInput();
                 if (ControllerHints.SetControllerActive(false)) RecomposeControllerGui();
             },
             TouchEnabled: () => services.RendererSettings.Settings.TouchEnabled,
@@ -79,7 +104,12 @@ internal sealed partial class GameRenderSession
             ResizeGraphics: Resize,
             RecomposeGui: RecomposeControllerGui,
             RecordInputAge: VulkanStats.RecordSdlInputAge,
-            StopAndDrainGraphics: StopAndDrain);
+            StopAndDrainGraphics: StopAndDrain)
+        {
+            ControllerPerformance = performance,
+            ControllerDiagnosticsEnabled = () => services.RendererSettings.Settings.ControllerEnabled,
+            ControllerInputActive = () => controllers?.InputActive == true,
+        };
     }
     private void RecomposeControllerGui()
     {

@@ -26,10 +26,18 @@ param(
     [switch]$AsyncPipelines,
     [switch]$Visible,
     [switch]$KeepOpen,
+    [switch]$MainMenuOptions,
+    [ValidateSet('open','save','cancel')][string]$MainOptionsAction = 'open',
+    [ValidateSet('Image','Generation','Effects','Device','Status')][string]$OptionsPage = 'Image',
     [string]$Python = 'python'
 )
 $ErrorActionPreference = 'Stop'
 if ($KeepOpen -and -not $Visible) { throw 'KeepOpen requires the explicitly selected Visible diagnostic mode.' }
+if ($MainMenuOptions -and ($Scenario -or $Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
+    throw 'MainMenuOptions is a distinct menu-only capture mode; world scenarios/commands/parity/input profiles cannot be combined.'
+}
+if (-not $MainMenuOptions -and $MainOptionsAction -ne 'open') { throw 'MainOptionsAction requires MainMenuOptions.' }
+if ($OptionsPage -ne 'Image' -and $MainOptionsAction -ne 'open') { throw 'Main Save/Cancel diagnostics require the Image page.' }
 
 function Throw-ScenarioError([string]$Category, [string]$Message) {
     throw "H01SCENARIO|$Category|$Message"
@@ -389,17 +397,21 @@ if ($scenarioSourcePath) {
 }
 & $Python (Join-Path $PSScriptRoot 'snapshot-world.py') $database (Join-Path $dataRoot "Saves/$World.vcdbs")
 if ($LASTEXITCODE -ne 0) { throw 'Consistent world snapshot failed; no client launched.' }
-foreach ($file in @('clientsettings.json','clientsettings.cache')) {
+foreach ($file in @('clientsettings.json')) {
     $source = Join-Path $sourceRoot $file
     if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $dataRoot }
 }
 $clientPath = Join-Path $dataRoot 'clientsettings.json'
+$silentAudioKeys = @('masterSoundLevel','soundLevel','entitySoundLevel','ambientSoundLevel','weatherSoundLevel','musicLevel')
+if (-not (Test-Path -LiteralPath $clientPath)) {
+    @{ intSettings = @{} } | ConvertTo-Json | Set-Content -LiteralPath $clientPath
+}
 if (Test-Path -LiteralPath $clientPath) {
     $client = Get-Content -LiteralPath $clientPath -Raw | ConvertFrom-Json -AsHashtable
     function Set-IsolatedSettings($node) {
         if ($node -isnot [System.Collections.IDictionary]) { return }
         foreach ($key in @($node.Keys)) {
-            if ($key -in @('soundLevel','musicLevel','vsyncMode')) { $node[$key] = 0 }
+            if ($key -in $silentAudioKeys -or $key -eq 'vsyncMode') { $node[$key] = 0 }
             elseif ($key -eq 'pauseGameOnLostFocus') { $node[$key] = $false }
             elseif ($key -eq 'fullScreen') { $node[$key] = $false }
             elseif ($key -eq 'disabledMods') {
@@ -414,8 +426,18 @@ if (Test-Path -LiteralPath $clientPath) {
         }
     }
     Set-IsolatedSettings $client
+    if ($client['intSettings'] -isnot [System.Collections.IDictionary]) { $client['intSettings'] = @{} }
+    foreach ($key in $silentAudioKeys) { $client['intSettings'][$key] = 0 }
     $client | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $clientPath
 }
+$mutedSettings = Get-Content -LiteralPath $clientPath -Raw | ConvertFrom-Json -AsHashtable
+foreach ($key in $silentAudioKeys) {
+    if (-not $mutedSettings['intSettings'].Contains($key) -or $mutedSettings['intSettings'][$key] -ne 0) {
+        throw ('Isolated audio mute failed: ' + $key + '; no client launched.')
+    }
+}
+@{ silent = $true; settings = 'data/clientsettings.json'; mutedKeys = $silentAudioKeys } |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runRoot 'audio-mute.json')
 # Mod discovery remains the game's own loader. Private runtime is loaded from
 # this package, so an installed older ordinary mod must not shadow this copy.
 New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Mods') -Force | Out-Null
@@ -429,12 +451,17 @@ $info = [Diagnostics.ProcessStartInfo]::new($dotnet)
 $info.UseShellExecute = $false; $info.CreateNoWindow = $true
 $info.WorkingDirectory = $gameRoot
 $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
-foreach ($argument in @('exec','--runtimeconfig',(Join-Path $gameRoot 'Vintagestory.runtimeconfig.json'),
+$launchArguments = @('exec','--runtimeconfig',(Join-Path $gameRoot 'Vintagestory.runtimeconfig.json'),
     '--depsfile',(Join-Path $gameRoot 'Vintagestory.deps.json'),(Join-Path $gameRoot 'Vintagestory.dll'),
-    '--dataPath',$dataRoot,'--openWorld',$World,'--addModPath',(Join-Path $dataRoot 'Mods'))) { $info.ArgumentList.Add($argument) }
+    '--dataPath',$dataRoot,'--addModPath',(Join-Path $dataRoot 'Mods'))
+if (-not $MainMenuOptions) { $launchArguments += @('--openWorld',$World) }
+foreach ($argument in $launchArguments) { $info.ArgumentList.Add($argument) }
 $info.Environment['DOTNET_STARTUP_HOOKS'] = $hook
 $info.Environment['VULKANSTORY_HEADLESS'] = '1'
 $info.Environment['VULKANSTORY_HEADLESS_VISIBLE'] = if ($Visible) { '1' } else { '0' }
+$info.Environment['VULKANSTORY_HEADLESS_MAIN_OPTIONS'] = if ($MainMenuOptions) { '1' } else { '0' }
+$info.Environment['VULKANSTORY_HEADLESS_MAIN_ACTION'] = $MainOptionsAction
+$info.Environment['VULKANSTORY_HEADLESS_OPTIONS_PAGE'] = $OptionsPage
 $info.Environment['VULKANSTORY_HEADLESS_MOD_DIRECTORY'] = Join-Path $dataRoot 'Mods/vulkanstory'
 $info.Environment['VULKANSTORY_HEADLESS_FRAMES'] = Join-Path $runRoot 'frames'
 $info.Environment['VULKANSTORY_HEADLESS_EXIT_WHEN_DONE'] = if ($KeepOpen) { '0' } else { '1' }
@@ -492,6 +519,9 @@ $verifyArguments = @{
     ProcessExitCode = $process.ExitCode
     TimedOut = $timedOut
     Visible = [bool]$Visible
+    MainMenuOptions = [bool]$MainMenuOptions
+    MainOptionsAction = $MainOptionsAction
+    ExpectedGameAssembly = Join-Path $packageRoot 'VulkanStory/managed/VulkanStory.Game.dll'
 }
 if ($Scenario) { $verifyArguments.RequireScenario = $true }
 & (Join-Path $PSScriptRoot 'verify-headless-result.ps1') @verifyArguments

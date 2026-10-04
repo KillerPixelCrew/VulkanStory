@@ -111,6 +111,7 @@ internal sealed unsafe class MeshManager : IDisposable
     /// keeps them in system memory. Cleared after the first allocation that does not fit.
     /// </summary>
     internal bool PersistentMeshesInVram { get; set; }
+    internal long PersistentMeshHeadroomMisses { get; private set; }
 
     public MeshManager(VulkanContext context, UploadManager? uploads = null)
     {
@@ -333,7 +334,10 @@ internal sealed unsafe class MeshManager : IDisposable
         // crosses PCIe (docs/performance-profile-2026-09-26.md). The CPU only
         // writes these buffers, which write-combined VRAM handles well. When the
         // BAR heap is full the allocation falls back to system memory.
-        if (persistent && PersistentMeshesInVram)
+        bool meshHeadroom = !persistent || !PersistentMeshesInVram ||
+            _context.Allocator.HasPersistentMeshHeadroom((ulong)byteSize);
+        if (!meshHeadroom) PersistentMeshHeadroomMisses++;
+        if (persistent && PersistentMeshesInVram && meshHeadroom)
         {
             try
             {
@@ -368,6 +372,21 @@ internal sealed unsafe class MeshManager : IDisposable
 
     /// <summary>Whether the mesh fetches its vertices through a storage buffer.</summary>
     public bool IsSsbo(int meshId) => Get(meshId)?.Ssbo ?? false;
+
+    internal ulong LiveBufferBytes
+    {
+        get
+        {
+            ulong bytes = 0;
+            foreach (VulkanMesh? mesh in _meshes)
+            {
+                if (mesh == null) continue;
+                bytes += mesh.Indices?.Size ?? 0;
+                foreach (VulkanBuffer? buffer in mesh.Buffers) bytes += buffer?.Size ?? 0;
+            }
+            return bytes;
+        }
+    }
 
     /// <summary>
     /// Fills an SSBO mesh's index buffer with the fixed quad pattern.

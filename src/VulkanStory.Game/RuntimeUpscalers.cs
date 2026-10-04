@@ -22,7 +22,11 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
     private void ReleaseBackend(IUpscalerBackend backend, bool shutdown)
     {
         RequireLifetime();
-        try { if (shutdown) backend.Shutdown(); else backend.RetireFeature(); }
+        try
+        {
+            if (shutdown) backend.Shutdown();
+            else backend.RetireFeature();
+        }
         catch (Exception error)
         {
             lifetimeFailure = error;

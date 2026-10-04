@@ -100,6 +100,7 @@ struct VulkanStoryXessFg {
     uint32_t width = 0, height = 0;
     uint32_t maxInterpolations = 0, activeInterpolations = 0;
     bool started = false;
+    int releaseFailure = 0;
 
     decltype(&xellD3D12CreateContext) createXell = nullptr;
     decltype(&xellDestroyContext) destroyXell = nullptr;
@@ -202,10 +203,56 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgWaitIdle(VulkanStoryXessFg
     return WaitForSingleObject(value->completionEvent, 10000) == WAIT_OBJECT_0 ? 0 : -3;
 }
 
-extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg* value) {
-    if (!value) return;
-    VulkanStoryXessFgWaitIdle(value);
-    if (value->fg && value->setEnabled) value->setEnabled(value->fg, 0);
+static int PrepareDestroy(VulkanStoryXessFg* value) {
+    if (!value) return 0;
+    if (value->fg && value->started) {
+        if (!value->setEnabled) return -1;
+        int result = static_cast<int>(value->setEnabled(value->fg, 0));
+        if (result < 0) return result;
+    }
+    int idle = VulkanStoryXessFgWaitIdle(value);
+    if (idle != 0) return idle;
+    // The SDK cannot destroy its context while our DXGI wrapper reference is
+    // outstanding. The present thread is stopped and both queues are drained;
+    // relinquish only this reference before destroying SDK consumers.
+    Release(value->swapchain);
+    // Destroy SDK consumers before the host retires shared input resources.
+    // On failure leave the failed context and all remaining owners attached.
+    if (value->fg) {
+        if (!value->destroyFg) return -1;
+        int result = static_cast<int>(value->destroyFg(value->fg));
+        if (result < 0) return result;
+        value->fg = nullptr;
+    }
+    if (value->xell) {
+        if (!value->destroyXell) return -1;
+        int result = static_cast<int>(value->destroyXell(value->xell));
+        if (result < 0) return result;
+        value->xell = nullptr;
+    }
+    value->started = false;
+    return 0;
+}
+
+// Creation and its diagnostic read run on the same serialized host thread.
+// Literal pointers remain valid until this bridge is unloaded.
+static thread_local const char* lastCreateStage = "not attempted";
+extern "C" __declspec(dllexport) const char* VulkanStoryXessFgLastCreateStage() {
+    return lastCreateStage;
+}
+
+extern "C" __declspec(dllexport) int VulkanStoryXessFgPrepareDestroy(VulkanStoryXessFg* value) {
+    if (!value) return 0;
+    if (value->releaseFailure != 0) return value->releaseFailure;
+    int result = PrepareDestroy(value);
+    if (result != 0) value->releaseFailure = result;
+    return result;
+}
+
+extern "C" __declspec(dllexport) int VulkanStoryXessFgDestroyChecked(VulkanStoryXessFg* value) {
+    if (!value) return 0;
+    int prepared = VulkanStoryXessFgPrepareDestroy(value);
+    if (prepared != 0) return prepared;
     Release(value->commandList);
     for (auto*& allocator : value->allocators) Release(allocator);
     Release(value->postList);
@@ -214,11 +261,6 @@ extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg
     Release(value->queryHeap);
     Release(value->completionFence);
     if (value->completionEvent) CloseHandle(value->completionEvent);
-    Release(value->swapchain);
-    if (value->fg && value->destroyFg) value->destroyFg(value->fg);
-    value->fg = nullptr;
-    if (value->xell && value->destroyXell) value->destroyXell(value->xell);
-    value->xell = nullptr;
     Release(value->sharedFence);
     Release(value->queue);
     Release(value->device);
@@ -227,34 +269,49 @@ extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg
     if (value->fgModule) FreeLibrary(value->fgModule);
     if (value->xellModule) FreeLibrary(value->xellModule);
     delete value;
+    return 0;
+}
+extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg* value) {
+    // Retain the legacy ABI for native bring-up callers, but never free after
+    // an unsuccessful drain or SDK destruction.
+    VulkanStoryXessFgDestroyChecked(value);
 }
 
 // The 64-bit LUID is copied from VkPhysicalDeviceIDProperties::deviceLUID.
 // The exact adapter match prevents cross-GPU resource handoffs.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreate(uint64_t adapterLuid,
     VulkanStoryXessFg** output) {
+    lastCreateStage = "argument validation";
     if (!output || !adapterLuid) return -1;
     *output = nullptr;
+    lastCreateStage = "native context allocation";
     auto* value = new (std::nothrow) VulkanStoryXessFg();
     if (!value) return -2;
     int error = 0;
     do {
+        lastCreateStage = "runtime DLL/export loading";
         if (!LoadRuntime(value)) { error = -3; break; }
+        lastCreateStage = "CreateDXGIFactory2";
         if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&value->factory)))) { error = -4; break; }
         LUID luid{};
         luid.LowPart = static_cast<DWORD>(adapterLuid);
         luid.HighPart = static_cast<LONG>(adapterLuid >> 32);
+        lastCreateStage = "EnumAdapterByLuid";
         if (FAILED(value->factory->EnumAdapterByLuid(luid, IID_PPV_ARGS(&value->adapter)))) {
             error = -5; break;
         }
+        lastCreateStage = "D3D12CreateDevice";
         if (FAILED(D3D12CreateDevice(value->adapter, D3D_FEATURE_LEVEL_11_0,
                 IID_PPV_ARGS(&value->device)))) { error = -6; break; }
         D3D12_COMMAND_QUEUE_DESC queue{};
         queue.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+        lastCreateStage = "CreateCommandQueue";
         if (FAILED(value->device->CreateCommandQueue(&queue,
                 IID_PPV_ARGS(&value->queue)))) { error = -7; break; }
+        lastCreateStage = "xellD3D12CreateContext";
         int xell = static_cast<int>(value->createXell(value->device, &value->xell));
         if (xell != 0 || !value->xell) { error = xell ? xell : -8; break; }
+        lastCreateStage = "xefgSwapChainD3D12CreateContext";
         int fg = static_cast<int>(value->createFg(value->device, &value->fg));
         if (fg != 0 || !value->fg) { error = fg ? fg : -9; break; }
         if (std::getenv("VULKANSTORY_XESS_FG_LOG")) {
@@ -269,21 +326,36 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgCreate(uint64_t adapterLui
                         std::fflush(stderr);
                     }, nullptr);
         }
+        lastCreateStage = "xefgSwapChainSetLatencyReduction";
         fg = static_cast<int>(value->setLatency(value->fg, value->xell));
         if (fg != 0) { error = fg; break; }
         xell_sleep_params_t mode{};
         mode.bLowLatencyMode = 1;
+        lastCreateStage = "xellSetSleepMode";
         xell = static_cast<int>(value->setSleepMode(value->xell, &mode));
         if (xell != 0) { error = xell; break; }
     } while (false);
-    if (error) { VulkanStoryXessFgDestroy(value); return error; }
+    if (error) {
+        std::fprintf(stderr, "[xess-fg] initialization stage %s failed (%d)\n", lastCreateStage, error);
+        int cleanup = VulkanStoryXessFgDestroyChecked(value);
+        if (cleanup != 0) {
+            *output = value;
+            std::fprintf(stderr, "[xess-fg] initialization failed (%d), release failed (%d); native owner retained\n",
+                error, cleanup);
+        }
+        return error;
+    }
     *output = value;
+    lastCreateStage = "ready";
     return 0;
 }
 
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateFromVulkan(
     VkPhysicalDevice physical, VulkanStoryXessFg** output) {
-    if (!physical || !output) return -1;
+    lastCreateStage = "Vulkan adapter LUID lookup";
+    if (!output) return -1;
+    *output = nullptr;
+    if (!physical) return -1;
     HMODULE loader = GetModuleHandleW(L"vulkan-1.dll");
     auto properties = loader ? reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
         GetProcAddress(loader, "vkGetPhysicalDeviceProperties2")) : nullptr;

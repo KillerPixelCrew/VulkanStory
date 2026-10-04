@@ -443,6 +443,7 @@ internal sealed partial class GameRenderSession
         Aggregate("preparedFrames", preparedFrames);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
+        Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));
         Aggregate("sdkReportedDlssPresents", frameGeneration.ActualDlssPresents);
         Current("cpuRenderCycleSucceeded", true);
         Current("presentCallReturned", true);
@@ -575,7 +576,15 @@ internal sealed partial class GameRenderSession
     private void RecordHeadlessRenderFailure(Exception error)
     {
         if (!HeadlessHarnessOptions.Active) return;
-        try { FailHeadlessRun(error.Message, scenarioFailurePhase); }
+        try
+        {
+            if (HeadlessHarnessOptions.FrameDirectory is { } directory)
+            {
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, "render-failure.txt"), error.ToString());
+            }
+            FailHeadlessRun(error.GetBaseException().Message, scenarioFailurePhase);
+        }
         catch { }
     }
 

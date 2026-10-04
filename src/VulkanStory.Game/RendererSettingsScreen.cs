@@ -39,7 +39,11 @@ internal sealed class RendererSettingsScreen : GuiScreen
     {
         ParentScreen.RenderToDefaultFramebuffer(dt);
         if (!IsOpened) return;
-        if (closeRequested) { ScreenManager.LoadScreen(ParentScreen); return; }
+        if (closeRequested)
+        {
+            if (panel.EndPreview() is string error) ScreenManager.api.Logger.Warning("Could not restore settings: {0}", error);
+            ScreenManager.LoadScreen(ParentScreen); return;
+        }
         if (panel.TakeRefresh()) ComposePanel();
         if (ElementComposer?.Composed != true) return;
         ElementComposer.Render(dt); ElementComposer.PostRender(dt);
