@@ -10,6 +10,8 @@ Current validated/installed implementation: `bc85817`, checkout `80158f3`
 (Options lifecycle/SDL resize, namespace correction and Linux notice paths).
 Both Game builds, both platform stage/packages and main/focused DLSS world lifecycle
 scenarios passed. Scoped software acceptance does not close the defects/gaps below.
+Current source `6a3fab6` removes redundant full-backbuffer tags per the pinned SDK
+guide; native build/runtime validation is pending. Installed identity remains above.
 Current development package: `artifacts/validation/options-lifecycle-20261008-232950/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
@@ -25,8 +27,9 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    resolved the observed -12 stop. The existing XeSS→FSR3→XeSS and latency
    Off→On→Boost profiles passed all actions/captures on RTX 4070. Ordinary
    Options close/resize/resume passed on DLSS: both measured resume windows
-   produced 40 real/80 SDK presents. Fix the stale Streamline extent exposed during
-   resize next; wider quality/pacing and eligible Intel behavior remain open.
+   produced 40 real/80 SDK presents. `6a3fab6` removes the stale full-extent override;
+   validate using a freshly built bridge with no sanitize warning. Wider quality/
+   pacing and eligible Intel behavior remain open.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
@@ -44,8 +47,9 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    Options operation works. Broader transitions/resize acceptance remains open.
    Main/world lifecycle now passed preview/Save/Cancel/abrupt-close restoration,
    all five pages and logical 1280×720 resize. Custom panels are contained, but
-   the shared main sidebar overlaps/clips while Options is active at that size;
-   diagnose its original layout/resize behavior before choosing a correction.
+   shared-sidebar overflow follows the original fixed layout at saved GUI scale1.25.
+   Existing logs prove recomposition, so no redundant parent callback is needed;
+   this inherited layout limit is not a missing VulkanStory resize implementation.
    Remaining acceptance is real SDL input, scrolling, error visibility,
    leave/rejoin and wider provider coverage after menus.
    User reports no visible/FPS difference between Quality and Ultra Performance;
@@ -75,12 +79,12 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | --- | --- | --- |
 | Renderer, SDL, official startup and graphics routing | Migrated source, original menu/world rendering, normal shutdown | Full lifecycle/material/input parity |
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
-| DLSS FG | Focused gain and Options/resume/resize scenarios passed on RTX 4070; both resume windows show 40 real/80 SDK presents | Correct stale backbuffer extent at deferred resize; moving quality/scanout/pacing and warning-39 recovery |
+| DLSS FG | Focused gain/lifecycle passed; full-extent override removed in source | Validate with fresh bridge/no sanitize warning; moving quality/scanout/pacing and warning-39 recovery |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
 | XeSS FG | XeLL/history corrections validated; XeSS→FSR3→XeSS and Off→On→Boost scenarios passed | Wider transitions, moving-scene/visible quality/pacing and eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
-| Options | Main/world callback lifecycle passed settled preview/Save/Cancel/abrupt-close, all pages, logical resize and provider resume | Main sidebar clipping at small size needs diagnosis; scrolling, broader physical interaction/error/leave-rejoin |
+| Options | Main/world callback lifecycle passed; custom panels fit; inherited sidebar fixed-layout limit confirmed/no missing recompose | Scrolling, broader physical interaction/error/leave-rejoin; native sidebar limit is recorded separately |
 | Latency/controllers/touch | World/GUI release guards, radial sticks, separate menu bindings and semantic inventory actions implemented; inventory packet path checked | Physical input, gesture/layer/radial extensions and latency/touch acceptance |
 
 ## Source and delivery

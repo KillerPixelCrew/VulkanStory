@@ -4,6 +4,14 @@ Updated 2026-10-08. Validated/installed implementation: `bc85817`, checkout `801
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+Current source `6a3fab6` removes full-backbuffer tags from scene tagging/invalidation.
+Pinned [Streamline 2.14.1 guide](../sdk/streamline-2.14.1/docs/ProgrammingGuideDLSS_G.md)
+§5.2 uses backbuffer tags only for subregions; this renderer presents the full image.
+SDK-owned sizing includes deferred resize. Four scene tags/lifetimes and native ABI
+remain. Source inspection only: no builds, tests, probes, packages, runs or deployment
+in this implementation turn. Next batch rebuilds the native bridge in a fresh bundle
+and requires no extent sanitize warning.
+
 Latest [lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232950/results.json)
 ran once at `80158f3`; all nine steps passed. Both Game Release builds, Windows/Linux
 staging and both platform archives passed. Main scenario: 56/56 actions, three paired
@@ -21,16 +29,20 @@ zero shader/pipeline compiles and zero allocations. Capture frame 1227 adds a 1.
 interval; cause is not established and this is not a game-only steady benchmark.
 SDK logs contain one stale 2560×1528 backbuffer extent clamped to 1280×720, six
 timer resets and three unsupported hook warnings. Tags initialize before deferred
-swapchain acquire/rebuild; update metadata after that size change is the next fix.
+swapchain acquire/rebuild. `6a3fab6` removes the unnecessary full-size override;
+native build/runtime validation remains pending.
 No warning39/negative FG state/crash or teardown failure was logged; explicit
 DLSS-G drain/free receipts are absent, so warning39 recovery remains open.
 
 Visual inspection shows upright world/HUD and contained custom Options panels.
 The resized main capture shows login/sidebar overlap and Credits/Quit below the
-viewport while Options is active. Original resize dispatch reaches only the active
-screen; shared sidebar fixed layout/parent handling needs diagnosis before choosing
-a correction. Existing return capture precedes resize, so proves no small-window
-restoration afterward. No production source repair or batch rerun in validation.
+viewport while Options is active. Follow-up source/log diagnosis confirms an inherited
+fixed layout at GUI scale1.25. [Existing resize log](../artifacts/validation/options-lifecycle-20261008-232950/main/data/Logs/client-main.log)
+line55 explicitly records compositemainmenu bounds recalculation/recomposition.
+Original GuiComposer also detects window bounds changes. Another parent callback
+preserves the same fixed geometry; StartMainMenu would dispose the active editor.
+No-change outcome: no missing recomposition demonstrated and no redundant callback
+added. Vanilla runtime comparison was not run. No batch rerun in validation.
 
 Windows was [delivered with backup](../artifacts/validation/options-lifecycle-20261008-232950/install-backup/deployment.json);
 [receipt verification](../artifacts/validation/options-lifecycle-20261008-232950/install-verification.json)
