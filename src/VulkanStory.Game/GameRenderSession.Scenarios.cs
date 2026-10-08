@@ -376,7 +376,8 @@ internal sealed partial class GameRenderSession
             return;
         }
         (bool scenarioHidden, bool scenarioFocused, bool staged, string location) = CurrentScenarioInvariants();
-        if (!scenarioHidden || scenarioFocused || !staged || !diagnosticWorldReady)
+        bool expectedHidden = HeadlessHarnessOptions.KeepWindowHidden;
+        if (scenarioHidden != expectedHidden || scenarioFocused == expectedHidden || !staged || !diagnosticWorldReady)
         {
             FailHeadlessRun("Scenario terminal invariants failed.", "completedFrame");
             return;

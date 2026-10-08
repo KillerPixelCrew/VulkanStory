@@ -181,7 +181,7 @@ internal sealed partial class GameRenderSession
 
     private void ThrottleHeadlessFrame()
     {
-        if (!HeadlessHarnessOptions.Enabled) return;
+        if (!HeadlessHarnessOptions.Enabled || !HeadlessHarnessOptions.KeepWindowHidden) return;
         int wait = 33 - (int)frameClock.ElapsedMilliseconds;
         if (wait > 0) Thread.Sleep(wait);
     }
