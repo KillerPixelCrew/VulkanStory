@@ -59,6 +59,16 @@ builds Game on both targets, stages/packages both, runs both profiles once and
 delivers Windows only after both pass. DLSS-FG world mode is visible/focused.
 These inputs have not run; callbacks do not prove general physical SDL interaction.
 
+T03 invocation discovery verified ordinary screenshot hotkey handlers and official
+.vrec filetarget/videofps/tickfps/start/stop commands. Current command scripts
+dispatch every line in one frame, so cannot record frames between start/stop.
+AVI Close clears recording before its worker finishes encoding; acceptance needs
+finalized output and independent decoding. Screenshot output-root isolation and
+exact timelapse command syntax are not established by the available saved bodies.
+The public registration/motion interfaces exist, but no compiled real consumer
+exercises them. A small isolated invocation/consumer slice remains; no capture,
+encoding, decoder, registration or runtime check ran during this discovery.
+
 `c5ba14d` corrects all five delegate declaration/creation references in the two
 GL source files using System.Func/System.Action. Source diff inspection passed;
 no builds or runtime checks ran in this implementation turn. The installed
