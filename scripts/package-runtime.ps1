@@ -44,7 +44,7 @@ $activation = if ($rid -eq 'win-x64') { @('hostfxr.dll') } else {
       'VulkanStory/loader.ini','VulkanStory/managed/profiles/vs-1.22.7-linux-x64.json',
       'VulkanStory/native/linux-x64/libSDL3.so','VulkanStory/native/linux-x64/libshaderc_shared.so')
 }
-foreach ($required in $activation + @('VulkanStory/managed/VulkanStory.Bootstrap.dll','VulkanStory/managed/VulkanStory.Game.dll','Mods/vulkanstory/modinfo.json',
+foreach ($required in @($activation) + @('VulkanStory/managed/VulkanStory.Bootstrap.dll','VulkanStory/managed/VulkanStory.Game.dll','Mods/vulkanstory/modinfo.json',
     'Mods/vulkanstoryinput/modinfo.json','Mods/vulkanstoryinput/VulkanStory.Input.Companion.dll','Mods/vulkanstoryinput/VulkanStory.Input.dll')) {
     if (-not $client.Contains($required)) { throw "Incomplete client inventory: $required" }
 }

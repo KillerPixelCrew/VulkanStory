@@ -27,7 +27,7 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 # Bootstrap uses reflection to load Game; build it explicitly, without a test project.
 foreach ($project in @('VulkanStory.Bootstrap', 'VulkanStory.Game', 'VulkanStory.Mod', 'VulkanStory.Input.Companion')) {
     $arguments = @('build', (Join-Path $projectRoot "src/$project/$project.csproj"), '-c', $Configuration)
-    if ($RuntimeIdentifier -eq 'linux-x64') { $arguments += @('-r', $RuntimeIdentifier, '-p:SelfContained=false') }
+    if ($RuntimeIdentifier -eq 'linux-x64') { $arguments += @('-r', $RuntimeIdentifier, '-p:SelfContained=false', '-p:IsRidAgnostic=false') }
     if ($VintageStoryPath) { $arguments += "-p:VintageStoryPath=$VintageStoryPath" }
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) { throw "Managed build failed: $project" }

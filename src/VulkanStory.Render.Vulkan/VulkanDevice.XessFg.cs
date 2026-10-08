@@ -220,6 +220,10 @@ public sealed unsafe partial class VulkanDevice
             Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
             nint pclToken = _streamlinePclReady && _streamlineTokenFrameId == _latencyFrameId
                 ? _streamlineTokenPointer : 0;
+            // Disabled pass-through retains no interpolation history; seed the
+            // first enabled present before XeSS uses a previous frame's inputs.
+            if (_xessProtocolReady && _xessRenderedFrames <= 1)
+                _xessConstants.Reset = 1;
             presenter.QueuePresent(prepared, _xessConstants, _latencyFrameId, pclToken);
             // The DX12 and Vulkan contexts time-slice the GPU: run concurrently, XeSS-FG's
             // ~2 ms of interpolation took ~5.4 ms and both queues idled at the switches.
