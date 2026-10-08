@@ -10,12 +10,14 @@ namespace VulkanStory.Game;
 internal enum HeadlessScenarioActionKind
 {
     Settings,
+    Options,
+    Resize,
     Capture,
     Checkpoint,
     Assert
 }
 
-/// <summary>Validated action scheduled at a specific scenario frame, including optional settings and capture expectations.</summary>
+/// <summary>Validated action scheduled at a scenario tick, including host operations, logical resize and observation expectations.</summary>
 internal sealed record HeadlessScenarioAction(
     int Index,
     string Id,
@@ -27,7 +29,11 @@ internal sealed record HeadlessScenarioAction(
     string? Field = null,
     string? Operator = null,
     JsonElement Expected = default,
-    string? Baseline = null);
+    string? Baseline = null,
+    string? Operation = null,
+    string? Page = null,
+    int Width = 0,
+    int Height = 0);
 
 /// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
@@ -48,6 +54,13 @@ internal sealed class HeadlessScenario
             ["focused"] = (JsonValueKind.True, false),
             ["stagedModLoaded"] = (JsonValueKind.True, false),
             ["worldReady"] = (JsonValueKind.True, false),
+            ["optionsHost"] = (JsonValueKind.String, false),
+            ["optionsPage"] = (JsonValueKind.String, true),
+            ["worldPaused"] = (JsonValueKind.True, true),
+            ["pauseMenuOpen"] = (JsonValueKind.True, false),
+            ["requestedTaa"] = (JsonValueKind.True, false),
+            ["appliedTaa"] = (JsonValueKind.True, false),
+            ["persistedTaa"] = (JsonValueKind.True, false),
             ["hasCurrentWorldSample"] = (JsonValueKind.True, false),
             ["WorldCaptured"] = (JsonValueKind.True, true),
             ["MotionValid"] = (JsonValueKind.True, true),
@@ -64,6 +77,8 @@ internal sealed class HeadlessScenario
             ["renderHeight"] = (JsonValueKind.Number, true),
             ["displayWidth"] = (JsonValueKind.Number, false),
             ["displayHeight"] = (JsonValueKind.Number, false),
+            ["windowWidth"] = (JsonValueKind.Number, false),
+            ["windowHeight"] = (JsonValueKind.Number, false),
             ["configuredDlssGeneratedFrames"] = (JsonValueKind.Number, true),
             ["dlssStateQueryFrameId"] = (JsonValueKind.Number, true),
             ["dlssStateQueryResult"] = (JsonValueKind.Number, true),
@@ -89,17 +104,20 @@ internal sealed class HeadlessScenario
         "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents"
     };
 
-    private HeadlessScenario(string path, string inputHash, string id, IReadOnlyList<HeadlessScenarioAction> actions)
+    private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)
     {
         InputPath = path;
         InputSha256 = inputHash;
         Id = id;
+        Context = context;
         Actions = actions;
     }
 
     internal string InputPath { get; }
     internal string InputSha256 { get; }
     internal string Id { get; }
+    /// <summary>Original host context; omitted scenario context retains loaded-world scheduling.</summary>
+    internal string Context { get; }
     internal IReadOnlyList<HeadlessScenarioAction> Actions { get; }
     internal static IReadOnlyDictionary<string, (JsonValueKind Kind, bool Nullable)> Fields => AssertionFields;
 
@@ -144,12 +162,16 @@ internal sealed class HeadlessScenario
     private static HeadlessScenario Parse(string path, string inputHash, JsonElement root)
     {
         Dictionary<string, JsonElement> rootProperties = ObjectProperties(root, "ScenarioField");
-        RequireOnly(rootProperties, ["schema", "id", "actions"], "ScenarioField");
+        RequireOnly(rootProperties, ["schema", "id", "context", "actions"], "ScenarioField");
         RequireAll(rootProperties, ["schema", "id", "actions"], "ScenarioField");
         if (rootProperties["schema"].ValueKind != JsonValueKind.Number ||
             !rootProperties["schema"].TryGetInt32(out int schema) || schema != 1)
             throw Error("SchemaVersion", "Scenario schema must be integer 1.");
         string id = RequiredString(rootProperties["id"], "ScenarioId");
+        string context = rootProperties.TryGetValue("context", out JsonElement contextValue)
+            ? RequiredString(contextValue, "ScenarioContext") : "world";
+        if (context is not ("world" or "main"))
+            throw Error("ScenarioContext", "Scenario context must be world or main.");
         JsonElement actionArray = rootProperties["actions"];
         if (actionArray.ValueKind != JsonValueKind.Array)
             throw Error("ActionsRange", "Scenario actions must be an array.");
@@ -176,6 +198,39 @@ internal sealed class HeadlessScenario
             HeadlessScenarioAction action;
             switch (kindText)
             {
+                case "options":
+                {
+                    RequireOnly(properties, ["id", "tick", "kind", "operation", "page"], "ActionField");
+                    RequireAll(properties, ["operation"], "ActionField");
+                    string operation = RequiredString(properties["operation"], "OptionsOperation");
+                    if (operation is not ("open" or "toggle-taa" or "save" or "cancel" or "back" or "resume" or "close"))
+                        throw Error("OptionsOperation", "Unknown Options operation: " + operation);
+                    if (context == "main" && operation == "resume")
+                        throw Error("OptionsOperation", "Resume requires a world scenario.");
+                    string? page = null;
+                    if (properties.TryGetValue("page", out JsonElement pageValue))
+                    {
+                        if (operation != "open") throw Error("OptionsPage", "page is allowed only for open.");
+                        page = RequiredString(pageValue, "OptionsPage");
+                        if (!RendererSettingsPanel.PageNames.Contains(page, StringComparer.Ordinal))
+                            throw Error("OptionsPage", "Unknown Options page: " + page);
+                    }
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Options,
+                        Operation: operation, Page: page);
+                    break;
+                }
+                case "resize":
+                {
+                    RequireOnly(properties, ["id", "tick", "kind", "width", "height"], "ActionField");
+                    RequireAll(properties, ["width", "height"], "ActionField");
+                    if (properties["width"].ValueKind != JsonValueKind.Number ||
+                        !properties["width"].TryGetInt32(out int width) || width is < 128 or > 8192 ||
+                        properties["height"].ValueKind != JsonValueKind.Number ||
+                        !properties["height"].TryGetInt32(out int height) || height is < 128 or > 8192)
+                        throw Error("ResizeRange", "Resize dimensions must be integers in 128..8192.");
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Resize, Width: width, Height: height);
+                    break;
+                }
                 case "settings":
                 {
                     RequireOnly(properties, ["id", "tick", "kind", "values"], "ActionField");
@@ -249,7 +304,7 @@ internal sealed class HeadlessScenario
             actions.Add(action);
             index++;
         }
-        return new HeadlessScenario(path, inputHash, id, actions);
+        return new HeadlessScenario(path, inputHash, id, context, actions);
     }
 
     private static RendererSettings InitialSettings()
@@ -347,6 +402,8 @@ internal sealed class HeadlessScenario
             "requestedUpscaler" or "effectiveUpscaler" => ["off", "dlss", "xess", "fsr3", "fsr4"],
             "requestedFrameGeneration" or "effectiveFrameGeneration" => ["off", "dlss", "fsr3", "xess"],
             "phase" => ["completedFrame"],
+            "optionsHost" => ["none", "main", "world"],
+            "optionsPage" => ["Image", "Generation", "Effects", "Device", "Status", "Graphics", "Home"],
             _ => null
         };
         if (choices != null && !choices.Contains(expected, StringComparer.Ordinal))

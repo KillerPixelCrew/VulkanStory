@@ -16,7 +16,7 @@
     "libSDL3.so": "C740B9E4DA05D2DC45940D597CC2FB104514723D26DA830F1C2003409B8D26E4",
     "libshaderc_shared.so": "9F2D5C6F53C191E59376251C614043019C6A7E325809703CAD186DA9B9DCE6D3"
   },
-  "requiredNotices": ["SDL-LICENSE.txt", "shaderc/AUTHORS", "shaderc/LICENSE", "glslang/LICENSE.txt", "SPIRV-Tools/LICENSE", "SPIRV-Headers/LICENSE"],
+  "requiredNotices": ["core/SDL-LICENSE.txt", "core/shaderc/AUTHORS", "core/shaderc/LICENSE", "core/glslang/LICENSE.txt", "core/SPIRV-Tools/LICENSE", "core/SPIRV-Headers/LICENSE"],
   "systemDependencies": ["Vulkan ICD and loader", "SDL3 Linux platform dependencies", "Optional DLSS: NVIDIA driver libnvidia-ngx.so.1 and its supported feature runtime"],
   "providerAcceptance": "unverified; Windows-only Streamline, XeSS-FG/XeLL and FSR4 DX12 bridges are excluded"
 }

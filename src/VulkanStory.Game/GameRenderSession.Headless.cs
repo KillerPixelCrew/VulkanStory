@@ -27,7 +27,12 @@ internal sealed partial class GameRenderSession
         if (!HeadlessHarnessOptions.Active) return;
         if (HeadlessHarnessOptions.Enabled && headlessDeadline.Elapsed.TotalSeconds >= headlessTimeout)
         { FailHeadlessRun("timeout", "renderCycle"); return; }
-        if (HeadlessHarnessOptions.MainMenuOptions) { PrepareMainOptionsDiagnostic(); return; }
+        if (HeadlessHarnessOptions.MainMenuOptions)
+        {
+            if (HeadlessHarnessOptions.Scenario == null) PrepareMainOptionsDiagnostic();
+            else if (scenarioTick != null) headlessWorldFrame++; // Menu frames in explicit main context.
+            return;
+        }
         if (HeadlessGameBindings.CurrentRunningClient() is not { BlocksReceivedAndLoaded: true } game) return;
         if (HeadlessHarnessOptions.FixedDeltaTime > 0)
         { delta = HeadlessHarnessOptions.FixedDeltaTime; game.DeltaTimeLimiter = delta; }
@@ -55,7 +60,8 @@ internal sealed partial class GameRenderSession
     /// <summary>Reads and writes configured headless frame output only after the harness readiness/warmup boundaries are satisfied.</summary>
     private void CaptureHeadlessFrame()
     {
-        if (HeadlessHarnessOptions.MainMenuOptions) { CaptureMainOptionsDiagnostic(); return; }
+        if (HeadlessHarnessOptions.MainMenuOptions && HeadlessHarnessOptions.Scenario == null)
+        { CaptureMainOptionsDiagnostic(); return; }
         if (headlessDone || headlessLegacyReady || headlessWorldFrame < 0) return;
         if (HeadlessParityDump.Enabled && !headlessParityDone && headlessWorldFrame == HeadlessParityDump.Frame)
         { DumpHeadlessAttachments(HeadlessParityDump.Directory!); headlessParityDone = true; }

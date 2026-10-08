@@ -53,10 +53,14 @@ internal sealed partial class GameRenderSession
         if (scenario == null || scenarioTerminal || headlessDone) return;
         if (scenarioTick == null)
         {
-            if (HeadlessGameBindings.CurrentRunningClient() is not { BlocksReceivedAndLoaded: true }) return;
+            try { if (!TryStartScenarioContext(scenario)) return; }
+            catch (Exception error) { FailHeadlessRun(error.GetBaseException().Message, "beforeInput"); return; }
             scenarioTick = 0;
         }
         else scenarioTick++;
+
+        try { RequireScenarioContext(); }
+        catch (Exception error) { FailHeadlessRun(error.GetBaseException().Message, "beforeInput"); return; }
 
         int tick = scenarioTick.Value;
         HeadlessScenarioAction? missed = scenario.Actions.FirstOrDefault(action =>
@@ -73,35 +77,37 @@ internal sealed partial class GameRenderSession
             return;
         }
 
-        scenarioFailurePhase = "settings";
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
-                     action.Tick == tick && action.Kind == HeadlessScenarioActionKind.Settings))
+                     action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Settings or
+                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Resize))
         {
+            string phase = ScenarioActionPhase(action.Kind);
+            scenarioFailurePhase = phase;
             try
             {
-                JsonObject current = JsonNode.Parse(RuntimeBootstrap.Current.ReadSettings())?.AsObject()
-                    ?? throw new InvalidOperationException("Runtime settings read returned no object.");
-                foreach (JsonProperty setting in action.Values.EnumerateObject())
-                    current[setting.Name] = JsonNode.Parse(setting.Value.GetRawText());
-                string? error = RuntimeBootstrap.Current.SaveSettings(current.ToJsonString());
-                if (error != null)
+                if (action.Kind == HeadlessScenarioActionKind.Settings)
                 {
-                    WriteScenarioEvent(action, "settings", false, false, null, error);
-                    FailHeadlessRun("Settings action failed: " + error, "settings");
-                    return;
+                    JsonObject current = JsonNode.Parse(RuntimeBootstrap.Current.ReadSettings())?.AsObject()
+                        ?? throw new InvalidOperationException("Runtime settings read returned no object.");
+                    foreach (JsonProperty setting in action.Values.EnumerateObject())
+                        current[setting.Name] = JsonNode.Parse(setting.Value.GetRawText());
+                    string? error = RuntimeBootstrap.Current.SaveSettings(current.ToJsonString());
+                    if (error != null) throw new InvalidOperationException(error);
                 }
+                else if (action.Kind == HeadlessScenarioActionKind.Options) ExecuteScenarioOptions(action);
+                else Window.SetSize(action.Width, action.Height); // SDL events own resize and GUI recomposition.
                 if (!scenarioExecutedActions.Add(action.Index))
                 {
-                    FailHeadlessRun("Settings action was executed more than once: " + action.Id, "settings");
+                    FailHeadlessRun("Pre-input action was executed more than once: " + action.Id, phase);
                     return;
                 }
-                WriteScenarioEvent(action, "settings", true, true, "accepted", null);
+                WriteScenarioEvent(action, phase, true, true, "accepted", null);
             }
             catch (Exception error)
             {
-                try { WriteScenarioEvent(action, "settings", false, false, null, error.Message); }
+                try { WriteScenarioEvent(action, phase, false, false, null, error.GetBaseException().Message); }
                 catch { }
-                FailHeadlessRun("Settings action failed: " + error.Message, "settings");
+                FailHeadlessRun("Pre-input action failed: " + error.GetBaseException().Message, phase);
                 return;
             }
         }
@@ -136,6 +142,7 @@ internal sealed partial class GameRenderSession
     private static string ScenarioActionPhase(HeadlessScenarioActionKind kind) => kind switch
     {
         HeadlessScenarioActionKind.Settings => "settings",
+        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Resize => "beforeInput",
         HeadlessScenarioActionKind.Capture => "preGenerateReadback",
         _ => "completedFrame"
     };
@@ -330,8 +337,11 @@ internal sealed partial class GameRenderSession
         SaveScenarioCaptureManifest();
 
         lastSuccessfulScenarioFrameId = completedFrameId;
-        IReadOnlyDictionary<string, ScenarioObservedField> observation =
-            SnapshotScenarioFrame(tick, completedFrameId);
+        RequireScenarioContext();
+        // Settings-file observations belong to requested checkpoints/assertions, not every provider frame.
+        IReadOnlyDictionary<string, ScenarioObservedField>? observation = scenario.Actions.Any(action =>
+            action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Checkpoint or HeadlessScenarioActionKind.Assert)
+            ? SnapshotScenarioFrame(tick, completedFrameId) : null;
         HeadlessScenarioAction? missed = scenario.Actions.FirstOrDefault(action =>
             action.Tick < tick && !scenarioExecutedActions.Contains(action.Index));
         if (missed != null)
@@ -347,7 +357,7 @@ internal sealed partial class GameRenderSession
         {
             if (action.Kind == HeadlessScenarioActionKind.Checkpoint)
             {
-                var checkpoint = new ScenarioCheckpoint(action.Name!, ScenarioSessionId, observation);
+                var checkpoint = new ScenarioCheckpoint(action.Name!, ScenarioSessionId, observation!);
                 if (!scenarioCheckpoints.TryAdd(action.Name!, checkpoint))
                 {
                     FailHeadlessRun("Checkpoint was recorded more than once: " + action.Name, "completedFrame");
@@ -358,11 +368,11 @@ internal sealed partial class GameRenderSession
                     FailHeadlessRun("Checkpoint action was executed more than once: " + action.Id, "completedFrame");
                     return;
                 }
-                WriteScenarioCheckpoint(action, tick, completedFrameId, observation);
+                WriteScenarioCheckpoint(action, tick, completedFrameId, observation!);
                 WriteScenarioEvent(action, "completedFrame", true, true, "checkpoint recorded", null,
                     completedFrameId: completedFrameId);
             }
-            else if (!EvaluateScenarioAssertion(action, tick, completedFrameId, observation))
+            else if (!EvaluateScenarioAssertion(action, tick, completedFrameId, observation!))
                 return;
         }
 
@@ -377,7 +387,9 @@ internal sealed partial class GameRenderSession
         }
         (bool scenarioHidden, bool scenarioFocused, bool staged, string location) = CurrentScenarioInvariants();
         bool expectedHidden = HeadlessHarnessOptions.KeepWindowHidden;
-        if (scenarioHidden != expectedHidden || scenarioFocused == expectedHidden || !staged || !diagnosticWorldReady)
+        bool contextReady = scenario.Context == "world" ? staged && diagnosticWorldReady
+            : Temporal.CurrentClient == null && HeadlessGameBindings.CurrentRunningClient() == null && !diagnosticWorldReady;
+        if (scenarioHidden != expectedHidden || scenarioFocused == expectedHidden || !contextReady)
         {
             FailHeadlessRun("Scenario terminal invariants failed.", "completedFrame");
             return;
@@ -394,6 +406,8 @@ internal sealed partial class GameRenderSession
         FrameBufferRef? primary = platform.FrameBuffers is { Count: > 0 } targets &&
             targets[0] is { Disposed: false } target ? target : null;
         var display = Window.PixelSize;
+        var window = Window.WindowSize;
+        var options = SnapshotScenarioOptions();
         DlssQueryObservation? query = frameGeneration!.HeadlessDlssQueryObservation;
         bool queryCurrent = query is { } q && q.QueryFrameId == completedFrameId;
         bool countersAvailable = !diagnosticsDisabled && !string.IsNullOrWhiteSpace(diagnosticDirectory) &&
@@ -417,6 +431,13 @@ internal sealed partial class GameRenderSession
         Current("focused", Window.IsFocused);
         Current("stagedModLoaded", HeadlessModDiscovery.IsStagedModLoaded(HeadlessModDiscovery.LoadedModLocation()));
         Current("worldReady", diagnosticWorldReady);
+        Current("optionsHost", options.Host);
+        Current("optionsPage", options.Page);
+        Current("worldPaused", options.Paused);
+        Current("pauseMenuOpen", options.PauseOpen);
+        Current("requestedTaa", options.Requested);
+        Current("appliedTaa", options.Applied);
+        Current("persistedTaa", options.Persisted);
         Current("hasCurrentWorldSample", currentWorldSample);
         Current("WorldCaptured", currentWorldSample ? raw.WorldCaptured : null);
         Current("MotionValid", currentWorldSample ? raw.MotionValid : null);
@@ -433,6 +454,8 @@ internal sealed partial class GameRenderSession
         Current("renderHeight", primary?.Height);
         Current("displayWidth", display.Width);
         Current("displayHeight", display.Height);
+        Current("windowWidth", window.Width);
+        Current("windowHeight", window.Height);
         Current("configuredDlssGeneratedFrames", configuredDlssCount);
         Current("dlssStateQueryFrameId", queryFrameId);
         Current("dlssStateQueryResult", queryResult);
@@ -655,6 +678,8 @@ internal sealed partial class GameRenderSession
         {
             schema = 1,
             id = scenario.Id,
+            context = scenario.Context,
+            gameAssembly = typeof(GameRenderSession).Assembly.Location,
             sessionId = ScenarioSessionId,
             inputSha256 = scenario.InputSha256,
             expectedActionCount = scenario.Actions.Count,
@@ -686,6 +711,8 @@ internal sealed partial class GameRenderSession
         var result = new
         {
             success,
+            context = HeadlessHarnessOptions.Scenario?.Context ?? (HeadlessHarnessOptions.MainMenuOptions ? "main" : "world"),
+            gameAssembly = typeof(GameRenderSession).Assembly.Location,
             reason,
             hidden,
             focused,

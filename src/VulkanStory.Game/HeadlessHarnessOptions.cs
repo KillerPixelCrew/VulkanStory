@@ -9,7 +9,6 @@ public static class HeadlessHarnessOptions
     public static readonly bool Enabled = ResolveFlag("VULKANSTORY_HEADLESS");
     /// <summary>Explicit diagnostic launch only; routine harness windows stay hidden.</summary>
     public static readonly bool KeepWindowHidden = Enabled && !ResolveFlag("VULKANSTORY_HEADLESS_VISIBLE");
-    internal static readonly bool MainMenuOptions = Enabled && ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS");
 
     /// <summary>The chat-command script, or null when there is none.</summary>
     public static readonly string? CommandScriptPath = ResolveExistingFile("VULKANSTORY_HEADLESS_COMMANDS");
@@ -25,6 +24,10 @@ public static class HeadlessHarnessOptions
 
     /// <summary>The validated scenario, or null when the bounded scenario runner is not active.</summary>
     internal static readonly HeadlessScenario? Scenario = ResolveScenario();
+
+    /// <summary>Main scenarios own their Options lifecycle and do not require loading a world.</summary>
+    internal static readonly bool MainMenuOptions = Enabled &&
+        (Scenario?.Context == "main" || ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS"));
 
     /// <summary>The in-world frames to write, ascending and without duplicates. Never null.</summary>
     public static readonly long[] Frames = ResolveFrames();
@@ -81,7 +84,10 @@ public static class HeadlessHarnessOptions
     {
         string? value = Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_SCENARIO");
         if (string.IsNullOrWhiteSpace(value)) return null;
-        return HeadlessScenario.Load(System.IO.Path.GetFullPath(value));
+        HeadlessScenario scenario = HeadlessScenario.Load(System.IO.Path.GetFullPath(value));
+        if (scenario.Context == "world" && ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS"))
+            throw new HeadlessScenarioValidationException("ScenarioContext", "World scenario cannot use main-menu Options mode.");
+        return scenario;
     }
 
     private static string? ResolveDirectory(string name)

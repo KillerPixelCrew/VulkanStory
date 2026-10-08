@@ -34,7 +34,7 @@ Initial isolated upscaler token: off, dlss, fsr3, fsr4, or xess.
 .PARAMETER FrameGeneration
 Initial isolated frame-generation token: off, dlss, fsr3, or xess.
 .PARAMETER Scenario
-Optional schema-one scenario JSON, validated then copied verbatim with its SHA256/identity into the run.
+Optional schema-one scenario JSON, validated then copied verbatim with its SHA256/identity into the run. Context defaults to world; main selects a menu-only lifecycle without copying or opening a save.
 .PARAMETER ControllerEnabled
 Currently rejected because the deferred child-owned controller input profile is required.
 .PARAMETER TouchEnabled
@@ -56,7 +56,7 @@ Allows the diagnostic child window to be visible and changes verifier visibility
 .PARAMETER KeepOpen
 Requires Visible and disables child exit-on-capture-completion; the launcher's timeout still applies.
 .PARAMETER MainMenuOptions
-Selects menu-only Options capture without opening/copying a world; rejects world scenarios, commands, parity, and input switches.
+Selects menu-only Options capture without opening/copying a world. Accepts only main-context scenarios; rejects commands, parity, and input switches.
 .PARAMETER MainOptionsAction
 Menu-only open/save/cancel action; Save/Cancel require the Image page.
 .PARAMETER OptionsPage
@@ -99,8 +99,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 if ($KeepOpen -and -not $Visible) { throw 'KeepOpen requires the explicitly selected Visible diagnostic mode.' }
-if ($MainMenuOptions -and ($Scenario -or $Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
-    throw 'MainMenuOptions is a distinct menu-only capture mode; world scenarios/commands/parity/input profiles cannot be combined.'
+if ($MainMenuOptions -and ($Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
+    throw 'MainMenuOptions cannot combine with commands/parity/input profiles.'
 }
 if (-not $MainMenuOptions -and $MainOptionsAction -ne 'open') { throw 'MainOptionsAction requires MainMenuOptions.' }
 if ($OptionsPage -ne 'Image' -and $MainOptionsAction -ne 'open') { throw 'Main Save/Cancel diagnostics require the Image page.' }
@@ -307,7 +307,9 @@ Root element retained by the caller's live JsonDocument.
 #>
 function Test-ScenarioDocument($Root) {
     $rootProperties = Get-ScenarioProperties $Root 'ScenarioField'
-    Require-ScenarioProperties $rootProperties @('schema','id','actions') @('schema','id','actions') 'ScenarioField'
+    Require-ScenarioProperties $rootProperties @('schema','id','actions','context') @('schema','id','actions') 'ScenarioField'
+    $context = if ($rootProperties.ContainsKey('context')) { Get-ScenarioString $rootProperties['context'] 'ScenarioContext' } else { 'world' }
+    if ($context -cnotin @('world','main')) { Throw-ScenarioError 'ScenarioContext' 'Context must be world or main.' }
     $schema = 0
     if ($rootProperties['schema'].ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
         -not $rootProperties['schema'].TryGetInt32([ref]$schema) -or $schema -ne 1) {
@@ -326,7 +328,7 @@ function Test-ScenarioDocument($Root) {
     $index = 0
     foreach ($action in $actions.EnumerateArray()) {
         $properties = Get-ScenarioProperties $action 'ActionField'
-        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline') @('id','tick','kind') 'ActionField'
+        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline','operation','page','width','height') @('id','tick','kind') 'ActionField'
         $actionId = Get-ScenarioString $properties['id'] 'ActionId'
         if (-not $ids.Add($actionId)) { Throw-ScenarioError 'DuplicateId' "Action IDs must be unique: $actionId" }
         $tick = Get-ScenarioTick $properties['tick']
@@ -337,6 +339,32 @@ function Test-ScenarioDocument($Root) {
             'settings' {
                 Require-ScenarioProperties $properties @('id','tick','kind','values') @('values') 'ActionField'
                 Apply-ScenarioSettings $properties['values']
+            }
+            'resize' {
+                Require-ScenarioProperties $properties @('id','tick','kind','width','height') @('width','height') 'ActionField'
+                foreach ($dimension in @('width','height')) {
+                    $size = 0
+                    if ($properties[$dimension].ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
+                        -not $properties[$dimension].TryGetInt32([ref]$size) -or $size -lt 128 -or $size -gt 8192) {
+                        Throw-ScenarioError 'ResizeRange' 'Resize dimensions must be integers in 128..8192.'
+                    }
+                }
+            }
+            'options' {
+                Require-ScenarioProperties $properties @('id','tick','kind','operation','page') @('operation') 'ActionField'
+                $operation = Get-ScenarioString $properties['operation'] 'OptionsOperation'
+                if ($operation -cnotin @('open','toggle-taa','save','cancel','back','resume','close')) {
+                    Throw-ScenarioError 'OptionsOperation' "Unknown Options operation: $operation"
+                }
+                if ($context -ceq 'main' -and $operation -ceq 'resume') {
+                    Throw-ScenarioError 'OptionsOperation' 'Main-context scenarios cannot resume a world.'
+                }
+                if ($properties.ContainsKey('page')) {
+                    $page = Get-ScenarioString $properties['page'] 'OptionsPage'
+                    if ($operation -cne 'open' -or $page -cnotin @('Image','Generation','Effects','Device','Status')) {
+                        Throw-ScenarioError 'OptionsPage' 'Page is allowed only for open and must be Image, Generation, Effects, Device or Status.'
+                    }
+                }
             }
             'capture' {
                 Require-ScenarioProperties $properties @('id','tick','kind','name','attachments') @('name','attachments') 'ActionField'
@@ -385,6 +413,8 @@ function Test-ScenarioDocument($Root) {
                         { $_ -in @('requestedUpscaler','effectiveUpscaler') } { @('off','dlss','xess','fsr3','fsr4'); break }
                         { $_ -in @('requestedFrameGeneration','effectiveFrameGeneration') } { @('off','dlss','fsr3','xess'); break }
                         'phase' { @('completedFrame'); break }
+                        'optionsHost' { @('none','main','world'); break }
+                        'optionsPage' { @('Image','Generation','Effects','Device','Status','Graphics','Home'); break }
                         default { $null }
                     }
                     if ($null -ne $choices -and -not ($choices -ccontains $choice)) {
@@ -409,7 +439,7 @@ function Test-ScenarioDocument($Root) {
         }
         $index++
     }
-    return @{ Id = $scenarioId; ActionCount = $index }
+    return @{ Id = $scenarioId; ActionCount = $index; Context = $context }
 }
 
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
@@ -422,19 +452,20 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned')) {
+foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa')) {
     $script:assertionKinds.Add($name, 'bool')
 }
-foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset')) { $script:assertionKinds.Add($name, 'bool?') }
+foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','worldPaused')) { $script:assertionKinds.Add($name, 'bool?') }
 foreach ($name in @('temporalFrameId','renderWidth','renderHeight','configuredDlssGeneratedFrames','dlssStateQueryFrameId','dlssStateQueryResult','dlssMaximumGenerated','dlssDynamicMfgSupport','successfulUpscaleFrames','preparedFrames')) {
     $script:assertionKinds.Add($name, 'number?')
 }
-foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId')) {
+foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight')) {
     $script:assertionKinds.Add($name, 'number')
 }
-foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase')) {
+foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase','optionsHost')) {
     $script:assertionKinds.Add($name, 'string')
 }
+$script:assertionKinds.Add('optionsPage', 'string?')
 $script:scenarioSettingsState = @{
     Upscaler = $Upscaler
     UpscalerQuality = 'quality'
@@ -448,6 +479,8 @@ $scenarioSourcePath = $null
 $scenarioSourceBytes = $null
 $scenarioId = $null
 $scenarioInputHash = $null
+$scenarioContext = 'world'
+$menuOnly = [bool]$MainMenuOptions
 $runRoot = $null
 try {
     $runRoot = [IO.Path]::GetFullPath($OutputDirectory)
@@ -467,6 +500,15 @@ try {
         try { $scenarioMetadata = Test-ScenarioDocument $scenarioDocument.RootElement }
         finally { $scenarioDocument.Dispose() }
         $scenarioId = $scenarioMetadata.Id
+        $scenarioContext = $scenarioMetadata.Context
+        if ($MainMenuOptions -and $scenarioContext -cne 'main') {
+            Throw-ScenarioError 'ScenarioContext' 'MainMenuOptions requires a main-context scenario.'
+        }
+        $menuOnly = $menuOnly -or $scenarioContext -ceq 'main'
+        if ($MainOptionsAction -ne 'open') { Throw-ScenarioError 'ScenarioContext' 'A scenario owns its Options actions; MainOptionsAction must remain open.' }
+        if ($menuOnly -and ($Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
+            Throw-ScenarioError 'ScenarioContext' 'Main-context scenarios cannot combine with world commands/parity/input profiles.'
+        }
         $sha = [Security.Cryptography.SHA256]::Create()
         try { $scenarioInputHash = [Convert]::ToHexString($sha.ComputeHash($scenarioSourceBytes)).ToLowerInvariant() }
         finally { $sha.Dispose() }
@@ -495,7 +537,7 @@ $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sourceRoot = (Resolve-Path -LiteralPath $SourceDataDirectory).Path
 if ([IO.Path]::GetFileName($World) -ne $World -or $World.EndsWith('.vcdbs')) { throw 'World must be a save basename, without extension.' }
 $database = Join-Path $sourceRoot "Saves/$World.vcdbs"
-if (-not $MainMenuOptions -and -not (Test-Path -LiteralPath $database)) { throw 'Existing user world is missing; refusing to create a replacement world.' }
+if (-not $menuOnly -and -not (Test-Path -LiteralPath $database)) { throw 'Existing user world is missing; refusing to create a replacement world.' }
 $hook = Join-Path $packageRoot 'VulkanStory/managed/VulkanStory.Bootstrap.dll'
 if (-not (Test-Path -LiteralPath $hook)) { throw 'Supply a complete staged runtime package.' }
 $dotnet = (Get-Command dotnet.exe -ErrorAction Stop).Source
@@ -513,7 +555,7 @@ if ($scenarioSourcePath) {
     [ordered]@{ id=$scenarioId; path='input/scenario.json'; sha256=$scenarioInputHash } |
         ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $inputRoot 'scenario-input.json')
 }
-if (-not $MainMenuOptions) {
+if (-not $menuOnly) {
     & $Python (Join-Path $PSScriptRoot 'snapshot-world.py') $database (Join-Path $dataRoot "Saves/$World.vcdbs")
     if ($LASTEXITCODE -ne 0) { throw 'Consistent world snapshot failed; no client launched.' }
 }
@@ -582,12 +624,12 @@ $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
 $launchArguments = @('exec','--runtimeconfig',(Join-Path $gameRoot 'Vintagestory.runtimeconfig.json'),
     '--depsfile',(Join-Path $gameRoot 'Vintagestory.deps.json'),(Join-Path $gameRoot 'Vintagestory.dll'),
     '--dataPath',$dataRoot,'--addModPath',(Join-Path $dataRoot 'Mods'))
-if (-not $MainMenuOptions) { $launchArguments += @('--openWorld',$World) }
+if (-not $menuOnly) { $launchArguments += @('--openWorld',$World) }
 foreach ($argument in $launchArguments) { $info.ArgumentList.Add($argument) }
 $info.Environment['DOTNET_STARTUP_HOOKS'] = $hook
 $info.Environment['VULKANSTORY_HEADLESS'] = '1'
 $info.Environment['VULKANSTORY_HEADLESS_VISIBLE'] = if ($Visible) { '1' } else { '0' }
-$info.Environment['VULKANSTORY_HEADLESS_MAIN_OPTIONS'] = if ($MainMenuOptions) { '1' } else { '0' }
+$info.Environment['VULKANSTORY_HEADLESS_MAIN_OPTIONS'] = if ($menuOnly) { '1' } else { '0' }
 $info.Environment['VULKANSTORY_HEADLESS_MAIN_ACTION'] = $MainOptionsAction
 $info.Environment['VULKANSTORY_HEADLESS_OPTIONS_PAGE'] = $OptionsPage
 $info.Environment['VULKANSTORY_HEADLESS_MOD_DIRECTORY'] = Join-Path $dataRoot 'Mods/vulkanstory'
@@ -647,7 +689,7 @@ $verifyArguments = @{
     ProcessExitCode = $process.ExitCode
     TimedOut = $timedOut
     Visible = [bool]$Visible
-    MainMenuOptions = [bool]$MainMenuOptions
+    MainMenuOptions = $menuOnly
     MainOptionsAction = $MainOptionsAction
     ExpectedGameAssembly = Join-Path $packageRoot 'VulkanStory/managed/VulkanStory.Game.dll'
 }

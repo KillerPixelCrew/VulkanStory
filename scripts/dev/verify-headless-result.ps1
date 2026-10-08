@@ -16,7 +16,7 @@ Requires scenario result/capture manifests and binding to copied input actions/f
 .PARAMETER Visible
 Whether a visible diagnostic child was requested; determines expected hidden/focus invariants.
 .PARAMETER MainMenuOptions
-Verifies main-menu Options artifacts instead of the loaded-world result.
+Verifies legacy main-menu Options artifacts, or main-context scenario results with staged Game assembly provenance and no loaded world.
 .PARAMETER MainOptionsAction
 Expected main-menu open/save/cancel transition.
 .PARAMETER ExpectedGameAssembly
@@ -193,7 +193,7 @@ if ($multiplierCheck) {
         }
     } catch { $failures.Add('MalformedOrMissingOptionsMultiplier') }
 }
-if ($MainMenuOptions) {
+if ($MainMenuOptions -and -not $RequireScenario) {
     try {
         $menu = Read-ResultObject (Join-Path $frameRoot 'main-options-result.json')
         Require-ResultFields $menu @('success','context','hidden','focused','hasWorld','host','displayed',
@@ -203,7 +203,7 @@ if ($MainMenuOptions) {
         $focused = Get-ResultBoolean $menu['focused']
         $expectedPrefix = if ($MainOptionsAction -eq 'open' -and -not $multiplierCheck) { 'gamesettings-vulkanstory-' } else { 'gamesettings-graphics' }
         if ((Get-ResultString $menu['context']) -cne 'main' -or (Get-ResultBoolean $menu['hasWorld']) -or
-            $hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or
+            $hidden -eq [bool]$Visible -or $focused -ne [bool]$Visible -or
             (Get-ResultString $menu['host']) -cne 'Vintagestory.Client.NoObf.GuiScreenSettings' -or
             -not (Get-ResultString $menu['displayed']).StartsWith($expectedPrefix, [StringComparison]::Ordinal)) {
             $failures.Add('MainOptionsInvariant')
@@ -237,7 +237,6 @@ if ($MainMenuOptions) {
             @(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.ppm' -File).Count -ne $ExpectedFrameCount) {
             $failures.Add('MainOptionsFrameCount')
         }
-        if ($RequireScenario) { $failures.Add('MainOptionsScenarioConflict') }
     }
     catch { $failures.Add('MalformedOrMissingMainOptionsResult') }
 } else {
@@ -250,8 +249,18 @@ try {
     $focused = Get-ResultBoolean $legacy['focused']
     $staged = Get-ResultBoolean $legacy['stagedModLoaded']
     $worldReady = Get-ResultBoolean $legacy['worldReady']
+    $context = if ($legacy.ContainsKey('context')) { Get-ResultString $legacy['context'] } else { 'world' }
+    $expectedContext = if ($MainMenuOptions) { 'main' } else { 'world' }
+    if ($context -cne $expectedContext) { $failures.Add('LegacyContext') }
+    if ($MainMenuOptions) {
+        Require-ResultFields $legacy @('gameAssembly')
+        if (-not $ExpectedGameAssembly -or
+            [IO.Path]::GetFullPath((Get-ResultString $legacy['gameAssembly'])) -ine [IO.Path]::GetFullPath($ExpectedGameAssembly)) {
+            $failures.Add('MainOptionsAssembly')
+        }
+    }
     [void](Get-ResultString $legacy['reason'])
-    [void](Get-ResultString $legacy['modLocation'])
+    [void](Get-ResultString $legacy['modLocation'] (-not $MainMenuOptions))
     [void](Get-ResultInteger $legacy['pid'])
     [void](Get-ResultInteger $legacy['worldFrame'])
     $requested = Get-ResultInteger $legacy['requested']
@@ -264,7 +273,8 @@ try {
         @(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.ppm' -File).Count -ne $ExpectedFrameCount) {
         $failures.Add('LegacyFrameFiles')
     }
-    if ($hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or -not $staged -or -not $worldReady) { $failures.Add('LegacyInvariant') }
+    if ($hidden -eq [bool]$Visible -or $focused -ne [bool]$Visible -or
+        (-not $MainMenuOptions -and -not $staged) -or $worldReady -eq [bool]$MainMenuOptions) { $failures.Add('LegacyInvariant') }
 }
 catch { $failures.Add('MalformedOrMissingHeadlessResult') }
 }
@@ -290,6 +300,17 @@ if ($RequireScenario) {
             $inputHash -ine (Get-ResultString $scenario['inputSha256'])) { throw 'Scenario input hash mismatch.' }
         $inputScenario = Read-ResultObject $inputPath
         Require-ResultFields $inputScenario @('schema','id','actions')
+        $inputContext = if ($inputScenario.ContainsKey('context')) { Get-ResultString $inputScenario['context'] } else { 'world' }
+        $resultContext = if ($scenario.ContainsKey('context')) { Get-ResultString $scenario['context'] } else { 'world' }
+        $expectedContext = if ($MainMenuOptions) { 'main' } else { 'world' }
+        if ($inputContext -cne $expectedContext -or $resultContext -cne $inputContext) { throw 'Scenario context mismatch.' }
+        if ($MainMenuOptions) {
+            Require-ResultFields $scenario @('gameAssembly')
+            if (-not $ExpectedGameAssembly -or
+                [IO.Path]::GetFullPath((Get-ResultString $scenario['gameAssembly'])) -ine [IO.Path]::GetFullPath($ExpectedGameAssembly)) {
+                throw 'Main scenario Game assembly mismatch.'
+            }
+        }
         if ((Get-ResultInteger $inputScenario['schema']) -ne 1 -or
             (Get-ResultString $inputScenario['id']) -cne (Get-ResultString $scenario['id']) -or
             (Get-ResultString $inputScenario['id']) -cne (Get-ResultString $inputReference['id']) -or
@@ -396,7 +417,8 @@ if ($RequireScenario) {
         if ($schema -ne 1 -or -not $complete -or -not $success -or $phase -cne 'completedFrame' -or
             -not $legacyReady -or $scenario['error'].ValueKind -ne [System.Text.Json.JsonValueKind]::Null -or
             $scenario['failedPhase'].ValueKind -ne [System.Text.Json.JsonValueKind]::Null) { $failures.Add('ScenarioTerminal') }
-        if ($hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or -not $staged -or -not $worldReady) { $failures.Add('ScenarioInvariant') }
+        if ($hidden -eq [bool]$Visible -or $focused -ne [bool]$Visible -or
+            (-not $MainMenuOptions -and -not $staged) -or $worldReady -eq [bool]$MainMenuOptions) { $failures.Add('ScenarioInvariant') }
         if ($expectedActions -ne $executedActions) { $failures.Add('ScenarioActionCount') }
         if ($requestedCaptures -ne $writtenCaptures -or $writtenCaptures -ne $pairedCaptures) { $failures.Add('ScenarioCaptureCount') }
         if ($manifestSchema -ne 1 -or $manifestSession -cne $sessionId -or
