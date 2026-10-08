@@ -6,13 +6,11 @@ Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.
 Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
-Current validated/installed implementation: `ae53b49`, checkout `e4da90d`
-(first-enabled XeSS history and packaging/RID corrections). All eight managed builds,
-helper syntax, Windows staging/package and both existing XeSS scenarios passed.
-Current source: `bc85817` adds the missing settings namespace import to lifecycle
-increment `ab85ef8`. The preceding Windows/Linux Game builds failed on that import;
-packaging/runtime/deployment were skipped. Correction is committed, validation pending.
-Current development package: `artifacts/validation/platform-increment-20261008-230846/stage-win`,
+Current validated/installed implementation: `bc85817`, checkout `80158f3`
+(Options lifecycle/SDL resize, namespace correction and Linux notice paths).
+Both Game builds, both platform stage/packages and main/focused DLSS world lifecycle
+scenarios passed. Scoped software acceptance does not close the defects/gaps below.
+Current development package: `artifacts/validation/options-lifecycle-20261008-232950/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
 76.9 SDK output FPS after the mapped-mesh regression correction.
@@ -25,15 +23,15 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 1. **SDK-01/SDK-04: broaden runtime transition acceptance.** Required XeLL enables
    before FG and stays active through requested Off. First-enabled history reset
    resolved the observed -12 stop. The existing XeSS→FSR3→XeSS and latency
-   Off→On→Boost profiles passed all actions/captures on RTX 4070. Next verify
-   ordinary Options close/resize/resume over settled frames using the new scheduled
-   callbacks; wider quality/pacing
-   and eligible Intel behavior remain open.
+   Off→On→Boost profiles passed all actions/captures on RTX 4070. Ordinary
+   Options close/resize/resume passed on DLSS: both measured resume windows
+   produced 40 real/80 SDK presents. Fix the stale Streamline extent exposed during
+   resize next; wider quality/pacing and eligible Intel behavior remain open.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
    updates; ordered range uploads now preserve buffer identity and placement.
-   Wider camera/object/transparency, menu-resume and cadence checks remain.
+   Wider camera/object/transparency, loading/leave-rejoin and cadence checks remain.
 3. **HW-01/HW-02: obtain AMD execution evidence.** Current recorded hardware is
    RTX 4070 Laptop GPU and Intel UHD 770; no AMD adapter. Unsupported fallback is
    verified, actual AMD SR/FG is not. Intel FSR3 SR/FG executes; XeSS-FG requires
@@ -44,8 +42,12 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    Image shows current provider, internal/output resolution and FPS. Release builds
    passed and the package is installed with hashes verified; user reports ordinary
    Options operation works. Broader transitions/resize acceptance remains open.
-   Remaining acceptance is real SDL input, scrolling/resize, error visibility,
-   leave/rejoin and correct provider resume after closing menus.
+   Main/world lifecycle now passed preview/Save/Cancel/abrupt-close restoration,
+   all five pages and logical 1280×720 resize. Custom panels are contained, but
+   the shared main sidebar overlaps/clips while Options is active at that size;
+   diagnose its original layout/resize behavior before choosing a correction.
+   Remaining acceptance is real SDL input, scrolling, error visibility,
+   leave/rejoin and wider provider coverage after menus.
    User reports no visible/FPS difference between Quality and Ultra Performance;
    their live log confirms 1707x1067 versus 853x533 DLSS inputs at 2560x1600 output.
    VSync is saved Off and maxFps is 241. Performance/visible output remains unverified.
@@ -73,18 +75,19 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | --- | --- | --- |
 | Renderer, SDL, official startup and graphics routing | Migrated source, original menu/world rendering, normal shutdown | Full lifecycle/material/input parity |
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
-| DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
+| DLSS FG | Focused gain and Options/resume/resize scenarios passed on RTX 4070; both resume windows show 40 real/80 SDK presents | Correct stale backbuffer extent at deferred resize; moving quality/scanout/pacing and warning-39 recovery |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
 | XeSS FG | XeLL/history corrections validated; XeSS→FSR3→XeSS and Off→On→Boost scenarios passed | Wider transitions, moving-scene/visible quality/pacing and eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
-| Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works. Scheduled main/world lifecycle actions now implemented for acceptance | Validate settled preview/Save/Cancel/abrupt-close, resize/all pages and provider resume; broader physical interaction |
+| Options | Main/world callback lifecycle passed settled preview/Save/Cancel/abrupt-close, all pages, logical resize and provider resume | Main sidebar clipping at small size needs diagnosis; scrolling, broader physical interaction/error/leave-rejoin |
 | Latency/controllers/touch | World/GUI release guards, radial sticks, separate menu bindings and semantic inventory actions implemented; inventory packet path checked | Physical input, gesture/layer/radial extensions and latency/touch acceptance |
 
 ## Source and delivery
 
-The installed implementation is `ae53b49`, checkout `e4da90d`. All managed builds,
-Windows staging/package and both XeSS profiles passed; all 400 installed hashes match.
+The installed implementation is `bc85817`, checkout `80158f3`. Both Game builds,
+both platform stage/packages and main/focused DLSS world profiles passed;
+all 400 installed hashes match. Linux ZIP exists; Linux runtime/install/providers remain unverified.
 The prior focused DLSS world/gain scenario passed at `9a14715`. Liquid motion is ready and
 Game XML warnings are resolved; the existing CS8600 warning remains. Used mesh
 writes stage only changed ranges, while rare raw pointer access synchronizes
@@ -145,7 +148,7 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | Managed cross-builds/helper syntax and RID propagation passed; notice-path correction applied, stage/package validation pending; actual Linux runtime/install/providers/URI proof open |
+| LINUX-01 | Managed cross-builds, RID/notice corrections, staging and ZIP passed; actual Linux runtime/install/providers/URI proof open |
 | GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |

@@ -1,19 +1,45 @@
 # Current development evidence
 
-Updated 2026-10-08. Validated/installed implementation: `ae53b49`, checkout `e4da90d`, on
+Updated 2026-10-08. Validated/installed implementation: `bc85817`, checkout `80158f3`, on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
-Current source `bc85817` adds the missing VulkanStory.Settings import to `ab85ef8`
-lifecycle/SDL-resize and Linux notice changes. No builds, runs or deployment occurred
-in this correction turn; validation is pending. The preceding
-[lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232520/results.json)
-ran once at checkout `90ed6f4`. Both Windows/Linux Game Release builds failed with
-CS0103 at HeadlessScenario.cs:215: RendererSettingsPanel is unavailable because
-the parser lacks the VulkanStory.Settings import. The existing CS8600 warning
-remains. Stage/package, both runtime scenarios and deployment were skipped;
-installed identity remains above. The missing import is now corrected in source.
-No production-source correction or repeated batch occurred in this validation turn.
+Latest [lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232950/results.json)
+ran once at `80158f3`; all nine steps passed. Both Game Release builds, Windows/Linux
+staging and both platform archives passed. Main scenario: 56/56 actions, three paired
+captures, no world and actual stagedModLoaded=false with matching Game assembly.
+Focused world scenario: 78/78 actions, 52/52 assertions, three paired captures,
+staged mod/world ready. Both resume windows show 40 real/80 SDK presents; final
+motion/inputs/reset/query identities agree with query result/status zero. Preview,
+Save/Cancel, abrupt-close restoration, all five pages and logical 1280×720 resize
+passed. These are callback/software acceptance, not general physical SDL/scanout.
+
+World timing varies: existing full-resolution status intervals measured 59.53/119.06
+and 11.37/22.74 real/SDK FPS; after Escape-close 44.39/88.79; resized 47.52/95.05.
+The slow bucket includes readback and 1154.58 ms render-submit p99, GPU span 10.681 ms,
+zero shader/pipeline compiles and zero allocations. Capture frame 1227 adds a 1.4 s
+interval; cause is not established and this is not a game-only steady benchmark.
+SDK logs contain one stale 2560×1528 backbuffer extent clamped to 1280×720, six
+timer resets and three unsupported hook warnings. Tags initialize before deferred
+swapchain acquire/rebuild; update metadata after that size change is the next fix.
+No warning39/negative FG state/crash or teardown failure was logged; explicit
+DLSS-G drain/free receipts are absent, so warning39 recovery remains open.
+
+Visual inspection shows upright world/HUD and contained custom Options panels.
+The resized main capture shows login/sidebar overlap and Credits/Quit below the
+viewport while Options is active. Original resize dispatch reaches only the active
+screen; shared sidebar fixed layout/parent handling needs diagnosis before choosing
+a correction. Existing return capture precedes resize, so proves no small-window
+restoration afterward. No production source repair or batch rerun in validation.
+
+Windows was [delivered with backup](../artifacts/validation/options-lifecycle-20261008-232950/install-backup/deployment.json);
+[receipt verification](../artifacts/validation/options-lifecycle-20261008-232950/install-verification.json)
+matches all 400 installed hashes. No normal installed-game launch occurred.
+Windows client ZIP SHA256 `87F7B746E272CC5AC16AB91991F17BC04FA6427B1B43169F46AC659314B7B6CD`.
+Linux ZIP SHA256 `15827ABB4951E37691C6619AAA6D5FE4D892EF6A74D164E6409953FD5E457615`;
+349 entries include native SDL/shaderc, six required notices and install/remove helpers,
+with no official game assemblies. Linux runtime/native provider/install/URI execution
+remains unverified. Existing CS8600 warning remains; no XML warnings occurred.
 
 Latest [platform batch](../artifacts/validation/platform-increment-20261008-230846/results.json)
 ran once at `e4da90d`: all eight managed Release builds, Linux shell/embedded-Python
@@ -55,17 +81,22 @@ ScreenManager source confirms StartMainMenu reuses its constructor-owned mainScr
 Prepared [main](../artifacts/implementation/options-lifecycle-main.json) and
 [world](../artifacts/implementation/options-lifecycle-world.json) inputs cover
 Save/Cancel/abrupt-close restoration, all five pages, resize and resumed provider
-inputs/present gains. The [next batch](../artifacts/implementation/validate-options-lifecycle.ps1)
-builds Game on both targets, stages/packages both, runs both profiles once and
-delivers Windows only after both pass. DLSS-FG world mode is visible/focused.
-These inputs have not run; callbacks do not prove general physical SDL interaction.
+inputs/present gains. The [batch helper](../artifacts/implementation/validate-options-lifecycle.ps1)
+built Game on both targets, staged/packaged both, ran both profiles once and
+delivered Windows after both passed. DLSS-FG world mode was visible/focused.
+Both inputs passed in the latest batch; callbacks do not prove general physical SDL interaction.
 
 T03 invocation discovery verified ordinary screenshot hotkey handlers and official
 .vrec filetarget/videofps/tickfps/start/stop commands. Current command scripts
 dispatch every line in one frame, so cannot record frames between start/stop.
 AVI Close clears recording before its worker finishes encoding; acceptance needs
-finalized output and independent decoding. Screenshot output-root isolation and
-exact timelapse command syntax are not established by the available saved bodies.
+finalized output and independent decoding. [GamePaths.Screenshots source](https://github.com/anegostudios/vsapi/blob/master/Config/GamePaths.cs#L54)
+defines a get-only MyPictures/Vintagestory resolver, independent of DataPath: a gated
+process-local getter override is needed for ordinary child screenshot isolation.
+Saved 1.22.7 source registers `.timelapse <days-per-render> <months>`; it does not
+reset the accumulated value. Natural completion/restoration and snapshot/restore
+of calendar/overlay state must be observed. Exact donor source bytes have no
+discovered binary-bound manifest; live invocation still needs current-binary proof.
 The public registration/motion interfaces exist, but no compiled real consumer
 exercises them. A small isolated invocation/consumer slice remains; no capture,
 encoding, decoder, registration or runtime check ran during this discovery.
