@@ -81,7 +81,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             if (!_xessProtocolReady || (_xellAppliedFrameCap == _vendorFrameCap && _appliedLatencyMode == DesiredLatencyMode)) return;
             // XeLL requires GPU work to be finished before its mode changes.
             intel.WaitForGpuIdle();
-            RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0),
+            // XeSS-FG requires XeLL enabled even when the generic preference is Off.
+            RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, true),
                 "frame-cap options");
             _xellAppliedFrameCap = _vendorFrameCap;
             _appliedLatencyMode = DesiredLatencyMode;
@@ -140,10 +141,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             if (!_xessProtocolReady || _appliedLatencyMode != latencyMode || _xellAppliedFrameCap != _vendorFrameCap)
             {
                 intel.WaitForGpuIdle();
+                // XeLL must be enabled before FG and remain enabled for its presenter.
+                RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, true),
+                    "mode options");
                 if (!_xessProtocolReady) RequireXellProtocol(intel.Runtime.SetEnabled(true), "enabling a complete XeSS frame");
                 _xessProtocolReady = true;
-                RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0),
-                    "mode options");
                 _appliedLatencyMode = latencyMode;
                 _xellAppliedFrameCap = _vendorFrameCap;
             }

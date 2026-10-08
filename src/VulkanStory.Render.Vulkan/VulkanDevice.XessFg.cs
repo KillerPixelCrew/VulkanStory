@@ -27,6 +27,8 @@ public sealed unsafe partial class VulkanDevice
     private uint _xessEffectiveGeneratedFrames;
     private bool _xessProtocolReady;
     private int _xellAppliedFrameCap = -1;
+    /// <summary>Whether the active XeSS presenter has enabled its required XeLL latency dependency, independently of the host's generic preference.</summary>
+    internal bool XessRequiresLowLatency => _xessPresenter != null && _xessProtocolReady;
     /// <summary>Interpolation count most recently configured by the active XeSS presenter.</summary>
     internal uint XessConfiguredGeneratedFrames => _xessEffectiveGeneratedFrames;
     // Historical SDK report for this device owner, including while FG is suspended.

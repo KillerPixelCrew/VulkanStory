@@ -23,6 +23,8 @@ internal sealed partial class GameRenderSession
                 : primary != null ? primary.Width + "x" + primary.Height + " -> " + display.Width + "x" + display.Height
                     : "targets not allocated; output " + display.Width + "x" + display.Height) + "\n" +
             "Frame generation requested: " + settings.FrameGeneration + "; " + fg + "\n" +
+            "Low latency requested: " + settings.LowLatencyMode +
+                (Device.XessRequiresLowLatency ? "; XeLL On (required by XeSS-FG presenter)" : "") + "\n" +
             "TAA resolve: " + (Graphics.TaaResolvedThisFrame ? "completed" : "off") + "; motion: " +
             (Temporal.Snapshot().MotionValid ? "current" : "unavailable") + "\n" +
             "AO: " + (Graphics.AmbientOcclusionShadersUseGtao ? "GTAO" : "SSAO / off") + "\n" +
