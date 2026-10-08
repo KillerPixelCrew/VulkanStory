@@ -4,7 +4,7 @@ using System.Runtime.Loader;
 
 namespace VulkanStory.Bootstrap;
 
-/// <summary>Validates the Windows client profile and installs managed integration before game startup.</summary>
+/// <summary>Validates a supported client profile and installs managed integration before game startup.</summary>
 /// <remarks>Graphics ownership remains with the original startup path until the integration commits routing.</remarks>
 internal static class BootstrapEntry
 {
@@ -25,18 +25,28 @@ internal static class BootstrapEntry
             StartupHookEnvironment.RemoveOwnHook(ownPath);
             string gameDirectory = Path.GetFullPath(AppContext.BaseDirectory);
             string? executable = Path.GetFileName(Environment.ProcessPath);
+            bool windows = OperatingSystem.IsWindows();
+            bool linux = OperatingSystem.IsLinux();
+            StringComparison processComparison = windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            bool clientEntry = Assembly.GetEntryAssembly()?.GetName().Name == "Vintagestory";
             bool harness = Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS") == "1" &&
-                string.Equals(executable, "dotnet.exe", StringComparison.OrdinalIgnoreCase) &&
-                Assembly.GetEntryAssembly()?.GetName().Name == "Vintagestory";
-            if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64 ||
-                (!string.Equals(executable, "Vintagestory.exe", StringComparison.OrdinalIgnoreCase) && !harness))
+                string.Equals(executable, windows ? "dotnet.exe" : "dotnet", processComparison);
+            if ((!windows && !linux) || RuntimeInformation.ProcessArchitecture != Architecture.X64 || !clientEntry ||
+                (!string.Equals(executable, windows ? "Vintagestory.exe" : "Vintagestory", processComparison) && !harness))
             {
-                SetStatus(trace, "bypassed", "Not the supported Windows x64 client process.");
+                SetStatus(trace, "bypassed", "Not a supported Windows/Linux x64 client process.");
                 return;
             }
 
+            if (!IsBootstrapEnabled(Path.Combine(gameDirectory, "VulkanStory", "loader.ini")))
+            {
+                SetStatus(trace, "bypassed", "Disabled by VulkanStory/loader.ini.");
+                return;
+            }
             string managedDirectory = Path.GetDirectoryName(ownPath)!;
-            GameProfile profile = GameProfile.Load(Path.Combine(managedDirectory, "profiles", "vs-1.22.7-win-x64.json"));
+            string profileId = windows ? "vs-1.22.7-win-x64" : "vs-1.22.7-linux-x64";
+            GameProfile profile = GameProfile.Load(Path.Combine(managedDirectory, "profiles", profileId + ".json"));
+            if (profile.Id != profileId) throw new InvalidDataException("Game profile does not match the selected platform.");
             if (Environment.Version.Major != profile.RuntimeMajor)
                 throw new InvalidDataException($"Expected .NET {profile.RuntimeMajor}, found {Environment.Version}.");
             profile.VerifyFiles(gameDirectory);
@@ -65,6 +75,33 @@ internal static class BootstrapEntry
             if (Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS") == "1")
                 throw new InvalidOperationException("Headless bootstrap failed; refusing visible fallback.", cause);
         }
+    }
+
+    /// <summary>Reads the bounded package-local enable switch before integration or graphics dependencies load.</summary>
+    /// <remarks>Missing configuration preserves the native Windows loader's enabled default; Linux installation requires the file.</remarks>
+    private static bool IsBootstrapEnabled(string path)
+    {
+        if (!File.Exists(path)) return OperatingSystem.IsWindows();
+        if (new FileInfo(path).Length > 64 * 1024) throw new InvalidDataException("Loader configuration exceeds the size limit.");
+        bool bootstrapSection = false;
+        bool enabled = true;
+        foreach (string raw in File.ReadLines(path))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line[0] is ';' or '#') continue;
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                bootstrapSection = line[1..^1].Trim().Equals("Bootstrap", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            int separator = line.IndexOf('=');
+            if (!bootstrapSection || separator < 0 ||
+                !line[..separator].Trim().Equals("Enabled", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!int.TryParse(line[(separator + 1)..].Trim(), out int value))
+                throw new InvalidDataException("Bootstrap Enabled must be an integer (0 disables activation).");
+            enabled = value != 0;
+        }
+        return enabled;
     }
 
     /// <summary>Publishes the bootstrap state for the late mod entry and appends its diagnostic marker.</summary>

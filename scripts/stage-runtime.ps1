@@ -6,7 +6,7 @@ Resolves the explicit payload inventory, required XML documentation sidecars, co
 .PARAMETER Configuration
 Build configuration used to locate existing managed DLL/XML and bootstrap outputs.
 .PARAMETER NativeDirectory
-Directory containing every binary required by packaging/native-win-x64.json.
+Directory containing every binary required by packaging/native-<RuntimeIdentifier>.json. Linux optional components are copied only when their complete input set exists.
 .PARAMETER NativeLicensesDirectory
 Nonempty notice tree copied under VulkanStory/licenses/native.
 .PARAMETER ManagedLicensesDirectory
@@ -15,6 +15,8 @@ Nonempty managed notice tree copied under VulkanStory/licenses/managed.
 Compiled shader corpus containing schema-one shaders.manifest.json and its hashed SPIR-V files.
 .PARAMETER OutputDirectory
 Fresh staging root; existing destinations are rejected rather than merged.
+.PARAMETER RuntimeIdentifier
+win-x64 or linux-x64, defaulting to the current host. Selects the official profile, native inventory, activation helpers and managed output layout.
 #>
 [CmdletBinding()]
 param(
@@ -23,10 +25,13 @@ param(
     [Parameter(Mandatory)][string]$NativeLicensesDirectory,
     [Parameter(Mandatory)][string]$ManagedLicensesDirectory,
     [Parameter(Mandatory)][string]$ShadersDirectory,
-    [Parameter(Mandatory)][string]$OutputDirectory
+    [Parameter(Mandatory)][string]$OutputDirectory,
+    [ValidateSet('win-x64','linux-x64')][string]$RuntimeIdentifier = $(if ($IsLinux) { 'linux-x64' } else { 'win-x64' })
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
+$profileId = "vs-1.22.7-$RuntimeIdentifier"
+$managedSuffix = if ($RuntimeIdentifier -eq 'linux-x64') { 'net10.0/linux-x64' } else { 'net10.0' }
 $stage = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $stage) { throw 'Choose a fresh output directory; staging never merges or deletes packages.' }
 $sources = [ordered]@{}
@@ -64,39 +69,47 @@ function Add-Tree([string]$relative, [string]$directory) {
         Add-Payload "$relative/$([IO.Path]::GetRelativePath($root, $file.FullName).Replace('\','/'))" $file.FullName
     }
 }
-$proxy = @(
-    (Join-Path $projectRoot "artifacts/native-bootstrap/$Configuration/hostfxr.dll"),
-    (Join-Path $projectRoot 'artifacts/native-bootstrap/hostfxr.dll')
-) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-if (-not $proxy) { throw 'Build the native hostfxr proxy first.' }
-Add-Payload 'hostfxr.dll' $proxy
+if ($RuntimeIdentifier -eq 'win-x64') {
+    $proxy = @(
+        (Join-Path $projectRoot "artifacts/native-bootstrap/$Configuration/hostfxr.dll"),
+        (Join-Path $projectRoot 'artifacts/native-bootstrap/hostfxr.dll')
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if (-not $proxy) { throw 'Build the native hostfxr proxy first.' }
+    Add-Payload 'hostfxr.dll' $proxy
+}
 Add-Payload 'VulkanStory/loader.ini' (Join-Path $projectRoot 'packaging/loader.ini')
-Add-Payload 'VulkanStory/README.txt' (Join-Path $projectRoot 'packaging/README-client.txt')
-Add-Payload 'VulkanStory/tools/deploy-runtime.ps1' (Join-Path $projectRoot 'scripts/deploy-runtime.ps1')
-Add-Payload 'VulkanStory/tools/remove-runtime.ps1' (Join-Path $projectRoot 'scripts/remove-runtime.ps1')
+$readme = if ($RuntimeIdentifier -eq 'linux-x64') { 'packaging/README-linux-client.txt' } else { 'packaging/README-client.txt' }
+Add-Payload 'VulkanStory/README.txt' (Join-Path $projectRoot $readme)
+if ($RuntimeIdentifier -eq 'win-x64') {
+    Add-Payload 'VulkanStory/tools/deploy-runtime.ps1' (Join-Path $projectRoot 'scripts/deploy-runtime.ps1')
+    Add-Payload 'VulkanStory/tools/remove-runtime.ps1' (Join-Path $projectRoot 'scripts/remove-runtime.ps1')
+} else {
+    Add-Payload 'VulkanStory/tools/install-linux-runtime.sh' (Join-Path $projectRoot 'scripts/install-linux-runtime.sh')
+    Add-Payload 'VulkanStory/tools/remove-linux-runtime.sh' (Join-Path $projectRoot 'scripts/remove-linux-runtime.sh')
+}
 foreach ($project in @('Bootstrap','Contracts','Game','Input','Platform.Sdl','Render.Vulkan')) {
-    Add-Payload "VulkanStory/managed/VulkanStory.$project.dll" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/net10.0/VulkanStory.$project.dll")
-    Add-Payload "VulkanStory/managed/VulkanStory.$project.xml" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/net10.0/VulkanStory.$project.xml")
+    Add-Payload "VulkanStory/managed/VulkanStory.$project.dll" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/$managedSuffix/VulkanStory.$project.dll")
+    Add-Payload "VulkanStory/managed/VulkanStory.$project.xml" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/$managedSuffix/VulkanStory.$project.xml")
 }
 # Explicit dependency inventory matches BootstrapDependencies; game/Harmony assemblies are excluded.
-$backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/net10.0"
+$backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/$managedSuffix"
 foreach ($name in @('SDL3-CS','Silk.NET.Core','Silk.NET.Shaderc','Silk.NET.Vulkan',
     'Silk.NET.Vulkan.Extensions.EXT','Silk.NET.Vulkan.Extensions.KHR',
     'Microsoft.DotNet.PlatformAbstractions','Microsoft.Extensions.DependencyModel')) {
     Add-Payload "VulkanStory/managed/$name.dll" (Join-Path $backend "$name.dll")
 }
-Add-Payload 'VulkanStory/managed/profiles/vs-1.22.7-win-x64.json' (Join-Path $projectRoot 'profiles/vs-1.22.7-win-x64.json')
-Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.dll' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/net10.0/VulkanStory.Mod.dll")
-Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.xml' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/net10.0/VulkanStory.Mod.xml")
+Add-Payload "VulkanStory/managed/profiles/$profileId.json" (Join-Path $projectRoot "profiles/$profileId.json")
+Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.dll' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/$managedSuffix/VulkanStory.Mod.dll")
+Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.xml' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/$managedSuffix/VulkanStory.Mod.xml")
 Add-Payload 'Mods/vulkanstory/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Mod/modinfo.json')
 # The ordinary server-only mod also loads in the integrated single-player server.
 # Its shared Input DLL comes from the same build as the early payload, preserving
 # assembly identity. Dedicated servers receive the separate companion archive.
 foreach ($name in @('VulkanStory.Input.Companion','VulkanStory.Input')) {
-    Add-Payload "Mods/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.dll")
-    Add-Payload "Mods/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.xml")
-    Add-Payload "optional-server/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.dll")
-    Add-Payload "optional-server/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.xml")
+    Add-Payload "Mods/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/$managedSuffix/$name.dll")
+    Add-Payload "Mods/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/$managedSuffix/$name.xml")
+    Add-Payload "optional-server/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/$managedSuffix/$name.dll")
+    Add-Payload "optional-server/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/$managedSuffix/$name.xml")
 }
 Add-Payload 'Mods/vulkanstoryinput/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Input.Companion/modinfo.json')
 Add-Payload 'optional-server/vulkanstoryinput/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Input.Companion/modinfo.json')
@@ -109,13 +122,27 @@ Add-Tree 'Mods/vulkanstoryinput/licenses/source-provenance' (Join-Path $projectR
 Add-Tree 'VulkanStory/licenses/native' $NativeLicensesDirectory
 Add-Tree 'VulkanStory/licenses/managed' $ManagedLicensesDirectory
 Add-Payload 'VulkanStory/licenses/dependency-notice-sources.json' (Join-Path $projectRoot 'packaging/notices/sources.json')
-$nativeInventory = Get-Content -LiteralPath (Join-Path $projectRoot 'packaging/native-win-x64.json') -Raw | ConvertFrom-Json
+$nativeInventoryPath = Join-Path $projectRoot "packaging/native-$RuntimeIdentifier.json"
+$nativeInventory = Get-Content -LiteralPath $nativeInventoryPath -Raw | ConvertFrom-Json
+if ($nativeInventory.schema -ne 1 -or $nativeInventory.rid -ne $RuntimeIdentifier) { throw 'Native inventory RID/schema mismatch.' }
+foreach ($notice in $nativeInventory.requiredNotices) {
+    if (-not (Test-Path -LiteralPath (Join-Path $NativeLicensesDirectory $notice) -PathType Leaf)) { throw "Missing required native notice: $notice" }
+}
+foreach ($expected in $nativeInventory.sha256.PSObject.Properties) {
+    $binary = Join-Path $NativeDirectory $expected.Name
+    if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -ine $expected.Value) { throw "Native runtime input identity mismatch: $($expected.Name)" }
+}
 foreach ($component in $nativeInventory.components.PSObject.Properties) {
     foreach ($required in $component.Value) {
-        Add-Payload "VulkanStory/native/win-x64/$required" (Join-Path $NativeDirectory $required)
+        Add-Payload "VulkanStory/native/$RuntimeIdentifier/$required" (Join-Path $NativeDirectory $required)
     }
 }
-Add-Payload 'VulkanStory/native-inventory.json' (Join-Path $projectRoot 'packaging/native-win-x64.json')
+foreach ($component in $nativeInventory.optionalComponents.PSObject.Properties) {
+    $present = @($component.Value | Where-Object { Test-Path -LiteralPath (Join-Path $NativeDirectory $_) -PathType Leaf })
+    if ($present.Count -ne 0 -and $present.Count -ne @($component.Value).Count) { throw "Incomplete optional native component: $($component.Name)" }
+    foreach ($optional in $present) { Add-Payload "VulkanStory/native/$RuntimeIdentifier/$optional" (Join-Path $NativeDirectory $optional) }
+}
+Add-Payload 'VulkanStory/native-inventory.json' $nativeInventoryPath
 $shaderRoot = [IO.Path]::GetFullPath($ShadersDirectory)
 $manifest = Get-Content -LiteralPath (Join-Path $shaderRoot 'shaders.manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.schemaVersion -ne 1) { throw 'Unsupported shader manifest schema.' }
@@ -147,6 +174,6 @@ foreach ($relative in $sources.Keys) {
     Copy-Item -LiteralPath $sources[$relative] -Destination $destination
     $inventory[$relative] = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
 }
-[ordered]@{ schema=1; product='VulkanStory'; profile='vs-1.22.7-win-x64'; acceptance='unverified'; files=$inventory } |
+[ordered]@{ schema=1; product='VulkanStory'; profile=$profileId; rid=$RuntimeIdentifier; acceptance='unverified'; files=$inventory } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'VulkanStory/package.json') -Encoding utf8
 Write-Host "Staged runtime at $stage. No installation, game launch or release acceptance was performed."

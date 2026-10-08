@@ -27,7 +27,8 @@ public static class StartupObservation
         try
         {
             Assembly game = Assembly.Load("VintagestoryLib");
-            if (!string.Equals(Path.GetFullPath(game.Location), Path.GetFullPath(Path.Combine(gameDirectory, "VintagestoryLib.dll")), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(Path.GetFullPath(game.Location), Path.GetFullPath(Path.Combine(gameDirectory, "VintagestoryLib.dll")),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new InvalidOperationException("Game assembly was loaded from an unexpected location.");
 
             StartupIlProfile.VerifyProfile1227(StartupIlInventory.CaptureProfile1227(game));
@@ -46,7 +47,7 @@ public static class StartupObservation
                 patchAttempted = true;
                 harmony.Patch(method, prefix: prefix, postfix: postfix);
             }
-            write("managed.patches.ready", $"profile=vs-1.22.7-win-x64; owner={Owner}; methods={events.Count}; observer-only");
+            write("managed.patches.ready", $"profile={StartupIlProfile.Id}; owner={Owner}; methods={events.Count}; observer-only");
         }
         catch (Exception failure)
         {

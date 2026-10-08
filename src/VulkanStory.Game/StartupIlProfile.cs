@@ -8,7 +8,8 @@ public static class StartupIlProfile
     private sealed record Document(string ProfileId, string GameAssemblySha256, StartupMethodInventory[] Methods);
     private static readonly Document Expected = Load();
 
-    public static string Id => Expected.ProfileId;
+    /// <summary>The selected OS profile; both official 1.22.7 packages contain the identical pinned game library.</summary>
+    public static string Id => OperatingSystem.IsLinux() ? "vs-1.22.7-linux-x64" : Expected.ProfileId;
     public static string GameAssemblySha256 => Expected.GameAssemblySha256;
 
     /// <summary>
@@ -63,6 +64,10 @@ public static class StartupIlProfile
             throw new InvalidDataException("Embedded startup IL profile is empty.");
         if (document.ProfileId != "vs-1.22.7-win-x64" || document.Methods.Length != StartupTargets.Profile1227.Length)
             throw new InvalidDataException("Embedded startup IL profile identity is invalid.");
+        // Static archive inspection verified the complete library hash on both
+        // platforms, which also proves every recorded IL operand is shared.
+        if (document.GameAssemblySha256 != "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0")
+            throw new InvalidDataException("Shared Windows/Linux startup IL library identity is invalid.");
         return document;
     }
 }

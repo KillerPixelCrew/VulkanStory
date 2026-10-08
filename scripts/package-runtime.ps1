@@ -6,7 +6,7 @@ Checks staging schema/profile, relative paths, payload hashes, and required clie
 .PARAMETER StagingDirectory
 Existing tree containing VulkanStory/package.json and every inventoried file.
 .PARAMETER OutputDirectory
-Fresh directory receiving VulkanStory-win-x64.zip, VulkanStory-Input-Companion.zip, and archives.json.
+Fresh directory receiving VulkanStory-<rid>.zip, VulkanStory-Input-Companion.zip, and archives.json. Linux clients extract to a package directory and run the included install-linux-runtime.sh once against their existing installation.
 #>
 [CmdletBinding()]
 param(
@@ -18,9 +18,11 @@ $stage = [IO.Path]::GetFullPath($StagingDirectory)
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh archive output directory.' }
 $manifest = Get-Content -LiteralPath (Join-Path $stage 'VulkanStory/package.json') -Raw | ConvertFrom-Json
-if ($manifest.schema -ne 1 -or $manifest.product -ne 'VulkanStory' -or $manifest.profile -ne 'vs-1.22.7-win-x64') {
+if ($manifest.schema -ne 1 -or $manifest.product -ne 'VulkanStory' -or $manifest.profile -notin @('vs-1.22.7-win-x64','vs-1.22.7-linux-x64')) {
     throw 'Unsupported runtime staging manifest.'
 }
+$rid = if ($manifest.profile -eq 'vs-1.22.7-linux-x64') { 'linux-x64' } else { 'win-x64' }
+if ($manifest.rid -and $manifest.rid -ne $rid) { throw 'Staging profile/RID mismatch.' }
 $client = [ordered]@{}
 $server = [ordered]@{}
 foreach ($entry in $manifest.files.PSObject.Properties) {
@@ -37,7 +39,12 @@ foreach ($entry in $manifest.files.PSObject.Properties) {
         $client[$relative] = @{ source=$source; hash=$entry.Value }
     }
 }
-foreach ($required in @('hostfxr.dll','VulkanStory/managed/VulkanStory.Game.dll','Mods/vulkanstory/modinfo.json',
+$activation = if ($rid -eq 'win-x64') { @('hostfxr.dll') } else {
+    @('VulkanStory/tools/install-linux-runtime.sh','VulkanStory/tools/remove-linux-runtime.sh',
+      'VulkanStory/loader.ini','VulkanStory/managed/profiles/vs-1.22.7-linux-x64.json',
+      'VulkanStory/native/linux-x64/libSDL3.so','VulkanStory/native/linux-x64/libshaderc_shared.so')
+}
+foreach ($required in $activation + @('VulkanStory/managed/VulkanStory.Bootstrap.dll','VulkanStory/managed/VulkanStory.Game.dll','Mods/vulkanstory/modinfo.json',
     'Mods/vulkanstoryinput/modinfo.json','Mods/vulkanstoryinput/VulkanStory.Input.Companion.dll','Mods/vulkanstoryinput/VulkanStory.Input.dll')) {
     if (-not $client.Contains($required)) { throw "Incomplete client inventory: $required" }
 }
@@ -68,18 +75,18 @@ function Write-Archive([string]$name, $files, [string]$manifestName, [string]$pr
                 $relative, [IO.Compression.CompressionLevel]::Optimal) | Out-Null
             $hashes[$relative] = $files[$relative].hash
         }
-        $record = [ordered]@{ schema=1; product=$product; profile=$manifest.profile; acceptance=$manifest.acceptance; files=$hashes }
+        $record = [ordered]@{ schema=1; product=$product; profile=$manifest.profile; rid=$rid; acceptance=$manifest.acceptance; files=$hashes }
         $entry = $archive.CreateEntry($manifestName)
         $writer = [IO.StreamWriter]::new($entry.Open(), [Text.UTF8Encoding]::new($false))
         try { $writer.Write(($record | ConvertTo-Json -Depth 6)) } finally { $writer.Dispose() }
     } finally { $archive.Dispose() }
     return [pscustomobject]@{ file=$name; sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
 }
-# The client archive extracts directly into the existing game directory.
+# Windows clients extract into the game directory; Linux clients use the one-time install helper.
 # The companion archive extracts directly into a server's Mods directory.
 New-Item -ItemType Directory -Path $output | Out-Null
 $archives = @(
-    (Write-Archive 'VulkanStory-win-x64.zip' $client 'VulkanStory/package.json' 'VulkanStory'),
+    (Write-Archive "VulkanStory-$rid.zip" $client 'VulkanStory/package.json' 'VulkanStory'),
     (Write-Archive 'VulkanStory-Input-Companion.zip' $server 'vulkanstoryinput/package.json' 'VulkanStory-Input-Companion')
 )
 $archives | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'archives.json') -Encoding utf8
