@@ -358,7 +358,10 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         fixed (StreamlineFrameGenerationState* pointer = &state)
             return _getFgStateDetails((uint*)pointer, 6);
     }
-    /// <summary>Invalidates frame resources for the supplied extent before a lifecycle transition.</summary>
+    /// <summary>Clears scene inputs before a lifecycle transition; the SDK resolves full backbuffer dimensions at presentation.</summary>
+    /// <param name="width">Presentation width retained by the native ABI; no backbuffer subregion is tagged.</param>
+    /// <param name="height">Presentation height retained by the native ABI; no backbuffer subregion is tagged.</param>
+    /// <returns>The native resource-tagging result.</returns>
     internal int InvalidateFrameTags(uint width, uint height) => _invalidateFrameTags(width, height);
     /// <summary>Requests DLSS-G resource release after its rendering and presentation work is drained.</summary>
     internal int FreeFrameGenerationResources() => _freeFrameGenerationResources();

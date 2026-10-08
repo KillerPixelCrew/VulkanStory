@@ -157,8 +157,8 @@ public sealed unsafe partial class VulkanDevice
         if (!_streamlineFrameGenerationReady || !_streamlineFrameTokenReady ||
             _context.Streamline == null || _swapchain == null) return;
         // Default every new token to a non-scene frame before any game draws.
-        // Generate may supply fresh scene inputs later; an initial menu present
-        // still needs its backbuffer extent even when no provider was selected.
+        // Generate may supply fresh scene inputs later. The SDK resolves the
+        // full backbuffer size after any deferred recreation during acquire.
         int result = _context.Streamline.InvalidateFrameTags(_swapchain.Extent.Width, _swapchain.Extent.Height);
         RequireStreamlineProtocol(result, "current-frame tag initialization");
     }

@@ -470,7 +470,7 @@ __declspec(dllexport) int VulkanStorySlMarkerForToken(uintptr_t token, uint32_t 
     return pclMarker && frame ? static_cast<int>(pclMarker(static_cast<sl::PCLMarker>(marker), *frame)) : -1;
 }
 /// @brief Sets matching camera constants and tags depth, motion, HUD-free color and UI on the current token.
-/// @details Input resources use eOnlyValidNow so the SDK records copies on commandBuffer before renderer staging images are reused. The SDK-owned backbuffer is tagged by full extent.
+/// @details Input resources use eOnlyValidNow so the SDK records copies on commandBuffer before renderer staging images are reused. Full-window rendering leaves backbuffer size to the SDK; client backbuffer tags are needed only for subregions.
 /// @param commandBuffer Borrowed recording Vulkan command buffer used for immediate resource copies.
 /// @param depth Borrowed depth metadata.
 /// @param motion Borrowed motion-vector metadata.
@@ -518,7 +518,6 @@ __declspec(dllexport) int VulkanStorySlTagFrame(VkCommandBuffer commandBuffer,
     const sl::Extent motionExtent{0, 0, motion->width, motion->height};
     const sl::Extent colorExtent{0, 0, hudless->width, hudless->height};
     const sl::Extent uiExtent{0, 0, ui->width, ui->height};
-    const sl::Extent backbufferExtent{0, 0, backbufferWidth, backbufferHeight};
       // The renderer reuses its four upright staging images on the next frame,
       // which can begin before this frame reaches the asynchronous Present.
       // Copy them on the tagging command buffer so each Present sees its own
@@ -528,26 +527,25 @@ __declspec(dllexport) int VulkanStorySlTagFrame(VkCommandBuffer commandBuffer,
           {&m, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &motionExtent},
           {&h, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eOnlyValidNow, &colorExtent},
           {&u, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eOnlyValidNow, &uiExtent},
-          // SL owns the presented swapchain image; only its full extent is tagged.
-          {nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &backbufferExtent},
       };
-    return static_cast<int>(setTagForFrame(*frameToken, viewport, tags, 5,
+    return static_cast<int>(setTagForFrame(*frameToken, viewport, tags, 4,
         reinterpret_cast<sl::CommandBuffer*>(commandBuffer)));
 }
-/// @brief Clears scene resource tags for the current frame token and optionally retains the backbuffer extent.
-/// @details Use at non-scene frames or before resources/provider state change.
+/// @brief Clears scene resource tags for the current frame token.
+/// @details Use at non-scene frames or before resources/provider state change. The SDK resolves the full backbuffer after deferred swapchain recreation; no client subregion is supplied.
+/// @param width Retained for native ABI compatibility; full-backbuffer sizing is SDK-owned.
+/// @param height Retained for native ABI compatibility; full-backbuffer sizing is SDK-owned.
 /// @return SDK result, or -1 without tagging/token availability.
-__declspec(dllexport) int VulkanStorySlInvalidateFrameTagsWithExtent(uint32_t width, uint32_t height) {
+__declspec(dllexport) int VulkanStorySlInvalidateFrameTagsWithExtent([[maybe_unused]] uint32_t width,
+    [[maybe_unused]] uint32_t height) {
     if (!setTagForFrame || !frameToken) return -1;
-    const sl::Extent backbufferExtent{0, 0, width, height};
     sl::ResourceTag tags[] = {
         {nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr},
         {nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr},
         {nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr},
         {nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, nullptr},
-        {nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &backbufferExtent},
     };
-    return static_cast<int>(setTagForFrame(*frameToken, viewport, tags, width && height ? 5 : 4, nullptr));
+    return static_cast<int>(setTagForFrame(*frameToken, viewport, tags, 4, nullptr));
 }
 /// @brief Applies DLSS-G enablement, interpolation count and presentation-resource metadata.
 /// @details Successful identical options are reused. An Off out-of-VRAM warning clears configuration without proving release; the host must drain and explicitly free resources.
