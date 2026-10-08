@@ -1,4 +1,5 @@
 #version 330 core
+#include vulkanstory-motion.ash
 #extension GL_ARB_explicit_attrib_location: enable
 
 // Optimum override of the vanilla particlescube.fsh (TAA P4). Vanilla is
@@ -88,9 +89,8 @@ void main()
 	if (taaPrevClip.w <= 1e-6) {
 		outMotion = vec4(0.0, 0.0, 1.0, 0.0);
 	} else {
-		vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;
-		vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;
-		outMotion = vec4(prevPixel - currentPixel, 1.0, gl_FragCoord.z);
+
+		outMotion = vec4(vulkanstoryMotionVector(taaPrevClip, taaRenderSize, taaJitterPx), 1.0, gl_FragCoord.z);
 	}
 #endif
 }

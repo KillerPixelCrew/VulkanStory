@@ -9,21 +9,12 @@
 // write Primary's motion attachment themselves. The temporal contract in docs/vulkan.md
 // requires reactive coverage and replace blending for motion.
 //
-// Every vanilla line below is untouched; the TAA block is added beside it and
-// preprocesses away entirely when TAAMOTION is 0.
+// Current-particle shading follows the retained game path. The previous-frame
+// calculation preprocesses away when TAAMOTION is 0.
 //
-// The previous position is the CAMERA-ONLY one: the particle is treated as
-// standing still in the world and only the camera is allowed to have moved
-// (accuracy rule 4's prevRel = truePos + cameraPosDelta). Per-particle previous
-// positions are not available - the instance buffer carries position and scale
-// only (ParticlePoolQuads' CustomFloats: 3 + 1 floats, stride 16), and adding a
-// previous-position channel would double an allocation sized by
-// MaxCubeParticles for every pool, main-thread and off-thread. It would also
-// buy nothing today: the fragment stage writes reactive 1, so the resolve's
-// `alpha = max(alpha, reactive)` throws this pixel's history away whatever the
-// vector says. What the writer is really for is exactly that: claiming the
-// pixel with a matching writer depth so the reactive value is delivered, and a
-// smeared particle trail is replaced by the current frame's particle.
+// Previous position/scale/direction come from rendered spawn-identity history.
+// A new, revived, absent or reset particle supplies invalid history; the writer
+// retains reactive coverage and lets temporal resolve use the current pixel.
 
 layout (location = 0) in vec3 vertexPosition;		// Per vertex
 layout (location = 1) in vec4 normalv;				// Per vertex
@@ -39,6 +30,10 @@ layout (location = 5) in float scale;					// Per instance
 layout (location = 6) in vec4 particleDir; 			// Per instance
 layout (location = 7) in vec4 rgbaLightIn; 		// Per instance
 layout (location = 8) in vec4 rgbaBlockIn; 		// Per instance
+layout (location = 9) in vec3 previousParticlePosition;
+layout (location = 10) in vec3 previousParticleScale;
+layout (location = 11) in vec4 previousParticleDirection;
+layout (location = 12) in float particleHistoryValid;
 
 uniform vec4 rgbaFogIn;
 uniform vec3 rgbaAmbientIn;	
@@ -104,11 +99,11 @@ vec4 taaParticleWorldPos(WarpState st, vec3 taaParticlePosition)
 {
 	vec4 taaWorldPos;
 #if defined(VEC3SCALE)
-	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(particleDir.z, particleDir.x) + particleDir.w);
-	taaWorldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(scale,1.0)) + vec4(taaParticlePosition, 1.0);
+	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(previousParticleDirection.z, previousParticleDirection.x) + previousParticleDirection.w);
+	taaWorldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(previousParticleScale,1.0)) + vec4(taaParticlePosition, 1.0);
 	taaWorldPos.w=1;
 #else
-	taaWorldPos = vec4(vertexPosition * scale + taaParticlePosition, 1.0);
+	taaWorldPos = vec4(vertexPosition * previousParticleScale + taaParticlePosition, 1.0);
 #endif
 
 	taaWorldPos = applyVertexWarpingState(st, renderFlags, taaWorldPos);
@@ -150,16 +145,13 @@ void main()
 #endif
 
 #if TAAMOTION > 0
-	// The same vertex, one frame ago: the particle where it is now, moved by
-	// exactly the camera's own motion (accuracy rule 4 - the instance positions
-	// are camera-relative, rebased against EntityPlayer.CameraPos every frame,
-	// which is the same origin cameraPosDelta is measured in), the warp
-	// re-evaluated with the previous frame's counters, and the previous
-	// UNJITTERED projection with the previous CameraMatrixOrigin.
+	// Previous rendered position is already relative to the previous camera.
+	// Re-evaluate its warp with previous counters and project with the previous
+	// unjittered projection and CameraMatrixOrigin.
 	{
 		WarpState taaPrev = previousWarpState();
-		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, particlePosition + cameraPosDelta);
-		taaPrevClip = prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos);
+		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, previousParticlePosition);
+		taaPrevClip = particleHistoryValid > 0.5 ? prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos) : vec4(0.0);
 	}
 #endif
 }

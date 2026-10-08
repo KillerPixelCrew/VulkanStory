@@ -54,7 +54,8 @@ internal sealed class VulkanMesh : IDisposable
 internal sealed unsafe class MeshManager : IDisposable
 {
     /// <summary>xyz, normals, uv, rgba, flags, then the four custom parts.</summary>
-    public const int MaxBuffers = 9;
+    public const int MaxBuffers = 10;
+    private const int BufferParticleHistory = 9;
 
     public const int BufferXyz = 0;
     public const int BufferNormals = 1;
@@ -84,6 +85,9 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private readonly VulkanContext _context;
     private readonly UploadManager? _uploads;
+    private readonly FrameRing? _frames;
+    /// <summary>Invalidates descriptor references when mapped storage is renamed.</summary>
+    internal Action<ulong>? BufferRetired { get; set; }
     private readonly Interner<VertexLayoutDescription> _layouts = new();
     private readonly List<VulkanMesh?> _meshes = new();
     private readonly Stack<int> _freeIds = new();
@@ -114,10 +118,11 @@ internal sealed unsafe class MeshManager : IDisposable
     internal bool PersistentMeshesInVram { get; set; }
     internal long PersistentMeshHeadroomMisses { get; private set; }
 
-    public MeshManager(VulkanContext context, UploadManager? uploads = null)
+    public MeshManager(VulkanContext context, UploadManager? uploads = null, FrameRing? frames = null)
     {
         _context = context;
         _uploads = uploads;
+        _frames = frames;
         _meshes.Add(null);   // 0 is never a real mesh
         PersistentMeshesInVram = uploads != null &&
             Environment.GetEnvironmentVariable("VULKANSTORY_VK_PERSISTENT_MESH_VRAM") != "0" &&
@@ -367,6 +372,41 @@ internal sealed unsafe class MeshManager : IDisposable
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
     }
 
+    /// <summary>Adds a separate previous-particle instance stream without changing the original game's buffer layout.</summary>
+    internal void UpdateParticleHistory(int meshId, float[] values)
+    {
+        VulkanMesh mesh = Get(meshId) ?? throw new InvalidOperationException("Particle history lost its mesh.");
+        int bytes = checked(values.Length * sizeof(float));
+        if (bytes == 0) return;
+        VulkanBuffer? existing = mesh.Buffers[BufferParticleHistory];
+        if (existing == null || existing.Size < (ulong)bytes)
+        {
+            if (existing != null)
+            {
+                BufferRetired?.Invoke(existing.Id);
+                if (_frames == null) throw new InvalidOperationException("Particle history requires a frame retirement owner.");
+                _frames.DeferDeletion(existing);
+            }
+            mesh.Buffers[BufferParticleHistory] = CreateBuffer(bytes, BufferUsageFlags.VertexBufferBit, persistent: false);
+            if (existing == null)
+            {
+                uint binding = (uint)mesh.Layout.Bindings.Length;
+                var bindings = mesh.Layout.Bindings.Append(new VertexBinding(binding, 44, true)).ToArray();
+                var attributes = mesh.Layout.Attributes.Concat(new[]
+                {
+                    new VertexAttribute(9, binding, Format.R32G32B32Sfloat, 0),
+                    new VertexAttribute(10, binding, Format.R32G32B32Sfloat, 12),
+                    new VertexAttribute(11, binding, Format.R32G32B32A32Sfloat, 24),
+                    new VertexAttribute(12, binding, Format.R32Sfloat, 40),
+                }).ToArray();
+                mesh.Layout = new VertexLayoutDescription(bindings, attributes);
+                mesh.LayoutId = _layouts.Intern(mesh.Layout);
+                mesh.BindingOrder.Add(BufferParticleHistory);
+            }
+        }
+        fixed (float* source = values) Write(meshId, BufferParticleHistory, 0, (IntPtr)source, bytes);
+    }
+
     private int Register(VulkanMesh mesh)
     {
         if (_freeIds.Count > 0)
@@ -453,8 +493,10 @@ internal sealed unsafe class MeshManager : IDisposable
         VulkanMesh? mesh = Get(meshId);
         if (mesh == null) return IntPtr.Zero;
 
-        if (slot < 0) return mesh.Indices?.Mapped ?? IntPtr.Zero;
-        return slot < MaxBuffers ? mesh.Buffers[slot]?.Mapped ?? IntPtr.Zero : IntPtr.Zero;
+        if (slot >= MaxBuffers) return IntPtr.Zero;
+        VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
+        if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
+        return WritableBuffer(mesh, slot, buffer).Mapped;
     }
 
     /// <summary>
@@ -500,8 +542,25 @@ internal sealed unsafe class MeshManager : IDisposable
             return;
         }
 
+        buffer = WritableBuffer(mesh!, slot, buffer);
         System.Buffer.MemoryCopy(
             (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
+    }
+
+    /// <summary>Renames previously recorded mapped storage before CPU writes; old command buffers retain their own bytes.</summary>
+    /// <remarks>A returned raw pointer is borrowed for writes before the next draw/update. Clients must request it again after GPU use.</remarks>
+    private VulkanBuffer WritableBuffer(VulkanMesh mesh, int slot, VulkanBuffer buffer)
+    {
+        if (buffer.FrameUse == 0) return buffer;
+        if (_frames == null) throw new InvalidOperationException("Mapped GPU storage requires a frame retirement owner before reuse.");
+        var replacement = new VulkanBuffer(_context, buffer.Size, buffer.Usage,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+        System.Buffer.MemoryCopy((void*)buffer.Mapped, (void*)replacement.Mapped, (long)buffer.Size, (long)buffer.Size);
+        if (slot < 0) mesh.Indices = replacement;
+        else mesh.Buffers[slot] = replacement;
+        BufferRetired?.Invoke(buffer.Id);
+        _frames.DeferDeletion(buffer);
+        return replacement;
     }
 
     /// <summary>Removes the mesh ID and releases its resources immediately or through the supplied frame ring.</summary>

@@ -79,6 +79,9 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// <summary>Declaration-order names, fixed for this linked program.</summary>
     public string[] SamplerNames { get; }
 
+    /// <param name="context">Borrowed Vulkan context used to create and later release this program's shader modules and optional standalone layout.</param>
+    /// <param name="programId">Renderer ID assigned to the linked shader program.</param>
+    /// <param name="translated">Translated stage binaries, resolved interface and optional specialization metadata used by this program.</param>
     /// <param name="sharedLayout">
     /// The device's shared pipeline layout. Programs built outside a device - in
     /// tests - pass none and get a <see cref="StandaloneLayout" /> of the same shape.

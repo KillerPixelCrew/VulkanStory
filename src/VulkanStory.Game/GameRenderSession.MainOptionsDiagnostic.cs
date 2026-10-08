@@ -53,17 +53,13 @@ internal sealed partial class GameRenderSession
         if (mainOptionsDiagnostic?.IsOpened != true ||
             !mainOptionsDiagnostic.ElementComposer.DialogName.StartsWith("gamesettings-graphics", StringComparison.Ordinal))
             throw new InvalidOperationException("Main-menu action did not return to Graphics.");
-        var requested = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!;
-        var persisted = new RendererSettingsStore(services.DataPath).Load();
-        bool applied = services.RendererSettings.Settings.Taa;
-        if (requested.Taa != values.Expected || persisted.Taa != values.Expected || applied != values.Expected)
-            throw new InvalidOperationException("Main-menu Options action did not preserve the expected TAA state.");
+        var result = CheckCapturedTaa(values.Expected, mainOptionsAction);
         string directory = HeadlessHarnessOptions.FrameDirectory ?? throw new InvalidOperationException("Main-menu action directory is absent.");
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "main-options-action.json"), JsonSerializer.Serialize(new
         {
             success = true, action = mainOptionsAction, before = values.Before, expected = values.Expected,
-            requested = requested.Taa, persisted = persisted.Taa, applied,
+            requested = result.Requested, persisted = result.Persisted, applied = result.Applied,
             returned = mainOptionsDiagnostic.ElementComposer.DialogName
         }));
         mainActionComplete = true;
@@ -73,14 +69,7 @@ internal sealed partial class GameRenderSession
         if (headlessDone || mainOptionsDiagnostic == null || headlessWorldFrame < 0) return;
         if (HeadlessHarnessOptions.ShouldCapture(headlessWorldFrame))
         {
-            Graphics.LoadFramebuffer(EnumFrameBuffer.Default);
-            var size = Graphics.CaptureDisplaySize();
-            byte[] pixels = new byte[checked(size.Width * size.Height * 4)];
-            GCHandle pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
-            try { Graphics.ReadCapturePixels(0, 0, size.Width, size.Height, pin.AddrOfPinnedObject()); }
-            finally { pin.Free(); }
-            if (HeadlessHarnessOptions.WriteFrame(headlessWorldFrame, size.Width, size.Height, pixels, true))
-            { WriteHeadlessPng(headlessWorldFrame, size.Width, size.Height, pixels); headlessWritten++; }
+            if (WriteCapturedFrame(headlessWorldFrame)) headlessWritten++;
         }
         if (!HeadlessHarnessOptions.CaptureFinished(headlessWorldFrame)) return;
         if (MultiplierDiagnosticRequested && !multiplierDiagnosticComplete)

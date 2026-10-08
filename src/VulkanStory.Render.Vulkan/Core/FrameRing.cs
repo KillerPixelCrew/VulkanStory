@@ -285,7 +285,10 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <param name="waitSemaphore">A binary semaphore to wait on (the acquire semaphore), or none.</param>
     /// <param name="waitStage">The stage <paramref name="waitSemaphore" /> is waited on at.</param>
     /// <param name="signalSemaphore">A binary semaphore to signal (the present semaphore), or none.</param>
-    /// <param name="frameWaitValue">A Frame timeline value to wait on at COLOR_ATTACHMENT_OUTPUT, or 0.</param>
+    /// <param name="frameWaitValue">A frame timeline value to wait on using the renderer's presentation frame-wait stage mask, or zero to omit the wait.</param>
+    /// <param name="externalSemaphore">Borrowed external timeline semaphore used for the optional GPU wait and signal.</param>
+    /// <param name="externalWaitValue">External completion value to wait for at the transfer stage before shared-image copies, or zero to omit the wait.</param>
+    /// <param name="externalSignalValue">External timeline value to signal after this submission completes, or zero to omit the signal.</param>
     private void Submit(Semaphore waitSemaphore, PipelineStageFlags waitStage, Semaphore signalSemaphore,
         ulong frameWaitValue, Semaphore externalSemaphore = default,
         ulong externalWaitValue = 0, ulong externalSignalValue = 0)

@@ -9,8 +9,9 @@
 //
 // The block ends at location 25, inside the 29 fragment-input locations Mesa's Intel
 // driver reports (maxFragmentInputComponents 116 on an ADL-S iGPU; NVIDIA reports 128).
-// The Vulkan floor is 64 components (16 locations), which the device floor's
-// descriptor-indexing requirements already rule out in practice.
+// The Vulkan floor is 64 components (16 locations). Descriptor indexing does
+// not raise that limit; native program linking checks each reflected interface
+// against the selected device and falls back to translated source when needed.
 
 #ifndef OPTIMUM_VARYINGS_GLSL
 #define OPTIMUM_VARYINGS_GLSL

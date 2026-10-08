@@ -195,17 +195,22 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         { device.RebuildStreamlineSwapchain(); Wait("a swapchain resize"); return; }
         if (presentError != 0)
         { Disable("dlss", "Streamline present failed with Vulkan result " + presentError); return; }
-        // Query after a complete tagged frame; the first pre-tag state can be invalid.
+        // Query capabilities after valid tags and before the first enable.
+        int result = device.TagStreamlineFrame(primary.DepthTextureId, primary.ColorTextureIds[motion],
+            scene.ColorTextureIds[0], ui.ColorTextureIds[0], dlssDepth, dlssMotion, dlssScene, dlssUi,
+            camera, frame.Provider.Reset || renderedFrames == 0);
+        if (result != 0)
+        { Disable("dlss", "Streamline frame tagging failed (" + result + ")"); return; }
         uint maxGenerated = 1;
-        if (renderedFrames > 0)
         {
             int stateResult = device.GetStreamlineFrameGenerationStateDetails(out var state);
             HeadlessDlssQueryObservation = new DlssQueryObservation(frame.FrameId, stateResult,
                 stateResult == 0 ? state : null);
             LastDlssStateResult = stateResult;
             LastDlssState = stateResult == 0 ? state : null;
-            if (stateResult != 0 || state.Status != 0)
+            if (stateResult != 0)
             {
+                if (renderedFrames == 0) { Wait("a valid first tagged DLSS-G capability query"); return; }
                 Disable("dlss", stateResult == 39 ? "Streamline reported an out-of-VRAM warning"
                     : "Streamline state query/status: " + stateResult + "/" + state.Status);
                 return;
@@ -213,21 +218,22 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             maxGenerated = state.MaximumGenerated;
             lastReportedDlssGeneratedLimit = maxGenerated;
             uint presented = state.Presents;
-            actualDlssPresents += presented;
-            VulkanStats.NoteSdkActualPresents(presented);
+            if (renderedFrames > 0)
+            {
+                actualDlssPresents += presented;
+                VulkanStats.NoteSdkActualPresents(presented);
+            }
             if (maxGenerated == 0) { Wait("a nonzero SDK generated-frame limit"); return; }
             if (output.Width < state.MinimumSize || output.Height < state.MinimumSize)
             { Wait("output dimensions at least " + state.MinimumSize + " pixels"); return; }
             if (device.PresentationVsyncEnabled && state.VsyncSupport != 1)
             { Wait("VSync to be disabled for this DLSS-G runtime"); return; }
+            if (state.MinimumSize == 0) { Wait("the SDK minimum output size"); return; }
+            if (renderedFrames > 0 && state.Status != 0)
+            { Disable("dlss", "Streamline state status: " + state.Status); return; }
             if (renderedFrames % 120 == 0)
                 notification("VulkanStory: DLSS-G SDK reports " + actualDlssPresents + " frames actually presented over " + renderedFrames + " rendered frames.");
         }
-        int result = device.TagStreamlineFrame(primary.DepthTextureId, primary.ColorTextureIds[motion],
-            scene.ColorTextureIds[0], ui.ColorTextureIds[0], dlssDepth, dlssMotion, dlssScene, dlssUi,
-            camera, frame.Provider.Reset || renderedFrames == 0);
-        if (result != 0)
-        { Disable("dlss", "Streamline frame tagging failed (" + result + ")"); return; }
         uint count = Math.Min((uint)Math.Clamp(settings.Settings.FrameGenerationMultiplier - 1, 1, 5), maxGenerated);
         if (count != configuredDlssCount)
             notification("VulkanStory: DLSS-G requested " + settings.Settings.FrameGenerationMultiplier + "×, effective " + (count + 1) + "× (SDK maximum " + (maxGenerated + 1) + "×).");

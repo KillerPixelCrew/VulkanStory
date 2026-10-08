@@ -2,12 +2,13 @@
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/RendererSettingsPanel.cs" Link="Settings/RendererSettingsPanel.cs" />
+    <Compile Include="../Shared/RendererChoices.cs" Link="Settings/RendererChoices.cs" />
     <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
     <ProjectReference Include="../VulkanStory.Input/VulkanStory.Input.csproj" />
     <ProjectReference Include="../VulkanStory.Render.Vulkan/VulkanStory.Render.Vulkan.csproj" />
     <EmbeddedResource Include="../../profiles/vs-1.22.7-startup-il.json" LogicalName="VulkanStory.Game.Profiles.Startup1227.json" />
-    <EmbeddedResource Include="Shaders/*.vsh;Shaders/*.fsh" LogicalName="VulkanStory.Game.Shaders.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Shaders/*.vsh;Shaders/*.fsh;Shaders/*.ash" LogicalName="VulkanStory.Game.Shaders.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Assets/PromptFont/promptfont.ttf;Assets/PromptFont/glyphs.json" LogicalName="VulkanStory.Game.PromptFont.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../VulkanStory.Mod/modinfo.json" LogicalName="VulkanStory.Game.ModInfo.json" />
     <Reference Include="0Harmony">
@@ -53,6 +54,19 @@
     <InternalsVisibleTo Include="VulkanStory.Bootstrap.Tests" />
     <InternalsVisibleTo Include="VulkanStory.Game.Tests" />
   </ItemGroup>
+  <!-- Keep one maintained fullscreen source and the existing manifest resource names. -->
+  <Target Name="EmbedFullscreenAliases" BeforeTargets="AssignTargetPaths">
+    <ItemGroup>
+      <_FullscreenShaderAlias Include="fsr-rcas.vsh;taa-debug.vsh;taa-resolve.vsh" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_FullscreenShaderAlias->'Shaders/fsr-easu.vsh')"
+          DestinationFiles="@(_FullscreenShaderAlias->'$(IntermediateOutputPath)fullscreen/%(Identity)')"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <EmbeddedResource Include="@(_FullscreenShaderAlias->'$(IntermediateOutputPath)fullscreen/%(Identity)')"
+                        LogicalName="VulkanStory.Game.Shaders.%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
   <Target Name="RequireOfficialReference" BeforeTargets="ResolveReferences">
     <Error Condition="!Exists('$(VintageStoryPath)/Lib/0Harmony.dll')" Text="Set VintageStoryPath in Directory.Build.local.props to the official game installation. Do not use Optimum's donor or deployed runtime directories." />
     <Error Condition="!Exists('$(VintageStoryPath)/VintagestoryAPI.dll') Or !Exists('$(VintageStoryPath)/VintagestoryLib.dll')" Text="The SDL game adapter requires the official client API and Lib assemblies." />

@@ -16,7 +16,8 @@ internal sealed partial class GameGraphicsAdapter
     /// <summary>Draws particle instances through the compatible native particle pass, otherwise retaining ordinary adapter drawing.</summary>
     /// <param name="mesh">Owned particle instance mesh.</param>
     /// <param name="quantity">Requested particle instance count.</param>
-    internal void RenderParticles(MeshRef mesh, int quantity)
+    /// <param name="frame">Current temporal frame used to select the previous rendered spawn state.</param>
+    internal void RenderParticles(MeshRef mesh, int quantity, TemporalFrameState frame)
     {
         var renderer = RequireDevice(); renderer.GpuMark("particles");
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
@@ -26,7 +27,9 @@ internal sealed partial class GameGraphicsAdapter
         { RenderMeshInstanced(mesh, quantity); return; }
         if (quad && !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[1]))
         { RenderMeshInstanced(mesh, quantity); return; }
-        int handle = MeshHandle(vao), layout = renderer.NativeMeshLayoutId(handle);
+        int handle = MeshHandle(vao);
+        if (!quad) renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame));
+        int layout = renderer.NativeMeshLayoutId(handle);
         RenderTargetFormats? all = renderer.NativeTargetFormats(CurrentTargetId, uint.MaxValue);
         if (layout < 0 || all == null) { RenderMeshInstanced(mesh, quantity); return; }
         int count = all.ColorFormats.Length;

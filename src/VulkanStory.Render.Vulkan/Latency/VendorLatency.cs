@@ -310,6 +310,19 @@ internal sealed unsafe class VendorLatency : IDisposable
     /// <summary>Cancels an outstanding AMD present marker when no present will occur.</summary>
     public void SkipPresent() => _amdFrameKey.Cancel();
 
+    /// <summary>Attributes a manual generated submit/present to the current real application's present identity.</summary>
+    internal void GeneratedMarker(bool rendering, bool start)
+    {
+        if (_disposed || _nv == null || !_reflexReady || _swapchain.Handle == 0) return;
+        var info = new SetLatencyMarkerInfoNV
+        {
+            SType = StructureType.SetLatencyMarkerInfoNV,
+            PresentID = _presentId,
+            Marker = (LatencyMarkerNV)((rendering ? 8 : 10) + (start ? 0 : 1)),
+        };
+        _nv.SetLatencyMarker(_context.Device, _swapchain, ref info);
+    }
+
     private void AntiLagUpdate(AntiLagStageAMD stage, ulong frameId, bool modeOnly)
     {
         var presentation = new AntiLagPresentationInfoAMD

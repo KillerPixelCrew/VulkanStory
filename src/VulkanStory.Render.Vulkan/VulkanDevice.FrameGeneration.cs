@@ -258,13 +258,20 @@ public sealed unsafe partial class VulkanDevice
 
         CommandBuffer commands = _frames.BeginPresentCommands();
         _presentPath.Record(commands, target, source);
-        ulong presentValue = _frames.SubmitPresent(target.AcquireSemaphore,
-            _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
+        ulong presentValue;
+        _vendorLatency?.GeneratedMarker(rendering: true, start: true);
+        try { presentValue = _frames.SubmitPresent(target.AcquireSemaphore,
+            _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore); }
+        finally { _vendorLatency?.GeneratedMarker(rendering: true, start: false); }
         _swapchain.NotePresentSubmitted(target, presentValue);
         // A generated image has no input/simulation phase of its own. Its
         // present id is still allocated so the following real image remains
         // monotonically ordered across swapchain recreation.
-        if (_swapchain.Present(target, 0, _generatedPresentId) == 0) return false;
+        ulong generatedId;
+        _vendorLatency?.GeneratedMarker(rendering: false, start: true);
+        try { generatedId = _swapchain.Present(target, 0, _generatedPresentId); }
+        finally { _vendorLatency?.GeneratedMarker(rendering: false, start: false); }
+        if (generatedId == 0) return false;
         VulkanStats.NotePresent(generated: true);
         _generatedFramePacer.NoteGeneratedPresent();
         if (!_generatedPresentLogged)
@@ -275,71 +282,4 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
-    /// <summary>Creates a DLSS-FG feature on the current recording buffer.</summary>
-    internal NgxResult CreateDlssFrameGeneration(uint width, uint height, Format format,
-        out NgxFrameGenerationFeature? feature)
-    {
-        feature = null;
-        if (!_frameActive) return NgxResult.FailNotInitialized;
-        _targets.FlushAllPendingClears(Commands);
-        _targets.EndRendering(Commands);
-        NgxResult result = NgxFrameGenerationFeature.Create(Commands, width, height, format, out feature);
-        _dynamicState.Invalidate();
-        return result;
-    }
-
-    /// <summary>Transfers a direct NGX interpolation feature to frame-timeline retirement.</summary>
-    internal void RetireDlssFrameGeneration(NgxFrameGenerationFeature feature) =>
-        _frames.DeferDeletion(feature);
-
-    /// <summary>
-    /// Transitions all seven images before asking NGX to record interpolation.
-    /// The outputs are storage images and remain owned by the frame timeline.
-    /// </summary>
-    internal NgxResult EvaluateDlssFrameGeneration(NgxFrameGenerationFeature feature,
-        int backbufferId, int depthId, int motionId, int hudlessId, int uiId,
-        int interpolatedId, int realId, in NgxFrameGenerationCamera camera, bool reset)
-    {
-        using GpuSection gpuSection = BeginGpuSection("fg_ngx_dispatch");
-        if (feature == null || !feature.IsValid) return NgxResult.FailFeatureNotFound;
-        if (!_frameActive) return NgxResult.FailNotInitialized;
-
-        VulkanTexture? backbuffer = _textures.Get(backbufferId);
-        VulkanTexture? depth = _textures.Get(depthId);
-        VulkanTexture? motion = _textures.Get(motionId);
-        VulkanTexture? hudless = hudlessId > 0 ? _textures.Get(hudlessId) : null;
-        VulkanTexture? ui = uiId > 0 ? _textures.Get(uiId) : null;
-        VulkanTexture? interpolated = _textures.Get(interpolatedId);
-        VulkanTexture? real = realId > 0 ? _textures.Get(realId) : null;
-        if (backbuffer == null || depth == null || motion == null || interpolated == null ||
-            (hudlessId > 0 && hudless == null) || (uiId > 0 && ui == null))
-            return NgxResult.FailMissingInput;
-        if (backbufferId == interpolatedId || (realId > 0 &&
-            (backbufferId == realId || interpolatedId == realId)))
-            return NgxResult.FailInvalidParameter;
-
-        CommandBuffer commands = Commands;
-        _targets.FlushAllPendingClears(commands);
-        _targets.EndRendering(commands);
-
-        _textures.Require(_barriers, commands, backbuffer, ResourceUsage.SampleExternal);
-        _textures.Require(_barriers, commands, depth, ResourceUsage.SampleExternal);
-        _textures.Require(_barriers, commands, motion, ResourceUsage.SampleExternal);
-        if (hudless != null) _textures.Require(_barriers, commands, hudless, ResourceUsage.SampleExternal);
-        if (ui != null) _textures.Require(_barriers, commands, ui, ResourceUsage.SampleExternal);
-        _textures.Require(_barriers, commands, interpolated, ResourceUsage.StorageWriteExternal);
-        if (real != null) _textures.Require(_barriers, commands, real, ResourceUsage.StorageWriteExternal);
-        _barriers.Flush(commands);
-
-        NgxResult result = feature.Evaluate(commands,
-            NgxResourceVk.Texture(backbuffer, readWrite: false),
-            NgxResourceVk.Texture(depth, readWrite: false),
-            NgxResourceVk.Texture(motion, readWrite: false),
-            hudless == null ? default : NgxResourceVk.Texture(hudless, readWrite: false),
-            ui == null ? default : NgxResourceVk.Texture(ui, readWrite: false),
-            NgxResourceVk.Texture(interpolated, readWrite: true),
-            real == null ? default : NgxResourceVk.Texture(real, readWrite: true), camera, reset);
-        _dynamicState.Invalidate();
-        return result;
-    }
 }

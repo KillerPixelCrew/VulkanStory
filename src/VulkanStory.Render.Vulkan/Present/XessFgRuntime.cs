@@ -159,10 +159,16 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         _setLatencyMode(_context, maxFps > 0 ? (uint)Math.Max(1, 1_000_000 / maxFps) : 0,
             enabled ? 1u : 0u) : -1;
     /// <summary>Runs native XeLL sleep using the low 32 bits of the renderer frame ID.</summary>
-    public int Sleep(ulong frameId) => _context != 0 ? _sleep(_context, (uint)frameId) : -1;
+    private uint lastSleptFrame;
+    public int Sleep(ulong frameId)
+    {
+        int result = _context != 0 ? _sleep(_context, (uint)frameId) : -1;
+        if (result >= 0) lastSleptFrame = (uint)frameId;
+        return result;
+    }
     /// <summary>Emits a native XeLL latency marker for the supplied frame ID.</summary>
-    public int Marker(ulong frameId, LatencyMarker marker) => _context != 0 ?
-        _marker(_context, (uint)frameId, (int)marker) : -1;
+    public int Marker(ulong frameId, LatencyMarker marker) => _context == 0 ? -1 :
+        lastSleptFrame != (uint)frameId ? 0 : _marker(_context, (uint)frameId, (int)marker);
     /// <inheritdoc/>
     public int CreateSharedImage(uint width, uint height, Format format, bool writable,
         out nint sharedHandle, out nint resource)
@@ -212,6 +218,7 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         return code;
     }
 
+    private bool releasePrepared;
     /// <summary>Prepares checked native-context release before dependent imported resources are destroyed.</summary>
     /// <remarks>Release failure is retained and subsequent release attempts throw without relinquishing ownership.</remarks>
     /// <exception cref="InvalidOperationException">The native bridge cannot safely prepare release, or an earlier release failed.</exception>
@@ -219,11 +226,12 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
     {
         if (_releaseFailure != null)
             throw new InvalidOperationException("XeSS-FG runtime release failed; remaining owners are retained.", _releaseFailure);
-        if (_context == 0) return;
+        if (_context == 0 || releasePrepared) return;
         try
         {
             int result = _prepareDestroy(_context);
             if (result != 0) throw new InvalidOperationException("XeSS-FG native release preparation failed (" + result + ").");
+            releasePrepared = true;
         }
         catch (Exception failure) { _releaseFailure = failure; throw; }
     }

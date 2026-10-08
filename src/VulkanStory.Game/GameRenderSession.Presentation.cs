@@ -1,3 +1,5 @@
+using Vintagestory.API.Client;
+
 namespace VulkanStory.Game;
 
 internal sealed partial class GameRenderSession

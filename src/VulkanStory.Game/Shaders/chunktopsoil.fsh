@@ -1,4 +1,5 @@
 #version 330 core
+#include vulkanstory-motion.ash
 // Optimum override of the vanilla chunktopsoil.fsh: adds the TAA motion-vector
 // output (P3). Everything else is vanilla, line for line.
 
@@ -42,9 +43,8 @@ layout(location = TAAMOTIONLOCATION) out vec4 outMotion;
 vec4 taaMotionVector(float reactive)
 {
 	if (taaPrevClip.w <= 1e-6) return vec4(0.0);
-	vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;
-	vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;
-	return vec4(prevPixel - currentPixel, reactive, gl_FragCoord.z);
+
+	return vec4(vulkanstoryMotionVector(taaPrevClip, taaRenderSize, taaJitterPx), reactive, gl_FragCoord.z);
 }
 #endif
 

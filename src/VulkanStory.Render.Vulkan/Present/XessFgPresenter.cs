@@ -297,7 +297,10 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             if (code != 0) throw new InvalidOperationException("Intel proxy initialization failed (" + code + ")");
             code = runtime.SetGeneratedFrames(1, out _, out _);
             if (code < 0) throw new InvalidOperationException("Intel generated-frame count setup failed (" + code + ")");
-            code = runtime.SetEnabled(true);
+            // Creation can happen after this frame's input/render phases.
+            // Present the first image without interpolation; the next pre-input
+            // sleep boundary enables a complete XeLL/FG frame.
+            code = runtime.SetEnabled(false);
             if (code < 0) throw new InvalidOperationException("Intel proxy enable failed (" + code + ")");
             presenter = new XessFgPresenter(context, runtime, fence!, sets, width, height,
                 pclPresentMarker, sources);
@@ -423,15 +426,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             StopPresentThread();
             // DX12 owns the shared done signals. Finish its queued work before
             // waiting for Vulkan submissions gated on those values.
-            if (_runtime.WaitIdle() != 0)
-                throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle; inputs retained.");
-            VulkanResult.Check(_context.WaitDeviceIdle(), "draining Vulkan before XeSS-FG release");
-            int disable = _runtime.SetEnabled(false);
-            if (disable < 0)
-                throw new InvalidOperationException("Disabling XeSS-FG failed (" + disable + "); inputs retained.");
-            if (_runtime.WaitIdle() != 0)
-                throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle");
             _runtime.PrepareRelease();
+            VulkanResult.Check(_context.WaitDeviceIdle(), "draining Vulkan before XeSS-FG release");
             for (int i = _images.Length - 1; i >= 0; i--) _images[i].Dispose();
             _fence.Dispose();
             _runtime.Dispose();

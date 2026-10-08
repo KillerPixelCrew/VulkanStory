@@ -25,7 +25,13 @@ internal static class ControllerGuiTargets
 
     /// <summary>Collects enabled screen/front-dialog composers, including inventory HUD grids when foreground inventory is active.</summary>
     /// <remarks>Uses the pinned game's private fields; absent fields reduce the available navigation targets.</remarks>
-    public static List<GuiComposer> ActiveComposers(IControllerPlatformHost platform)
+    /// <summary>One GUI discovery snapshot shared by context ownership and navigation in a controller poll.</summary>
+    internal sealed record GuiSnapshot(object? Owner, List<GuiComposer> Composers);
+
+    public static List<GuiComposer> ActiveComposers(IControllerPlatformHost platform) => Snapshot(platform).Composers;
+
+    /// <summary>Collects the last foreground dialog at the lowest input order and its enabled composers.</summary>
+    internal static GuiSnapshot Snapshot(IControllerPlatformHost platform)
     {
         var composers = new List<GuiComposer>();
         ScreenManager? manager = platform.Original.keyEventHandlers.OfType<ScreenManager>().FirstOrDefault();
@@ -35,16 +41,17 @@ internal static class ControllerGuiTargets
             composers.Add(screenComposer);
 
         ClientMain? game = screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
+        GuiDialog? foreground = null;
         if (game?.api?.OpenedGuis != null)
         {
-            double frontOrder = double.PositiveInfinity;
-            foreach (object item in game.api.OpenedGuis)
-                if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.Dialog) frontOrder = Math.Min(frontOrder, dialog.InputOrder);
-            foreach (object item in game.api.OpenedGuis)
+            GuiDialog[] dialogs = game.api.OpenedGuis.OfType<GuiDialog>().Where(dialog => dialog.IsOpened()).ToArray();
+            foreach (GuiDialog dialog in dialogs)
+                if (dialog.DialogType == EnumDialogType.Dialog &&
+                    (foreground == null || dialog.InputOrder <= foreground.InputOrder)) foreground = dialog;
+            if (foreground != null)
             {
-                if (item is not GuiDialog dialog || !dialog.IsOpened() ||
-                    dialog.DialogType != EnumDialogType.Dialog || dialog.InputOrder > frontOrder) continue;
-                foreach (GuiComposer composer in dialog.Composers.Values)
+                composers.Clear();
+                foreach (GuiComposer composer in foreground.Composers.Values)
                     if (composer.Enabled) composers.Add(composer);
             }
             // The hotbar remains a HUD dialog while inventory is open. Include
@@ -53,13 +60,13 @@ internal static class ControllerGuiTargets
             bool inventory = composers.Any(composer => InteractiveElementsField?.GetValue(composer) is
                 Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase));
             if (inventory)
-                foreach (object item in game.api.OpenedGuis)
-                    if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.HUD)
+                foreach (GuiDialog dialog in dialogs)
+                    if (dialog.DialogType == EnumDialogType.HUD)
                         foreach (GuiComposer composer in dialog.Composers.Values)
                             if (composer.Enabled && InteractiveElementsField?.GetValue(composer) is
                                 Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase)) composers.Add(composer);
         }
-        return composers;
+        return new GuiSnapshot(!platform.IsFocused ? platform : foreground ?? (object?)screen, composers);
     }
 
     /// <summary>Returns the client owned by the current running-game screen, or null outside a loaded game.</summary>
@@ -74,16 +81,7 @@ internal static class ControllerGuiTargets
     /// <remarks>For equal dialog input orders, the last encountered dialog owns the context.</remarks>
     internal static object? ForegroundOwner(IControllerPlatformHost platform)
     {
-        if (!platform.IsFocused) return platform;
-        if (ActiveGame(platform)?.api?.OpenedGuis is { } guis)
-        {
-            GuiDialog? foreground = null;
-            foreach (object item in guis)
-                if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.Dialog &&
-                    (foreground == null || dialog.InputOrder <= foreground.InputOrder)) foreground = dialog;
-            if (foreground != null) return foreground;
-        }
-        return platform.ControllerCurrentScreen();
+        return Snapshot(platform).Owner;
     }
 
     /// <summary>Extracts visible grid-slot geometry in reverse composer order for semantic inventory operations.</summary>
@@ -99,16 +97,7 @@ internal static class ControllerGuiTargets
             foreach (GuiElement element in elements.Values)
             {
                 if (element is not GuiElementItemSlotGridBase grid || grid.SlotBounds == null) continue;
-                int count = Math.Min(grid.SlotBounds.Length, grid.renderedSlots.Count);
-                for (int i = 0; i < count; i++)
-                {
-                    ElementBounds bounds = grid.SlotBounds[i];
-                    var center = new Vector2((float)(bounds.absX + bounds.OuterWidth / 2),
-                        (float)(bounds.absY + bounds.OuterHeight / 2));
-                    if (bounds.OuterWidth <= 0 || bounds.OuterHeight <= 0 ||
-                        grid.InsideClipBounds?.PointInside(center.X, center.Y) == false) continue;
-                    targets.Add(new ControllerSlotTarget(grid, i, grid.renderedSlots.GetKeyAtIndex(i), bounds, center));
-                }
+                targets.AddRange(VisibleSlots(grid));
             }
         }
         return targets;
@@ -128,8 +117,7 @@ internal static class ControllerGuiTargets
             {
                 if (element is GuiElementItemSlotGridBase grid && grid.SlotBounds != null)
                 {
-                    int count = Math.Min(grid.SlotBounds.Length, grid.renderedSlots.Count);
-                    for (int i = 0; i < count; i++) Add(grid.SlotBounds[i], grid.InsideClipBounds, width, height, targets);
+                    foreach (var slot in VisibleSlots(grid)) Add(slot.Bounds, grid.InsideClipBounds, width, height, targets);
                 }
                 else if (element.GetType().GetField("elementCells")?.GetValue(element) is IEnumerable<IGuiElementCell> cells)
                 {
@@ -142,6 +130,20 @@ internal static class ControllerGuiTargets
             }
         }
         return targets;
+    }
+
+    /// <summary>Uses one slot geometry/clip rule for cursor and semantic inventory navigation.</summary>
+    private static IEnumerable<ControllerSlotTarget> VisibleSlots(GuiElementItemSlotGridBase grid)
+    {
+        if (grid.SlotBounds == null) yield break;
+        int count = Math.Min(grid.SlotBounds.Length, grid.renderedSlots.Count);
+        for (int i = 0; i < count; i++)
+        {
+            ElementBounds bounds = grid.SlotBounds[i];
+            var center = new Vector2((float)(bounds.absX + bounds.OuterWidth / 2), (float)(bounds.absY + bounds.OuterHeight / 2));
+            if (bounds.OuterWidth <= 0 || bounds.OuterHeight <= 0 || grid.InsideClipBounds?.PointInside(center.X, center.Y) == false) continue;
+            yield return new ControllerSlotTarget(grid, i, grid.renderedSlots.GetKeyAtIndex(i), bounds, center);
+        }
     }
 
     private static void Add(ElementBounds bounds, ElementBounds? clip, int width, int height, List<Vector2> targets)

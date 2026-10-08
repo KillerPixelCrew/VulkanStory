@@ -15,6 +15,15 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// value and resolving to a cached sampler at bind time reproduces the GL
 /// behaviour without creating an object per texture.
 /// </summary>
+/// <param name="MagFilter">Texel filtering used when magnifying the texture.</param>
+/// <param name="MinFilter">Texel filtering used when minifying within the selected mip levels.</param>
+/// <param name="MipmapMode">Filtering between mip levels when mipmapped sampling is enabled.</param>
+/// <param name="AddressU">Texture-coordinate addressing mode along the U axis.</param>
+/// <param name="AddressV">Texture-coordinate addressing mode along the V axis.</param>
+/// <param name="LodBias">Requested mip-selection bias, clamped to the device's supported bias range when creating the sampler.</param>
+/// <param name="CompareEnable">Whether sampling uses the retained less-or-equal depth comparison.</param>
+/// <param name="MaxAnisotropy">Requested anisotropy level; sampler creation uses at least one and falls back to one when unsupported.</param>
+/// <param name="BorderColor">Vulkan border color used by border-addressing modes.</param>
 /// <param name="Mipmapped">
 /// Whether the GL min filter is one of the four MIPMAP forms. GL treats
 /// GL_NEAREST and GL_LINEAR as "level 0 only" however many levels the texture

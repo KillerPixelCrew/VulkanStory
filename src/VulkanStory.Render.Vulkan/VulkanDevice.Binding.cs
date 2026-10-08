@@ -127,6 +127,10 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>The client texture id each <see cref="_frameTextureValues" /> entry was resolved from.</summary>
     private readonly int[] _frameTextureIds = new int[SetConvention.FrameTextures.Length];
     private readonly object _frameTextureLock = new();
+    private readonly SamplerBindingValue[] _frameSamplerScratch = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+    private readonly SamplerBindingValue[] _lastFrameSamplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+    private readonly BufferBindingValue[] _storageBufferScratch = new BufferBindingValue[SetConvention.StorageSetBindingCount];
+    private readonly BufferBindingValue[] _lastStorageBuffers = new BufferBindingValue[SetConvention.StorageSetBindingCount];
 
     /// <summary>Whether set 1's placeholders have been put in the layout their descriptors name.</summary>
     private bool _bindlessPlaceholdersReadable;
@@ -240,7 +244,7 @@ public sealed unsafe partial class VulkanDevice
         if (program.Interface.UsesFrameBlock || program.Interface.UsesFrameTextures)
         {
             if (!TrySnapshotFrameGlobals(program, out uint offset)) return false;
-            var samplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+            var samplers = _frameSamplerScratch;
             lock (_frameTextureLock)
             {
                 for (int i = 0; i < samplers.Length; i++)
@@ -248,13 +252,17 @@ public sealed unsafe partial class VulkanDevice
                     samplers[i] = _frameTextureValues[i].View.Handle != 0 ? _frameTextureValues[i] : FrameTexturePlaceholder(i);
                 }
             }
-            var contents = new DescriptorSetContents(0, SetConvention.FrameSet, samplers,
-                new[]
+            DescriptorSet frameSet = _boundFrameSet;
+            if (frameSet.Handle == 0 || !samplers.AsSpan().SequenceEqual(_lastFrameSamplers))
+            {
+                var contents = new DescriptorSetContents(0, SetConvention.FrameSet, samplers.ToArray(), new[]
                 {
                     new BufferBindingValue((uint)SetConvention.FrameGlobalsBinding, _frames.UniformBuffer, 0,
                         (ulong)_frameGlobals.Length),
                 });
-            DescriptorSet frameSet = GetDescriptorSet(contents, shared.FrameSetLayout);
+                frameSet = GetDescriptorSet(contents, shared.FrameSetLayout);
+                samplers.CopyTo(_lastFrameSamplers, 0);
+            }
             if (frameSet.Handle != _boundFrameSet.Handle || offset != _boundFrameOffset)
             {
                 api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,
@@ -309,7 +317,7 @@ public sealed unsafe partial class VulkanDevice
     {
         SharedPipelineLayout shared = _sharedLayout!;
         VulkanBuffer placeholder = _placeholderUniforms!;
-        var buffers = new BufferBindingValue[SetConvention.StorageSetBindingCount];
+        var buffers = _storageBufferScratch;
         for (int binding = 0; binding < buffers.Length; binding++)
         {
             buffers[binding] = new BufferBindingValue((uint)binding, placeholder.Handle, 0, placeholder.Size, placeholder.Id);
@@ -439,10 +447,15 @@ public sealed unsafe partial class VulkanDevice
             RenderTrace.Write(trace.ToString());
         }
 
-        var contents = new DescriptorSetContents(0, SetConvention.StorageSet, Array.Empty<SamplerBindingValue>(), buffers);
-        DescriptorSet storageSet = namesRingOffset
-            ? _descriptorArenas[_frames.Current.Index].Get(contents, shared.StorageSetLayout)
-            : GetDescriptorSet(contents, shared.StorageSetLayout);
+        DescriptorSet storageSet = _boundStorageSet;
+        if (storageSet.Handle == 0 || !buffers.AsSpan().SequenceEqual(_lastStorageBuffers))
+        {
+            var contents = new DescriptorSetContents(0, SetConvention.StorageSet, Array.Empty<SamplerBindingValue>(), buffers.ToArray());
+            storageSet = namesRingOffset
+                ? _descriptorArenas[_frames.Current.Index].Get(contents, shared.StorageSetLayout)
+                : GetDescriptorSet(contents, shared.StorageSetLayout);
+            buffers.CopyTo(_lastStorageBuffers, 0);
+        }
         if (storageSet.Handle == _boundStorageSet.Handle && recordOffset == _boundRecordOffset) return true;
 
         _context.Api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,

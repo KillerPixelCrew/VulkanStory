@@ -78,10 +78,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _vendorFrameCap = Math.Max(0, maxFps);
         if (_xessPresenter is { } intel)
         {
+            if (!_xessProtocolReady || (_xellAppliedFrameCap == _vendorFrameCap && _appliedLatencyMode == DesiredLatencyMode)) return;
             // XeLL requires GPU work to be finished before its mode changes.
             intel.WaitForGpuIdle();
             RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0),
                 "frame-cap options");
+            _xellAppliedFrameCap = _vendorFrameCap;
+            _appliedLatencyMode = DesiredLatencyMode;
             return;
         }
         if (_frameGenerationProvider == "xess") return;
@@ -131,12 +134,15 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
         if (_xessPresenter is { } intel)
         {
-            if (_appliedLatencyMode != latencyMode)
+            if (!_xessProtocolReady || _appliedLatencyMode != latencyMode || _xellAppliedFrameCap != _vendorFrameCap)
             {
                 intel.WaitForGpuIdle();
+                if (!_xessProtocolReady) RequireXellProtocol(intel.Runtime.SetEnabled(true), "enabling a complete XeSS frame");
+                _xessProtocolReady = true;
                 RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0),
                     "mode options");
                 _appliedLatencyMode = latencyMode;
+                _xellAppliedFrameCap = _vendorFrameCap;
             }
             ReserveFramePresentIds(mayGenerate);
             int sleepResult = intel.Runtime.Sleep(frameId);
@@ -819,7 +825,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // Seam S4: the installed backend tags this ring's submits.
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
-        _meshes = new MeshManager(_context, _uploads);
+        _meshes = new MeshManager(_context, _uploads, _frames);
         _meshUploads = new MeshUploads(_meshes);
         _targets = new RenderTargetManager(_context, _textures, _graph);
         // An inline upload records transfer commands into the frame command
@@ -855,6 +861,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _pipelines.AsyncCompiles = !synchronousPipelines;
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
+        _meshes.BufferRetired = _descriptors.Release;
         _compute = new ComputePipelineCache(_context, () => _pipelines.DriverCache, _pipelines.DriverCacheLock);
         // Decision 9: the bindless table retires a texture's slots on the timeline
         // values of its deletion, and the shared layout names the table's set layout.

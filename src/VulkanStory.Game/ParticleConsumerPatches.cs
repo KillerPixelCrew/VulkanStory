@@ -14,6 +14,9 @@ internal static class ParticleConsumerPatches
     private static ProcessRuntime? runtime;
     private static readonly MethodInfo Render = AccessTools.Method(typeof(SystemRenderParticles), "Render", [typeof(int), typeof(float)])!;
     private static readonly MethodInfo Draw = AccessTools.Method(typeof(ClientPlatformAbstract), "RenderMeshInstanced", [typeof(MeshRef), typeof(int)])!;
+    private static readonly MethodInfo Spawn = AccessTools.Method(typeof(ParticleGeneric), "Spawned", [typeof(ParticlePhysics)])!;
+    private static readonly MethodInfo Produce = AccessTools.Method(typeof(ParticleGeneric), "UpdateBuffers",
+        [typeof(MeshData), typeof(Vintagestory.API.MathTools.Vec3d), typeof(int).MakeByRefType(), typeof(int).MakeByRefType(), typeof(int).MakeByRefType()])!;
     private static void Check(IReadOnlyList<CodeInstruction> body)
     {
         if (body.Count(instruction => instruction.Calls(Draw)) != 2)
@@ -31,11 +34,14 @@ internal static class ParticleConsumerPatches
             if (Render == null || Render.ReturnType != typeof(void) || Render.GetMethodBody() == null)
                 throw new MissingMethodException("Original particle renderer changed.");
             Check(PatchProcessor.GetOriginalInstructions(Render));
+            if (Spawn == null || Produce == null) throw new MissingMethodException("Original particle instance producers changed.");
         }, () =>
         {
             if (runtime != null) throw new InvalidOperationException("Particle routing already has an owner.");
             runtime = owner; attempted = true;
             harmony.Patch(Render, transpiler: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
+            harmony.Patch(Spawn, postfix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Spawned)));
+            harmony.Patch(Produce, postfix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Produced)));
         }, () =>
         {
             if (!attempted) return;
@@ -61,7 +67,9 @@ internal static class ParticleConsumerPatches
         if (platform is not ClientPlatformWindows windows || !runtime.TrySession(windows, out var session))
             throw new InvalidOperationException("Active particle routing lost its session.");
         bool motion = session.Graphics.BeginCameraMotionWrite();
-        try { session.Graphics.RenderParticles(mesh, quantity); }
+        try { session.Graphics.RenderParticles(mesh, quantity, session.Temporal.State); }
         finally { if (motion) session.Graphics.EndMotionWrite(); }
     }
+    private static void Spawned(ParticleGeneric __instance) => ParticleMotionHistory.Spawned(__instance);
+    private static void Produced(ParticleGeneric __instance, MeshData __0, ref int __2) => ParticleMotionHistory.Produced(__instance, __0, __2);
 }

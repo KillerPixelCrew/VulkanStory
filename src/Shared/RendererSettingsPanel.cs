@@ -146,9 +146,11 @@ internal sealed class RendererSettingsPanel
     /// <summary>Adds a single-row page selector for standalone hosts with a bounded viewport.</summary>
     internal void AddCompactPageNavigation(GuiComposer composer, double width, Func<bool>? canInteract = null)
     {
-        composer.AddDropDown(PageNames, PageNames, page, (index, _) =>
+        composer.AddDropDown(PageNames, PageNames, page, (value, selected) =>
         {
-            if (canInteract?.Invoke() == false || controllerPending) return;
+            if (!selected || canInteract?.Invoke() == false || controllerPending) return;
+            int index = Array.IndexOf(PageNames, value);
+            if (index < 0) return;
             page = index; refresh = true;
         }, ElementBounds.Fixed(0, 0, width, 28), "vulkanstory-pages");
     }
@@ -180,15 +182,16 @@ internal sealed class RendererSettingsPanel
         double controlY = y;
         double lastLabelHeight = 0;
         int textSequence = 0;
+        void DefinedChoice(string label, string key)
+        {
+            var values = RendererChoices.Get(key, draft["Upscaler"]?.GetValue<string>() == "xess");
+            Choice(label, key, values.Select(item => item.Value).ToArray(), values.Select(item => item.Label).ToArray());
+        }
         switch (page)
         {
             case 0:
-                Choice("Upscaler", "Upscaler", ["off", "dlss", "xess", "fsr3", "fsr4"], ["Off", "DLSS", "XeSS", "FSR 3.1", "FSR 4"]);
-                if (draft["Upscaler"]?.GetValue<string>() == "xess")
-                    Choice("Quality", "UpscalerQuality", ["dlaa", "ultraqualityplus", "ultraquality", "quality", "balanced", "performance", "ultraperformance"],
-                        ["Native AA", "Ultra Quality+", "Ultra Quality", "Quality", "Balanced", "Performance", "Ultra Performance"]);
-                else Choice("Quality", "UpscalerQuality", ["dlaa", "quality", "balanced", "performance", "ultraperformance"],
-                    ["Native AA", "Quality", "Balanced", "Performance", "Ultra Performance"]);
+                DefinedChoice("Upscaler", "Upscaler");
+                DefinedChoice("Quality", "UpscalerQuality");
                 Slider("Render scale (%)", "RenderScale", 25, 100, 5, 100);
                 Switch("Temporal anti-aliasing", "Taa");
                 Slider("TAA sharpness (%)", "TaaSharpness", 0, 100, 5, 100);
@@ -206,16 +209,16 @@ internal sealed class RendererSettingsPanel
                 Text("Quality controls the selected upscaler's internal resolution. Render scale applies when the upscaler is Off. FPS gains can be limited by VSync, a frame cap or the CPU.");
                 break;
             case 1:
-                Choice("Frame generation", "FrameGeneration", ["off", "dlss", "xess", "fsr3"], ["Off", "DLSS-G", "XeSS-FG", "FSR 3 FG"]);
+                DefinedChoice("Frame generation", "FrameGeneration");
                 Slider("Requested multiplier", "FrameGenerationMultiplier", 2, 6, 1, 1);
-                Choice("Low latency", "LowLatencyMode", ["off", "on", "boost"], ["Off", "On", "Boost"]);
+                DefinedChoice("Low latency", "LowLatencyMode");
                 Switch("Show FPS counter", "ShowFpsCounter");
                 Text("Available providers and multipliers depend on your GPU. Unsupported settings fall back automatically.");
                 Text("With frame generation selected, low latency remains enabled. Boost depends on the provider.");
                 break;
             case 2:
-                Choice("Ambient occlusion", "AmbientOcclusion", ["auto", "vanilla", "gtao"], ["Auto", "SSAO", "GTAO"]);
-                Choice("AO quality", "AmbientOcclusionPreset", ["low", "medium", "high", "ultra"], ["Low", "Medium", "High", "Ultra"]);
+                DefinedChoice("Ambient occlusion", "AmbientOcclusion");
+                DefinedChoice("AO quality", "AmbientOcclusionPreset");
                 Switch("Show ambient occlusion", "AmbientOcclusionDebugView");
                 Switch("Reduce god-ray sample cost", "GodRaysSampleCap");
                 Switch("Handheld shadow tier", "HandheldShadowTier");

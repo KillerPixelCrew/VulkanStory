@@ -210,12 +210,9 @@ internal sealed partial class GameRenderSession
         bool currentWorldSample = temporal.WorldCaptured && temporal.FrameId == captureFrameId;
         string captureDirectory = Path.Combine(ScenarioOutputDirectory, "scenario-captures", action.Name!);
         Directory.CreateDirectory(captureDirectory);
-        Graphics.LoadFramebuffer(EnumFrameBuffer.Default);
-        var size = Graphics.CaptureDisplaySize();
-        byte[] pixels = new byte[checked(size.Width * size.Height * 4)];
-        var pin = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
-        try { Graphics.ReadCapturePixels(0, 0, size.Width, size.Height, pin.AddrOfPinnedObject()); }
-        finally { pin.Free(); }
+        var captured = ReadCapturedFrame();
+        var size = (captured.Width, captured.Height);
+        byte[] pixels = captured.Pixels;
 
         string ppmPath = Path.Combine(captureDirectory, action.Name + ".ppm");
         string pngPath = Path.Combine(captureDirectory, action.Name + ".png");

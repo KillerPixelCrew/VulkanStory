@@ -1,4 +1,5 @@
 #version 330 core
+#include vulkanstory-motion.ash
 #extension GL_ARB_explicit_attrib_location: enable
 
 // Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
@@ -107,9 +108,8 @@ void main()
 		return;
 	}
 
-	vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * taaRenderSize;
-	vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;
-	outMotion = vec4(prevPixel - currentPixel, reactive, gl_FragCoord.z);
+
+	outMotion = vec4(vulkanstoryMotionVector(prevClip, taaRenderSize, taaJitterPx), reactive, gl_FragCoord.z);
 #else
 	outMotion = vec4(0.0);
 #endif

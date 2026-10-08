@@ -91,8 +91,9 @@ internal static class ShaderSourceConsumerPatches
     }
     private static bool LoadInclude(ShaderProgram __0, string __1, HashSet<string>? __2, ref string __result)
     {
-        if (Adapter() is not { } graphics || __1 != "vertexwarp.vsh" || Source(__1) is not { } code) return true;
-        if (!graphics.ShaderOverrides.MayReplaceInclude(__1)) return true;
+        if (Adapter() is not { } graphics ||
+            (__1 != "vertexwarp.vsh" && __1 != "vulkanstory-motion.ash") || Source(__1) is not { } code) return true;
+        if (__1 == "vertexwarp.vsh" && !graphics.ShaderOverrides.MayReplaceInclude(__1)) return true;
         __0.includes.Add(__1);
         __result = Expand(__0, code, __2 ?? new HashSet<string>());
         return false;

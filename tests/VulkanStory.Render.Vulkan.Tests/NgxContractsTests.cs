@@ -76,9 +76,6 @@ public sealed unsafe class NgxContractsTests
         Assert.True(Camera(0.1f, 1000f, Identity()).IsValid);
         Assert.False(Camera(10f, 1f, Identity()).IsValid);
         Assert.False(Camera(0.1f, 1000f, new float[15]).IsValid);
-        Assert.Equal(NgxResult.FailInvalidParameter,
-            NgxFrameGenerationFeature.Create(default, 1920, 1080,
-                Format.R8G8B8A8Unorm, out NgxFrameGenerationFeature? feature));
-        Assert.Null(feature);
+
     }
 }

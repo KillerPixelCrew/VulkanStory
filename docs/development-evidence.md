@@ -1,17 +1,31 @@
 # Current development evidence
 
-Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
-`e507ef5` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
+Updated 2026-10-08. Implementation source: `codex/review-issue-fixes`, continuing
+after `e507ef5` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
 The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
-review correction: 99 source-corrected findings and 16 unapplied findings.
-This implementation pass also adds source-grounded XML
-documentation across maintained C# files. No new build, test, package, deployment
-or game run has occurred; the October-4 installed payload below is unchanged.
-Documentation coverage is 373 maintained C# files after removing obsolete copies,
-plus all nine active native source/header/test files. Compiler XML sidecars are
-enabled and included in the staging source; their emitted artifacts are unverified.
+review correction: all 115 findings have source corrections. The final pass adds
+spawn-based particle transform history, shared capture/settings/shader definitions,
+checked first-enable provider protocol and capabilities, safe mapped-buffer reuse,
+and removes dormant NGX/greedy paths and repeated contract cases.
+
+The [bounded review batch](../artifacts/validation/review-fixes-20261008-160139/results.json)
+passed managed Bootstrap/Companion, renderer/shader-tool, all five native provider
+bridges, native bootstrap and the full native shader corpus (50 programs, 135
+variants, 270 SPIR-V files). Game failed on duplicate fullscreen resource items;
+Mod failed on a string-valued dropdown callback used as an integer. Staging and
+the isolated world check were skipped. Both causes and the same controller callback
+have subsequent source corrections; these repairs are not yet compiler-verified.
+No test suite, deployment or game run occurred; the October-4 installed payload
+below is unchanged. The 26 renderer XML warning causes were corrected in source,
+with compiler confirmation pending.
+
+Documentation covers 376 maintained C# files after pruning and adding shared
+implementations, plus all nine active native source/header/test files. Compiler
+XML sidecars are enabled and included in staging; Game/Mod sidecars and a complete
+package remain unverified. Earlier runtime evidence below belongs to its recorded
+payloads and does not validate these review corrections.
 
 | Area | Evidence | Limit |
 | --- | --- | --- |

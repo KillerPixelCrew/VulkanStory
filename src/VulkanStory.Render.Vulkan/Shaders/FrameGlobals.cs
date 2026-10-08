@@ -224,7 +224,7 @@ internal static class FrameGlobals
     }
 
     /// <summary>
-    /// The text of <see cref="IncludePath" />: the block at its fixed offsets under an instance
+    /// The generated GLSL include text: the block at its fixed offsets under an instance
     /// name, then one group of <c>#define name optimumFrame.name</c> lines per owner.
     ///
     /// A group is outside the include guard and activates when its owner macro is defined and

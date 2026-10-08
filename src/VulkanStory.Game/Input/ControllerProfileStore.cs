@@ -113,7 +113,7 @@ internal sealed class ControllerProfile
     /// <summary>Whether releasing the radial button confirms its selection rather than a later button press.</summary>
     public bool RadialHoldToOpen { get; set; } = true;
     /// <summary>Eight clockwise action tokens starting at the wheel's top sector.</summary>
-    public string[] RadialActions { get; set; } = ["inventory", "menu", "settings", "drop", "previous", "next", "firstslot", "screenshot"];
+    public string[] RadialActions { get; set; } = ControllerRadialDialog.DefaultActions();
     /// <summary>Gameplay pause/menu physical button.</summary>
     public int MenuButton { get; set; } = 6;
     /// <summary>Controller settings physical button.</summary>

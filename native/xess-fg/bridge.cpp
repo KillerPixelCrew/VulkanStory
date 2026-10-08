@@ -107,6 +107,7 @@ struct VulkanStoryXessFg {
     uint32_t maxInterpolations = 0, activeInterpolations = 0;
     bool started = false;
     int releaseFailure = 0;
+    bool releasePrepared = false;
 
     decltype(&xellD3D12CreateContext) createXell = nullptr;
     decltype(&xellDestroyContext) destroyXell = nullptr;
@@ -278,8 +279,10 @@ extern "C" __declspec(dllexport) const char* VulkanStoryXessFgLastCreateStage() 
 extern "C" __declspec(dllexport) int VulkanStoryXessFgPrepareDestroy(VulkanStoryXessFg* value) {
     if (!value) return 0;
     if (value->releaseFailure != 0) return value->releaseFailure;
+    if (value->releasePrepared) return 0;
     int result = PrepareDestroy(value);
     if (result != 0) value->releaseFailure = result;
+    else value->releasePrepared = true;
     return result;
 }
 

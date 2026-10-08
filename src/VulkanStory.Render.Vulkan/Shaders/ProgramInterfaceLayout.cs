@@ -244,6 +244,7 @@ internal sealed partial class ProgramInterfaceLayout
     /// fragment, geometry - so the result is deterministic and the SPIR-V cache
     /// key is stable across runs.
     /// </summary>
+    /// <param name="stages">Parsed shader stages in deterministic interface order, normally vertex, fragment and geometry.</param>
     /// <param name="declaredAttributes">
     /// Locations from <c>IShaderProgram</c>'s BindAttribLocation map, for mods
     /// that name attributes through the API instead of a layout qualifier.

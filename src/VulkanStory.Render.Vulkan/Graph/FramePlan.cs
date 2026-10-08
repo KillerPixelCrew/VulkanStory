@@ -137,6 +137,8 @@ internal sealed class FramePlan
 
 /// <summary>One attachment of a pass: which resource, how it is used, and whether its
 /// contents are allowed to die with the frame.</summary>
+/// <param name="ResourceId">Frame-graph resource ID identifying the logical image used by this attachment.</param>
+/// <param name="Usage">Declared attachment access used to choose synchronization and whether initial contents may be discarded.</param>
 /// <param name="Transient">The contents are never read in a later frame. A resource is
 /// treated as transient only when every attachment use of it in the frame says so and its
 /// first reference is a plain write (see <see cref="FramePlan"/>).</param>

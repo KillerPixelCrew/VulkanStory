@@ -26,6 +26,7 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
     private readonly delegate* unmanaged[Cdecl]<nint, int> destroy;
     private readonly delegate* unmanaged[Cdecl]<nint, int> prepareDestroy;
     private Exception? releaseFailure;
+    private bool releasePrepared;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, uint, uint, uint, nint*, nint*, int> createImage;
     private readonly delegate* unmanaged[Cdecl]<nint, void> releaseImage;
     private readonly delegate* unmanaged[Cdecl]<nint, nint*, int> createFence;
@@ -181,11 +182,12 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
     {
         if (releaseFailure != null)
             throw new InvalidOperationException("FSR 4 native release failed; remaining owners retained.", releaseFailure);
-        if (context == 0) return;
+        if (context == 0 || releasePrepared) return;
         try
         {
             int result = prepareDestroy(context);
             if (result != 0) throw new InvalidOperationException("FSR 4 SDK release preparation failed (" + result + ").");
+            releasePrepared = true;
         }
         catch (Exception failure) { releaseFailure = failure; throw; }
     }

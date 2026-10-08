@@ -68,7 +68,12 @@ internal sealed class ControllerSettingsDialog : GuiDialog
         var initialize = new List<Action>();
 
         string[] pages = ["Tuning", "Actions", "More", "Axes", "Inventory", "Radial menu", "Gameplay gestures", "Inventory gestures", "Modifier"];
-        composer.AddDropDown(pages, pages, page, (index, _) => { page = index; RequestRefresh(); }, ElementBounds.Fixed(0, 0, contentWidth, 28));
+        composer.AddDropDown(pages, pages, page, (value, selected) =>
+        {
+            int index = Array.IndexOf(pages, value);
+            if (!selected || index < 0) return;
+            page = index; RequestRefresh();
+        }, ElementBounds.Fixed(0, 0, contentWidth, 28));
         var clip = ElementBounds.Fixed(0, 42, contentWidth, visibleHeight);
         var body = ElementBounds.Fixed(0, 0, contentWidth, 1).WithParent(clip);
         composer.AddVerticalScrollbar(value =>

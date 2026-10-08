@@ -86,7 +86,7 @@ public static unsafe class VulkanPresentPreflight
                     int layoutId = MeshManager.EmptyLayoutId;
                     if (meshDraw)
                     {
-                        meshes = new MeshManager(context!, frames.Uploads);
+                        meshes = new MeshManager(context!, frames.Uploads, frames);
                         meshId = meshes.CreateEmpty(36, 0, 0, 0, 0, 12,
                             null, null, null, null, MeshDrawMode.Triangles, false, false);
                         float[] vertices = [-0.8f, -0.8f, 0, 0.8f, -0.8f, 0, 0, 0.8f, 0];

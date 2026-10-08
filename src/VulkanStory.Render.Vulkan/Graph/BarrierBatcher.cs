@@ -10,7 +10,7 @@ namespace VulkanStory.Render.Vulkan.Graph;
 /// <c>vkCmdPipelineBarrier2</c>. Stages and accesses come from each image's
 /// <see cref="ResourceStateTracker" />, never ALL_COMMANDS.
 ///
-/// <see cref="Require" /> updates the tracker at once, so the barriers must be
+/// The <c>Require</c> overloads update the tracker at once, so the barriers must be
 /// flushed before the commands that perform the uses are recorded, and never
 /// inside an open rendering scope (checked in debug builds). One batcher belongs
 /// to one recording thread; the trackers it touches are locked per call.
@@ -30,7 +30,7 @@ internal sealed unsafe class BarrierBatcher
     /// </summary>
     public Func<CommandBuffer, bool>? ScopeOpen { get; set; }
 
-    /// <summary>Barriers recorded by <see cref="Require" /> and not yet flushed.</summary>
+    /// <summary>Barriers recorded by the <c>Require</c> overloads and not yet flushed.</summary>
     public int Pending => _count;
 
     /// <summary>Accumulates the transitions required for the supplied image subresource range and usage.</summary>

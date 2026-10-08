@@ -4,7 +4,7 @@
 #extension GL_GOOGLE_include_directive : require
 // Native port of particlescube.vsh (the Optimum override in sources/shaders, docs/vulkan.md).
 // Axes: VEC3SCALE (the scale attribute's type), TAAMOTION (the previous clip position), GBUFFER (the
-// G-buffer varyings). sources/shaders/particlescube.vsh explains the camera-only previous position.
+// G-buffer varyings). The Game particle-history producer supplies the previous rendered transform.
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -83,6 +83,10 @@ layout (location = 5) in float scale;					// Per instance
 layout (location = 6) in vec4 particleDir; 			// Per instance
 layout (location = 7) in vec4 rgbaLightIn; 		// Per instance
 layout (location = 8) in vec4 rgbaBlockIn; 		// Per instance
+layout (location = 9) in vec3 previousParticlePosition;
+layout (location = 10) in vec3 previousParticleScale;
+layout (location = 11) in vec4 previousParticleDirection;
+layout (location = 12) in float particleHistoryValid;
 
 layout(location = 0) out vec4 color;
 layout(location = 1) out vec4 rgbaFog;
@@ -133,11 +137,11 @@ vec4 taaParticleWorldPos(WarpState st, vec3 taaParticlePosition)
 {
 	vec4 taaWorldPos;
 #if VEC3SCALE == 1
-	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(particleDir.z, particleDir.x) + particleDir.w);
-	taaWorldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(scale,1.0)) + vec4(taaParticlePosition, 1.0);
+	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(previousParticleDirection.z, previousParticleDirection.x) + previousParticleDirection.w);
+	taaWorldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(previousParticleScale,1.0)) + vec4(taaParticlePosition, 1.0);
 	taaWorldPos.w=1;
 #else
-	taaWorldPos = vec4(vertexPosition * scale + taaParticlePosition, 1.0);
+	taaWorldPos = vec4(vertexPosition * previousParticleScale + taaParticlePosition, 1.0);
 #endif
 
 	taaWorldPos = applyVertexWarpingState(st, renderFlags, taaWorldPos);
@@ -179,13 +183,13 @@ void main()
 #endif
 
 #if TAAMOTION == 1
-	// The same vertex, one frame ago: the particle where it is now, moved by exactly the camera's own
-	// motion, the warp re-evaluated with the previous frame's counters, and the previous UNJITTERED
-	// projection with the previous CameraMatrixOrigin.
+	// Previous rendered position is already relative to the previous camera.
+	// Re-evaluate its warp with previous counters and project with the previous
+	// unjittered projection and CameraMatrixOrigin.
 	{
 		WarpState taaPrev = previousWarpState();
-		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, particlePosition + cameraPosDelta);
-		taaPrevClip = prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos);
+		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, previousParticlePosition);
+		taaPrevClip = particleHistoryValid > 0.5 ? prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos) : vec4(0.0);
 	}
 #endif
 

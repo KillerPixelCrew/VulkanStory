@@ -224,16 +224,12 @@ internal sealed partial class GameRenderSession
             if (!ReferenceEquals(Temporal.CurrentClient, pending.World) || !pending.Parent.IsOpened() ||
                 pending.Parent.SingleComposer?.DialogName.StartsWith("gamesettings-graphics", StringComparison.Ordinal) != true)
                 throw new InvalidOperationException("Options action did not return to the original Graphics composer.");
-            var requested = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!;
-            var persisted = new RendererSettingsStore(services.DataPath).Load();
-            bool applied = services.RendererSettings.Settings.Taa;
-            if (requested.Taa != pending.Expected || persisted.Taa != pending.Expected || applied != pending.Expected)
-                throw new InvalidOperationException("Options " + pending.Action + " did not preserve the expected TAA setting.");
+            var result = CheckCapturedTaa(pending.Expected, pending.Action);
             if (HeadlessHarnessOptions.FrameDirectory is { } directory)
                 File.WriteAllText(Path.Combine(directory, "options-action.json"), JsonSerializer.Serialize(new
                 {
                     success = true, action = pending.Action, before = pending.Before, expected = pending.Expected,
-                    requested = requested.Taa, persisted = persisted.Taa, applied,
+                    requested = result.Requested, persisted = result.Persisted, applied = result.Applied,
                     returned = pending.Parent.SingleComposer.DialogName
                 }));
         }

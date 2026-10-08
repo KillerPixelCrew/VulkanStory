@@ -68,17 +68,7 @@ internal sealed partial class GameRenderSession
         }
         if (HeadlessHarnessOptions.ShouldCapture(headlessWorldFrame))
         {
-            Graphics.LoadFramebuffer(EnumFrameBuffer.Default);
-            var size = Graphics.CaptureDisplaySize();
-            byte[] pixels = new byte[checked(size.Width * size.Height * 4)];
-            GCHandle pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
-            try { Graphics.ReadCapturePixels(0, 0, size.Width, size.Height, pin.AddrOfPinnedObject()); }
-            finally { pin.Free(); }
-            if (HeadlessHarnessOptions.WriteFrame(headlessWorldFrame, size.Width, size.Height, pixels, true))
-            {
-                WriteHeadlessPng(headlessWorldFrame, size.Width, size.Height, pixels);
-                headlessWritten++;
-            }
+            if (WriteCapturedFrame(headlessWorldFrame)) headlessWritten++;
             if (HeadlessParityDump.AmbientOcclusionOutputs) DumpHeadlessAo(HeadlessHarnessOptions.FrameDirectory!, "frame" + headlessWorldFrame.ToString("D6"));
         }
         if (HeadlessHarnessOptions.CaptureFinished(headlessWorldFrame) && (!HeadlessParityDump.Enabled || headlessParityDone))

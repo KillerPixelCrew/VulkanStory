@@ -8,8 +8,11 @@ namespace VulkanStory.Game.Input;
 /// <summary>Eight-sector in-world action wheel selected by processed controller stick direction.</summary>
 internal sealed class ControllerRadialDialog : GuiDialog
 {
-    internal static readonly string[] Actions = ["inventory", "menu", "settings", "drop", "previous", "next", "firstslot", "screenshot", "none"];
-    private static readonly string[] Labels = ["Inventory", "Pause", "Settings", "Drop", "Previous", "Next", "Slot 1", "Screenshot", "Empty"];
+    private static readonly (string Action, string Label)[] Definitions =
+        [("inventory", "Inventory"), ("menu", "Pause"), ("settings", "Settings"), ("drop", "Drop"), ("previous", "Previous"), ("next", "Next"), ("firstslot", "Slot 1"), ("screenshot", "Screenshot"), ("none", "Empty")];
+    internal static readonly string[] Actions = Definitions.Select(item => item.Action).ToArray();
+    /// <summary>Creates the default wheel from the first eight supported action definitions.</summary>
+    internal static string[] DefaultActions() => Definitions.Take(8).Select(item => item.Action).ToArray();
     private readonly string[] slots;
     /// <summary>Selected sector index, or -1 while the stick is below the selection threshold.</summary>
     internal int Selected { get; private set; } = -1;
@@ -42,7 +45,7 @@ internal sealed class ControllerRadialDialog : GuiDialog
     internal static string Label(string action)
     {
         int index = Array.IndexOf(Actions, action);
-        return index >= 0 ? Labels[index] : "Empty";
+        return index >= 0 ? Definitions[index].Label : "Empty";
     }
 
     /// <summary>Selects the nearest clockwise sector from up for stick magnitude at least 0.35, then redraws on change.</summary>

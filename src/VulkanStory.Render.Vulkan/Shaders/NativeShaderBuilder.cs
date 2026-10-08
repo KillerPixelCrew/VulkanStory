@@ -38,7 +38,7 @@ internal sealed class NativeShaderBuilder
     /// <summary>The define symbols that stay compile-time variants (contract section 5), sorted.</summary>
     public static readonly string[] VariantAxes =
     {
-        "ALLOWDEPTHOFFSET", "GBUFFER", "GLOWSUB", "GREEDYMESH", "TAAMOTION", "USEOIT", "USESSBO", "VEC3SCALE",
+        "ALLOWDEPTHOFFSET", "GBUFFER", "GLOWSUB", "TAAMOTION", "USEOIT", "USESSBO", "VEC3SCALE",
     };
 
     public const string IncludeDirectoryName = "include";

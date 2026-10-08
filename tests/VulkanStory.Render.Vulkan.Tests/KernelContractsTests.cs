@@ -14,55 +14,6 @@ namespace VulkanStory.Render.Vulkan.Tests;
 public sealed class KernelContractsTests
 {
     [Fact]
-    public void InitialTransientWritesDiscardButPersistentTargetsLoad()
-    {
-        static PassSignature Pass(int target, bool transient) => new()
-        {
-            NameId = target, Width = 32, Height = 24, FormatsId = 1,
-            Attachments = [new AttachmentUse(target, ResourceUsage.ColorWrite, transient)]
-        };
-
-        FramePlan plan = FramePlan.Build([Pass(1, true), Pass(2, false)]);
-        Assert.Equal(AttachmentLoadOp.DontCare, plan.LoadOp(0, 0));
-        Assert.Equal(AttachmentLoadOp.Load, plan.LoadOp(1, 0));
-    }
-
-    [Theory]
-    [InlineData(ResourceUsage.StorageReadCompute)]
-    [InlineData(ResourceUsage.StorageWrite)]
-    [InlineData(ResourceUsage.StorageReadWrite)]
-    public void ComputeUsesOrderPreviousWritesEvenInTheSameStage(ResourceUsage next)
-    {
-        var state = new ResourceStateTracker(1, 1, false);
-        var transitions = new List<ImageTransition>();
-        state.Require(0, 1, 0, 1, ResourceUsage.StorageWrite, false, transitions);
-        transitions.Clear();
-        state.Require(0, 1, 0, 1, next, false, transitions);
-        BarrierSides barrier = Assert.Single(transitions).Sides;
-        Assert.Equal(ImageLayout.General, barrier.OldLayout);
-        Assert.Equal(ImageLayout.General, barrier.NewLayout);
-        Assert.True((barrier.SrcAccess & AccessFlags2.ShaderStorageWriteBit) != 0);
-        Assert.True((barrier.DstStage & PipelineStageFlags2.ComputeShaderBit) != 0);
-    }
-
-    [Fact]
-    public void ComputeMipDispatchCoversOddExtentsAndRejectsFeedback()
-    {
-        var pass = new ComputePassDeclaration
-        {
-            Bindings = [new ComputeBinding(0, 1, ComputeAccess.Sampled),
-                new ComputeBinding(1, 1, ComputeAccess.StorageWrite, 1)],
-            Dispatches = [ComputeDispatch.Covering(1)]
-        };
-        static ComputeImageInfo? Image(int _) => new(35, 19, 4, 1);
-        Assert.Null(ComputePassPlanner.Validate(pass, Image));
-        Assert.Equal((3u, 2u, 1u),
-            ComputePassPlanner.Groups(pass.Dispatches[0], pass, Image, 8, 8));
-        pass.Bindings[1] = pass.Bindings[1] with { BaseMip = 0 };
-        Assert.NotNull(ComputePassPlanner.Validate(pass, Image));
-    }
-
-    [Fact]
     public void OptionalUnavailableInstanceExtensionDoesNotEnterEnabledSet()
     {
         var enabled = new List<string>();

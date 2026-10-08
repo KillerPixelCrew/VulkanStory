@@ -429,9 +429,13 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Writes packed face-record bytes into a mesh's SSBO-backed position slot.</summary>
     public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize) =>
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
-    /// <summary>Returns borrowed mapped storage for the requested mesh slot, or zero when absent/unmapped.</summary>
+    /// <summary>Returns writable mapped storage for this update, or zero when absent/unmapped.</summary>
+    /// <remarks>Write before the next draw/update and reacquire after GPU use; storage may be renamed to protect in-flight bytes.</remarks>
     public IntPtr GetMappedPointer(int meshId, VulkanStory.Contracts.MeshBufferSlot slot) =>
         _meshes.MappedPointer(meshId, (int)slot);
+
+    /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
+    internal void UpdateParticleHistory(int meshId, float[] values) => _meshes.UpdateParticleHistory(meshId, values);
 
     /// <summary>Removes the mesh and schedules its GPU-owned buffers for frame-safe deletion.</summary>
     public void DeleteMesh(int meshId) => _meshes.Delete(meshId, _frames);

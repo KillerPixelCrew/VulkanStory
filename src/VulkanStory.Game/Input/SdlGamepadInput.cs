@@ -272,7 +272,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             rawMoveStick *= new Vector2(profile.InvertMoveX ? -1f : 1f, profile.InvertMoveY ? -1f : 1f);
             Vector2 movementStick = ControllerStickProcessing.Process(rawMoveStick, 0f, 0f, profile.MoveCurveExponent);
             Vector2 lookStick = ReadStick(profile.LookXAxis, profile.LookYAxis, profile.LookDeadzone, profile.LookOuterDeadzone);
-            object? foreground = inWorld ? null : ControllerGuiTargets.ForegroundOwner(platform);
+            var guiSnapshot = inWorld ? null : ControllerGuiTargets.Snapshot(platform);
+            object? foreground = guiSnapshot?.Owner;
             if (inputContext.Update(inWorld, foreground, sampledButtons,
                 RawTrigger(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative),
                 RawTrigger(profile.SecondaryTriggerAxis, profile.SecondaryTriggerNegative), movementStick, lookStick))
@@ -439,7 +440,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                     ? new List<GuiComposer> { keyboardScreen.ElementComposer }
                     : keyboardDialog?.IsOpened() == true
                     ? keyboardDialog.Composers.Values.Where(composer => composer.Enabled).ToList()
-                    : ControllerGuiTargets.ActiveComposers(platform)
+                    : guiSnapshot?.Composers ?? ControllerGuiTargets.ActiveComposers(platform)
                 : null;
             GuiElementItemSlotGridBase? focusedGrid = menuNavigation ? FocusedSlotGrid(composers!) : null;
             GuiElementSlider? focusedSlider = menuNavigation && focusedGrid == null ? FocusedSlider(composers!) : null;

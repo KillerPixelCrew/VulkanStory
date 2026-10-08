@@ -25,6 +25,8 @@ public sealed unsafe partial class VulkanDevice
     private ulong _xessRenderedFrames;
     private ulong _xessPresentedFrames;
     private uint _xessEffectiveGeneratedFrames;
+    private bool _xessProtocolReady;
+    private int _xellAppliedFrameCap = -1;
     /// <summary>Interpolation count most recently configured by the active XeSS presenter.</summary>
     internal uint XessConfiguredGeneratedFrames => _xessEffectiveGeneratedFrames;
     // Historical SDK report for this device owner, including while FG is suspended.
@@ -100,10 +102,10 @@ public sealed unsafe partial class VulkanDevice
         _xessRenderedFrames = 0;
         _xessPresentedFrames = 0;
         _xessEffectiveGeneratedFrames = 0;
-        int latencyMode = DesiredLatencyMode;
-        RequireXellProtocol(_xessPresenter!.Runtime.SetLatencyMode(_vendorFrameCap,
-            latencyMode != 0), "initial mode options");
-        _appliedLatencyMode = latencyMode;
+        _xessProtocolReady = false;
+        _xellAppliedFrameCap = -1;
+        RequireXellProtocol(_xessPresenter!.Runtime.SetLatencyMode(0, false), "initial pass-through options");
+        _appliedLatencyMode = -1;
         MirrorValidationMessage("--- XeSS-FG DX12 proxy active on the Vulkan window");
         return true;
     }

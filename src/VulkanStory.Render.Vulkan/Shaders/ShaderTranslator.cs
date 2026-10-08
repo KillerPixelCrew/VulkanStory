@@ -65,6 +65,9 @@ internal static class ShaderTranslator
         EnumShaderType.GeometryShader,
     };
 
+    /// <param name="stages">Shader sources with their stage, prefix definitions and diagnostic filenames; supported stages are processed in the fixed stage order.</param>
+    /// <param name="compiler">Borrowed compiler used to preprocess the source stages and compile their rewritten Vulkan GLSL.</param>
+    /// <param name="declaredAttributes">Optional client attribute-name locations forwarded to program interface construction.</param>
     /// <param name="includes">
     /// The include files the program was assembled from, as ShaderRegistry records
     /// them. They decide which uniforms read the shared frame block

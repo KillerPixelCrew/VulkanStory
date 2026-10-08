@@ -28,6 +28,8 @@ internal sealed class PipelineCacheGrowthTrigger
     private long _lastSampleTimestamp;
     private long _baselineBytes;
 
+    /// <param name="thresholdBytes">Required cache growth above the saved baseline before writing; clamped to at least one byte.</param>
+    /// <param name="interval">Interval between cache-size samples, converted to the monotonic Stopwatch clock.</param>
     /// <param name="baselineBytes">What is on disk already: the seed the cache was created from, or 0.</param>
     public PipelineCacheGrowthTrigger(long thresholdBytes, TimeSpan interval, long baselineBytes)
     {

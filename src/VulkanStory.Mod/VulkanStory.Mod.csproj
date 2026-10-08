@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <Compile Include="../Shared/RendererSettingsPanel.cs" Link="Settings/RendererSettingsPanel.cs" />
+    <Compile Include="../Shared/RendererChoices.cs" Link="Settings/RendererChoices.cs" />
     <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
     <None Update="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

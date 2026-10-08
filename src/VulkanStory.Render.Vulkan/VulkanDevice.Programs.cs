@@ -91,6 +91,11 @@ public sealed unsafe partial class VulkanDevice
             programId = _nextProgramId++;
             try
             {
+                var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
+                int output = InterfaceComponents(SpirvReflection.Reflect(native.Spirv[EnumShaderType.VertexShader]).Outputs);
+                int input = InterfaceComponents(SpirvReflection.Reflect(native.Spirv[EnumShaderType.FragmentShader]).Inputs);
+                if (output > limits.MaxVertexOutputComponents || input > limits.MaxFragmentInputComponents)
+                    throw new InvalidOperationException("Native shader interface exceeds this device's vertex-output/fragment-input limits.");
                 resources = new ShaderProgramResources(_context, programId, native, _sharedLayout!.Layout);
             }
             catch (InvalidOperationException error)
@@ -273,6 +278,19 @@ public sealed unsafe partial class VulkanDevice
     };
 
     /// <summary>Removes a program and schedules its GPU resources for safe frame retirement.</summary>
+    /// <summary>Counts the highest reflected interface location, including array and matrix spans.</summary>
+    private static int InterfaceComponents(IEnumerable<SpirvInterfaceVariable> variables)
+    {
+        int extent = 0;
+        foreach (var variable in variables)
+        {
+            int columns = variable.GlslType.StartsWith("mat", StringComparison.Ordinal) &&
+                variable.GlslType.Length > 3 && char.IsDigit(variable.GlslType[3]) ? variable.GlslType[3] - '0' : 1;
+            extent = Math.Max(extent, (variable.Location + columns * Math.Max(1, variable.ArrayLength)) * 4);
+        }
+        return extent;
+    }
+
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;

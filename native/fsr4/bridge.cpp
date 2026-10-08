@@ -56,6 +56,7 @@ struct VulkanStoryFsr4 {
     PfnFfxDispatch dispatch{};
     PfnFfxQuery query{};
     int releaseFailure{};
+    bool releasePrepared{};
 };
 
 /// @brief Checks the Vulkan adapter vendor required by this FSR4 bridge.
@@ -119,6 +120,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4WaitIdle(VulkanStoryFsr4* va
 extern "C" __declspec(dllexport) int VulkanStoryFsr4PrepareDestroy(VulkanStoryFsr4* value) {
     if (!value) return 0;
     if (value->releaseFailure != 0) return value->releaseFailure;
+    if (value->releasePrepared) return 0;
     int idle = VulkanStoryFsr4WaitIdle(value);
     if (idle != 0) return value->releaseFailure = idle;
     if (value->effect) {
@@ -128,6 +130,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4PrepareDestroy(VulkanStoryFs
         if (result != 0) return value->releaseFailure = result;
         value->effect = nullptr;
     }
+    value->releasePrepared = true;
     return 0;
 }
 /// @brief Performs checked release preparation then frees native/COM owners and the context allocation.

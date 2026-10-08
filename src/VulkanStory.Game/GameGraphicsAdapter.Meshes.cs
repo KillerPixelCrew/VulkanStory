@@ -32,8 +32,11 @@ internal sealed partial class GameGraphicsAdapter
         MeshReference(RequireDevice().CreateEmptyMesh(xyz, normals, uv, rgba, flags, indices,
             GameMeshLayout.Part(floats), GameMeshLayout.Part(shorts), GameMeshLayout.Part(bytes), GameMeshLayout.Part(ints),
             GameMeshLayout.DrawMode(mode), staticDraw, false), indices, mode, !staticDraw);
-    internal void UpdateMesh(MeshRef mesh, MeshData data) =>
+    internal void UpdateMesh(MeshRef mesh, MeshData data)
+    {
+        ParticleMotionHistory.Uploaded(mesh, data);
         RequireDevice().UpdateMesh(MeshHandle((VAO)mesh), GameMeshLayout.Capture(data));
+    }
     private int MeshHandle(VAO mesh)
     {
         if (!Meshes.TryGetValue(mesh, out var owner) || !ReferenceEquals(owner.Adapter, this))

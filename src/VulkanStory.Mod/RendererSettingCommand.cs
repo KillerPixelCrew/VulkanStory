@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using VulkanStory.Settings;
 
 namespace VulkanStory.Mod;
 
@@ -23,18 +24,7 @@ internal static class RendererSettingCommand
         {
             case JsonValueKind.String:
                 string choice = input.Trim().ToLowerInvariant();
-                string[] allowed = property.Key switch
-                {
-                    "Upscaler" => ["off", "dlss", "xess", "fsr3", "fsr4"],
-                    "FrameGeneration" => ["off", "dlss", "fsr3", "xess"],
-                    "UpscalerQuality" => draft["Upscaler"]?.GetValue<string>() == "xess"
-                        ? ["dlaa", "ultraquality", "ultraqualityplus", "quality", "balanced", "performance", "ultraperformance"]
-                        : ["dlaa", "quality", "balanced", "performance", "ultraperformance"],
-                    "LowLatencyMode" => ["off", "on", "boost"],
-                    "AmbientOcclusion" => ["auto", "vanilla", "gtao"],
-                    "AmbientOcclusionPreset" => ["low", "medium", "high", "ultra"],
-                    _ => throw new ArgumentException("This setting has no command choices: " + property.Key),
-                };
+                string[] allowed = RendererChoices.Get(property.Key, draft["Upscaler"]?.GetValue<string>() == "xess").Select(item => item.Value).ToArray();
                 if (!allowed.Contains(choice)) throw new ArgumentException("Choose " + string.Join(", ", allowed) + ".");
                 value = JsonValue.Create(choice);
                 break;

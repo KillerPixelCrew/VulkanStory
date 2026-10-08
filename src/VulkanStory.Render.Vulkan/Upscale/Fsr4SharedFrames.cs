@@ -146,9 +146,6 @@ internal sealed class Fsr4SharedFrames : IDisposable
         try
         {
             VulkanResult.Check(context.WaitDeviceIdle(), "draining Vulkan before FSR 4 shared resource release");
-            int idle = runtime.WaitIdle();
-            if (idle != 0)
-                throw new InvalidOperationException("FSR 4 DX12 queue did not become idle (" + idle + ").");
             runtime.PrepareRelease();
             for (int i = sets.Length - 1; i >= 0; i--) sets[i].Dispose();
             fence.Dispose();

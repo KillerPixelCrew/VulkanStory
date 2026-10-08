@@ -1,4 +1,5 @@
 #version 330 core
+#include vulkanstory-motion.ash
 #extension GL_ARB_explicit_attrib_location: enable
 
 // Optimum TAA (P4): the fragment half of the liquid velocity pass.
@@ -66,9 +67,8 @@ void main()
 		return;
 	}
 
-	vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;
-	vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;
-	outMotion = vec4(prevPixel - currentPixel, clamp(taaLiquidReactive, 0.0, 1.0), gl_FragCoord.z);
+
+	outMotion = vec4(vulkanstoryMotionVector(taaPrevClip, taaRenderSize, taaJitterPx), clamp(taaLiquidReactive, 0.0, 1.0), gl_FragCoord.z);
 #else
 	outMotion = vec4(0.0);
 #endif

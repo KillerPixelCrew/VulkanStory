@@ -121,7 +121,7 @@
     <Compile Include="Shaders/SpirvReflection.cs" />
     <Compile Include="Upscale/Ngx/NgxDeviceRequirements.cs" />
     <Compile Include="Upscale/Ngx/NgxDlssFeature.cs" />
-    <Compile Include="Upscale/Ngx/NgxFrameGenerationFeature.cs" />
+    <Compile Include="Upscale/Ngx/NgxFrameGenerationCamera.cs" />
     <Compile Include="Upscale/Ngx/NgxInterop.cs" />
     <Compile Include="Upscale/Ngx/NgxLifetime.cs" />
     <Compile Include="Upscale/Ngx/NgxParameters.cs" />
