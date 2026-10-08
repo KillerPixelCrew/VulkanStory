@@ -2,6 +2,8 @@
 
 Updated 2026-10-08. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
+Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.md).
+Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8; compiled/staged/installed implementation `9a14715`.
 Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
