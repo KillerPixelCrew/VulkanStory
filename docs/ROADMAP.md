@@ -6,13 +6,11 @@ Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.
 Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
-Current source increment: `ae53b49` (first-enabled XeSS history and packaging/RID corrections),
-following XeLL repair, GL01 discovery and Linux activation. The preceding source
-passed all managed builds/helper syntax and Windows staging/startup; these latest
-corrections await one bounded validation batch.
-Installed identity remains below.
-Installed implementation: `9a14715`.
-Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
+Current validated/installed implementation: `ae53b49`, checkout `e4da90d`
+(first-enabled XeSS history and packaging/RID corrections). All eight managed builds,
+helper syntax, Windows staging/package and both existing XeSS scenarios passed.
+Linux staging now reaches required notices but fails on missing `core/` path prefixes.
+Current development package: `artifacts/validation/platform-increment-20261008-230846/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
 76.9 SDK output FPS after the mapped-mesh regression correction.
@@ -22,12 +20,12 @@ The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4
 Working upscaling/frame generation across supported vendors, and usable original
 Options menus from both the main menu and a loaded world. The goal is **not complete**.
 
-1. **SDK-01/SDK-04: validate repaired XeSS FG enablement.** Required XeLL now
-   enables before FG and remains active through generic Off/frame-cap changes.
-   The preceding batch resolved the -15 crash but failed after the first enabled
-   present reported SDK -12. `ae53b49` seeds history on the first enabled present;
-   disabled pass-through retains no history. Build and run the existing bounded
-   profiles once with SDK detail logging; the precise -12 resource remains unproven.
+1. **SDK-01/SDK-04: broaden runtime transition acceptance.** Required XeLL enables
+   before FG and stays active through requested Off. First-enabled history reset
+   resolved the observed -12 stop. The existing XeSS→FSR3→XeSS and latency
+   Off→On→Boost profiles passed all actions/captures on RTX 4070. Next verify
+   ordinary Options close/resize/resume over settled frames; wider quality/pacing
+   and eligible Intel behavior remain open.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
@@ -74,7 +72,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
 | DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
-| XeSS FG | Mandatory XeLL enables without -15 crash; first-enabled history reset now applied in source | Validate reset and inspect SDK input detail if -12 persists; then handoff/latency/visible/eligible Intel acceptance |
+| XeSS FG | XeLL/history corrections validated; XeSS→FSR3→XeSS and Off→On→Boost scenarios passed | Wider transitions, moving-scene/visible quality/pacing and eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
 | Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works | Broader transitions/resize |
@@ -82,8 +80,9 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 
 ## Source and delivery
 
-The installed source is `9a14715`. Its Game/Mod Release builds,
-staging and the focused world/gain scenario passed. Liquid motion is ready and
+The installed implementation is `ae53b49`, checkout `e4da90d`. All managed builds,
+Windows staging/package and both XeSS profiles passed; all 400 installed hashes match.
+The prior focused DLSS world/gain scenario passed at `9a14715`. Liquid motion is ready and
 Game XML warnings are resolved; the existing CS8600 warning remains. Used mesh
 writes stage only changed ranges, while rare raw pointer access synchronizes
 queued updates. Foreground scenarios require focus and skip the diagnostic throttle.
@@ -101,8 +100,9 @@ original finding, source reference, audit coverage and recorded proof limit.
 
 ### Pending review verification
 
-- Verify active XeSS FG and overlapping XeLL Present markers; the latest capture
-  used DLSS-G and does not verify this separate provider path.
+- Active XeSS FG, PCL asynchronous Present brackets and XeLL sleep/input/simulation/
+  render markers passed the scoped batch. XeLL Present marker returns are not
+  separately logged; their overlap and wider latency impact remain open.
 - Run the existing partial-output-array checks and a scenario using
   `hostGeneratedPresents`. New/expanded tests remain deferred under the working rules.
 
@@ -142,7 +142,7 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | All preceding managed cross-builds/helper syntax passed; RID-reference output and package activation list corrected in source, validation pending; actual Linux runtime/install/providers/URI proof open |
+| LINUX-01 | Managed cross-builds/helper syntax and RID propagation passed; Linux stage notice-path correction next; package and actual Linux runtime/install/providers/URI proof open |
 | GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |

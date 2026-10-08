@@ -1,29 +1,46 @@
 # Current development evidence
 
-Updated 2026-10-08. Installed implementation: `9a14715` on
+Updated 2026-10-08. Validated/installed implementation: `ae53b49`, checkout `e4da90d`, on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
-Current source `ae53b49` forces history reset on the first enabled XeSS present,
-wraps the Windows activation inventory as an array and propagates Linux RID to
-referenced libraries with Linux-only IsRidAgnostic=false. Source diff inspection
-completed; no builds, tests, packages, deployment or runtime checks ran in this
-implementation turn. The next bounded batch is prepared with existing XeSS SDK
-callback logging enabled. Success of these corrections remains unverified.
+Latest [platform batch](../artifacts/validation/platform-increment-20261008-230846/results.json)
+ran once at `e4da90d`: all eight managed Release builds, Linux shell/embedded-Python
+syntax, Windows staging and both Windows ZIP archives passed. Both existing isolated
+foggy-village scenarios passed all 21 actions and three paired captures each:
+XeSS→FSR3→XeSS and latency Off→On→Boost. First-enabled history reset resolves the
+observed -12 stop; mandatory XeLL remains active through requested Off. These hidden
+stationary runs establish scoped software execution, not visible quality/scanout,
+moving-scene cadence or eligible-Intel acceptance. The existing CS8600 warning remains.
+Independent completed-handoff inspection found 12/12 assertions passing and 160
+SDK-reported presents over each 80-frame XeSS/FSR3/returned-XeSS interval. XeSS SDK
+callbacks recorded two resets/two context destructions, with no warning/error
+callback or negative result. XeLL's 255 sleep/simulation/input/render marker sets
+and PCL's 257 asynchronous Present start/end pairs returned zero. Captures show
+an upright world/HUD but use preGenerateReadback, so do not prove generated pixels.
+XeLL Present marker return values are not separately logged; overlapping XeLL
+Present-marker verification remains open.
 
-Latest [platform batch](../artifacts/validation/platform-increment-20261008-225349/results.json)
-at `0892584` passed all eight managed Release builds, Linux helper syntax and Windows
-staging. GL startup registration passed in real world loading; no third-party mod
-refusal was exercised. Windows ZIP generation failed because a scalar activation
-string concatenated the required array; Linux staging lacked per-project referenced
-RID outputs. Both packaging corrections are now applied in `ae53b49`, without
-changing Windows default outputs; their validation is pending.
-Both XeSS profiles no longer crashed with -15, but stopped at world120 because
-first-enabled presentation reported -12 and FG was disabled. Source inspection
-confirmed reset was applied to disabled pass-through, which the SDK says retains
-no history. `ae53b49` resets the first enabled present; the SDK callback
-log is needed to prove the specific missing input if -12 remains. No repairs/reruns
-occurred in this validation turn. The installed implementation remains `9a14715`.
+Linux RID reference outputs are now present. Linux staging stopped because its
+requiredNotices names omit the existing notice tree's `core/` prefix; no Linux ZIP
+or runtime/install check ran. Next implementation corrects that manifest contract,
+preserving required notices. No production-source repair or batch rerun occurred
+in this validation turn. GL registration passed normal world startup; third-party
+refusal remains unexercised and specific adapters remain user-deferred.
+
+The validated Windows stage was delivered to the established installation with an
+external [backup](../artifacts/validation/platform-increment-20261008-230846/install-backup/deployment.json).
+Independent [receipt verification](../artifacts/validation/platform-increment-20261008-230846/install-verification.json)
+matched all 400 installed file hashes. The owned loader configuration was preserved;
+no normal installed-game launch occurred. Client archive SHA256:
+`3E21DB8AC57D6DBA9214FADA460897B43770ED04F418DA7B8434CDD869346D85`.
+
+Read-only Options lifecycle discovery confirms that current diagnostics stop at
+Graphics with the parent open, and the scenario scheduler requires a loaded world.
+Next source slice schedules original Options callbacks, settled preview/restore,
+native Back/resume and SDL SetSize, with narrowly scoped lifecycle observations.
+Main-menu readiness must be separate from loaded-world completion. No lifecycle
+actions were implemented or run during this validation turn.
 
 `c5ba14d` corrects all five delegate declaration/creation references in the two
 GL source files using System.Func/System.Action. Source diff inspection passed;
