@@ -1,48 +1,57 @@
 # Current development evidence
 
-Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
-`aaae759` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
-Latest compiled/staged source: `014fef2`.
+Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
+`codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
-The [completed review ledger](completed-review-findings-2026-10-08.md) records
-all 118 completed implementation findings, including the three
-introduced regressions found by the read-only re-review of `cdd2cfa`. XeLL keeps
-successful sleeps eligible through their asynchronous PresentEnd, fragment-output
-reflection preserves constant aggregate indices, and both launcher whitelists now
-accept hostGeneratedPresents. The earlier pass adds
-spawn-based particle transform history, shared capture/settings/shader definitions,
-checked first-enable provider protocol and capabilities, safe mapped-buffer reuse,
-and removes dormant NGX/greedy paths and repeated contract cases.
+All 118 [review implementation findings](completed-review-findings-2026-10-08.md)
+are completed. The latest runtime correction addresses the mapped-buffer regression
+introduced by `6df3105`: small updates after any GPU use cloned whole capacities,
+churned descriptors and changed VRAM placement. `e4de738` uses the existing ordered
+GPU range-upload path. Rare raw-pointer access synchronizes queued writes/readers;
+this compatibility path was source-reviewed, not separately exercised. Existing
+backend stats now time Reflex sleep without changing its protocol.
 
-The [latest bounded batch](../artifacts/validation/rereview-fixes-20261008-175333/results.json)
-at `014fef2` passed Bootstrap, Game, Mod, Input.Companion and shader-tool Release
-builds, the native shader corpus (50 programs, 135 variants, 270 SPIR-V files),
-and staging. It reused the five bridges/native bootstrap from the
-[earlier successful native build](../artifacts/validation/review-fixes-20261008-160139/results.json)
-and the existing vendor redistributables/notices. The prior Game/Mod build failures
-are resolved. The renderer's 26 XML warning causes are compiler-confirmed resolved;
-Game reported 17 XML warnings plus its existing Scenarios.cs CS8600 warning.
+The old hidden strict test logged [DLSS-G disabled because its window was not focused](../artifacts/validation/streamline-global-20261004-030212/run/stderr.log).
+Its 1:1 result did not establish a present-path defect. The first focused run showed
+104 real / 208 SDK presents in 31.165 s (3.34 / 6.67 FPS), exposing the base-renderer
+slowdown. Two foreground runs passed their action assertions but failed terminal
+visibility invariants; those failures remain recorded in
+[fg-ready](../artifacts/validation/fg-ready-20261008-204227/focused-world/frames/scenario-result.json)
+and [mesh-range](../artifacts/validation/mesh-range-20261008-211002/world/frames/scenario-result.json).
+`9a14715` makes terminal checks honor visible/focused mode and removes the 33 ms
+hidden-diagnostic throttle from explicitly visible runs.
 
-The hidden foggy-village snapshot ran on RTX 4070, produced two PNG/PPM frames,
-loaded the staged mod and world, and exited cleanly. The
-[capture verifier passed](../artifacts/validation/rereview-fixes-20261008-175333/isolated-xess-world.log).
-This is scoped world-capture evidence: logs do not establish active XeSS FG or
-complete XeLL marker execution. They report a liquid-motion include failure,
-so the pass does not prove a correct liquid motion path. `aaae759` fixes that
-private loader to read the owned include from the assembly and corrects all 17
-Game XML warning causes; these follow-up changes are not compiled or staged yet.
-Per-element output fixtures and a scenario asserting hostGeneratedPresents were
-not run. No test suite or deployment occurred; the October-4 installed payload
-below is unchanged. The one bounded batch ran once; no runtime rerun followed.
+The [final foreground batch](../artifacts/validation/fg-foreground-20261008-211805/results.json)
+passed Game/Mod Release builds, staging and the existing strict DLSS gain scenario:
+all six actions executed, captures paired, all assertions and terminal checks passed.
+RTX 4070 used DLSS Quality 1707x1019 to 2560x1528, with 2x requested/configured,
+query result/status zero, SDK maximum one generated frame and VSync disabled.
+Current world camera/motion and liquid motion were ready. A
+[2.055 s steady interval](../artifacts/validation/fg-foreground-20261008-211805/steady-metrics.json)
+recorded 79 real / 158 SDK presents: 38.4 / 76.9 FPS. The inspected stationary
+[world capture](../artifacts/validation/fg-foreground-20261008-211805/world/status/world-rendered-97644.png)
+shows intact scene/HUD and a 50 / 101 FPS sample. Backend timing showed no steady
+allocation/blocking-upload churn and negligible Reflex waits. These are scoped
+SDK-output/capture measurements, not physical scanout or moving-scene quality acceptance.
+
+The same stage was deployed to `C:/Users/N1GHT/AppData/Roaming/Vintagestory` with
+[backups](../artifacts/validation/fg-foreground-20261008-211805/install-backup/).
+[All 400 receipt hashes match](../artifacts/validation/fg-foreground-20261008-211805/install-verification.json),
+including Renderer/Game DLLs against stage. User settings/save and loader policy
+were preserved; no normal installed client was launched after delivery. The only
+Game build warning is existing Scenarios.cs CS8600. Renderer's 26 and Game's 17
+XML warning causes are compiler-confirmed resolved. Native bridges/bootstrap and
+50-program shader corpus reuse the previously recorded successful inputs.
+No unit suite or new/expanded tests ran; current XeSS FG/marker and partial-output
+array fixture checks remain separate from this DLSS foreground result.
 
 Documentation covers 376 maintained C# files after pruning and adding shared
 implementations, plus all nine active native source/header/test files and 22
 maintained scripts (19 PowerShell, two Python, one shell). Six migrated native
 reference build scripts are excluded from active documentation work. Compiler
-XML sidecars were emitted and staged at `014fef2`; Game documentation corrections
-at `aaae759` still need fresh emitted sidecars. Earlier runtime evidence below belongs to its recorded
-payloads and does not validate these review corrections.
+XML sidecars were emitted, staged and deployed at `9a14715`. Earlier runtime
+evidence below belongs to its recorded payloads and does not validate later source.
 
 | Area | Evidence | Limit |
 | --- | --- | --- |
@@ -50,7 +59,7 @@ payloads and does not validate these review corrections.
 | Intel XeSS SR | [201 successful evaluations, current motion](../artifacts/validation/intel-motion-20261004-062918/) | Quality/interactive acceptance incomplete |
 | Intel XeSS FG | [XeLL initialization rejection](../artifacts/validation/intel-fg-stage-20261004-064938/) | UHD 770 outside supported Arc/Core Ultra families |
 | NVIDIA XeSS/FSR3 | [21-action handoff and normal teardown](../artifacts/validation/resource-bindings-20261004-103435/) | SDK counts are not display quality/pacing proof |
-| NVIDIA DLSS FG | [Strict gain check failed: 180 SDK presents over 180 real frames](../artifacts/validation/streamline-global-20261004-030212/) | Primary unresolved defect; visible comparison not authorized/run |
+| NVIDIA DLSS FG | [Focused strict gain scenario passed](../artifacts/validation/fg-foreground-20261008-211805/); sampled 38.4 real / 76.9 SDK output FPS | Moving-scene/generated-image quality, scanout and sustained pacing remain unaccepted |
 | Main/world Options | [Save/Cancel/persistence/Graphics return](../artifacts/validation/options-current-save-cancel-20261004-082438/); [6x slider interaction](../artifacts/validation/multiplier-world-20261004-055122/) | Diagnostic input; physical input, resize and error paths incomplete |
 | Status/FPS UI | [Provider limits](../artifacts/validation/suspended-limits-20261004-090105/); [unclipped HUD](../artifacts/validation/fps-hud-sizing-20261004-091348/) | Narrow-window/scale coverage incomplete |
 | Silent harness | [Exact settings block checked offline](../artifacts/validation/headless-audio-offline-20261004-105627/) | Six volumes zero, cache excluded; no acoustic measurement or new launch |

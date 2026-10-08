@@ -3,23 +3,22 @@
 Updated 2026-10-08. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
-ee2d870839efc58f3cf3f9c2a3513ced15477fb8; implementation commit `aaae759`;
-latest compiled/staged source `014fef2`.
-Current staged candidate: `artifacts/validation/rereview-fixes-20261008-175333/stage`;
-world capture passed, but active XeSS FG was not established and liquid-motion loading failed.
-Subsequent liquid-include and XML-documentation repairs require compilation.
-Installed development package: `artifacts/validation/controller-prompt-polish-20261004-160020/stage`,
-installed in the user's Vintage Story directory; hashes verified, manual test pending.
+ee2d870839efc58f3cf3f9c2a3513ced15477fb8; compiled/staged/installed implementation `9a14715`.
+Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
+installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
+The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
+76.9 SDK output FPS after the mapped-mesh regression correction.
 
 ## Immediate goal and next work
 
 Working upscaling/frame generation across supported vendors, and usable original
 Options menus from both the main menu and a loaded world. The goal is **not complete**.
 
-1. **SDK-02: resolve DLSS FG output gain.** The last strict hidden check produced
-   one reported output per real frame. The prepared visible comparison needs the
-   user's launch instruction. Do not substitute more peripheral hardening or an
-   unchanged hidden run for this check.
+1. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
+   now verified on RTX 4070. The SDK suppressed the old hidden run because its window
+   was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
+   updates; ordered range uploads now preserve buffer identity and placement.
+   Wider camera/object/transparency, menu-resume and cadence checks remain.
 2. **HW-01/HW-02: obtain AMD execution evidence.** Current recorded hardware is
    RTX 4070 Laptop GPU and Intel UHD 770; no AMD adapter. Unsupported fallback is
    verified, actual AMD SR/FG is not. Intel FSR3 SR/FG executes; XeSS-FG requires
@@ -39,7 +38,9 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 ## Working rules
 
 - Official Vintage Story 1.22.7, Windows x64; use the complete **foggy village story**.
-- Routine checks use the isolated hidden harness. It must be silent: all six audio
+- Routine checks use the isolated harness. DLSS-FG checks run visible and focused,
+  as requested on 2026-10-08; hidden windows cannot establish its output gain.
+  Other routine checks stay hidden. The harness must be silent: all six audio
   levels are zeroed and verified before launch; the copied cache is excluded.
   Offline preparation checks passed; no acoustic measurement has been performed.
 - Do not change installed settings/save or deploy/open/focus/close the user's game
@@ -57,7 +58,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | --- | --- | --- |
 | Renderer, SDL, official startup and graphics routing | Migrated source, original menu/world rendering, normal shutdown | Full lifecycle/material/input parity |
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
-| DLSS FG | Constants/tags/options/present integration | **Output gain unresolved**; visible check pending |
+| DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
 | XeSS FG | NVIDIA scoped execution/handoff/cadence | Visible output/pacing; eligible Intel coverage |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
@@ -67,11 +68,12 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 
 ## Source and delivery
 
-The latest compiled/staged source is `014fef2`: all managed Release builds,
-50 native shader programs and staging passed. Its isolated world capture passed,
-but active XeSS FG and the liquid motion path were not established. Source
-`aaae759` repairs the liquid include loader and Game XML warnings; recompilation
-is pending. Exact payloads and proof limits are in [development-evidence.md](development-evidence.md).
+The latest compiled/staged/installed source is `9a14715`. Game/Mod Release builds,
+staging and the focused world/gain scenario passed. Liquid motion is ready and
+Game XML warnings are resolved; the existing CS8600 warning remains. Used mesh
+writes stage only changed ranges, while rare raw pointer access synchronizes
+queued updates. Foreground scenarios require focus and skip the diagnostic throttle.
+Exact payloads and proof limits are in [development-evidence.md](development-evidence.md).
 
 The staged and installed packages are identified above. The October-1 ZIP and
 prepared visible launchers retain their older recorded payloads.
@@ -85,10 +87,8 @@ original finding, source reference, audit coverage and recorded proof limit.
 
 ### Pending review verification
 
-- Compile/stage the liquid-include and 17 Game XML documentation corrections at
-  `aaae759`, then check liquid-motion loading in the isolated foggy-village world.
 - Verify active XeSS FG and overlapping XeLL Present markers; the latest capture
-  establishes world loading/capture, not active FG execution.
+  used DLSS-G and does not verify this separate provider path.
 - Run the existing partial-output-array checks and a scenario using
   `hostGeneratedPresents`. New/expanded tests remain deferred under the working rules.
 
@@ -111,7 +111,7 @@ findings to their broader feature and acceptance areas.
 | REN-04 | Post-processing/material parity |
 | REN-05 | Graph/resource ownership and bounded fallback |
 | SDK-01 | SR settings, unsupported behavior and live switching |
-| SDK-02 | Actual FG output, HUD/occlusion correctness and pacing |
+| SDK-02 | Broader FG HUD/occlusion quality, moving-scene and pacing coverage; RTX 4070 DLSS-G functional output gain passed |
 | SDK-03 | Verify DLSS-G framebuffer teardown after SDK VRAM warning 39; the checked drain/free correction is implemented |
 | SDK-04 | Latency authority and concrete impact of SDK warnings |
 | SDL-01 | Interactive window/focus/fullscreen/input lifecycle |
