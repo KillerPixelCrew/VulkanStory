@@ -15,6 +15,10 @@
       <HintPath>$(VintageStoryPath)/Lib/0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Mono.Cecil">
+      <HintPath>$(VintageStoryPath)/Lib/Mono.Cecil.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="VintagestoryAPI">
       <HintPath>$(VintageStoryPath)/VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
@@ -69,6 +73,7 @@
   </Target>
   <Target Name="RequireOfficialReference" BeforeTargets="ResolveReferences">
     <Error Condition="!Exists('$(VintageStoryPath)/Lib/0Harmony.dll')" Text="Set VintageStoryPath in Directory.Build.local.props to the official game installation. Do not use Optimum's donor or deployed runtime directories." />
+    <Error Condition="!Exists('$(VintageStoryPath)/Lib/Mono.Cecil.dll')" Text="Mod GL discovery requires the official game's shipped Mono.Cecil assembly; it must not be bundled separately." />
     <Error Condition="!Exists('$(VintageStoryPath)/VintagestoryAPI.dll') Or !Exists('$(VintageStoryPath)/VintagestoryLib.dll')" Text="The SDL game adapter requires the official client API and Lib assemblies." />
   </Target>
 </Project>

@@ -32,6 +32,7 @@ internal static class StartupProfileComposition
             SceneProfileComposition.Create1227(runtime, essentials, survival),
             PostProcessingConsumerPatches.CreateGroup(runtime),
             RemainingPlatformConsumerPatches.CreateGroup(enabled),
+            ModCompatibilityConsumerPatches.CreateGroup(runtime),
         ]));
     }
     // Called by the supported version adapter after ALL ordinary, scene and
@@ -58,7 +59,7 @@ internal static class StartupProfileComposition
     {
         StartupPatchGroup[] groups = completeCoverage.ToArray();
         string[] required = ["graphics-textures", "graphics-shaders", "graphics-shader-sources", "graphics-meshes", "graphics-states",
-            "graphics-framebuffers", "graphics-queries-capture", "graphics-platform-start", "graphics-platform-remaining", "graphics-temporal", "graphics-motion-uniforms", "graphics-ui", "graphics-menu-settings", "graphics-controller-hints", "graphics-controller-analog-direction", "graphics-controller-analog-client", "graphics-scene", "graphics-post"];
+            "graphics-framebuffers", "graphics-queries-capture", "graphics-platform-start", "graphics-platform-remaining", "graphics-temporal", "graphics-motion-uniforms", "graphics-ui", "graphics-menu-settings", "graphics-controller-hints", "graphics-controller-analog-direction", "graphics-controller-analog-client", "graphics-scene", "graphics-post", "graphics-mod-compatibility"];
         var attempted = new List<StartupPatchGroup>();
         return new StartupPatchGroup("graphics-api", () =>
         {
