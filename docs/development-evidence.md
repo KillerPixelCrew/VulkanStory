@@ -4,6 +4,16 @@ Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+The [platform-increment batch](../artifacts/validation/platform-increment-20261008-224404/results.json)
+ran once at checkout `f92e8ea`: Windows and Linux-target Bootstrap/Mod/Companion
+Release builds passed; bash and embedded Python helper syntax passed. Both Game
+targets failed because new GL source imports conflicting Func delegate names from
+System and Vintagestory.API.Common. Win Game log names ModGlUsage.cs:52 and
+ModCompatibilityConsumerPatches.cs:21. Staging, packaging and both runtime scenarios
+were skipped. Static Linux source acceptance found no additional actionable defect,
+but is not Linux execution evidence. The next implementation qualifies System.Func;
+no source repair or repeat batch occurred during this validation turn.
+
 Source-only increment `9767c89`: `cab1cf5` applies mandatory XeLL before XeSS FG
 and retains it through requested latency Off/frame-cap changes, publishing the
 effective dependency; `c2f33e0` adds loader-bound metadata GL discovery/refusal

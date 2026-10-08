@@ -7,7 +7,8 @@ Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
 Current source increment: `9767c89` (XeLL repair, GL01 discovery and Linux activation/package);
-compilation/runtime verification is pending. Installed identity remains below.
+Game compilation failed on new GL delegate ambiguity; correction is queued.
+Bootstrap/Mod/Companion cross-build and Linux helper syntax passed. Installed identity remains below.
 Latest compiled/staged/installed implementation: `9a14715`.
 Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
@@ -23,6 +24,8 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    scenarios crashed with SDK -15. Source now enables required XeLL before FG and
    retains it through generic Off/frame-cap changes, with requested/effective
    state shown separately. Build and rerun the corrected bounded profiles next.
+   Game currently fails compilation because the new GL code's Func names conflict
+   with game API delegates; qualifying those names is the next implementation step.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
@@ -137,8 +140,8 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | Activation/profile/install/remove/RID package source implemented; builds/runtime/install lifecycle, Linux providers and URI launch coverage pending |
-| GL-01 | Loader-bound binary/emitted-source discovery/refusal implemented; compile/startup/refusal execution pending |
+| LINUX-01 | Bootstrap/Mod/Companion cross-build and helper syntax passed; Game compile/package blocked by GL ambiguity; actual runtime/install/providers/URI proof pending |
+| GL-01 | Loader-bound discovery/refusal source implemented; System.Func qualification required before Game compilation and startup execution |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
 
