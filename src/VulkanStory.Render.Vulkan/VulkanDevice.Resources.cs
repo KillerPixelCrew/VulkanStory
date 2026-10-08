@@ -430,9 +430,42 @@ public sealed unsafe partial class VulkanDevice
     public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize) =>
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
     /// <summary>Returns writable mapped storage for this update, or zero when absent/unmapped.</summary>
-    /// <remarks>Write before the next draw/update and reacquire after GPU use; storage may be renamed to protect in-flight bytes.</remarks>
-    public IntPtr GetMappedPointer(int meshId, VulkanStory.Contracts.MeshBufferSlot slot) =>
-        _meshes.MappedPointer(meshId, (int)slot);
+    /// <remarks>Use on the renderer owner thread. Write before the next draw/update and reacquire after GPU use. This rare raw access completes queued writes and GPU readers before exposing the original storage.</remarks>
+    public IntPtr GetMappedPointer(int meshId, VulkanStory.Contracts.MeshBufferSlot slot)
+    {
+        if ((int)slot >= MeshManager.MaxBuffers) return IntPtr.Zero;
+        VulkanBuffer? buffer = _meshes.BufferOf(meshId, (int)slot);
+        if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
+        if (buffer.FrameUse == 0) return buffer.Mapped;
+
+        // Ordinary updates stay asynchronous. Only explicit CPU pointer access
+        // needs queued transfers visible to the host and previous readers finished.
+        CommandBuffer commands = _uploads.BeginRecording(inlineInFrame: _frameActive);
+        try
+        {
+            var barrier = new BufferMemoryBarrier2
+            {
+                SType = StructureType.BufferMemoryBarrier2,
+                SrcStageMask = PipelineStageFlags2.AllCommandsBit,
+                SrcAccessMask = AccessFlags2.MemoryWriteBit,
+                DstStageMask = PipelineStageFlags2.HostBit,
+                DstAccessMask = AccessFlags2.HostReadBit,
+                SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                Buffer = buffer.Handle, Size = Vk.WholeSize,
+            };
+            var dependency = new DependencyInfo
+            {
+                SType = StructureType.DependencyInfo,
+                BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier,
+            };
+            _context.Api.CmdPipelineBarrier2(commands, &dependency);
+        }
+        finally { _uploads.EndRecording(); }
+        if (_frameActive) _frames.Timeline.WaitForFrame(SubmitPartial(), WaitSite.Readback);
+        else _frames.Timeline.WaitForTransfer(_uploads.SubmitStandalone(), WaitSite.Readback);
+        return buffer.Mapped;
+    }
 
     /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
     internal void UpdateParticleHistory(int meshId, float[] values) => _meshes.UpdateParticleHistory(meshId, values);

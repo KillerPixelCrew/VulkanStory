@@ -53,6 +53,8 @@ internal enum WaitSite
     /// thread can stall here on GPU work it did not issue.
     /// </summary>
     QueueSubmit = 8,
+    /// <summary>Streamline Reflex sleep before input sampling.</summary>
+    ReflexSleep = 9,
 
 }
 
@@ -107,9 +109,10 @@ internal static class VulkanStats
         "swapchain_acquire",
         "present",
         "queue_submit",
+        "reflex_sleep",
     };
 
-    public const int WaitSiteCount = 9;
+    public const int WaitSiteCount = 10;
 
     /// <summary>
     /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> can record for

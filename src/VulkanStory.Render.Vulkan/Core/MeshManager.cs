@@ -341,10 +341,9 @@ internal sealed unsafe class MeshManager : IDisposable
                 MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         }
 
-        // A dynamic mesh is host visible and stays mapped, because the game
-        // writes straight through the pointer while the GPU may still be
-        // reading - the same lack of synchronisation GL allowed and the chunk
-        // tesselator relies on. With resizable BAR it is mapped VRAM: chunk pools
+        // A dynamic mesh is host visible for its initial fill. Range updates
+        // after GPU use go through ordered staging instead of overwriting live
+        // readers or cloning the entire pool. With resizable BAR it is mapped VRAM: chunk pools
         // are read by every chunk pass, and from system memory each vertex fetch
         // crosses PCIe (docs/performance-profile-2026-09-26.md). The CPU only
         // writes these buffers, which write-combined VRAM handles well. When the
@@ -535,9 +534,11 @@ internal sealed unsafe class MeshManager : IDisposable
             return;
         }
 
-        if (buffer!.Mapped == IntPtr.Zero)
+        if (buffer!.Mapped == IntPtr.Zero || (buffer.FrameUse != 0 && _uploads != null))
         {
-            // Device-local: staged and copied, never waited on.
+            // Recorded/submitted readers need an ordered GPU range update, even
+            // for mapped storage. Keep the buffer, placement and descriptors;
+            // copying its whole capacity on each small update is prohibitively costly.
             _uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);
             return;
         }

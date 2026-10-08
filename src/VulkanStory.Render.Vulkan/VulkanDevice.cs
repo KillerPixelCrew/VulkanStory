@@ -126,7 +126,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // it before XeLL or Anti-Lag so their input pacing follows the final sleep.
         if (_streamlineReflexReady && streamlineFrameBegun)
         {
-            int result = streamline!.ReflexSleep();
+            long sleepStarted = VulkanStats.WaitStart();
+            int result;
+            try { result = streamline!.ReflexSleep(); }
+            finally { VulkanStats.NoteWait(WaitSite.ReflexSleep, sleepStarted); }
             RequireStreamlineProtocol(result, "Reflex sleep");
             _reflexSleepSuccessCount++;
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " reflexSleep=" + result +
