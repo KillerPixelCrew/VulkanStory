@@ -6,8 +6,13 @@ This is the single current evidence summary. Raw runs remain under artifacts/val
 
 Current source `ab85ef8` implements scheduled main/world Options lifecycle and SDL
 resize, matching PowerShell preflight/result checks, and Linux `core/` notice paths.
-Source diff inspection completed. No builds, tests, probes, packages, deployment
-or game runs occurred in this implementation turn; installed identity remains above.
+Its [lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232520/results.json)
+ran once at checkout `90ed6f4`. Both Windows/Linux Game Release builds failed with
+CS0103 at HeadlessScenario.cs:215: RendererSettingsPanel is unavailable because
+the parser lacks the VulkanStory.Settings import. The existing CS8600 warning
+remains. Stage/package, both runtime scenarios and deployment were skipped;
+installed identity remains above. Next implementation adds the missing import.
+No production-source correction or repeated batch occurred in this validation turn.
 
 Latest [platform batch](../artifacts/validation/platform-increment-20261008-230846/results.json)
 ran once at `e4da90d`: all eight managed Release builds, Linux shell/embedded-Python

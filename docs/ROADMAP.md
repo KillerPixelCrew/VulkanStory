@@ -10,8 +10,9 @@ Current validated/installed implementation: `ae53b49`, checkout `e4da90d`
 (first-enabled XeSS history and packaging/RID corrections). All eight managed builds,
 helper syntax, Windows staging/package and both existing XeSS scenarios passed.
 Current source: `ab85ef8` adds scheduled original Options lifecycle/SDL resize and
-corrects Linux notice paths. Source inspection only; compilation/runtime/package
-validation of this increment is pending.
+corrects Linux notice paths. Its Windows/Linux Game builds failed because the
+scenario parser lacks the VulkanStory.Settings import. Packaging/runtime/deployment
+were skipped. Next implementation adds that import; no validation retry occurred.
 Current development package: `artifacts/validation/platform-increment-20261008-230846/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
