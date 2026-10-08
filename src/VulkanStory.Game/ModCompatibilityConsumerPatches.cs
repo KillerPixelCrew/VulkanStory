@@ -18,9 +18,9 @@ internal static class ModCompatibilityConsumerPatches
     private static readonly Dictionary<string, ModGlInspection> Inspections = new(StringComparer.Ordinal);
     private static readonly HashSet<ModContainer> Refused = new();
     private static ProcessRuntime? runtime;
-    private static Func<ModLoader, List<ModContainer>, List<ModContainer>>? verify;
+    private static System.Func<ModLoader, List<ModContainer>, List<ModContainer>>? verify;
     private static ReadModInfo? readInfo;
-    private static Action<GameMod, ModInfo>? setInfo;
+    private static System.Action<GameMod, ModInfo>? setInfo;
 
     /// <summary>Invokes the official Cecil-based mod-attribute reader without loading a source-mod assembly.</summary>
     /// <param name="mod">Original mod container whose attribute semantics the game owns.</param>
@@ -68,9 +68,9 @@ internal static class ModCompatibilityConsumerPatches
         {
             if (runtime != null || instantiate == null || compile == null || verifier == null || metadataReader == null || infoSetter == null)
                 throw new InvalidOperationException("Mod discovery is unvalidated or already owned.");
-            verify = verifier.CreateDelegate<Func<ModLoader, List<ModContainer>, List<ModContainer>>>();
+            verify = verifier.CreateDelegate<System.Func<ModLoader, List<ModContainer>, List<ModContainer>>>();
             readInfo = metadataReader.CreateDelegate<ReadModInfo>();
-            setInfo = infoSetter.CreateDelegate<Action<GameMod, ModInfo>>();
+            setInfo = infoSetter.CreateDelegate<System.Action<GameMod, ModInfo>>();
             runtime = owner; attempted = true;
             harmony.Patch(instantiate,
                 prefix: new HarmonyMethod(typeof(ModCompatibilityConsumerPatches), nameof(BeforeInstantiate)) { priority = Priority.First },

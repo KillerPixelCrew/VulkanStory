@@ -49,7 +49,7 @@ internal static class ModGlUsage
     /// <param name="readInfo">Official metadata-only identity reader used when source compilation precedes mod-info assignment.</param>
     /// <returns>The image identity, all detected operation sites, and any inspection failure.</returns>
     internal static ModGlInspection Inspect(byte[] image, string source, ModInfo? info,
-        Func<AssemblyDefinition, ModInfo?>? readInfo = null)
+        System.Func<AssemblyDefinition, ModInfo?>? readInfo = null)
     {
         string hash = Convert.ToHexString(SHA256.HashData(image));
         string name = "unreadable";
