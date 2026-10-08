@@ -3,8 +3,12 @@
 Updated 2026-10-08. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
-ee2d870839efc58f3cf3f9c2a3513ced15477fb8; implementation commit `6df3105`.
-Current development package: `artifacts/validation/controller-prompt-polish-20261004-160020/stage`,
+ee2d870839efc58f3cf3f9c2a3513ced15477fb8; implementation commit `aaae759`;
+latest compiled/staged source `014fef2`.
+Current staged candidate: `artifacts/validation/rereview-fixes-20261008-175333/stage`;
+world capture passed, but active XeSS FG was not established and liquid-motion loading failed.
+Subsequent liquid-include and XML-documentation repairs require compilation.
+Installed development package: `artifacts/validation/controller-prompt-polish-20261004-160020/stage`,
 installed in the user's Vintage Story directory; hashes verified, manual test pending.
 
 ## Immediate goal and next work
@@ -80,10 +84,12 @@ compiled payloads, not automatically the latest worktree.
 ## Cleanup audit backlog
 
 Issue work started 2026-10-08 on `codex/review-issue-fixes`. Rows marked **Applied in source** have corrections in the current source, including the final 16 after `e507ef5`.
-The [review validation batch](../artifacts/validation/review-fixes-20261008-160139/results.json)
-passed renderer/native/bootstrap/companion and native shader compilation; Game/Mod
-failed before staging or runtime checks. Their source repairs and XML-warning
-corrections await compiler confirmation. Audit rows remain open for validation;
+The [latest review-fix batch](../artifacts/validation/rereview-fixes-20261008-175333/results.json)
+passed all managed Release builds, native shader compilation and staging. Its
+isolated world capture passed on RTX 4070, but does not establish active XeSS FG;
+the runtime log exposed a liquid-motion include failure. That loader has a subsequent
+source correction, and 17 Game XML warning causes are corrected in source; compilation
+of those follow-up repairs is pending. Audit rows retain their scoped proof limits;
 the installed package is unchanged. CLEAN-05 needs no change at this baseline. Audit baseline:
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8. CLEAN-01 through CLEAN-17 came
 from the 78 changed code/script/scenario files in that 80-path commit, plus
@@ -91,7 +97,7 @@ duplicate and compile-inclusion scans across 495 first-party code files.
 
 The requested front-to-back scan of **all maintained Rewrite source is complete**,
 including unchanged and inactive source under the current project directories.
-CLEAN-18–116 add **99 findings**; with CLEAN-05 retracted, the backlog contains **115 items**: 115 have source corrections; validation is pending.
+CLEAN-18–116 add **99 findings**; with CLEAN-05 retracted, the original backlog contains **115 items** with source corrections. The read-only re-review of `cdd2cfa` added CLEAN-117–119, now implemented at `014fef2`; the backlog contains **118 items** with source corrections and scoped verification limits.
 
 Full reads cover 379 src files, all 31 native files (including retained bridge
 references), all 76 shader files, 56 test files, 21 scripts, six tools, both
@@ -118,9 +124,9 @@ Khronos Vulkan and pinned NVIDIA/AMD/Intel SDK contracts were compared with thei
 actual producer, execution, pacing and ownership paths; see the vendor review below.
 
 The read-only audit ran no builds or game checks. Its subsequent implementation
-has the bounded compile results above; no new package, deployment or runtime check
-completed. Performance effects and conditional failure scenarios remain unverified
-at runtime. These findings add implementation work to the related items below;
+has the scoped build, staging and world-capture results above; no deployment ran.
+Performance effects and conditional failure scenarios remain unverified outside
+those recorded checks. These findings add implementation work to the related items below;
 they do not close their existing acceptance boundaries.
 
 | ID | Related items | Finding and completion boundary | Source evidence |
@@ -228,7 +234,7 @@ they do not close their existing acceptance boundaries.
 | CLEAN-101 | REN-03, DEL-04 | **Applied in source; validation pending.** **P3:** Embedded optimum-map stages have no current registration/producer/reference. Remove or relocate the orphan pair, preserving an external requirement if one is demonstrated. | [Orphan pair](../src/VulkanStory.Game/Shaders/optimum-map.vsh), [embedding](../src/VulkanStory.Game/VulkanStory.Game.csproj#L10) |
 | CLEAN-102 | REN-02, REN-03 | **Applied in source; validation pending.** **P3:** Shader comments still name old source/launcher ownership and contradict the particle zero-alpha writer. Correct paths/rationale without renaming ABI symbols. | [Old paths](../src/VulkanStory.Render.Vulkan/Shaders/NativeShaderManifest.cs#L11), [motion comment](../shaders/native/include/motion.glsl#L23), [actual writer](../shaders/native/particlescube.glsl#L261) |
 | CLEAN-103 | REN-04 | **Applied in source; validation pending.** **P3:** Unused shader locals/helpers and an unreachable Mild-in-Medium branch obscure active math. Remove proven dead calculations; establish intended attenuation/tint before changing appearance. Preserve compatibility uniforms/layouts. | [Unused liquid weight](../src/VulkanStory.Game/Shaders/chunkliquid.fsh#L169), [unreachable condition](../shaders/native/include/fogandlight.frag.glsl#L171), [unused tint calculation](../shaders/native/guitopsoil.glsl#L62) |
-| CLEAN-104 | REN-02, REN-03 | **Applied in source; validation pending.** **P3:** Owned fragment stages duplicate the motion/jitter/behind-camera formula. Share a small include through the existing loading seam, preserving reactive and writer-depth differences. | [Owned motion](../src/VulkanStory.Game/Shaders/chunkopaque.fsh#L63), [native shared helper](../shaders/native/include/motion.glsl) |
+| CLEAN-104 | REN-02, REN-03 | **Applied in source; follow-up compilation pending.** **P3:** Owned fragment stages share the motion/jitter/behind-camera formula while preserving reactive and writer-depth differences. The latest world log exposed the private liquid loader looking for the owned include in game assets; it now reads both owned includes from the assembly. | [Owned motion](../src/VulkanStory.Game/Shaders/chunkopaque.fsh#L63), [liquid include loader](../src/VulkanStory.Game/GameGraphicsAdapter.LiquidMotion.cs#L32), [native shared helper](../shaders/native/include/motion.glsl) |
 | CLEAN-105 | DEL-04, SDK-02, SDK-04 | **Applied in source; validation pending.** **P2:** The documented stage's Streamline bridge imports libwinpthread-1.dll, absent from its native inventory/package. Static-link that runtime consistently or package the exact dependency/notices. PE metadata establishes this dependency; clean-machine loading was not run. | [Link flags](../native/streamline/build.ps1#L26), [inventory](../packaging/native-win-x64.json#L12) |
 | CLEAN-106 | DEL-02 | **Applied in source; validation pending.** **P2:** Updates leave removed package files installed while dropping them from the new receipt, so removal loses ownership. Retain their receipt entries or retire verified old bytes into the existing backup. | [New receipt](../scripts/deploy-runtime.ps1#L126), [removal](../scripts/remove-runtime.ps1#L47) |
 | CLEAN-107 | DEL-02 | **Applied in source; validation pending.** **P2:** Failed deployment restores backups but leaves newly copied files unowned, blocking retry as a collision. Retire unchanged new files through the existing failed-batch backup and restore activation last. | [Rollback](../scripts/deploy-runtime.ps1#L135), [collision](../scripts/deploy-runtime.ps1#L98) |
@@ -241,6 +247,9 @@ they do not close their existing acceptance boundaries.
 | CLEAN-114 | REN-05 | **Applied in source; validation pending.** **P3:** Kernel/RenderTarget contract cases repeat existing FramePlanning behaviors. Keep one existing canonical case per behavior and retain distinct assertions; no new test writing is required. | [Repeated cases](../tests/VulkanStory.Render.Vulkan.Tests/KernelContractsTests.cs#L14), [existing cases](../tests/VulkanStory.Render.Vulkan.Tests/FramePlanningTests.cs#L19) |
 | CLEAN-115 | DEL-04, UI-01 | **Applied in source; validation pending.** **P3:** Current-status/evidence front matter and native READMEs still identify superseded source/payload/source-only claims as current. Date historical checkpoints and point current evidence to this Roadmap; preserve old hashes/results. | [Old status](current-port-status.md#L18), [old identity](development-evidence.md#L3), [native status](../native/fsr4/README.md#L23) |
 | CLEAN-116 | CAP-01, DEL-04 | **Applied in source; validation pending.** **P3:** SSIM/NGX helper instructions retain old environment names, missing paths and absent make/csproj wiring. Point active instructions to the actual parity/provider build flow and preserve provenance separately. | [Parity instructions](../scripts/dev/ssim.py#L2), [NGX comment](../native/ngx/vulkanstory_ngx.c#L9), [shell comments](../native/ngx/build.sh#L33) |
+| CLEAN-117 | SDK-03, SDK-04 | **Implemented; build verified.** **P2:** XeLL tracked only the newest slept frame, dropping asynchronous Present markers for an older in-flight frame. Successful sleeps remain eligible until their PresentEnd; initial unslept pass-through remains excluded. Active XeLL marker execution is not established by the latest capture. | [XeLL frame eligibility](../src/VulkanStory.Render.Vulkan/Present/XessFgRuntime.cs#L166) |
+| CLEAN-118 | REN-05 | **Implemented; build and shader-corpus compilation verified.** **P2:** Compiled fragment-output reflection marked an entire array when only one element was stored. Constant access-chain indices now retain element locations; dynamic indices and whole-aggregate stores cover possible targets. Dedicated array fixtures remain unrun. | [Output write reflection](../src/VulkanStory.Render.Vulkan/Shaders/SpirvReflection.cs#L450) |
+| CLEAN-119 | CAP-01 | **Implemented; source consistency inspected.** **P2:** The managed scenario loader accepted hostGeneratedPresents while the PowerShell launcher rejected it. Numeric-field and monotonic-delta whitelists now both accept it. The latest world capture did not use a scenario assertion. | [Launcher delta whitelist](../scripts/dev/headless-capture.ps1#L395), [numeric whitelist](../scripts/dev/headless-capture.ps1#L432) |
 
 ### Vendor contract review
 

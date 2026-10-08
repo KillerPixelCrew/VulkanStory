@@ -1,32 +1,47 @@
 # Current development evidence
 
 Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
-`6df3105` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
+`aaae759` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
+Latest compiled/staged source: `014fef2`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
 The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
-review correction: all 115 findings have source corrections. The final pass adds
+review correction: all 118 findings have source corrections, including the three
+introduced regressions found by the read-only re-review of `cdd2cfa`. XeLL keeps
+successful sleeps eligible through their asynchronous PresentEnd, fragment-output
+reflection preserves constant aggregate indices, and both launcher whitelists now
+accept hostGeneratedPresents. The earlier pass adds
 spawn-based particle transform history, shared capture/settings/shader definitions,
 checked first-enable provider protocol and capabilities, safe mapped-buffer reuse,
 and removes dormant NGX/greedy paths and repeated contract cases.
 
-The [bounded review batch](../artifacts/validation/review-fixes-20261008-160139/results.json)
-passed managed Bootstrap/Companion, renderer/shader-tool, all five native provider
-bridges, native bootstrap and the full native shader corpus (50 programs, 135
-variants, 270 SPIR-V files). Game failed on duplicate fullscreen resource items;
-Mod failed on a string-valued dropdown callback used as an integer. Staging and
-the isolated world check were skipped. Both causes and the same controller callback
-have subsequent source corrections; these repairs are not yet compiler-verified.
-No test suite, deployment or game run occurred; the October-4 installed payload
-below is unchanged. The 26 renderer XML warning causes were corrected in source,
-with compiler confirmation pending.
+The [latest bounded batch](../artifacts/validation/rereview-fixes-20261008-175333/results.json)
+at `014fef2` passed Bootstrap, Game, Mod, Input.Companion and shader-tool Release
+builds, the native shader corpus (50 programs, 135 variants, 270 SPIR-V files),
+and staging. It reused the five bridges/native bootstrap from the
+[earlier successful native build](../artifacts/validation/review-fixes-20261008-160139/results.json)
+and the existing vendor redistributables/notices. The prior Game/Mod build failures
+are resolved. The renderer's 26 XML warning causes are compiler-confirmed resolved;
+Game reported 17 XML warnings plus its existing Scenarios.cs CS8600 warning.
+
+The hidden foggy-village snapshot ran on RTX 4070, produced two PNG/PPM frames,
+loaded the staged mod and world, and exited cleanly. The
+[capture verifier passed](../artifacts/validation/rereview-fixes-20261008-175333/isolated-xess-world.log).
+This is scoped world-capture evidence: logs do not establish active XeSS FG or
+complete XeLL marker execution. They report a liquid-motion include failure,
+so the pass does not prove a correct liquid motion path. `aaae759` fixes that
+private loader to read the owned include from the assembly and corrects all 17
+Game XML warning causes; these follow-up changes are not compiled or staged yet.
+Per-element output fixtures and a scenario asserting hostGeneratedPresents were
+not run. No test suite or deployment occurred; the October-4 installed payload
+below is unchanged. The one bounded batch ran once; no runtime rerun followed.
 
 Documentation covers 376 maintained C# files after pruning and adding shared
 implementations, plus all nine active native source/header/test files and 22
 maintained scripts (19 PowerShell, two Python, one shell). Six migrated native
 reference build scripts are excluded from active documentation work. Compiler
-XML sidecars are enabled and included in staging; Game/Mod sidecars and a complete
-package remain unverified. Earlier runtime evidence below belongs to its recorded
+XML sidecars were emitted and staged at `014fef2`; Game documentation corrections
+at `aaae759` still need fresh emitted sidecars. Earlier runtime evidence below belongs to its recorded
 payloads and does not validate these review corrections.
 
 | Area | Evidence | Limit |
