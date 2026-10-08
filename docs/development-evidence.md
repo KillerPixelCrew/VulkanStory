@@ -4,6 +4,11 @@ Updated 2026-10-08. Validated/installed implementation: `ae53b49`, checkout `e4d
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+Current source `ab85ef8` implements scheduled main/world Options lifecycle and SDL
+resize, matching PowerShell preflight/result checks, and Linux `core/` notice paths.
+Source diff inspection completed. No builds, tests, probes, packages, deployment
+or game runs occurred in this implementation turn; installed identity remains above.
+
 Latest [platform batch](../artifacts/validation/platform-increment-20261008-230846/results.json)
 ran once at `e4da90d`: all eight managed Release builds, Linux shell/embedded-Python
 syntax, Windows staging and both Windows ZIP archives passed. Both existing isolated
@@ -23,8 +28,8 @@ Present-marker verification remains open.
 
 Linux RID reference outputs are now present. Linux staging stopped because its
 requiredNotices names omit the existing notice tree's `core/` prefix; no Linux ZIP
-or runtime/install check ran. Next implementation corrects that manifest contract,
-preserving required notices. No production-source repair or batch rerun occurred
+or runtime/install check ran. `ab85ef8` corrects that manifest contract,
+preserving all required notices; its stage/package validation is pending. No production-source repair or batch rerun occurred
 in this validation turn. GL registration passed normal world startup; third-party
 refusal remains unexercised and specific adapters remain user-deferred.
 
@@ -35,12 +40,19 @@ matched all 400 installed file hashes. The owned loader configuration was preser
 no normal installed-game launch occurred. Client archive SHA256:
 `3E21DB8AC57D6DBA9214FADA460897B43770ED04F418DA7B8434CDD869346D85`.
 
-Read-only Options lifecycle discovery confirms that current diagnostics stop at
-Graphics with the parent open, and the scenario scheduler requires a loaded world.
-Next source slice schedules original Options callbacks, settled preview/restore,
-native Back/resume and SDL SetSize, with narrowly scoped lifecycle observations.
-Main-menu readiness must be separate from loaded-world completion. No lifecycle
-actions were implemented or run during this validation turn.
+Options lifecycle now schedules the existing original entry, checkbox/footer,
+native world Back/resume/Escape and main leave callbacks. Main scenarios require
+no world and report actual mod-loaded state with Game assembly provenance. World
+scenarios retain original client/dialog identity. Logical SDL dimensions avoid
+pixel/DPI assumptions; preview assertions settle on later ticks. Saved official
+ScreenManager source confirms StartMainMenu reuses its constructor-owned mainScreen.
+Prepared [main](../artifacts/implementation/options-lifecycle-main.json) and
+[world](../artifacts/implementation/options-lifecycle-world.json) inputs cover
+Save/Cancel/abrupt-close restoration, all five pages, resize and resumed provider
+inputs/present gains. The [next batch](../artifacts/implementation/validate-options-lifecycle.ps1)
+builds Game on both targets, stages/packages both, runs both profiles once and
+delivers Windows only after both pass. DLSS-FG world mode is visible/focused.
+These inputs have not run; callbacks do not prove general physical SDL interaction.
 
 `c5ba14d` corrects all five delegate declaration/creation references in the two
 GL source files using System.Func/System.Action. Source diff inspection passed;

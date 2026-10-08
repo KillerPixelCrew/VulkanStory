@@ -9,7 +9,9 @@ ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
 Current validated/installed implementation: `ae53b49`, checkout `e4da90d`
 (first-enabled XeSS history and packaging/RID corrections). All eight managed builds,
 helper syntax, Windows staging/package and both existing XeSS scenarios passed.
-Linux staging now reaches required notices but fails on missing `core/` path prefixes.
+Current source: `ab85ef8` adds scheduled original Options lifecycle/SDL resize and
+corrects Linux notice paths. Source inspection only; compilation/runtime/package
+validation of this increment is pending.
 Current development package: `artifacts/validation/platform-increment-20261008-230846/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
@@ -24,7 +26,8 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    before FG and stays active through requested Off. First-enabled history reset
    resolved the observed -12 stop. The existing XeSS→FSR3→XeSS and latency
    Off→On→Boost profiles passed all actions/captures on RTX 4070. Next verify
-   ordinary Options close/resize/resume over settled frames; wider quality/pacing
+   ordinary Options close/resize/resume over settled frames using the new scheduled
+   callbacks; wider quality/pacing
    and eligible Intel behavior remain open.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
@@ -75,7 +78,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | XeSS FG | XeLL/history corrections validated; XeSS→FSR3→XeSS and Off→On→Boost scenarios passed | Wider transitions, moving-scene/visible quality/pacing and eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
-| Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works | Broader transitions/resize |
+| Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works. Scheduled main/world lifecycle actions now implemented for acceptance | Validate settled preview/Save/Cancel/abrupt-close, resize/all pages and provider resume; broader physical interaction |
 | Latency/controllers/touch | World/GUI release guards, radial sticks, separate menu bindings and semantic inventory actions implemented; inventory packet path checked | Physical input, gesture/layer/radial extensions and latency/touch acceptance |
 
 ## Source and delivery
@@ -142,7 +145,7 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | Managed cross-builds/helper syntax and RID propagation passed; Linux stage notice-path correction next; package and actual Linux runtime/install/providers/URI proof open |
+| LINUX-01 | Managed cross-builds/helper syntax and RID propagation passed; notice-path correction applied, stage/package validation pending; actual Linux runtime/install/providers/URI proof open |
 | GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
