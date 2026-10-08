@@ -4,6 +4,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks managed RGBA/float to BGRA8 conversion, row/alpha retention, and depth-only rejection.</summary>
+/// <remarks>Uses in-memory capture data rather than reading a GPU framebuffer.</remarks>
 public sealed class FramebufferCaptureTests
 {
     [Fact]

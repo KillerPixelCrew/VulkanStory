@@ -1,5 +1,9 @@
 using VulkanStory.Render.Vulkan.Core;
 
+// CLI entry selecting one scoped Vulkan/SDL preflight from the declared flags.
+// Some modes create an SDL window and submit GPU work; their result covers the
+// selected operation rather than the game adapter or full provider integration.
+// Exit codes: 0 for success, 1 for a reported preflight failure, 2 for invalid arguments.
 bool sdlSurface = args.Length == 1 && args[0] == "--sdl-surface";
 bool sdlSwapchain = args.Length == 1 && args[0] == "--sdl-swapchain";
 bool sdlPresent = args.Length == 1 && args[0] == "--sdl-present";

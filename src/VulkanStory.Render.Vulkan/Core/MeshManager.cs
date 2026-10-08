@@ -37,6 +37,7 @@ internal sealed class VulkanMesh : IDisposable
     /// <summary>Which buffers actually feed vertex bindings, in binding order.</summary>
     public List<int> BindingOrder { get; } = new();
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         foreach (VulkanBuffer? buffer in Buffers) buffer?.Dispose();
@@ -129,6 +130,7 @@ internal sealed unsafe class MeshManager : IDisposable
         }
     }
 
+    /// <summary>Returns a live mesh for a positive in-range ID, otherwise null.</summary>
     public VulkanMesh? Get(int id) => id > 0 && id < _meshes.Count ? _meshes[id] : null;
 
     public int Count
@@ -164,6 +166,8 @@ internal sealed unsafe class MeshManager : IDisposable
         };
 
         var builder = new VertexLayoutBuilder();
+        try
+        {
 
         // The order here is the order the GL allocator assigns attribute slots.
         // With SSBO vertex fetch the xyz slot holds packed face records rather
@@ -230,6 +234,12 @@ internal sealed unsafe class MeshManager : IDisposable
         mesh.LayoutId = _layouts.Intern(mesh.Layout);
 
         return Register(mesh);
+        }
+        catch
+        {
+            mesh.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -429,6 +439,7 @@ internal sealed unsafe class MeshManager : IDisposable
         }
     }
 
+    /// <summary>Returns the requested live mesh buffer, or null when the mesh/slot has no buffer.</summary>
     public VulkanBuffer? BufferOf(int meshId, int slot)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -436,6 +447,7 @@ internal sealed unsafe class MeshManager : IDisposable
         return slot < 0 ? mesh.Indices : mesh.Buffers[slot];
     }
 
+    /// <summary>Returns a borrowed mapped mesh-buffer pointer, or zero when no mapped buffer exists.</summary>
     public IntPtr MappedPointer(int meshId, int slot)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -445,7 +457,6 @@ internal sealed unsafe class MeshManager : IDisposable
         return slot < MaxBuffers ? mesh.Buffers[slot]?.Mapped ?? IntPtr.Zero : IntPtr.Zero;
     }
 
-    /// <summary>Writes bytes into a mesh buffer through its mapping.</summary>
     /// <summary>
     /// Copies data into one of a mesh's buffers at a byte offset.
     ///
@@ -493,6 +504,7 @@ internal sealed unsafe class MeshManager : IDisposable
             (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
     }
 
+    /// <summary>Removes the mesh ID and releases its resources immediately or through the supplied frame ring.</summary>
     public void Delete(int meshId, FrameRing? ring = null)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -546,6 +558,7 @@ internal sealed unsafe class MeshManager : IDisposable
         }
     }
 
+    /// <summary>Records a live mesh draw using its stored topology and index count; missing/empty meshes are ignored.</summary>
     public void Draw(CommandBuffer commandBuffer, int meshId, int instanceCount = 1)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -607,10 +620,14 @@ internal sealed unsafe class MeshManager : IDisposable
         }
     }
 
+    /// <summary>Returns a live mesh for a positive in-range ID, otherwise null.</summary>
     public int LayoutIdOf(int meshId) => Get(meshId)?.LayoutId ?? -1;
+    /// <summary>Returns a live mesh for a positive in-range ID, otherwise null.</summary>
     public VertexLayoutDescription LayoutOf(int layoutId) => _layouts.Get(layoutId);
+    /// <summary>Number of vertex layouts retained by the mesh layout interner.</summary>
     public int LayoutCount => _layouts.Count;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

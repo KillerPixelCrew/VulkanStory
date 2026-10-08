@@ -12,8 +12,11 @@ namespace VulkanStory.Game.Tests;
 
 // Retained cases from ControllerInputArbitrationTests at migration baseline
 // 386e0d05386d0b228b439d09aeca851428f7bbf3, exercised through the new adapter.
+/// <summary>Checks physical/touch/controller hold arbitration, focus cleanup, text routing, and cumulative wheel state.</summary>
+/// <remarks>Uses an uninitialized platform with recording handlers; physical SDL devices are not exercised.</remarks>
 public sealed class InputArbitrationTests
 {
+    /// <summary>Records delivered game key/mouse events and the last key/wheel payload.</summary>
     private sealed class Probe : KeyEventHandler, MouseEventHandler
     {
         internal readonly List<string> Events = new();
@@ -28,6 +31,7 @@ public sealed class InputArbitrationTests
         public void OnMouseWheel(MouseWheelEventArgs e) => Wheel = e;
     }
 
+    /// <summary>CPU input state initialized without the original platform constructor's native screen discovery.</summary>
     private sealed class Fixture
     {
         internal readonly ClientPlatformWindows Platform;

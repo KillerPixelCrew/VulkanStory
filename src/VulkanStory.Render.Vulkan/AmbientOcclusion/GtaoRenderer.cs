@@ -45,6 +45,7 @@ internal sealed class GtaoRenderer : IDisposable
     private Format _programDepthFormat;
     private Format _programTermFormat;
 
+    /// <summary>Borrows the Vulkan renderer that owns AO compute programs and target textures.</summary>
     public GtaoRenderer(VulkanDevice device) => _device = device;
 
     /// <summary>Why the last <see cref="Render" /> returned 0.</summary>
@@ -65,6 +66,7 @@ internal sealed class GtaoRenderer : IDisposable
     /// <summary>The denoised visibility.</summary>
     public int OutputTexture => _output;
 
+    /// <summary>Renderer ID of the Hilbert sampling-noise texture, or zero before allocation.</summary>
     public int HilbertTexture => _hilbert;
 
     /// <summary>
@@ -159,6 +161,7 @@ internal sealed class GtaoRenderer : IDisposable
         return 0;
     }
 
+    /// <summary>Creates or replaces AO targets when the requested extent changes.</summary>
     private unsafe bool EnsureTargets(uint width, uint height)
     {
         if (_hilbert == 0)
@@ -183,6 +186,7 @@ internal sealed class GtaoRenderer : IDisposable
         return _hilbert != 0 && _device.TextureOf(_workingDepth)?.MipLevels == DepthLevels;
     }
 
+    /// <summary>Lazily creates all required AO compute programs from retained GLSL sources.</summary>
     private bool EnsurePrograms()
     {
         Format depthFormat = _device.TextureOf(_workingDepth)!.Format;
@@ -226,6 +230,7 @@ internal sealed class GtaoRenderer : IDisposable
         _width = _height = 0;
     }
 
+    /// <summary>Deletes the renderer-owned AO program IDs and clears the cached handles.</summary>
     private void ReleasePrograms()
     {
         if (_prefilter != 0) _device.DeleteComputeProgram(_prefilter);
@@ -234,6 +239,7 @@ internal sealed class GtaoRenderer : IDisposable
         _prefilter = _main = _denoise = 0;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         ReleaseTargets();

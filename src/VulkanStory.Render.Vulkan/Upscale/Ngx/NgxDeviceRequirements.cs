@@ -28,6 +28,7 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
         _log = log;
     }
 
+    /// <inheritdoc/>
     public string Name => "NGX";
 
     /// <summary>Per feature: the result of the query and the extensions it named.</summary>
@@ -41,6 +42,7 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
     /// <summary>Extensions NGX named that this instance or device does not have.</summary>
     public List<string> Refused { get; } = new();
 
+    /// <inheritdoc/>
     public void ContributeInstanceExtensions(InstanceRequirements requirements)
     {
         foreach (NgxFeature feature in _features)
@@ -69,6 +71,7 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
         }
     }
 
+    /// <inheritdoc/>
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
         IntPtr instance = (IntPtr)requirements.Instance.Handle;

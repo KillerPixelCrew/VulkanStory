@@ -84,6 +84,7 @@ internal sealed class FrameGraph
 {
     public const string Variable = "VULKANSTORY_VULKAN_FRAMEGRAPH";
 
+    /// <summary>Whether the frame graph is enabled; only an explicit zero disables it.</summary>
     public static bool EnabledByEnvironment => Environment.GetEnvironmentVariable(Variable) != "0";
 
     /// <summary>Change only between frames.</summary>
@@ -121,6 +122,7 @@ internal sealed class FrameGraph
     /// <summary>Whether every pass opened so far this frame matches one of the last two plans.</summary>
     public bool PrefixMatchesPlan => _prefixMatches[0] || _prefixMatches[1];
 
+    /// <summary>Interns a pass name into the graph's stable integer name table.</summary>
     public int NameId(string name)
     {
         if (!_names.TryGetValue(name, out int id))
@@ -261,6 +263,7 @@ internal sealed class FrameGraph
 
     // ------------------------------------------------------------ clear promotion
 
+    /// <summary>Whether deferred image clears remain to be promoted or recorded.</summary>
     public bool HasPendingClears => _pending.Count > 0;
 
     public void PromoteColorClear(VulkanTexture texture, uint layer, float r, float g, float b, float a)

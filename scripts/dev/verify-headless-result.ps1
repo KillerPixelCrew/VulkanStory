@@ -86,6 +86,25 @@ function Assert-NullableResultString($Element) {
 function Assert-NullableResultInteger($Element) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Null) { [void](Get-ResultInteger $Element) }
 }
+function Resolve-ResultPath([string]$Root, [string]$Relative) {
+    if ([IO.Path]::IsPathRooted($Relative) -or $Relative.Replace('\','/').Split('/') -contains '..') {
+        throw 'Invalid result path.'
+    }
+    $path = [IO.Path]::GetFullPath((Join-Path $Root $Relative))
+    if (-not $path.StartsWith($Root.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Result path escapes its run directory.'
+    }
+    $node = $path
+    while ($node -and $node.Length -ge $Root.Length) {
+        if ((Test-Path -LiteralPath $node) -and
+            ((Get-Item -LiteralPath $node -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Result path traverses a reparse point.'
+        }
+        if ($node.Equals($Root, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $node = Split-Path $node -Parent
+    }
+    return $path
+}
 
 $runRoot = [IO.Path]::GetFullPath($RunDirectory)
 $frameRoot = Join-Path $runRoot 'frames'
@@ -173,6 +192,10 @@ try {
     if ($ExpectedFrameCount -lt 0 -or $requested -ne $ExpectedFrameCount -or $written -ne $ExpectedFrameCount) {
         $failures.Add('LegacyFrameCount')
     }
+    if (@(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.png' -File).Count -ne $ExpectedFrameCount -or
+        @(Get-ChildItem -LiteralPath $frameRoot -Filter 'frame-*.ppm' -File).Count -ne $ExpectedFrameCount) {
+        $failures.Add('LegacyFrameFiles')
+    }
     if ($hidden -eq [bool]$Visible -or (-not $Visible -and $focused) -or -not $staged -or -not $worldReady) { $failures.Add('LegacyInvariant') }
 }
 catch { $failures.Add('MalformedOrMissingHeadlessResult') }
@@ -191,6 +214,22 @@ if ($RequireScenario) {
         [void](Get-ResultString $scenario['id'])
         $sessionId = Get-ResultString $scenario['sessionId']
         Assert-ResultHash $scenario['inputSha256']
+        $inputReference = Read-ResultObject (Join-Path $runRoot 'input/scenario-input.json')
+        Require-ResultFields $inputReference @('id','path','sha256')
+        $inputPath = Resolve-ResultPath $runRoot (Get-ResultString $inputReference['path'])
+        $inputHash = (Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash
+        if ($inputHash -ine (Get-ResultString $inputReference['sha256']) -or
+            $inputHash -ine (Get-ResultString $scenario['inputSha256'])) { throw 'Scenario input hash mismatch.' }
+        $inputScenario = Read-ResultObject $inputPath
+        Require-ResultFields $inputScenario @('schema','id','actions')
+        if ((Get-ResultInteger $inputScenario['schema']) -ne 1 -or
+            (Get-ResultString $inputScenario['id']) -cne (Get-ResultString $scenario['id']) -or
+            (Get-ResultString $inputScenario['id']) -cne (Get-ResultString $inputReference['id']) -or
+            $inputScenario['actions'].ValueKind -ne [System.Text.Json.JsonValueKind]::Array) {
+            throw 'Scenario input identity mismatch.'
+        }
+        $inputActions = @($inputScenario['actions'].EnumerateArray())
+        $inputCaptures = @($inputActions | Where-Object { $_.GetProperty('kind').GetString() -ceq 'capture' })
         $expectedActions = Get-ResultInteger $scenario['expectedActionCount']
         $executedActions = Get-ResultInteger $scenario['executedActionCount']
         if ($expectedActions -lt 1 -or $expectedActions -gt 128 -or $executedActions -gt 128) {
@@ -199,6 +238,9 @@ if ($RequireScenario) {
         $requestedCaptures = Get-ResultInteger $scenario['requestedScenarioCaptures']
         $writtenCaptures = Get-ResultInteger $scenario['writtenScenarioCaptures']
         $pairedCaptures = Get-ResultInteger $scenario['pairedScenarioCaptures']
+        if ($expectedActions -ne $inputActions.Count -or $requestedCaptures -ne $inputCaptures.Count) {
+            throw 'Scenario counts do not match the copied input.'
+        }
         if ($requestedCaptures -gt $expectedActions -or $writtenCaptures -gt $expectedActions -or $pairedCaptures -gt $expectedActions) {
             throw 'Capture count exceeds declared actions.'
         }
@@ -229,6 +271,15 @@ if ($RequireScenario) {
             $index = Get-ResultInteger $capture['actionIndex']
             $actionId = Get-ResultString $capture['actionId']
             $name = Get-ResultString $capture['name']
+            if ($index -ge $inputActions.Count) { throw 'Capture index is outside input actions.' }
+            $inputAction = Get-ResultObject $inputActions[$index]
+            Require-ResultFields $inputAction @('kind','id','name','attachments','tick')
+            if ((Get-ResultString $inputAction['kind']) -cne 'capture' -or
+                (Get-ResultString $inputAction['id']) -cne $actionId -or
+                (Get-ResultString $inputAction['name']) -cne $name -or
+                (Get-ResultBoolean $inputAction['attachments']) -ne (Get-ResultBoolean $capture['attachments'])) {
+                throw 'Capture identity differs from its input action.'
+            }
             if ($index -ge $expectedActions -or -not $captureIndexes.Add($index) -or
                 -not $captureIds.Add($actionId) -or -not $captureNames.Add($name) -or
                 -not [regex]::IsMatch($name, '\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\z')) {
@@ -238,6 +289,7 @@ if ($RequireScenario) {
             $capturePhase = Get-ResultString $capture['phase']
             $captureSession = Get-ResultString $capture['sessionId']
             $tick = Get-ResultInteger $capture['scenarioTick']
+            if ($tick -lt (Get-ResultInteger $inputAction['tick'])) { throw 'Capture predates its scheduled action.' }
             if ($tick -gt 100000) { throw 'Capture tick outside core range.' }
             $captureFrame = Get-ResultInteger $capture['captureFrameId']
             $completedFrame = Get-ResultInteger $capture['completedFrameId']
@@ -262,6 +314,11 @@ if ($RequireScenario) {
                 $filePath = Get-ResultString $file['Path']
                 if (-not $filePaths.Add($filePath)) { throw 'Duplicate captured file path.' }
                 Assert-ResultHash $file['Sha256']
+                $actualFile = Resolve-ResultPath $frameRoot $filePath
+                if (-not (Test-Path -LiteralPath $actualFile -PathType Leaf) -or
+                    (Get-FileHash -LiteralPath $actualFile -Algorithm SHA256).Hash -ine (Get-ResultString $file['Sha256'])) {
+                    throw 'Captured file is missing or its SHA256 changed.'
+                }
                 Assert-NullableResultInteger $file['Width']
                 Assert-NullableResultInteger $file['Height']
             }

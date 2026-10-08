@@ -8,6 +8,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Focused expectations carried from VertexAttributeDefaultTests and PipelineCacheTests.
+/// <summary>Checks default vertex formats and driver-cache sampling/growth policy.</summary>
+/// <remarks>No graphics pipeline is created or merged by this fixture.</remarks>
 public sealed class PipelineContractsTests
 {
     [Theory]

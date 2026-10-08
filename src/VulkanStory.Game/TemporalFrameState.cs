@@ -69,6 +69,9 @@ namespace VulkanStory.Game
         public int PerceptionEffectId;
         public float PerceptionEffectIntensity;
 
+        /// <summary>Copies the original game deformation uniforms into a frame value, preserving wrapped counters.</summary>
+        /// <param name="u">Original default uniforms; null returns the zero/default snapshot.</param>
+        /// <returns>Current warp values independent of later uniform mutation.</returns>
         public static TemporalWarpState FromUniforms(DefaultShaderUniforms u)
         {
             TemporalWarpState state = default(TemporalWarpState);
@@ -116,7 +119,9 @@ namespace VulkanStory.Game
         /// <summary>The Halton offset for this frame index, whether or not it is applied.</summary>
         Vec2f JitterSequencePx { get; }
 
+        /// <summary>Current scene render width in pixels, before display-resolution reconstruction.</summary>
         int RenderWidth { get; }
+        /// <summary>Current scene render height in pixels, before display-resolution reconstruction.</summary>
         int RenderHeight { get; }
 
         /// <summary>The unjittered projection last loaded for the given view this frame.</summary>
@@ -136,9 +141,13 @@ namespace VulkanStory.Game
         /// </summary>
         EnumTemporalView ActiveView { get; }
 
+        /// <summary>Current unjittered column-major world camera matrix; live owner storage, read only.</summary>
         float[] CameraMatrix { get; }
+        /// <summary>Previous unjittered world camera matrix; live owner storage, read only.</summary>
         float[] PrevCameraMatrix { get; }
+        /// <summary>Current camera matrix with the origin-relative convention used by scene shaders; live owner storage.</summary>
         float[] CameraMatrixOrigin { get; }
+        /// <summary>Previous origin-relative camera matrix; live owner storage.</summary>
         float[] PrevCameraMatrixOrigin { get; }
 
         /// <summary>Current minus previous EntityPlayer.CameraPos, differenced in double precision.</summary>
@@ -146,17 +155,26 @@ namespace VulkanStory.Game
 
         /// <summary>DefaultShaderUniforms.PlayerPos: the camera relative to the slowly rebased reference position.</summary>
         Vec3f Playerpos { get; }
+        /// <summary>Previous player/camera position relative to the retained world reference.</summary>
         Vec3f PrevPlayerpos { get; }
 
+        /// <summary>Current scene deformation uniforms captured for motion writers.</summary>
         TemporalWarpState Warp { get; }
+        /// <summary>Previous frame deformation uniforms, preserving wrapped counters.</summary>
         TemporalWarpState PrevWarp { get; }
 
+        /// <summary>Whether temporal history must be discarded for the current frame.</summary>
         bool Reset { get; }
+        /// <summary>Reason selected for the current history reset, or None.</summary>
         EnumTemporalResetReason ResetReason { get; }
 
+        /// <summary>Current camera near clipping distance in game units.</summary>
         float ZNear { get; }
+        /// <summary>Current camera far clipping distance in game units.</summary>
         float ZFar { get; }
+        /// <summary>Current world field of view in the original camera convention.</summary>
         float Fov { get; }
+        /// <summary>Current rendered-frame time in milliseconds.</summary>
         float DeltaTimeMs { get; }
     }
 
@@ -221,10 +239,14 @@ namespace VulkanStory.Game
             }
         }
 
+        /// <inheritdoc />
         public long FrameIndex { get; private set; }
 
+        /// <inheritdoc />
         public Vec2f JitterPx { get; } = new Vec2f();
+        /// <inheritdoc />
         public Vec2f PrevJitterPx { get; } = new Vec2f();
+        /// <inheritdoc />
         public Vec2f JitterSequencePx { get; } = new Vec2f();
 
         /// <summary>
@@ -245,36 +267,56 @@ namespace VulkanStory.Game
             }
         }
 
+        /// <inheritdoc />
         public int RenderWidth { get; private set; }
+        /// <inheritdoc />
         public int RenderHeight { get; private set; }
 
+        /// <inheritdoc />
         public float[] CameraMatrix => cameraMatrix;
+        /// <inheritdoc />
         public float[] PrevCameraMatrix => cameraMatrixPrev;
+        /// <inheritdoc />
         public float[] CameraMatrixOrigin => cameraMatrixOrigin;
+        /// <inheritdoc />
         public float[] PrevCameraMatrixOrigin => cameraMatrixOriginPrev;
 
+        /// <inheritdoc />
         public Vec3f CameraPosDelta { get; } = new Vec3f();
 
+        /// <inheritdoc />
         public Vec3f Playerpos { get; } = new Vec3f();
+        /// <inheritdoc />
         public Vec3f PrevPlayerpos { get; } = new Vec3f();
 
+        /// <inheritdoc />
         public TemporalWarpState Warp { get; private set; }
+        /// <inheritdoc />
         public TemporalWarpState PrevWarp { get; private set; }
 
+        /// <inheritdoc />
         public bool Reset { get; private set; }
+        /// <inheritdoc />
         public EnumTemporalResetReason ResetReason { get; private set; }
 
         /// <summary>See <see cref="ITemporalFrameContext.ActiveView" />.</summary>
         public EnumTemporalView ActiveView { get; private set; }
 
+        /// <inheritdoc />
         public float ZNear { get; private set; }
+        /// <inheritdoc />
         public float ZFar { get; private set; }
+        /// <inheritdoc />
         public float Fov { get; private set; }
+        /// <inheritdoc />
         public float DeltaTimeMs { get; private set; }
 
         public float[] GetProjection(EnumTemporalView view) => projection[(int)view];
         public float[] GetPrevProjection(EnumTemporalView view) => projectionPrev[(int)view];
         public bool IsViewCaptured(EnumTemporalView view) => viewCaptured[(int)view];
+        /// <summary>Checks whether the specified view was captured in the previous rendered frame.</summary>
+        /// <param name="view">World or hand camera identity.</param>
+        /// <returns>True when previous view data exists for this camera identity.</returns>
         public bool WasViewCaptured(EnumTemporalView view) => viewCapturedPrev[(int)view];
 
         internal void AdvanceForFrame(ulong frameId, float deltaTimeMs, int width, int height,
@@ -289,6 +331,10 @@ namespace VulkanStory.Game
             renderFrameId = frameId;
         }
 
+        /// <summary>Borrows current/previous world camera arrays and provider constants for the owning frame.</summary>
+        /// <param name="motionValid">Complete scene producer eligibility determined by the game owner.</param>
+        /// <param name="canGenerate">Generation eligibility determined by pause/reset/producer state.</param>
+        /// <returns>Camera/provider snapshot referring to owner storage until the next advance.</returns>
         internal GameTemporalFrame Snapshot(bool motionValid, bool canGenerate)
         {
             bool captured = cameraCapturedThisFrame && IsViewCaptured(EnumTemporalView.World);
@@ -301,7 +347,7 @@ namespace VulkanStory.Game
             return new GameTemporalFrame(renderFrameId, captured, motionValid && captured,
                 canGenerate && captured && inverseValid, provider, cameraMatrixOrigin,
                 GetProjection(EnumTemporalView.World), cameraMatrixOriginPrev,
-                GetPrevProjection(EnumTemporalView.World));
+                GetPrevProjection(EnumTemporalView.World), CameraPosDelta.X, CameraPosDelta.Y, CameraPosDelta.Z);
         }
 
         /// <summary>
@@ -514,6 +560,8 @@ namespace VulkanStory.Game
         /// Freezes the camera matrices for the frame: the entity view (camera at the
         /// player) and the terrain view (camera at the chunk-relative origin).
         /// </summary>
+        /// <param name="cameraMatrixIn">Original full camera matrix.</param>
+        /// <param name="cameraMatrixOriginIn">Original origin-relative camera matrix.</param>
         public void CaptureCamera(double[] cameraMatrixIn, double[] cameraMatrixOriginIn)
         {
             if (cameraMatrixIn != null)
@@ -531,6 +579,8 @@ namespace VulkanStory.Game
         /// by the current jitter. The shear matches Mat4d.Perspective's convention
         /// (clip.w = -z_view), so a static point moves by exactly JitterPx pixels.
         /// </summary>
+        /// <param name="matrix">Original 16-element column-major projection; the input is not modified.</param>
+        /// <returns>Borrowed float scratch projection, overwritten by the next call.</returns>
         public float[] ApplyJitterCopy(double[] matrix)
         {
             for (int i = 0; i < 16; i++) jitteredScratch[i] = (float)matrix[i];

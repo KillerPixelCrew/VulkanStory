@@ -11,6 +11,11 @@ internal sealed partial class GameGraphicsAdapter
 {
     // Retained VulkanClientPlatform.Leaf.cs RGBA pointer upload; baseline
     // 386e0d05386d0b228b439d09aeca851428f7bbf3. Used by the original SVG rasterizer.
+    /// <summary>Copies tightly packed RGBA pixels from the supplied pointer into a newly owned 2D texture.</summary>
+    /// <param name="width">Texture width in texels.</param>
+    /// <param name="height">Texture height in texels.</param>
+    /// <param name="pixels">Readable tightly packed RGBA source pointer, valid for the duration of this call.</param>
+    /// <returns>Owned backend texture identifier.</returns>
     internal int LoadTextureFromRgbaPointer(int width, int height, IntPtr pixels)
     {
         var renderer = RequireDevice();
@@ -97,7 +102,7 @@ internal sealed partial class GameGraphicsAdapter
         RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
         if (mipmapsEnabled() && generateMipmaps)
         {
-            BuildMipMaps(retainedTextureId);
+            ConfigureMipMapSampling(retainedTextureId);
         }
         return retainedTextureId;
     }
@@ -167,7 +172,7 @@ internal sealed partial class GameGraphicsAdapter
 
                 if (makeMipMap)
                 {
-                    BuildMipMaps(intoTexture.TextureId);
+                    ConfigureMipMapSampling(intoTexture.TextureId);
                 }
             }
             else

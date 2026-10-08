@@ -8,16 +8,25 @@
 #include <vector>
 
 namespace vulkanstory {
+/// @brief Parsed host/fxr directory version used to select an installed hostfxr.
+/// @details Stores three numeric core components and prerelease identifiers. Nonempty build metadata is discarded for precedence.
 struct fxr_version {
+    /// @brief Major, minor and patch numbers used in numeric precedence.
     std::array<std::uint64_t, 3> numbers{};
+    /// @brief Owned prerelease identifiers; an empty vector denotes a release version.
     std::vector<std::wstring> prerelease;
 
+    /// @brief Checks for a nonempty sequence of ASCII decimal digits.
     static bool digits(std::wstring_view value) {
         if (value.empty()) return false;
         for (wchar_t c : value) if (c < L'0' || c > L'9') return false;
         return true;
     }
 
+    /// @brief Parses three numeric core components and optional prerelease identifiers.
+    /// @details Rejects core overflow, missing components, leading zeroes and malformed prerelease identifiers; strips nonempty build metadata.
+    /// @param value Borrowed directory-name text valid for the call.
+    /// @return Owned parsed value, or no value when validation fails.
     static std::optional<fxr_version> parse(std::wstring_view value) {
         fxr_version result;
         // .NET host/fxr directories use SemVer; build metadata does not affect precedence.
@@ -60,6 +69,8 @@ struct fxr_version {
         return result;
     }
 
+    /// @brief Compares core numbers followed by SemVer prerelease precedence.
+    /// @details Numeric prerelease identifiers precede text identifiers; a release wins over its same-core prerelease. Build metadata does not affect this comparison.
     bool operator<(const fxr_version& rhs) const {
         if (numbers != rhs.numbers) return numbers < rhs.numbers;
         if (prerelease.empty() || rhs.prerelease.empty())

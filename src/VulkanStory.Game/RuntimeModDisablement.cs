@@ -3,6 +3,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Reads the original game disabled-mod policy at window-service selection, after game settings and paths have initialized.</summary>
 internal static class RuntimeModDisablement
 {
     // Use the same metadata as the shipped ordinary mod, rather than assuming

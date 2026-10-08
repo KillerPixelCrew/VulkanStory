@@ -5,6 +5,7 @@ namespace VulkanStory.Game;
 
 // Asset origins are authoritative at the game's normal load/reload boundary.
 // No Optimum launcher-generated scan report is required by the new host.
+/// <summary>Tracks patched or non-game shader assets and limits retained stage/include replacement to compatible original sources.</summary>
 internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Action<string> warning)
 {
     private readonly HashSet<string> programs = new(StringComparer.OrdinalIgnoreCase);
@@ -24,6 +25,7 @@ internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Ac
         if (!sharedIncludes) warning("VulkanStory: shared shader includes are overridden; native bundle and stock scene motion/AO modes are disabled.");
         sharedIncludes = true;
     }
+    /// <summary>Rebuilds shader override knowledge from current game assets, failing closed when discovery cannot establish original sources.</summary>
     internal void Refresh()
     {
         programs.Clear(); sharedIncludes = false; known = false;
@@ -60,6 +62,11 @@ internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Ac
             warning("VulkanStory: shader override discovery failed; using the rewriter and disabling stock scene feature publication: " + error.Message);
         }
     }
+    /// <summary>Checks whether the named shader stage can use the retained embedded source.</summary>
+    /// <param name="pass">Original registered pass name.</param>
+    /// <param name="domain">Asset domain requested by the original shader load.</param>
+    /// <param name="extension">Shader stage file extension.</param>
+    /// <returns>True only for an allowed original stage.</returns>
     internal bool MayReplaceStage(string pass, string? domain, string extension)
     {
         if (!string.IsNullOrEmpty(domain) && !string.Equals(domain, "game", StringComparison.OrdinalIgnoreCase))
@@ -68,6 +75,9 @@ internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Ac
         if (selected != null && External(selected)) { MarkProgram(pass); return false; }
         return true;
     }
+    /// <summary>Checks whether a retained include can replace the current original asset.</summary>
+    /// <param name="name">Include asset name.</param>
+    /// <returns>True when retained source replacement is permitted.</returns>
     internal bool MayReplaceInclude(string name)
     {
         IAsset? selected = assets()?.TryGet_BaseAssets(new AssetLocation("shaderincludes/" + name));

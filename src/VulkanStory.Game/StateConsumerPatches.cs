@@ -7,6 +7,8 @@ using VulkanStory.Render.Vulkan.Core;
 
 namespace VulkanStory.Game;
 
+/// <summary>Translates original platform graphics state into the adapter state tracker while routing is committed.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class StateConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-state";
@@ -39,6 +41,10 @@ internal static class StateConsumerPatches
 
     // This subset is not a complete mandatory graphics-api group and cannot
     // satisfy StartupRoutingTransaction.RequiredGroups by itself.
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="enabled">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateSubset(Func<bool> enabled)
     {
         ArgumentNullException.ThrowIfNull(enabled);

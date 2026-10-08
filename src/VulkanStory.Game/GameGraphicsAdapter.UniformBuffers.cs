@@ -15,6 +15,12 @@ internal sealed partial class GameGraphicsAdapter
     private static readonly Action<UBORef, bool> SetUniformBufferDisposed =
         AccessTools.PropertySetter(typeof(UBORef), nameof(UBORef.Disposed)).CreateDelegate<Action<UBORef, bool>>();
 
+    /// <summary>Creates a backend named-block buffer and attaches its ownership/binding metadata to the original UBO reference.</summary>
+    /// <param name="program">Backend program identifier owning the named block.</param>
+    /// <param name="binding">Original uniform block binding index.</param>
+    /// <param name="block">Original block name.</param>
+    /// <param name="size">Requested block capacity in bytes.</param>
+    /// <returns>Original UBO reference carrying adapter ownership.</returns>
     internal UBORef CreateUniformBuffer(int program, int binding, string block, int size)
     {
         int handle = RequireDevice().CreateUniformBuffer(program, binding, block, size);

@@ -154,7 +154,6 @@ vec4 applyVertexWarpingState(WarpState st, int renderFlags, vec4 worldPos) {
 			float bendNoiseFactor = 1.4;
 			float bendConstant = 0.8;
 
-			int windwaveConfig = 0;
 
 			switch (windMode) {
 				case 1: // Weak Wind

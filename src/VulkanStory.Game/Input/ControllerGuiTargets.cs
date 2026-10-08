@@ -23,6 +23,8 @@ internal static class ControllerGuiTargets
     private static readonly FieldInfo? InteractiveElementsField = typeof(GuiComposer).GetField(
         "interactiveElements", BindingFlags.Instance | BindingFlags.NonPublic);
 
+    /// <summary>Collects enabled screen/front-dialog composers, including inventory HUD grids when foreground inventory is active.</summary>
+    /// <remarks>Uses the pinned game's private fields; absent fields reduce the available navigation targets.</remarks>
     public static List<GuiComposer> ActiveComposers(IControllerPlatformHost platform)
     {
         var composers = new List<GuiComposer>();
@@ -60,6 +62,7 @@ internal static class ControllerGuiTargets
         return composers;
     }
 
+    /// <summary>Returns the client owned by the current running-game screen, or null outside a loaded game.</summary>
     public static ClientMain? ActiveGame(IControllerPlatformHost platform)
     {
         ScreenManager? manager = platform.Original.keyEventHandlers.OfType<ScreenManager>().FirstOrDefault();
@@ -67,6 +70,8 @@ internal static class ControllerGuiTargets
         return screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
     }
 
+    /// <summary>Returns the input-context owner used for release guards: unfocused host, front dialog, or current screen.</summary>
+    /// <remarks>For equal dialog input orders, the last encountered dialog owns the context.</remarks>
     internal static object? ForegroundOwner(IControllerPlatformHost platform)
     {
         if (!platform.IsFocused) return platform;
@@ -81,6 +86,7 @@ internal static class ControllerGuiTargets
         return platform.ControllerCurrentScreen();
     }
 
+    /// <summary>Extracts visible grid-slot geometry in reverse composer order for semantic inventory operations.</summary>
     internal static List<ControllerSlotTarget> SlotTargets(IReadOnlyList<GuiComposer> composers)
     {
         var targets = new List<ControllerSlotTarget>();
@@ -108,6 +114,7 @@ internal static class ControllerGuiTargets
         return targets;
     }
 
+    /// <summary>Collects window-contained, unclipped centers of slots, list cells, and focusable GUI elements.</summary>
     public static List<Vector2> Collect(IControllerPlatformHost platform, IReadOnlyList<GuiComposer> composers)
     {
         var targets = new List<Vector2>();
@@ -147,5 +154,11 @@ internal static class ControllerGuiTargets
     }
 }
 
+/// <summary>Rendered inventory-slot geometry plus the grid's filtered index and underlying inventory slot identity.</summary>
+/// <param name="Grid">Official GUI grid responsible for permissions and slot operations.</param>
+/// <param name="Index">Index in the grid's rendered/filtered slot collection.</param>
+/// <param name="SlotId">Inventory slot ID mapped from the rendered collection.</param>
+/// <param name="Bounds">Live rendered slot bounds used for cursor containment.</param>
+/// <param name="Center">Drawable-coordinate center used for directional navigation.</param>
 internal readonly record struct ControllerSlotTarget(GuiElementItemSlotGridBase Grid, int Index,
     int SlotId, ElementBounds Bounds, Vector2 Center);

@@ -7,22 +7,28 @@ namespace VulkanStory.Render.Vulkan.Shaders;
 /// <summary>One stage's input to translation.</summary>
 internal sealed class ShaderStageSource
 {
+    /// <summary>Shader stage represented by this source record.</summary>
     public EnumShaderType Stage;
     /// <summary>Include-expanded GLSL, as ShaderRegistry produces it.</summary>
     public string Code = "";
     /// <summary>The program's <c>#define</c> block.</summary>
     public string PrefixCode = "";
+    /// <summary>Diagnostic filename supplied to compilation.</summary>
     public string Filename = "shader";
 }
 
 /// <summary>A whole program, translated and ready to become pipeline stages.</summary>
 internal sealed class TranslatedProgram
 {
+    /// <summary>Resolved cross-stage Vulkan program interface.</summary>
     public ProgramInterfaceLayout Layout = new();
+    /// <summary>Successfully compiled SPIR-V modules keyed by shader stage.</summary>
     public Dictionary<EnumShaderType, byte[]> Spirv { get; } = new();
     /// <summary>The rewritten GLSL per stage, kept for diagnostics.</summary>
     public Dictionary<EnumShaderType, string> RewrittenSource { get; } = new();
+    /// <summary>Parse, interface, rewrite or shaderc failures accumulated during translation.</summary>
     public List<string> Errors { get; } = new();
+    /// <summary>Whether program translation recorded no errors.</summary>
     public bool Success => Errors.Count == 0;
 
     /// <summary>
@@ -146,6 +152,14 @@ internal static class ShaderTranslator
             }
 
             program.Spirv[stage] = compiled.Spirv;
+            if (stage == EnumShaderType.FragmentShader)
+            {
+                // Compiled stores include out/inout helper and pointer writes
+                // that a textual assignment scan cannot identify reliably.
+                program.Layout.WrittenFragmentOutputs.Clear();
+                program.Layout.WrittenFragmentOutputs.UnionWith(
+                    SpirvReflection.Reflect(compiled.Spirv).WrittenOutputLocations);
+            }
         }
 
         return program;

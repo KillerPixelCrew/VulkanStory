@@ -2,6 +2,7 @@
 // Frame planning, command parsing and Netpbm writer retained; no modified API dependency.
 namespace VulkanStory.Game;
 
+/// <summary>Parses explicit headless environment configuration and writes capture/result files for the isolated harness.</summary>
 public static class HeadlessHarnessOptions
 {
     /// <summary>True when <c>VULKANSTORY_HEADLESS</c> asks for an invisible window.</summary>
@@ -133,6 +134,7 @@ public static class HeadlessHarnessOptions
     public const long MaxFrames = 100000L;
 
     /// <summary>A cadence: <paramref name="count" /> frames from <paramref name="first" />, every <paramref name="stride" />.</summary>
+    /// <returns>Ordered capture frame numbers, or an empty array for nonpositive count.</returns>
     public static long[] PlanFrames(long first, long count, long stride)
     {
         if (count <= 0L) return new long[0];
@@ -150,6 +152,8 @@ public static class HeadlessHarnessOptions
     /// An explicit frame list: comma, space or semicolon separated, negatives and
     /// unparsable entries dropped, ascending and without duplicates.
     /// </summary>
+    /// <param name="list">Comma, space or semicolon-separated zero-based frame indices.</param>
+    /// <returns>Sorted unique nonnegative parsed indices; malformed entries are omitted.</returns>
     public static long[] ParseFrameList(string list)
     {
         if (string.IsNullOrWhiteSpace(list)) return new long[0];
@@ -193,6 +197,8 @@ public static class HeadlessHarnessOptions
     }
 
     /// <summary>The one file name both backends write, so two captures pair by name.</summary>
+    /// <param name="worldFrame">Zero-based rendered frame index.</param>
+    /// <returns>Invariant frame-NNNNNN.ppm basename.</returns>
     public static string FrameFileName(long worldFrame)
     {
         return "frame-" + worldFrame.ToString("D6", System.Globalization.CultureInfo.InvariantCulture) + ".ppm";
@@ -238,6 +244,14 @@ public static class HeadlessHarnessOptions
         return WriteFrame(
             System.IO.Path.Combine(FrameDirectory, FrameFileName(worldFrame)), width, height, pixels, bgra);
     }
+    /// <summary>Writes tightly packed four-channel pixels as an RGB Netpbm frame.</summary>
+    /// <param name="path">Output pathname; its parent directory is created when needed.</param>
+    /// <param name="width">Positive image width in pixels.</param>
+    /// <param name="height">Positive image height in pixels.</param>
+    /// <param name="pixels">Row-major RGBA/BGRA data containing at least width times height times four bytes.</param>
+    /// <param name="bgra">True for BGRA source order; false for RGBA.</param>
+    /// <returns>True after file writing, false for malformed input.</returns>
+    /// <remarks>The writer strips alpha and preserves source row order. File errors propagate.</remarks>
     public static bool WriteFrame(string path, int width, int height, byte[] pixels, bool bgra)
     {
         if (path == null || pixels == null || width <= 0 || height <= 0) return false;
@@ -250,7 +264,8 @@ public static class HeadlessHarnessOptions
         return true;
     }
 
-    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels,
+    /// <summary>Writes selected channels from four-byte texels, preserving the capture row order.</summary>
+    internal static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels,
         int step = 1)
     {
         using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);

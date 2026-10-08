@@ -6,6 +6,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks tap, drag, long-press, cancellation, and multi-contact suppression from synthetic finger events.</summary>
+/// <remarks>Covers managed gesture dispatch rather than physical touch or native event pumping.</remarks>
 public sealed class SdlTouchMouseTests
 {
     private static SdlInputEvent Finger(uint type, ulong time, ulong finger, float x, float y) =>

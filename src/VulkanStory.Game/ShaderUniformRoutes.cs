@@ -49,6 +49,7 @@ internal static class ShaderUniformRoutes
             throw new InvalidOperationException("Shader uniform overload must contain exactly one expected GL setter.");
     }
 
+    /// <summary>Checks exact original uniform overloads and GL call anchors before installation.</summary>
     internal static void ValidateBindings()
     {
         foreach (var route in Routes)
@@ -60,6 +61,8 @@ internal static class ShaderUniformRoutes
         }
     }
 
+    /// <summary>Installs program-aware uniform call substitutions while startup routing remains dormant.</summary>
+    /// <param name="harmony">Startup Harmony owner responsible for patch removal.</param>
     internal static void Install(Harmony harmony)
     {
         foreach (var route in Routes)

@@ -34,10 +34,10 @@ uniform float temporalFrameIndex;
 
 // Useful numbers
 #define PI  radians(180.0)
-#define TAU PI * 2.0
-#define RCPPI 1.0 / PI
-#define PHI sqrt(5.0) * 0.5 + 0.5
-#define GOLDEN_ANGLE TAU / PHI / PHI
+#define TAU (PI * 2.0)
+#define RCPPI (1.0 / PI)
+#define PHI (sqrt(5.0) * 0.5 + 0.5)
+#define GOLDEN_ANGLE (TAU / PHI / PHI)
 #define LOG2 log(2.0)
 
 #define cubicSmooth(x) (x * x) * (3.0 - 2.0 * x)
@@ -68,11 +68,8 @@ vec2 goldenSpiralS(float index, float total) {
 
 // Useful tool to convert 2D offset patterns into 3D. Looks great with screen space stuff, more complicated things such as path tracing should use a rand.
 vec3 sphereMap(vec2 a) {
-    float phi = a.y * 2.0 * PI;
-    float cosTheta = 1.0 - a.x;
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-    return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+    vec2 disk = a / max(1.0, length(a));
+    return vec3(disk, sqrt(max(0.0, 1.0 - dot(disk, disk))));
 }
 
 

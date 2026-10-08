@@ -4,6 +4,7 @@ using Vintagestory.API.MathTools;
 
 namespace VulkanStory.Mod;
 
+/// <summary>Nonfocusable HUD displaying the runtime's real-frame/generated-output text with viewport-aware wrapping.</summary>
 internal sealed class RendererFpsHud : HudElement
 {
     private readonly GuiComposer counter;
@@ -13,6 +14,7 @@ internal sealed class RendererFpsHud : HudElement
     private string lastText = "";
     private int lastWidth;
     private float lastScale;
+    /// <summary>Creates the retained dynamic text composer; visibility remains controlled by the runtime setting callback.</summary>
     internal RendererFpsHud(ICoreClientAPI api) : base(api)
     {
         font = CairoFont.WhiteSmallishText().WithStroke(ColorUtil.BlackArgbDouble, 1.5);
@@ -21,9 +23,13 @@ internal sealed class RendererFpsHud : HudElement
             .AddDynamicText("Real: -- FPS | FG output: -- FPS", font, ElementBounds.Fixed(0, 0, 360, 28), "fps").OnlyDynamic().Compose();
         text = counter.GetDynamicText("fps");
     }
+    /// <inheritdoc />
     public override bool Focusable => false;
+    /// <inheritdoc />
     public override string ToggleKeyCombinationCode => null!;
     private static bool Enabled => AppContext.GetData("VulkanStory.Runtime.ShowFpsCounter") is Func<bool> show && show();
+    /// <inheritdoc />
+    /// <remarks>Updates text synchronously on the GUI render thread only when text, width, or GUI scale changes.</remarks>
     public override void OnRenderGUI(float deltaTime)
     {
         if (!Enabled) return;
@@ -48,6 +54,8 @@ internal sealed class RendererFpsHud : HudElement
         }
         counter.Render(deltaTime);
     }
+    /// <inheritdoc />
     public override void OnFinalizeFrame(float dt) { if (Enabled) counter.PostRender(dt); }
+    /// <inheritdoc />
     public override void Dispose() { counter.Dispose(); base.Dispose(); }
 }

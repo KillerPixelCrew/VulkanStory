@@ -165,10 +165,13 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     /// <summary>The driver's pipeline cache; compute pipelines compile through it too, so one file warms both.</summary>
     public Silk.NET.Vulkan.PipelineCache DriverCache => _driverCache;
+    /// <summary>Serializes all host access to the shared Vulkan driver cache, including compute creation.</summary>
+    internal object DriverCacheLock => _driverCacheLock;
 
     /// <summary>The driver created its cache from the initial data rather than empty.</summary>
     public bool SeedAccepted { get; }
 
+    /// <summary>Attempts native pipeline-cache creation from validated driver-cache bytes.</summary>
     private static bool TryCreateDriverCache(
         VulkanContext context, byte[]? initialData, out Silk.NET.Vulkan.PipelineCache cache)
     {
@@ -222,15 +225,6 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     }
 
     /// <summary>
-    /// The pipeline for <paramref name="key" /> if it can be had without compiling on this
-    /// thread; otherwise false, with the compile queued on the background worker, and the
-    /// caller skips its draw (Unreal's default for a PSO that is not ready,
-    /// docs/vulkan.md#caches §2). A key already compiling is not queued again.
-    /// Finished compiles become visible at <see cref="PublishCompleted" />.
-    ///
-    /// With <see cref="AsyncCompiles" /> off this never returns false.
-    /// </summary>
-    /// <summary>
     /// <see cref="TryGet" /> ahead of any draw: the compile starts (or the driver cache serves it)
     /// when a native system asks for its pipeline, and no draw is counted as skipped for it.
     /// </summary>
@@ -249,6 +243,9 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     private bool _preparing;
 
+    /// <summary>Returns a cached graphics pipeline or schedules/executes compilation according to cache policy.</summary>
+    /// <remarks>Pending keys are not queued again. Background results become visible at <see cref="PublishCompleted"/>. With asynchronous compilation disabled, creation is synchronous.</remarks>
+    /// <returns>Whether a usable pipeline is available now; false permits the caller to skip the draw while compilation is pending.</returns>
     public bool TryGet(PipelineKey key, PipelineRequest request, out Pipeline pipeline)
     {
         if (_pipelines.TryGetValue(key, out pipeline))
@@ -768,6 +765,30 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         VulkanStats.NotePipelinesPending(_pendingJobs.Count);
     }
 
+    /// <summary>Detaches published pipelines of a deleted program for GPU-safe retirement by the caller.</summary>
+    /// <returns>A deduplicated owner, or null when no unshared pipeline remains.</returns>
+    internal IDisposable? RemoveProgramPipelines(int programId)
+    {
+        var removed = new HashSet<Pipeline>();
+        var keys = new List<PipelineKey>();
+        foreach (var entry in _pipelines)
+            if (entry.Key.ProgramId == programId) { keys.Add(entry.Key); removed.Add(entry.Value); }
+        foreach (PipelineKey key in keys) _pipelines.Remove(key);
+        foreach (Pipeline shared in _pipelines.Values) removed.Remove(shared);
+        foreach (Pipeline shared in _prewarmed.Values) removed.Remove(shared);
+        return removed.Count == 0 ? null : new RetiredPipelines(_context, removed);
+    }
+
+    /// <summary>Destroys detached pipeline handles after the frame timeline releases their last use.</summary>
+    private sealed class RetiredPipelines(VulkanContext context, HashSet<Pipeline> pipelines) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (Pipeline pipeline in pipelines) context.Api.DestroyPipeline(context.Device, pipeline, null);
+            pipelines.Clear();
+        }
+    }
+
     private void Forget(CompileJob job)
     {
         if (_pendingJobs.TryGetValue(job.Id, out CompileJob? current) && ReferenceEquals(current, job))
@@ -1073,6 +1094,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         }
     }
 
+    /// <summary>Serializes the driver cache while the caller holds the cache synchronization lock.</summary>
     private byte[] SerializeDriverCacheLocked()
     {
         // The cache can grow between the size query and the fetch while another
@@ -1098,6 +1120,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         return Array.Empty<byte>();
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

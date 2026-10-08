@@ -7,6 +7,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks CPU frame-plan reuse, attachment loads, image lifetimes, resource transitions, and compute dispatch validation.</summary>
+/// <remarks>Models resource state and fake backing allocation without submitting GPU work.</remarks>
 public class FramePlanningTests
 {
     private static PassSignature Pass(int target, bool transient = true, params int[] reads) => new()
@@ -108,6 +110,7 @@ public class FramePlanningTests
         Assert.Equal(minimum, slots.Distinct().Count());
     }
 
+    /// <summary>Monotonic fake image IDs for allocator lifetime checks without native image allocation.</summary>
     private sealed class ImageBacking : ITransientBacking
     {
         private int _next;

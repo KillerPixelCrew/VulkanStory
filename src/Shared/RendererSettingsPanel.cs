@@ -5,6 +5,8 @@ using Vintagestory.API.Client;
 namespace VulkanStory.Settings;
 
 // Shared source linked into the early menu integration and ordinary API-only mod.
+/// <summary>Shared renderer settings draft, live preview, Save/Cancel behavior, and page composition for both GUI hosts.</summary>
+/// <remarks>Runtime actions are supplied through process callbacks; failed actions remain visible on the current page.</remarks>
 internal sealed class RendererSettingsPanel
 {
     private readonly JsonObject draft;
@@ -19,13 +21,23 @@ internal sealed class RendererSettingsPanel
     private bool controllerPending;
     private int page;
     internal static readonly string[] PageNames = ["Image", "Generation", "Effects", "Device", "Status"];
+    /// <summary>Display name of the currently selected settings page.</summary>
     internal string CurrentPageName => PageNames[page];
     private bool refresh;
     private string? errorMessage;
+    /// <summary>Revision incremented whenever a nonnull error is displayed, allowing hosts to reveal it.</summary>
     internal long ErrorRevision { get; private set; }
+    /// <summary>Current error block's composed Y position, or null when no error block exists.</summary>
     internal double? ErrorContentY { get; private set; }
     private long nextStatusRefresh;
     private Action? refreshImageStatus;
+    /// <summary>Creates an editable JSON draft and retains the initial committed state for Cancel restoration.</summary>
+    /// <param name="json">Current renderer settings serialized as a JSON object.</param>
+    /// <param name="apply">Persists/applies a draft, returning null on success or a visible error message.</param>
+    /// <param name="notify">Receives success notifications.</param>
+    /// <param name="close">Closes the current settings host after successful Save/Cancel.</param>
+    /// <param name="editingActive">Optional guard used by deferred controller-open callbacks.</param>
+    /// <param name="controllerOpened">Optional host transition after controller settings open; null uses the close callback.</param>
     internal RendererSettingsPanel(string json, Func<string, string?> apply, Action<string> notify, Action close,
         Func<bool>? editingActive = null, Func<string?>? controllerOpened = null)
     {
@@ -36,6 +48,8 @@ internal sealed class RendererSettingsPanel
         save = apply; this.notify = notify; this.close = close;
         this.editingActive = editingActive; this.controllerOpened = controllerOpened ?? (() => { close(); return null; });
     }
+    /// <summary>Consumes the refresh flag and updates visible status at most once per second.</summary>
+    /// <returns>Whether the host should recompose its content; Image status text may update in place.</returns>
     internal bool TakeRefresh()
     {
         bool value = refresh; refresh = false;
@@ -61,6 +75,8 @@ internal sealed class RendererSettingsPanel
         if (error != null) { ShowError("Could not restore settings: " + error); return true; }
         close(); return true;
     }
+    /// <summary>Restores the last committed JSON state when a live preview is active.</summary>
+    /// <returns>Null when no restoration is needed or restoration succeeded; otherwise the runtime callback's error.</returns>
     internal string? EndPreview()
     {
         if (!previewApplied) return null;
@@ -102,6 +118,7 @@ internal sealed class RendererSettingsPanel
         refresh = true;
         return true;
     }
+    /// <summary>Adds standalone settings content, composes the host, and initializes widgets after composition.</summary>
     internal GuiComposer Compose(GuiComposer composer, Func<bool>? canInteract = null)
     {
         Action initialize = AddContent(composer, 550, out _, embedded: false, canInteract: canInteract);
@@ -109,6 +126,7 @@ internal sealed class RendererSettingsPanel
         initialize();
         return result;
     }
+    /// <summary>Adds width-adaptive page buttons and returns the height reserved for navigation.</summary>
     internal double AddPageNavigation(GuiComposer composer, double width, double y = 0,
         Func<bool>? canInteract = null)
     {
@@ -124,6 +142,25 @@ internal sealed class RendererSettingsPanel
         }
         return Math.Ceiling((double)pages.Length / columns) * 36 + 12;
     }
+
+    /// <summary>Adds a single-row page selector for standalone hosts with a bounded viewport.</summary>
+    internal void AddCompactPageNavigation(GuiComposer composer, double width, Func<bool>? canInteract = null)
+    {
+        composer.AddDropDown(PageNames, PageNames, page, (index, _) =>
+        {
+            if (canInteract?.Invoke() == false || controllerPending) return;
+            page = index; refresh = true;
+        }, ElementBounds.Fixed(0, 0, width, 28), "vulkanstory-pages");
+    }
+    /// <summary>Adds the selected page to a composer under construction and reports its content extent.</summary>
+    /// <param name="composer">Host composer to populate.</param>
+    /// <param name="width">Available content width in GUI layout units.</param>
+    /// <param name="height">Resulting content height for the host's layout or scroll viewport.</param>
+    /// <param name="embedded">Whether to use the embedded Options spacing and adaptive text layout.</param>
+    /// <param name="canInteract">Optional current-host guard checked by user callbacks.</param>
+    /// <param name="includeFooter">Whether to append Save/Cancel controls.</param>
+    /// <param name="includePages">Whether to append page navigation before the content.</param>
+    /// <returns>Widget initialization callback to invoke after the host composer has been composed.</returns>
     internal Action AddContent(GuiComposer composer, double width, out double height, bool embedded = true,
         Func<bool>? canInteract = null, bool includeFooter = true, bool includePages = true)
     {
@@ -155,7 +192,7 @@ internal sealed class RendererSettingsPanel
                 Slider("Render scale (%)", "RenderScale", 25, 100, 5, 100);
                 Switch("Temporal anti-aliasing", "Taa");
                 Slider("TAA sharpness (%)", "TaaSharpness", 0, 100, 5, 100);
-                Slider("TAA mip bias", "TaaMipBias", -40, 0, 1, 10);
+                Slider("TAA mip bias", "TaaMipBias", -20, 0, 1, 10);
                 Slider("Upscaler mip adjustment (%)", "UpscalerLodBiasOffset", 0, 100, 5, 100);
                 const string imageStatusKey = "vulkanstory-image-status";
                 string ImageStatus() => AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> read
@@ -284,6 +321,7 @@ internal sealed class RendererSettingsPanel
             y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
         }
     }
+    /// <summary>Adds guarded Cancel and Save buttons; Save is disabled while a controller transition is pending.</summary>
     internal GuiComposer AddFooter(GuiComposer composer, double width, double y, Func<bool>? canInteract = null)
     {
         bool Live() => canInteract?.Invoke() != false;

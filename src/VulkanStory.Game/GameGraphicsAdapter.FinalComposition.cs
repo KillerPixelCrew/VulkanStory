@@ -17,6 +17,7 @@ internal sealed partial class GameGraphicsAdapter
             "contrastLevel", "brightnessLevel", "sepiaLevel", "windWaveCounter", "glitchEffectStrength",
             "sunPosScreenIn", "sunPos3dIn", "playerViewVector", "damageVignetting", "damageVignettingSide", "frostVignetting"],
         ["primaryScene", "glowParts", "bloomParts", "godrayParts", "ssaoScene"]);
+    /// <summary>Composes scene post outputs into the presentation target and records whether the upscaled composite is ready.</summary>
     internal void RenderFinalComposition()
     {
         var renderer = RequireDevice();

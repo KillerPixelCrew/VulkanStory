@@ -108,6 +108,7 @@ internal sealed class NativeShaderLibrary
     /// <summary>A <c>sources/shaders-vk</c> tree to compile at device start instead of the shipped manifest.</summary>
     public const string SourceVariable = "VULKANSTORY_VK_SHADER_SOURCE";
 
+    /// <summary>Native shader loading mode: disabled, precompiled directory or source compilation.</summary>
     public enum Mode { Off, Directory, Source }
 
     /// <summary>How a link request came out.</summary>
@@ -121,6 +122,7 @@ internal sealed class NativeShaderLibrary
         Failed,
     }
 
+    /// <summary>Parsed native shader manifest used to validate artifacts and resolve variants.</summary>
     public NativeShaderManifest Manifest { get; }
 
     /// <summary>Where the manifest came from, for the log.</summary>

@@ -32,7 +32,7 @@ target="$out/$name"
 if ! command -v "$cc" >/dev/null 2>&1; then
     # Same reason as the failed-compile path below: a library left over from a
     # build on a host that still had a compiler would be packaged by the
-    # csproj's Exists() condition and shipped beside a managed side it no longer
+    # native bundle staging and shipped beside a managed side it no longer
     # matches. Without a compiler the only correct output is no output.
     rm -f "$target" "$target.tmp"
     echo "vulkanstory-ngx: no C compiler ($cc) on this host; skipping the NGX shim - DLSS will report unavailable."
@@ -41,8 +41,7 @@ fi
 
 mkdir -p "$out" || exit 0
 
-# Only relink when the source is newer, so an incremental dotnet build does not
-# shell out to the compiler on every invocation.
+# Only relink when the source or header is newer during explicit bridge builds.
 if [ -f "$target" ] && [ "$target" -nt "$src" ] && [ "$target" -nt "$here/vulkanstory_ngx.h" ]; then
     exit 0
 fi
@@ -59,7 +58,7 @@ libs=""
 #
 # It compiles to a temporary file and only replaces the shipped library once the
 # compiler said yes: a failed compile that left the previous library in place
-# would be picked up by the csproj's Exists() condition and shipped beside a
+# would be picked up by native bundle staging and shipped beside a
 # managed side it no longer matches.
 if ! "$cc" -std=c99 -O2 -fPIC -shared -fvisibility=hidden \
         -fno-optimize-sibling-calls \

@@ -7,6 +7,7 @@ using VulkanStory.Input;
 
 namespace VulkanStory.Input.Companion;
 
+/// <summary>Optional server mod that negotiates analog player packets and applies them at vanilla movement boundaries.</summary>
 public sealed class AnalogInputCompanion : ModSystem
 {
     private const string HarmonyOwner = "vulkanstory.input.companion.physics";
@@ -14,7 +15,10 @@ public sealed class AnalogInputCompanion : ModSystem
     private Harmony? harmony;
     private readonly List<WeakReference<AnalogPlayerBehavior>> attached = new();
     private static ConditionalWeakTable<EntityControls, AnalogPlayerBehavior> controls = new();
+    /// <inheritdoc />
     public override bool ShouldLoad(EnumAppSide side) => side == EnumAppSide.Server;
+    /// <inheritdoc />
+    /// <remarks>Installs the movement patch and attaches player behaviors; installation failure rolls back this mod's hooks.</remarks>
     public override void StartServerSide(ICoreServerAPI server)
     {
         api = server;
@@ -44,10 +48,12 @@ public sealed class AnalogInputCompanion : ModSystem
         attached.Add(new WeakReference<AnalogPlayerBehavior>(behavior));
     }
     private void Disconnect(IServerPlayer player) => player.Entity?.GetBehavior<AnalogPlayerBehavior>()?.ResetConnection();
+    /// <summary>Associates a player's current controls with the behavior that owns its negotiated speed sample.</summary>
     internal static void Bind(EntityControls value, AnalogPlayerBehavior behavior)
     {
         controls.Remove(value); controls.Add(value, behavior);
     }
+    /// <summary>Removes the behavior association when analog input is cleared or controls are replaced.</summary>
     internal static void Unbind(EntityControls value) => controls.Remove(value);
     private static void PrepareSpeed(EntityControls __instance)
     { if (controls.TryGetValue(__instance, out var owner)) owner.PrepareSpeed(); }
@@ -55,6 +61,8 @@ public sealed class AnalogInputCompanion : ModSystem
     {
         if (controls.TryGetValue(__instance, out _)) AnalogMovement.ApplyDirection(__instance, __0, __1);
     }
+    /// <inheritdoc />
+    /// <remarks>Detaches player events, clears movement overrides, removes attached behaviors, and unpatches this owner.</remarks>
     public override void Dispose()
     {
         if (api != null)
@@ -73,13 +81,20 @@ public sealed class AnalogInputCompanion : ModSystem
     }
 }
 
+/// <summary>Connection-bound analog negotiation and expiring speed/direction state for one server player entity.</summary>
+/// <param name="entity">Player entity receiving the behavior and entity packets.</param>
+/// <param name="api">Server API used to acknowledge negotiation.</param>
+/// <param name="player">Owning connection whose identity and base movement speed are retained.</param>
 internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IServerPlayer player) : EntityBehavior(entity)
 {
     private bool negotiated, hasInput;
     private float factor = 1f;
     private long expires;
     private EntityControls? bound;
+    /// <inheritdoc />
     public override string PropertyName() => "vulkanstoryanalog";
+    /// <inheritdoc />
+    /// <remarks>Only the owning connection's entity is accepted; input requires prior version negotiation and expires after 600 ms.</remarks>
     public override void OnReceivedClientPacket(IServerPlayer sender, int packetid, byte[] data, ref EnumHandling handled)
     {
         if (packetid is not (AnalogMovement.ProbePacketId or AnalogMovement.PacketId)) return;
@@ -105,16 +120,20 @@ internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IS
         value.MovespeedMultiplier = sender.WorldData.MoveSpeedMultiplier * factor;
         value.Dirty = true;
     }
+    /// <summary>Restores the current base-speed-scaled factor before vector calculation or clears an expired sample.</summary>
     internal void PrepareSpeed()
     {
         if (!hasInput || bound == null) return;
         if (Environment.TickCount64 > expires) { ClearInput(); return; }
         bound.MovespeedMultiplier = player.WorldData.MoveSpeedMultiplier * factor;
     }
+    /// <inheritdoc />
     public override void OnGameTick(float deltaTime)
     { if (hasInput && Environment.TickCount64 > expires) ClearInput(); }
+    /// <inheritdoc />
     public override void OnEntityDespawn(EntityDespawnData despawn)
     { ClearInput(); negotiated = false; base.OnEntityDespawn(despawn); }
+    /// <summary>Removes axis/control bindings and restores the player's current base speed while retaining negotiation.</summary>
     internal void ClearInput()
     {
         if (bound != null)
@@ -125,5 +144,6 @@ internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IS
         }
         hasInput = false; factor = 1f; expires = 0;
     }
+    /// <summary>Clears movement overrides and requires a fresh protocol handshake.</summary>
     internal void ResetConnection() { ClearInput(); negotiated = false; }
 }

@@ -50,14 +50,14 @@ void main(void)
 	if (isVertical == 1) {
 		float pixelSize = 1.0 / frameSize.y;
 
-		for (int i = -5; i < 5; i++) {
+		for (int i = -5; i <= 5; i++) {
 			texCoords[i + 5] = texCoord + vec2(0, pixelSize * i);
 		}
 
 	} else {
 		float pixelSize = 1.0 / frameSize.x;
 
-		for (int i = -5; i < 5; i++) {
+		for (int i = -5; i <= 5; i++) {
 			texCoords[i + 5] = texCoord + vec2(pixelSize * i, 0);
 		}
 	}

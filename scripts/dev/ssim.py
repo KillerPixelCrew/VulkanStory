@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Per-attachment parity comparison for OPTIMUM_PARITY_DUMP directories.
+"""Per-attachment parity comparison for VulkanStory headless capture directories.
 
 Pairs the files of two dump directories by name (the file-name format both
-backends share, OptimumParityDump.FileNameFormat:
+backends share, HeadlessParityDump.FileNameFormat:
 "<slotIndex>-<slotName>-<color<i>|depth>-<format>.<ext>"), computes SSIM and
 the mean absolute difference per attachment, prints a markdown table and exits
 non-zero when an attachment is below the threshold and not allowlisted, or
@@ -22,7 +22,7 @@ window). Mean absolute difference is in native units: 0-255 for PPM/PGM, raw
 values for PFM. A difference in the pattern of non-finite values (NaN/Inf) is a
 failure on its own. numpy only.
 
-Allowlist (docs/vulkan.md): a markdown table whose first column is
+Allowlist: a markdown table whose first column is
 the attachment file name or an fnmatch glob (backticks are stripped) and whose
 third column bounds the accepted deviation with one or more of
   ssim>=<x>   mad<=<x>   missing   any
@@ -30,7 +30,7 @@ separated by commas. "missing" accepts a file that exists on one side only;
 "any" accepts everything. An allowlisted attachment outside its bounds fails.
 
 Usage:
-  scripts/dev/ssim.py <dirA> <dirB> [--allowlist docs/vulkan.md]
+  scripts/dev/ssim.py <dirA> <dirB> [--allowlist <bounds.md>]
                       [--threshold 0.98] [--csv out.csv]
   scripts/dev/ssim.py --self-test
 Exit: 0 all attachments pass, 1 a failure, 2 usage or allowlist error.
@@ -265,6 +265,8 @@ def list_dump(directory):
 def run(dir_a, dir_b, allowlist=None, threshold=0.98, csv_path=None, out=sys.stdout):
     rows = parse_allowlist(allowlist) if allowlist else []
     names_a, names_b = set(list_dump(dir_a)), set(list_dump(dir_b))
+    if not names_a | names_b:
+        raise ParityError("comparison has no captured attachments")
     results = []
     failed = 0
     for name in sorted(names_a | names_b):
@@ -282,10 +284,10 @@ def run(dir_a, dir_b, allowlist=None, threshold=0.98, csv_path=None, out=sys.std
             ssim, mad, note = 0.0, float("nan"), "encoding %s vs %s" % (kind, kind_b)
         else:
             ssim, mad, note = compare_arrays(a, b, kind)
-        if ssim >= threshold and not note:
-            status = "ok"
-        elif bounds is not None and within(bounds, ssim, mad):
+        if bounds is not None and not note and within(bounds, ssim, mad):
             status = "allowlisted"
+        elif bounds is None and ssim >= threshold and not note:
+            status = "ok"
         else:
             status = "FAIL" if bounds is None else "FAIL: outside allowlist bound"
             failed += 1

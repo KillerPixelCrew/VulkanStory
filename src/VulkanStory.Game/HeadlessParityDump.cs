@@ -2,6 +2,7 @@
 using VulkanStory.Contracts;
 namespace VulkanStory.Game;
 
+/// <summary>Writes requested color, depth and floating-point attachment dumps with explicit dimensions for renderer parity comparisons.</summary>
 public static class HeadlessParityDump
 {
     /// <summary>The absolute dump directory, or null when the dump is off.</summary>
@@ -50,6 +51,13 @@ public static class HeadlessParityDump
             System.Globalization.CultureInfo.InvariantCulture, out long frame) && frame >= 0 ? frame : 0;
     }
 
+    /// <summary>Formats a backend-neutral attachment filename so captures from different rendering paths pair by name.</summary>
+    /// <param name="slotIndex">Retained target/dump slot number.</param>
+    /// <param name="slotName">Target name used by both comparison paths.</param>
+    /// <param name="attachment">Color/depth attachment label.</param>
+    /// <param name="format">Backend-neutral format name.</param>
+    /// <param name="extension">Dump file extension without a leading dot.</param>
+    /// <returns>Invariant attachment filename matching FileNameFormat.</returns>
     public static string FileName(int slotIndex, string slotName, string attachment, string format, string extension)
     {
         return string.Format(System.Globalization.CultureInfo.InvariantCulture, FileNameFormat,
@@ -62,6 +70,8 @@ public static class HeadlessParityDump
     /// GL_RGB; the Vulkan device promotes it to RGBA8 storage but reports the
     /// requested token), so the two dumps pair by file name.
     /// </summary>
+    /// <param name="glInternalFormat">Retained original internal-format token.</param>
+    /// <returns>Canonical storage name, or a gl-prefixed hexadecimal token for unknown formats.</returns>
     public static string FormatName(int glInternalFormat)
     {
         switch (glInternalFormat)
@@ -92,6 +102,8 @@ public static class HeadlessParityDump
     }
 
     /// <summary>Stored channels: 4, 3 or 1.</summary>
+    /// <param name="glInternalFormat">Retained original internal-format token.</param>
+    /// <returns>Stored dump channel count: one, three or four.</returns>
     public static int ChannelsOf(int glInternalFormat)
     {
         string name = FormatName(glInternalFormat);
@@ -105,6 +117,12 @@ public static class HeadlessParityDump
     /// Writes one attachment's files and returns how many were written (0 when the
     /// readback is malformed).
     /// </summary>
+    /// <param name="directory">Output directory for requested attachment files.</param>
+    /// <param name="slotIndex">Retained framebuffer/dump slot number.</param>
+    /// <param name="slotName">Target name used to pair captures.</param>
+    /// <param name="attachment">Color/depth attachment label.</param>
+    /// <param name="readback">Owned readback dimensions, format and byte/float storage.</param>
+    /// <returns>Number of files written; zero for unsupported or malformed input.</returns>
     public static int Write(string directory, int slotIndex, string slotName, string attachment,
         TextureCaptureData readback)
     {
@@ -163,39 +181,16 @@ public static class HeadlessParityDump
     /// Returns false when the arguments do not describe a frame; it never throws
     /// for that reason alone.
     /// </summary>
-    public static bool WriteFrame(string path, int width, int height, byte[] pixels, bool bgra)
-    {
-        if (path == null || pixels == null || width <= 0 || height <= 0) return false;
-        if (pixels.LongLength < (long)width * height * 4) return false;
-        string? directory = System.IO.Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) System.IO.Directory.CreateDirectory(directory);
-        // BGRA: start at B's neighbour R (index 2) and walk backwards, so the file
-        // gets R, G, B either way.
-        WriteNetpbm(path, width, height, pixels, bgra ? 2 : 0, 3, bgra ? -1 : 1);
-        return true;
-    }
+    /// <param name="path">Output pathname.</param>
+    /// <param name="width">Image width in pixels.</param>
+    /// <param name="height">Image height in pixels.</param>
+    /// <returns>True after writing; false when dimensions/storage are malformed.</returns>
+    /// <remarks>File errors propagate.</remarks>
+    public static bool WriteFrame(string path, int width, int height, byte[] pixels, bool bgra) =>
+        HeadlessHarnessOptions.WriteFrame(path, width, height, pixels, bgra);
 
-    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels,
-        int step = 1)
-    {
-        using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
-        byte[] header = System.Text.Encoding.ASCII.GetBytes(
-            (channels == 3 ? "P6\n" : "P5\n") + width + " " + height + "\n255\n");
-        file.Write(header, 0, header.Length);
-        byte[] row = new byte[width * channels];
-        for (int y = 0; y < height; y++)
-        {
-            int source = y * width * 4;
-            for (int x = 0; x < width; x++)
-            {
-                for (int c = 0; c < channels; c++)
-                {
-                    row[x * channels + c] = rgba[source + x * 4 + firstChannel + c * step];
-                }
-            }
-            file.Write(row, 0, row.Length);
-        }
-    }
+    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels, int step = 1) =>
+        HeadlessHarnessOptions.WriteNetpbm(path, width, height, rgba, firstChannel, channels, step);
 
     private static void WritePfm(string path, int width, int height, float[] data, int stride,
         int firstChannel, int channels)

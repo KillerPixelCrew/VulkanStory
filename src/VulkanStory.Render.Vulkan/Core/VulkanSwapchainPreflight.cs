@@ -6,6 +6,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Create and retire an SDL-backed Vulkan swapchain without the game.</summary>
 public static class VulkanSwapchainPreflight
 {
+    /// <summary>Runs the explicit hidden swapchain creation and release preflight.</summary>
+    /// <remarks>This method creates native resources and may submit GPU work; it is an opt-in validation entry point.</remarks>
+    /// <returns>Null on successful completion, otherwise the failure detail.</returns>
     public static string? Check()
     {
         try

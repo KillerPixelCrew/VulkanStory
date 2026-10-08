@@ -18,6 +18,8 @@ internal sealed partial class GameRenderSession
         if (!float.IsFinite(providerBias)) throw new ArgumentOutOfRangeException(nameof(providerBias));
         if (temporal?.CurrentClient is { } client) RefreshTerrainLodBias(client);
     }
+    /// <summary>Updates terrain sampler bias from effective TAA/SR/render-scale policy for the matching world client.</summary>
+    /// <param name="client">Matching original client whose terrain atlas samplers should be refreshed.</param>
     internal void RefreshTerrainLodBias(ClientMain client)
     {
         RequireOwner();

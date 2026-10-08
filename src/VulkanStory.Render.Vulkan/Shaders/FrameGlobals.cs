@@ -40,6 +40,7 @@ internal static class FrameGlobals
     /// <summary>The dynamic lights slider's maximum; DYNLIGHTS never exceeds it.</summary>
     public const int MaxDynamicLights = 100;
 
+    /// <summary>Canonical frame-uniform name, GLSL type, capacity, owner and optional initializer.</summary>
     private readonly record struct Entry(string Name, string TypeName, int Capacity, string Owner, string? Initializer = null);
 
     // Owners and initialisers mirror ShaderProgramBase.Use() and the vanilla
@@ -197,9 +198,6 @@ internal static class FrameGlobals
         alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
 
     // ------------------------------------------------------------ native include
-
-    /// <summary>The generated native include (docs/vulkan.md sections 1 and 3).</summary>
-    public const string IncludePath = "sources/shaders-vk/include/frame.glsl";
 
     /// <summary>The block's instance name in native shaders.</summary>
     public const string InstanceName = "optimumFrame";

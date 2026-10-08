@@ -5,6 +5,7 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Sequential C-ABI frame resources, camera matrices and shared-fence values for XeSS presentation.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct XessPresentationFrame
 {
@@ -79,6 +80,8 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
 
     private nint Export(string symbol) => NativeLibrary.GetExport(_module, symbol);
 
+    /// <summary>Loads the private XeSS-FG bridge and creates its DX12 context on the Vulkan-selected adapter.</summary>
+    /// <returns>Whether context creation succeeded; reason includes the recorded native creation stage on failure.</returns>
     public static bool TryCreate(VulkanContext vulkan, out XessFgRuntime? runtime,
         out string reason)
     {
@@ -133,9 +136,16 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         }
     }
 
+    /// <summary>Starts the native presenter for a borrowed Win32 window and display extent.</summary>
     public int Start(nint window, uint width, uint height, bool vsync) =>
         _context != 0 ? _start(_context, window, width, height, vsync ? 1u : 0u) : -1;
+    /// <summary>Applies native frame-generation enablement and returns the bridge result.</summary>
     public int SetEnabled(bool enabled) => _context != 0 ? _setEnabled(_context, enabled ? 1u : 0u) : -1;
+    /// <summary>Negotiates the requested interpolation count with the runtime.</summary>
+    /// <param name="requested">Requested generated frames per rendered frame.</param>
+    /// <param name="effective">Count actually configured by the bridge.</param>
+    /// <param name="maximum">Runtime-reported generated-frame limit.</param>
+    /// <returns>Native bridge result code; zero indicates success.</returns>
     public int SetGeneratedFrames(uint requested, out uint effective, out uint maximum)
     {
         effective = maximum = 0;
@@ -144,12 +154,16 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
             return _context != 0 ? _setGeneratedFrames(_context, requested,
                 effectivePtr, maximumPtr) : -1;
     }
+    /// <summary>Applies XeLL enablement and a nonnegative frame cap through the presenter bridge.</summary>
     public int SetLatencyMode(int maxFps, bool enabled) => _context != 0 ?
         _setLatencyMode(_context, maxFps > 0 ? (uint)Math.Max(1, 1_000_000 / maxFps) : 0,
             enabled ? 1u : 0u) : -1;
+    /// <summary>Runs native XeLL sleep using the low 32 bits of the renderer frame ID.</summary>
     public int Sleep(ulong frameId) => _context != 0 ? _sleep(_context, (uint)frameId) : -1;
+    /// <summary>Emits a native XeLL latency marker for the supplied frame ID.</summary>
     public int Marker(ulong frameId, LatencyMarker marker) => _context != 0 ?
         _marker(_context, (uint)frameId, (int)marker) : -1;
+    /// <inheritdoc/>
     public int CreateSharedImage(uint width, uint height, Format format, bool writable,
         out nint sharedHandle, out nint resource)
     {
@@ -162,10 +176,12 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         resource = created;
         return code;
     }
+    /// <inheritdoc/>
     public void ReleaseImage(nint resource)
     {
         if (resource != 0) _releaseImage(resource);
     }
+    /// <inheritdoc/>
     public int CreateSharedFence(out nint sharedHandle)
     {
         nint handle = 0;
@@ -173,9 +189,15 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         sharedHandle = handle;
         return code;
     }
+    /// <summary>Waits for the native shared fence to reach the supplied value.</summary>
     public int WaitSharedFence(ulong value) => _context != 0 ? _waitSharedFence(_context, value) : -1;
+    /// <summary>Queues a native shared-fence signal; callers must ensure the value represents completed work.</summary>
     public int SignalSharedFence(ulong value) => _context != 0 ? _signalSharedFence(_context, value) : -1;
+    /// <summary>Waits for the native DX12 queue to finish its tracked work.</summary>
+    /// <returns>Zero on successful completion; a nonzero bridge code on failure or an absent context.</returns>
     public int WaitIdle() => _context != 0 ? _waitIdle(_context) : -1;
+    /// <summary>Presents a prepared shared-image frame and reports native presentation/interpolation outcomes.</summary>
+    /// <returns>The native presentation result code; output counters describe the bridge-reported outcome.</returns>
     public int Present(in XessPresentationFrame frame, out uint framesPresented,
         out int frameGenResult, out bool frameGenEnabled)
     {
@@ -190,6 +212,9 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         return code;
     }
 
+    /// <summary>Prepares checked native-context release before dependent imported resources are destroyed.</summary>
+    /// <remarks>Release failure is retained and subsequent release attempts throw without relinquishing ownership.</remarks>
+    /// <exception cref="InvalidOperationException">The native bridge cannot safely prepare release, or an earlier release failed.</exception>
     internal void PrepareRelease()
     {
         if (_releaseFailure != null)
@@ -202,6 +227,7 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         }
         catch (Exception failure) { _releaseFailure = failure; throw; }
     }
+    /// <inheritdoc/>
     public void Dispose()
     {
         PrepareRelease();

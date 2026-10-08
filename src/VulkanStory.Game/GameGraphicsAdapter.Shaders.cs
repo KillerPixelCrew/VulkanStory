@@ -5,6 +5,7 @@ using OpenTK.Mathematics;
 
 namespace VulkanStory.Game;
 
+/// <summary>Borrowed game-side policy and logging callbacks for shader linking; no game singleton crosses into the renderer.</summary>
 internal sealed record GameShaderCallbacks(Func<bool> HandheldShadowTier,
     Action<string, string?> LinkError, Action<string> ProgramLoaded);
 
@@ -14,6 +15,9 @@ internal sealed partial class GameGraphicsAdapter
     private readonly ConditionalWeakTable<Shader, object> injectedHandheldShadowStages = new();
     internal int StatedProgram { get; private set; }
 
+    /// <summary>Applies the owned handheld-shadow define and submits the original stage source to backend compilation.</summary>
+    /// <param name="shader">Original stage object.</param>
+    /// <returns>Whether stage acceptance succeeded.</returns>
     internal bool CompileShader(Shader shader)
     {
         var renderer = RequireDevice();
@@ -34,6 +38,9 @@ internal sealed partial class GameGraphicsAdapter
         return renderer.CompileShader(shaderDefinitions.Stage(shader));
     }
 
+    /// <summary>Links original shader sources through the retained backend and publishes the backend program identifier on success.</summary>
+    /// <param name="program">Original program receiving backend ID and link status.</param>
+    /// <returns>True after successful backend linking; false after a reported link refusal.</returns>
     internal bool CreateShaderProgram(ShaderProgram program)
     {
         var renderer = RequireDevice();
@@ -94,6 +101,8 @@ internal sealed partial class GameGraphicsAdapter
     internal void DetachShader(int program, int shader) { RequireDevice(); }
     internal void DeleteShader(int shader) { RequireDevice(); } // SPIR-V stage modules belong to the linked program.
     internal void DeleteSampler(int sampler) => RequireDevice().DeleteSampler(sampler);
+    /// <summary>Deletes the backend program and releases its previous-animation buffer association.</summary>
+    /// <param name="program">Original published backend program identifier.</param>
     internal void DeleteProgram(int program)
     {
         ReleasePreviousAnimation(program);

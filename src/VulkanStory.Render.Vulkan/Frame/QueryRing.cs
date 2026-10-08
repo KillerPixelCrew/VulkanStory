@@ -28,9 +28,8 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// opens. Its result is the sum of those segments. The pool a resumed segment
 /// needs is created and reset between the two scopes.
 ///
-/// The plan named <c>vkCmdCopyQueryPoolResults</c> for the copy. That command is
-/// not part of Vulkan 1.3 core and needs an extension the hardware floor does not
-/// include; a host read gated on the timeline gives the same no-wait guarantee.
+/// Vulkan supports <c>vkCmdCopyQueryPoolResults</c> in core. This implementation
+/// uses a timeline-gated host read to preserve its existing no-wait result path.
 /// </summary>
 internal sealed unsafe class QueryRing : IDisposable
 {
@@ -59,6 +58,7 @@ internal sealed unsafe class QueryRing : IDisposable
         for (int i = 0; i < framesInFlight; i++) _slots[i] = new SlotQueries();
     }
 
+    /// <summary>Occlusion query pools and pending query records owned by one in-flight frame slot.</summary>
     private sealed class SlotQueries
     {
         public readonly List<QueryPool> Pools = new();
@@ -72,6 +72,7 @@ internal sealed unsafe class QueryRing : IDisposable
         public ulong[] Host = Array.Empty<ulong>();
     }
 
+    /// <summary>One segment of a logical occlusion query associated with the recorded slot.</summary>
     private sealed class QueryRecord
     {
         public readonly int Slot;
@@ -94,6 +95,7 @@ internal sealed unsafe class QueryRing : IDisposable
         }
     }
 
+    /// <summary>Logical occlusion query state retained across command-buffer segments.</summary>
     private sealed class QueryObject
     {
         public QueryRecord? Active;

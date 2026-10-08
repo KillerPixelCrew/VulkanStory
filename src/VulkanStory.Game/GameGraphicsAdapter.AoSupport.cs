@@ -13,6 +13,8 @@ internal sealed partial class GameGraphicsAdapter
     internal bool AmbientOcclusionShadersUseGtao { get; private set; }
     private int sceneSsaoProgram;
     private bool sceneSsaoFailed;
+    /// <summary>Binds the borrowed temporal owner used by AO camera inputs before scene rendering starts.</summary>
+    /// <param name="temporal">Borrowed session temporal owner supplying current camera/reset state.</param>
     internal void ConfigureAmbientOcclusion(GameTemporalOwner temporal)
     {
         if (Environment.CurrentManagedThreadId != ownerThread || device == null)

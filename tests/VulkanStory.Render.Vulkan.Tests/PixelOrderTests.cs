@@ -4,6 +4,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Retained pixel-order regression from the baseline capture tests.
+/// <summary>Checks in-place RGBA/BGRA channel swapping, reversibility, and no-op input guards.</summary>
+/// <remarks>Operates on pinned CPU texels without GPU readback.</remarks>
 public sealed class PixelOrderTests
 {
     [Fact]

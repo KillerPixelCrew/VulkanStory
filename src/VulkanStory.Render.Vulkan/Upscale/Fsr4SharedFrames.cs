@@ -8,6 +8,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Three independent image sets for Vulkan-to-DX12 FSR 4 dispatches.</summary>
 internal sealed class Fsr4SharedFrames : IDisposable
 {
+    /// <summary>One shared color, depth, motion and output set with its most recent DX12 completion value.</summary>
     internal sealed class ImageSet : IDisposable
     {
         public required VulkanSharedImage Color { get; init; }
@@ -16,6 +17,7 @@ internal sealed class Fsr4SharedFrames : IDisposable
         public required VulkanSharedImage Output { get; init; }
         public ulong LastDx12Done;
 
+        /// <inheritdoc/>
         public void Dispose()
         {
             Output.Dispose(); Motion.Dispose(); Depth.Dispose(); Color.Dispose();
@@ -40,8 +42,16 @@ internal sealed class Fsr4SharedFrames : IDisposable
         this.sets = sets;
     }
 
+    /// <summary>Imported Vulkan timeline semaphore backed by the shared DX12 fence.</summary>
     public Semaphore SharedSemaphore => fence.Semaphore;
 
+    /// <summary>Creates three independent shared image sets and their shared fence.</summary>
+    /// <param name="context">Borrowed Vulkan context; must outlive the shared resources.</param>
+    /// <param name="runtime">Borrowed DX12 runtime; must outlive the imported images.</param>
+    /// <param name="plan">Input and display extents.</param>
+    /// <param name="frames">New owner on success.</param>
+    /// <param name="reason">Creation detail.</param>
+    /// <returns>Whether all image sets and the imported fence were created.</returns>
     public static bool TryCreate(VulkanContext context, Fsr4Runtime runtime,
         in UpscalerPlan plan, out Fsr4SharedFrames? frames, out string reason)
     {
@@ -102,9 +112,13 @@ internal sealed class Fsr4SharedFrames : IDisposable
         return image!;
     }
 
+    /// <summary>Selected image set and ordered fence values for a Vulkan-to-DX12-to-Vulkan exchange.</summary>
     public readonly record struct PreparedFrame(ImageSet Images, ulong WaitForDx12,
         ulong ReadyForDx12, ulong DoneByDx12);
 
+    /// <summary>Rotates to the next image set and reserves ready/done fence values.</summary>
+    /// <remarks>The caller must wait for WaitForDx12 before overwriting this set and signal ReadyForDx12 after input copies.</remarks>
+    /// <returns>The prepared set; call MarkDispatched when its DX12 dispatch is submitted.</returns>
     public PreparedFrame Next()
     {
         RequireLifetime();
@@ -115,6 +129,7 @@ internal sealed class Fsr4SharedFrames : IDisposable
             nextFenceValue++, nextFenceValue++);
     }
 
+    /// <summary>Records the submitted DX12 completion value for the prepared image set.</summary>
     public void MarkDispatched(in PreparedFrame prepared) =>
         prepared.Images.LastDx12Done = prepared.DoneByDx12;
 
@@ -123,6 +138,7 @@ internal sealed class Fsr4SharedFrames : IDisposable
         if (releaseFailure != null)
             throw new InvalidOperationException("FSR 4 shared resource release failed; remaining owners are retained.", releaseFailure);
     }
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireLifetime();

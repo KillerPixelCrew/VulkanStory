@@ -20,6 +20,7 @@ namespace VulkanStory.Game.Input;
 /// <summary>
 /// Polls SDL's gamepad subsystem beside the SDL-owned window and frame loop.
 /// </summary>
+/// <remarks>Owns the selected native gamepad, synthetic held input, per-device profile edits, controller dialogs, gyro, and haptics.</remarks>
 internal sealed unsafe class SdlGamepadInput : IDisposable
 {
     private const uint GamepadSubsystem = 0x00002000;
@@ -54,7 +55,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private ClientMain? keyboardGame;
     private bool keyboardChordWasDown;
     private bool keyboardBackConsumed;
-    private bool settingsButtonWasDown;
     private readonly ControllerButtonCapture buttonCapture = new();
     private bool gyroAvailable;
     private bool gyroEnabled;
@@ -65,12 +65,14 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private SyncedTreeAttribute? damageAttributes;
     private ClientMain? damageGame;
     private float pendingDamageRumble;
-    internal float PendingDamageRumbleForTests => Volatile.Read(ref pendingDamageRumble);
     private nint gamepad;
     private int gamepadId;
     private string gamepadName = "none";
+    /// <summary>Throttled connection/routing diagnostic text for the current controller.</summary>
     internal string Status { get; private set; } = "waiting for SDL gamepad detection";
+    /// <summary>Whether the latest poll routed a nonidle controller state.</summary>
     internal bool InputActive { get; private set; }
+    /// <summary>Collects the current foreground inventory geometry for semantic slot actions.</summary>
     internal List<ControllerSlotTarget> CurrentSlotTargets() =>
         ControllerGuiTargets.SlotTargets(ControllerGuiTargets.ActiveComposers(platform));
     private string? loggedRoutingState;
@@ -84,17 +86,18 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private long nextMenuScroll;
     private bool initialized;
     private bool unavailable;
-    private bool leftShoulderHeld;
-    private bool rightShoulderHeld;
     private float lookRemainderX;
     private float lookRemainderY;
     private bool rightStickWasActive;
     private readonly bool[] dpadHeld = new bool[4];
     private readonly long[] dpadNextRepeat = new long[4];
 
+    /// <summary>Exact game hotkey mapping retained until its matching synthetic release is sent.</summary>
     private readonly record struct HeldKey(int Code, bool Alt, bool Ctrl, bool Shift);
+    /// <summary>Unsaved per-device snapshot retained when selection moves to another controller.</summary>
     private readonly record struct PendingProfileWrite(string Path, string Key, ControllerProfile Profile);
 
+    /// <summary>Registers the SDL import resolver and retains the session host; native subsystem setup is deferred.</summary>
     public SdlGamepadInput(IControllerPlatformHost platform)
     {
         SdlNativeLibrary.RegisterAssemblyImports(typeof(SdlGamepadInput).Assembly);
@@ -106,17 +109,23 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         };
     }
 
+    /// <summary>Fresh validated profile snapshot for settings composition; callers do not edit the active profile directly.</summary>
     internal ControllerProfile CurrentProfile => profile.Validated();
+    /// <summary>Readable name for a standard SDL gamepad axis, or Unknown for an unsupported index.</summary>
     internal static string AxisName(int axis) => axis switch
     {
         0 => "Left X", 1 => "Left Y", 2 => "Right X", 3 => "Right Y",
         4 => "Left trigger", 5 => "Right trigger", _ => "Unknown"
     };
+    /// <summary>Readable physical-button name using SDL's device-specific face labels when connected.</summary>
     internal string ButtonName(int button) => ControllerButtonBindings.Name(
         button, gamepad != 0 ? SDL_GetGamepadButtonLabel(gamepad, button) : 0);
+    /// <summary>Action currently awaiting remapping, or null when capture is idle.</summary>
     internal string? PendingBinding => buttonCapture.Action;
+    /// <summary>Whether remapping is ignoring initially held buttons until release.</summary>
     internal bool BindingWaitingForRelease => buttonCapture.WaitingForRelease;
 
+    /// <summary>Validates the action, begins release-before-press capture, and requests settings recomposition.</summary>
     internal void BeginBinding(string action)
     {
         ControllerButtonBindings.Find(action);
@@ -124,12 +133,15 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         settingsDialog?.RequestRefresh();
     }
 
+    /// <summary>Ends remapping capture and optionally requests settings recomposition.</summary>
     internal void CancelBinding(bool refresh = true)
     {
         buttonCapture.Cancel();
         if (refresh) settingsDialog?.RequestRefresh();
     }
 
+    /// <summary>Applies an edit to a validated copy, updates prompts/gyro, and schedules persistence after a half-second debounce.</summary>
+    /// <param name="change">Mutation applied to the copy before it is validated again.</param>
     internal void UpdateProfile(Action<ControllerProfile> change)
     {
         ControllerProfile edited = profile.Validated();
@@ -142,6 +154,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         profileWriteDue = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2;
     }
 
+    /// <summary>Persists a dirty device profile when due, logging supported I/O/JSON failures and delaying retry.</summary>
+    /// <param name="force">Whether to bypass the debounce deadline.</param>
     internal void FlushProfile(bool force)
     {
         if (!profileDirty || profilePath == null || profileKey == null ||
@@ -200,19 +214,28 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         pendingProfileRetryDue = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 5;
     }
 
+    /// <summary>Pumps SDL and processes one controller sample when this object owns the event-drain boundary.</summary>
+    /// <param name="onWindowEvent">Optional neutral window/input event consumer.</param>
+    /// <param name="onInputPumped">Optional callback at the completed input-pump boundary.</param>
+    /// <remarks>The process adapter uses PrepareForEventPump/PollAfterEventPump to avoid a second queue drain.</remarks>
     public void Poll(Action<SdlInputEvent>? onWindowEvent = null, Action? onInputPumped = null)
         => PollCore(onWindowEvent, onInputPumped, false, false);
 
     // The process adapter owns the queue. These phases preserve the retained
     // native-update/input-marker ordering without draining SDL a second time.
+    /// <summary>Prepares the subsystem and refreshes SDL gamepad state before the process-owned queue drain.</summary>
     internal void PrepareForEventPump()
     {
         Prepare();
         if (initialized && !unavailable) SDL_UpdateGamepads();
     }
+    /// <summary>Requests an active-device switch for a focused, live window when another gamepad emits activity.</summary>
     internal void NoteGamepadActivity(int id) => onGamepadActivity(id);
+    /// <summary>Processes controller state after the process adapter already drained SDL, propagating its hotplug flag.</summary>
     internal void PollAfterEventPump(bool deviceChanged) => PollCore(null, null, true, deviceChanged);
 
+    /// <summary>Samples input, manages context/dialog ownership, and dispatches gameplay or GUI actions for one frame.</summary>
+    /// <remarks>SDL missing-library/entry failures disable this optional path; synthetic controls release on context loss.</remarks>
     private void PollCore(Action<SdlInputEvent>? onWindowEvent, Action? onInputPumped,
         bool alreadyPumped, bool externalDeviceChanged)
     {
@@ -334,7 +357,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 {
                     CancelBinding();
                     ReleaseAll();
-                    settingsButtonWasDown = Button(profile.SettingsButton);
                     return;
                 }
                 (string Action, int Button)? captured = buttonCapture.Update(buttons);
@@ -345,7 +367,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                         p, captured.Value.Action, captured.Value.Button));
                     settingsDialog?.RequestRefresh();
                 }
-                settingsButtonWasDown = Button(profile.SettingsButton);
                 return;
             }
 
@@ -378,10 +399,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 ToggleSettings();
                 ReleaseAll();
                 inputContext.Reset();
-                settingsButtonWasDown = true;
                 return;
             }
-            settingsButtonWasDown = settingsDown;
 
             float lx = movementStick.X, ly = movementStick.Y;
             platform.ControllerMoveAxes = inWorld ? movementStick : Vector2.Zero;
@@ -469,8 +488,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 if (ActionPulse("previous", profile.PreviousHotbarButton, ControllerGestureMode.Press)) Scroll(1);
                 if (ActionPulse("next", profile.NextHotbarButton, ControllerGestureMode.Press)) Scroll(-1);
             }
-            leftShoulderHeld = leftShoulder;
-            rightShoulderHeld = rightShoulder;
             if (inWorld)
             {
                 ResetDpad();
@@ -561,6 +578,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
 
     // The SDL client calls this before AMD's INPUT stage so first-use subsystem
     // setup and mapping-file I/O are outside the keyed input-processing window.
+    /// <summary>Initializes the optional gamepad subsystem and loads bundled/custom mappings once, disabling it on native-load failure.</summary>
     internal void Prepare()
     {
         if (unavailable || initialized) return;
@@ -578,6 +596,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         catch (EntryPointNotFoundException error) { Disable(error.Message); }
     }
 
+    /// <summary>Selects a connected requested device, then the current device, then the first device, or zero for none.</summary>
     internal static int SelectGamepad(ReadOnlySpan<int> ids, int current, int requested)
     {
         foreach (int id in ids) if (id == requested && requested != 0) return id;
@@ -607,6 +626,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             gamepadName, buttons.ToString("X"), lx, ly, rx, ry, platform.IsFocused);
     }
 
+    /// <summary>Reconciles connected devices, retires the previous device's UI/input, and loads the selected device's profile.</summary>
     private void RefreshGamepad(bool deviceChanged)
     {
         int count;
@@ -664,7 +684,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             Status = name + ": opened by SDL";
             string? serial = Marshal.PtrToStringUTF8(SDL_GetGamepadSerial(gamepad));
             string key = ControllerProfileStore.DeviceKey(SDL_GetGamepadVendor(gamepad), SDL_GetGamepadProduct(gamepad), name, serial);
-            profilePath = Path.Combine(GamePaths.ModConfig, "optimum-controllers.json");
+            profilePath = Path.Combine(GamePaths.ModConfig, "vulkanstory-controllers.json");
             profileKey = key;
             if (TakeUnsavedProfile(profilePath, key) is { } unsaved)
             {
@@ -674,6 +694,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             }
             else try
             {
+                ControllerProfileStore.ImportLegacy(profilePath, Path.Combine(GamePaths.ModConfig, "optimum-controllers.json"));
                 profile = ControllerProfileStore.LoadDevice(profilePath, key, name);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
@@ -767,6 +788,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         return raw;
     }
 
+    /// <summary>Tests a signed raw SDL axis against a normalized threshold using the requested polarity.</summary>
     internal static bool AxisThresholdPressed(short value, bool negative, float threshold) =>
         (negative ? -(int)value : value) > threshold * 32767f;
 
@@ -841,8 +863,10 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         if (trigger.HasValue && profile.TriggerRumbleEnabled && profile.TriggerRumbleStrength > 0f && triggerRumbleAvailable)
         {
             ushort strength = (ushort)MathF.Round(profile.TriggerRumbleStrength * ushort.MaxValue);
-            ushort left = trigger == EnumMouseButton.Left ? strength : (ushort)0;
-            ushort right = trigger == EnumMouseButton.Right ? strength : (ushort)0;
+            int axis = trigger == EnumMouseButton.Left ? profile.PrimaryTriggerAxis :
+                trigger == EnumMouseButton.Right ? profile.SecondaryTriggerAxis : -1;
+            ushort left = axis == 4 ? strength : (ushort)0;
+            ushort right = axis == 5 ? strength : (ushort)0;
             if (left == 0 && right == 0) return;
             triggerRumbleAvailable = SDL_RumbleGamepadTriggers(gamepad, left, right, duration);
             triggerRumblePlaying = triggerRumbleAvailable;
@@ -856,6 +880,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         damageGame = damageAttributes != null ? currentGame : null;
     }
 
+    /// <summary>Moves the hurt listener to the current player's attributes and discards any previous pending haptic.</summary>
     internal void BindDamageAttributes(SyncedTreeAttribute? current)
     {
         if (current == null) damageGame = null;
@@ -902,6 +927,9 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         OpenSettings();
     }
 
+    /// <summary>Opens controller settings for the active game, closing the keyboard and reusing only a matching game-owned dialog.</summary>
+    /// <returns>False without a connected gamepad/game API or when the dialog refuses to open.</returns>
+    /// <remarks>Dialog construction failures are logged and rethrown.</remarks>
     internal bool OpenSettings()
     {
         CloseKeyboard();
@@ -931,9 +959,12 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             throw;
         }
     }
+    /// <summary>Returns the open settings dialog only when its owning client matches by reference.</summary>
     internal ControllerSettingsDialog? OpenedSettings(ClientMain owner) =>
         ReferenceEquals(settingsGame, owner) && settingsDialog?.IsOpened() == true ? settingsDialog : null;
 
+    /// <summary>Creates an explicitly selected controller page for the isolated headless UI harness.</summary>
+    /// <exception cref="InvalidOperationException">The harness is disabled or the new dialog cannot open.</exception>
     internal void OpenDiagnosticSettings(ClientMain game, int page)
     {
         if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Controller UI diagnostics require the isolated harness.");
@@ -943,6 +974,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         settingsDialog.ShowDiagnosticPage(page);
         if (!settingsDialog.TryOpen()) throw new InvalidOperationException("Controller settings diagnostic could not open.");
     }
+    /// <summary>Whether both client and dialog identify the current settings ownership.</summary>
     internal bool OwnsSettings(ClientMain owner, ControllerSettingsDialog dialog) =>
         ReferenceEquals(settingsGame, owner) && ReferenceEquals(settingsDialog, dialog);
 
@@ -1018,17 +1050,20 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         finally { try { game?.UnregisterDialog(dialog); } finally { dialog.Dispose(); } }
     }
 
+    /// <summary>Replaces any old wheel with a new game-owned wheel using the active profile's eight actions.</summary>
+    /// <returns>Whether the dialog opened; an unsuccessful wheel is closed and disposed.</returns>
     internal bool OpenRadial(ClientMain game)
     {
         CloseRadial();
         radialGame = game;
-        radialDialog = new ControllerRadialDialog(game.api, profile.RadialActions);
+        radialDialog = new ControllerRadialDialog(game.api, profile.RadialActions, ButtonName(profile.GuiBackButton));
         radialButtonWasDown = true;
         if (radialDialog.TryOpen()) return true;
         CloseRadial();
         return false;
     }
 
+    /// <summary>Returns the open wheel only for its owning client.</summary>
     internal ControllerRadialDialog? OpenedRadial(ClientMain game) =>
         ReferenceEquals(radialGame, game) && radialDialog?.IsOpened() == true ? radialDialog : null;
 
@@ -1056,6 +1091,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         SetKey(action, false, fallback);
     }
 
+    /// <summary>Retires the departing world's dialogs/hurt listener and releases controls unless a new world already owns input.</summary>
     internal void WorldLeaving(ClientMain game)
     {
         if (ReferenceEquals(radialGame, game)) CloseRadial();
@@ -1158,6 +1194,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         Array.Clear(dpadNextRepeat, 0, dpadNextRepeat.Length);
     }
 
+    /// <summary>Closes owned controller UI, releases synthetic controls/haptics, unbinds hurt state, and flushes profile writes.</summary>
     internal void SuspendInput()
     {
         CloseSettings();
@@ -1171,12 +1208,14 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     }
 
     // Retry pending profile writes while disabled without polling controller input.
+    /// <summary>Retries due profile writes while controller processing is disabled.</summary>
     internal void PollSuspended()
     {
         LogRoutingState("disabled in VulkanStory settings");
         FlushProfile(false);
         FlushPendingProfiles(false);
     }
+    /// <summary>Closes the radial wheel, cancels requested device switching, and releases synthetic input until physical release.</summary>
     internal void OnFocusLost()
     {
         CloseRadial();
@@ -1185,6 +1224,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         inputContext.Reset();
     }
 
+    /// <summary>Releases owned synthetic keys/mouse buttons, resets movement/gesture/repeat state, and stops gyro/haptics.</summary>
     private void ReleaseAll()
     {
         gestures.Clear();
@@ -1200,8 +1240,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         foreach (HeldKey key in heldKeys.Values) SendKey(key, false);
         heldKeys.Clear();
         foreach (EnumMouseButton button in heldMouse.ToArray()) SetMouse(button, false);
-        leftShoulderHeld = rightShoulderHeld = false;
-        settingsButtonWasDown = false;
         lookRemainderX = lookRemainderY = 0;
         rightStickWasActive = false;
         ResetDpad();
@@ -1234,6 +1272,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         platform.Original.Logger.Warning("[VulkanStory] SDL3 gamepad input unavailable: {0}", reason);
     }
 
+    /// <summary>Closes owned UI/native gamepad, releases synthetic input and listeners, flushes profiles, and quits the subsystem.</summary>
     public void Dispose()
     {
         CloseRadial();

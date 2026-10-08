@@ -169,6 +169,7 @@ internal sealed partial class GameRenderSession
         WriteJsonAtomically(ScenarioManifestPath, manifest);
     }
 
+    /// <summary>Writes requested scenario attachment readbacks at the scheduled post-render seam and records their file identities.</summary>
     private void CaptureScenarioReadbacks()
     {
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;

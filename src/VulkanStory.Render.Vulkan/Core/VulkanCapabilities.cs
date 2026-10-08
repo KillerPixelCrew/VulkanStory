@@ -70,6 +70,7 @@ internal static class DeviceCaps
         _ => "pipeline",
     };
 
+    /// <summary>Reads the optional color-write capability override from the renderer environment setting.</summary>
     public static ColorWriteTier? FromEnvironment() =>
         ParseColorWriteTier(Environment.GetEnvironmentVariable(ColorWriteTierVariable));
 }

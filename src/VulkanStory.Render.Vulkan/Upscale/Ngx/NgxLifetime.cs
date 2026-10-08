@@ -19,6 +19,8 @@ internal enum NgxLifetimeOutcome
 
     /// <summary>The shutdown was refused because a feature was still live.</summary>
     FeatureStillLive,
+    /// <summary>Native shutdown failed; device/module ownership remains retained and shutdown cannot be retried.</summary>
+    ShutdownFailed,
 }
 
 /// <summary>
@@ -60,6 +62,7 @@ internal sealed class NgxLifetimeOwner
     private bool _shutDown;
     private IntPtr _device;
     private int _liveFeatures;
+    private bool _shutdownFailed;
 
     /// <summary>
     /// <paramref name="shutdownCall" /> is the real <c>Shutdown1</c> unless a test
@@ -123,6 +126,7 @@ internal sealed class NgxLifetimeOwner
         result = NgxResult.FailNotInitialized;
         lock (_gate)
         {
+            if (_shutdownFailed) return NgxLifetimeOutcome.ShutdownFailed;
             if (_shutDown) return NgxLifetimeOutcome.AlreadyShutDown;
             if (_initialized) return NgxLifetimeOutcome.AlreadyInitialized;
 
@@ -197,17 +201,21 @@ internal sealed class NgxLifetimeOwner
                 return NgxLifetimeOutcome.FeatureStillLive;
             }
 
-            // Clear the state before the call, not after: the shutdown reaches native
-            // code (and a throwing delegate in tests), and an exception must not leave
-            // the owner reporting Spent and Initialized at the same time - the platform
-            // catches it and carries on with teardown. The handle is copied because the
-            // call still needs it.
+            // Spend the one native shutdown attempt before entering native code,
+            // but retain device/initialized ownership until successful completion.
             IntPtr device = _device;
             _shutDown = true;
+            ShutdownCalls++;
+            try { ShutdownResult = _shutdownCall(device); }
+            catch { _shutdownFailed = true; throw; }
+            if (ShutdownResult != NgxResult.Success)
+            {
+                _shutdownFailed = true;
+                log?.Invoke("[VulkanStory] NGX shutdown failed; remaining ownership retained: " + NgxInterop.Describe(ShutdownResult));
+                return NgxLifetimeOutcome.ShutdownFailed;
+            }
             _initialized = false;
             _device = IntPtr.Zero;
-            ShutdownCalls++;
-            ShutdownResult = _shutdownCall(device);
             if (log != null)
             {
                 log("[VulkanStory] DLSS: NVSDK_NGX_VULKAN_Shutdown1: " + NgxInterop.Describe(ShutdownResult));

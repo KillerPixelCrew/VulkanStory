@@ -47,11 +47,14 @@ internal static class FramebufferDrawBufferRoutes
             throw new InvalidOperationException("Official framebuffer selection/clear anchors changed: " + route.Name);
     }
 
+    /// <summary>Checks exact original color-selector/clear call counts before patch installation.</summary>
     internal static void ValidateBindings()
     {
         foreach (var route in Profile1227) Check(route, PatchProcessor.GetOriginalInstructions(Target(route)));
     }
 
+    /// <summary>Installs the pinned draw-buffer and color-clear transpilers using the supplied startup Harmony owner.</summary>
+    /// <param name="harmony">Owner responsible for removing these patches during rollback/shutdown.</param>
     internal static void Install(Harmony harmony)
     {
         foreach (var route in Profile1227)

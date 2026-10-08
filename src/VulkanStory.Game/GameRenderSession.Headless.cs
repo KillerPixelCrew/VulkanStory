@@ -52,6 +52,7 @@ internal sealed partial class GameRenderSession
         }
     }
 
+    /// <summary>Reads and writes configured headless frame output only after the harness readiness/warmup boundaries are satisfied.</summary>
     private void CaptureHeadlessFrame()
     {
         if (HeadlessHarnessOptions.MainMenuOptions) { CaptureMainOptionsDiagnostic(); return; }

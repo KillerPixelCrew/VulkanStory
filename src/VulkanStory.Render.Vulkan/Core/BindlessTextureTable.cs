@@ -40,6 +40,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     /// <summary>The colour placeholder under poison mode, where an undefined read is meant to be loud.</summary>
     private static readonly byte[] Magenta = { 255, 0, 255, 255 };
 
+    /// <summary>Deferred descriptor write for one bindless texture-kind array slot.</summary>
     private readonly record struct PendingWrite(TextureKind Kind, uint Slot, ImageView View, Sampler Sampler, ImageLayout Layout);
 
     private readonly VulkanContext _context;
@@ -670,6 +671,7 @@ internal sealed class BindlessSlotBook
 {
     public const int MaxVariantsPerTexture = 4;
 
+    /// <summary>Bindless slot awaiting the recorded frame completion before reuse.</summary>
     private readonly record struct Retired(TextureKind Kind, uint Slot, ulong Frame);
 
     private readonly ITimelineClock _clock;

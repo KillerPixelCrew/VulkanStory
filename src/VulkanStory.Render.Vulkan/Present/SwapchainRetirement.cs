@@ -16,6 +16,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 internal sealed class SwapchainRetirement
 {
+    /// <summary>Retired swapchain slot and the rendering/presentation completion gates required for destruction.</summary>
     private readonly record struct Entry(IDisposable Slot, ulong LastPresentValue, ulong? CompletionValue, Func<bool>? PresentsComplete);
 
     private readonly ITimelineClock _clock;
@@ -24,6 +25,7 @@ internal sealed class SwapchainRetirement
 
     public SwapchainRetirement(ITimelineClock clock) => _clock = clock;
 
+    /// <summary>Number of entries awaiting frame or presentation completion before reuse/release.</summary>
     public int PendingCount => _entries.Count;
 
     /// <summary>Queues a replaced slot (0: never submitted for presentation).</summary>
@@ -207,10 +209,14 @@ internal sealed class AcquireSemaphoreFreeList
         Capacity = handles.Count;
     }
 
+    /// <summary>Maximum acquire-semaphore handles retained by the free list.</summary>
     public int Capacity { get; }
+    /// <summary>Number of acquire semaphores currently available for reuse.</summary>
     public int FreeCount => _free.Count;
+    /// <summary>Number of entries awaiting frame or presentation completion before reuse/release.</summary>
     public int PendingCount => _pending.Count;
 
+    /// <summary>Returns one more acquire semaphore than the swapchain image count.</summary>
     public static int CapacityFor(uint imageCount) => (int)imageCount + 1;
 
     /// <summary>A free semaphore; parked ones whose submission completed (Frame counter <paramref name="frameCompleted" />) are reclaimed first when none is free.</summary>

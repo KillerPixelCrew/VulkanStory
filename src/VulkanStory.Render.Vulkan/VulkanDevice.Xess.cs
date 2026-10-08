@@ -5,11 +5,14 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>XeSS SR command recording, motion conversion and GPU-safe provider retirement.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     private bool? upscalerMotionBlitSupported;
+    /// <summary>Transfers native-provider disposal to the renderer's frame retirement queue.</summary>
     internal void RetireUpscalerResource(IDisposable resource) => _frames.DeferDeletion(resource);
 
+    /// <summary>Converts renderer motion and records a XeSS SR execution with the current temporal constants.</summary>
     internal int EvaluateXess(XessNative api, nint context, int motionRg, in UpscalerFrame frame, bool firstFrame)
     {
         using GpuSection gpuSection = BeginGpuSection("upscale_xess");
@@ -40,6 +43,7 @@ public sealed unsafe partial class VulkanDevice
         return result;
     }
 
+    /// <summary>Uses the retained motion-conversion program to prepare an RG motion texture for the supplied render extent.</summary>
     private bool PrepareUpscalerMotion(VulkanTexture sourceMotion, VulkanTexture motion,
         uint width, uint height, CommandBuffer commands)
     {

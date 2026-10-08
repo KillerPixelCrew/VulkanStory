@@ -405,6 +405,7 @@ internal sealed unsafe class NgxSession : IDisposable
         return memory;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         lock (_gate)
@@ -445,6 +446,7 @@ internal readonly struct NgxOptimalSettings
     public uint MaxHeight { get; }
     public float Sharpness { get; }
 
+    /// <inheritdoc/>
     public override string ToString() =>
         OptimalWidth + "x" + OptimalHeight +
         " (min " + MinWidth + "x" + MinHeight + ", max " + MaxWidth + "x" + MaxHeight +

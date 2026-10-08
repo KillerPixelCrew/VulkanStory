@@ -28,7 +28,9 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     private readonly VulkanContext _context;
     private bool _disposed;
 
+    /// <summary>Renderer ID for this linked shader program.</summary>
     public int ProgramId { get; }
+    /// <summary>Resolved descriptor, uniform and vertex interface for the linked program.</summary>
     public ProgramInterfaceLayout Interface { get; }
 
     public Dictionary<EnumShaderType, ShaderModule> Modules { get; } = new();
@@ -92,6 +94,8 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         Specialization = translated.Specialization;
         IsNative = translated.IsNative;
 
+        try
+        {
         foreach (KeyValuePair<EnumShaderType, byte[]> stage in translated.Spirv)
         {
             Modules[stage.Key] = CreateModule(stage.Value);
@@ -116,6 +120,14 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
             sharedLayout = StandaloneLayout.Layout;
         }
         PipelineLayout = sharedLayout;
+        }
+        catch
+        {
+            StandaloneLayout?.Dispose();
+            foreach (ShaderModule module in Modules.Values) context.Api.DestroyShaderModule(context.Device, module, null);
+            Modules.Clear();
+            throw;
+        }
     }
 
     /// <summary>
@@ -298,6 +310,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         SnapshotOffset = offset;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

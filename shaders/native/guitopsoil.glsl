@@ -59,10 +59,6 @@ void main(void)
     uv2 = uvIn;
     rgba = vec4(1);
     rgba2 = vec4(1);
-	float glowLevel = extraGlow / 128.0;
-
-	vec4 color = rgbaIn * (1 + glowLevel);
-	if (applyColor == 1) color *= colorIn;
 
 	gl_Position = projectionMatrix * modelViewMatrix * vec4(vertexPositionIn, 1.0);
 

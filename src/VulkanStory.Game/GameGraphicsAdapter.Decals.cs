@@ -14,6 +14,8 @@ internal sealed partial class GameGraphicsAdapter
     private readonly NativeMeshPass nativeDecals = new("decals", [], ["decalTexture", "blockTexture"]);
     private bool decalScopeActive;
     private int decalAtlas, decalBlockAtlas;
+    /// <summary>Begins the decal pool scope and captures its atlas texture bindings; actual native pass selection happens at draw time.</summary>
+    /// <remarks>Pair with EndDecalPass in cleanup. Recursive pool entry is rejected.</remarks>
     internal void BeginDecalPass()
     {
         RequireDevice();
@@ -23,6 +25,7 @@ internal sealed partial class GameGraphicsAdapter
         decalBlockAtlas = programTextures.GetValueOrDefault((program, "blockTexture"));
         decalScopeActive = true;
     }
+    /// <summary>Clears the decal pool scope and its captured atlas identifiers.</summary>
     internal void EndDecalPass()
     { decalScopeActive = false; decalAtlas = decalBlockAtlas = 0; }
     private bool TryDrawDecalPoolNative(MeshRef mesh, int[] starts, int[] sizes, int groups)

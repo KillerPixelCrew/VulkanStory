@@ -56,6 +56,9 @@ internal sealed partial class GameGraphicsAdapter
             GameMeshLayout.Part(floats), GameMeshLayout.Part(shorts), GameMeshLayout.Part(bytes), GameMeshLayout.Part(ints),
             GameMeshLayout.DrawMode(mode), staticDraw, true), indices, mode, !staticDraw);
 
+    /// <summary>Packs the supplied original mesh into the retained SSBO layout and updates its adapter-owned backend mesh.</summary>
+    /// <param name="mesh">Owned original mesh receiving the update.</param>
+    /// <param name="data">Original geometry to pack into the retained SSBO layout.</param>
     internal void UpdateSsboMesh(MeshRef mesh, MeshData data)
     {
         var renderer = RequireDevice();

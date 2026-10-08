@@ -6,6 +6,8 @@ namespace VulkanStory.Render.Vulkan.Tests;
 
 // Focused cases carried from the source renderer's shader translation,
 // delivery, and native runtime tests. No shader compiler or GPU is required.
+/// <summary>Checks GLSL parsing, malformed SPIR-V rejection, shader variant keys, and descriptor convention constants.</summary>
+/// <remarks>No shader compiler or GPU is required by these cases.</remarks>
 public sealed class ShaderSourceContractsTests
 {
     [Fact]

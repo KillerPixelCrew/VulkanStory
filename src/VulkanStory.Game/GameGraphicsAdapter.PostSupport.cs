@@ -159,6 +159,9 @@ internal sealed partial class GameGraphicsAdapter
         LoadFramebuffer(EnumFrameBuffer.Primary);
         CheckGraphicsError("post");
     }
+    /// <summary>Runs display-resolution bloom, god rays and luma after scene reconstruction, preserving the selected scene/glow identities.</summary>
+    /// <param name="scene">Scene texture after SR/TAA reconstruction.</param>
+    /// <param name="glow">Glow texture matched to the selected scene.</param>
     internal void RenderPostTail(int scene, int glow)
     {
         RequireDevice();

@@ -6,6 +6,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Retained CPU cases from ResourceLifetimeTests.
+/// <summary>Checks descriptor types, resource-age classification, and resource-lifetime-aware cache keys.</summary>
+/// <remarks>CPU cache contracts only; no Vulkan descriptor lifetime is exercised.</remarks>
 public sealed class DescriptorLifetimeTests
 {
     [Fact]

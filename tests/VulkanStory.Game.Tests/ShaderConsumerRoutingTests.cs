@@ -6,6 +6,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks official shader/UBO patch installation and rejection before ownerless GL operations.</summary>
+/// <remarks>Does not create native shader programs or evaluate rendered output.</remarks>
 public sealed class ShaderConsumerRoutingTests
 {
     [Fact]

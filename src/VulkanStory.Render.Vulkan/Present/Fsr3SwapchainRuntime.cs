@@ -23,6 +23,8 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
         _context = context;
     }
 
+    /// <summary>Creates the FidelityFX swapchain context when the renderer has the required distinct queues.</summary>
+    /// <returns>Whether the SDK created a nonzero context; reason records queue or SDK failure detail.</returns>
     public static bool TryCreate(VulkanContext vk, SwapchainCreateInfoKHR* info,
         out Fsr3SwapchainRuntime? runtime, out string reason)
     {
@@ -52,9 +54,12 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
         return true;
     }
 
+    /// <summary>Provider swapchain handle, or default after context destruction.</summary>
     public SwapchainKHR Handle => _context != 0 ? _api.SwapchainHandle(_context) : default;
+    /// <summary>Borrowed native provider context; zero when it is absent.</summary>
     public nint NativeContext => _context;
 
+    /// <summary>Recreates the provider-owned swapchain while retaining its native presentation context.</summary>
     public Result Recreate(SwapchainCreateInfoKHR* info, out SwapchainKHR chain)
     {
         RequireLifetime();
@@ -66,6 +71,7 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
         return result;
     }
 
+    /// <summary>Queries provider-owned swapchain images using Vulkan count/query semantics.</summary>
     public Result GetImages(Device device, SwapchainKHR chain, ref uint count, Image* images)
     {
         RequireLifetime();
@@ -74,6 +80,7 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
             return _api.GetSwapchainImages(_context, chain, countPtr, images);
     }
 
+    /// <summary>Acquires a provider image with an infinite timeout and the supplied Vulkan synchronization.</summary>
     public Result Acquire(Device device, SwapchainKHR chain, Semaphore semaphore, Fence fence,
         ref uint index)
     {
@@ -83,17 +90,20 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
             return _api.AcquireSwapchain(_context, chain, ulong.MaxValue, semaphore, fence, indexPtr);
     }
 
+    /// <summary>Presents exclusively through the FidelityFX swapchain context.</summary>
     public Result Present(Queue queue, PresentInfoKHR* info)
     {
         RequireLifetime();
         return _context != 0 ? _api.PresentSwapchain(_context, queue, info) : Result.ErrorInitializationFailed;
     }
 
+    /// <summary>Disables and drains provider presentation before releasing the supplied swapchain.</summary>
     public void PrepareDestroy(SwapchainKHR chain)
     {
         RequireLifetime();
         if (_context != 0) CheckRelease(_api.PrepareSwapchainDestroy(_context, chain), "disable/drain before swapchain release");
     }
+    /// <summary>Destroys the specified provider swapchain after release preparation succeeds.</summary>
     public void DestroyChain(SwapchainKHR chain)
     {
         RequireLifetime();
@@ -106,15 +116,18 @@ internal sealed unsafe class Fsr3SwapchainRuntime : IDisposable
         _releaseFailure = failure;
         throw failure;
     }
+    /// <summary>Throws after a checked provider release failure so remaining native ownership is retained.</summary>
     internal void RequireLifetime()
     {
         if (_releaseFailure != null)
             throw new InvalidOperationException("FidelityFX release failed; cleanup is terminal.", _releaseFailure);
     }
 
+    /// <summary>Returns the native provider-reported present count, or zero when no context is active.</summary>
     public ulong LastPresentCount(SwapchainKHR chain) => _context != 0 ?
         _api.SwapchainLastPresentCount(_context, chain) : 0;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireLifetime();

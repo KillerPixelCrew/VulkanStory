@@ -3,9 +3,19 @@ using System.Text.Json;
 
 namespace VulkanStory.Bootstrap;
 
+/// <summary>Official client metadata and SHA256 file identities required before startup patches are attempted.</summary>
+/// <param name="Schema">Profile schema version; the loader currently accepts one.</param>
+/// <param name="Id">Stable integration-profile identity.</param>
+/// <param name="GameVersion">Recorded official game version.</param>
+/// <param name="RuntimeMajor">Required .NET runtime major version.</param>
+/// <param name="Files">Game-relative files and their expected SHA256 hex digests.</param>
 internal sealed record GameProfile(int Schema, string Id, string GameVersion, int RuntimeMajor,
     Dictionary<string, string> Files)
 {
+    /// <summary>Reads a bounded profile JSON file and rejects unsupported or empty profile data.</summary>
+    /// <param name="path">Profile JSON path.</param>
+    /// <returns>The deserialized schema-one profile.</returns>
+    /// <exception cref="InvalidDataException">The profile exceeds 64 KiB or has unsupported/empty metadata.</exception>
     internal static GameProfile Load(string path)
     {
         using FileStream file = File.OpenRead(path);
@@ -18,6 +28,9 @@ internal sealed record GameProfile(int Schema, string Id, string GameVersion, in
         return profile;
     }
 
+    /// <summary>Hashes every named official game file and refuses mismatches or paths outside the game root.</summary>
+    /// <param name="gameDirectory">Official installation root against which relative profile paths are resolved.</param>
+    /// <exception cref="InvalidDataException">A path escapes the root or a file does not match its recorded digest.</exception>
     internal void VerifyFiles(string gameDirectory)
     {
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gameDirectory)) + Path.DirectorySeparatorChar;

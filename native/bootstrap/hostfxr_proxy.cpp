@@ -30,6 +30,8 @@ DWORD attach_thread = 0;
 thread_local error_writer_fn error_writer = nullptr;
 constexpr int bootstrap_error = static_cast<int>(0x80008083u);
 
+/// @brief Resolves a borrowed Win32 module to its full path.
+/// @details Throws when GetModuleFileNameW fails or fills the fixed-size buffer.
 std::wstring module_path(HMODULE module) {
     std::vector<wchar_t> buffer(32768);
     DWORD count = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -37,6 +39,8 @@ std::wstring module_path(HMODULE module) {
     return {buffer.data(), count};
 }
 
+/// @brief Reads a named process environment value, distinguishing absent and present-but-empty values.
+/// @details Throws if the variable grows while its allocated buffer is being read.
 std::optional<std::wstring> environment(const wchar_t* name) {
     SetLastError(ERROR_SUCCESS);
     DWORD length = GetEnvironmentVariableW(name, nullptr, 0);
@@ -50,6 +54,8 @@ std::optional<std::wstring> environment(const wchar_t* name) {
     return std::wstring(buffer.data(), count);
 }
 
+/// @brief Converts a UTF-16 path/value to UTF-8.
+/// @details Invalid Unicode raises a runtime error; an empty input returns an empty string.
 std::string utf8(const std::wstring& value) {
     if (value.empty()) return {};
     int count = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
@@ -61,6 +67,7 @@ std::string utf8(const std::wstring& value) {
     return result;
 }
 
+/// @brief Quotes and escapes a UTF-8 byte string for the bootstrap JSON-lines log.
 std::string json_string(const std::string& value) {
     std::ostringstream out;
     out << '"';
@@ -74,6 +81,7 @@ std::string json_string(const std::string& value) {
     return out.str();
 }
 
+/// @brief Lazily creates the per-process bootstrap log path under local application data or the temporary directory.
 const fs::path& log_path() {
     static fs::path value = [] {
         auto local = environment(L"LOCALAPPDATA");
@@ -93,6 +101,8 @@ const fs::path& log_path() {
     return value;
 }
 
+/// @brief Appends one native bootstrap event while serializing log writes.
+/// @details Logging failures are swallowed so forwarding remains available. This function is called outside DllMain.
 void trace(const char* event, const std::string& detail = {}, LONGLONG counter = 0, DWORD thread = 0) noexcept {
     try {
         static std::mutex guard;
@@ -115,8 +125,11 @@ void trace(const char* event, const std::string& detail = {}, LONGLONG counter =
     } catch (...) { /* Keep forwarding functional when logging is unavailable. */ }
 }
 
+/// @brief Locates VulkanStory/loader.ini relative to this proxy module.
 fs::path config_path() { return fs::path(module_path(own_module)).parent_path() / L"VulkanStory/loader.ini"; }
 
+/// @brief Reads a Bootstrap section string from the package-local loader configuration.
+/// @details An overlong configuration value raises a runtime error.
 std::wstring config_value(const wchar_t* key) {
     std::vector<wchar_t> buffer(32768);
     DWORD count = GetPrivateProfileStringW(L"Bootstrap", key, L"", buffer.data(),
@@ -125,6 +138,8 @@ std::wstring config_value(const wchar_t* key) {
     return {buffer.data(), count};
 }
 
+/// @brief Reads the registered x64 .NET installation from the architecture-specific registry key.
+/// @details Returns no path when the registry value is missing, malformed or empty.
 std::optional<fs::path> registered_root() {
     HKEY key = nullptr;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\dotnet\\Setup\\InstalledVersions\\x64", 0,
@@ -141,6 +156,8 @@ std::optional<fs::path> registered_root() {
     return fs::path(buffer);
 }
 
+/// @brief Selects the configured, environment, registered or standard x64 .NET root.
+/// @details A configured root must be an existing absolute directory; unresolved discovery raises a runtime error.
 fs::path select_root() {
     std::wstring explicit_root = config_value(L"DotnetRoot");
     if (!explicit_root.empty()) {
@@ -159,6 +176,8 @@ fs::path select_root() {
     throw std::runtime_error("Cannot discover the installed x64 .NET host. Set Bootstrap.DotnetRoot.");
 }
 
+/// @brief Process-lifetime owner of the installed hostfxr module selected by host-directory version precedence.
+/// @details Construction rejects a recursive proxy path. The module remains loaded because the runtime may retain its callbacks after a host entry returns.
 struct real_host {
     fs::path root;
     HMODULE module;
@@ -189,8 +208,11 @@ struct real_host {
     }
 };
 
+/// @brief Returns the lazily constructed process-lifetime installed-host owner.
 real_host& host() { static real_host instance; return instance; }
 
+/// @brief Temporarily installs a process-local environment value and retains its prior state.
+/// @details Destruction restores the prior value only when nobody changed the replacement value during the forwarded host call. The borrowed variable-name pointer must outlive this guard.
 struct environment_change {
     const wchar_t* name;
     std::optional<std::wstring> previous;
@@ -210,6 +232,8 @@ struct environment_change {
     }
 };
 
+/// @brief Checks the client executable/assembly identity and package-local bootstrap enable flag.
+/// @details The payload file checks and hook setup are performed separately by the startupinfo export.
 bool should_activate(const wchar_t* host_path, const wchar_t* app_path) {
     if (!host_path || !app_path || _wcsicmp(fs::path(host_path).filename().c_str(), L"Vintagestory.exe") != 0 ||
         _wcsicmp(fs::path(app_path).filename().c_str(), L"Vintagestory.dll") != 0) return false;
@@ -217,6 +241,8 @@ bool should_activate(const wchar_t* host_path, const wchar_t* app_path) {
     return true;
 }
 
+/// @brief Records a forwarding failure and calls the current thread's optional error writer.
+/// @details Returns the fixed host bootstrap error code without retrying game entry.
 int report_failure(const std::exception& error) noexcept {
     trace("native.forwarding.failed", error.what());
     if (error_writer) error_writer(L"VulkanStory could not forward to the installed .NET host. Remove the VulkanStory hostfxr.dll to use normal host discovery; see the bootstrap log.");
@@ -224,6 +250,9 @@ int report_failure(const std::exception& error) noexcept {
 }
 }
 
+/// @brief Stores the current thread's borrowed host error callback and forwards writer registration.
+/// @details If installed-host registration fails, the prior locally recorded writer is returned.
+/// @param writer Caller-owned callback; its lifetime follows the hostfxr error-writer contract.
 extern "C" error_writer_fn __cdecl hostfxr_set_error_writer(error_writer_fn writer) {
     auto previous = error_writer;
     error_writer = writer;
@@ -231,6 +260,13 @@ extern "C" error_writer_fn __cdecl hostfxr_set_error_writer(error_writer_fn writ
     catch (const std::exception& error) { trace("native.error_writer.unavailable", error.what()); return previous; }
 }
 
+/// @brief Arms the optional managed startup hook before forwarding the original apphost startup entry.
+/// @details Setup failure bypasses only VulkanStory hook activation. The real host entry is called once with the installed framework root; forwarding errors return the bootstrap error.
+/// @param argc Original argument count.
+/// @param argv Borrowed original wide-string argument array.
+/// @param host_path Original host executable path.
+/// @param app_path Original managed application path.
+/// @return Original host exit code, or the proxy bootstrap failure code.
 extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, const wchar_t* host_path,
     const wchar_t* /*app_local_root*/, const wchar_t* app_path) {
     try {
@@ -268,11 +304,17 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
     } catch (const std::exception& error) { return report_failure(error); }
 }
 
+/// @brief Forwards the legacy host entry without adding a startup hook.
+/// @return Original host exit code, or the proxy bootstrap failure code.
 extern "C" int __cdecl hostfxr_main(int argc, const wchar_t** argv) {
     try { return host().function<main_fn>("hostfxr_main")(argc, argv); }
     catch (const std::exception& error) { return report_failure(error); }
 }
 
+/// @brief Forwards a single-file bundle entry using the installed framework root.
+/// @details Bundles are outside the activation profile and receive no VulkanStory startup hook.
+/// @param offset Original bundle header offset.
+/// @return Original host exit code, or the proxy bootstrap failure code.
 extern "C" int __cdecl hostfxr_main_bundle_startupinfo(int argc, const wchar_t** argv, const wchar_t* host_path,
     const wchar_t* /*app_local_root*/, const wchar_t* app_path, std::int64_t offset) {
     try {
@@ -282,6 +324,9 @@ extern "C" int __cdecl hostfxr_main_bundle_startupinfo(int argc, const wchar_t**
     } catch (const std::exception& error) { return report_failure(error); }
 }
 
+/// @brief Records only module/thread/timestamp bookkeeping at process attach.
+/// @details Runs under the loader lock. Host discovery, file scanning, managed startup and graphics initialization occur later in forwarded host entry points.
+/// @return TRUE; this entry performs no managed or graphics activation.
 BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         own_module = module;

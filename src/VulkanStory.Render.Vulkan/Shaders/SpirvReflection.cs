@@ -38,6 +38,7 @@ internal sealed class SpirvBlock
     public List<SpirvBlockMember> Members = new();
 }
 
+/// <summary>Reflected SPIR-V descriptor variable with set, binding, descriptor kind and array metadata.</summary>
 internal sealed class SpirvDescriptorBinding
 {
     public uint VariableId;
@@ -54,6 +55,7 @@ internal sealed class SpirvDescriptorBinding
     public SpirvBlock? Block;
 }
 
+/// <summary>Reflected non-built-in shader input or output with a location and GLSL-compatible type.</summary>
 internal sealed class SpirvInterfaceVariable
 {
     public uint VariableId;
@@ -64,6 +66,7 @@ internal sealed class SpirvInterfaceVariable
     public int ArrayLength;
 }
 
+/// <summary>Reflected SPIR-V specialization constant and its decoded default value.</summary>
 internal sealed class SpirvSpecConstant
 {
     public int SpecId;
@@ -175,12 +178,14 @@ internal static class SpirvReflection
     private const int StoragePushConstant = 9;
     private const int StorageStorageBuffer = 12;
 
+    /// <summary>SPIR-V type instruction opcode and operands used during module reflection.</summary>
     private sealed class TypeInfo
     {
         public int Op;
         public uint[] Operands = Array.Empty<uint>();
     }
 
+    /// <summary>Parsed SPIR-V names, types, decorations, constants and executable instructions used by the reflector.</summary>
     private sealed class Module
     {
         public readonly Dictionary<uint, string> Names = new();
@@ -197,6 +202,7 @@ internal static class SpirvReflection
         public uint[] Interface = Array.Empty<uint>();
     }
 
+    /// <summary>Parses SPIR-V words and reflects entry-point interfaces, descriptors, block layouts and specialization constants.</summary>
     public static SpirvModuleReflection Reflect(byte[] spirv)
     {
         if (spirv == null || spirv.Length < 20 || spirv.Length % 4 != 0)

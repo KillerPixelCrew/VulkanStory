@@ -8,8 +8,11 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks dormant OS forwarding, active owner guards, and original platform setter accessors.</summary>
+/// <remarks>A dispatch proxy substitutes OS services; no SDL window is used.</remarks>
 public sealed class PlatformWrapperTests
 {
+    /// <summary>Controlled OS service implementation recording clipboard/focus forwarding without a real window.</summary>
     public class OsServices : DispatchProxy
     {
         internal string Clipboard = "original";

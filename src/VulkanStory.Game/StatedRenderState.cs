@@ -122,6 +122,11 @@ internal sealed class StatedRenderState
         _blend[slot].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
     }
 
+    /// <summary>Sets the global writable RGBA channel mask and invalidates cached attachment snapshots.</summary>
+    /// <param name="r">Whether red is writable.</param>
+    /// <param name="g">Whether green is writable.</param>
+    /// <param name="b">Whether blue is writable.</param>
+    /// <param name="a">Whether alpha is writable.</param>
     public void SetColorMask(bool r, bool g, bool b, bool a)
     {
         ColorComponentFlags next = (r ? ColorComponentFlags.RBit : 0) | (g ? ColorComponentFlags.GBit : 0) |
@@ -136,6 +141,9 @@ internal sealed class StatedRenderState
     /// functions and enable, written only when the attachment is a selected draw buffer and
     /// the colour mask allows it.
     /// </summary>
+    /// <param name="slot">Zero-based color attachment slot.</param>
+    /// <returns>Effective state, or a zero-write state for an unsupported slot.</returns>
+    /// <remarks>Separate UI targets use the retained premultiplied blend conversion.</remarks>
     public AttachmentBlend AttachmentFor(int framebufferId, int slot)
     {
         if ((uint)slot >= MaxColorAttachments) return new AttachmentBlend { WriteMask = 0 };

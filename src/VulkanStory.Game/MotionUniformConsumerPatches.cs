@@ -5,6 +5,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Observes original shader uniform writes to retain per-draw model and deformation state for motion producers.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class MotionUniformConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-motion-uniforms";
@@ -18,6 +20,10 @@ internal static class MotionUniformConsumerPatches
     private static MethodInfo Target(string name, Type[] parameters) => typeof(ShaderProgramBase).GetMethod(name,
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly, null, parameters, null) ??
         throw new MissingMethodException(typeof(ShaderProgramBase).FullName, name);
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

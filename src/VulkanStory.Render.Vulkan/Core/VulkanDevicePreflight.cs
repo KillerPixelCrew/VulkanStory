@@ -6,6 +6,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Exercises the retained device owner rather than constructing its managers separately.</summary>
 public static class VulkanDevicePreflight
 {
+    /// <summary>Runs the explicit device creation and destruction preflight.</summary>
+    /// <remarks>This method creates native resources and may submit GPU work; it is an opt-in validation entry point.</remarks>
+    /// <returns>Null on successful completion, otherwise the failure detail.</returns>
     public static string? Check()
     {
         try

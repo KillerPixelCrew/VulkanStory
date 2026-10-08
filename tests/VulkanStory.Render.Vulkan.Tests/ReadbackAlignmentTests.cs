@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks copy-offset alignment for mixed texel sizes and four-byte transfer constraints.</summary>
+/// <remarks>Arithmetic coverage only; no native readback transfer is submitted.</remarks>
 public sealed class ReadbackAlignmentTests
 {
     [Theory]

@@ -9,8 +9,12 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Test-assembly initializer that verifies pinned official reference hashes before resolving game/Lib dependencies.</summary>
+/// <remarks>The assembly disables parallel tests because Harmony patches and game statics are shared process state.</remarks>
 internal static class OfficialGameResolver
 {
+    /// <summary>Reads the configured official directory/profile and attaches its managed dependency resolver.</summary>
+    /// <remarks>Fails module initialization for missing configuration, unreadable files, or mismatched hashes.</remarks>
     [ModuleInitializer]
     internal static void Initialize()
     {

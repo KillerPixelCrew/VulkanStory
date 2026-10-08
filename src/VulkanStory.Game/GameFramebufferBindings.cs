@@ -25,6 +25,7 @@ internal static class GameFramebufferBindings
     private static readonly AccessTools.FieldRef<ClientPlatformWindows, MeshRef?> Quad =
         AccessTools.FieldRefAccess<ClientPlatformWindows, MeshRef?>("screenQuad");
 
+    /// <summary>Checks the exact original framebuffer field types before any startup mutation.</summary>
     internal static void Validate()
     {
         var field = typeof(ClientPlatformWindows).GetField("curFb", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -40,11 +41,17 @@ internal static class GameFramebufferBindings
             if (typeof(ClientPlatformWindows).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?.FieldType != type)
                 throw new MissingFieldException("Original framebuffer metadata changed: " + name);
     }
+    /// <summary>Publishes the current framebuffer reference to the unchanged original platform.</summary>
+    /// <param name="platform">Original platform retaining normal consumer state.</param>
+    /// <param name="target">Current target, or null for default.</param>
     internal static void Set(ClientPlatformWindows platform, FrameBufferRef? target) => Current(platform) = target;
     internal static float[] ClearColor(ClientPlatformWindows platform) => Clear(platform) ??
         throw new InvalidOperationException("Original framebuffer clear color is not initialized.");
     internal static bool OffscreenEnabled(ClientPlatformWindows platform) => Offscreen(platform);
     internal static float SsaaLevel(ClientPlatformWindows platform) => Scale(platform);
+    /// <summary>Publishes allocation-time SSAO, shadow and supersampling state into existing platform fields.</summary>
+    /// <param name="platform">Original platform receiving metadata.</param>
+    /// <param name="settings">Captured allocation settings.</param>
     internal static void AdoptSettings(ClientPlatformWindows platform, GameFramebufferSettings settings)
     {
         SetupSsao(platform) = settings.SsaoQuality > 0;

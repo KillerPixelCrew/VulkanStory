@@ -162,6 +162,7 @@ internal sealed unsafe class NgxFrameGenerationFeature : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (disposed) return;

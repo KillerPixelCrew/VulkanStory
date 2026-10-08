@@ -4,15 +4,19 @@ using System.Collections.Generic;
 namespace VulkanStory.Render.Vulkan.Core;
 
 // Extracted unchanged uniform-buffer state from the retained device facade.
+/// <summary>CPU shadow of a named client uniform block, with versioned snapshots in the frame uniform arena.</summary>
 internal sealed unsafe class ClientUniformBuffer
 {
+    /// <summary>Borrows a CPU shadow array and associates it with a shader block name.</summary>
     public ClientUniformBuffer(byte[] shadow, string blockName)
     {
         Shadow = shadow;
         BlockName = blockName;
     }
 
+    /// <summary>Mutable CPU block bytes copied into a frame arena when the version changes.</summary>
     public byte[] Shadow { get; }
+    /// <summary>Shader block name used to resolve the client buffer association.</summary>
     public string BlockName { get; }
 
     /// <summary>Bumped by every write, so an unchanged block reuses its snapshot.</summary>
@@ -20,9 +24,15 @@ internal sealed unsafe class ClientUniformBuffer
 
     /// <summary>Which frame's ring the snapshot below lives in, and what it holds.</summary>
     public uint SnapshotFrame { get; private set; }
+    /// <summary>CPU version captured by the latest frame-arena snapshot.</summary>
     public uint SnapshotVersion { get; private set; }
+    /// <summary>Byte offset of the latest snapshot inside its frame uniform ring.</summary>
     public uint SnapshotOffset { get; private set; }
 
+    /// <summary>Copies changed input bytes into the CPU shadow and increments the version only when bytes differ.</summary>
+    /// <param name="data">Borrowed readable memory containing at least size bytes.</param>
+    /// <param name="offset">Destination byte offset within the shadow.</param>
+    /// <param name="size">Byte count to compare and copy.</param>
     public void Write(IntPtr data, int offset, int size)
     {
         // A client that re-uploads identical bytes before every draw would
@@ -34,6 +44,7 @@ internal sealed unsafe class ClientUniformBuffer
         Version++;
     }
 
+    /// <summary>Associates the current CPU version with the supplied frame and uniform-ring offset.</summary>
     public void NoteSnapshot(uint frame, uint offset)
     {
         SnapshotFrame = frame;
@@ -41,10 +52,16 @@ internal sealed unsafe class ClientUniformBuffer
         SnapshotOffset = offset;
     }
 
+    /// <summary>CPU version captured by the latest frame-arena snapshot.</summary>
     public bool HasSnapshotFor(uint frame) => SnapshotFrame == frame && SnapshotVersion == Version;
 
     // Retained per-draw copy into the frame's uniform arena. A partial submit
     // keeps the same frame identity and arena, so the snapshot remains valid.
+    /// <summary>Reuses a current snapshot or copies the shadow into the current frame's uniform arena.</summary>
+    /// <param name="frame">Renderer frame identity, retained across partial submissions.</param>
+    /// <param name="slot">Current frame-slot uniform arena.</param>
+    /// <param name="offset">Snapshot byte offset, or zero on exhaustion.</param>
+    /// <returns>Whether a valid snapshot is available; false when the arena has no room.</returns>
     public bool TrySnapshot(uint frame, FrameSlot slot, out uint offset)
     {
         if (HasSnapshotFor(frame))
@@ -65,6 +82,7 @@ internal sealed unsafe class ClientUniformBuffer
     }
 }
 
+/// <summary>Owns client uniform-buffer IDs and the named block-to-buffer associations resolved for each draw.</summary>
 internal sealed class ClientUniformBufferManager
 {
     internal readonly Dictionary<int, ClientUniformBuffer> Buffers = new();
@@ -82,6 +100,8 @@ internal sealed class ClientUniformBufferManager
 
     private int _nextUniformBufferId = 1;
 
+    /// <summary>Allocates a client buffer ID and at least four shadow bytes, immediately binding a nonempty block name.</summary>
+    /// <returns>New client uniform-buffer ID.</returns>
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size)
     {
         int bytes = Math.Max(size, 4);
@@ -94,6 +114,7 @@ internal sealed class ClientUniformBufferManager
         return id;
     }
 
+    /// <summary>Writes a valid byte range into a known buffer; missing buffers, null data and invalid ranges are ignored.</summary>
     public void UpdateUniformBuffer(int handle, IntPtr data, int offset, int size)
     {
         if (!Buffers.TryGetValue(handle, out ClientUniformBuffer? ubo)) return;
@@ -103,6 +124,7 @@ internal sealed class ClientUniformBufferManager
         ubo.Write(data, offset, size);
     }
 
+    /// <summary>Associates a known buffer with its nonempty block name for subsequent draws.</summary>
     public void BindUniformBuffer(int handle)
     {
         if (Buffers.TryGetValue(handle, out ClientUniformBuffer? ubo) && ubo.BlockName.Length > 0)
@@ -121,6 +143,7 @@ internal sealed class ClientUniformBufferManager
     /// </summary>
     public void UnbindUniformBuffer(int handle) { }
 
+    /// <summary>Removes the shadow buffer and clears its block association only when that buffer remains bound.</summary>
     public void DeleteUniformBuffer(int handle)
     {
         if (!Buffers.Remove(handle, out ClientUniformBuffer? ubo)) return;

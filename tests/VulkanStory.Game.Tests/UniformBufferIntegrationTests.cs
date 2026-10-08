@@ -6,8 +6,11 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks original UBO routes writing owned CPU shadows and retaining disposal semantics.</summary>
+/// <remarks>No Vulkan context/window is created; GPU snapshot lifetime is outside this fixture.</remarks>
 public sealed class UniformBufferIntegrationTests
 {
+    /// <summary>Two sequential 64-bit fields whose pinned bytes exercise full and ranged UBO writes.</summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct Payload { public long First, Second; }
 

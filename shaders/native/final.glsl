@@ -108,7 +108,6 @@ layout(location = 0) out vec4 outColor;
 // ============================================================
 // Color grading (vanilla, unchanged)
 // ============================================================
-float SmoothStep(float x) { return x * x * (3.0 - 2.0 * x); }
 
 vec4 ColorGrade(vec4 color) {
 	color.a = dot(color.rgb, vec3(0.299, 0.587, 0.114));
@@ -212,10 +211,10 @@ void main(void)
 
 	// Vignetting
 	vec2 position = (gl_FragCoord.xy * invFrameSize.xy) - vec2(0.5);
-	float grayvignette = 1 - smoothstep(1.1, 0.75 - 0.45, length(position));
+	float grayvignette = smoothstep(0.75 - 0.45, 1.1, length(position));
 
 	if (frostVignetting > 0) {
-		float str = -0.05 + 1.05*clamp(1 - smoothstep(1.1 - frostVignetting / 4, 0.75 - 0.45, length(position)), 0, 1) - grayvignette;
+		float str = -0.05 + 1.05*clamp(smoothstep(0.75 - 0.45, max(0.30001, 1.1 - frostVignetting / 4), length(position)), 0, 1) - grayvignette;
 		float wx = gnoise(vec3(gl_FragCoord.x / 20.0, str, gl_FragCoord.x / 11.0 + gl_FragCoord.y / 10.0));
 		float wy = gnoise(vec3(gl_FragCoord.x / 20.0, str, gl_FragCoord.x / 10.0 - gl_FragCoord.y / 9.0));
 		float g = 2*gnoise(vec3(wx / 3.0, wy / 3.0, 0.2)) + 0.8;
@@ -229,7 +228,7 @@ void main(void)
 	}
 
 	if (damageVignetting > 0) {
-		float str = clamp(1 - smoothstep(1.1 - damageVignetting / 4, 0.75 - 0.45, length(position)), 0, 1) - grayvignette;
+		float str = clamp(smoothstep(0.75 - 0.45, max(0.30001, 1.1 - damageVignetting / 4), length(position)), 0, 1) - grayvignette;
 		float g = gnoise(vec3(gl_FragCoord.x / 20.0, gl_FragCoord.y / 20.0, 0)) + 0.5;
 		g += gnoise(vec3(gl_FragCoord.x / 5.0, gl_FragCoord.y / 5.0, 0))/5;
 		g -= str*2;

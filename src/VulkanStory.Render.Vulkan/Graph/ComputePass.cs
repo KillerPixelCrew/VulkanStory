@@ -39,8 +39,11 @@ public readonly record struct ComputeBinding(
 /// </summary>
 public sealed class ComputeDispatch
 {
+    /// <summary>Explicit dispatch workgroup count in X.</summary>
     public uint GroupsX = 1;
+    /// <summary>Explicit dispatch workgroup count in Y.</summary>
     public uint GroupsY = 1;
+    /// <summary>Explicit dispatch workgroup count in Z.</summary>
     public uint GroupsZ = 1;
 
     /// <summary>Index into the pass's bindings whose level extent sizes the dispatch; -1 uses the explicit counts.</summary>
@@ -49,9 +52,11 @@ public sealed class ComputeDispatch
     /// <summary>Pushed for the compute stage before the dispatch; at most the program's push constant size.</summary>
     public byte[]? PushConstants;
 
+    /// <summary>Creates a dispatch with explicit workgroup counts and optional borrowed push-constant bytes.</summary>
     public static ComputeDispatch Explicit(uint x, uint y, uint z = 1, byte[]? pushConstants = null) =>
         new() { GroupsX = x, GroupsY = y, GroupsZ = z, PushConstants = pushConstants };
 
+    /// <summary>Creates a dispatch whose workgroup counts cover the image selected by its binding index.</summary>
     public static ComputeDispatch Covering(int bindingIndex, byte[]? pushConstants = null) =>
         new() { SizeFromBinding = bindingIndex, PushConstants = pushConstants };
 }
@@ -89,6 +94,7 @@ internal readonly record struct ComputeImageInfo(uint Width, uint Height, uint M
 /// </summary>
 internal static class ComputePassPlanner
 {
+    /// <summary>Maps declared compute image access to the renderer synchronization usage.</summary>
     public static ResourceUsage UsageOf(ComputeAccess access) => access switch
     {
         ComputeAccess.Sampled => ResourceUsage.SampleCompute,
@@ -98,8 +104,10 @@ internal static class ComputePassPlanner
         _ => throw new ArgumentOutOfRangeException(nameof(access), access, null),
     };
 
+    /// <summary>Reports whether the compute access requires a storage-image descriptor.</summary>
     public static bool IsStorage(ComputeAccess access) => access != ComputeAccess.Sampled;
 
+    /// <summary>Reports whether the compute declaration includes a storage-image write.</summary>
     public static bool Writes(ComputeAccess access) =>
         access is ComputeAccess.StorageWrite or ComputeAccess.StorageReadWrite;
 

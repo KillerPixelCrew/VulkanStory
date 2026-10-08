@@ -13,6 +13,9 @@ internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeMeshPass nativeParticlesCube = new("particlescube", [], []);
     private readonly NativeMeshPass nativeParticlesQuad = new("particlesquad", [], []);
+    /// <summary>Draws particle instances through the compatible native particle pass, otherwise retaining ordinary adapter drawing.</summary>
+    /// <param name="mesh">Owned particle instance mesh.</param>
+    /// <param name="quantity">Requested particle instance count.</param>
     internal void RenderParticles(MeshRef mesh, int quantity)
     {
         var renderer = RequireDevice(); renderer.GpuMark("particles");

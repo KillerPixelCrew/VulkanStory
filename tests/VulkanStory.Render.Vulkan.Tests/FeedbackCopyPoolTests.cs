@@ -6,8 +6,11 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Retained ResourceLifetimeTests feedback-copy retirement regression.
+/// <summary>Checks feedback-copy reuse/retirement against a simulated completion timeline.</summary>
+/// <remarks>Fake backing IDs and disposal callbacks do not establish real GPU synchronization.</remarks>
 public sealed class FeedbackCopyPoolTests
 {
+    /// <summary>Manually advanced counters separating recorded work from simulated completion.</summary>
     private sealed class Clock : ITimelineClock
     {
         public ulong FrameRecorded { get; set; }

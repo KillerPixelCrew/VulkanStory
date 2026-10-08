@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks removal of only this assembly's absolute startup-hook entries while retaining other hook order.</summary>
+/// <remarks>Exercises string filtering without changing the test process environment.</remarks>
 public sealed class StartupHookEnvironmentTests
 {
     [Fact]

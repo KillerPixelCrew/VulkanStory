@@ -7,11 +7,13 @@ using VulkanStory.Render.Vulkan.Core;
 
 namespace VulkanStory.Game;
 
+/// <summary>One pre-input snapshot of ordinary post-processing, shadow and frame-pacing settings.</summary>
 internal sealed record GameFrameSettings(bool Bloom, bool GodRays, bool Fxaa,
     bool Ssao, int ShadowQuality, bool Vsync, float MaxFps);
 
 // The process session owns its concrete services. Startup supplies the selected
 // game data path and normalized renderer settings, without placeholder callbacks.
+/// <summary>Concrete renderer settings and resolved game data path selected for the process session.</summary>
 internal sealed record GameSessionServices(RendererSettingsState RendererSettings, string DataPath)
 {
     internal static GameSessionServices Load(string dataPath)
@@ -22,6 +24,7 @@ internal sealed record GameSessionServices(RendererSettingsState RendererSetting
     }
 }
 
+/// <summary>Owns the SDL window, Vulkan device, input adapters, temporal history and providers on one session thread; the original game supplies simulation and scene callbacks.</summary>
 internal sealed partial class GameRenderSession : IDisposable
 {
     // A failed factory has no ProcessRuntime.session owner yet. If its cleanup
@@ -59,6 +62,17 @@ internal sealed partial class GameRenderSession : IDisposable
     private GameRenderSession(ClientPlatformWindows platform, StartupRoutingTransaction routing, GameSessionServices services)
     { this.platform = platform; this.routing = routing; this.services = services; }
 
+    /// <summary>Creates the owned SDL window, Vulkan device, providers and adapters while startup routing is dormant.</summary>
+    /// <param name="platform">Original game platform identity retained by every adapter.</param>
+    /// <param name="routing">Prepared startup transaction whose predicate gates game draws.</param>
+    /// <param name="services">Resolved data path and normalized session settings.</param>
+    /// <param name="title">Original game window title.</param>
+    /// <param name="width">Requested logical window width.</param>
+    /// <param name="height">Requested logical window height.</param>
+    /// <param name="windowState">Original window-state numeric value; hidden harness policy still controls visibility.</param>
+    /// <param name="windowBorder">Original border numeric value mapped to SDL border/resizability.</param>
+    /// <returns>A fully prepared session to be committed by the startup transaction.</returns>
+    /// <remarks>Factory failure releases partial resources. Cleanup failure retains the complete owner graph and throws both failures.</remarks>
     internal static GameRenderSession Create(ClientPlatformWindows platform, StartupRoutingTransaction routing,
         GameSessionServices services, string title, int width, int height, int windowState = 0, int windowBorder = 0)
     {
@@ -127,11 +141,14 @@ internal sealed partial class GameRenderSession : IDisposable
         }
     }
 
+    /// <summary>Runs the active SDL loop on the session owner thread until the ordinary close path accepts exit.</summary>
     internal void Run()
     {
         RequireActive();
         input!.Run();
     }
+    /// <summary>Dispatches one original game frame between owned Vulkan begin and provider/presentation boundaries.</summary>
+    /// <remarks>Requires a pre-input settings snapshot and rejects recursion. A render failure retains the failed frame and rejects later frame/control work.</remarks>
     internal void RenderFrame()
     {
         RequireActive();
@@ -224,6 +241,8 @@ internal sealed partial class GameRenderSession : IDisposable
         if (reloadTerrainPending) ReloadTerrainShaders();
         reloadTerrainPending = false;
     }
+    /// <summary>Evaluates SR at the reconstruction seam before bloom, final composition and UI.</summary>
+    /// <returns>True when this matching camera/motion frame was evaluated; false when the temporal prerequisites decline.</returns>
     internal bool RenderUpscaler()
     {
         RequireActive();
@@ -232,9 +251,10 @@ internal sealed partial class GameRenderSession : IDisposable
         GameTemporalFrame temporal = Temporal.Snapshot();
         if (temporal.FrameId != Device.LatencyFrameId || !temporal.HasCamera || !temporal.MotionValid)
         { Graphics.UpscaledThisFrame = false; return false; }
-        bool evaluated = upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
-        return evaluated;
+        return upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
     }
+    /// <summary>Runs SR or native TAA followed by the retained display-resolution post tail.</summary>
+    /// <remarks>AO precedes this seam and UI is excluded from reconstruction inputs.</remarks>
     internal void RenderTemporalPostTail()
     {
         RequireActive();
@@ -244,6 +264,8 @@ internal sealed partial class GameRenderSession : IDisposable
         if (!RenderUpscaler()) Graphics.RenderTaaResolve(Temporal);
         Graphics.RenderPostTail(Graphics.PostSceneTexture(), Graphics.PostGlowTexture());
     }
+    /// <summary>Executes AO followed by temporal reconstruction and display-resolution post stages.</summary>
+    /// <param name="projection">Original scene projection used by the AO path; ignored when offscreen rendering is disabled.</param>
     internal void RenderPostProcessing(float[]? projection)
     {
         RequireActive();
@@ -251,6 +273,9 @@ internal sealed partial class GameRenderSession : IDisposable
         Graphics.RenderAmbientOcclusionPost(projection!);
         RenderTemporalPostTail();
     }
+    /// <summary>Normalizes and applies requested options to this active session.</summary>
+    /// <param name="next">Requested settings snapshot.</param>
+    /// <remarks>Pacing/input/FPS and multiplier-only changes retain scene resources. Other changes reset FG/SR/history and request target/shader rebuilding.</remarks>
     internal void ApplyRendererSettings(RendererSettings next)
     {
         RequireActive();
@@ -265,6 +290,7 @@ internal sealed partial class GameRenderSession : IDisposable
             ShowFpsCounter = next.ShowFpsCounter,
             ControllerEnabled = next.ControllerEnabled,
             TouchEnabled = next.TouchEnabled,
+            FrameGenerationMultiplier = next.FrameGenerationMultiplier,
         }) == next)
         {
             services.RendererSettings.Apply(next);
@@ -356,6 +382,8 @@ internal sealed partial class GameRenderSession : IDisposable
             throw new InvalidOperationException("Session render cycle failed; further frame/control work is rejected.", renderCycleFailure);
         if (stopping || !routing.RoutingEnabled || input is null) throw new InvalidOperationException("Complete SDL/Vulkan session routing is not active.");
     }
+    /// <summary>Drains and releases providers/device before detaching input and destroying the SDL window.</summary>
+    /// <remarks>Must run on the owner thread outside rendering. Failed GPU release retains dependent window/patch owners and propagates.</remarks>
     public void Dispose()
     {
         RequireOwner();

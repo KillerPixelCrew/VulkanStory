@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace VulkanStory.Game;
 
+/// <summary>Supported deterministic operations in an isolated headless scenario.</summary>
 internal enum HeadlessScenarioActionKind
 {
     Settings,
@@ -14,6 +15,7 @@ internal enum HeadlessScenarioActionKind
     Assert
 }
 
+/// <summary>Validated action scheduled at a specific scenario frame, including optional settings and capture expectations.</summary>
 internal sealed record HeadlessScenarioAction(
     int Index,
     string Id,
@@ -27,11 +29,13 @@ internal sealed record HeadlessScenarioAction(
     JsonElement Expected = default,
     string? Baseline = null);
 
+/// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
 {
     internal string Category { get; } = category;
 }
 
+/// <summary>Loads and validates the scenario document before session execution; action support and observation scope are explicit.</summary>
 internal sealed class HeadlessScenario
 {
     private static readonly JsonSerializerOptions SettingsJson = new() { PropertyNameCaseInsensitive = false };
@@ -68,6 +72,7 @@ internal sealed class HeadlessScenario
             ["successfulUpscaleFrames"] = (JsonValueKind.Number, true),
             ["preparedFrames"] = (JsonValueKind.Number, true),
             ["realPresents"] = (JsonValueKind.Number, false),
+            ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedDlssPresents"] = (JsonValueKind.Number, false),
             ["cpuRenderCycleSucceeded"] = (JsonValueKind.True, false),
@@ -81,7 +86,7 @@ internal sealed class HeadlessScenario
         };
     private static readonly HashSet<string> MonotonicTotals = new(StringComparer.Ordinal)
     {
-        "successfulUpscaleFrames", "preparedFrames", "realPresents", "sdkReportedPresents"
+        "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, IReadOnlyList<HeadlessScenarioAction> actions)
@@ -98,6 +103,10 @@ internal sealed class HeadlessScenario
     internal IReadOnlyList<HeadlessScenarioAction> Actions { get; }
     internal static IReadOnlyDictionary<string, (JsonValueKind Kind, bool Nullable)> Fields => AssertionFields;
 
+    /// <summary>Loads, hashes and validates the complete isolated scenario before any action executes.</summary>
+    /// <param name="path">Scenario JSON pathname.</param>
+    /// <returns>Validated scenario with supported actions and observation scopes.</returns>
+    /// <remarks>Malformed or unsupported instructions throw a categorized validation exception; file errors propagate.</remarks>
     internal static HeadlessScenario Load(string path)
     {
         string fullPath;

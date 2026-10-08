@@ -5,12 +5,17 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>FSR 4 shared-image exchange between Vulkan submissions and the DX12 reconstruction runtime.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    /// <summary>Creates the Vulkan-imported image sets and fence for the supplied FSR 4 runtime/plan.</summary>
     internal bool TryCreateFsr4SharedFrames(Fsr4Runtime runtime, in UpscalerPlan plan,
         out Fsr4SharedFrames? shared, out string reason) =>
         Fsr4SharedFrames.TryCreate(_context, runtime, plan, out shared, out reason);
 
+    /// <summary>Exchanges prepared input and output images with DX12 through ordered shared-fence submissions.</summary>
+    /// <remarks>Input copies signal readiness for DX12; the output-copy submission waits for DX12 completion before using the result.</remarks>
+    /// <returns>The DX12 bridge result code.</returns>
     internal int EvaluateFsr4(Fsr4Runtime runtime, Fsr4SharedFrames shared, int motionRg,
         in UpscalerPlan plan, in UpscalerFrame frame, bool firstFrame)
     {

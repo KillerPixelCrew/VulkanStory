@@ -6,6 +6,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Remaining public legacy state methods from the retained platform implementation.
+/// <summary>Redirects the remaining pinned platform graphics operations, including GUI scaling and pixel readback.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class RemainingPlatformConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-platform-remaining";
@@ -22,6 +24,10 @@ internal static class RemainingPlatformConsumerPatches
         new("GlStencilOp", [typeof(int), typeof(int), typeof(int)], nameof(StencilOperation), 1),
         new("GlClearStencil", [], nameof(ClearStencil), 1),
     ];
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="enabled">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(Func<bool> enabled)
     {
         ArgumentNullException.ThrowIfNull(enabled);

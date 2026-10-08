@@ -3,6 +3,10 @@ using System.Runtime.Loader;
 
 namespace VulkanStory.Bootstrap;
 
+/// <summary>Resolves early managed dependencies from pinned payload paths and the official game's binary folders.</summary>
+/// <param name="managedDirectory">Directory containing the private VulkanStory managed payload.</param>
+/// <param name="gameDirectory">Official client installation root.</param>
+/// <param name="trace">Optional callback for successful resolution diagnostics.</param>
 internal sealed class BootstrapDependencies(string managedDirectory, string gameDirectory,
     Action<string, string>? trace = null)
 {
@@ -32,9 +36,12 @@ internal sealed class BootstrapDependencies(string managedDirectory, string game
         "Microsoft.DotNet.PlatformAbstractions", "Microsoft.Extensions.DependencyModel"
     };
 
+    /// <summary>Attaches this resolver to the existing default load context.</summary>
     internal void Register() => AssemblyLoadContext.Default.Resolving += Resolve;
+    /// <summary>Detaches this resolver; already loaded assemblies remain in the default context.</summary>
     internal void Unregister() => AssemblyLoadContext.Default.Resolving -= Resolve;
 
+    /// <summary>Loads a verified dependency path into the requesting load context when a candidate exists.</summary>
     private Assembly? Resolve(AssemblyLoadContext context, AssemblyName requested)
     {
         string? path = Locate(requested);
@@ -43,6 +50,10 @@ internal sealed class BootstrapDependencies(string managedDirectory, string game
         return context.LoadFromAssemblyPath(path);
     }
 
+    /// <summary>Finds and verifies an allowed early dependency without loading its assembly.</summary>
+    /// <param name="requested">Assembly identity requested by the runtime.</param>
+    /// <returns>An absolute candidate path, or null for an invalid name or an absent unpinned dependency.</returns>
+    /// <exception cref="FileLoadException">A located dependency does not satisfy the requested identity/version.</exception>
     internal string? Locate(AssemblyName requested)
     {
         string? name = requested.Name;
@@ -66,6 +77,7 @@ internal sealed class BootstrapDependencies(string managedDirectory, string game
         return null;
     }
 
+    /// <summary>Checks assembly metadata and returns an absolute path, preserving missing-file and metadata failures.</summary>
     private static string VerifyIdentity(AssemblyName requested, string path)
     {
         AssemblyName actual = AssemblyName.GetAssemblyName(path);

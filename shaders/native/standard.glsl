@@ -154,7 +154,6 @@ void main(void)
 		worldPos = applyGlobalWarping(worldPos);
 	}
 	if (dontWarpVertices == 2) {
-		int windMode = ((flags | addRenderFlags) >> WindModePosition) & 0xF;
 		vec4 newPos = applyVertexWarping(flags | addRenderFlags, worldPos);
 		worldPos = mix(worldPos, newPos, 0.25); // Hardcoded intensity downscale of 4x
 		worldPos = applyGlobalWarping(worldPos);
@@ -294,8 +293,8 @@ void main() {
 
 		outColor = vec4(
 		  (a1 * col1.r + col2.r * a2) / (a1+a2),
-		  (a1 * col1.b + col2.g * a2) / (a1+a2),
-		  (a1 * col1.g + col2.b * a2) / (a1+a2),
+		  (a1 * col1.g + col2.g * a2) / (a1+a2),
+		  (a1 * col1.b + col2.b * a2) / (a1+a2),
 		  a1 + a2
 		) * color;
 

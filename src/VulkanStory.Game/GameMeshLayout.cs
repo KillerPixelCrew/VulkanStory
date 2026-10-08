@@ -6,6 +6,9 @@ namespace VulkanStory.Game;
 /// <summary>Preserves game allocation metadata without passing game objects into Vulkan.</summary>
 internal static class GameMeshLayout
 {
+    /// <summary>Captures backend-neutral upload metadata while borrowing the original managed vertex/index arrays.</summary>
+    /// <param name="data">Original game mesh; source arrays must remain valid for the upload call.</param>
+    /// <returns>Mesh description retaining offsets, counts, draw mode and custom attribute layouts.</returns>
     internal static MeshUploadData Capture(MeshData data) => new()
     {
         VerticesCount = data.VerticesCount, IndicesCount = data.IndicesCount,
@@ -23,6 +26,9 @@ internal static class GameMeshLayout
     private static MeshCustomUpload<T>? Upload<T>(CustomMeshDataPart<T>? part, MeshCustomPartLayout? layout) =>
         part is null ? null : new(part.Values, part.Count, part.BaseOffset, layout!);
 
+    /// <summary>Converts supported original mesh topology without passing game enums into the renderer.</summary>
+    /// <param name="mode">Original triangle, line or line-strip mode.</param>
+    /// <returns>Matching backend mode. Unsupported modes throw.</returns>
     internal static MeshDrawMode DrawMode(EnumDrawMode mode) => mode switch
     {
         EnumDrawMode.Triangles => MeshDrawMode.Triangles,

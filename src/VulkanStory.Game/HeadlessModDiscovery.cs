@@ -4,8 +4,11 @@ using Vintagestory.Common;
 
 namespace VulkanStory.Game;
 
+/// <summary>Installs the isolated harness mod-discovery hook that excludes candidate-local development trees from ordinary game scanning.</summary>
 internal static class HeadlessModDiscovery
 {
+    /// <summary>Resolves the pinned original mod-discovery target for the isolated harness.</summary>
+    /// <returns>Original discovery method to patch; unsupported shapes throw.</returns>
     internal static MethodInfo Validate()
     {
         var method = AccessTools.Method(typeof(ModLoader), "CollectMods", []) ??
@@ -19,6 +22,8 @@ internal static class HeadlessModDiscovery
         return method;
     }
 
+    /// <summary>Removes development-tree candidates from original discovery results in explicitly enabled headless mode.</summary>
+    /// <param name="__result">Original mutable discovered-mod list.</param>
     internal static void Filter(List<ModContainer> __result)
     {
         if (!HeadlessHarnessOptions.Enabled) return;

@@ -25,7 +25,9 @@ internal readonly record struct VertexAttribute(uint Location, uint Binding, For
 /// </summary>
 internal sealed class VertexLayoutDescription : IEquatable<VertexLayoutDescription>
 {
+    /// <summary>Ordered vertex-buffer binding descriptions included in layout equality.</summary>
     public VertexBinding[] Bindings { get; }
+    /// <summary>Ordered vertex attribute descriptions included in layout equality.</summary>
     public VertexAttribute[] Attributes { get; }
 
     private readonly int _hash;
@@ -123,6 +125,7 @@ internal sealed class VertexLayoutDescription : IEquatable<VertexLayoutDescripti
         type.Name.StartsWith("u", StringComparison.Ordinal) ||
         type.Name == "int" || type.Name == "uint" || type.Name == "bool";
 
+    /// <inheritdoc/>
     public bool Equals(VertexLayoutDescription? other)
     {
         if (other is null || other._hash != _hash) return false;
@@ -140,7 +143,9 @@ internal sealed class VertexLayoutDescription : IEquatable<VertexLayoutDescripti
         return true;
     }
 
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => Equals(obj as VertexLayoutDescription);
+    /// <inheritdoc/>
     public override int GetHashCode() => _hash;
 }
 
@@ -187,6 +192,7 @@ internal sealed class VertexLayoutBuilder
         return this;
     }
 
+    /// <summary>Snapshots the builder's binding and attribute lists into a vertex-layout description.</summary>
     public VertexLayoutDescription Build() => new(_bindings.ToArray(), _attributes.ToArray());
 
     // ------------------------------------------------------------ format mapping

@@ -6,6 +6,8 @@ namespace VulkanStory.Platform.Sdl.Tests;
 
 // Ported from the source renderer's SdlEventPumpTests. The game adapter now
 // maps physical scancodes to GlKeys after the SDL boundary.
+/// <summary>Checks SDL event memory offsets and copied text for synthetic keyboard, pointer, display, and touch buffers.</summary>
+/// <remarks>Exercises buffer decoding, not native queue pumping or physical input.</remarks>
 public sealed unsafe class SdlEventDecodingTests
 {
     [Fact]

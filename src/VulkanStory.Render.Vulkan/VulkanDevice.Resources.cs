@@ -10,10 +10,12 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Texture, sampler, framebuffer and mesh resource operations exposed to the game integration.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     // -------------------------------------------------------------------- textures
 
+    /// <summary>Creates a renderer-owned 2D texture from the neutral client formats and optional initial pixels.</summary>
     public int CreateTexture2D(
         int width, int height, EnumTextureInternalFormat internalFormat,
         EnumTexturePixelFormat pixelFormat, IntPtr pixels, bool generateMipmaps)
@@ -30,6 +32,7 @@ public sealed unsafe partial class VulkanDevice
         return id;
     }
 
+    /// <summary>Creates a renderer 2D texture from a retained raw GL internal format and raw texel bytes.</summary>
     public int CreateTexture2DRaw(int width, int height, int glInternalFormat, IntPtr pixels, int bytesPerPixel,
         bool generateMipmaps = false)
     {
@@ -111,6 +114,7 @@ public sealed unsafe partial class VulkanDevice
         _sampledTextureOverrides.Clear();
     }
 
+    /// <summary>Creates a cube texture using a raw GL internal format and explicit upload texel size.</summary>
     public int CreateTextureCubeRaw(int size, int glInternalFormat, IntPtr[] facePixels, int bytesPerPixel)
     {
         Format format = GlEnums.TextureFormatFromGl(glInternalFormat);
@@ -125,6 +129,7 @@ public sealed unsafe partial class VulkanDevice
         return id;
     }
 
+    /// <summary>Creates a renderer cube texture from six borrowed face-pixel pointers.</summary>
     public int CreateTextureCube(
         int size, EnumTextureInternalFormat internalFormat,
         EnumTexturePixelFormat pixelFormat, IntPtr[] facePixels)
@@ -141,12 +146,14 @@ public sealed unsafe partial class VulkanDevice
         return id;
     }
 
+    /// <summary>Creates an array texture with the requested layer count and neutral client format.</summary>
     public int CreateTexture2DArray(
         int width, int height, int layers,
         EnumTextureInternalFormat internalFormat, EnumTexturePixelFormat pixelFormat) =>
         _textures.Create((uint)width, (uint)height,
             GlEnums.TextureFormatFrom(internalFormat), layers: (uint)layers);
 
+    /// <summary>Uploads borrowed client pixels into a texture mip rectangle using the client pixel format.</summary>
     public void UploadTexture2D(
         int textureId, int level, int x, int y, int width, int height,
         EnumTexturePixelFormat pixelFormat, IntPtr pixels)
@@ -156,6 +163,7 @@ public sealed unsafe partial class VulkanDevice
             pixelFormat == EnumTexturePixelFormat.Red ? 1 : 4);
     }
 
+    /// <summary>Uploads borrowed raw texels into a texture mip rectangle with the supplied byte size.</summary>
     public void UploadTexture2DRaw(
         int textureId, int level, int x, int y, int width, int height, IntPtr pixels, int bytesPerPixel)
     {
@@ -164,12 +172,14 @@ public sealed unsafe partial class VulkanDevice
         _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels, bytesPerPixel);
     }
 
+    /// <summary>Records mip generation for a live texture using the renderer upload/resource path.</summary>
     public void GenerateMipmaps(int textureId)
     {
         FlushPendingClears(textureId);
         _textures.GenerateMipmaps(textureId);
     }
 
+    /// <summary>Removes a texture ID and schedules GPU-safe release through the renderer resource owner.</summary>
     public void DeleteTexture(int textureId) => ReleaseTexture(textureId);
 
     /// <summary>
@@ -199,15 +209,19 @@ public sealed unsafe partial class VulkanDevice
         if (texture != null) VulkanStats.NoteTextureDeleted();
     }
 
+    /// <summary>Updates a retained client texture sampling parameter by its raw GL parameter name.</summary>
     public void SetTextureParameter(int textureId, int parameterName, int value) =>
         _textures.SetParameter(textureId, parameterName, value);
 
+    /// <summary>Updates a retained client texture sampling parameter by its raw GL parameter name.</summary>
     public void SetTextureParameter(int textureId, int parameterName, float value) =>
         _textures.SetParameter(textureId, parameterName, value);
 
+    /// <summary>Updates the texture's retained RGBA sampler-border state.</summary>
     public void SetTextureBorderColor(int textureId, float r, float g, float b, float a) =>
         _textures.SetBorderColor(textureId, r, g, b, a);
 
+    /// <summary>Returns a supported retained texture parameter, using the renderer's fallback for an unknown ID/name.</summary>
     public int GetTextureParameter(int textureId, int parameterName)
     {
         VulkanTexture? texture = _textures.Get(textureId);
@@ -218,6 +232,7 @@ public sealed unsafe partial class VulkanDevice
             : 0;
     }
 
+    /// <summary>Uploads a borrowed pixel rectangle into one array-texture layer.</summary>
     public void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
         int width, int height, IntPtr pixels)
     {
@@ -225,6 +240,7 @@ public sealed unsafe partial class VulkanDevice
         _textures.Upload(textureId, 0, x, y, (uint)width, (uint)height, pixels, 4, (uint)layer);
     }
 
+    /// <summary>Uploads normalized-short pixel data into a texture mip rectangle.</summary>
     public void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
         int width, int height, short[] pixels)
     {
@@ -235,6 +251,7 @@ public sealed unsafe partial class VulkanDevice
     private readonly Dictionary<int, SamplerState> _standaloneSamplers = new();
     private int _nextSamplerId = 1;
 
+    /// <summary>Creates a standalone client sampler-state ID with nearest or linear defaults.</summary>
     public int CreateSampler(bool linear)
     {
         int id = _nextSamplerId++;
@@ -251,6 +268,7 @@ public sealed unsafe partial class VulkanDevice
         return id;
     }
 
+    /// <summary>Updates a supported parameter in the standalone sampler-state table.</summary>
     public void SetSamplerParameter(int samplerId, int parameterName, float value)
     {
         if (!_standaloneSamplers.TryGetValue(samplerId, out SamplerState state)) return;
@@ -260,6 +278,7 @@ public sealed unsafe partial class VulkanDevice
             : state;
     }
 
+    /// <summary>Removes the standalone client sampler-state ID.</summary>
     public void DeleteSampler(int samplerId) => _standaloneSamplers.Remove(samplerId);
 
     private static int BytesPerPixel(EnumTextureInternalFormat format) => format switch
@@ -273,8 +292,10 @@ public sealed unsafe partial class VulkanDevice
 
     // ---------------------------------------------------------------- framebuffers
 
+    /// <summary>Registers a renderer framebuffer with the supplied pixel extent.</summary>
     public int CreateFramebuffer(int width, int height) => _targets.Create((uint)width, (uint)height);
 
+    /// <summary>Associates a renderer texture/layer with the selected framebuffer attachment slot.</summary>
     public void AttachTexture(int framebufferId, EnumFramebufferAttachment attachment, int textureId, int layer)
     {
         int index = attachment == EnumFramebufferAttachment.DepthAttachment
@@ -284,6 +305,7 @@ public sealed unsafe partial class VulkanDevice
         _targets.Attach(framebufferId, index, textureId, (uint)layer);
     }
 
+    /// <summary>Checks retained framebuffer attachment compatibility and reports a client-readable status.</summary>
     public bool CheckFramebufferComplete(int framebufferId, out string status)
     {
         // Dynamic rendering has no framebuffer object to validate, so
@@ -299,6 +321,7 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
+    /// <summary>Unbinds and removes a framebuffer through the renderer target manager.</summary>
     public void DeleteFramebuffer(int framebufferId)
     {
         _targets.Delete(framebufferId);
@@ -383,26 +406,34 @@ public sealed unsafe partial class VulkanDevice
     }
 }
 
+/// <summary>Texture, sampler, framebuffer and mesh resource operations exposed to the game integration.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     // --------------------------------------------------------------------- meshes
 
     private MeshUploads _meshUploads = null!;
+    /// <summary>Creates and uploads a mesh through the neutral mesh-data contract.</summary>
     public int CreateMesh(VulkanStory.Contracts.MeshUploadData data, bool staticDraw) =>
         _meshUploads.CreateMesh(data, staticDraw);
+    /// <summary>Updates each supplied mesh stream using its declared destination byte offset.</summary>
     public void UpdateMesh(int meshId, VulkanStory.Contracts.MeshUploadData data) =>
         _meshUploads.UpdateMesh(meshId, data);
+    /// <summary>Allocates mesh stream capacities and custom layouts without initial data.</summary>
+    /// <remarks>All stream size arguments are bytes; the SSBO flag selects packed-face storage and the retained quad-index pattern.</remarks>
     public int CreateEmptyMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize,
         VulkanStory.Contracts.MeshCustomPartLayout? customFloats, VulkanStory.Contracts.MeshCustomPartLayout? customShorts,
         VulkanStory.Contracts.MeshCustomPartLayout? customBytes, VulkanStory.Contracts.MeshCustomPartLayout? customInts,
         VulkanStory.Contracts.MeshDrawMode drawMode, bool staticDraw, bool ssbo) =>
         _meshUploads.CreateEmptyMesh(xyzSize, normalsSize, uvSize, rgbaSize, flagsSize, indicesSize,
             customFloats, customShorts, customBytes, customInts, drawMode, staticDraw, ssbo);
+    /// <summary>Writes packed face-record bytes into a mesh's SSBO-backed position slot.</summary>
     public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize) =>
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
+    /// <summary>Returns borrowed mapped storage for the requested mesh slot, or zero when absent/unmapped.</summary>
     public IntPtr GetMappedPointer(int meshId, VulkanStory.Contracts.MeshBufferSlot slot) =>
         _meshes.MappedPointer(meshId, (int)slot);
 
+    /// <summary>Removes the mesh and schedules its GPU-owned buffers for frame-safe deletion.</summary>
     public void DeleteMesh(int meshId) => _meshes.Delete(meshId, _frames);
 }
 

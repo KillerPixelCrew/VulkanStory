@@ -8,6 +8,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Translates the pinned Essentials cloud-map framebuffer, texture and draw operations into owned Vulkan resources.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class CloudMapConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-cloud-map";
@@ -39,6 +41,11 @@ internal static class CloudMapConsumerPatches
             throw new InvalidOperationException("Original cloud-map GL/draw count changed.");
         foreach (var call in calls) Wrapper((MethodInfo)call.operand);
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <param name="essentials">Original Essentials assembly containing the pinned built-in consumers.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly essentials)
     {
         Type type = essentials.GetType("FluffyClouds.CloudRendererMap", true)!;

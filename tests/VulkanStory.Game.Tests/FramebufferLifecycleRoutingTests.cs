@@ -8,6 +8,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks official framebuffer lifecycle routes, host dimensions, placeholders, and ownership/disposal guards.</summary>
+/// <remarks>Uses owned zero-ID placeholders and CPU state rather than native framebuffer allocation.</remarks>
 public sealed class FramebufferLifecycleRoutingTests
 {
     [Fact]

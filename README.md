@@ -2,7 +2,9 @@
 
 Fresh Vintage Story Vulkan renderer and SDL window/input mod, targeting the official 1.22.7 Windows x64 client.
 
-**Status — 2026-10-01:** the full Vulkan backend, SDL host, official-game Harmony integration, SR/FG providers, controller UI, capture routes and declared mod-pass API are wired and compile. Isolated world captures have run with native resolution, DLSS, FSR3 and XeSS; these are scoped checkpoints, not full feature-parity acceptance. A Windows development ZIP has been produced. The full port remains open. See [current feature status](docs/current-port-status.md) and [roadmap](docs/porting-plan.md).
+The [Roadmap](docs/ROADMAP.md) is authoritative for current feature status, source/package identity and remaining work. [Development evidence](docs/development-evidence.md) separates applied source from build, runtime and hardware checks. The full port remains open.
+
+**Historical checkpoint — 2026-10-01:** the Vulkan backend, SDL host, official-game integration, providers and mod API were wired and compiled; isolated native/DLSS/FSR3/XeSS captures and a development ZIP were recorded. These scoped results do not certify later source or full feature parity.
 
 Routine runtime work uses the [isolated hidden harness](docs/headless-harness.md) with a snapshot of **foggy village story**. It does not deploy to or control the user's game. New test writing remains deferred; implementation and validation turns stay separate.
 
@@ -33,4 +35,4 @@ Set `VintageStoryPath` in `Directory.Build.local.props` to the official installa
 
 Use the harness against a fresh stage for routine renderer checks. The ownership-aware updater is `scripts/deploy-runtime.ps1`; installed deployment is separate from harness work. No automatic replacement of the user's running game is part of development checks.
 
-The latest ZIP is recorded in [the candidate checkpoint](docs/validation-client-candidate-2026-10-01-01.md). It predates subsequent controller/graph changes; the newest stage is recorded in [the native-resolution world checkpoint](docs/validation-graph-native-world-2026-10-01-01.md).
+The [October-1 candidate](docs/validation-client-candidate-2026-10-01-01.md) and [native-resolution world checkpoint](docs/validation-graph-native-world-2026-10-01-01.md) are historical payloads. Use the Roadmap for the current stage and its acceptance limits.

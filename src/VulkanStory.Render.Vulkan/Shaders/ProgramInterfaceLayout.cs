@@ -23,6 +23,7 @@ internal sealed class UniformMember
     /// <summary>Default value as written in the shader, or null.</summary>
     public string? Initializer;
 
+    /// <summary>Uniform array length, or one for a scalar/nonarray declaration.</summary>
     public int ElementCount => ArrayLength == 0 ? 1 : ArrayLength;
 }
 
@@ -52,6 +53,7 @@ internal sealed class SamplerBinding
     /// <summary>Byte offset of the slot index in the push block, or -1 for a frame texture.</summary>
     public int PushOffset = -1;
 
+    /// <summary>Whether the sampler resolves through a shared frame-texture binding.</summary>
     public bool IsFrameTexture => FrameBinding >= 0;
 }
 
@@ -180,10 +182,12 @@ internal sealed partial class ProgramInterfaceLayout
     /// <summary>Size of the program record in bytes; 0 when it has no members.</summary>
     public int BlockSize { get; private set; }
 
+    /// <summary>Whether default uniforms require a nonempty packed uniform block.</summary>
     public bool HasUniformBlock => BlockSize > 0;
 
     /// <summary>Diagnostics that made the layout unusable.</summary>
     public List<string> Errors { get; } = new();
+    /// <summary>Whether interface construction recorded unsupported or conflicting declarations.</summary>
     public bool HasErrors => Errors.Count > 0;
 
     /// <summary>
@@ -205,6 +209,7 @@ internal sealed partial class ProgramInterfaceLayout
         return buffer;
     }
 
+    /// <summary>Writes the parsed default initializer into the reflected member's CPU shadow span.</summary>
     internal static void WriteInitializer(byte[] buffer, UniformMember member)
     {
         // Only scalar literal defaults are honoured. Every initialiser in the
@@ -621,15 +626,6 @@ internal sealed partial class ProgramInterfaceLayout
     }
 
     /// <summary>
-    /// Whether the fragment body stores to <paramref name="name" />: a plain,
-    /// swizzled or indexed assignment, or a compound one. Declarations are
-    /// excluded by requiring the identifier not to be preceded by a type or
-    /// the "out" keyword on the same statement.
-    /// </summary>
-    internal static bool FragmentOutputIsAssigned(string source, string name)
-        => TryGetWrittenFragmentOutputElements(source, name, out _);
-
-    /// <summary>
     /// Which elements of a fragment output the body stores to.
     /// Returns false when nothing stores to it at all. On true,
     /// <paramref name="elements" /> is null when the whole variable is written -
@@ -680,11 +676,6 @@ internal sealed partial class ProgramInterfaceLayout
 
 
     /// <summary>
-    /// How many consecutive locations a variable consumes. A vector of any width
-    /// fits in one; a matrix takes one per column; an array multiplies by its
-    /// length.
-    /// </summary>
-    /// <summary>
     /// Notes a vertex input so the device can supply GL's constant default when
     /// the mesh does not carry it. Arrays and matrices are skipped: nothing in
     /// the game declares one as a vertex input, and spanning several locations
@@ -705,6 +696,7 @@ internal sealed partial class ProgramInterfaceLayout
         layout.VertexInputs.Add(new VertexInputSlot(declaration.Name, location, type));
     }
 
+    /// <summary>Counts consecutive interface locations: vectors occupy one, matrices one per column, and arrays multiply by their length.</summary>
     private static int LocationSpan(GlslDeclaration declaration)
     {
         int elements = declaration.ArrayLength == 0 ? 1 : declaration.ArrayLength;

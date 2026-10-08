@@ -1,5 +1,5 @@
 // The only writer of the motion attachment in native shaders
-// (docs/vulkan.md, docs/vulkan.md).
+// (docs/frame-motion-coverage-implementation.md).
 //
 //   rg = motion vector: previous pixel - current unjittered pixel, render pixels
 //   b  = reactive [0,1]
@@ -21,7 +21,7 @@
 #define OPTIMUM_MOTION_GLSL
 
 // The raw vector, without the behind-camera test. particlescube calls this directly: on
-// its behind-camera branch it keeps its writer depth and its reactive value of 1.
+// its behind-camera branch it clears writer depth and keeps reactive value 1.
 vec2 optimumMotionVector(vec4 prevClip, vec2 renderSize, vec2 jitterPx)
 {
 	vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * renderSize;

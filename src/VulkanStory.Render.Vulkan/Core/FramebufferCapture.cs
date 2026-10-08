@@ -5,6 +5,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>GL unsigned-byte BGRA output from the retained neutral decoder.</summary>
 internal static class FramebufferCapture
 {
+    /// <summary>Converts supported raw texture-capture pixels to tightly packed BGRA8 screenshot bytes.</summary>
     internal static byte[] Bgra8(TextureCaptureData capture)
     {
         if (capture.Width < 0 || capture.Height < 0) throw new ArgumentOutOfRangeException(nameof(capture));

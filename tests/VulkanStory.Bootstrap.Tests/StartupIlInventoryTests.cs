@@ -4,8 +4,11 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks field/call operand discovery and offset ordering from a managed fixture's IL.</summary>
+/// <remarks>Does not inspect or execute a live game startup path.</remarks>
 public sealed class StartupIlInventoryTests
 {
+    /// <summary>Managed field source used to create a deterministic ldfld operand in the scanned method.</summary>
     private sealed class Fixture
     {
         public int Value = -3;

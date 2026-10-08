@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks presentation-observer counters crossing the neutral renderer-to-host callback boundary.</summary>
+/// <remarks>Counter routing is not evidence of generated-frame display or scanout.</remarks>
 public sealed class ContextBoundaryTests
 {
     [Fact]

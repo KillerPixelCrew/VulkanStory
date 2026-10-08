@@ -10,6 +10,7 @@ namespace VulkanStory.Game;
 
 // The session supplies pacing/markers, renderer resizing/teardown, GUI text
 // targeting, and controller mapping. No renderer or game singleton lives in SDL.
+/// <summary>Session-supplied boundaries for SDL input, latency, controls and frame dispatch; callbacks execute from the owned event loop.</summary>
 internal sealed record GamePlatformCallbacks(
     Action BeforeInput, Action InputPumped, Action UpdateControllers, Action ControllersPumped,
     Action<int> ControllerActivity, Action RefreshControllers, Action ControllerFocusLost,
@@ -20,11 +21,6 @@ internal sealed record GamePlatformCallbacks(
     internal ControllerPerformanceDiagnostics? ControllerPerformance { get; init; }
     internal Func<bool>? ControllerDiagnosticsEnabled { get; init; }
     internal Func<bool>? ControllerInputActive { get; init; }
-    internal GamePlatformCallbacks WithTextInput(SdlGuiTextInput text) => this with
-    {
-        HasTextTarget = text.HasCurrentTarget, SyncTextInput = text.Sync,
-        StopTextInput = text.Stop, TextTargetRevision = () => text.TargetRevision,
-    };
 }
 
 /// <summary>SDL state alongside the unchanged official platform object.</summary>
@@ -48,6 +44,8 @@ internal sealed class GamePlatformAdapter : IDisposable
     private (int Width, int Height)? pendingPixels;
     private bool recompose, closeRequested, pumping, stopping;
     private int externalCloseRequested;
+    /// <summary>Queues an exit request for the next owned SDL pump without destroying the window.</summary>
+    /// <remarks>Uses an atomic request flag; ordinary game close cancellation still applies.</remarks>
     internal void RequestWindowExit() => Interlocked.Exchange(ref externalCloseRequested, 1);
     internal void RefreshWindowLayout() { RequireActive(); QueueLayout(); }
     private EnumWindowBorder windowBorder = EnumWindowBorder.Resizable;
@@ -81,6 +79,13 @@ internal sealed class GamePlatformAdapter : IDisposable
     }
 
     // Construction failure leaves native resources with the session factory.
+    /// <summary>Attaches SDL input/window services to one unchanged original platform and replaces its XPlatInterface with a scoped adapter.</summary>
+    /// <param name="platform">Original game platform identity.</param>
+    /// <param name="window">Session window, retained through device drain.</param>
+    /// <param name="routing">Complete startup transaction used to gate window operations.</param>
+    /// <param name="callbacks">Session-owned input, resize, controller and teardown boundaries.</param>
+    /// <returns>The new platform sidecar.</returns>
+    /// <remarks>Construction failure leaves native resources with the session factory; replacing XPlatInterface failure removes the association.</remarks>
     internal static GamePlatformAdapter Attach(ClientPlatformWindows platform, SdlWindowHost window,
         StartupRoutingTransaction routing, GamePlatformCallbacks callbacks)
     {
@@ -117,6 +122,8 @@ internal sealed class GamePlatformAdapter : IDisposable
         Window.SetBordered(windowBorder != EnumWindowBorder.Hidden);
     }
 
+    /// <summary>Maps the original window-state request to SDL fullscreen, restore, minimize or maximize and queues layout refresh.</summary>
+    /// <param name="value">Original OpenTK state enum; unknown numeric states are rejected.</param>
     internal void SetWindowState(OpenTK.Windowing.Common.WindowState value)
     {
         RequireActive();
@@ -137,6 +144,8 @@ internal sealed class GamePlatformAdapter : IDisposable
         QueueLayout();
     }
 
+    /// <summary>Pumps input and original frame callbacks until close is accepted or cancellation is requested.</summary>
+    /// <param name="cancellation">Optional loop cancellation token.</param>
     internal void Run(CancellationToken cancellation = default)
     {
         RequireActive();
@@ -144,6 +153,8 @@ internal sealed class GamePlatformAdapter : IDisposable
         while (!closeRequested && !cancellation.IsCancellationRequested) PumpFrame();
     }
 
+    /// <summary>Runs one pre-input pacing, SDL drain, controller, resize/text and original-frame dispatch cycle.</summary>
+    /// <remarks>Owner thread only; recursive pumping is rejected. Rendering remains gated on complete startup routing.</remarks>
     internal void PumpFrame()
     {
         RequireActive();
@@ -176,6 +187,9 @@ internal sealed class GamePlatformAdapter : IDisposable
         finally { pumping = false; }
     }
 
+    /// <summary>Converts controller framebuffer-pixel coordinates to SDL logical coordinates and records the short-lived synthetic warp.</summary>
+    /// <param name="pixelX">Horizontal framebuffer-pixel position.</param>
+    /// <param name="pixelY">Vertical framebuffer-pixel position.</param>
     internal void WarpControllerCursor(float pixelX, float pixelY)
     {
         RequireActive();
@@ -196,6 +210,9 @@ internal sealed class GamePlatformAdapter : IDisposable
     private Vector2 Pixels(float x, float y) =>
         SdlWindowCoordinates.ToPixels(new(x, y), Window.WindowSize, Window.PixelSize);
 
+    /// <summary>Dispatches one neutral SDL event to the matching original platform input/window handlers.</summary>
+    /// <param name="e">Collected event; unrelated window events are filtered by identity.</param>
+    /// <remarks>Runs on the owner thread inside the active event pump.</remarks>
     internal void Dispatch(SdlInputEvent e)
     {
         RequireActive();
@@ -388,6 +405,8 @@ internal sealed class GamePlatformAdapter : IDisposable
         if (!routing.RoutingEnabled) throw new InvalidOperationException("Complete startup routing is not active.");
     }
 
+    /// <summary>Requests close, drains session graphics, then detaches original input/OS bindings and destroys the SDL window.</summary>
+    /// <remarks>Rejected during pumping. Drain failure propagates before dependent window resources are released.</remarks>
     public void Dispose()
     {
         RequireOwner();
@@ -402,6 +421,8 @@ internal sealed class GamePlatformAdapter : IDisposable
 
     // Only the session owner calls this after successful device disposal.
     // It is also needed when an earlier non-GPU cleanup action reported errors.
+    /// <summary>Restores original OS services and releases SDL/input sidecars after the session confirms device disposal.</summary>
+    /// <remarks>The caller must have completed graphics drain. Cleanup actions collect failures while clearing associations; pumping must already have stopped.</remarks>
     internal void DetachAfterDrain()
     {
         RequireOwner();

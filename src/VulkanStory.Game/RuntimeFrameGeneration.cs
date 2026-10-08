@@ -6,12 +6,14 @@ using VulkanStory.Render.Vulkan.Core;
 
 namespace VulkanStory.Game;
 
+/// <summary>Associates one DLSS-G state-query result with the latency-frame identity at which it was observed.</summary>
 internal readonly record struct DlssQueryObservation(ulong QueryFrameId, int Result,
     StreamlineFrameGenerationState? State);
 
 // Direct host migration from porting/old-platform/VulkanClientPlatform.FrameGeneration.cs.
 // Baseline: 386e0d05386d0b228b439d09aeca851428f7bbf3. SDK wrappers,
 // upright image formats, camera conversion and presentation ownership are retained.
+/// <summary>Coordinates session frame-generation eligibility, matching scene inputs and effective provider state around presentation.</summary>
 internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettingsState settings,
     Action<string> notification, Action<string> error,
     Action requestTemporalReset) : IDisposable
@@ -26,6 +28,8 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     private int fsrScene, fsrUi, fsrDepth, fsrMotion, fsrGenerated;
     private int dlssScene, dlssUi, dlssDepth, dlssMotion;
     private int dlssWidth, dlssHeight, dlssRenderWidth, dlssRenderHeight;
+    private double xessCameraX, xessCameraY, xessCameraZ;
+    private static readonly float[] DepthRemap = [1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, .5f, 0f, 0f, 0f, .5f, 1f];
     private readonly Dictionary<string, string> failed = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> waits = new(StringComparer.Ordinal);
     private bool disposed;
@@ -34,11 +38,13 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     internal string RequestedProvider => settings.Settings.FrameGeneration;
     internal string EffectiveProvider => failed.ContainsKey(activeProvider) ? "off" : activeProvider;
     // Prepared describes current inputs, not actual SDK interpolation/presentation.
+    /// <summary>Whether current frame inputs were prepared; this does not prove SDK interpolation or physical presentation.</summary>
     internal bool PreparedThisFrame { get; private set; }
     internal string PreparationStatus => PreparedThisFrame ? "current inputs prepared" : preparationStatus;
     internal uint ConfiguredDlssGeneratedFrames => configuredDlssCount;
     // Configuration after this frame's preparation/presentation handoff;
     // this does not report how many images reached the display.
+    /// <summary>Configured generated-image count after current preparation, or zero while unprepared; total multiplier is this count plus one.</summary>
     internal uint ConfiguredGeneratedFrames => !PreparedThisFrame ? 0 : EffectiveProvider switch
     {
         "dlss" => configuredDlssCount,
@@ -46,7 +52,9 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         "xess" => device.XessConfiguredGeneratedFrames,
         _ => 0,
     };
+    /// <summary>Last accumulated DLSS-G SDK-reported presentation count; physical scanout is a separate observation.</summary>
     internal uint ActualDlssPresents => actualDlssPresents;
+    /// <summary>Most recent provider-reported generated-image limit, or null when the selected provider has not reported it.</summary>
     internal uint? LastReportedSdkGeneratedLimit => RequestedProvider switch
     {
         "dlss" => lastReportedDlssGeneratedLimit,
@@ -55,9 +63,15 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     };
     internal StreamlineFrameGenerationState? LastDlssState { get; private set; }
     internal int? LastDlssStateResult { get; private set; }
+    /// <summary>DLSS-G query receipt for the current harness frame, including query identity and return code.</summary>
     internal DlssQueryObservation? HeadlessDlssQueryObservation { get; private set; }
     internal string? Unavailable(string provider) => failed.GetValueOrDefault(provider);
 
+    /// <summary>Prepares the selected frame-generation provider using the completed HUD-free scene and matching temporal frame.</summary>
+    /// <param name="graphics">Adapter publishing this frame scene/UI identities and motion readiness.</param>
+    /// <param name="buffers">Current session-owned framebuffer set.</param>
+    /// <param name="frame">Snapshot whose frame identity must match the device latency frame.</param>
+    /// <remarks>Availability and incomplete inputs keep generation inactive for the frame; provider preparation status records the reason.</remarks>
     internal void Generate(GameGraphicsAdapter graphics, IReadOnlyList<FrameBufferRef> buffers,
         in GameTemporalFrame frame)
     {
@@ -105,23 +119,25 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         FrameBufferRef? primary = Target(buffers, 0);
         FrameBufferRef? output = Target(buffers, GameGraphicsAdapter.GeneratedFrameIndex);
         if (motion < 0 || primary?.ColorTextureIds is not { } colors || colors.Length <= motion ||
-            output?.ColorTextureIds is not { Length: > 0 } || primary.DepthTextureId <= 0)
-        { Wait("primary depth, motion and output images"); Reset(); return; }
+            primary.DepthTextureId <= 0)
+        { Wait("primary depth and motion images"); Reset(); return; }
+        if (provider == "fsr3" && output?.ColorTextureIds is not { Length: > 0 })
+        { Wait("the FSR3 interpolation output image"); return; }
         FrameBufferRef? scene = graphics.SceneNoHudCaptured
             ? Target(buffers, graphics.SceneNoHudFramebufferIndex) : null;
         FrameBufferRef? ui = Target(buffers, graphics.UiFramebufferIndex);
         if (scene?.ColorTextureIds is not { Length: > 0 } || ui?.ColorTextureIds is not { Length: > 0 } ||
-            scene.Width != output.Width || scene.Height != output.Height ||
-            ui.Width != output.Width || ui.Height != output.Height)
+            ui.Width != scene.Width || ui.Height != scene.Height ||
+            (provider == "fsr3" && (scene.Width != output!.Width || scene.Height != output.Height)))
         { Wait("matching HUD-less scene and UI images"); return; }
-        if (!TryGetCamera(frame, output.Width, output.Height, out NgxFrameGenerationCamera camera))
+        if (!TryGetCamera(frame, scene.Width, scene.Height, out NgxFrameGenerationCamera camera))
         { Wait("valid world camera matrices"); return; }
 
         try
         {
-            if (provider == "dlss") GenerateDlss(primary, scene, ui, output, motion, frame, camera);
+            if (provider == "dlss") GenerateDlss(primary, scene, ui, scene, motion, frame, camera);
             else if (provider == "xess") GenerateXess(primary, scene, ui, motion, frame);
-            else GenerateFsr3(graphics, primary, scene, ui, output, motion, frame);
+            else GenerateFsr3(graphics, primary, scene, ui, output!, motion, frame);
         }
         catch (Exception failure) { Disable(provider, "frame preparation threw: " + failure.Message); }
     }
@@ -240,7 +256,17 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             JitterX = frame.Provider.JitterX, JitterY = -frame.Provider.JitterY,
             MotionScaleX = 1f, MotionScaleY = -1f,
         };
-        ReadOnlySpan<float> view = frame.View.Span, projection = frame.Projection.Span;
+        if (frame.Provider.Reset || renderedFrames == 0) xessCameraX = xessCameraY = xessCameraZ = 0;
+        else
+        {
+            xessCameraX += frame.CameraDeltaX;
+            xessCameraY += frame.CameraDeltaY;
+            xessCameraZ += frame.CameraDeltaZ;
+        }
+        float[] origin = Mat4f.Create();
+        origin[12] = -(float)xessCameraX; origin[13] = -(float)xessCameraY; origin[14] = -(float)xessCameraZ;
+        ReadOnlySpan<float> view = Mat4f.Mul(new float[16], frame.View.ToArray(), origin);
+        ReadOnlySpan<float> projection = VulkanProjection(frame.Projection.Span);
         for (int row = 0; row < 4; row++)
         for (int column = 0; column < 4; column++)
         {
@@ -255,14 +281,19 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         PreparedThisFrame = true;
     }
 
+    /// <summary>Builds Vulkan-depth camera constants and current/previous clip transforms from the borrowed temporal snapshot.</summary>
+    /// <param name="frame">Current unjittered column-major world camera/history.</param>
+    /// <param name="width">Render width used for camera aspect.</param>
+    /// <param name="height">Render height used for camera aspect.</param>
+    /// <param name="camera">Validated provider camera on success; default when prerequisites or inversions fail.</param>
+    /// <returns>True when the camera data and every required inverse are valid.</returns>
     internal static bool TryGetCamera(in GameTemporalFrame frame, int width, int height,
         out NgxFrameGenerationCamera camera)
     {
         camera = default;
         if (!frame.HasCamera || width <= 0 || height <= 0) return false;
         // Same GL [-w,w] to Vulkan [0,w] clip-depth remap as the shader rewriter.
-        float[] depthRemap = [1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, .5f, 0f, 0f, 0f, .5f, 1f];
-        float[] projection = Mat4f.Mul(new float[16], depthRemap, frame.Projection.ToArray());
+        float[] projection = VulkanProjection(frame.Projection.Span);
         float[] inverseProjection = Mat4f.Invert(new float[16], projection);
         float[] view = frame.View.ToArray();
         float[] inverseView = Mat4f.Invert(new float[16], view);
@@ -270,8 +301,11 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         float[] currentViewProj = Mat4f.Mul(new float[16], projection, view);
         float[] inverseCurrent = Mat4f.Invert(new float[16], currentViewProj);
         if (inverseCurrent == null) return false;
-        float[] previousProjection = Mat4f.Mul(new float[16], depthRemap, frame.PreviousProjection.ToArray());
+        float[] previousProjection = VulkanProjection(frame.PreviousProjection.Span);
         float[] previousViewProj = Mat4f.Mul(new float[16], previousProjection, frame.PreviousView.ToArray());
+        float[] cameraDelta = Mat4f.Create();
+        cameraDelta[12] = frame.CameraDeltaX; cameraDelta[13] = frame.CameraDeltaY; cameraDelta[14] = frame.CameraDeltaZ;
+        previousViewProj = Mat4f.Mul(new float[16], previousViewProj, cameraDelta);
         float[] toPrevious = Mat4f.Mul(new float[16], previousViewProj, inverseCurrent);
         float[] fromPrevious = Mat4f.Invert(new float[16], toPrevious);
         if (fromPrevious == null) return false;
@@ -283,6 +317,10 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             inverseView[0], inverseView[1], inverseView[2], -inverseView[8], -inverseView[9], -inverseView[10]);
         return camera.IsValid;
     }
+
+    /// <summary>Copies a GL projection and remaps its clip depth to Vulkan's zero-to-one range.</summary>
+    private static float[] VulkanProjection(ReadOnlySpan<float> projection) =>
+        Mat4f.Mul(new float[16], DepthRemap, projection.ToArray());
 
     private static FrameBufferRef? Target(IReadOnlyList<FrameBufferRef> targets, int index) =>
         index >= 0 && index < targets.Count && targets[index] is { Disposed: false } target ? target : null;
@@ -307,6 +345,8 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         }
         if (waits.Add(reason)) notification("VulkanStory: frame generation waiting for " + reason);
     }
+    /// <summary>Disables the active frame-generation provider and clears input preparation before target/settings transitions.</summary>
+    /// <remarks>Checked provider release failures propagate and prevent dependent resource destruction.</remarks>
     internal void Reset()
     {
         RequireOwner();
@@ -337,6 +377,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         if (Environment.CurrentManagedThreadId != ownerThread)
             throw new InvalidOperationException("Frame generation requires the render session owner thread.");
     }
+    /// <summary>Resets frame generation and releases its owned preparation state before device teardown.</summary>
     public void Dispose()
     {
         if (disposed) return;

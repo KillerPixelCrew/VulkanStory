@@ -52,8 +52,10 @@ internal sealed class InstanceRequirements
     /// <summary>Notes about refused requests; never an error.</summary>
     public Action<string>? Log;
 
+    /// <summary>Reports whether the requested extension name exists in the available extension set.</summary>
     public bool Has(string name) => _available.Contains(name);
 
+    /// <summary>Reports whether the extension was selected for instance/device creation.</summary>
     public bool IsEnabled(string name) => _enabled.Contains(name);
 
     /// <summary>
@@ -73,6 +75,7 @@ internal sealed class InstanceRequirements
         return true;
     }
 
+    /// <summary>Ordered borrowed extension names selected for Vulkan creation.</summary>
     public IReadOnlyList<string> Enabled => _enabled;
 }
 
@@ -106,6 +109,7 @@ internal sealed unsafe class DeviceRequirements : IDisposable
         _enabled = enabled;
     }
 
+    /// <summary>Borrowed Vulkan dispatch used to query selected-device support.</summary>
     public Vk Api { get; }
 
     /// <summary>
@@ -115,6 +119,7 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     /// </summary>
     public Instance Instance { get; }
 
+    /// <summary>Borrowed physical device whose optional provider requirements are being negotiated.</summary>
     public PhysicalDevice PhysicalDevice { get; }
 
     /// <summary>Notes about refused requests; never an error.</summary>
@@ -127,6 +132,7 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     /// <summary>The advertised revision, 0 when the device does not have the extension.</summary>
     public uint SpecVersion(string name) => _available.TryGetValue(name, out uint version) ? version : 0;
 
+    /// <summary>Reports whether the extension was selected for instance/device creation.</summary>
     public bool IsEnabled(string name) => _enabled.Contains(name);
 
     /// <summary>
@@ -239,8 +245,10 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     /// <summary>The head of the chain, null when nothing was chained.</summary>
     public void* Chain => _chain;
 
+    /// <summary>Ordered borrowed extension names selected for Vulkan creation.</summary>
     public IReadOnlyList<string> Enabled => _enabled;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

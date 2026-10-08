@@ -16,6 +16,10 @@ internal sealed partial class GameGraphicsAdapter
     private FrameBufferRef? cloudSavedFramebuffer;
     private int cloudSavedFramebufferId, cloudBoundTexture;
     private readonly NativeMeshPass nativeCloudMap = new("cloudmap", [], []);
+    /// <summary>Creates the pinned cloud-map texture format as an adapter-owned resource; unsupported original formats are rejected.</summary>
+    /// <param name="width">Square cloud-map side length in texels.</param>
+    /// <param name="format">Pinned original internal-format token.</param>
+    /// <returns>Owned texture identifier.</returns>
     internal int CreateCloudTexture(int width, int format)
     {
         var renderer = RequireDevice();

@@ -40,6 +40,9 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         State.JitterActive && State.WasViewCaptured(EnumTemporalView.World) &&
         State.RenderedFrameId == device.LatencyFrameId;
 
+    /// <summary>Begins scene ownership for a matching original client and requests history reset when client identity changes.</summary>
+    /// <param name="value">Client associated with this owner platform.</param>
+    /// <remarks>Recursive scene entry and mismatched platforms are rejected.</remarks>
     internal void EnterScene(ClientMain value)
     {
         if (inScene) throw new InvalidOperationException("Recursive world render loop.");
@@ -55,6 +58,9 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         motionFailed = opaqueEntered = afterOitEntered = false;
         motionDrawFailure = null;
     }
+    /// <summary>Advances camera/warp history and temporal frame identity at the scene Before stage.</summary>
+    /// <param name="dt">Original render delta in seconds, converted to milliseconds for provider timing.</param>
+    /// <remarks>Requires scene entry and a current client; captures FOV/dimension changes as reset reasons.</remarks>
     internal void Begin(float dt)
     {
         if (!inScene || client == null) throw new InvalidOperationException("Temporal advance is outside the world render loop.");
@@ -75,6 +81,8 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
             client.MainCamera.Fov, client.shUniforms, temporal || settings.Settings.TaaJitterDev,
             jitter || settings.Settings.TaaJitterDev);
     }
+    /// <summary>Records unjittered world camera, camera position and projection for the current scene.</summary>
+    /// <param name="projection">Original 16-element column-major world projection.</param>
     internal void CaptureWorld(double[] projection)
     {
         if (!inScene || client == null) throw new InvalidOperationException("World camera capture is outside the scene.");
@@ -82,12 +90,18 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         State.CaptureCameraPosition(client.EntityPlayer?.CameraPos, client.shUniforms);
         State.RecordProjection(EnumTemporalView.World, projection);
     }
+    /// <summary>Classifies the original projection as world or hand view and records it for the matching client.</summary>
+    /// <param name="value">Client whose projection changed.</param>
+    /// <param name="fov">FOV passed by the original projection call.</param>
+    /// <param name="projection">Unjittered original projection matrix.</param>
     internal void RecordProjection(ClientMain value, float fov, double[] projection)
     {
         if (!ReferenceEquals(client, value)) return;
         State.RecordProjection(fov != value.MainCamera.Fov ? EnumTemporalView.Hand : EnumTemporalView.World, projection);
     }
     internal void CloseJitter() => State.JitterActive = false;
+    /// <summary>Clears scene and camera ownership only when the departing client matches the current one.</summary>
+    /// <param name="value">Client leaving or being disposed.</param>
     internal void DetachClient(ClientMain value)
     {
         if (!ReferenceEquals(client, value)) return;
@@ -99,6 +113,8 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         State.JitterActive = false;
         State.RequestReset(EnumTemporalResetReason.WorldLoad);
     }
+    /// <summary>Closes the scene bracket and invalidates motion/history after an original scene failure.</summary>
+    /// <param name="failure">Original exception, or null after a successful scene.</param>
     internal void ExitScene(Exception? failure)
     {
         inScene = false;
@@ -123,6 +139,8 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (stage == EnumRenderStage.Opaque) opaqueEntered = true;
         if (stage == EnumRenderStage.AfterOIT) afterOitEntered = true;
     }
+    /// <summary>Marks the current scene motion chain incomplete and retains its first rejection reason.</summary>
+    /// <param name="reason">Optional producer rejection detail.</param>
     internal void RejectMotionDraw(string? reason = null)
     {
         if (!inScene) return;
@@ -131,6 +149,9 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
             "scene producer rejected a motion draw: " + reason;
         MotionReadiness = motionDrawFailure;
     }
+    /// <summary>Publishes motion eligibility only after matching camera/stage and all producer-tail prerequisites succeed.</summary>
+    /// <param name="producerTailComplete">Whether liquid/sky producer-tail coverage completed.</param>
+    /// <param name="tailFailure">Specific reason for a declined tail, when known.</param>
     internal void CompleteSceneMotion(bool producerTailComplete, string? tailFailure = null)
     {
         motionValid = HasCurrentSceneSample && settings.EffectiveTemporalPipeline && EntityMotion.Enabled &&
@@ -140,6 +161,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
                 motionFailed ? motionDrawFailure ?? "scene producer rejected a motion draw" :
                 tailFailure ?? "motion producer tail incomplete");
     }
+    /// <summary>Requests a toggle reset and withdraws current motion eligibility before a settings/provider transition.</summary>
     internal void RequestReset()
     {
         State.RequestReset(EnumTemporalResetReason.Toggle);
@@ -147,6 +169,9 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         MotionReadiness = "temporal reset requested";
         if (inScene) motionFailed = true;
     }
+    /// <summary>Returns current camera/provider inputs and complete motion eligibility for this temporal frame.</summary>
+    /// <returns>A borrowed camera snapshot; pause, reset or incomplete motion prevents generation.</returns>
+    /// <remarks>Matrix storage remains owned by the temporal state and is updated on later frame advance.</remarks>
     internal GameTemporalFrame Snapshot() => State.Snapshot(motionValid,
         client != null && !client.IsPaused && !State.Reset && motionValid);
 }

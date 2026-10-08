@@ -12,6 +12,8 @@ using Vintagestory.ClientNative;
 
 namespace VulkanStory.Game;
 
+/// <summary>Routes pinned occlusion-query, screenshot and video-readback operations to the session graphics owner.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class QueriesCaptureConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-queries-capture";
@@ -80,6 +82,10 @@ internal static class QueriesCaptureConsumerPatches
             if (instructions.Count(instruction => instruction.Calls(call.Original)) != call.Count)
                 throw new InvalidOperationException("Original query/capture anchors changed: " + body.Target.Name + "/" + call.Original.Name);
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="routing">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateSubset(Func<bool> routing)
     {
         ArgumentNullException.ThrowIfNull(routing);

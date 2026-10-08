@@ -10,6 +10,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Original mechanical renderer transforms remain intact; only instance storage changes.
+/// <summary>Extends pinned Survival instance producers with current and previous transforms under scoped device identities.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class InstanceMotionConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-motion-instances";
@@ -19,6 +21,11 @@ internal static class InstanceMotionConsumerPatches
     private static readonly MethodInfo Allocation = AccessTools.Method(typeof(CustomMeshDataPart<float>),
         nameof(CustomMeshDataPart<float>.SetAllocationSize), [typeof(int)])!;
 
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <param name="survival">Original Survival assembly containing the pinned built-in consumers.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly survival)
     {
         const string ns = "Vintagestory.GameContent.Mechanics.";

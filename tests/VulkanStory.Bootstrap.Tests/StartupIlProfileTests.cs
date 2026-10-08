@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks exact startup-anchor matching against changed operands, offsets, and occurrence counts.</summary>
+/// <remarks>Uses synthetic method inventories rather than running startup patches.</remarks>
 public sealed class StartupIlProfileTests
 {
     private static StartupMethodInventory Method(params StartupIlUse[] uses) =>

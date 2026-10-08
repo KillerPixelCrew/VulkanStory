@@ -28,8 +28,12 @@ internal sealed unsafe class XessSharedFence : IDisposable
         Semaphore = semaphore;
     }
 
+    /// <summary>Owned Vulkan timeline semaphore imported from a DX12 fence.</summary>
     public Semaphore Semaphore { get; }
 
+    /// <summary>Creates a DX12 fence and imports its NT handle as a Vulkan timeline semaphore.</summary>
+    /// <remarks>The transient Win32 handle is closed after import. This wrapper owns only the Vulkan semaphore; the native runtime owns the DX12 fence.</remarks>
+    /// <returns>Whether fence creation and semaphore import succeeded.</returns>
     public static bool TryCreate(VulkanContext context, IDx12SharedRuntime runtime,
         out XessSharedFence? result, out string reason)
     {
@@ -108,6 +112,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(nint handle);
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

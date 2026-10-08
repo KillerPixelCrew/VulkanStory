@@ -10,6 +10,9 @@ internal sealed class GameShaderDefinitions
 {
     private readonly ConditionalWeakTable<IShader, ShaderStageDefinition> stages = new();
 
+    /// <summary>Builds one backend stage definition from original game shader source and prefixes.</summary>
+    /// <param name="shader">Original stage object; the object remains game-owned.</param>
+    /// <returns>Backend-neutral stage source and declaration metadata.</returns>
     internal ShaderStageDefinition Stage(IShader shader)
     {
         var stage = stages.GetValue(shader, _ => new ShaderStageDefinition());

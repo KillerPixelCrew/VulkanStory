@@ -4,6 +4,7 @@ namespace VulkanStory.Game;
 
 // Scene coverage for the pinned original renderer/content paths. General platform
 // API coverage remains a separate required group in the version profile.
+/// <summary>Combines the complete pinned built-in scene and motion consumer groups for the official Essentials and Survival assemblies.</summary>
 internal static class SceneProfileComposition
 {
     internal static StartupPatchGroup Create1227(ProcessRuntime runtime, Assembly essentials, Assembly survival)

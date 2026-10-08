@@ -7,9 +7,17 @@ using VulkanStory.Platform.Sdl;
 namespace VulkanStory.Game.Input;
 
 // Retained bitmap conversion and cursor ownership from VulkanClientPlatform.SdlInput.
+/// <summary>Converts game cursor bitmaps to SDL RGBA cursors and keeps the original platform's cursor identity in sync.</summary>
+/// <param name="platform">Original platform supplying cursor state and failure logging.</param>
+/// <param name="bindings">Game state accessors used to publish the selected cursor.</param>
+/// <param name="window">SDL window owning native cursor lifetimes.</param>
+/// <param name="guiScale">Current GUI scale used to resize cursor images and hotspots.</param>
 internal sealed class GameCursorController(ClientPlatformWindows platform,
     GamePlatformBindings bindings, SdlWindowHost window, System.Func<float> guiScale)
 {
+    /// <summary>Uploads a scaled RGBA cursor, disposing only any temporary resized bitmap.</summary>
+    /// <returns>True when uploaded or intentionally suppressed by a hidden window; false on conversion/load failure.</returns>
+    /// <remarks>Failures are logged and restore the default cursor.</remarks>
     internal bool Load(string code, int hotX, int hotY, BitmapRef bitmapRef)
     {
         if (window.KeepsHidden) return true;
@@ -49,6 +57,7 @@ internal sealed class GameCursorController(ClientPlatformWindows platform,
         }
     }
 
+    /// <summary>Selects a loaded cursor and updates game state; null restores the default, and failures are logged.</summary>
     internal void Use(string? code, bool forceUpdate)
     {
         if (window.KeepsHidden) return;
@@ -65,6 +74,7 @@ internal sealed class GameCursorController(ClientPlatformWindows platform,
         }
     }
 
+    /// <summary>Restores the SDL default cursor and clears the game's custom cursor name unless the window stays hidden.</summary>
     internal void Restore()
     {
         if (window.KeepsHidden) return;

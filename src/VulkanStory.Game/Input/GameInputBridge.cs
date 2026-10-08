@@ -7,6 +7,8 @@ namespace VulkanStory.Game.Input;
 
 // Adapter extraction from ClientPlatformWindows input patches at baseline
 // 386e0d05386d0b228b439d09aeca851428f7bbf3. Source arbitration is retained.
+/// <summary>Routes physical, touch, and reference-counted controller input into original game handlers without duplicate releases.</summary>
+/// <remarks>Per-source held state prevents one source from releasing a key/button that another source still owns.</remarks>
 internal sealed class GameInputBridge
 {
     private readonly ClientPlatformWindows platform;
@@ -20,6 +22,7 @@ internal sealed class GameInputBridge
     private Dictionary<EnumMouseButton, int>? controllerMouseButtons;
     private HashSet<EnumMouseButton>? touchMouseButtons;
 
+    /// <summary>Retains original handlers, shared mouse/wheel state, and callbacks for input ownership and cursor lookup.</summary>
     internal GameInputBridge(ClientPlatformWindows platform, GamePlatformBindings bindings,
         Action notePhysicalInput, System.Func<(float X, float Y)> cursorPosition, System.Func<float> wheelSensitivity)
     {
@@ -30,12 +33,14 @@ internal sealed class GameInputBridge
         this.wheelSensitivity = wheelSensitivity;
     }
 
+    /// <summary>Whether a physical source currently holds any of the four supplied movement key codes.</summary>
     internal bool PhysicalMovementHeld(int forward, int backward, int left, int right) =>
         physicalKeys != null && (physicalKeys.Contains(forward) || physicalKeys.Contains(backward) ||
             physicalKeys.Contains(left) || physicalKeys.Contains(right));
 
     // Called after the controller mapper drops its actions on focus loss or shutdown.
     // Collapse any remaining source references and deliver only the final release.
+    /// <summary>Collapses remaining controller references and emits final releases while preserving other sources' ownership.</summary>
     internal void ReleaseControllers()
     {
         if (controllerKeys != null)
@@ -56,6 +61,7 @@ internal sealed class GameInputBridge
         }
     }
 
+	/// <summary>Updates physical key ownership and dispatches a transition unless controller input already holds the same key.</summary>
 	public void InjectPhysicalKey(KeyEvent source, bool down)
 	{
 		int keyCode = source.KeyCode;
@@ -89,6 +95,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Delivers committed text as character events to every original key handler.</summary>
 	public void InjectPhysicalText(string text)
 	{
 		foreach (char character in text)
@@ -98,6 +105,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Marks physical input activity, updates shared pixel coordinates, and forwards relative mouse motion.</summary>
 	public void InjectPhysicalMouseMotion(float x, float y, float deltaX, float deltaY)
 	{
 		notePhysicalInput();
@@ -106,6 +114,7 @@ internal sealed class GameInputBridge
 			handler.OnMouseMove(new MouseEvent((int)bindings.MouseX, (int)bindings.MouseY, (int)deltaX, (int)deltaY));
 	}
 
+	/// <summary>Updates shared pixel coordinates and forwards synthetic cursor motion without claiming physical input ownership.</summary>
 	public void InjectControllerMouseMotion(float x, float y, float deltaX, float deltaY)
 	{
 		bindings.SetMousePosition(x, y);
@@ -113,6 +122,7 @@ internal sealed class GameInputBridge
 			handler.OnMouseMove(new MouseEvent((int)bindings.MouseX, (int)bindings.MouseY, (int)deltaX, (int)deltaY));
 	}
 
+	/// <summary>Tracks a physical mouse transition at pixel coordinates, dispatching only when touch/controller ownership permits it.</summary>
 	public void InjectPhysicalMouseButton(EnumMouseButton button, bool down, float x, float y)
 	{
 		if (button == EnumMouseButton.None) return;
@@ -137,6 +147,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Marks physical input and applies the current sensitivity to a wheel amount at pixel coordinates.</summary>
 	public void InjectPhysicalMouseWheel(float verticalAmount, float x, float y)
 	{
 		notePhysicalInput();
@@ -146,6 +157,7 @@ internal sealed class GameInputBridge
 		InjectMouseWheel(amount);
 	}
 
+	/// <summary>Applies one synthetic wheel amount using the shared cumulative wheel position.</summary>
 	public void InjectControllerMouseWheel(int direction) => InjectMouseWheel(direction);
 
 	private void InjectMouseWheel(float amount)
@@ -161,6 +173,7 @@ internal sealed class GameInputBridge
 			});
 	}
 
+	/// <summary>Tracks touch-generated mouse ownership and forwards a transition only when another source does not hold it.</summary>
 	public void InjectTouchMouseButton(EnumMouseButton button, bool down, float x, float y)
 	{
 		if (button == EnumMouseButton.None) return;
@@ -179,6 +192,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Acquires/releases one controller reference for a game key, emitting only the first press or final unshared release.</summary>
 	public void InjectControllerKey(KeyEvent source, bool down)
 	{
 		int keyCode = source.KeyCode;
@@ -214,6 +228,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Acquires/releases a controller button reference and dispatches at the current cursor when source arbitration allows it.</summary>
 	public void InjectControllerMouseButton(EnumMouseButton button, bool down)
 	{
 		if (down)
@@ -244,6 +259,7 @@ internal sealed class GameInputBridge
 		}
 	}
 
+	/// <summary>Releases physical/touch held state on focus loss, preserves controller references, and notifies original focus state.</summary>
 	public void InjectPhysicalFocusChanged(bool focused)
 	{
 		if (!focused)

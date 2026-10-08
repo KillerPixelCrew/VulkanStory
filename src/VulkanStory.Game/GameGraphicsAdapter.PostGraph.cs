@@ -24,6 +24,9 @@ internal sealed partial class GameGraphicsAdapter
         _ => 0u,
     };
 
+    /// <summary>Enumerates deduplicated texture inputs for the retained post target, including camera-depth and TAA history dependencies where required.</summary>
+    /// <param name="target">Retained framebuffer slot index of the post target.</param>
+    /// <returns>Unique nonzero backend texture identifiers read by the selected post operation.</returns>
     private int[] PostReadTextures(int target)
     {
         var reads = new List<int>();

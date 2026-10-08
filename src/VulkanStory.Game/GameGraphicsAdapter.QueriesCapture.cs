@@ -18,6 +18,8 @@ internal sealed partial class GameGraphicsAdapter
     private readonly HashSet<int> queries = new();
     private readonly HashSet<int> releasedQueries = new();
 
+    /// <summary>Creates and records an occlusion query owned by this adapter.</summary>
+    /// <returns>Backend query identifier.</returns>
     internal int CreateOcclusionQuery()
     {
         int query = RequireDevice().CreateOcclusionQuery();
@@ -31,11 +33,17 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal void BeginOcclusionQuery(int query) { RequireQuery(query); RequireDevice().BeginOcclusionQuery(query); }
     internal void EndOcclusionQuery(int query) { RequireQuery(query); RequireDevice().EndOcclusionQuery(query); }
+    /// <summary>Returns either availability or the query result for an adapter-owned occlusion query.</summary>
+    /// <param name="query">Occlusion-query identifier owned by this adapter.</param>
+    /// <param name="availability">True to query availability; false to return the result.</param>
+    /// <returns>Availability flag or query result according to the request.</returns>
     internal int ReadOcclusionQuery(int query, bool availability)
     {
         RequireQuery(query);
         return availability ? (RequireDevice().IsQueryResultAvailable(query) ? 1 : 0) : RequireDevice().GetQueryResult(query);
     }
+    /// <summary>Deletes an owned query and removes its adapter registry entry.</summary>
+    /// <param name="query">Owned query identifier.</param>
     internal void DeleteOcclusionQuery(int query)
     {
         RequireDevice();
@@ -70,6 +78,8 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal static GameGraphicsAdapter VideoOwner(IAviWriter writer) => VideoOwners.TryGetValue(writer, out var owner)
         ? owner : throw new InvalidOperationException("Active video writer has no Vulkan capture owner.");
+    /// <summary>Lazily binds the original screenshot service to this adapter pixel-readback implementation.</summary>
+    /// <returns>Session capture service; its texture/device ownership remains with the session.</returns>
     internal Screenshot CaptureService()
     {
         RequireDevice();

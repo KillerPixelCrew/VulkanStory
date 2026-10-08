@@ -5,22 +5,32 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Frame-generation tagging, presentation selection and resource-retirement portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    /// <summary>Whether device support, bound Streamline functions and an active swapchain are all present.</summary>
     internal bool StreamlineFrameGenerationAvailable => _streamlineReflexReady &&
         _streamlineFrameGenerationReady && _streamlineFrameGenerationSupported &&
         _context.Streamline != null && _swapchain != null;
 
+    /// <summary>Whether the available Streamline path can use the current nonparked, unrecreated swapchain.</summary>
     internal bool StreamlineFrameGenerationReady => StreamlineFrameGenerationAvailable &&
         !_swapchain!.NeedsRecreation && !_swapchain.Parked && !_swapchain.Fsr3ProxyActive;
 
+    /// <summary>Whether the active swapchain is owned by the FidelityFX presentation proxy.</summary>
     internal bool Fsr3ProxyReady => _swapchain is { Fsr3ProxyActive: true };
+    /// <summary>Whether FidelityFX must use the direct path because distinct proxy queues are unavailable.</summary>
     internal bool Fsr3DirectPresentation => !_context.Fsr3SwapchainQueuesAvailable;
+    /// <summary>Borrowed active FidelityFX swapchain context, or zero.</summary>
     internal nint Fsr3ProxyContext => _swapchain?.Fsr3ProxyContext ?? 0;
+    /// <summary>Output format selected for direct or proxy FidelityFX frame generation.</summary>
     internal Format Fsr3ProxyFormat => Fsr3DirectPresentation ? Format.R8G8B8A8Unorm :
         _swapchain?.Format ?? Format.Undefined;
+    /// <summary>Latest active FidelityFX swapchain-proxy failure.</summary>
     internal string? Fsr3ProxyFailure => _swapchain?.Fsr3ProxyFailure;
 
+    /// <summary>Flips matching scene resources into presentation orientation and tags them with camera/reset constants.</summary>
+    /// <returns>Native bridge result, or a negative local readiness/resource/conversion failure code.</returns>
     internal int TagStreamlineFrame(int depthId, int motionId, int hudlessId, int uiId,
         int uprightDepthId, int uprightMotionId, int uprightHudlessId, int uprightUiId,
         in NgxFrameGenerationCamera camera, bool reset)
@@ -80,11 +90,13 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
+    /// <summary>Applies DLSS-G enablement and interpolation count using the active swapchain dimensions and format.</summary>
     internal int SetStreamlineFrameGeneration(bool enabled, uint generatedFrames = 1) =>
         _context.Streamline == null || _swapchain == null ? -1 :
         _context.Streamline.SetFrameGeneration(enabled, generatedFrames, _swapchain.Extent.Width,
             _swapchain.Extent.Height, _swapchain.Format, _swapchain.ImageCount);
 
+    /// <summary>Queries DLSS-G status, presented count and generated-frame limit.</summary>
     internal int GetStreamlineFrameGenerationState(out uint status, out uint presented,
         out uint maxGenerated)
     {
@@ -93,17 +105,22 @@ public sealed unsafe partial class VulkanDevice
             out maxGenerated) ?? -1;
     }
 
+    /// <summary>Consumes a recorded Streamline presentation error, or returns zero without a runtime.</summary>
     internal int TakeStreamlinePresentError() => _context.Streamline?.TakePresentError() ?? 0;
+    /// <summary>Vertical-synchronization state requested by the renderer host.</summary>
     internal bool PresentationVsyncEnabled => _vsync;
+    /// <summary>Queries the full DLSS-G capability/state snapshot, defaulting it when no runtime exists.</summary>
     internal int GetStreamlineFrameGenerationStateDetails(out StreamlineFrameGenerationState state)
     {
         state = default;
         return _context.Streamline?.GetFrameGenerationStateDetails(out state) ?? -1;
     }
 
+    /// <summary>Requests recreation of the active swapchain using current window dimensions and VSync.</summary>
     internal void RebuildStreamlineSwapchain() =>
         _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
 
+    /// <summary>Invalidates current frame tags and disables DLSS-G before the consuming resources change.</summary>
     internal void SuspendStreamlineFrameGeneration()
     {
         if (_context.Streamline == null) return;
@@ -118,18 +135,11 @@ public sealed unsafe partial class VulkanDevice
 
     private void CheckStreamlineDisable(int result)
     {
-        if (result == 0) return;
-        const int outOfVramWarning = 39; // sl::Result::eWarnOutOfVRAM, Streamline 2.14.1.
-        if (result != outOfVramWarning)
-            throw new InvalidOperationException("Disabling DLSS-G failed (" + result + ").");
-        // A warning is not proof that the consumer released its inputs. Drain
-        // and explicitly free the feature before allowing framebuffer disposal.
-        VulkanResult.Check(_context.WaitDeviceIdle(), "draining DLSS-G after VRAM warning");
-        int release = _context.Streamline!.FreeFrameGenerationResources();
-        if (release != 0)
-            throw new InvalidOperationException("Releasing DLSS-G after VRAM warning failed (" + release + ").");
+        StreamlineRuntime.CheckDisableResult(_context, result);
     }
 
+    /// <summary>Disables, drains and frees DLSS-G resources before NGX/device teardown.</summary>
+    /// <exception cref="InvalidOperationException">The checked disable, GPU drain or resource release fails.</exception>
     internal void ReleaseStreamlineFrameGenerationResources()
     {
         RequireFrameRelease();
@@ -188,10 +198,12 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
+    /// <summary>Whether the current active frame and swapchain permit the direct generated-present path.</summary>
     internal bool CanPresentGeneratedFrame => _frameActive && _swapchain != null &&
         !_swapchain.NeedsRecreation && !_swapchain.Parked &&
         _swapchain.PresentMode != PresentModeKHR.MailboxKhr;
 
+    /// <summary>Changes presentation-provider ownership and disables competing vendor pacing for XeSS.</summary>
     internal void SetFrameGenerationPresentation(string provider)
     {
         if (provider != "xess") StopXessPresenter();
@@ -201,20 +213,23 @@ public sealed unsafe partial class VulkanDevice
         {
             _vendorLatency?.SetMode(0);
             if (_streamlineReflexReady && _context.Streamline is { } streamline)
-                RequireStreamlineProtocol(streamline.SetReflex(0, _vendorFrameCap), "Reflex off for XeSS pacing handoff");
+                RequireStreamlineProtocol(streamline.SetReflex(0, 0), "Reflex off for XeSS pacing handoff");
         }
         _appliedLatencyMode = -1;
         _swapchain?.SetFrameGenerationProvider(provider == "xess" ? "off" : provider);
     }
 
+    /// <summary>Reserves the real-present ID and, when requested, an earlier generated-present ID.</summary>
     internal void ReserveFramePresentIds(bool mayGenerate)
     {
         _generatedPresentId = mayGenerate ? PresentIdCounter.Next() : 0;
         _realPresentId = PresentIdCounter.Next();
     }
 
+    /// <summary>Present ID reserved for the current rendered frame.</summary>
     internal ulong RealPresentId => _realPresentId;
 
+    /// <summary>Clears a queued generated image and resets its CPU pacing history.</summary>
     internal void ResetGeneratedFramePresent()
     {
         _generatedFrameForPresent = 0;
@@ -249,7 +264,7 @@ public sealed unsafe partial class VulkanDevice
         // A generated image has no input/simulation phase of its own. Its
         // present id is still allocated so the following real image remains
         // monotonically ordered across swapchain recreation.
-        _swapchain.Present(target, 0, _generatedPresentId);
+        if (_swapchain.Present(target, 0, _generatedPresentId) == 0) return false;
         VulkanStats.NotePresent(generated: true);
         _generatedFramePacer.NoteGeneratedPresent();
         if (!_generatedPresentLogged)
@@ -273,6 +288,7 @@ public sealed unsafe partial class VulkanDevice
         return result;
     }
 
+    /// <summary>Transfers a direct NGX interpolation feature to frame-timeline retirement.</summary>
     internal void RetireDlssFrameGeneration(NgxFrameGenerationFeature feature) =>
         _frames.DeferDeletion(feature);
 

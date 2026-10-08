@@ -92,7 +92,6 @@
     <Compile Include="Latency/NvLowLatency2Functions.cs" />
     <Compile Include="Latency/SdlInputAgeRecorder.cs" />
     <Compile Include="Latency/VendorLatency.cs" />
-    <Compile Include="Latency/XellNative.cs" />
     <Compile Include="Present/GeneratedFramePacer.cs" />
     <Compile Include="Present/Fsr3SwapchainRuntime.cs" />
     <Compile Include="Present/Swapchain.cs" />

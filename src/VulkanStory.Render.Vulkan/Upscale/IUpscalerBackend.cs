@@ -3,6 +3,12 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Renderer texture IDs and matching temporal constants for one reconstruction dispatch.</summary>
+/// <param name="Color">Linear scene-color input texture.</param>
+/// <param name="Depth">Depth input texture used by the scene's motion producers.</param>
+/// <param name="Motion">Renderer motion texture; the backend converts it when its SDK requires another format.</param>
+/// <param name="Output">Display-resolution destination texture.</param>
+/// <param name="Temporal">Jitter, camera, timing and history-reset data for this frame.</param>
 internal readonly record struct UpscalerFrame(
     int Color, int Depth, int Motion, int Output, TemporalProviderFrame Temporal);
 
@@ -12,29 +18,60 @@ internal readonly record struct UpscalerFrame(
 /// </summary>
 internal interface IUpscalerBackend : IDisposable
 {
+    /// <summary>Stable settings ID used to select this provider.</summary>
     string Id { get; }
+    /// <summary>Whether device bring-up succeeded and no availability failure has been recorded.</summary>
     bool Active { get; }
+    /// <summary>Latest provider-unavailability reason, or <see langword="null"/> when none is recorded.</summary>
     string? Unavailable { get; }
+    /// <summary>Optional extension and feature contributor to invoke before creating the Vulkan device.</summary>
     IDeviceRequirementContributor? Requirements { get; }
+    /// <summary>Attaches the provider to an already created renderer device.</summary>
+    /// <param name="device">Renderer owner used for resources, dispatch and GPU-safe retirement.</param>
+    /// <param name="instance">Borrowed Vulkan instance handle.</param>
+    /// <param name="physicalDevice">Borrowed selected physical-device handle.</param>
+    /// <param name="logicalDevice">Borrowed logical-device handle.</param>
+    /// <returns>Whether this provider can be used with the selected device.</returns>
     bool BringUp(IUpscalerDevice device, IntPtr instance, IntPtr physicalDevice, IntPtr logicalDevice);
+    /// <summary>Resolves the requested output extent and quality into provider input dimensions.</summary>
+    /// <param name="displayWidth">Output width in pixels.</param>
+    /// <param name="displayHeight">Output height in pixels.</param>
+    /// <param name="quality">Settings quality name; interpretation is provider-specific.</param>
+    /// <param name="lodBiasOffset">Requested strength of the provider's additional texture LOD bias.</param>
+    /// <param name="plan">Resolved plan on success; invalid or default on failure.</param>
+    /// <returns>Whether an active provider produced a valid plan.</returns>
     bool TryPlan(int displayWidth, int displayHeight, string quality,
         float lodBiasOffset, out UpscalerPlan plan);
+    /// <summary>Records reconstruction for the current frame, creating or replacing plan-dependent resources as needed.</summary>
+    /// <param name="plan">Valid plan matching the input and output textures.</param>
+    /// <param name="frame">Texture IDs and temporal constants retained through GPU completion.</param>
+    /// <param name="error">Provider failure detail, or <see langword="null"/> on success.</param>
+    /// <returns>Whether the provider accepted the dispatch; this does not wait for GPU completion.</returns>
     bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error);
+    /// <summary>Releases or schedules retirement of plan-dependent resources before reuse or provider switching.</summary>
+    /// <remarks>Checked release failures may throw and retain native owners; callers must preserve their lifetime.</remarks>
     void RetireFeature();
+    /// <summary>Retires active resources and stops the backend before renderer-device destruction.</summary>
     void Shutdown();
 }
 
 /// <summary>The DLSS-SR implementation of the shared provider contract.</summary>
 internal sealed class DlssBackend(DlssUpscaler host) : IUpscalerBackend
 {
+    /// <inheritdoc/>
     public string Id => "dlss";
+    /// <inheritdoc/>
     public bool Active => host.Active;
+    /// <inheritdoc/>
     public string? Unavailable => host.Unavailable;
+    /// <inheritdoc/>
     public IDeviceRequirementContributor? Requirements => host.Requirements;
 
+    /// <inheritdoc/>
     public bool BringUp(IUpscalerDevice device, IntPtr instance, IntPtr physicalDevice, IntPtr logicalDevice) =>
         host.BringUp(device, instance, physicalDevice, logicalDevice);
 
+    /// <inheritdoc/>
     public bool TryPlan(int displayWidth, int displayHeight, string quality,
         float lodBiasOffset, out UpscalerPlan plan)
     {
@@ -46,6 +83,7 @@ internal sealed class DlssBackend(DlssUpscaler host) : IUpscalerBackend
         return plan.IsValid;
     }
 
+    /// <inheritdoc/>
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)
     {
         error = null;
@@ -64,7 +102,10 @@ internal sealed class DlssBackend(DlssUpscaler host) : IUpscalerBackend
         return false;
     }
 
+    /// <inheritdoc/>
     public void RetireFeature() => host.RetireFeature();
+    /// <inheritdoc/>
     public void Shutdown() => host.Shutdown();
+    /// <inheritdoc/>
     public void Dispose() => host.Dispose();
 }

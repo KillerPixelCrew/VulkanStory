@@ -5,8 +5,12 @@ using System.Text;
 namespace VulkanStory.Game.Input;
 
 // CPU timings on the SDL/render thread. These are not GPU or generated-frame timings.
+/// <summary>Opt-in CPU phase, allocation, and real-frame cadence sampling on the SDL/render thread.</summary>
+/// <param name="write">Receives aggregated diagnostic text approximately every five seconds while recording.</param>
+/// <remarks>Requires VULKANSTORY_CONTROLLER_DIAGNOSTICS=1; sampled intervals do not measure GPU or generated frames.</remarks>
 internal sealed class ControllerPerformanceDiagnostics(Action<string> write)
 {
+    /// <summary>Accumulated CPU counters for one menu/world and controller/physical-input bucket.</summary>
     private struct Sample
     {
         internal long Count, IntervalCount, Interval, MaxInterval, Total, MaxTotal;
@@ -15,12 +19,14 @@ internal sealed class ControllerPerformanceDiagnostics(Action<string> write)
     }
 
     private readonly Sample[] samples = new Sample[8];
-    private readonly bool allowed = Environment.GetEnvironmentVariable("VULKANSTORY_CONTROLLER_DIAGNOSTICS") != "0";
+    private readonly bool allowed = Environment.GetEnvironmentVariable("VULKANSTORY_CONTROLLER_DIAGNOSTICS") == "1";
     private long start, previousStart, pacingEnd, eventsEnd, controllerEnd, allocatedStart, reportDue, updateTicks, sleepTicks;
     private int gc0, gc1, gc2, bucket, previousBucket;
     private bool recording, physical;
+    /// <summary>Whether the current frame is collecting diagnostic measurements.</summary>
     internal bool Recording => recording;
 
+    /// <summary>Starts an eligible frame sample or clears accumulated samples when recording is disabled.</summary>
     internal void BeginFrame(bool enabled)
     {
         physical = false;
@@ -45,11 +51,17 @@ internal sealed class ControllerPerformanceDiagnostics(Action<string> write)
         }
     }
 
+    /// <summary>Tags this frame as containing a physical input event for bucket selection.</summary>
     internal void PhysicalInput() => physical = true;
+    /// <summary>Closes the pre-input pacing phase when recording is active.</summary>
     internal void EndPacing() { if (recording) pacingEnd = Stopwatch.GetTimestamp(); }
+    /// <summary>Closes SDL event processing when recording is active.</summary>
     internal void EndEvents() { if (recording) eventsEnd = Stopwatch.GetTimestamp(); }
+    /// <summary>Adds Stopwatch ticks spent in the gamepad-update subset of event processing.</summary>
     internal void RecordGamepadUpdate(long ticks) { if (recording) updateTicks += ticks; }
+    /// <summary>Adds Stopwatch ticks spent in the vendor-sleep subset of pacing.</summary>
     internal void RecordVendorSleep(long ticks) { if (recording) sleepTicks += ticks; }
+    /// <summary>Closes controller processing and selects the current input/context bucket.</summary>
     internal void EndControllers(bool active, bool world)
     {
         if (!recording) return;
@@ -57,6 +69,7 @@ internal sealed class ControllerPerformanceDiagnostics(Action<string> write)
         bucket = (world ? 0 : 4) + (active ? 1 : 0) + (physical ? 2 : 0);
     }
 
+    /// <summary>Accumulates the current CPU sample and periodically publishes then resets the aggregate.</summary>
     internal void EndFrame()
     {
         if (!recording) return;

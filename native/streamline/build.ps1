@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $vulkanInclude 'vulkan\vulkan.h'))) 
 $target = [IO.Path]::GetFullPath($Output)
 New-Item -ItemType Directory -Path (Split-Path $target) -Force | Out-Null
 $temporary = [IO.Path]::ChangeExtension($target, '.tmp.dll')
-& $compiler -std=c++20 -O2 -shared -static-libgcc -static-libstdc++ -I $include -I $vulkanInclude $source -o $temporary -lwintrust -ladvapi32
+& $compiler -std=c++20 -O2 -shared -static -I $include -I $vulkanInclude $source -o $temporary -lwintrust -ladvapi32
 if ($LASTEXITCODE -ne 0) {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     throw 'Streamline bridge compilation failed.'

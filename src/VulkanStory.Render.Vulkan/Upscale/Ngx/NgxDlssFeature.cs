@@ -53,6 +53,7 @@ internal readonly record struct NgxDlssSettings(
         NgxDlssCreateFlags.MotionVectorsLowRes | NgxDlssCreateFlags.AutoExposure |
         NgxDlssCreateFlags.IsHdr;
 
+    /// <inheritdoc/>
     public override string ToString() =>
         RenderWidth + "x" + RenderHeight + " -> " + DisplayWidth + "x" + DisplayHeight +
         " " + Quality + " [" + Flags + "]";
@@ -156,9 +157,8 @@ internal readonly record struct NgxDlssEvaluation
 /// (<c>VulkanDevice.RetireDlssFeature</c>).</item>
 /// </list>
 ///
-/// Nothing here throws. Every call answers an <see cref="NgxResult" />, so a
-/// driver that refuses is a feature that stays null, not an exception on the
-/// render thread.
+/// Creation/evaluation answer <see cref="NgxResult" />. Checked disposal throws
+/// on release failure so the retirement owner retains the remaining native handles.
 /// </summary>
 internal sealed unsafe class NgxDlssFeature : IDisposable
 {
@@ -166,6 +166,7 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
     private IntPtr _handle;
     private IntPtr _parameters;
     private bool _disposed;
+    private Exception? _releaseFailure;
 
     private NgxDlssFeature(IntPtr handle, IntPtr parameters, NgxDlssSettings settings)
     {
@@ -344,15 +345,24 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
         lock (_gate)
         {
             if (_disposed) return;
-            _disposed = true;
-
-            IntPtr handle = _handle;
-            IntPtr parameters = _parameters;
-            _handle = IntPtr.Zero;
-            _parameters = IntPtr.Zero;
-
-            if (handle != IntPtr.Zero && NgxShim.IsAvailable) LastReleaseResult = NgxShim.ReleaseFeature(handle);
-            if (parameters != IntPtr.Zero) LastDestroyParametersResult = NgxInterop.DestroyParameters(parameters);
+            if (_releaseFailure != null) throw new InvalidOperationException("NGX feature release failed; remaining ownership retained.", _releaseFailure);
+            try
+            {
+                if (_handle != IntPtr.Zero)
+                {
+                    LastReleaseResult = NgxShim.IsAvailable ? NgxShim.ReleaseFeature(_handle) : NgxResult.FailNotInitialized;
+                    if (LastReleaseResult != NgxResult.Success) throw new InvalidOperationException("NGX feature release failed: " + LastReleaseResult);
+                    _handle = IntPtr.Zero;
+                }
+                if (_parameters != IntPtr.Zero)
+                {
+                    LastDestroyParametersResult = NgxInterop.DestroyParameters(_parameters);
+                    if (LastDestroyParametersResult != NgxResult.Success) throw new InvalidOperationException("NGX parameter release failed: " + LastDestroyParametersResult);
+                    _parameters = IntPtr.Zero;
+                }
+                _disposed = true;
+            }
+            catch (Exception error) { _releaseFailure = error; throw; }
         }
     }
 

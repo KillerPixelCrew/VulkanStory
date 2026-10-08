@@ -14,6 +14,7 @@ internal sealed partial class GameRenderSession
     private readonly string mainOptionsAction = Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_MAIN_ACTION") ?? "open";
     private (bool Before, bool Expected)? mainActionValues;
     private bool mainActionAwaitFrame = true, mainActionComplete;
+    /// <summary>Advances the explicitly selected original-main-menu Options diagnostic from the session event loop.</summary>
     private void PrepareMainOptionsDiagnostic()
     {
         if (headlessDone) return;

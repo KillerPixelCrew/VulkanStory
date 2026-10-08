@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Contracts.Tests;
 
+/// <summary>Checks stored latency selection and the effective low-latency dependency of active frame generation.</summary>
+/// <remarks>Covers mode selection without calling a native latency SDK.</remarks>
 public sealed class RendererLatencySelectionTests
 {
     [Theory]

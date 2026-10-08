@@ -9,8 +9,11 @@ namespace VulkanStory.Render.Vulkan.Shaders;
 /// <summary>The result of rewriting one stage for Vulkan.</summary>
 internal sealed class RewrittenShader
 {
+    /// <summary>Rewritten Vulkan GLSL source.</summary>
     public string Code = "";
+    /// <summary>Unsupported source/interface operations discovered during rewriting.</summary>
     public List<string> Errors { get; } = new();
+    /// <summary>Whether rewriting recorded any source/interface failures.</summary>
     public bool HasErrors => Errors.Count > 0;
 }
 
@@ -56,8 +59,10 @@ internal static class ShaderRewriter
 {
     private const string MainReplacementName = "_optimum_main";
 
+    /// <summary>Source replacement with original byte-character span coordinates.</summary>
     private readonly record struct Edit(int Start, int Length, string Replacement);
 
+    /// <summary>Applies the supported GLSL translation edits using the resolved program interface and optional depth remap.</summary>
     public static RewrittenShader Rewrite(
         ParsedShader parsed,
         ProgramInterfaceLayout layout,

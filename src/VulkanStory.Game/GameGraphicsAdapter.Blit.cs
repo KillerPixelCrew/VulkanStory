@@ -16,6 +16,7 @@ internal sealed partial class GameGraphicsAdapter
     private bool fsrEasuFailed, fsrRcasFailed, taaDebugFailed, fsrDisabled;
     private string? lastBlitRefusal;
 
+    /// <summary>Copies the completed scene through the selected reconstruction/sharpening path into the default presentation target.</summary>
     internal void BlitPrimaryToDefault()
     {
         RequireDevice();

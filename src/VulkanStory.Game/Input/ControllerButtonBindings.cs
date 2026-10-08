@@ -2,11 +2,18 @@ using System;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>A named action's label and accessors for its button in a controller profile.</summary>
+/// <param name="Code">Stable stored action code.</param>
+/// <param name="Label">User-facing action description.</param>
+/// <param name="Get">Reads the action's current physical button.</param>
+/// <param name="Set">Writes the action's physical button.</param>
 internal readonly record struct ControllerButtonBinding(
     string Code, string Label, Func<ControllerProfile, int> Get, Action<ControllerProfile, int> Set);
 
+/// <summary>World and inventory binding catalogs used by remapping and controller prompts.</summary>
 internal static class ControllerButtonBindings
 {
+    /// <summary>World-action bindings, including the menu back action shared with default sneak.</summary>
     public static readonly ControllerButtonBinding[] All =
     [
         new("accept", "Jump", p => p.AcceptButton, (p, v) => p.AcceptButton = v),
@@ -23,6 +30,7 @@ internal static class ControllerButtonBindings
         new("radial", "Radial action menu", p => p.RadialButton, (p, v) => p.RadialButton = v)
     ];
 
+    /// <summary>Bindings interpreted as semantic inventory actions while GUI navigation is active.</summary>
     public static readonly ControllerButtonBinding[] Inventory =
     [
         new("select", "Select / accept", p => p.GuiSelectButton, (p, v) => p.GuiSelectButton = v),
@@ -31,6 +39,8 @@ internal static class ControllerButtonBindings
         new("quickmove", "Quick transfer", p => p.QuickMoveButton, (p, v) => p.QuickMoveButton = v),
     ];
 
+    /// <summary>Finds a stored action in the world or inventory catalog.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">The action code is absent from both catalogs.</exception>
     public static ControllerButtonBinding Find(string code)
     {
         foreach (ControllerButtonBinding binding in All)
@@ -40,6 +50,7 @@ internal static class ControllerButtonBindings
         throw new ArgumentOutOfRangeException(nameof(code), code, "Unknown controller action");
     }
 
+    /// <summary>Assigns a button and swaps the first conflict within its catalog, preserving the sneak/back sharing exception.</summary>
     public static void AssignUnique(ControllerProfile profile, string code, int button)
     {
         ControllerButtonBinding selected = Find(code);
@@ -57,6 +68,9 @@ internal static class ControllerButtonBindings
         selected.Set(profile, button);
     }
 
+    /// <summary>Returns a readable physical-button name, using a supplied SDL face-button label when known.</summary>
+    /// <param name="button">SDL gamepad button index.</param>
+    /// <param name="faceLabel">SDL face-label value; zero uses position-based names.</param>
     public static string Name(int button, int faceLabel = 0)
     {
         if (button is >= 0 and <= 3)

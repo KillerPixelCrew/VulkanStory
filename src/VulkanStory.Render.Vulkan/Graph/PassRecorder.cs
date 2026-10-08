@@ -35,6 +35,7 @@ internal sealed unsafe class PassRecorder
     private readonly List<PendingClear> _clears = new();
     private readonly List<AttachmentUse> _uses = new();
 
+    /// <summary>Borrows the context, resource managers and frame graph used to record pass-entry transitions.</summary>
     public PassRecorder(VulkanContext context, TextureManager textures, BarrierBatcher barriers, FrameGraph graph)
     {
         _context = context;
@@ -43,6 +44,7 @@ internal sealed unsafe class PassRecorder
         _graph = graph;
     }
 
+    /// <summary>Borrowed frame graph that records signatures, promoted clears and pass splits.</summary>
     public FrameGraph Graph => _graph;
 
     /// <summary>The declared pass, while one is current.</summary>
@@ -54,6 +56,7 @@ internal sealed unsafe class PassRecorder
     /// <summary>Whether the declared pass has opened its scope.</summary>
     public bool Opened { get; private set; }
 
+    /// <summary>Selects a declared pass and its target before the first rendering scope is opened.</summary>
     public void Declare(PassDeclaration declaration, VulkanFramebuffer framebuffer)
     {
         Declared = declaration;
@@ -250,8 +253,8 @@ internal sealed unsafe class PassRecorder
     }
 
     /// <summary>
-    /// Every render-target texture outside the scope that is not already shader-readable:
-    /// what a mod-hosted stage might sample.
+    /// Every render-target texture outside the scope that a mod-hosted stage might sample.
+    /// Shader-readable layout alone does not establish visibility to all reader stages.
     /// </summary>
     private void ForEachOpenSamplingCandidate(CommandBuffer commandBuffer, IReadOnlyList<VulkanFramebuffer?> framebuffers,
         ReadOnlySpan<VulkanTexture?> colour, VulkanTexture? depth, bool flushClears)
@@ -270,8 +273,9 @@ internal sealed unsafe class PassRecorder
                 {
                     FlushClears(commandBuffer, texture);
                 }
-                else if (texture.Layout != ImageLayout.ShaderReadOnlyOptimal)
+                else
                 {
+                    _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.SampleVertex);
                     _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.SampleFragment);
                 }
             }

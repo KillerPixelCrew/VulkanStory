@@ -36,6 +36,7 @@ internal sealed class PipelineCacheGrowthTrigger
         _baselineBytes = baselineBytes;
     }
 
+    /// <summary>Byte size recorded at the most recent completed cache save.</summary>
     public long BaselineBytes => Interlocked.Read(ref _baselineBytes);
 
     /// <summary>
@@ -57,6 +58,7 @@ internal sealed class PipelineCacheGrowthTrigger
     /// <summary>The cache is at least the threshold larger than what was last written.</summary>
     public bool GrewEnough(long currentBytes) => currentBytes - BaselineBytes >= _thresholdBytes;
 
+    /// <summary>Updates the interlocked byte-size baseline after a successful save.</summary>
     public void NoteSaved(long bytes) => Interlocked.Exchange(ref _baselineBytes, bytes);
 }
 
@@ -75,8 +77,11 @@ internal sealed class PipelineCachePersistence
     private Task? _pending;
     private long _saves;
 
+    /// <summary>Device/driver-specific on-disk pipeline-cache path.</summary>
     public string CachePath { get; }
+    /// <summary>On-disk log of pipeline requests used for prewarming.</summary>
     public string KeyLogPath { get; }
+    /// <summary>Owned pipeline-request log associated with this persistence configuration.</summary>
     public PipelineKeyLog KeyLog { get; }
 
     /// <summary>Where a failed write is reported (the validation mirror in the device).</summary>
@@ -134,6 +139,7 @@ internal sealed class PipelineCachePersistence
         }
     }
 
+    /// <summary>Attempts final pipeline-driver cache and key-log persistence during renderer shutdown.</summary>
     public void SaveAtShutdown(GraphicsPipelineCache cache)
     {
         WaitForPendingSave();
@@ -174,6 +180,7 @@ internal sealed class PipelineCachePersistence
 /// <summary>The device and driver a pipeline cache blob was produced by.</summary>
 internal readonly record struct PipelineCacheIdentity(uint VendorId, uint DeviceId, uint DriverVersion, byte[] Uuid)
 {
+    /// <summary>Builds cache compatibility identity from device vendor, device ID, driver version and pipeline-cache UUID.</summary>
     public static PipelineCacheIdentity Of(VulkanCapabilities capabilities) => new(
         capabilities.VendorId, capabilities.DeviceId, capabilities.DriverVersion, capabilities.PipelineCacheUuid);
 
@@ -209,6 +216,7 @@ internal static class PipelineCacheFile
 
     private const uint VulkanHeaderVersionOne = 1;
 
+    /// <summary>Builds the per-device/driver cache path under the selected cache root.</summary>
     public static string PathFor(string cacheRoot, PipelineCacheIdentity identity) =>
         Path.Combine(cacheRoot, "pipeline", identity.FileName);
 
@@ -226,6 +234,7 @@ internal static class PipelineCacheFile
         return CacheFileWriter.WriteAtomically(path, Wrap(data, identity));
     }
 
+    /// <summary>Serializes driver-cache bytes with the renderer cache identity/header.</summary>
     internal static byte[] Wrap(byte[] data, PipelineCacheIdentity identity)
     {
         var file = new byte[HeaderSize + data.Length];

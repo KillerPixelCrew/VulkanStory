@@ -168,7 +168,6 @@ vec4 applyReflectiveEffect(vec4 texColor, inout float glow, int renderFlags, vec
 		fd = max(0.0,fd + 1);
 		float nb = max(0.1, 0.5 * dot(normal, lightPosition));
 
-		if (windMode == ReflectiveModeMild) fd/=3;
 
 		texColor.rgb*= 1.0 +vec3(nb * fd) / 2.0;
 		glow+=nb*fd * 0.15;

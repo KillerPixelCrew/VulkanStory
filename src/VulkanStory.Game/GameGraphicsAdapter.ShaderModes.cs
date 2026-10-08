@@ -89,6 +89,8 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal void NoteRetainedSceneSource(ShaderProgram program, bool vertex) =>
         retainedSceneSources[program] = (byte)(retainedSceneSources.GetValueOrDefault(program) | (vertex ? 1 : 2));
+    /// <summary>Publishes motion/AO readiness after the original shader load completes; failed or incompatible compiled modes disable the corresponding features.</summary>
+    /// <param name="success">Whether the original registered-program load completed successfully.</param>
     internal void EndSceneShaderLoad(bool success)
     {
         RequireDevice();

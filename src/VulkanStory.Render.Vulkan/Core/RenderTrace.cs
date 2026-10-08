@@ -21,12 +21,14 @@ internal static partial class RenderTrace
 
     public static bool Enabled => Path != null;
 
+    /// <summary>Writes an enabled trace message through the retained diagnostic output path.</summary>
     public static void Write(string line)
     {
         if (Path == null) return;
         lock (Gate)
         {
-            File.AppendAllText(Path, line + "\n");
+            try { File.AppendAllText(Path, line + "\n"); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
         }
     }
 

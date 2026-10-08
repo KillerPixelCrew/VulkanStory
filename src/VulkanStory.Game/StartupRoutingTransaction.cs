@@ -1,7 +1,9 @@
 namespace VulkanStory.Game;
 
+/// <summary>Named startup mutation with separate validation, installation and rollback callbacks.</summary>
 internal sealed record StartupPatchGroup(string Name, Action Validate, Action Install, Action Remove);
 
+/// <summary>States of the owner-thread startup transaction; only Active permits routed game operations.</summary>
 internal enum StartupRoutingState
 {
     Fresh,
@@ -31,11 +33,15 @@ internal sealed class StartupRoutingTransaction : IDisposable
     private readonly int ownerThread = Environment.CurrentManagedThreadId;
     private int state;
 
+    /// <summary>Captures the mandatory groups and the constructing thread as the transaction owner.</summary>
+    /// <param name="groups">Groups whose names must match the complete startup coverage set.</param>
     public StartupRoutingTransaction(IEnumerable<StartupPatchGroup> groups) => this.groups = groups.ToArray();
 
     public StartupRoutingState State => (StartupRoutingState)Volatile.Read(ref state);
     public bool RoutingEnabled => State == StartupRoutingState.Active;
 
+    /// <summary>Validates every group before installing any mutation, then leaves routing dormant in Prepared state.</summary>
+    /// <remarks>Runs on the creating thread. Failure removes attempted groups in reverse order and preserves rollback failures in an aggregate exception.</remarks>
     public void Prepare()
     {
         RequireOwner();
@@ -76,6 +82,7 @@ internal sealed class StartupRoutingTransaction : IDisposable
     /// Prepares SDL/Vulkan while patches are dormant, then commits routing. The
     /// session factory must release its partial resources before propagating failure.
     /// </summary>
+    /// <param name="prepareSession">Factory action responsible for unwinding partial native/session resources when it throws.</param>
     public void Commit(Action prepareSession)
     {
         RequireOwner();

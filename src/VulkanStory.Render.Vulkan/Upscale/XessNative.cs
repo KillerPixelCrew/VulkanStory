@@ -7,18 +7,27 @@ namespace VulkanStory.Render.Vulkan.Core;
 
 // Intel XeSS SDK 3.0.2, inc/xess/{xess.h,xess_vk.h}, pack(8), Windows x64 ABI.
 // Keep the module loaded for the process: deferred contexts can outlive a selected provider.
+/// <summary>Process-retained XeSS Vulkan exports with the pinned Windows x64 SDK ABI.</summary>
 internal sealed unsafe class XessNative
 {
     private static readonly object loadGate = new();
     private static XessNative? loaded;
     private readonly nint module;
+    /// <summary>Native required-instance-extension query; returned extension pointers borrow SDK storage.</summary>
     public readonly delegate* unmanaged[Cdecl]<uint*, byte***, uint*, int> InstanceExtensions;
+    /// <summary>Native required-device-extension query for the selected instance/physical device.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, nint, uint*, byte***, int> DeviceExtensions;
+    /// <summary>Native feature-chain negotiation callback that can modify the caller's chain.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, nint, void**, int> DeviceFeatures;
+    /// <summary>Native reconstruction-context creation entry point; returned contexts are owned by the backend.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, nint, nint, nint*, int> Create;
+    /// <summary>Native reconstruction initialization entry point for the selected output extent and quality.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, XessInit*, int> Init;
+    /// <summary>Native XeSS execution entry point using the active Vulkan command buffer.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, nint, XessExecute*, int> Execute;
+    /// <summary>Native reconstruction-context destruction entry point; call only after referencing GPU work completes.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, int> Destroy;
+    /// <summary>Native XeSS optimal/minimum/maximum input-resolution query.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, XessSize*, int, XessSize*, XessSize*, XessSize*, int> Resolution;
 
     private XessNative(nint module)
@@ -34,6 +43,9 @@ internal sealed unsafe class XessNative
         Resolution = (delegate* unmanaged[Cdecl]<nint, XessSize*, int, XessSize*, XessSize*, XessSize*, int>)Export("xessGetOptimalInputResolution");
     }
     private nint Export(string name) => NativeLibrary.GetExport(module, name);
+    /// <summary>Returns process-cached XeSS exports or loads the pinned Windows x64 runtime from an absolute path.</summary>
+    /// <remarks>A successful module stays loaded so deferred contexts can safely invoke its exports.</remarks>
+    /// <returns>Loaded exports, or null with availability/load detail.</returns>
     public static XessNative? TryLoad(out string? error)
     {
         lock (loadGate)
@@ -54,8 +66,10 @@ internal sealed unsafe class XessNative
     }
 }
 
+/// <summary>Sequential width and height pair in the pinned XeSS C ABI.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal struct XessSize { public uint Width, Height; public XessSize(int w, int h) { Width = (uint)w; Height = (uint)h; } }
+/// <summary>XeSS context initialization parameters, output extent and optional heap/cache handles.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal struct XessInit
 {
@@ -64,6 +78,7 @@ internal struct XessInit
     public uint Flags, CreationNodeMask, VisibleNodeMask;
     public ulong BufferHeap, BufferOffset, TextureHeap, TextureOffset, PipelineCache;
 }
+/// <summary>Borrowed Vulkan image-view and subresource metadata for a XeSS input or output.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal struct XessImage
 {
@@ -71,6 +86,7 @@ internal struct XessImage
     public ImageSubresourceRange Range;
     public Format Format;
     public uint Width, Height;
+    /// <summary>Borrows the renderer texture's level-zero image/view metadata for a XeSS resource record.</summary>
     public static XessImage From(VulkanTexture texture) => new()
     {
         View = texture.View.Handle,
@@ -81,6 +97,7 @@ internal struct XessImage
         Height = texture.Height,
     };
 }
+/// <summary>Sequential XeSS execution resources, jitter, exposure, reset and subrectangle parameters.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal struct XessExecute
 {

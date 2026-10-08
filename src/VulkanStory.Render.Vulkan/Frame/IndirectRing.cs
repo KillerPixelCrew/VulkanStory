@@ -24,6 +24,7 @@ internal sealed class IndirectRing
 
     private const ulong Granularity = 64UL * 1024;
 
+    /// <summary>Capacity and cursor for one frame-slot indirect-command region.</summary>
     private struct Slot
     {
         public ulong Capacity;

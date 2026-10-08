@@ -45,8 +45,11 @@ internal enum MemoryPoolClass
 /// <summary>A region of a memory block handed to one resource.</summary>
 internal readonly struct MemoryAllocation
 {
+    /// <summary>Vulkan device-memory allocation backing this block or suballocation.</summary>
     public DeviceMemory Memory { get; init; }
+    /// <summary>Byte offset within the backing device-memory allocation.</summary>
     public ulong Offset { get; init; }
+    /// <summary>Byte length of the memory block or suballocation.</summary>
     public ulong Size { get; init; }
 
     /// <summary>Host pointer to this region, or zero when the memory is not mapped.</summary>
@@ -54,6 +57,7 @@ internal readonly struct MemoryAllocation
 
     internal MemoryBlock? Block { get; init; }
 
+    /// <summary>Whether this suballocation retains an owning memory block.</summary>
     public bool IsValid => Block != null;
 }
 
@@ -66,6 +70,7 @@ internal readonly struct MemoryAllocation
 /// </summary>
 internal sealed unsafe class MemoryBlock : IDisposable
 {
+    /// <summary>Byte range available for aligned suballocation within one memory block.</summary>
     private readonly struct FreeRange
     {
         public FreeRange(ulong offset, ulong size)
@@ -74,8 +79,11 @@ internal sealed unsafe class MemoryBlock : IDisposable
             Size = size;
         }
 
+        /// <summary>Byte offset within the backing device-memory allocation.</summary>
         public ulong Offset { get; }
+        /// <summary>Byte length of the memory block or suballocation.</summary>
         public ulong Size { get; }
+        /// <summary>Byte length of the memory block or suballocation.</summary>
         public ulong End => Offset + Size;
     }
 
@@ -83,7 +91,9 @@ internal sealed unsafe class MemoryBlock : IDisposable
     private readonly List<FreeRange> _free = new();
     private bool _disposed;
 
+    /// <summary>Vulkan device-memory allocation backing this block or suballocation.</summary>
     public DeviceMemory Memory { get; }
+    /// <summary>Byte length of the memory block or suballocation.</summary>
     public ulong Size { get; }
     public uint TypeIndex { get; }
 
@@ -111,8 +121,10 @@ internal sealed unsafe class MemoryBlock : IDisposable
     /// <summary>Base host pointer when the memory type is host visible.</summary>
     public IntPtr Mapped { get; private set; }
 
+    /// <summary>Total bytes currently assigned to live suballocations in this block.</summary>
     public ulong Used { get; private set; }
 
+    /// <summary>Total bytes currently assigned to live suballocations in this block.</summary>
     public bool IsEmpty => Used == 0;
 
     /// <summary>
@@ -168,15 +180,20 @@ internal sealed unsafe class MemoryBlock : IDisposable
             // Mapped once for the block's whole life. Mapping is not free and a
             // resource may be written from any thread, so per-resource mapping
             // would be both slower and harder to synchronise.
-            if (context.Api.MapMemory(context.Device, Memory, 0, size, 0, &mapped) == Result.Success)
+            Result result = context.Api.MapMemory(context.Device, Memory, 0, size, 0, &mapped);
+            if (result != Result.Success)
             {
-                Mapped = (IntPtr)mapped;
+                context.Api.FreeMemory(context.Device, Memory, null);
+                VulkanResult.Check(result, "mapping a host-visible memory block");
             }
+            Mapped = (IntPtr)mapped;
         }
 
         _free.Add(new FreeRange(0, size));
     }
 
+    /// <summary>Reserves an aligned byte range from this memory block.</summary>
+    /// <returns>Whether a fitting free range was found; offset is zero on failure.</returns>
     public bool TryAllocate(ulong size, ulong alignment, out ulong offset)
     {
         offset = 0;
@@ -209,6 +226,8 @@ internal sealed unsafe class MemoryBlock : IDisposable
         return false;
     }
 
+    /// <summary>Returns the specified allocation range to its owner and coalesces adjacent free ranges.</summary>
+    /// <remarks>Call only after all GPU users of that range have completed.</remarks>
     public void Free(ulong offset, ulong size)
     {
         if (_disposed || size == 0) return;
@@ -239,6 +258,7 @@ internal sealed unsafe class MemoryBlock : IDisposable
         _free.Insert(index, new FreeRange(start, end - start));
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -333,6 +353,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private readonly List<MemoryBlock> _dedicated = new();
     private readonly PhysicalDeviceMemoryProperties _memoryProperties;
     private readonly ulong[] _heapUsed;
+    private readonly ulong[] _heapImageBytes;
     private readonly ulong[] _heapBudget;
     private readonly ulong[] _heapDriverUsage;
     private readonly ulong[] _heapOwnedAtBudgetRefresh;
@@ -353,6 +374,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         _context = context;
         context.Api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice, out _memoryProperties);
         _heapUsed = new ulong[_memoryProperties.MemoryHeapCount];
+        _heapImageBytes = new ulong[_memoryProperties.MemoryHeapCount];
         _heapBudget = new ulong[_memoryProperties.MemoryHeapCount];
         _heapDriverUsage = new ulong[_memoryProperties.MemoryHeapCount];
         _heapOwnedAtBudgetRefresh = new ulong[_memoryProperties.MemoryHeapCount];
@@ -413,6 +435,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         }
     }
 
+    /// <summary>Returns the retained allocation-block size policy for the selected pool class.</summary>
     public static ulong BlockSizeOf(MemoryPoolClass poolClass) => poolClass switch
     {
         MemoryPoolClass.DeviceImages => 128 * MiB,
@@ -435,6 +458,8 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return (properties & reBar) == reBar ? MemoryPoolClass.ReBar : MemoryPoolClass.DeviceBuffers;
     }
 
+    /// <summary>Allocates aligned Vulkan memory satisfying resource requirements and requested properties.</summary>
+    /// <remarks>Ownership is represented by the returned allocation; release it through this allocator after GPU completion.</remarks>
     public MemoryAllocation Allocate(
         MemoryRequirements requirements, MemoryPropertyFlags properties, bool linear, string what) =>
         Allocate(requirements, properties, linear, what, InferClass(properties, linear), false, default, default);
@@ -610,6 +635,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private void NoteBlockCreated(MemoryBlock block)
     {
         _heapUsed[block.HeapIndex] += block.Size;
+        if (block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient) _heapImageBytes[block.HeapIndex] += block.Size;
         _classBytes[(int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class)] += block.Size;
         if (block.Class == MemoryPoolClass.ReBar) _reBarUsed += block.Size;
         if (block.Class == MemoryPoolClass.Transient)
@@ -645,6 +671,8 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private void NoteBlockReleased(MemoryBlock block)
     {
         _heapUsed[block.HeapIndex] -= Math.Min(_heapUsed[block.HeapIndex], block.Size);
+        if (block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
+            _heapImageBytes[block.HeapIndex] -= Math.Min(_heapImageBytes[block.HeapIndex], block.Size);
         int index = (int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class);
         _classBytes[index] -= Math.Min(_classBytes[index], block.Size);
         if (block.Class == MemoryPoolClass.ReBar) _reBarUsed -= Math.Min(_reBarUsed, block.Size);
@@ -668,6 +696,8 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             Block = block,
         };
 
+    /// <summary>Returns the specified allocation range to its owner and coalesces adjacent free ranges.</summary>
+    /// <remarks>Call only after all GPU users of that range have completed.</remarks>
     public void Free(in MemoryAllocation allocation)
     {
         MemoryBlock? block = allocation.Block;
@@ -811,6 +841,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         }
     }
 
+    /// <summary>Captures current allocator pool, dedicated-allocation and heap-budget diagnostic totals under its lock.</summary>
     public MemorySnapshot Snapshot()
     {
         lock (_gate)
@@ -912,6 +943,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         }
     }
 
+    /// <summary>Checks BAR-backed mesh headroom while preserving the current image/provider reserve policy.</summary>
     internal bool HasPersistentMeshHeadroom(ulong bytes)
     {
         const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
@@ -926,14 +958,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             // Leave room for image/provider working-set transitions. A single
             // image-pool block was insufficient: DLSS-G reported VRAM pressure
             // while mesh pools kept consuming the rest of the heap's budget.
-            ulong imageBytes = 0;
-            foreach (List<MemoryBlock> pool in _pools.Values)
-                foreach (MemoryBlock block in pool)
-                    if (block.HeapIndex == heap && block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
-                        imageBytes += block.Size;
-            foreach (MemoryBlock block in _dedicated)
-                if (block.HeapIndex == heap && block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
-                    imageBytes += block.Size;
+            ulong imageBytes = _heapImageBytes[heap];
             ulong externalBytes = _heapDriverUsage[heap] > _heapOwnedAtBudgetRefresh[heap]
                 ? _heapDriverUsage[heap] - _heapOwnedAtBudgetRefresh[heap] : 0;
             ulong reserve = Math.Max(BlockSizeOf(MemoryPoolClass.DeviceImages), imageBytes + externalBytes);
@@ -943,6 +968,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         }
     }
 
+    /// <summary>Most recently calculated reserve used when deciding BAR-backed persistent mesh placement.</summary>
     internal ulong PersistentMeshReserveBytes { get; private set; }
 
     /// <summary>The property flags of a memory type. Tests and diagnostics.</summary>
@@ -1048,6 +1074,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return line.ToString();
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         lock (_gate)

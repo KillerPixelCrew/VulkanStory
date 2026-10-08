@@ -180,7 +180,7 @@ void main(){
     float opaque = min(1.0, cloudOpaqueness * min(1.0, 10.0 * selfThickness)) * 2.0;
     opaque += undulatingModeness * 4.0;
     opaque *= alpha;
-    opaque *= smoothstep(0.95, 0.9, linearfade);
+    opaque *= 1.0 - smoothstep(0.9, 0.95, linearfade);
 
     float greyscale = smoothstep(0.0, 1.1, dayLight)
                     * (0.1 + cloudBrightness * 0.7)

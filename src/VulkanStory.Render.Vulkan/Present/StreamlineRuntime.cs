@@ -8,12 +8,15 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Sequential six-word snapshot returned by the Streamline frame-generation bridge.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct StreamlineFrameGenerationState
 {
     internal uint Status, Presents, MaximumGenerated, MinimumSize, VsyncSupport, DynamicMfgSupport;
 }
 
+/// <summary>Borrowed Vulkan image metadata in the Streamline bridge C ABI.</summary>
+/// <remarks>Tag lifetime is controlled by the frame-tagging/presentation owner; this record does not own the image.</remarks>
 [StructLayout(LayoutKind.Sequential)]
 internal partial struct StreamlineTaggedImage
 {
@@ -21,6 +24,8 @@ internal partial struct StreamlineTaggedImage
     public uint Layout, Format, Width, Height, Usage;
 }
 
+/// <summary>Camera transforms, jitter, motion scale and reset constants for matching Streamline frame tags.</summary>
+/// <remarks>Matrix pointers borrow caller storage for the native bridge call.</remarks>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct StreamlineFrameCamera
 {
@@ -37,6 +42,7 @@ internal unsafe struct StreamlineFrameCamera
 /// </summary>
 internal sealed unsafe class StreamlineRuntime : IDisposable
 {
+    /// <summary>Win32 display-adapter enumeration record used only to choose optional NVIDIA plugins.</summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct DisplayDevice
     {
@@ -67,6 +73,7 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         return false;
     }
 
+    /// <summary>Applies an explicit plugin override or enables DLSS-G only for an unpinned NVIDIA-adapter selection.</summary>
     internal static bool ShouldLoadDlssG(int preferredDeviceIndex, bool hasNvidiaAdapter,
         string? setting) => setting switch
     {
@@ -78,6 +85,7 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         _ => preferredDeviceIndex < 0 && hasNvidiaAdapter,
     };
 
+    /// <summary>Applies an explicit plugin override or enables DLSS-G only for an unpinned NVIDIA-adapter selection.</summary>
     internal static bool ShouldLoadReflex(int preferredDeviceIndex, bool hasNvidiaAdapter,
         string? setting) => ShouldLoadDlssG(preferredDeviceIndex, hasNvidiaAdapter, setting);
 
@@ -165,6 +173,12 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
             StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, uint, uint, int>)Export("VulkanStorySlTagFrame");
     }
 
+    /// <summary>Loads the private Streamline bridge and initializes selected PCL, Reflex and DLSS-G plugins.</summary>
+    /// <param name="preferredDeviceIndex">Explicit Vulkan device index, or a negative value for automatic selection.</param>
+    /// <param name="runtime">New session owner on success.</param>
+    /// <param name="reason">Load or initialization detail.</param>
+    /// <param name="preferredVendorId">Optional Vulkan vendor pin used to avoid NVIDIA feature injection on another adapter.</param>
+    /// <returns>Whether initialization succeeded.</returns>
     internal static bool TryCreate(int preferredDeviceIndex,
         out StreamlineRuntime? runtime, out string reason, uint? preferredVendorId = null)
     {
@@ -222,6 +236,12 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         }
     }
 
+    /// <summary>Resolves Vulkan commands through the Streamline proxy with instance fallback.</summary>
+    /// <param name="instance">Active instance, or default for global commands.</param>
+    /// <param name="device">Active device, or default before device creation.</param>
+    /// <param name="name">Vulkan command name encoded as a terminated UTF-8 string.</param>
+    /// <returns>Native command address, or zero when unresolved.</returns>
+    /// <exception cref="ObjectDisposedException">The session has been disposed.</exception>
     internal nint GetVulkanProcAddress(Instance instance, Device device, string name)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -237,45 +257,60 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
             return address != 0 ? address : _instanceProc(instance, pointer);
         }
     }
+    /// <summary>Creates a Vulkan instance through the Streamline proxy so its required extensions can be applied.</summary>
     internal Result CreateInstance(InstanceCreateInfo* info, out Instance instance)
     {
         instance = default;
         fixed (Instance* pointer = &instance) return _createInstance(info, pointer);
     }
+    /// <summary>Creates the selected Vulkan logical device through Streamline.</summary>
     internal Result CreateDevice(Instance instance, PhysicalDevice physical, DeviceCreateInfo* info, out Device device)
     {
         device = default;
         fixed (Device* pointer = &device) return _createDevice(instance, physical, info, pointer);
     }
+    /// <summary>Enumerates physical devices through the proxy using Vulkan count/query semantics.</summary>
     internal Result EnumeratePhysicalDevices(Instance instance, ref uint count, PhysicalDevice* devices)
     {
         fixed (uint* pointer = &count) return _enumeratePhysicalDevices(instance, pointer, devices);
     }
+    /// <summary>Creates a swapchain through the Streamline presentation proxy.</summary>
     internal Result CreateSwapchain(Device device, SwapchainCreateInfoKHR* info, out SwapchainKHR chain)
     {
         chain = default;
         fixed (SwapchainKHR* pointer = &chain) return _createSwapchain(device, info, pointer);
     }
+    /// <summary>Destroys a proxy-owned swapchain after its rendering and presentation users are drained.</summary>
     internal void DestroySwapchain(Device device, SwapchainKHR chain) => _destroySwapchain(device, chain);
+    /// <summary>Enumerates proxy swapchain images using Vulkan count/query semantics.</summary>
     internal Result GetImages(Device device, SwapchainKHR chain, ref uint count, Image* images)
     {
         fixed (uint* pointer = &count) return _getImages(device, chain, pointer, images);
     }
+    /// <summary>Acquires a proxy swapchain image with an infinite timeout and the supplied binary semaphore.</summary>
     internal Result Acquire(Device device, SwapchainKHR chain, Semaphore semaphore, ref uint index)
     {
         fixed (uint* pointer = &index) return _acquire(device, chain, ulong.MaxValue, semaphore, default, pointer);
     }
+    /// <summary>Submits presentation through the Streamline proxy with the caller-owned Vulkan present information.</summary>
     internal Result Present(Device device, Queue queue, PresentInfoKHR* info) => _present(device, queue, info);
+    /// <summary>Creates a Win32 surface through the Streamline proxy.</summary>
     internal Result CreateSurface(Instance instance, Win32SurfaceCreateInfoKHR* info, out SurfaceKHR surface)
     {
         surface = default;
         fixed (SurfaceKHR* pointer = &surface) return _createSurface(instance, info, pointer);
     }
+    /// <summary>Destroys a proxy surface after its swapchains are released.</summary>
     internal void DestroySurface(Instance instance, SurfaceKHR surface) => _destroySurface(instance, surface);
+    /// <summary>Waits for device idle through the Streamline proxy and returns the Vulkan result.</summary>
     internal Result DeviceWaitIdle(Device device) => _deviceWaitIdle(device);
+    /// <summary>Binds Reflex functions for the created device and returns the bridge status.</summary>
     internal int BindReflex() => _bindReflex();
+    /// <summary>Binds DLSS-G functions for the created device and returns the bridge status.</summary>
     internal int BindFrameGeneration() => _bindFrameGeneration();
+    /// <summary>Binds PCL functions when exported; returns -1 when the bridge lacks that optional export.</summary>
     internal int BindPcl() => _bindPcl == null ? -1 : _bindPcl();
+    /// <summary>Queries independent Reflex low-latency and latency-report availability flags.</summary>
     internal int GetReflexState(out bool lowLatencyAvailable, out bool latencyReportAvailable)
     {
         uint available = 0, reports = 0;
@@ -284,17 +319,27 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         latencyReportAvailable = reports != 0;
         return result;
     }
+    /// <summary>Returns the PCL latency-ping window message, or zero when unavailable.</summary>
     internal uint PclWindowMessage() => _pclWindowMessage == null ? 0 : _pclWindowMessage();
+    /// <summary>Queries DLSS-G support for the selected Vulkan physical device.</summary>
     internal int IsFrameGenerationSupported(PhysicalDevice physical) => _isFrameGenerationSupported(physical);
+    /// <summary>Applies the native Reflex mode and a nonnegative maximum FPS.</summary>
     internal int SetReflex(int mode, int maxFps) => _setReflex(mode, (uint)Math.Max(maxFps, 0));
+    /// <summary>Obtains Streamline frame identity using the low 32 bits of the renderer frame ID.</summary>
     internal int BeginFrame(ulong id) => _beginFrame((uint)id);
+    /// <summary>Returns the bridge-held token for the frame begun most recently.</summary>
     internal nint CurrentFrameToken() => _currentFrameToken();
+    /// <summary>Invokes Reflex sleep for the current frame token before input collection.</summary>
     internal int ReflexSleep() => _reflexSleep();
+    /// <summary>Emits a latency marker for the bridge-held current frame token.</summary>
     internal int Marker(uint marker) => _marker(marker);
+    /// <summary>Emits a latency marker for an explicitly retained token, including asynchronous present work.</summary>
     internal int MarkerForToken(nint token, uint marker) => _markerForToken(token, marker);
+    /// <summary>Applies DLSS-G enablement, generated-frame count and presentation-resource dimensions.</summary>
     internal int SetFrameGeneration(bool enabled, uint generatedFrames, uint width,
         uint height, Format colorFormat, uint buffers) =>
         _setFg(enabled ? 1 : 0, generatedFrames, width, height, (uint)colorFormat, buffers);
+    /// <summary>Queries provider status, presented count and maximum generated-frame count.</summary>
     internal int GetFrameGenerationState(out uint status, out uint presented,
         out uint maxGenerated)
     {
@@ -304,26 +349,47 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         fixed (uint* maxPtr = &maxGenerated)
             return _getFgState(statusPtr, presentedPtr, maxPtr);
     }
+    /// <summary>Consumes the bridge-recorded asynchronous presentation error.</summary>
     internal int TakePresentError() => _takePresentError();
+    /// <summary>Reads all six frame-generation capability/state words from the bridge.</summary>
     internal int GetFrameGenerationStateDetails(out StreamlineFrameGenerationState state)
     {
         state = default;
         fixed (StreamlineFrameGenerationState* pointer = &state)
             return _getFgStateDetails((uint*)pointer, 6);
     }
+    /// <summary>Invalidates frame resources for the supplied extent before a lifecycle transition.</summary>
     internal int InvalidateFrameTags(uint width, uint height) => _invalidateFrameTags(width, height);
+    /// <summary>Requests DLSS-G resource release after its rendering and presentation work is drained.</summary>
     internal int FreeFrameGenerationResources() => _freeFrameGenerationResources();
+
+    /// <summary>Accepts a completed disable or drains/frees DLSS-G after its documented VRAM warning.</summary>
+    internal static void CheckDisableResult(VulkanContext context, int result)
+    {
+        if (result == 0) return;
+        const int outOfVramWarning = 39;
+        if (result != outOfVramWarning)
+            throw new InvalidOperationException("Disabling DLSS-G failed (" + result + ").");
+        VulkanResult.Check(context.WaitDeviceIdle(), "draining DLSS-G after VRAM warning");
+        int release = context.Streamline!.FreeFrameGenerationResources();
+        if (release != 0)
+            throw new InvalidOperationException("Releasing DLSS-G after VRAM warning failed (" + release + ").");
+    }
+    /// <summary>Disables DLSS-G through the bridge before releasing provider-owned resources.</summary>
     internal int DisableFrameGenerationForRelease() => _disableFrameGenerationForRelease();
+    /// <summary>Tags matching borrowed depth, motion, HUD-free scene, UI and camera constants on the current command buffer.</summary>
     internal int TagFrame(CommandBuffer commands, StreamlineTaggedImage* depth,
         StreamlineTaggedImage* motion, StreamlineTaggedImage* hudless, StreamlineTaggedImage* ui,
         StreamlineFrameCamera* camera, uint width, uint height) =>
         _tagFrame(commands, depth, motion, hudless, ui, camera, width, height);
+    /// <summary>Shuts down the native Streamline session once; module unloading belongs to disposal.</summary>
     internal void Shutdown()
     {
         if (_shutdownComplete) return;
         _shutdown();
         _shutdownComplete = true;
     }
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

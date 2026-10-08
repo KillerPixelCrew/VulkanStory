@@ -29,6 +29,8 @@ internal sealed partial class GameRenderSession
         HandheldShadowTier: () => services.RendererSettings.Settings.HandheldShadowTier,
         LinkError: (pass, error) => platform.Logger.Error("VulkanStory shader '{0}' failed: {1}", pass, error ?? "unknown link error"),
         ProgramLoaded: pass => platform.Logger.Debug("VulkanStory linked shader: {0}", pass));
+    /// <summary>Captures ordinary game post-processing and pacing policy before input, suppressing FXAA when the effective temporal pipeline owns reconstruction.</summary>
+    /// <returns>Immutable options used for this frame input/pacing and original render dispatch.</returns>
     private GameFrameSettings CaptureFrameSettings()
     {
         RequireOwner();

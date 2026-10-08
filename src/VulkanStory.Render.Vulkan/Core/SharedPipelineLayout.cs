@@ -27,6 +27,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     public DescriptorSetLayout FrameSetLayout { get; }
     public DescriptorSetLayout TextureSetLayout { get; }
     public DescriptorSetLayout StorageSetLayout { get; }
+    /// <summary>Owned shared Vulkan pipeline layout used by compatible native shader programs.</summary>
     public PipelineLayout Layout { get; }
 
     /// <summary>
@@ -192,6 +193,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

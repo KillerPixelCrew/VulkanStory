@@ -58,6 +58,7 @@ internal sealed class PresentIdMap
     /// <summary>The frame id of the newest present recorded, 0 before the first.</summary>
     public ulong LastFrameId { get; private set; }
 
+    /// <summary>Records the bounded mapping from a present identity to its rendered-frame identity.</summary>
     public void Record(ulong presentId, ulong frameId)
     {
         _presentIds[_next] = presentId;
@@ -93,7 +94,9 @@ internal readonly struct PresentTarget
         AcquireSemaphore = acquireSemaphore;
     }
 
+    /// <summary>Borrowed swapchain slot owning the acquired image and synchronization.</summary>
     public SwapchainSlot Slot { get; }
+    /// <summary>Image index acquired from the owning swapchain slot.</summary>
     public uint ImageIndex { get; }
 
     /// <summary>Signalled by the acquire; Submit B waits on it.</summary>
@@ -102,7 +105,9 @@ internal readonly struct PresentTarget
     /// <summary>Signalled by Submit B; vkQueuePresentKHR waits on it.</summary>
     public Semaphore PresentSemaphore => Slot.PresentSemaphoreFor(ImageIndex);
 
+    /// <summary>Borrowed acquired swapchain image.</summary>
     public Image Image => Slot.Images[ImageIndex];
+    /// <summary>Swapchain image extent in pixels.</summary>
     public Extent2D Extent => Slot.Extent;
 }
 
@@ -143,30 +148,18 @@ internal sealed unsafe class SwapchainSlot : IDisposable
             VulkanResult.Check(api.GetImages(context.Device, handle, ref count, imagesPtr), "vkGetSwapchainImagesKHR");
         }
 
-        Views = new ImageView[count];
-        for (int i = 0; i < count; i++)
-        {
-            var viewInfo = new ImageViewCreateInfo
-            {
-                SType = StructureType.ImageViewCreateInfo,
-                Image = Images[i],
-                ViewType = ImageViewType.Type2D,
-                Format = format,
-                SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
-            };
-            ImageView view;
-            VulkanResult.Check(context.Api.CreateImageView(context.Device, &viewInfo, null, &view),
-                "vkCreateImageView for a swapchain image");
-            Views[i] = view;
-        }
-
         // The present semaphore belongs to the IMAGE, not to a rolling counter:
         // vkQueuePresentKHR keeps waiting on it until that image is presented, and
         // the only moment it is provably free again is when the same image is
         // re-acquired. A counter-indexed semaphore could be re-signalled while an
         // earlier present still waits on it.
         _presentSemaphores = CreateSemaphores((int)count);
-        _acquireSemaphores = CreateSemaphores(AcquireSemaphoreFreeList.CapacityFor(count));
+        try { _acquireSemaphores = CreateSemaphores(AcquireSemaphoreFreeList.CapacityFor(count)); }
+        catch
+        {
+            foreach (Semaphore semaphore in _presentSemaphores) context.Api.DestroySemaphore(context.Device, semaphore, null);
+            throw;
+        }
         var handles = new ulong[_acquireSemaphores.Length];
         for (int i = 0; i < handles.Length; i++) handles[i] = _acquireSemaphores[i].Handle;
         _freeAcquire = new AcquireSemaphoreFreeList(handles);
@@ -174,10 +167,13 @@ internal sealed unsafe class SwapchainSlot : IDisposable
 
     public SwapchainKHR Handle { get; }
     public Image[] Images { get; }
-    public ImageView[] Views { get; }
+    /// <summary>Swapchain image extent in pixels.</summary>
     public Extent2D Extent { get; }
+    /// <summary>Selected swapchain image format.</summary>
     public Format Format { get; }
+    /// <summary>Selected Vulkan presentation mode.</summary>
     public PresentModeKHR PresentMode { get; }
+    /// <summary>Number of images in the current swapchain slot.</summary>
     public uint ImageCount => (uint)Images.Length;
     public int AcquireSemaphoreCount => _acquireSemaphores.Length;
     public int FreeAcquireSemaphores => _freeAcquire.FreeCount;
@@ -208,6 +204,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         if (frameValue > LastPresentValue) LastPresentValue = frameValue;
     }
 
+    /// <summary>Checks the slot's available presentation-completion evidence before retirement.</summary>
     public bool PresentsComplete()
     {
         for (int i = _pendingPresents.Count - 1; i >= 0; i--)
@@ -222,6 +219,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         return _pendingPresents.Count == 0;
     }
 
+    /// <summary>Prepares a presentation-completion fence for the next supported fenced present.</summary>
     public Fence PreparePresentFence()
     {
         // Streamline owns presentation completion. Its proxy does not signal
@@ -238,6 +236,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         return fence;
     }
 
+    /// <summary>Stores or releases the prepared fence according to the completed queue-present result.</summary>
     public void FinishPresentFence(Fence fence, Result result)
     {
         if (fence.Handle == 0) return;
@@ -253,16 +252,26 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     {
         var semaphores = new Semaphore[count];
         var createInfo = new SemaphoreCreateInfo { SType = StructureType.SemaphoreCreateInfo };
-        for (int i = 0; i < count; i++)
+        try
         {
-            Semaphore semaphore;
-            VulkanResult.Check(_context.Api.CreateSemaphore(_context.Device, &createInfo, null, &semaphore),
-                "vkCreateSemaphore for a swapchain slot");
-            semaphores[i] = semaphore;
+            for (int i = 0; i < count; i++)
+            {
+                Semaphore semaphore;
+                VulkanResult.Check(_context.Api.CreateSemaphore(_context.Device, &createInfo, null, &semaphore),
+                    "vkCreateSemaphore for a swapchain slot");
+                semaphores[i] = semaphore;
+            }
+        }
+        catch
+        {
+            foreach (Semaphore semaphore in semaphores)
+                if (semaphore.Handle != 0) _context.Api.DestroySemaphore(_context.Device, semaphore, null);
+            throw;
         }
         return semaphores;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireLifetime();
@@ -287,10 +296,6 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         _pendingPresents.Clear();
         _freePresentFences.Clear();
 
-        foreach (ImageView view in Views)
-        {
-            if (view.Handle != 0) _context.Api.DestroyImageView(_context.Device, view, null);
-        }
         if (Handle.Handle != 0) _api.Destroy(_context.Device, Handle);
         foreach (Semaphore semaphore in _acquireSemaphores)
         {
@@ -301,6 +306,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
             if (semaphore.Handle != 0) _context.Api.DestroySemaphore(_context.Device, semaphore, null);
         }
     }
+    /// <summary>Rejects further use after a retained swapchain/provider release failure.</summary>
     internal void RequireLifetime()
     {
         if (_disposalFailure != null)
@@ -345,9 +351,13 @@ internal sealed unsafe class Swapchain : IDisposable
     private bool _disposed;
     private Exception? _disposalFailure;
 
+    /// <summary>Selected swapchain image format.</summary>
     public Format Format { get; private set; } = Format.B8G8R8A8Unorm;
+    /// <summary>Swapchain image extent in pixels.</summary>
     public Extent2D Extent { get; private set; }
+    /// <summary>Selected Vulkan presentation mode.</summary>
     public PresentModeKHR PresentMode { get; private set; } = PresentModeKHR.FifoKhr;
+    /// <summary>Number of images in the current swapchain slot.</summary>
     public uint ImageCount => _current?.ImageCount ?? 0;
 
     /// <summary>Set when the chain is stale; the next acquire rebuilds it first.</summary>
@@ -432,9 +442,16 @@ internal sealed unsafe class Swapchain : IDisposable
         // The graphics queue has to be able to present. A separate present queue
         // is possible in principle but does not occur on any desktop driver, and
         // supporting it would add a queue-ownership transfer to every frame.
-        surfaceApi.GetPhysicalDeviceSurfaceSupport(
+        Result surfaceSupport = surfaceApi.GetPhysicalDeviceSurfaceSupport(
             context.PhysicalDevice, context.GraphicsQueueFamily, surface,
             out Silk.NET.Core.Bool32 supported);
+        if (surfaceSupport != Result.Success)
+        {
+            WindowSurface.Destroy(context, surface);
+            surfaceApi.Dispose();
+            swapchainApi.Dispose();
+            VulkanResult.Check(surfaceSupport, "querying surface presentation support");
+        }
         if (!supported)
         {
             failureReason = "the graphics queue family cannot present to this surface";
@@ -479,8 +496,7 @@ internal sealed unsafe class Swapchain : IDisposable
         if (_context.Streamline == null) return;
         int result = _context.Streamline.SetFrameGeneration(false, 1, old.Extent.Width,
             old.Extent.Height, old.Format, old.ImageCount);
-        if (result != 0)
-            throw new InvalidOperationException("Disabling DLSS-G before swapchain replacement failed (" + result + ").");
+        StreamlineRuntime.CheckDisableResult(_context, result);
     }
 
     private bool Build(out string? failureReason)
@@ -488,8 +504,8 @@ internal sealed unsafe class Swapchain : IDisposable
         RequireLifetime();
         failureReason = null;
 
-        _surfaceApi.GetPhysicalDeviceSurfaceCapabilities(
-            _context.PhysicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
+        VulkanResult.Check(_surfaceApi.GetPhysicalDeviceSurfaceCapabilities(
+            _context.PhysicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities), "querying surface capabilities");
 
         Extent2D extent = ChooseExtent(capabilities, _width, _height);
         if (SwapchainPolicy.IsParked(extent))
@@ -517,6 +533,7 @@ internal sealed unsafe class Swapchain : IDisposable
             // create the successor through the same context. Switching owner
             // follows this path too, so acquire/present never mix providers.
             if (old != null) DisableStreamlineForRebuild(old);
+            if (old != null) _swapchainApi.PrepareDestroy(old.Handle);
             // Retained slots still belong to the departing dispatch even if a
             // failed creation left no current slot. Release them before switching.
             VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before FG proxy transition");
@@ -538,6 +555,16 @@ internal sealed unsafe class Swapchain : IDisposable
         // The DLSS-G guide requires generation to be off before a resize or
         // present-mode change. The next valid world frame turns it back on.
         if (old != null) DisableStreamlineForRebuild(old);
+        if ((capabilities.SupportedUsageFlags & ImageUsageFlags.TransferDstBit) == 0)
+            throw new InvalidOperationException("Surface images do not support transfer-destination presentation.");
+        CompositeAlphaFlagsKHR alpha = CompositeAlphaFlagsKHR.OpaqueBitKhr;
+        if ((capabilities.SupportedCompositeAlpha & alpha) == 0)
+        {
+            alpha = capabilities.SupportedCompositeAlpha & CompositeAlphaFlagsKHR.PreMultipliedBitKhr;
+            if (alpha == 0) alpha = capabilities.SupportedCompositeAlpha & CompositeAlphaFlagsKHR.PostMultipliedBitKhr;
+            if (alpha == 0) alpha = capabilities.SupportedCompositeAlpha & CompositeAlphaFlagsKHR.InheritBitKhr;
+            if (alpha == 0) throw new InvalidOperationException("Surface has no supported composite-alpha mode.");
+        }
         var createInfo = new SwapchainCreateInfoKHR
         {
             SType = StructureType.SwapchainCreateInfoKhr,
@@ -550,10 +577,10 @@ internal sealed unsafe class Swapchain : IDisposable
             // Transfer destination because the frame is blitted in rather than
             // rendered directly: the game renders into its own targets and the
             // last step copies the result across, flipping it on the way.
-            ImageUsage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.TransferDstBit,
+            ImageUsage = ImageUsageFlags.TransferDstBit,
             ImageSharingMode = SharingMode.Exclusive,
             PreTransform = capabilities.CurrentTransform,
-            CompositeAlpha = CompositeAlphaFlagsKHR.OpaqueBitKhr,
+            CompositeAlpha = alpha,
             PresentMode = presentMode,
             Clipped = true,
             // Always the current chain: images it has not handed out can be freed
@@ -596,7 +623,13 @@ internal sealed unsafe class Swapchain : IDisposable
             return false;
         }
 
-        _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode);
+        try { _current = new SwapchainSlot(_context, _swapchainApi, handle, extent, Format, presentMode); }
+        catch
+        {
+            _swapchainApi.PrepareDestroy(handle);
+            _swapchainApi.Destroy(_context.Device, handle);
+            throw;
+        }
         if (_swapchainApi is not Fsr3SwapchainDispatch)
             _vendorLatency?.OnSwapchainCreated(handle);
         Extent = extent;
@@ -628,45 +661,64 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     private Format ChooseFormat(out ColorSpaceKHR colorSpace)
     {
-        uint count = 0;
-        _surfaceApi.GetPhysicalDeviceSurfaceFormats(_context.PhysicalDevice, _surface, ref count, null);
-
-        var formats = new SurfaceFormatKHR[count];
-        fixed (SurfaceFormatKHR* formatsPtr = formats)
+        SurfaceFormatKHR[] formats = Array.Empty<SurfaceFormatKHR>();
+        for (int attempt = 0; attempt < 3; attempt++)
         {
-            _surfaceApi.GetPhysicalDeviceSurfaceFormats(_context.PhysicalDevice, _surface, ref count, formatsPtr);
+            uint count = 0;
+            VulkanResult.Check(_surfaceApi.GetPhysicalDeviceSurfaceFormats(_context.PhysicalDevice, _surface, ref count, null), "querying surface format count");
+            if (count == 0) throw new InvalidOperationException("Surface advertises no presentation formats.");
+            formats = new SurfaceFormatKHR[count];
+            Result result;
+            fixed (SurfaceFormatKHR* formatsPtr = formats)
+                result = _surfaceApi.GetPhysicalDeviceSurfaceFormats(_context.PhysicalDevice, _surface, ref count, formatsPtr);
+            if (result == Result.Incomplete)
+            {
+                if (attempt == 2) throw new InvalidOperationException("Surface format enumeration did not stabilize.");
+                continue;
+            }
+            VulkanResult.Check(result, "querying surface formats");
+            Array.Resize(ref formats, (int)count);
+            break;
         }
 
+        if (formats.Length == 1 && formats[0].Format == Format.Undefined)
+            formats[0].Format = Format.B8G8R8A8Unorm;
         foreach (SurfaceFormatKHR candidate in formats)
         {
-            if (candidate.Format is Format.B8G8R8A8Unorm or Format.R8G8B8A8Unorm)
+            if ((candidate.Format is Format.B8G8R8A8Unorm or Format.R8G8B8A8Unorm) &&
+                (_context.OptimalFormatFeatures(candidate.Format) & FormatFeatureFlags.BlitDstBit) != 0)
             {
                 colorSpace = candidate.ColorSpace;
                 return candidate.Format;
             }
         }
 
-        if (formats.Length > 0)
+        foreach (SurfaceFormatKHR candidate in formats)
         {
-            colorSpace = formats[0].ColorSpace;
-            return formats[0].Format;
+            if ((_context.OptimalFormatFeatures(candidate.Format) & FormatFeatureFlags.BlitDstBit) == 0) continue;
+            colorSpace = candidate.ColorSpace;
+            return candidate.Format;
         }
-
-        colorSpace = ColorSpaceKHR.SpaceSrgbNonlinearKhr;
-        return Format.B8G8R8A8Unorm;
+        throw new InvalidOperationException("Surface advertises no blit-compatible presentation format.");
     }
 
     private PresentModeKHR[] SupportedPresentModes()
     {
-        uint count = 0;
-        _surfaceApi.GetPhysicalDeviceSurfacePresentModes(_context.PhysicalDevice, _surface, ref count, null);
-
-        var modes = new PresentModeKHR[count];
-        fixed (PresentModeKHR* modesPtr = modes)
+        for (int attempt = 0; attempt < 3; attempt++)
         {
-            _surfaceApi.GetPhysicalDeviceSurfacePresentModes(_context.PhysicalDevice, _surface, ref count, modesPtr);
+            uint count = 0;
+            VulkanResult.Check(_surfaceApi.GetPhysicalDeviceSurfacePresentModes(_context.PhysicalDevice, _surface, ref count, null), "querying present-mode count");
+            if (count == 0) throw new InvalidOperationException("Surface advertises no present modes.");
+            var modes = new PresentModeKHR[count];
+            Result result;
+            fixed (PresentModeKHR* modesPtr = modes)
+                result = _surfaceApi.GetPhysicalDeviceSurfacePresentModes(_context.PhysicalDevice, _surface, ref count, modesPtr);
+            if (result == Result.Incomplete) continue;
+            VulkanResult.Check(result, "querying present modes");
+            Array.Resize(ref modes, (int)count);
+            return modes;
         }
-        return modes;
+        throw new InvalidOperationException("Surface present-mode enumeration did not stabilize.");
     }
 
     /// <summary>
@@ -682,6 +734,7 @@ internal sealed unsafe class Swapchain : IDisposable
         NeedsRecreation = true;
     }
 
+    /// <summary>Selects the complete swapchain dispatch owner for the requested presentation provider.</summary>
     public void SetFrameGenerationProvider(string provider)
     {
         if (_frameGenerationProvider == provider) return;
@@ -863,9 +916,10 @@ internal sealed unsafe class Swapchain : IDisposable
             VulkanResult.Check(result, "vkQueuePresentKHR");
         }
 
-        return presentId;
+        return result is Result.Success or Result.SuboptimalKhr ? presentId : 0;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireLifetime();
@@ -878,6 +932,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
         // Teardown, not recreation: everything this chain ever presented must be
         // finished before its slots go.
+        if (_current != null) _swapchainApi.PrepareDestroy(_current.Handle);
         VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle for swapchain teardown");
         _retirement.DisposeAll();
         _vendorLatency?.OnSwapchainRetired();
@@ -894,6 +949,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
         _surfaceApi.Dispose();
     }
+    /// <summary>Rejects further use after a retained swapchain/provider release failure.</summary>
     internal void RequireLifetime()
     {
         if (_disposalFailure != null)
@@ -908,7 +964,7 @@ internal sealed unsafe class Swapchain : IDisposable
 /// The wait stages of the present submission, checked in one place.
 ///
 /// Submit B waits on two things: the Frame timeline at the value Submit A
-/// signalled (the frame image it reads is finished), at COLOR_ATTACHMENT_OUTPUT;
+/// signalled (the frame image it reads is finished), at TRANSFER;
 /// and the acquire semaphore at the stage where the swapchain image is first
 /// touched: TRANSFER for the flipped blit, COLOR_ATTACHMENT_OUTPUT for a raster
 /// path (FSR's final pass). ALL_COMMANDS would also block the barrier and every

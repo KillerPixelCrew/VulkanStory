@@ -101,6 +101,9 @@ internal sealed partial class GameGraphicsAdapter
     private bool nativeEntityReported;
 
     /// <summary>An entity's shape: the native draw inside the stage's pass, or the neutral body.</summary>
+    /// <param name="mesh">Owned entity mesh.</param>
+    /// <param name="samplerName">Original program sampler receiving the supplied texture.</param>
+    /// <param name="textureId">Adapter-owned texture identifier.</param>
     internal void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)
     {
         if (!NativeEntitiesEnabled || device == null || mesh == null)

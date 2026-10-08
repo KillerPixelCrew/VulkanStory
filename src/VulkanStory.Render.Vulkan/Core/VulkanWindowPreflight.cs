@@ -6,6 +6,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Create and release an SDL3 Vulkan surface without starting the game.</summary>
 public static class VulkanWindowPreflight
 {
+    /// <summary>Runs the explicit SDL window/Vulkan surface initialization and release preflight.</summary>
+    /// <remarks>This method creates native resources and may submit GPU work; it is an opt-in validation entry point.</remarks>
+    /// <returns>Null on successful completion, otherwise the failure detail.</returns>
     public static string? Check()
     {
         try

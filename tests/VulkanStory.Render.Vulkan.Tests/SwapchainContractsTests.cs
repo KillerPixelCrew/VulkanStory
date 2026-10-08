@@ -5,8 +5,11 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Carried from the source renderer's PresentationTests: no GPU required.
+/// <summary>Checks simulated render/present retirement, acquire-semaphore reuse, and present fallback policy.</summary>
+/// <remarks>Controlled timelines and handles do not establish native presentation completion.</remarks>
 public sealed class SwapchainContractsTests
 {
+    /// <summary>Controlled timeline counters for render-versus-present retirement scenarios.</summary>
     private sealed class Clock : ITimelineClock
     {
         public ulong FrameRecorded { get; set; }
@@ -15,6 +18,7 @@ public sealed class SwapchainContractsTests
         public ulong TransferCompleted { get; set; }
     }
 
+    /// <summary>Disposal callback probe representing a retired swapchain resource.</summary>
     private sealed class Resource(Action dispose) : IDisposable
     {
         public void Dispose() => dispose();

@@ -85,9 +85,11 @@ internal static class VulkanStats
 {
     private static readonly SdlInputAgeRecorder SdlInputAges = new();
 
+    /// <summary>Records valid SDL event-to-dispatch age samples on the shared SDL clock.</summary>
     public static void RecordSdlInputAge(ulong eventTimestampNanoseconds, ulong dispatchTimestampNanoseconds) =>
         SdlInputAges.Record(eventTimestampNanoseconds, dispatchTimestampNanoseconds);
 
+    /// <summary>Formats a sampled SDL dispatch-age record for diagnostics.</summary>
     public static string FormatSdlInputAgeLine(SdlInputAgeSample sample) =>
         string.Format(CultureInfo.InvariantCulture,
             "stats.input_age events={0} mean_ms={1:F2} p99_ms={2:F2} max_ms={3:F2}",
@@ -170,6 +172,7 @@ internal static class VulkanStats
     public static void NoteTextureCreated() => Interlocked.Increment(ref _texturesCreated);
     public static void NoteTextureDeleted() => Interlocked.Increment(ref _texturesDeleted);
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
+    /// <summary>Records one completed renderer real or generated presentation observation.</summary>
     public static void NotePresent(bool generated)
     {
         if (generated)
@@ -488,6 +491,7 @@ internal static class VulkanStats
 
     private static long _indirectOverflows;
 
+    /// <summary>Records one frame interval in the bounded synchronized interval ring.</summary>
     public static void NoteDynamicStateCommands(int count) => Interlocked.Add(ref _dynamicStateCommands, count);
 
     public static long DynamicStateCommands => Interlocked.Read(ref _dynamicStateCommands);
@@ -522,8 +526,10 @@ internal static class VulkanStats
         Interlocked.Add(ref _waitTicks[index], Stopwatch.GetTimestamp() - startTimestamp);
     }
 
+    /// <summary>Returns the interlocked count of waits recorded at the selected instrumentation site.</summary>
     public static long WaitCount(WaitSite site) => Interlocked.Read(ref _waitCounts[(int)site]);
 
+    /// <summary>Converts accumulated wait ticks at the selected site to milliseconds.</summary>
     public static double WaitMilliseconds(WaitSite site) =>
         Interlocked.Read(ref _waitTicks[(int)site]) * 1000.0 / Stopwatch.Frequency;
 
@@ -793,11 +799,13 @@ internal static class VulkanStats
             uploads, uploadMs, uploadMs / (elapsed * 1000.0) * 100.0, created, deleted, dropped, overflows);
     }
 
+    /// <summary>Formats the bounded frame-interval snapshot as a pacing diagnostic line.</summary>
     public static string FormatPacingLine(FramePacingSnapshot pacing) =>
         string.Format(CultureInfo.InvariantCulture,
             "stats.pacing samples={0} p50_ms={1:F3} p95_ms={2:F3} p99_ms={3:F3} stddev_ms={4:F3} stutters={5}",
             pacing.Samples, pacing.P50, pacing.P95, pacing.P99, pacing.StdDev, pacing.Stutters);
 
+    /// <summary>Formats matching wait-count and wait-duration snapshots.</summary>
     public static string FormatWaitsLine(long[] counts, double[] milliseconds)
     {
         var line = new StringBuilder("stats.waits");
@@ -811,6 +819,7 @@ internal static class VulkanStats
         return line.ToString();
     }
 
+    /// <summary>Formats a renderer counter snapshot for the periodic diagnostic output.</summary>
     public static string FormatCountersLine(CounterSample counters) =>
         string.Format(CultureInfo.InvariantCulture,
             "stats.counters blocking_uploads={0} uploads={1} scopes={2} barriers={3} rebar_fallbacks={4} " +
@@ -857,6 +866,7 @@ internal static class VulkanStats
     /// <summary>A draw skipped because its pipeline was still compiling in the background.</summary>
     public static void NotePipelineDrawSkipped() => Interlocked.Increment(ref _pipelineDrawsSkipped);
 
+    /// <summary>Replaces the diagnostic count of outstanding asynchronous pipeline jobs.</summary>
     public static void NotePipelinesPending(int pending) => Interlocked.Exchange(ref _pipelinesPending, pending);
 
     /// <summary>Serialised driver cache size at the last sample or save.</summary>
@@ -983,6 +993,7 @@ internal sealed class FrameIntervalRing
         get { lock (_lock) return _count; }
     }
 
+    /// <summary>Records one frame interval in the bounded synchronized interval ring.</summary>
     public void Add(double milliseconds)
     {
         if (!(milliseconds >= 0) || double.IsInfinity(milliseconds)) return;
@@ -994,6 +1005,7 @@ internal sealed class FrameIntervalRing
         }
     }
 
+    /// <summary>Copies frame intervals under the ring lock and calculates bounded pacing percentiles.</summary>
     public FramePacingSnapshot Snapshot()
     {
         lock (_lock)

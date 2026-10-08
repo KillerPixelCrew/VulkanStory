@@ -6,6 +6,8 @@ namespace VulkanStory.Game;
 
 // Post effects, final composition and blit form one group. Scene/API/window
 // coverage must still join it before the complete startup transaction commits.
+/// <summary>Routes original post, final composition and primary-to-default seams through the session reconstruction pipeline.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class PostProcessingConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-post-processing";
@@ -16,6 +18,10 @@ internal static class PostProcessingConsumerPatches
         throw new MissingMethodException("Original final composition method is missing.");
     private static readonly MethodInfo Blit = AccessTools.Method(typeof(ClientPlatformWindows), "BlitPrimaryToDefault", []) ??
         throw new MissingMethodException("Original final blit method is missing.");
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner);

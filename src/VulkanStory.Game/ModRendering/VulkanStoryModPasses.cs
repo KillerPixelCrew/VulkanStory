@@ -46,9 +46,9 @@ namespace VulkanStory.Game.ModRendering
         PrimaryColor = 1,
         /// <summary>Primary colour 1: glow.</summary>
         PrimaryGlow = 2,
-        /// <summary>Primary colour 2: SSAO G-buffer position (SSAO on only).</summary>
+        /// <summary>Primary colour 3: SSAO G-buffer position (SSAO on only).</summary>
         PrimaryGBufferPosition = 3,
-        /// <summary>Primary colour 3: SSAO G-buffer normal (SSAO on only).</summary>
+        /// <summary>Primary colour 2: SSAO G-buffer normal (SSAO on only).</summary>
         PrimaryGBufferNormal = 4,
         /// <summary>
         /// The TAA motion attachment (TAA on only). Never a declared write: a pass writes it by
@@ -100,6 +100,8 @@ namespace VulkanStory.Game.ModRendering
     }
 
     /// <summary>The draw callback of a declared pass. Render thread only.</summary>
+    /// <param name="pass">Copied registration declaration for the current pass bracket.</param>
+    /// <remarks>The adapter logs callback failures and restores pass state before continuing declared-pass processing.</remarks>
     public delegate void VulkanStoryPassDraw(VulkanStoryPassDecl pass);
 
     /// <summary>
@@ -125,6 +127,7 @@ namespace VulkanStory.Game.ModRendering
         /// <summary>A name unique within the mod, for logs and traces.</summary>
         public string Name = "";
 
+        /// <summary>Selects combined color/motion writes or a velocity-only motion pass; the registered writer is validated before opening.</summary>
         public EnumVulkanStoryMotionWrite Mode;
 
         internal VulkanStoryMotionWriterDecl Clone() => new VulkanStoryMotionWriterDecl { Name = Name, Mode = Mode };
@@ -141,6 +144,7 @@ namespace VulkanStory.Game.ModRendering
         /// <summary>A name unique within the mod; registering the same name again replaces the pass.</summary>
         public string Name = "";
 
+        /// <summary>Original render stage after whose ordinary registered renderers this pass runs.</summary>
         public EnumVulkanStoryPass Slot;
 
         /// <summary>Attachments the draw samples. Pre-transitioned to shader-readable at pass entry.</summary>
@@ -154,6 +158,7 @@ namespace VulkanStory.Game.ModRendering
         /// </summary>
         public EnumVulkanStoryAttachment[] Writes = Array.Empty<EnumVulkanStoryAttachment>();
 
+        /// <summary>Render-thread callback executed inside the declared attachment scope; state restoration still runs if the callback throws.</summary>
         public VulkanStoryPassDraw Draw;
 
         /// <summary>Non-null: the platform opens this motion window around <see cref="Draw" />.</summary>
@@ -171,9 +176,11 @@ namespace VulkanStory.Game.ModRendering
     }
 
     /// <summary>One registered pass: the owning mod and its (copied) declaration.</summary>
+    /// <remarks>The declaration is copied at registration. Consumers must treat returned registry declarations as read-only.</remarks>
     public sealed class VulkanStoryPassRegistration
     {
         public readonly string ModId;
+        /// <summary>Copied declaration used by the registry; registration is required again to change the original submitted declaration.</summary>
         public readonly VulkanStoryPassDecl Decl;
 
         internal VulkanStoryPassRegistration(string modId, VulkanStoryPassDecl decl)
@@ -193,8 +200,8 @@ namespace VulkanStory.Game.ModRendering
             {
             case EnumVulkanStoryAttachment.PrimaryColor:
             case EnumVulkanStoryAttachment.PrimaryGlow:
-            case EnumVulkanStoryAttachment.PrimaryGBufferPosition:
             case EnumVulkanStoryAttachment.PrimaryGBufferNormal:
+            case EnumVulkanStoryAttachment.PrimaryGBufferPosition:
             case EnumVulkanStoryAttachment.PrimaryMotion:
                 return EnumVulkanStoryTarget.Primary;
             case EnumVulkanStoryAttachment.TransparentAccumulation:
@@ -209,6 +216,8 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>The colour slot of a target attachment, -1 for depth and read-only handles (motion: -1, it moves).</summary>
+        /// <param name="attachment">Well-known attachment handle.</param>
+        /// <returns>Fixed color slot or -1 for depth, read-only and dynamically placed motion attachments.</returns>
         public static int ColorSlotOf(EnumVulkanStoryAttachment attachment)
         {
             switch (attachment)
@@ -220,16 +229,19 @@ namespace VulkanStory.Game.ModRendering
             case EnumVulkanStoryAttachment.PrimaryGlow:
             case EnumVulkanStoryAttachment.TransparentRevealage:
                 return 1;
-            case EnumVulkanStoryAttachment.PrimaryGBufferPosition:
+            case EnumVulkanStoryAttachment.PrimaryGBufferNormal:
             case EnumVulkanStoryAttachment.TransparentGlow:
                 return 2;
-            case EnumVulkanStoryAttachment.PrimaryGBufferNormal:
+            case EnumVulkanStoryAttachment.PrimaryGBufferPosition:
                 return 3;
             default:
                 return -1;
             }
         }
 
+        /// <summary>Identifies the supported depth handles.</summary>
+        /// <param name="attachment">Well-known attachment handle.</param>
+        /// <returns>True for primary, liquid or shadow depth.</returns>
         public static bool IsDepth(EnumVulkanStoryAttachment attachment) =>
             attachment == EnumVulkanStoryAttachment.PrimaryDepth || attachment == EnumVulkanStoryAttachment.LiquidDepth ||
             attachment == EnumVulkanStoryAttachment.ShadowFarDepth || attachment == EnumVulkanStoryAttachment.ShadowNearDepth;
@@ -268,6 +280,9 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>Checks a declaration against the contract; false with the first broken rule.</summary>
+        /// <param name="decl">Declaration to inspect; no registration or graphics mutation occurs.</param>
+        /// <param name="reason">First broken rule on failure; null after success.</param>
+        /// <returns>True when the declared contract is accepted.</returns>
         public static bool Validate(VulkanStoryPassDecl decl, out string reason)
         {
             reason = null;
@@ -363,6 +378,11 @@ namespace VulkanStory.Game.ModRendering
         /// Checks a motion writer. With a slot and target (a writer on a declared pass) the window
         /// rules are checked too; a renderer's writer is checked against them at begin time.
         /// </summary>
+        /// <param name="writer">Motion writer declaration.</param>
+        /// <param name="reason">First invalid rule on failure; null after success.</param>
+        /// <param name="slot">Optional declared stage; ordinary renderer writers are checked at begin time.</param>
+        /// <param name="target">Target the writer would draw into; only Primary is accepted.</param>
+        /// <returns>True for a supported writer/window contract.</returns>
         public static bool ValidateMotionWriter(VulkanStoryMotionWriterDecl writer, out string reason,
             EnumVulkanStoryPass? slot = null, EnumVulkanStoryTarget target = EnumVulkanStoryTarget.Primary)
         {
@@ -447,6 +467,11 @@ namespace VulkanStory.Game.ModRendering
         /// Registers (or replaces, by name) a pass for <paramref name="modId" />. False with the
         /// broken rule when the declaration does not satisfy <see cref="VulkanStoryPassContract.Validate" />.
         /// </summary>
+        /// <param name="capi">Original client API used for automatic LeaveWorld cleanup.</param>
+        /// <param name="decl">Declaration whose arrays and optional motion writer are copied.</param>
+        /// <param name="reason">Broken contract rule on failure; null after success.</param>
+        /// <returns>True after registration; false after contract refusal.</returns>
+        /// <remarks>Register from the main/render thread. Null API and empty mod identifiers throw before validation; OpenGL registration has no draw effect.</remarks>
         public static bool Register(ICoreClientAPI capi, string modId, VulkanStoryPassDecl decl, out string reason)
         {
             if (capi == null) throw new ArgumentNullException(nameof(capi));
@@ -475,6 +500,12 @@ namespace VulkanStory.Game.ModRendering
         /// Registers a motion writer a <c>RegisterRenderer</c> renderer opens around its own draws
         /// with <see cref="BeginMotionWriter" />. The same instance is what Begin takes.
         /// </summary>
+        /// <param name="capi">Original client API used for LeaveWorld cleanup.</param>
+        /// <param name="modId">Nonempty owning mod identifier.</param>
+        /// <param name="writer">Writer instance later passed to BeginMotionWriter.</param>
+        /// <param name="reason">Broken writer rule on failure; null after success.</param>
+        /// <returns>True when registered; false after validation refusal.</returns>
+        /// <remarks>This writer is retained by reference; register and open on the render thread.</remarks>
         public static bool RegisterMotionWriter(ICoreClientAPI capi, string modId, VulkanStoryMotionWriterDecl writer, out string reason)
         {
             if (capi == null) throw new ArgumentNullException(nameof(capi));
@@ -490,6 +521,9 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>Removes one pass of a mod; false when it had none of that name.</summary>
+        /// <param name="modId">Owning mod identifier.</param>
+        /// <param name="passName">Registered pass name.</param>
+        /// <returns>True after removal; false when no matching entry exists.</returns>
         public static bool Unregister(string modId, string passName)
         {
             lock (Gate)
@@ -507,6 +541,7 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>Removes everything a mod registered and detaches from its API's LeaveWorld.</summary>
+        /// <param name="modId">Owning mod identifier.</param>
         public static void UnregisterMod(string modId)
         {
             ModEntry entry;
@@ -530,6 +565,7 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>The mods with at least one registration, for diagnostics.</summary>
+        /// <returns>Fresh array of registry keys.</returns>
         public static string[] RegisteredMods()
         {
             lock (Gate)
@@ -544,6 +580,9 @@ namespace VulkanStory.Game.ModRendering
         /// The passes declared for a slot, in registration order (mods by first registration).
         /// The array is shared and rebuilt only when a registration changes; never modify it.
         /// </summary>
+        /// <param name="slot">Declared pass stage.</param>
+        /// <returns>Shared cached array, or an empty array for an unsupported index.</returns>
+        /// <remarks>Treat both the returned array and registration declarations as read-only; registration changes rebuild the cache.</remarks>
         public static VulkanStoryPassRegistration[] ForSlot(EnumVulkanStoryPass slot)
         {
             int index = (int)slot;
@@ -556,6 +595,7 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>Whether <paramref name="writer" /> is registered for any mod.</summary>
+        /// <returns>True only for a registered instance.</returns>
         public static bool IsRegisteredWriter(VulkanStoryMotionWriterDecl writer)
         {
             if (writer == null) return false;
@@ -574,6 +614,9 @@ namespace VulkanStory.Game.ModRendering
         /// window did not open (OpenGL, TAA off, outside Opaque/AfterOIT, Primary not bound, an
         /// unregistered writer); then do not call <see cref="EndMotionWriter" />.
         /// </summary>
+        /// <param name="writer">Exact registered writer instance.</param>
+        /// <returns>True when opened; call EndMotionWriter in finally only after true.</returns>
+        /// <remarks>Inactive routing, a closed temporal window, incompatible target/stage or an unregistered writer returns false.</remarks>
         public static bool BeginMotionWriter(VulkanStoryMotionWriterDecl writer)
         {
             System.Func<VulkanStoryMotionWriterDecl, bool> hook = MotionBeginHook;
@@ -581,6 +624,7 @@ namespace VulkanStory.Game.ModRendering
         }
 
         /// <summary>Closes the window a true <see cref="BeginMotionWriter" /> opened.</summary>
+        /// <remarks>Call from the render thread in finally after a successful begin; do not call for a refused begin.</remarks>
         public static void EndMotionWriter()
         {
             Action hook = MotionEndHook;
@@ -629,6 +673,8 @@ namespace VulkanStory.Game.ModRendering
     public static class VulkanStoryModRenderExtensions
     {
         /// <summary>The id registrations of a mod system are stored under: its mod id, else its assembly name.</summary>
+        /// <param name="system">Owning original ModSystem.</param>
+        /// <returns>Mod ID when available; otherwise the system assembly name.</returns>
         public static string VulkanStoryModId(ModSystem system)
         {
             if (system == null) throw new ArgumentNullException(nameof(system));
@@ -636,12 +682,27 @@ namespace VulkanStory.Game.ModRendering
             return string.IsNullOrWhiteSpace(id) ? system.GetType().Assembly.GetName().Name : id;
         }
 
+        /// <summary>Registers a copied pass using the owning ModSystem identifier.</summary>
+        /// <param name="capi">Original client API.</param>
+        /// <param name="system">Owning mod system.</param>
+        /// <param name="decl">Pass declaration to copy and validate.</param>
+        /// <param name="reason">Contract refusal detail on failure; null on success.</param>
+        /// <returns>Whether registration succeeded.</returns>
         public static bool RegisterVulkanStoryPass(this ICoreClientAPI capi, ModSystem system, VulkanStoryPassDecl decl, out string reason) =>
             VulkanStoryModPasses.Register(capi, VulkanStoryModId(system), decl, out reason);
 
+        /// <summary>Registers the exact writer instance using the owning ModSystem identifier.</summary>
+        /// <param name="capi">Original client API.</param>
+        /// <param name="system">Owning mod system.</param>
+        /// <param name="writer">Motion writer instance later opened around draws.</param>
+        /// <param name="reason">Contract refusal detail on failure; null on success.</param>
+        /// <returns>Whether registration succeeded.</returns>
         public static bool RegisterVulkanStoryMotionWriter(this ICoreClientAPI capi, ModSystem system, VulkanStoryMotionWriterDecl writer, out string reason) =>
             VulkanStoryModPasses.RegisterMotionWriter(capi, VulkanStoryModId(system), writer, out reason);
 
+        /// <summary>Removes every pass and motion writer registered for the supplied mod system.</summary>
+        /// <param name="capi">Original client API extension receiver.</param>
+        /// <param name="system">Owning mod system.</param>
         public static void UnregisterVulkanStoryPasses(this ICoreClientAPI capi, ModSystem system) =>
             VulkanStoryModPasses.UnregisterMod(VulkanStoryModId(system));
     }

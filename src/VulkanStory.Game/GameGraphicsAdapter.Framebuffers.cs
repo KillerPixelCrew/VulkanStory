@@ -24,6 +24,9 @@ internal sealed partial class GameGraphicsAdapter
         return target;
     }
 
+    /// <summary>Creates a Vulkan framebuffer from original attachment descriptors and associates the returned game reference with this adapter.</summary>
+    /// <param name="attributes">Original game attachment/size descriptor.</param>
+    /// <returns>Original game reference with an adapter-owned framebuffer association.</returns>
     internal FrameBufferRef CreateFramebuffer(FramebufferAttrs attributes)
     {
         var renderer = RequireDevice();
@@ -34,6 +37,8 @@ internal sealed partial class GameGraphicsAdapter
         };
         var colors = new List<int>();
         int mask = 0;
+        try
+        {
         foreach (FramebufferAttrsAttachment attachment in attributes.Attachments)
         {
             RawTexture texture = attachment.Texture;
@@ -52,6 +57,13 @@ internal sealed partial class GameGraphicsAdapter
         if (!renderer.CheckFramebufferComplete(target.FboId, out string status))
             throw new Exception("FBO " + attributes.Name + ": " + status);
         return RegisterFramebuffer(target);
+        }
+        catch
+        {
+            Stated.ForgetFramebuffer(target.FboId);
+            renderer.DeleteFramebuffer(target.FboId);
+            throw;
+        }
     }
 
     private FramebufferOwner FramebufferOwnership(FrameBufferRef target)
@@ -76,6 +88,9 @@ internal sealed partial class GameGraphicsAdapter
         return handle;
     }
 
+    /// <summary>Binds an owned game framebuffer and optionally preserves the retained viewport.</summary>
+    /// <param name="target">Owned target or null for default framebuffer.</param>
+    /// <param name="keepViewport">True to leave the current viewport unchanged.</param>
     internal void SetFramebuffer(FrameBufferRef? target, bool keepViewport)
     {
         var renderer = RequireDevice();
@@ -91,6 +106,9 @@ internal sealed partial class GameGraphicsAdapter
             Stated.Viewport = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)target.Width, (uint)target.Height));
     }
 
+    /// <summary>Releases an owned framebuffer and optionally its owned attachment textures.</summary>
+    /// <param name="target">Owned game reference; null is accepted.</param>
+    /// <param name="disposeTextures">Whether attachment textures should also be deleted.</param>
     internal void DisposeFramebuffer(FrameBufferRef? target, bool disposeTextures)
     {
         var renderer = RequireDevice();

@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks CPU uniform shadows, byte-change versioning, frame snapshots, and named-block binding ownership.</summary>
+/// <remarks>No Vulkan upload or draw is submitted.</remarks>
 public sealed class ClientUniformBufferTests
 {
     [Fact]

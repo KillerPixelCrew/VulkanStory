@@ -5,37 +5,47 @@ using Vintagestory.API.Client;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Eight-sector in-world action wheel selected by processed controller stick direction.</summary>
 internal sealed class ControllerRadialDialog : GuiDialog
 {
     internal static readonly string[] Actions = ["inventory", "menu", "settings", "drop", "previous", "next", "firstslot", "screenshot", "none"];
     private static readonly string[] Labels = ["Inventory", "Pause", "Settings", "Drop", "Previous", "Next", "Slot 1", "Screenshot", "Empty"];
     private readonly string[] slots;
+    /// <summary>Selected sector index, or -1 while the stick is below the selection threshold.</summary>
     internal int Selected { get; private set; } = -1;
+    /// <summary>Configured action in the selected sector, or null while no sector is selected.</summary>
     internal string? SelectedAction => Selected >= 0 ? slots[Selected] : null;
 
-    internal ControllerRadialDialog(ICoreClientAPI api, string[] actions) : base(api)
+    /// <summary>Creates the wheel from a cloned eight-slot action array.</summary>
+    internal ControllerRadialDialog(ICoreClientAPI api, string[] actions, string cancelButton) : base(api)
     {
         slots = (string[])actions.Clone();
         ElementBounds background = ElementStdBounds.DialogBackground().WithFixedPadding(12, 12);
         SingleComposer = api.Gui.CreateCompo("vulkanstory-controller-radial", ElementStdBounds.AutosizedMainDialog)
             .AddShadedDialogBG(background)
             .BeginChildElements(background)
-            .AddStaticText("Choose an action. B cancels.", CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, 0, 360, 24))
+            .AddStaticText("Choose an action. " + cancelButton + " cancels.", CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, 0, 360, 24))
             .AddDynamicCustomDraw(ElementBounds.Fixed(0, 28, 360, 360), DrawWheel, "wheel")
             .EndChildElements().Compose();
     }
 
+    /// <inheritdoc />
     public override bool DisableMouseGrab => true;
+    /// <inheritdoc />
     public override string ToggleKeyCombinationCode => null!;
+    /// <inheritdoc />
     public override double DrawOrder => 0.97;
+    /// <inheritdoc />
     public override double InputOrder => 0.02;
 
+    /// <summary>Looks up an action label; unknown tokens display as Empty.</summary>
     internal static string Label(string action)
     {
         int index = Array.IndexOf(Actions, action);
         return index >= 0 ? Labels[index] : "Empty";
     }
 
+    /// <summary>Selects the nearest clockwise sector from up for stick magnitude at least 0.35, then redraws on change.</summary>
     internal void Select(Vector2 direction)
     {
         int selected = -1;

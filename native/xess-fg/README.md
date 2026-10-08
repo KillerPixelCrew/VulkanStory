@@ -20,6 +20,4 @@ authorized binaries in the private native RID directory and never run it.
 The bridge loads `libxess_fg.dll` and `libxell.dll` from its own directory;
 retain their vendor-supplied dependencies and redistribution notices in packaging.
 
-Source-only pending validation. Native compilation/exports, runtime dependencies,
-matching Vulkan/DX12 adapter, image/fence import, XeLL and real proxy present
-remain open. A managed ABI fixture alone does not establish these gates.
+Native compilation and scoped NVIDIA execution/handoff are recorded in the [Roadmap](../../docs/ROADMAP.md) and [development evidence](../../docs/development-evidence.md). Those results apply to their recorded source and hardware. Later fixes need their own validation; visible quality/cadence, latency and eligible Intel coverage remain open. A managed ABI fixture alone does not establish these gates.

@@ -4,9 +4,17 @@ using System.Reflection.Emit;
 namespace VulkanStory.Game;
 
 /// <summary>A resolved member operand in one original startup method's IL.</summary>
+/// <param name="Offset">Byte offset of the instruction within the original IL body.</param>
+/// <param name="Opcode">Instruction mnemonic.</param>
+/// <param name="Token">Metadata token decoded from the original operand.</param>
+/// <param name="Member">Resolved declaring type/member signature used as the pinned anchor.</param>
 public sealed record StartupIlUse(int Offset, string Opcode, int Token, string Member);
 
 /// <summary>The exact profile target and every member operand in its original body.</summary>
+/// <param name="Event">Pinned bootstrap observation event identity.</param>
+/// <param name="Target">Complete original method/constructor signature.</param>
+/// <param name="IlLength">Original body length in bytes.</param>
+/// <param name="Uses">Ordered resolved member operands from the body.</param>
 public sealed record StartupMethodInventory(
     string Event, string Target, int IlLength, IReadOnlyList<StartupIlUse> Uses);
 
@@ -30,6 +38,10 @@ public static class StartupIlInventory
         }
     }
 
+    /// <summary>Reads exact original startup bodies and resolves their member operands without executing game code.</summary>
+    /// <param name="game">Official VintagestoryLib assembly whose original targets are inspected.</param>
+    /// <returns>One inventory per pinned startup event, in profile order.</returns>
+    /// <remarks>Missing or bodyless exact targets throw before routing changes.</remarks>
     public static IReadOnlyList<StartupMethodInventory> CaptureProfile1227(Assembly game)
     {
         ArgumentNullException.ThrowIfNull(game);

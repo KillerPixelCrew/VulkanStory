@@ -31,9 +31,13 @@ internal readonly record struct BufferBindingValue(
 /// </summary>
 internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
 {
+    /// <summary>Program identity included in descriptor-content equality.</summary>
     public int ProgramId { get; }
+    /// <summary>Descriptor-set index within the program interface.</summary>
     public int SetIndex { get; }
+    /// <summary>Sampler/image binding values retained as part of the descriptor-content key.</summary>
     public SamplerBindingValue[] Samplers { get; }
+    /// <summary>Buffer binding values retained as part of the descriptor-content key.</summary>
     public BufferBindingValue[] Buffers { get; }
 
     private readonly int _hash;
@@ -68,6 +72,7 @@ internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
         _hash = hash.ToHashCode();
     }
 
+    /// <inheritdoc/>
     public bool Equals(DescriptorSetContents? other)
     {
         if (other is null || other._hash != _hash) return false;
@@ -86,7 +91,9 @@ internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
         return true;
     }
 
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => Equals(obj as DescriptorSetContents);
+    /// <inheritdoc/>
     public override int GetHashCode() => _hash;
 }
 
@@ -122,6 +129,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
         public uint Remaining;
     }
 
+    /// <summary>Descriptor set paired with the pool that owns its allocation.</summary>
     private readonly record struct CachedSet(DescriptorSet Set, PoolSlot Pool);
 
     private readonly VulkanContext _context;
@@ -138,11 +146,14 @@ internal sealed unsafe class DescriptorCache : IDisposable
     private bool _disposed;
 
     public int Count => _sets.Count;
+    /// <summary>Number of recorded cache hits.</summary>
     public long Hits { get; private set; }
+    /// <summary>Number of recorded cache misses.</summary>
     public long Misses { get; private set; }
 
     public DescriptorCache(VulkanContext context) => _context = context;
 
+    /// <summary>Returns a cached descriptor set or allocates/writes one for the supplied content key and layout.</summary>
     public DescriptorSet Get(DescriptorSetContents contents, DescriptorSetLayout layout)
     {
         if (_sets.TryGetValue(contents, out CachedSet existing))
@@ -250,6 +261,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
             _sets = sets;
         }
 
+        /// <inheritdoc/>
         public void Dispose() => _cache.Free(_sets);
     }
 
@@ -343,9 +355,9 @@ internal sealed unsafe class DescriptorCache : IDisposable
         // uniform buffer (the record) and every other binding a storage buffer.
         var sizes = stackalloc DescriptorPoolSize[3]
         {
-            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, SetsPerPool * 2),
-            new DescriptorPoolSize(DescriptorType.CombinedImageSampler, SetsPerPool * 8),
-            new DescriptorPoolSize(DescriptorType.StorageBuffer, SetsPerPool * (uint)SetConvention.StorageSetBindingCount),
+            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, maxSets * 2),
+            new DescriptorPoolSize(DescriptorType.CombinedImageSampler, maxSets * 8),
+            new DescriptorPoolSize(DescriptorType.StorageBuffer, maxSets * (uint)SetConvention.StorageSetBindingCount),
         };
 
         var createInfo = new DescriptorPoolCreateInfo
@@ -365,6 +377,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
         return pool;
     }
 
+    /// <summary>Writes sampler and buffer descriptor values into the supplied set according to the shared binding convention.</summary>
     internal static void Write(VulkanContext context, DescriptorSet set, DescriptorSetContents contents)
     {
         int writeCount = contents.Samplers.Length + contents.Buffers.Length;
@@ -434,6 +447,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

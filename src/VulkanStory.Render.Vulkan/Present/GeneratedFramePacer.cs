@@ -13,12 +13,16 @@ internal sealed class GeneratedFramePacer
     private long realTarget;
     private double renderIntervalTicks = Stopwatch.Frequency / 60.0;
 
+    /// <summary>Creates a CPU present pacer with optional clock and sleep functions.</summary>
+    /// <param name="now">Timestamp source in Stopwatch ticks; defaults to Stopwatch.GetTimestamp.</param>
+    /// <param name="sleep">Millisecond sleep callback; defaults to Thread.Sleep.</param>
     internal GeneratedFramePacer(Func<long>? now = null, Action<int>? sleep = null)
     {
         this.now = now ?? Stopwatch.GetTimestamp;
         this.sleep = sleep ?? Thread.Sleep;
     }
 
+    /// <summary>Samples generated-present cadence and schedules the real present at half the smoothed render interval.</summary>
     internal void NoteGeneratedPresent()
     {
         long timestamp = now();
@@ -33,8 +37,11 @@ internal sealed class GeneratedFramePacer
         realTarget = timestamp + (long)(renderIntervalTicks * 0.5);
     }
 
+    /// <summary>Next real-present target in Stopwatch ticks, or zero when no wait is scheduled.</summary>
     internal long PendingRealTargetTicks => realTarget;
 
+    /// <summary>Consumes the pending real-present target and blocks until its clock deadline.</summary>
+    /// <remarks>Uses millisecond sleeps for coarse waits and spinning for the final interval. Call on the presentation owner thread.</remarks>
     internal void WaitForRealPresent()
     {
         long target = realTarget;
@@ -50,6 +57,7 @@ internal sealed class GeneratedFramePacer
         }
     }
 
+    /// <summary>Clears pending timing and restores the initial 60 Hz interval estimate.</summary>
     internal void Reset()
     {
         lastGenerated = 0;

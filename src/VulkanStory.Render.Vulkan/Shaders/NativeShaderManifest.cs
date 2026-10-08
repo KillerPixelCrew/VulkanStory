@@ -34,8 +34,10 @@ internal sealed class NativeShaderManifest
     /// <summary>Sorted by name.</summary>
     public List<NativeProgram> Programs = new();
 
+    /// <summary>Returns a manifest program by its exact name, or null when absent.</summary>
     public NativeProgram? FindProgram(string name) => Programs.Find(p => p.Name == name);
 
+    /// <summary>Returns the requested program variant, or null when absent.</summary>
     public NativeVariant? Find(string program, string variantKey) =>
         FindProgram(program)?.Variants.Find(v => v.Key == variantKey);
 
@@ -57,6 +59,7 @@ internal sealed class NativeShaderManifest
 
     // ------------------------------------------------------------------ writer
 
+    /// <summary>Serializes the manifest and reflected native interfaces to its current JSON schema.</summary>
     public string ToJson()
     {
         using var stream = new MemoryStream();
@@ -251,6 +254,7 @@ internal sealed class NativeShaderManifest
         }
     }
 
+    /// <summary>Reads a manifest JSON file and parses its recorded schema/interface metadata.</summary>
     public static NativeShaderManifest Load(string path) => Parse(File.ReadAllText(path));
 
     private static NativeProgram ReadProgram(JsonElement element)
@@ -401,6 +405,7 @@ internal sealed class NativeShaderManifest
     }
 }
 
+/// <summary>Named native shader program and the compiled variants supplied in its manifest.</summary>
 internal sealed class NativeProgram
 {
     /// <summary>The program's <c>PassName</c>, which is also its source file base name.</summary>
@@ -411,6 +416,7 @@ internal sealed class NativeProgram
     public List<NativeVariant> Variants = new();
 }
 
+/// <summary>One compile-definition variant with stage artifacts and reflected program interface metadata.</summary>
 internal sealed class NativeVariant
 {
     /// <summary><see cref="NativeShaderManifest.VariantKey" />: sorted <c>NAME=value</c>, comma separated.</summary>
@@ -434,6 +440,7 @@ internal sealed class NativeVariant
     public List<NativeSpecConstant> SpecializationConstants = new();
 }
 
+/// <summary>One shader stage artifact and its recorded source/binary identity.</summary>
 internal sealed class NativeStage
 {
     /// <summary><c>vertex</c> or <c>fragment</c>.</summary>
@@ -446,6 +453,7 @@ internal sealed class NativeStage
     public string Sha256 = "";
 }
 
+/// <summary>Reflected uniform or push-constant block layout recorded in the native manifest.</summary>
 internal sealed class NativeBlock
 {
     public string TypeName = "";
@@ -453,6 +461,7 @@ internal sealed class NativeBlock
     public List<NativeMember> Members = new();
 }
 
+/// <summary>Reflected native block member with byte offset, size and GLSL type.</summary>
 internal sealed class NativeMember
 {
     public string Name = "";
@@ -463,6 +472,7 @@ internal sealed class NativeMember
     public int ArrayLength;
 }
 
+/// <summary>Native sampled-image slot and its bindless or frame-texture addressing metadata.</summary>
 internal sealed class NativeSampler
 {
     /// <summary>The GLSL 330 sampler name, which is also the push member's name.</summary>
@@ -477,6 +487,7 @@ internal sealed class NativeSampler
     public int Order;
 }
 
+/// <summary>Named native frame texture assigned to the shared descriptor-set convention.</summary>
 internal sealed class NativeFrameTexture
 {
     public string Name = "";
@@ -484,6 +495,7 @@ internal sealed class NativeFrameTexture
     public int Binding;
 }
 
+/// <summary>Native uniform/storage resource binding recorded by shader reflection.</summary>
 internal sealed class NativeStorageBinding
 {
     public string Name = "";
@@ -497,6 +509,7 @@ internal sealed class NativeStorageBinding
     public bool Used;
 }
 
+/// <summary>Vertex input or fragment output with its reflected location and GLSL type.</summary>
 internal sealed class NativeInterfaceVariable
 {
     public int Location;
@@ -505,6 +518,7 @@ internal sealed class NativeInterfaceVariable
     public int ArrayLength;
 }
 
+/// <summary>Reflected specialization-constant ID, name, type and default value.</summary>
 internal sealed class NativeSpecConstant
 {
     public int Id;

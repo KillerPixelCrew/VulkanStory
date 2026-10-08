@@ -71,8 +71,10 @@ internal static class CacheFileWriter
         }
     }
 
+    /// <summary>Identifies I/O and access-denied errors eligible for the bounded cache-write retry.</summary>
     private static bool IsTransient(Exception error) => error is IOException or UnauthorizedAccessException;
 
+    /// <summary>Best-effort deletion of a temporary cache file after a write/replacement attempt.</summary>
     private static void TryDelete(string path)
     {
         try

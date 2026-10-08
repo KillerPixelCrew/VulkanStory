@@ -2,6 +2,7 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Conversion of renderer texture views into borrowed NGX Vulkan resource descriptors.</summary>
 internal partial struct NgxResourceVk
 {
     /// <summary>

@@ -45,7 +45,7 @@ internal enum GtaoTone
     MultiBounce,
 }
 
-/// <summary>Specialization constant ids; <c>sources/shaders-vk/gtao/common.glsl</c> is the source of truth.</summary>
+/// <summary>Specialization constant ids; <c>shaders/native/gtao/common.glsl</c> is the source of truth.</summary>
 internal static class GtaoSpecialization
 {
     public const int Integration = 0;
@@ -70,24 +70,36 @@ internal sealed record GtaoSettings
 {
     public const int PushConstantBytes = 80;
 
+    /// <summary>Number of angular sampling slices used by the AO specialization.</summary>
     public uint SliceCount { get; init; } = 2;
+    /// <summary>Number of depth samples per side in each AO slice.</summary>
     public uint StepsPerSlice { get; init; } = 2;
+    /// <summary>Number of spatial denoise passes before AO composition.</summary>
     public uint DenoisePasses { get; init; } = 1;
+    /// <summary>Selected per-slice horizon or bitmask integration model.</summary>
     public GtaoIntegration Integration { get; init; } = GtaoIntegration.BitmaskCosine;
+    /// <summary>Selected sample-thickness model for bitmask occlusion.</summary>
     public GtaoThickness Thickness { get; init; } = GtaoThickness.Random;
+    /// <summary>Whether the material-class channel distinguishes thin occluders.</summary>
     public bool ClassChannel { get; init; } = true;
     /// <summary>64 (XeGTAO) or 61, coprime with the 8 and 32 jitter phases (C.7).</summary>
     public uint NoiseCycle { get; init; } = 64;
+    /// <summary>Whether AO denoise specialization includes normal-edge weighting.</summary>
     public bool NormalEdges { get; init; }
+    /// <summary>Composition tone mode; MultiBounce requires an albedo input.</summary>
     public GtaoTone Tone { get; init; } = GtaoTone.Linear;
 
     /// <summary>Effect radius in blocks (C.2: start 0.75, tuned in D).</summary>
     public float EffectRadius { get; init; } = 0.75f;
+    /// <summary>Multiplier applied to the configured AO effect radius.</summary>
     public float RadiusMultiplier { get; init; } = 1.457f;
+    /// <summary>AO radius-falloff range passed to the compute push constants.</summary>
     public float FalloffRange { get; init; } = 0.615f;
     /// <summary>Measurement only (C.11): 1.0 is the physically meaningful value.</summary>
     public float FinalValuePower { get; init; } = 1.0f;
+    /// <summary>Power used to distribute AO sample steps within the radius.</summary>
     public float SampleDistributionPower { get; init; } = 2.0f;
+    /// <summary>Offset controlling AO depth-mip selection.</summary>
     public float DepthMipSamplingOffset { get; init; } = 3.30f;
     /// <summary>Solid surfaces, blocks (C.5: a fence post is 0.125-0.25, a block 1).</summary>
     public float ThicknessSolid { get; init; } = 0.5f;
@@ -97,7 +109,9 @@ internal sealed record GtaoSettings
     public float ThicknessDistanceScale { get; init; } = 1f / 64f;
     /// <summary>Vanilla ssao.fsh's fade: clamp(1.2 - z / 250, 0, 1).</summary>
     public float FarFadeBias { get; init; } = 1.2f;
+    /// <summary>View-distance divisor for the retained far AO fade.</summary>
     public float FarFadeDistance { get; init; } = 250f;
+    /// <summary>AO spatial denoise blur parameter.</summary>
     public float DenoiseBlurBeta { get; init; } = 1.2f;
 
     /// <summary>

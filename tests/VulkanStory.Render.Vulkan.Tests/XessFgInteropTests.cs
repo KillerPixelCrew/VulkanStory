@@ -5,6 +5,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Retained native x64 layout from XessFgBridgeTests and the C++ frame ABI.
+/// <summary>Checks x64 XeSS presentation-frame size and matrix/fence offsets against the retained bridge ABI.</summary>
+/// <remarks>No XeSS/DX12 provider execution or presentation cadence is exercised.</remarks>
 public sealed class XessFgInteropTests
 {
     [Fact]

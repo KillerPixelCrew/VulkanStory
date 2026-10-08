@@ -16,6 +16,8 @@ internal sealed partial class GameGraphicsAdapter
     private readonly NativeMeshPass nativeSun = new("standard", [], []);
     private readonly Dictionary<int, string[]> worldSamplerNames = new();
     internal void RenderNightSky(MeshRef mesh) => RenderCelestialMesh(mesh, nativeNightSky, "NightSky", false);
+    /// <summary>Draws the current celestial mesh through a native pass, preserving the original shader state when native selection declines.</summary>
+    /// <param name="mesh">Original mesh associated with this adapter.</param>
     internal void RenderCelestialBody(MeshRef mesh)
     {
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;

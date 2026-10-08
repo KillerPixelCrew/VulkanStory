@@ -7,6 +7,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Retained shader files pass through the original include/prefix/compile lifecycle.
+/// <summary>Supplies retained shader stages and includes only when the asset override policy permits replacement.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class ShaderSourceConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-shader-sources";
@@ -25,6 +27,10 @@ internal static class ShaderSourceConsumerPatches
             [typeof(ShaderProgram), typeof(string), typeof(HashSet<string>)])!
         .CreateDelegate<Func<ShaderProgram, string, HashSet<string>, string>>();
 
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

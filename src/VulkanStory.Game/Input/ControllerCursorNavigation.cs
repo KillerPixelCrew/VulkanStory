@@ -4,9 +4,15 @@ using OpenTK.Mathematics;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Geometry-only cardinal cursor selection with aligned row/column wrap at an edge.</summary>
 internal static class ControllerCursorNavigation
 {
     /// <summary>Pick the nearest useful UI target in a cardinal direction.</summary>
+    /// <param name="origin">Current cursor position in the same coordinates as targets.</param>
+    /// <param name="direction">Cardinal unit direction requested by controller navigation.</param>
+    /// <param name="targets">Visible focusable target centers.</param>
+    /// <param name="next">Selected target when a useful forward or wrapped candidate exists.</param>
+    /// <returns>True when a candidate was found; false when the target set offers no movement.</returns>
     public static bool TryNext(Vector2 origin, Vector2 direction, IReadOnlyList<Vector2> targets, out Vector2 next)
     {
         float bestScore = float.PositiveInfinity;

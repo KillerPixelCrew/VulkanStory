@@ -52,6 +52,7 @@ internal sealed partial class GameGraphicsAdapter
         return index >= 0 && targets != null && index < targets.Count &&
             targets[index] is { Disposed: false, ColorTextureIds.Length: > 0 } target ? target : null;
     }
+    /// <summary>Copies the completed current scene into the HUD-free display-sized target before UI drawing.</summary>
     internal void CaptureSceneNoHud()
     {
         var renderer = RequireDevice();
@@ -71,6 +72,7 @@ internal sealed partial class GameGraphicsAdapter
         }
         finally { renderer.EndNativePass(); }
     }
+    /// <summary>Redirects UI writes to the separate premultiplied UI target after preserving the HUD-free scene; scope cleanup restores the scene target.</summary>
     internal void OpenUiScope()
     {
         var renderer = RequireDevice();
@@ -82,6 +84,7 @@ internal sealed partial class GameGraphicsAdapter
         renderer.RedirectDefaultFramebuffer(ui.FboId);
         Stated.UiImageFramebuffer = ui.FboId;
     }
+    /// <summary>Closes any open UI scope and composites its premultiplied image over the real scene.</summary>
     internal void ComposeUiTarget()
     {
         var renderer = RequireDevice();
@@ -104,6 +107,10 @@ internal sealed partial class GameGraphicsAdapter
         }
         finally { renderer.EndNativePass(); }
     }
+    /// <summary>Composites the separate UI image over one generated output target.</summary>
+    /// <param name="output">Generated frame target.</param>
+    /// <param name="ui">Matching separate premultiplied UI target.</param>
+    /// <returns>True when native composition succeeded; false when its prerequisites/pass decline.</returns>
     internal bool ComposeGeneratedFrameUi(FrameBufferRef output, FrameBufferRef ui)
     {
         var renderer = RequireDevice();
@@ -122,6 +129,7 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal void ClearUiOrDefaultDepth(float depth) =>
         RequireDevice().ClearNativeDepth(NativeDefaultTarget, depth);
+    /// <summary>Closes UI redirection after failed or aborted drawing so later operations cannot remain bound to the UI target.</summary>
     internal void AbortUiScope() { RequireDevice(); CloseUiScope(); }
     internal void ReloadUiProgram()
     {

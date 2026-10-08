@@ -5,8 +5,10 @@ using Vintagestory.API.Client;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Builds context-sensitive action glyphs and draws controller prompts with font/fallback shapes.</summary>
 internal static class ControllerGlyphs
 {
+    /// <summary>Builds a fresh game-hotkey glyph map from effective world, GUI, or modifier-layer bindings.</summary>
     public static Dictionary<string, string> Build(ControllerProfile profile, Func<int, string> buttonName,
         bool gui = false, bool modifier = false)
     {
@@ -58,6 +60,7 @@ internal static class ControllerGlyphs
         return glyphs;
     }
 
+    /// <summary>Labels trigger/stick axes using the device's face-button family and requested stick polarity.</summary>
     public static string AxisGlyph(int index, bool negative, Func<int, string> buttonName)
     {
         string south = buttonName(0);
@@ -75,6 +78,7 @@ internal static class ControllerGlyphs
         };
     }
 
+    /// <summary>Maps device face labels and common SDL buttons to compact prompt text.</summary>
     public static string ButtonGlyph(int index, Func<int, string> buttonName)
     {
         string name = buttonName(index);
@@ -100,6 +104,7 @@ internal static class ControllerGlyphs
         };
     }
 
+    /// <summary>Draws a prompt in its bounds, preferring the bundled controller font and falling back to labeled shapes.</summary>
     public static void Draw(Context ctx, ICoreClientAPI api, ElementBounds bounds, string glyph)
     {
         double x = bounds.drawX + 1, y = bounds.drawY + 1;

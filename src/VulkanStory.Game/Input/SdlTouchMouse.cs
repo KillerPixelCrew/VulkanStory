@@ -23,6 +23,12 @@ internal sealed class SdlTouchMouse(
     private ulong downNanoseconds;
     private bool dragging, longPressed, suppressUntilAllReleased;
 
+    /// <summary>Consumes a normalized finger event and dispatches drawable-pixel cursor/button operations.</summary>
+    /// <param name="input">SDL finger event with contact identity and normalized coordinates.</param>
+    /// <param name="logicalSize">Logical window extent used to scale drag slop for high DPI.</param>
+    /// <param name="pixelSize">Drawable extent used to map and clamp cursor coordinates.</param>
+    /// <param name="nowNanoseconds">Fallback monotonic time when a down event carries no timestamp.</param>
+    /// <remarks>A second contact cancels the primary gesture and suppresses input until all contacts release.</remarks>
     public void Handle(SdlInputEvent input, (int Width, int Height) logicalSize,
         (int Width, int Height) pixelSize, ulong nowNanoseconds)
     {
@@ -82,6 +88,7 @@ internal sealed class SdlTouchMouse(
         }
     }
 
+    /// <summary>Emits one right-click for a stationary primary contact held for at least 500 ms.</summary>
     public void Tick(ulong nowNanoseconds)
     {
         if (primary == null || dragging || longPressed || suppressUntilAllReleased ||
@@ -92,6 +99,7 @@ internal sealed class SdlTouchMouse(
         button(EnumMouseButton.Right, false, lastX, lastY);
     }
 
+    /// <summary>Releases a synthetic drag, clears contact ownership, and resets multi-touch suppression.</summary>
     public void Cancel()
     {
         CancelPrimary();
@@ -99,6 +107,7 @@ internal sealed class SdlTouchMouse(
         suppressUntilAllReleased = false;
     }
 
+    /// <summary>Releases any drag button and drops the primary gesture while retaining the contact set.</summary>
     private void CancelPrimary()
     {
         if (dragging) button(EnumMouseButton.Left, false, lastX, lastY);

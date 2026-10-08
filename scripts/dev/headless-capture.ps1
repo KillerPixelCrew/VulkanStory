@@ -377,7 +377,7 @@ $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sourceRoot = (Resolve-Path -LiteralPath $SourceDataDirectory).Path
 if ([IO.Path]::GetFileName($World) -ne $World -or $World.EndsWith('.vcdbs')) { throw 'World must be a save basename, without extension.' }
 $database = Join-Path $sourceRoot "Saves/$World.vcdbs"
-if (-not (Test-Path -LiteralPath $database)) { throw 'Existing user world is missing; refusing to create a replacement world.' }
+if (-not $MainMenuOptions -and -not (Test-Path -LiteralPath $database)) { throw 'Existing user world is missing; refusing to create a replacement world.' }
 $hook = Join-Path $packageRoot 'VulkanStory/managed/VulkanStory.Bootstrap.dll'
 if (-not (Test-Path -LiteralPath $hook)) { throw 'Supply a complete staged runtime package.' }
 $dotnet = (Get-Command dotnet.exe -ErrorAction Stop).Source
@@ -395,8 +395,10 @@ if ($scenarioSourcePath) {
     [ordered]@{ id=$scenarioId; path='input/scenario.json'; sha256=$scenarioInputHash } |
         ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $inputRoot 'scenario-input.json')
 }
-& $Python (Join-Path $PSScriptRoot 'snapshot-world.py') $database (Join-Path $dataRoot "Saves/$World.vcdbs")
-if ($LASTEXITCODE -ne 0) { throw 'Consistent world snapshot failed; no client launched.' }
+if (-not $MainMenuOptions) {
+    & $Python (Join-Path $PSScriptRoot 'snapshot-world.py') $database (Join-Path $dataRoot "Saves/$World.vcdbs")
+    if ($LASTEXITCODE -ne 0) { throw 'Consistent world snapshot failed; no client launched.' }
+}
 foreach ($file in @('clientsettings.json')) {
     $source = Join-Path $sourceRoot $file
     if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $dataRoot }

@@ -3,11 +3,16 @@ using VulkanStory.Contracts;
 namespace VulkanStory.Render.Vulkan.Core;
 
 // Retained mesh upload bodies; only game data access has moved to owned contracts.
+/// <summary>Translates neutral mesh upload contracts into retained vertex, index and SSBO buffer writes.</summary>
 internal sealed unsafe class MeshUploads(MeshManager meshes)
 {
     private readonly MeshManager _meshes = meshes;
     private int[] _prunedCustomInts = [];
 
+    /// <summary>Allocates retained mesh buffers and uploads each populated stream using its own counts and destination offsets.</summary>
+    /// <param name="data">Neutral mesh data with vertex/index counts and optional custom streams.</param>
+    /// <param name="staticDraw">Whether to request persistent/static backing for the mesh.</param>
+    /// <returns>Registered renderer mesh ID.</returns>
     public int CreateMesh(MeshUploadData data, bool staticDraw)
     {
         // Sized as GL's UploadMesh sizes them. Every part follows the vertex
@@ -29,6 +34,9 @@ internal sealed unsafe class MeshUploads(MeshManager meshes)
         return id;
     }
 
+    /// <summary>Allocates mesh stream capacities and custom layouts without uploading values.</summary>
+    /// <remarks>Size arguments are bytes. SSBO meshes use packed face records and the retained shared quad index pattern.</remarks>
+    /// <returns>Registered renderer mesh ID.</returns>
     public int CreateEmptyMesh(
         int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize,
         MeshCustomPartLayout? customFloats, MeshCustomPartLayout? customShorts,

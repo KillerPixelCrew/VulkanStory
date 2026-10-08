@@ -22,6 +22,7 @@ internal readonly record struct FeedbackCopyDesc(uint Width, uint Height, Format
 /// </summary>
 internal sealed class FeedbackCopyPool
 {
+    /// <summary>Pooled feedback image with matching description, retirement value and idle-age state.</summary>
     private sealed class Copy
     {
         public int TextureId;
@@ -48,6 +49,7 @@ internal sealed class FeedbackCopyPool
         IdleFrames = idleFrames;
     }
 
+    /// <summary>Frame-age threshold before an unused feedback copy is eligible for destruction.</summary>
     public int IdleFrames { get; }
 
     /// <summary>Copies taken and not yet released.</summary>

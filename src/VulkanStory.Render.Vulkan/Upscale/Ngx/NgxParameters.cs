@@ -92,7 +92,7 @@ internal static class NgxParameterNames
 /// (<c>NVSDK_NGX_Parameter_SetUI</c> and friends) live in the SDK's static
 /// library, not in the driver's <c>libnvidia-ngx.so.1</c>. So the calls go
 /// through the object's own vtable - and that dispatch lives in
-/// <c>native/optimum-ngx</c>, not here: the vtable slots are functions inside
+/// <c>native/ngx</c>, not here: the vtable slots are functions inside
 /// libnvidia-ngx, so calling them from a managed stub hits the same
 /// return-address abort as every other NGX entry point
 /// (<see cref="NgxInterop.ManagedCallSiteIsSupported" />). No slot number
@@ -120,14 +120,21 @@ internal readonly unsafe struct NgxParameters
     private const int SlotGetInt = 12;
     private const int SlotGetVoidPointer = 15;
 
+    /// <summary>Borrows a live native NGX parameter-map pointer without taking destruction responsibility.</summary>
     public NgxParameters(IntPtr handle) => Handle = handle;
 
+    /// <summary>Borrowed native NGX parameter-map pointer.</summary>
     public IntPtr Handle { get; }
 
+    /// <summary>Borrowed native NGX parameter-map pointer.</summary>
     public bool IsNull => Handle == IntPtr.Zero;
 
+    /// <summary>Borrowed native NGX parameter-map pointer.</summary>
     private void** Vtable => *(void***)Handle;
 
+    /// <summary>Sets a named NGX parameter as a unsigned 32-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native parameter map.</param>
     public void SetUInt(string name, uint value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetUInt(Handle, name, value); return; }
@@ -139,6 +146,9 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Sets a named NGX parameter as a signed 32-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native parameter map.</param>
     public void SetInt(string name, int value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetInt(Handle, name, value); return; }
@@ -150,6 +160,9 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Sets a named NGX parameter as a single-precision value.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native parameter map.</param>
     public void SetFloat(string name, float value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetFloat(Handle, name, value); return; }
@@ -161,6 +174,9 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Sets a named NGX parameter as a double-precision value.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native parameter map.</param>
     public void SetDouble(string name, double value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetDouble(Handle, name, value); return; }
@@ -172,6 +188,9 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Sets a named NGX parameter as a unsigned 64-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native parameter map.</param>
     public void SetULong(string name, ulong value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetULong(Handle, name, value); return; }
@@ -183,6 +202,9 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Sets a named NGX parameter as a borrowed native resource pointer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Value passed to the native map; resource-pointer lifetime remains caller-owned.</param>
     public void SetVoidPointer(string name, IntPtr value)
     {
         if (!NgxInterop.UseDirectCalls) { NgxShim.SetVoidPointer(Handle, name, value); return; }
@@ -195,6 +217,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a unsigned 32-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetUInt(string name, out uint value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetUInt(Handle, name, out value);
@@ -210,6 +236,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a signed 32-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetInt(string name, out int value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetInt(Handle, name, out value);
@@ -225,6 +255,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a single-precision value.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetFloat(string name, out float value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetFloat(Handle, name, out value);
@@ -240,6 +274,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a double-precision value.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetDouble(string name, out double value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetDouble(Handle, name, out value);
@@ -255,6 +293,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a unsigned 64-bit integer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetULong(string name, out ulong value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetULong(Handle, name, out value);
@@ -270,6 +312,10 @@ internal readonly unsafe struct NgxParameters
         finally { Marshal.FreeCoTaskMem(utf8); }
     }
 
+    /// <summary>Reads a named NGX parameter as a borrowed native resource pointer.</summary>
+    /// <param name="name">Exact SDK parameter name.</param>
+    /// <param name="value">Returned value; valid according to the native result code.</param>
+    /// <returns>The native NGX accessor result.</returns>
     public NgxResult GetVoidPointer(string name, out IntPtr value)
     {
         if (!NgxInterop.UseDirectCalls) return NgxShim.GetVoidPointer(Handle, name, out value);

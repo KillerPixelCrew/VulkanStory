@@ -21,6 +21,8 @@ internal sealed partial class GameGraphicsAdapter
     private NativeTexture[] chunkTextures = [];
     private int[] chunkReads = [];
 
+    /// <summary>Captures target/write-mask and fixed draw state for a named terrain pool; native pass opening is deferred to its first draw.</summary>
+    /// <param name="name">Retained terrain pool/pass name.</param>
     internal void BeginChunkPool(string name)
     {
         RequireDevice();
@@ -35,6 +37,7 @@ internal sealed partial class GameGraphicsAdapter
         chunkDepthWrite = Stated.DepthWrite; chunkCull = Stated.CullMode;
         RequireDevice().GpuMark(name);
     }
+    /// <summary>Closes an opened native terrain pass and clears its enclosing pool scope.</summary>
     internal void EndChunkPool()
     {
         if (!chunkScopeActive) return;

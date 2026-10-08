@@ -3,6 +3,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Caches original platform render-option field delegates and dispatches its unchanged per-frame method.</summary>
 internal static class GameFrameBindings
 {
     private static readonly AccessTools.FieldRef<ClientPlatformWindows, NewFrameHandler?> Handler =
@@ -20,6 +21,9 @@ internal static class GameFrameBindings
             if (AccessTools.Field(typeof(ClientPlatformWindows), name)?.FieldType != type)
                 throw new MissingFieldException("Original frame metadata changed: " + name);
     }
+    /// <summary>Publishes the pre-input render-option snapshot to the original platform fields.</summary>
+    /// <param name="platform">Original platform whose render callback consumes the values.</param>
+    /// <param name="settings">Single frame settings snapshot.</param>
     internal static void Adopt(ClientPlatformWindows platform, GameFrameSettings settings)
     {
         Bloom(platform) = settings.Bloom; GodRays(platform) = settings.GodRays;
@@ -27,6 +31,9 @@ internal static class GameFrameBindings
         Shadow(platform) = settings.ShadowQuality;
         ShaderProgramBase.shadowmapQuality = settings.ShadowQuality;
     }
+    /// <summary>Invokes the unchanged original platform per-frame renderer.</summary>
+    /// <param name="platform">Original platform owned by the active session.</param>
+    /// <param name="delta">Elapsed real-frame time in seconds.</param>
     internal static void Dispatch(ClientPlatformWindows platform, float delta) =>
         (Handler(platform) ?? throw new InvalidOperationException("Original game frame handler is not attached.")).OnNewFrame(delta);
     internal static bool RenderBloom(ClientPlatformWindows platform) => Bloom(platform);

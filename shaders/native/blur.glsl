@@ -22,7 +22,7 @@
 //
 // blur.fsh also declares an input named frameSize that no vertex stage writes and nothing reads. The
 // record's frameSize is a global name in both stages, so that input would redeclare it: the fragment stage
-// drops it (docs/vulkan.md, "Family post"). texCoords[21] spans locations 0-20; the program
+// drops it (docs/vulkan.md, "Family post"). texCoords[17] spans locations 0-16; the program
 // includes none of the includes varyings.glsl places at 16 and above.
 layout(push_constant, scalar) uniform OptimumDraw
 {
@@ -38,7 +38,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
 #if defined(OPTIMUM_VERTEX)
 
 
-layout(location = 0) out vec2 texCoords[21];
+layout(location = 0) out vec2 texCoords[17];
 
 void main(void)
 {
@@ -50,14 +50,14 @@ void main(void)
 	if (isVertical == 1) {
 		float pixelSize = 1.0 / frameSize.y;
 
-		for (int i = -8; i < 8; i++) {
+		for (int i = -8; i <= 8; i++) {
 			texCoords[i + 8] = texCoord + vec2(0, pixelSize * i);
 		}
 
 	} else {
 		float pixelSize = 1.0 / frameSize.x;
 
-		for (int i = -8; i < 8; i++) {
+		for (int i = -8; i <= 8; i++) {
 			texCoords[i + 8] = texCoord + vec2(pixelSize * i, 0);
 		}
 	}
@@ -70,7 +70,7 @@ void main(void)
 
 
 // blur.fsh's `in vec2 frameSize;` is dropped: see blur.interface.glsl.
-layout(location = 0) in vec2 texCoords[21];
+layout(location = 0) in vec2 texCoords[17];
 
 layout(location = 0) out vec4 outColor;
 

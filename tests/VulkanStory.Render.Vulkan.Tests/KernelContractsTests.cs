@@ -9,6 +9,8 @@ namespace VulkanStory.Render.Vulkan.Tests;
 
 // Expectations carried from FramePlanningTests, FrameGenerationBoundaryTests,
 // DeviceValidationTests, and UpscalerDeviceRequirementsTests in the source tree.
+/// <summary>Checks retained CPU planning, device requirement, pacing target, and latency-report contracts.</summary>
+/// <remarks>No native provider, GPU work, or physical input is executed.</remarks>
 public sealed class KernelContractsTests
 {
     [Fact]

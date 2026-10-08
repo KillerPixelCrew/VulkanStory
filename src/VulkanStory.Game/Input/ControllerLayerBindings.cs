@@ -2,8 +2,11 @@ using System.Collections.Generic;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Modifier-layer overrides with exclusive physical-button ownership among explicit shifted actions.</summary>
 internal static class ControllerLayerBindings
 {
+    /// <summary>Resolves an explicit shifted binding or inherits the main button unless another shifted action owns it.</summary>
+    /// <returns>Effective physical button, or -1 when inheritance is suppressed.</returns>
     internal static int Resolve(IReadOnlyDictionary<string, int> shifted, string action, int mainButton)
     {
         if (shifted.TryGetValue(action, out int button)) return button;
@@ -14,6 +17,7 @@ internal static class ControllerLayerBindings
         return mainButton;
     }
 
+    /// <summary>Assigns a shifted button, removing the first conflict; a negative button removes the override.</summary>
     internal static void Assign(Dictionary<string, int> shifted, string action, int button)
     {
         string? collision = null;

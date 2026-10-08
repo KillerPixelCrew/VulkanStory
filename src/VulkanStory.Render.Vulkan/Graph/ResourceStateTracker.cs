@@ -302,6 +302,8 @@ public enum ResourceUsage
     SampleFragment,
     /// <summary>Sampled by a vertex shader.</summary>
     SampleVertex,
+    /// <summary>Sampled by a geometry shader.</summary>
+    SampleGeometry,
     /// <summary>Read as a storage image.</summary>
     StorageRead,
     /// <summary>Sampled by a compute shader.</summary>
@@ -364,12 +366,14 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.DepthReadOnly => new(ImageLayout.DepthReadOnlyOptimal, DepthTests,
             AccessFlags2.DepthStencilAttachmentReadBit),
         ResourceUsage.DepthReadOnlySampled => new(ImageLayout.DepthReadOnlyOptimal,
-            DepthTests | PipelineStageFlags2.FragmentShaderBit,
+            DepthTests | PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit,
             AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleFragment => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleVertex => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.VertexShaderBit, AccessFlags2.ShaderReadBit),
+        ResourceUsage.SampleGeometry => new(ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags2.GeometryShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.StorageRead => new(ImageLayout.General,
             PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit,
             AccessFlags2.ShaderStorageReadBit),

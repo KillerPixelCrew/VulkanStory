@@ -6,6 +6,8 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>XeSS Vulkan reconstruction backend that contributes SDK requirements before device creation.</summary>
+/// <remarks>Plan changes retire the previous context through the renderer timeline. SDK warning results are treated as successful operations.</remarks>
 internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementContributor
 {
     // xess.h: ENABLE_AUTOEXPOSURE is bit 8; LDR_INPUT_COLOR is bit 6.
@@ -19,12 +21,19 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
     private UpscalerPlan initializedPlan;
     private int motion;
     private bool ready, firstFrame;
+    /// <inheritdoc/>
     public string Id => "xess";
+    /// <inheritdoc/>
     public string Name => "XeSS-SR";
+    /// <inheritdoc/>
     public bool Active => ready && Unavailable == null;
+    /// <inheritdoc/>
     public string? Unavailable { get; private set; }
+    /// <inheritdoc/>
     public IDeviceRequirementContributor? Requirements => api == null ? null : this;
 
+    /// <summary>Loads the optional XeSS SR exports and records load failure as unavailability.</summary>
+    /// <param name="log">Destination for XeSS-operation failures.</param>
     public XessBackend(Action<string> log)
     {
         this.log = log;
@@ -38,6 +47,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         log("[VulkanStory] " + Unavailable);
         return false;
     }
+    /// <summary>Rejects null or excessive SDK extension lists before reading their entries.</summary>
     private bool CheckExtensionList(uint count, byte** names)
     {
         if (count <= 256 && (count == 0 || names != null)) return true;
@@ -45,6 +55,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         log("[VulkanStory] " + Unavailable);
         return false;
     }
+    /// <inheritdoc/>
     public void ContributeInstanceExtensions(InstanceRequirements requirements)
     {
         if (api == null || Unavailable != null) return;
@@ -62,6 +73,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
             }
         }
     }
+    /// <inheritdoc/>
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
         if (api == null || Unavailable != null) return;
@@ -82,6 +94,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
             }
         }
     }
+    /// <inheritdoc/>
     public void FinalizeDeviceFeatures(DeviceRequirements requirements, void** features)
     {
         if (api == null || Unavailable != null) return;
@@ -97,11 +110,17 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         }
     }
 
+    /// <summary>SDK callback that may modify the supplied Vulkan feature-chain pointer.</summary>
     internal delegate int DeviceFeatureCall(void** features);
 
     // The SDK may change any node in the supplied pNext chain before returning an
     // error. Save every node we currently put in that chain, not only the core
     // Vulkan 1.2/1.3 nodes, so another provider sees the original feature set.
+    /// <summary>Snapshots supported feature-chain nodes, invokes SDK negotiation and restores their bytes when negotiation fails.</summary>
+    /// <param name="features">Address of the renderer-owned Vulkan feature-chain head.</param>
+    /// <param name="call">SDK negotiation callback, which may mutate the chain.</param>
+    /// <returns>The SDK result code; nonnegative results preserve negotiated changes.</returns>
+    /// <exception cref="InvalidOperationException">The chain is cyclic, too long or contains an unsupported node type.</exception>
     internal static int InvokeDeviceFeatureNegotiation(void** features, DeviceFeatureCall call)
     {
         void* original = *features;
@@ -117,6 +136,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
                 StructureType.PhysicalDeviceVulkan12Features => sizeof(PhysicalDeviceVulkan12Features),
                 StructureType.PhysicalDeviceVulkan13Features => sizeof(PhysicalDeviceVulkan13Features),
                 StructureType.PhysicalDeviceFaultFeaturesExt => sizeof(PhysicalDeviceFaultFeaturesEXT),
+                StructureType.PhysicalDeviceAntiLagFeaturesAmd => sizeof(PhysicalDeviceAntiLagFeaturesAMD),
                 StructureType.PhysicalDeviceColorWriteEnableFeaturesExt => sizeof(PhysicalDeviceColorWriteEnableFeaturesEXT),
                 StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt => sizeof(PhysicalDeviceExtendedDynamicState3FeaturesEXT),
                 StructureType.PhysicalDevicePresentIDFeaturesKhr => sizeof(PhysicalDevicePresentIdFeaturesKHR),
@@ -146,6 +166,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
             }
         }
     }
+    /// <inheritdoc/>
     public bool BringUp(IUpscalerDevice target, nint instance, nint physicalDevice, nint logicalDevice)
     {
         if (api == null || Unavailable != null) return false;
@@ -160,11 +181,13 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         context = new XessContext(api, handle);
         return true;
     }
+    /// <summary>Maps renderer quality names to XeSS quality constants; unknown names select Quality.</summary>
     internal static int QualityOf(string? quality) => quality?.ToLowerInvariant() switch
     {
         "ultraperformance" => 100, "performance" => 101, "balanced" => 102,
         "ultraquality" => 104, "ultraqualityplus" => 105, "dlaa" or "native" => 106, _ => 103,
     };
+    /// <inheritdoc/>
     public bool TryPlan(int displayWidth, int displayHeight, string quality,
         float lodBiasOffset, out UpscalerPlan plan)
     {
@@ -176,12 +199,15 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         if (!Check(api!.Resolution(context!.Handle, &output, QualityOf(quality), &optimal, &minimum, &maximum),
             "xessGetOptimalInputResolution")) return false;
         plan = new UpscalerPlan((int)optimal.Width, (int)optimal.Height, displayWidth, displayHeight,
-            quality, RecommendedLodBias((int)optimal.Width, displayWidth), lodBiasOffset);
+            quality, RecommendedLodBias((int)optimal.Width, displayWidth) * Math.Clamp(lodBiasOffset, 0f, 1f), lodBiasOffset);
         return plan.IsValid;
     }
     // XeSS-SR guide: additional bias = log2(input width / target width).
+    /// <summary>Computes the additional XeSS texture LOD bias from positive input and output widths.</summary>
+    /// <returns>The base-two logarithm of the input-to-output width ratio.</returns>
     internal static float RecommendedLodBias(int renderWidth, int displayWidth) =>
         MathF.Log2((float)renderWidth / displayWidth);
+    /// <inheritdoc/>
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)
     {
         error = null;
@@ -204,19 +230,25 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
         error = Unavailable;
         return false;
     }
+    /// <inheritdoc/>
     public void RetireFeature()
     {
         if (context != null) { device!.RetireUpscalerResource(context); context = null; }
         if (motion != 0) { device!.DeleteTexture(motion); motion = 0; }
         initializedPlan = default;
     }
+    /// <inheritdoc/>
     public void Shutdown() { RetireFeature(); ready = false; }
+    /// <inheritdoc/>
     public void Dispose() => Shutdown();
 
+    /// <summary>Owns a XeSS SR context released after its GPU references complete.</summary>
+    /// <remarks>Negative SDK destruction results retain ownership and make further release terminal.</remarks>
     private sealed class XessContext(XessNative api, nint handle) : IDisposable
     {
         private Exception? releaseFailure;
         public nint Handle { get; private set; } = handle;
+        /// <inheritdoc/>
         public void Dispose()
         {
             if (releaseFailure != null)

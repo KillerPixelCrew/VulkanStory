@@ -4,6 +4,7 @@ namespace VulkanStory.Game;
 
 // The profile supplies all mandatory startup groups, including complete GL
 // coverage. Existing graphics subsets do not become a complete profile here.
+/// <summary>Complete startup patch coverage and a deferred settings/data-path factory; the factory runs at the first window request.</summary>
 internal sealed record GameStartupPlan(StartupPatchGroup[] Groups, Func<GameSessionServices> CreateServices);
 
 /// <summary>Shared early/ordinary-mod entry into the one process runtime.</summary>
@@ -14,6 +15,10 @@ public static class RuntimeBootstrap
     public static bool IsActive => current?.IsActive == true;
     internal static ProcessRuntime Current => current ?? throw new InvalidOperationException("The early runtime is not loaded.");
 
+    /// <summary>Installs the process runtime and complete official startup routing before the game entry point executes.</summary>
+    /// <param name="gameDirectory">Official game installation used to verify assembly locations.</param>
+    /// <param name="trace">Diagnostic sink receiving event names and details.</param>
+    /// <remarks>A second installation is rejected. Failures publish failed status and propagate; trace callbacks from the runtime notification path are best effort.</remarks>
     public static void Install(string gameDirectory, Action<string, string> trace)
     {
         if (current != null) throw new InvalidOperationException("The process runtime is already installed.");
@@ -37,6 +42,7 @@ public static class RuntimeBootstrap
     internal static void Configure(GameStartupPlan plan) => Current.Prepare(plan);
 }
 
+/// <summary>Owns startup routing and the SDL/Vulkan session; transitions run on the thread that created the runtime.</summary>
 internal sealed partial class ProcessRuntime(Action<string, string> trace)
 {
     private readonly int ownerThread = Environment.CurrentManagedThreadId;
@@ -61,11 +67,17 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
         Status = status;
         AppContext.SetData("VulkanStory.Runtime.Status", status);
     }
+    /// <summary>Sends a runtime diagnostic without allowing a sink exception to change graphics ownership.</summary>
+    /// <param name="name">Diagnostic event name.</param>
+    /// <param name="detail">Event payload text.</param>
     internal void Notify(string name, string detail)
     {
         try { trace(name, detail); }
         catch { /* Diagnostics cannot change graphics ownership or rollback. */ }
     }
+    /// <summary>Validates and installs a complete startup plan while graphics routing remains dormant.</summary>
+    /// <param name="completePlan">All mandatory patch groups and the deferred service factory.</param>
+    /// <remarks>Must run once on the runtime owner thread before the first window request.</remarks>
     internal void Prepare(GameStartupPlan completePlan)
     {
         RequireOwner();
@@ -90,6 +102,9 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
         }
         catch { Publish("failed"); throw; }
     }
+    /// <summary>Records the original platform instance before the first SDL window is created.</summary>
+    /// <param name="value">Original platform retained for the process session.</param>
+    /// <remarks>A second distinct platform is rejected.</remarks>
     internal void RememberPlatform(ClientPlatformWindows value)
     {
         RequireOwner();
@@ -110,6 +125,9 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
         }
         catch { Publish("failed"); throw; }
     }
+    /// <summary>Selects normalized settings at the first window boundary and honors original mod disablement.</summary>
+    /// <returns>True when the prepared renderer should create the window; false after disabling routing for ordinary startup.</returns>
+    /// <remarks>Headless mode rejects disabled rendering instead of permitting a visible fallback.</remarks>
     internal bool SelectWindowServices()
     {
         RequireOwner();
@@ -129,6 +147,10 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
             : "VulkanStory settings disable the renderer; original window startup continues.");
         return false;
     }
+    /// <summary>Finds the active session for the exact original platform instance.</summary>
+    /// <param name="platform">Original platform identity expected by routed consumers.</param>
+    /// <param name="found">Matching active session when the method returns true.</param>
+    /// <returns>False while routing is inactive. An active identity mismatch throws.</returns>
     internal bool TrySession(ClientPlatformWindows platform, out GameRenderSession found)
     {
         found = null!;
@@ -142,6 +164,8 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
         if (!IsActive || session is null) throw new InvalidOperationException("SDL loop has no committed session.");
         session.Run();
     }
+    /// <summary>Drains and releases the session before removing routing patches and published control delegates.</summary>
+    /// <remarks>Runs on the owner thread. A session drain failure propagates before patch/window owners are cleared.</remarks>
     internal void Shutdown()
     {
         RequireOwner();

@@ -25,6 +25,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 {
     void ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
 
+    /// <summary>Renderer-owned frame timing recorder shared with latency boundary callbacks.</summary>
     internal FrameTimingRecorder Latency { get; private set; } = new();
     private VendorLatency? _vendorLatency;
     private bool _streamlineReflexReady;
@@ -56,6 +57,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (LatencyTraceEnabled) Console.Error.WriteLine("[VulkanStory latency] " + message);
     }
     private RendererLatencySelection _latencySelection = new("on", "off");
+    /// <summary>Host-selected latency settings snapshot read and written with volatile semantics.</summary>
     public RendererLatencySelection LatencySelection
     {
         get => System.Threading.Volatile.Read(ref _latencySelection);
@@ -66,16 +68,18 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
     }
     private int DesiredLatencyMode => LatencySelection.EffectiveMode;
+    /// <summary>Whether the selected active vendor presenter or extension currently owns frame limiting.</summary>
     internal bool VendorLatencyOwnsFrameCap => _frameGenerationProvider == "xess"
         ? _xessPresenter != null
         : _vendorLatency?.OwnsFrameCap == true || _streamlineReflexReady;
+    /// <summary>Stores the host FPS limit and forwards it to the active vendor pacing authority.</summary>
     internal void SetVendorLatencyFrameCap(int maxFps)
     {
         _vendorFrameCap = Math.Max(0, maxFps);
         if (_xessPresenter is { } intel)
         {
             // XeLL requires GPU work to be finished before its mode changes.
-            intel.WaitForPresentIdle();
+            intel.WaitForGpuIdle();
             RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, DesiredLatencyMode != 0),
                 "frame-cap options");
             return;
@@ -85,6 +89,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (_streamlineReflexReady && _context.Streamline is { } streamline)
             RequireStreamlineProtocol(streamline.SetReflex(DesiredLatencyMode, _vendorFrameCap), "Reflex frame-cap options");
     }
+    /// <summary>Begins vendor frame identity and performs the selected latency sleep before input collection.</summary>
     internal void SleepVendorLatency(ulong frameId, bool mayGenerate)
     {
         // PCL needs a frame token even when another vendor owns low-latency sleep.
@@ -128,7 +133,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             if (_appliedLatencyMode != latencyMode)
             {
-                intel.WaitForPresentIdle();
+                intel.WaitForGpuIdle();
                 RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, latencyMode != 0),
                     "mode options");
                 _appliedLatencyMode = latencyMode;
@@ -159,12 +164,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             throw new InvalidOperationException("XeLL " + operation + " failed (" + result +
                 ") at frame " + _latencyFrameId + ".");
     }
+    /// <summary>Marks the actual input-start boundary for the active AMD latency extension.</summary>
     internal void MarkVendorInputStart(ulong frameId)
     {
         _vendorLatency?.InputStart(frameId);
         if (LatencyTraceEnabled && _vendorLatency?.Kind == VendorLatencyKind.AntiLag)
             TraceLatency("frame=" + frameId + " amdInputStart");
     }
+    /// <summary>Records renderer timing and forwards the supported vendor/PCL marker for the current frame.</summary>
     internal void MarkLatency(ulong frameId, LatencyMarker marker)
     {
         Latency.Marker(frameId, marker);
@@ -206,7 +213,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (_frameGenerationProvider == "xess") return;
         _vendorLatency?.Marker(frameId, marker);
     }
+    /// <summary>Registered PCL latency-ping message, or zero when PCL is unavailable.</summary>
     internal uint PclWindowMessage => _streamlinePclReady ? _context.Streamline?.PclWindowMessage() ?? 0 : 0;
+    /// <summary>Forwards an observed latency-ping boundary to the available Streamline PCL path.</summary>
     internal void MarkPclLatencyPing()
     {
         if (!_streamlinePclReady || !_streamlineFrameTokenReady ||
@@ -221,6 +230,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             MirrorValidationMessage("Streamline PCL ping marker failed: " + result);
         }
     }
+    /// <summary>Forwards an asynchronous present marker using the explicitly retained frame token.</summary>
     private void MarkAsyncPclPresent(ulong frameId, nint token, LatencyMarker marker)
     {
         if (!_streamlinePclReady || token == 0 || _context.Streamline is not { } streamline) return;
@@ -235,6 +245,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
                 frameId + ", marker=" + marker + ", result=" + result);
         }
     }
+    /// <summary>Current monotonic renderer latency-frame identity.</summary>
     internal ulong LatencyFrameId => _latencyFrameId;
     private ulong _latencyFrameId;
     private bool _latencyFrameIdPending;
@@ -260,6 +271,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _frames.Latency.FrameId = _latencyFrameId;
     }
 
+    /// <summary>Records the render-start boundary once for the current latency frame.</summary>
     internal void NoteRenderStageStarted()
     {
         if (_latencyRenderStartFrame == _latencyFrameId) return;
@@ -359,6 +371,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// </summary>
     public bool? SynchronousPipelines { get; set; }
 
+    /// <summary>Resolves configured or environment-selected synchronous pipeline compilation.</summary>
     internal static bool ResolveSynchronousPipelines(bool? configured, string? environment) =>
         configured ?? environment?.Trim() is "1" or "on" or "true";
 
@@ -379,6 +392,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// <summary>The pipeline cache. Tests only.</summary>
     internal GraphicsPipelineCache PipelinesForTests => _pipelines;
 
+    /// <summary>Selects the configured/environment shader-cache root while excluding capture-directory misuse.</summary>
     internal static string? ResolveShaderCacheRoot(string? configured, string? environment)
     {
         if (string.IsNullOrWhiteSpace(environment)) return string.IsNullOrWhiteSpace(configured) ? null : configured;
@@ -486,17 +500,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     // ------------------------------------------------------------------ lifecycle
 
+    /// <summary>Stable display name of this renderer backend.</summary>
     public string BackendName => "Vulkan";
 
-    /// <summary>
-    /// Whether this machine can run the backend, decided without a window.
-    ///
-    /// The check has to happen before the window is created, because a window
-    /// opened with no graphics API cannot be handed back to OpenGL without being
-    /// destroyed and reopened. Creating an instance and a device is the only
-    /// honest way to know - driver support for the required 1.3 features is not
-    /// something that can be inferred from a vendor string.
-    /// </summary>
     /// <summary>
     /// Whether VULKANSTORY_VULKAN_VALIDATION asks for the validation layers.
     ///
@@ -578,6 +584,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
     }
 
+    /// <summary>Checks Vulkan availability through a temporary context before automatic renderer selection.</summary>
+    /// <param name="failureReason">Diagnostic detail when support could not be established.</param>
+    /// <returns>Whether the Vulkan device preflight succeeded.</returns>
     public static bool IsSupported(out string failureReason)
     {
         string driver;
@@ -653,10 +662,17 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         return false;
     }
 
+    /// <summary>Initializes renderer resources and optional presentation for an SDL window or headless extent.</summary>
+    /// <param name="window">Borrowed SDL host, or null for headless rendering.</param>
+    /// <param name="width">Initial render/output width.</param>
+    /// <param name="height">Initial render/output height.</param>
+    /// <param name="failureReason">Initialization failure detail.</param>
+    /// <returns>Whether required renderer initialization completed.</returns>
     public bool Initialize(SdlWindowHost? window, int width, int height, out string failureReason)
         => InitializeWindow(window is null ? null : new SdlVulkanWindowSurface(window),
             width, height, out failureReason);
 
+    /// <summary>Initializes device, managers and optional surface/presentation using the neutral window contract.</summary>
     internal bool InitializeWindow(IVulkanWindowSurface? window, int width, int height, out string failureReason)
     {
         _presentationSurfaceSource = window;
@@ -763,6 +779,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
         _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineReflexReady
             ? null : VendorLatency.TryCreate(_context, vendorLatencyRequirements.Kind);
+        if (_vendorLatency != null) _vendorLatency.Failure = MirrorValidationMessage;
         // Any hard Vulkan failure now reaches the client's error channel and the
         // validation log instead of turning into a silent stall.
         VulkanResult.OnFailure = message =>
@@ -838,7 +855,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _pipelines.AsyncCompiles = !synchronousPipelines;
         _pipelines.KeyLog = _pipelinePersistence?.KeyLog;
         _descriptors = new DescriptorCache(_context);
-        _compute = new ComputePipelineCache(_context, () => _pipelines.DriverCache);
+        _compute = new ComputePipelineCache(_context, () => _pipelines.DriverCache, _pipelines.DriverCacheLock);
         // Decision 9: the bindless table retires a texture's slots on the timeline
         // values of its deletion, and the shared layout names the table's set layout.
         _bindless = new BindlessTextureTable(_context, _textures, _frames.Timeline);
@@ -923,6 +940,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     private bool _vsync = true;
 
     private VulkanTexture? DefaultColorTexture() => _textures.Get(_defaultColor);
+    /// <summary>Renderer texture ID for the current default color attachment.</summary>
     internal int DefaultColorTextureId => _defaultColor;
     private int _defaultFramebuffer;
     private int _defaultColor;
@@ -1028,8 +1046,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _defaultDepth = 0;
     }
 
+    /// <summary>Selected GPU name, falling back to Vulkan before device initialization.</summary>
     public string RendererString => _context?.Capabilities.DeviceName ?? "Vulkan";
+    /// <summary>Selected Vulkan driver name, or unknown before initialization.</summary>
     public string VendorString => _context?.Capabilities.DriverName ?? "unknown";
+    /// <summary>Vulkan API/driver version description for the active context.</summary>
     public string VersionString => _context == null
         ? "unknown"
         : VulkanContext.VersionString(_context.Capabilities.ApiVersion);
@@ -1042,10 +1063,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// </summary>
     public string ShaderVersionString => "4.50";
 
+    /// <summary>Selected device's maximum 2D image dimension, or zero before initialization.</summary>
     public int MaxTextureSize => (int)(_context?.Capabilities.MaxImageDimension2D ?? 0);
+    /// <summary>Whether the selected Vulkan device supports the wideLines feature.</summary>
     public bool SupportsThickLines => _context?.Capabilities.WideLines ?? false;
+    /// <summary>Storage-buffer support exposed by the renderer's required device contract.</summary>
     public bool SupportsSSBOs => true;
 
+    /// <summary>Client-visible renderer debug-mode state.</summary>
     public bool DebugMode { get; set; }
 
     /// <summary>
@@ -1114,6 +1139,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     // ---------------------------------------------------------------------- frame
 
+    /// <summary>Acquires a reusable frame slot, begins recording and initializes the graph, descriptors and provider frame tags.</summary>
     public void BeginFrame()
     {
         RequireFrameLifetime();
@@ -1196,7 +1222,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
                 if (_gpuTimestamps != null) sample += "\n" + _gpuTimestamps.TakeLine();
                 System.IO.File.AppendAllText(StatsLogPath, sample + "\n");
             }
-            catch (System.IO.IOException)
+            catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException)
             {
             }
         }
@@ -1205,10 +1231,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// <summary>Stopwatch timestamp of the last BeginFrame, 0 before the first.</summary>
     private long _lastFrameStart;
 
-    /// <summary>Deferred destructions still waiting on the timelines. Tests only.</summary>
     /// <summary>The frame ring's timelines. Tests only.</summary>
     internal FrameTimeline TimelineForTests => _frames.Timeline;
 
+    /// <summary>Formats current allocator and resource-manager memory diagnostics.</summary>
     internal string ResourceMemoryDiagnostics()
     {
         var timeline = _frames.Timeline;
@@ -1219,11 +1245,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             _context.Allocator.DiagnosticMemoryLine();
     }
 
-    /// <summary>The frame ring's upload manager. Tests only.</summary>
     /// <summary>Decision 9's set 1. Tests only.</summary>
     internal BindlessTextureTable BindlessForTests => _bindless!;
 
-    /// <summary>Decision 9's shared pipeline layout. Tests only.</summary>
     // ------------------------------------------------------------------ compute
 
     /// <summary>The compute programs. Tests only.</summary>
@@ -1503,7 +1527,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// the frame and signals the Frame timeline; only then does the CPU block on
     /// vkAcquireNextImageKHR, with the whole frame already in flight. Submit B
     /// (the present path: the flipped blit) waits on the frame at
-    /// COLOR_ATTACHMENT_OUTPUT and on the acquire semaphore at the image's first
+    /// TRANSFER and on the acquire semaphore at the image's first
     /// use, and signals the image's present semaphore; then the image is presented.
     /// </summary>
     public void Present()
@@ -1575,14 +1599,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _generatedFramePacer.WaitForRealPresent();
         MarkLatency(_latencyFrameId, LatencyMarker.PresentStart);
         ulong presentId = _swapchain.Present(target, _latencyFrameId, _realPresentId);
-        VulkanStats.NotePresent(generated: false);
+        if (presentId != 0) VulkanStats.NotePresent(generated: false);
         CountFsr3SdkPresents();
         _realPresentId = 0;
         _generatedPresentId = 0;
         MarkLatency(_latencyFrameId, LatencyMarker.PresentEnd);
         Latency.OnPresent(_latencyFrameId, presentId);
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
-            renderValue, presentValue, renderCompletedAtAcquire, true);
+            renderValue, presentValue, renderCompletedAtAcquire, presentId != 0);
 
         long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_lastPresentReturn != 0 && _vsync && !generatedPresented &&
@@ -1630,6 +1654,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (_swapchain == null && _xessPresenter == null) RestoreVulkanSwapchain();
     }
 
+    /// <summary>Updates requested vertical synchronization and queues swapchain recreation when needed.</summary>
     public void SetVSync(bool enabled)
     {
         if (_vsync == enabled) return;
@@ -1639,12 +1664,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     }
 
     private Exception? _frameFailure;
+    /// <summary>Retains the first terminal frame failure so unsafe resource release cannot proceed.</summary>
     internal void RetainFailedFrame(Exception failure) => _frameFailure ??= failure;
     private void RequireFrameLifetime()
     {
         if (_frameFailure != null)
             throw new InvalidOperationException("Vulkan frame failed; recording and resource owners remain retained.", _frameFailure);
     }
+    /// <summary>Checks retained frame ownership failures before lifecycle teardown.</summary>
     internal void RequireFrameRelease()
     {
         RequireFrameLifetime();
@@ -1683,6 +1710,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         return new GpuSection(this, enclosing);
     }
 
+    /// <summary>Restores the enclosing GPU profiling section when its scoped inner work is complete.</summary>
     internal readonly struct GpuSection : IDisposable
     {
         private readonly VulkanDevice? _device;
@@ -1694,6 +1722,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             _enclosing = enclosing;
         }
 
+        /// <inheritdoc/>
         public void Dispose()
         {
             if (_device != null && _enclosing != null) _device.GpuMark(_enclosing);
@@ -1714,6 +1743,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _pipelinePersistence.SaveAtShutdown(_pipelines);
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireFrameRelease();

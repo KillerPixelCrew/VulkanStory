@@ -3,6 +3,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>A windowless check of the renderer's actual Vulkan device floor.</summary>
 public static class VulkanPreflight
 {
+    /// <summary>Creates and releases a temporary headless Vulkan context to check the required device capabilities.</summary>
     /// <returns>Null when a usable Vulkan device can be created; otherwise the renderer's rejection reason.</returns>
     public static string? Check()
     {

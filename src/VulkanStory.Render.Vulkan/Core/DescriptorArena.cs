@@ -35,6 +35,7 @@ internal sealed unsafe class DescriptorArena : IDisposable
     /// <summary>Distinct sets handed out since the last reset.</summary>
     public int SetsThisFrame => _sets.Count;
 
+    /// <summary>Number of native descriptor pools currently owned by this frame arena.</summary>
     public int PoolCount => _pools.Count;
 
     /// <summary>Lookups that found a set already written this frame.</summary>
@@ -43,6 +44,7 @@ internal sealed unsafe class DescriptorArena : IDisposable
     /// <summary>Sets allocated and written, over the arena's life.</summary>
     public long Allocations { get; private set; }
 
+    /// <summary>Number of frame-arena reset operations.</summary>
     public long Resets { get; private set; }
 
     /// <summary>
@@ -60,6 +62,7 @@ internal sealed unsafe class DescriptorArena : IDisposable
         Resets++;
     }
 
+    /// <summary>Reuses identical contents within this frame arena or allocates and writes a descriptor set.</summary>
     public DescriptorSet Get(DescriptorSetContents contents, DescriptorSetLayout layout)
     {
         if (_sets.TryGetValue(contents, out DescriptorSet existing))
@@ -113,6 +116,7 @@ internal sealed unsafe class DescriptorArena : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -152,9 +156,12 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
 
     public ComputeDescriptorArena(VulkanContext context) => _context = context;
 
+    /// <summary>Number of native descriptor pools currently owned by this frame arena.</summary>
     public int PoolCount => _pools.Count;
+    /// <summary>Descriptor-set allocations recorded by this arena.</summary>
     public long Allocations { get; private set; }
 
+    /// <summary>Clears cached bindings and resets owned descriptor pools for reuse after the slot's GPU completion.</summary>
     public void Reset()
     {
         foreach (DescriptorPool pool in _pools) _context.Api.ResetDescriptorPool(_context.Device, pool, 0);
@@ -246,6 +253,7 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
         return pool;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

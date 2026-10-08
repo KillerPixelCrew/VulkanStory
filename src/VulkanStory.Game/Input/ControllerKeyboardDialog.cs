@@ -6,8 +6,10 @@ namespace VulkanStory.Game.Input;
 internal sealed class ControllerKeyboardDialog : GuiDialog
 {
     private readonly ControllerKeyboardContent content;
+    /// <summary>Original focused text field receiving keyboard edits.</summary>
     internal GuiElementEditableTextBase Target { get; }
 
+    /// <summary>Creates and composes an in-game keyboard for the supplied editable target.</summary>
     public ControllerKeyboardDialog(ICoreClientAPI api, GuiElementEditableTextBase target) : base(api)
     {
         Target = target;
@@ -15,11 +17,16 @@ internal sealed class ControllerKeyboardDialog : GuiDialog
         ComposeKeyboard();
     }
 
+    /// <inheritdoc />
     public override bool DisableMouseGrab => true;
+    /// <inheritdoc />
     public override string ToggleKeyCombinationCode => null!;
+    /// <inheritdoc />
     public override double DrawOrder => 0.98;
+    /// <inheritdoc />
     public override double InputOrder => 0.01;
 
+    /// <summary>Recomposes changed key labels only while this dialog remains open.</summary>
     public void ApplyPendingRefresh()
     {
         if (!IsOpened() || !content.TakeRefreshRequest()) return;

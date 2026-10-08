@@ -4,6 +4,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Retained SubmissionTests indirect-ring regression at migration baseline.
+/// <summary>Checks indirect-ring slot capacity and deferred growth at frame-slot recycling.</summary>
+/// <remarks>CPU offset bookkeeping does not allocate or synchronize a native command buffer.</remarks>
 public sealed class IndirectRingTests
 {
     [Fact]

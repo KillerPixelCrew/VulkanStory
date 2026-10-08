@@ -29,6 +29,8 @@ internal sealed partial class GameGraphicsAdapter
             aoTemporal.RejectMotionDraw(reason + "; pass=" +
                 (ShaderProgramBase.CurrentShaderProgram?.PassName ?? "unknown") + "; program=" + StatedProgram);
     }
+    /// <summary>Opens camera-motion writes only while the current scene and primary motion target are eligible.</summary>
+    /// <returns>True after opening; false when prerequisites decline.</returns>
     internal bool BeginCameraMotionWrite()
     {
         RequireDevice();
@@ -42,6 +44,8 @@ internal sealed partial class GameGraphicsAdapter
         frame.ApplyMotionUniforms(program);
         return BeginMotionWrite(aoTemporal);
     }
+    /// <summary>Opens motion writes for an eligible animated scene draw; callers must close the window through EndMotionWrite even if setup or drawing fails.</summary>
+    /// <returns>True when the motion write mask was opened; false when the scene/target/program prerequisites decline.</returns>
     internal bool BeginAnimatedMotionWrite()
     {
         RequireDevice();
@@ -66,6 +70,7 @@ internal sealed partial class GameGraphicsAdapter
         Stated.SetSlotBlend(motion, 32774, 1, 0, 1, 0);
         return true;
     }
+    /// <summary>Closes the active motion write window and restores its retained attachment mask.</summary>
     internal void EndMotionWrite()
     {
         RequireDevice();

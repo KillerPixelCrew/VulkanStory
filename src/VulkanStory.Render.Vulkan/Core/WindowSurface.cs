@@ -6,20 +6,34 @@ using VulkanStory.Platform.Sdl;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Window-owned native handles and surface-creation operations consumed by the Vulkan backend.</summary>
 internal interface IVulkanWindowSurface
 {
+    /// <summary>Borrowed native window pointer used by the platform host.</summary>
     IntPtr NativeHandle { get; }
+    /// <summary>Borrowed Win32 HWND, or zero when the window has no Win32 handle.</summary>
     nint Win32Handle { get; }
+    /// <summary>Returns the instance extensions required to create this window's Vulkan surface.</summary>
     string[] RequiredInstanceExtensions();
+    /// <summary>Creates a Vulkan surface for the borrowed window using the selected native/proxy dispatch.</summary>
+    /// <param name="context">Borrowed instance owner.</param>
+    /// <param name="surface">Created surface on success; its lifetime belongs to the presentation owner.</param>
+    /// <param name="failureReason">Failure detail, or null on success.</param>
+    /// <returns>Whether surface creation succeeded.</returns>
     bool TryCreate(VulkanContext context, out SurfaceKHR surface, out string? failureReason);
 }
 
+/// <summary>Borrows an SDL window and adapts its required extensions and surface creation to the Vulkan context.</summary>
 internal sealed class SdlVulkanWindowSurface(SdlWindowHost window) : IVulkanWindowSurface
 {
+    /// <inheritdoc/>
     public IntPtr NativeHandle => window.NativeHandle;
+    /// <inheritdoc/>
     public nint Win32Handle => window.Win32Handle;
+    /// <inheritdoc/>
     public string[] RequiredInstanceExtensions() => window.RequiredInstanceExtensions();
 
+    /// <inheritdoc/>
     public bool TryCreate(VulkanContext context, out SurfaceKHR surface, out string? failureReason)
     {
         surface = default;
@@ -61,6 +75,7 @@ internal static unsafe class WindowSurface
         surfaceApi.Dispose();
     }
 
+    /// <summary>Creates a Win32 Vulkan surface through the Streamline proxy when available.</summary>
     internal static bool TryCreateStreamlineWin32(
         VulkanContext context, nint hwnd, out SurfaceKHR surface, out string? failureReason)
     {

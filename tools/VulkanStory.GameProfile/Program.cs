@@ -4,6 +4,10 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using VulkanStory.Game;
 
+// CLI entry: verifies the official installation hashes against the embedded startup
+// IL profile, validates platform metadata, and writes a method-operand inventory.
+// This metadata check does not launch the game or establish startup/render acceptance.
+// Exit codes: 0 for a matching inventory, 1 for a captured failure, 2 for invalid arguments.
 if (args.Length != 6 || args[0] != "--game-directory" || args[2] != "--profile" || args[4] != "--output")
 {
     Console.Error.WriteLine("Usage: VulkanStory.GameProfile --game-directory <official game dir> --profile <profile.json> --output <inventory.json>");

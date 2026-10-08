@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace VulkanStory.Platform.Sdl;
 
+/// <summary>Explicit SDL3 import resolution for the package-selected native runtime and integration assemblies.</summary>
+/// <remarks>Resolver registration does not itself load SDL; native loading is deferred until a P/Invoke requests it.</remarks>
 public static class SdlNativeLibrary
 {
     private static readonly HashSet<Assembly> registeredImports = new();
@@ -12,10 +14,14 @@ public static class SdlNativeLibrary
     static SdlNativeLibrary() => NativeLibrary.SetDllImportResolver(
         typeof(SdlNativeLibrary).Assembly, Resolve);
 
+    /// <summary>Forces this type's resolver registration before an SDL call without performing native initialization.</summary>
     internal static void EnsureRegistered() { }
 
     // Controller P/Invokes remain in the game integration assembly. They use
     // the same package-selected SDL binary as the window/event implementation.
+    /// <summary>Registers the shared SDL resolver once for another assembly containing SDL3 P/Invokes.</summary>
+    /// <param name="assembly">Integration assembly whose imports must use the same native SDL runtime.</param>
+    /// <remarks>An assembly with an independently installed import resolver can cause NativeLibrary registration to throw.</remarks>
     public static void RegisterAssemblyImports(Assembly assembly)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -28,6 +34,8 @@ public static class SdlNativeLibrary
         }
     }
 
+    /// <summary>Loads SDL from the importing assembly's package-relative RID directory, preserving ordinary probing for standalone tools.</summary>
+    /// <remarks>A recognized deployed package refuses missing or unloadable private SDL binaries.</remarks>
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (!string.Equals(libraryName, "SDL3", StringComparison.Ordinal)) return 0;

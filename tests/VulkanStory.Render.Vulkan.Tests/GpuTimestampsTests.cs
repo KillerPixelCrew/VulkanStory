@@ -7,6 +7,7 @@ namespace VulkanStory.Render.Vulkan.Tests;
 /// GPU timestamp section labels become <c>stats.gpu</c> keys, which the profiling
 /// scripts parse with <c>[a-z_0-9]+</c>.
 /// </summary>
+/// <remarks>Checks label normalization/environment gating only; it does not sample GPU timestamps.</remarks>
 public class GpuTimestampsTests
 {
     [Theory]

@@ -9,6 +9,7 @@ namespace VulkanStory.Game.Input;
 /// </summary>
 internal static class SdlKeyMap
 {
+    /// <summary>Maps a physical SDL scancode to a game hotkey code, returning Unknown for unmapped keys.</summary>
     internal static GlKeys ToGlKey(int scancode) => scancode switch
     {
         >= 4 and <= 29 => GlKeys.A + (scancode - 4),

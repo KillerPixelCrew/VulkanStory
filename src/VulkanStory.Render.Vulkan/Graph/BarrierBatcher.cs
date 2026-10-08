@@ -33,10 +33,14 @@ internal sealed unsafe class BarrierBatcher
     /// <summary>Barriers recorded by <see cref="Require" /> and not yet flushed.</summary>
     public int Pending => _count;
 
+    /// <summary>Accumulates the transitions required for the supplied image subresource range and usage.</summary>
+    /// <remarks>The caller flushes the accumulated barriers before the corresponding consuming commands. Discard mode permits discarding prior contents.</remarks>
     public void Require(VulkanTexture texture, uint baseMip, uint mipCount, uint baseLayer, uint layerCount,
         ResourceUsage usage) =>
         Require(texture, baseMip, mipCount, baseLayer, layerCount, usage, discard: false);
 
+    /// <summary>Accumulates the transitions required for the supplied image subresource range and usage.</summary>
+    /// <remarks>The caller flushes the accumulated barriers before the corresponding consuming commands. Discard mode permits discarding prior contents.</remarks>
     public void Require(VulkanTexture texture, uint baseMip, uint mipCount, uint baseLayer, uint layerCount,
         ResourceUsage usage, bool discard) =>
         Require(texture.Image, texture.Aspect, texture.Sync, baseMip, mipCount, baseLayer, layerCount, usage, discard);
@@ -71,9 +75,17 @@ internal sealed unsafe class BarrierBatcher
         {
             ref ImageMemoryBarrier2 existing = ref _pending[i];
             if (existing.Image.Handle != image.Handle || !SameRange(existing.SubresourceRange, range)) continue;
-            existing.NewLayout = sides.NewLayout;
-            existing.DstStageMask = sides.DstStage;
-            existing.DstAccessMask = sides.DstAccess;
+            if (existing.NewLayout == sides.NewLayout)
+            {
+                existing.DstStageMask |= sides.DstStage;
+                existing.DstAccessMask |= sides.DstAccess;
+            }
+            else
+            {
+                existing.NewLayout = sides.NewLayout;
+                existing.DstStageMask = sides.DstStage;
+                existing.DstAccessMask = sides.DstAccess;
+            }
             return;
         }
 

@@ -19,10 +19,14 @@ internal static class UniformBufferUploads
     private static readonly MethodInfo PointerGetter = typeof(GCHandleProvider).GetProperty(nameof(GCHandleProvider.Pointer))!.GetMethod!;
     private static readonly MethodInfo ProviderDispose = typeof(GCHandleProvider).GetMethod(nameof(GCHandleProvider.Dispose), Type.EmptyTypes)!;
 
+    /// <summary>Records the original UBO whose generic pointer upload is expected on this thread.</summary>
+    /// <param name="buffer">Owned original UBO reference.</param>
     internal static void NoteBound(UBO buffer) => bound = buffer;
+    /// <summary>Clears thread-local bound-buffer and observed-helper state when the UBO binding closes.</summary>
     internal static void Clear() { bound = null; observedHandles?.Clear(); }
     internal static void NoteDeleted(UBO buffer) { if (ReferenceEquals(bound, buffer)) Clear(); }
 
+    /// <summary>Checks the original generic upload helper and exact pointer-upload signatures before patch installation.</summary>
     internal static void ValidateBindings()
     {
         MethodInfo[] definitions = typeof(UBO).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
@@ -61,6 +65,8 @@ internal static class UniformBufferUploads
                 parameters[2] != typeof(IntPtr) || parameters[3] != typeof(BufferUsageHint)))
             throw new InvalidOperationException("Original UBO pointer upload signature changed.");
     }
+    /// <summary>Installs validated upload prefixes and helper-pointer lifecycle observers.</summary>
+    /// <param name="harmony">Startup Harmony owner that removes the installed hooks.</param>
     internal static void Install(Harmony harmony)
     {
         if (dataTarget is null || subDataTarget is null) throw new InvalidOperationException("UBO upload targets were not validated.");
@@ -71,6 +77,13 @@ internal static class UniformBufferUploads
         harmony.Patch(PointerGetter, postfix: new HarmonyMethod(typeof(UniformBufferUploads), nameof(ObservePointer)));
         harmony.Patch(ProviderDispose, prefix: new HarmonyMethod(typeof(UniformBufferUploads), nameof(ForgetProvider)));
     }
+    /// <summary>Routes one original UBO pointer upload, pinning only payloads observed from the original helper.</summary>
+    /// <param name="target">Original GL-shaped buffer target token.</param>
+    /// <param name="offset">Byte offset into the bound UBO.</param>
+    /// <param name="size">Byte count to upload.</param>
+    /// <param name="data">Native pointer or an observed original helper handle token.</param>
+    /// <returns>True for an unowned/inactive GL operation; false after an owned upload.</returns>
+    /// <remarks>Arbitrary pointers are never decoded as GCHandle tokens; observed payload ownership must match the bound buffer.</remarks>
     private static bool Upload(BufferTarget target, IntPtr offset, IntPtr size, IntPtr data)
     {
         if (!ShaderConsumerPatches.GraphicsRoutingEnabled || (int)target != 35345) return true;

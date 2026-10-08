@@ -6,6 +6,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Validated cached accessors for the pinned game's private GUI/screen and caret fields.</summary>
 internal sealed class GameGuiBindings
 {
     private readonly AccessTools.FieldRef<ScreenManager, GuiScreen> currentScreen;
@@ -13,6 +14,7 @@ internal sealed class GameGuiBindings
     private readonly AccessTools.FieldRef<ClientMain, List<GuiDialog>> loadedGuis;
     private readonly AccessTools.FieldRef<GuiElementEditableTextBase, double> caretX, leftOffset;
 
+    /// <summary>Validates field shapes before creating reusable accessors, avoiding repeated reflection in input paths.</summary>
     internal GameGuiBindings()
     {
         Validate();
@@ -23,12 +25,19 @@ internal sealed class GameGuiBindings
         leftOffset = AccessTools.FieldRefAccess<GuiElementEditableTextBase, double>("renderLeftOffset");
     }
 
+    /// <summary>Current screen, or null before the game's screen manager exists.</summary>
     internal GuiScreen? CurrentScreen => ClientProgram.screenManager is { } manager ? currentScreen(manager) : null;
+    /// <summary>Client instance associated with a running-game screen.</summary>
     internal ClientMain? RunningGame(GuiScreenRunningGame screen) => runningGame(screen);
+    /// <summary>The game's live loaded-dialog list; callers do not own this collection.</summary>
     internal List<GuiDialog>? LoadedGuis(ClientMain game) => loadedGuis(game);
+    /// <summary>Editable field caret X offset used to locate the SDL IME rectangle.</summary>
     internal double CaretX(GuiElementEditableTextBase text) => caretX(text);
+    /// <summary>Editable field render-left offset used to locate the SDL IME rectangle.</summary>
     internal double LeftOffset(GuiElementEditableTextBase text) => leftOffset(text);
 
+    /// <summary>Checks all required private GUI fields without instantiating their owners.</summary>
+    /// <exception cref="MissingFieldException">A required declared field is absent, readonly, or has a changed type.</exception>
     internal static void Validate()
     {
         Field<ScreenManager, GuiScreen>("CurrentScreen");

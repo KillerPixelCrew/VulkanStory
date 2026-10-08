@@ -73,7 +73,6 @@ layout(location = 0) out vec4 outColor;
 #include "fxaa.glsl"
 #include "colorutil.glsl"
 
-float SmoothStep(float x) { return x * x * (3.0f - 2.0f * x); }
 
 vec4 ColorGrade(vec4 color) {
 	// I don't know why, but this seems to make the scene look a lot better
@@ -102,7 +101,7 @@ vec4 ColorGrade(vec4 color) {
 
 	// Vignetting
 	vec2 position = (gl_FragCoord.xy * invFrameSize.xy) - vec2(0.5);
-	float vignette = 1 - smoothstep(1.1- damageVignetting / 4, 0.75 - 0.45, length(position));
+	float vignette = smoothstep(0.75 - 0.45, max(0.30001, 1.1 - damageVignetting / 4), length(position));
 	color.rgb = mix(color.rgb, vec3(0.8 * damageVignetting/2, 0, 0), vignette);
 
 	// Limit brightness

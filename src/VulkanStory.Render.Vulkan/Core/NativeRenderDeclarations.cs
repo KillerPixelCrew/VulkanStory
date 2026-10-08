@@ -26,6 +26,7 @@ internal enum NativeUniformBlock : byte
 /// </summary>
 internal readonly record struct NativeUniform(NativeUniformBlock Block, int Offset, int Size)
 {
+    /// <summary>Whether this resolved native uniform/sampler refers to a present reflected declaration.</summary>
     public bool IsPresent => Block != NativeUniformBlock.None;
 }
 
@@ -36,8 +37,10 @@ internal readonly record struct NativeUniform(NativeUniformBlock Block, int Offs
 /// </summary>
 internal readonly record struct NativeSamplerSlot(int Index, int PushOffset, int FrameBinding, TextureKind Kind)
 {
+    /// <summary>Sentinel for an absent native sampler declaration.</summary>
     public static NativeSamplerSlot None => new(-1, -1, -1, TextureKind.Texture2D);
 
+    /// <summary>Whether this resolved native uniform/sampler refers to a present reflected declaration.</summary>
     public bool IsPresent => Index >= 0;
 }
 
@@ -66,6 +69,7 @@ internal sealed class NativePipelineDescription
     public bool DepthTest;
     public bool DepthWrite;
     public CompareOp DepthCompare = CompareOp.Less;
+    /// <summary>Sentinel for an absent native sampler declaration.</summary>
     public CullModeFlags Cull = CullModeFlags.None;
 
     /// <summary>
@@ -159,14 +163,19 @@ internal sealed class NativePipeline
     /// </summary>
     internal string[] SamplerNames { get; }
 
+    /// <summary>Borrowed linked program resources from which this native pipeline was resolved.</summary>
     internal ShaderProgramResources Program { get; }
 
+    /// <summary>Renderer ID of the linked program supplying this native pipeline.</summary>
     public int ProgramId => Program.ProgramId;
 
+    /// <summary>Native pipeline state declaration retained for resolution and drawing.</summary>
     public NativePipelineDescription Description { get; }
 
+    /// <summary>Resolved graphics-pipeline cache key for this native declaration.</summary>
     internal PipelineKey Key { get; }
 
+    /// <summary>Borrowed graphics pipeline request matching the resolved native state.</summary>
     internal GraphicsPipelineCache.PipelineRequest Request { get; }
 
     /// <summary>The interned blend set the dynamic-state cache compares on, with the mask tier's dynamic blend.</summary>
@@ -203,6 +212,7 @@ internal sealed class NativePassDescription
     public int[] Reads = Array.Empty<int>();
 
     public uint TransientSlots;
+    /// <summary>Sentinel for an absent native sampler declaration.</summary>
     public PassFlags Flags = PassFlags.None;
 
     /// <summary>

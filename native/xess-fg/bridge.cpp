@@ -15,6 +15,7 @@
 #include "xess_fg/xefg_swapchain_d3d12.h"
 #include "xell/xell_d3d12.h"
 
+/// @brief Releases a local COM reference and clears its pointer without GPU waiting.
 template<typename T> static void Release(T*& value) {
     if (value) { value->Release(); value = nullptr; }
 }
@@ -22,9 +23,12 @@ template<typename T> static void Release(T*& value) {
 // Opt-in present-phase timing (VULKANSTORY_XESS_FG_TIMING=1): mean and max milliseconds
 // per phase, written to stderr every 120 presents. Diagnostics only.
 namespace {
+/// @brief CPU presentation-phase indices used only by opt-in XeSS diagnostics.
 enum TimingPhase { kAllocatorWait, kRecord, kSubmit, kPresent, kRetire, kSleep, kPhaseCount };
 const char* const kPhaseNames[kPhaseCount] = {
     "allocator_wait", "record", "submit", "dxgi_present", "retire", "xell_sleep" };
+/// @brief Bounded opt-in CPU phase and calibrated GPU timing accumulators.
+/// @details The serialized presenter owner updates this global diagnostic state. Every 120 presents the formatted record is written and accumulators reset.
 struct PresentTiming {
     bool enabled = std::getenv("VULKANSTORY_XESS_FG_TIMING") != nullptr;
     double frequency = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return static_cast<double>(f.QuadPart); }();
@@ -68,6 +72,8 @@ struct PresentTiming {
 PresentTiming timing;
 }
 
+/// @brief Native owner of matching-adapter DX12 resources, XeLL/FG contexts and triple allocator tracking.
+/// @details Calls are serialized by the managed presenter owner. Shared image COM references remain caller-owned. releaseFailure preserves unsafe cleanup states instead of releasing remaining owners.
 struct VulkanStoryXessFg {
     HMODULE fgModule = nullptr;
     HMODULE xellModule = nullptr;
@@ -122,6 +128,8 @@ struct VulkanStoryXessFg {
     decltype(&xefgSwapChainGetLastPresentStatus) presentStatus = nullptr;
 };
 
+/// @brief Fixed-layout frame resource and camera record shared with the managed XeSS presenter.
+/// @details All resource pointers borrow shared images in COMMON state. readyFenceValue follows Vulkan input copies; doneFenceValue follows queued DX12 copy/tag/present work and must exceed readyFenceValue.
 struct VulkanStoryXessFrame {
     uint32_t frameId;
     uint32_t reset;
@@ -142,6 +150,7 @@ struct VulkanStoryXessFrame {
 static_assert(sizeof(VulkanStoryXessFrame) == 216);
 static_assert(offsetof(VulkanStoryXessFrame, readyFenceValue) == 200);
 
+/// @brief Locates this bridge's directory for sibling Intel runtime loading.
 static std::wstring ModulePath() {
     HMODULE own = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -155,6 +164,8 @@ static std::wstring ModulePath() {
     return separator == std::wstring::npos ? std::wstring{} : result.substr(0, separator + 1);
 }
 
+/// @brief Loads private XeSS-FG/XeLL modules and resolves the required SDK export set.
+/// @details Acquired module handles belong to value and are released by checked context destruction.
 static bool LoadRuntime(VulkanStoryXessFg* value) {
     std::wstring base = ModulePath();
     if (base.empty()) return false;
@@ -192,17 +203,35 @@ static bool LoadRuntime(VulkanStoryXessFg* value) {
         value->presentStatus;
 }
 
-extern "C" __declspec(dllexport) int VulkanStoryXessFgWaitIdle(VulkanStoryXessFg* value) {
-    if (!value) return -1;
-    if (!value->completionFence || !value->completionValue ||
-        value->completionFence->GetCompletedValue() >= value->completionValue) return 0;
+/// @brief Waits up to ten seconds for the tracked DX12 completion value.
+/// @details A UINT64_MAX fence value records device removal as terminal failure rather than successful completion.
+static int WaitForCompletion(VulkanStoryXessFg* value, uint64_t target) {
+    if (value->releaseFailure != 0) return value->releaseFailure;
+    if (!target) return 0;
+    if (!value->completionFence) return value->releaseFailure = static_cast<int>(E_UNEXPECTED);
+    uint64_t completed = value->completionFence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+        return value->releaseFailure = static_cast<int>(DXGI_ERROR_DEVICE_REMOVED);
+    if (completed >= target) return 0;
     if (!value->completionEvent) return -2;
     HRESULT result = value->completionFence->SetEventOnCompletion(
-        value->completionValue, value->completionEvent);
+        target, value->completionEvent);
     if (FAILED(result)) return static_cast<int>(result);
-    return WaitForSingleObject(value->completionEvent, 10000) == WAIT_OBJECT_0 ? 0 : -3;
+    if (WaitForSingleObject(value->completionEvent, 10000) != WAIT_OBJECT_0) return -3;
+    completed = value->completionFence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+        return value->releaseFailure = static_cast<int>(DXGI_ERROR_DEVICE_REMOVED);
+    return completed >= target ? 0 : -3;
 }
 
+/// @brief Waits for the context's most recent tracked DX12 completion value.
+/// @return Zero when complete; -1 for a null context or a nonzero completion error.
+extern "C" __declspec(dllexport) int VulkanStoryXessFgWaitIdle(VulkanStoryXessFg* value) {
+    return value ? WaitForCompletion(value, value->completionValue) : -1;
+}
+
+/// @brief Disables active FG, drains DX12, releases the DXGI wrapper reference and destroys SDK consumers.
+/// @details The presenter thread must be stopped and Vulkan users drained by the caller. On failure remaining context/resource owners stay attached.
 static int PrepareDestroy(VulkanStoryXessFg* value) {
     if (!value) return 0;
     if (value->fg && value->started) {
@@ -237,10 +266,15 @@ static int PrepareDestroy(VulkanStoryXessFg* value) {
 // Creation and its diagnostic read run on the same serialized host thread.
 // Literal pointers remain valid until this bridge is unloaded.
 static thread_local const char* lastCreateStage = "not attempted";
+/// @brief Returns the diagnostic stage recorded by creation on this same host thread.
+/// @details The returned literal pointer borrows bridge module lifetime and must not be freed.
 extern "C" __declspec(dllexport) const char* VulkanStoryXessFgLastCreateStage() {
     return lastCreateStage;
 }
 
+/// @brief Performs checked SDK-consumer release preparation before shared input resources are destroyed.
+/// @details A failed drain/destruction is persisted as releaseFailure, retaining the owner and preventing subsequent destructive cleanup.
+/// @return Zero when prepared/null, otherwise the retained failure code.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgPrepareDestroy(VulkanStoryXessFg* value) {
     if (!value) return 0;
     if (value->releaseFailure != 0) return value->releaseFailure;
@@ -249,6 +283,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgPrepareDestroy(VulkanStory
     return result;
 }
 
+/// @brief Releases native/COM/modules and deletes the context only after checked preparation succeeds.
+/// @details The caller must stop present work and drain Vulkan shared-image users first. Failed preparation leaves the value pointer owned and valid for retained-failure reporting.
+/// @return Zero after destruction/null, otherwise the retained preparation failure.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgDestroyChecked(VulkanStoryXessFg* value) {
     if (!value) return 0;
     int prepared = VulkanStoryXessFgPrepareDestroy(value);
@@ -271,6 +308,8 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgDestroyChecked(VulkanStory
     delete value;
     return 0;
 }
+/// @brief Legacy void destruction entry point that retains unsafe owners instead of freeing them.
+/// @details New callers use DestroyChecked to observe failed drains or SDK destruction.
 extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg* value) {
     // Retain the legacy ABI for native bring-up callers, but never free after
     // an unsuccessful drain or SDK destruction.
@@ -279,6 +318,11 @@ extern "C" __declspec(dllexport) void VulkanStoryXessFgDestroy(VulkanStoryXessFg
 
 // The 64-bit LUID is copied from VkPhysicalDeviceIDProperties::deviceLUID.
 // The exact adapter match prevents cross-GPU resource handoffs.
+/// @brief Creates DX12/XeLL/FG contexts on the exact adapter identified by the Vulkan device LUID.
+/// @details Creation records thread-local stages. Failed initialization can attach a retained native owner to output when checked cleanup fails.
+/// @param adapterLuid Nonzero Windows adapter LUID copied from Vulkan physical-device ID properties.
+/// @param output Required owner slot; checked destruction owns final release.
+/// @return Zero on success; local, HRESULT-derived or Intel SDK failure otherwise.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreate(uint64_t adapterLuid,
     VulkanStoryXessFg** output) {
     lastCreateStage = "argument validation";
@@ -350,6 +394,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgCreate(uint64_t adapterLui
     return 0;
 }
 
+/// @brief Queries the selected Vulkan device LUID and creates its matching native presentation context.
+/// @details The Vulkan physical device is borrowed and must expose a valid Windows LUID.
+/// @return Native creation result, or a negative argument/Vulkan-query availability code.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateFromVulkan(
     VkPhysicalDevice physical, VulkanStoryXessFg** output) {
     lastCreateStage = "Vulkan adapter LUID lookup";
@@ -372,6 +419,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateFromVulkan(
     return VulkanStoryXessFgCreate(luid, output);
 }
 
+/// @brief Initializes the three-buffer XeSS DXGI swapchain and presentation command resources for a borrowed HWND.
+/// @details The caller ensures this presenter is the window's sole swapchain owner. The initial vsync argument is reserved here; each frame supplies its actual Present interval.
+/// @return Zero on successful startup; local, HRESULT or SDK failure otherwise.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgStart(VulkanStoryXessFg* value,
     HWND window, uint32_t width, uint32_t height, uint32_t vsync) {
     if (!value || !window || !width || !height || value->started) return -1;
@@ -432,12 +482,21 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgStart(VulkanStoryXessFg* v
     return 0;
 }
 
+/// @brief Forwards frame-generation enablement for an already started native presenter.
+/// @return SDK result, or -1 without a started FG context.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgSetEnabled(VulkanStoryXessFg* value,
     uint32_t enabled) {
     return value && value->fg && value->started ?
         static_cast<int>(value->setEnabled(value->fg, enabled ? 1 : 0)) : -1;
 }
 
+/// @brief Clamps interpolation count to the started runtime's supported range and avoids redundant SDK updates.
+/// @details Outputs describe the clamped request and maximum. activeInterpolations updates only for nonnegative SDK results.
+/// @param value Borrowed started native owner.
+/// @param requested Requested generated frames per rendered frame; clamped to one through the SDK limit.
+/// @param effective Required output for the clamped count.
+/// @param maximum Required output for the native interpolation limit.
+/// @return SDK result, zero for an unchanged count, or -1 for missing prerequisites.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgSetGeneratedFrames(
     VulkanStoryXessFg* value, uint32_t requested, uint32_t* effective, uint32_t* maximum) {
     if (!value || !value->fg || !value->started || !effective || !maximum ||
@@ -454,6 +513,15 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgSetGeneratedFrames(
 // VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT is a handle to a D3D12
 // committed resource created by ID3D12Device::CreateSharedHandle. Vulkan imports
 // this handle; it is not a handle exported from an arbitrary Vulkan allocation.
+/// @brief Creates a committed DX12 texture and NT handle for dedicated Vulkan import.
+/// @details Resources are created in COMMON state with the supported Vulkan/DXGI format mapping.
+/// @param value Borrowed native DX12 owner.
+/// @param width Nonzero image width.
+/// @param height Nonzero image height.
+/// @param vkFormat Supported Vulkan format translated to DXGI.
+/// @param sharedHandle Caller-owned NT handle; close it after import/use.
+/// @param resource Caller-owned COM reference; release after both APIs finish.
+/// @return Zero on success; outputs are cleared before creation. Unsupported formats/local/HRESULT failures are nonzero.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateSharedImage(VulkanStoryXessFg* value,
     uint32_t width, uint32_t height, uint32_t vkFormat, HANDLE* sharedHandle,
     ID3D12Resource** resource) {
@@ -499,12 +567,17 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateSharedImage(VulkanSt
     return 0;
 }
 
+/// @brief Releases a caller-owned shared-image COM reference; null is accepted.
+/// @details No waiting occurs; the host must first complete Vulkan import users and DX12 consumers.
 extern "C" __declspec(dllexport) void VulkanStoryXessFgReleaseImage(ID3D12Resource* resource) {
     Release(resource);
 }
 
 // The caller closes the NT handle after a permanent Vulkan semaphore import.
 // The bridge retains the ID3D12Fence for its command queue's GPU-side waits.
+/// @brief Creates or reuses the native-owned DX12 shared fence and exports a caller-owned NT handle.
+/// @details The importer closes the handle after permanent Vulkan timeline-semaphore import; the bridge keeps the DX12 fence for GPU queue waits/signals.
+/// @return Zero on success, or a local/HRESULT error.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateSharedFence(
     VulkanStoryXessFg* value, HANDLE* sharedHandle) {
     if (!value || !value->device || !sharedHandle) return -1;
@@ -519,6 +592,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgCreateSharedFence(
     return FAILED(result) ? static_cast<int>(result) : 0;
 }
 
+/// @brief Queues a DX12 GPU wait for the borrowed shared-fence value.
+/// @details This returns after enqueuing the wait; it does not synchronously wait on the CPU.
+/// @return Zero when enqueued, otherwise local/HRESULT failure.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgWaitSharedFence(
     VulkanStoryXessFg* value, uint64_t fenceValue) {
     if (!value || !value->queue || !value->sharedFence || !fenceValue) return -1;
@@ -526,6 +602,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgWaitSharedFence(
     return FAILED(result) ? static_cast<int>(result) : 0;
 }
 
+/// @brief Queues a DX12 shared-fence signal behind prior queue work.
+/// @details The caller must reserve ordered values and must not equate a successful enqueue with immediate GPU completion.
+/// @return Zero when enqueued, otherwise local/HRESULT failure.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgSignalSharedFence(
     VulkanStoryXessFg* value, uint64_t fenceValue) {
     if (!value || !value->queue || !value->sharedFence || !fenceValue) return -1;
@@ -533,6 +612,7 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgSignalSharedFence(
     return FAILED(result) ? static_cast<int>(result) : 0;
 }
 
+/// @brief Records an all-subresource state transition for a borrowed DX12 resource.
 static void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
     D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
     D3D12_RESOURCE_BARRIER barrier{};
@@ -545,6 +625,8 @@ static void Transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource
 }
 
 namespace {
+/// @brief Lazily creates opt-in timestamp queries, readback storage and post-present command lists.
+/// @details Objects remain owned by the context and are released during checked destruction; a false result disables that timing sample.
 bool EnsureGpuTiming(VulkanStoryXessFg* value) {
     if (value->postList) return true;
     D3D12_QUERY_HEAP_DESC heap{};
@@ -574,6 +656,8 @@ bool EnsureGpuTiming(VulkanStoryXessFg* value) {
 
 // The slot's previous present has completed on the DX12 queue: its two
 // timestamps are final and go on the CPU clock through a fresh calibration.
+/// @brief Reads completed slot timestamps and calibrates them to the CPU performance-counter clock.
+/// @details The caller first waits for the slot's previous DX12 completion before reusing query/allocator storage.
 void HarvestGpuTiming(VulkanStoryXessFg* value, uint32_t slot) {
     if (!value->slotTimed[slot]) return;
     value->slotTimed[slot] = false;
@@ -604,6 +688,9 @@ void HarvestGpuTiming(VulkanStoryXessFg* value, uint32_t slot) {
 // The Vulkan queue signals readyFenceValue after releasing shared-image
 // ownership. The SDK records its ONLY_NOW input copies into this command list;
 // doneFenceValue is signalled only after its proxy Present has queued work.
+/// @brief Records input copies/tags and performs native proxy presentation for one prepared frame.
+/// @details After submission, shared done and local completion signals track queued work even when Present fails. Input resources are tagged ONLY_NOW on the recording command list.
+/// @return Zero when presentation/status querying succeeds, otherwise a local, HRESULT or Intel SDK result.
 static int PresentFrame(VulkanStoryXessFg* value,
     const VulkanStoryXessFrame* frame, uint32_t* framesPresented,
     int* frameGenResult, uint32_t* frameGenEnabled) {
@@ -635,12 +722,8 @@ static int PresentFrame(VulkanStoryXessFg* value,
     int64_t phaseStart = timed ? timing.Now() : 0;
     uint32_t slot = value->nextAllocator++ % static_cast<uint32_t>(value->allocators.size());
     uint64_t completion = value->allocatorCompletion[slot];
-    if (completion && value->completionFence->GetCompletedValue() < completion) {
-        HRESULT result = value->completionFence->SetEventOnCompletion(completion,
-            value->completionEvent);
-        if (FAILED(result)) return static_cast<int>(result);
-        if (WaitForSingleObject(value->completionEvent, 10000) != WAIT_OBJECT_0) return -3;
-    }
+    int idle = WaitForCompletion(value, completion);
+    if (idle != 0) return idle;
     if (timed) { int64_t now = timing.Now(); timing.Add(kAllocatorWait, phaseStart, now); phaseStart = now; }
     const bool gpuTimed = timed && EnsureGpuTiming(value);
     if (gpuTimed) HarvestGpuTiming(value, slot);
@@ -740,6 +823,7 @@ static int PresentFrame(VulkanStoryXessFg* value,
     uint64_t finished = ++value->completionValue;
     HRESULT retire = value->queue->Signal(value->completionFence, finished);
     value->allocatorCompletion[slot] = finished;
+    if (FAILED(retire)) value->releaseFailure = static_cast<int>(retire);
     // Diagnostics (VULKANSTORY_XESS_FG_SERIALIZE): finish this present's DX12 work before
     // returning, so its GPU time is measured without the Vulkan queue competing.
     static const bool serialize = std::getenv("VULKANSTORY_XESS_FG_SERIALIZE") != nullptr;
@@ -747,7 +831,7 @@ static int PresentFrame(VulkanStoryXessFg* value,
         SUCCEEDED(value->completionFence->SetEventOnCompletion(finished, value->completionEvent)))
         WaitForSingleObject(value->completionEvent, 10000);
     if (FAILED(handoff)) return static_cast<int>(handoff);
-    if (FAILED(retire)) return static_cast<int>(retire);
+    if (FAILED(retire)) return value->releaseFailure;
     if (presentIdCode < 0) return presentIdCode;
     if (FAILED(result)) return static_cast<int>(result);
     xefg_swapchain_present_status_t status{};
@@ -763,6 +847,14 @@ static int PresentFrame(VulkanStoryXessFg* value,
 // Vulkan may already wait on doneFenceValue (the next frame's submission is gated on
 // it), so every call signals it, failed ones included. A failed call first waits for
 // readyFenceValue on this queue: the shared timeline must never move backwards.
+/// @brief Presents a prepared frame and preserves the ordered shared-fence handoff on recoverable failure.
+/// @details When the normal path did not signal the requested done value, the wrapper first queues a wait for readiness, then queues done and local completion signals. Failed signals retain a terminal release error; no CPU-side completion value is fabricated.
+/// @param value Borrowed started native presenter; host calls are serialized.
+/// @param frame Borrowed matching resources/constants with ordered ready/done values.
+/// @param framesPresented Required native status output; zeroed before presentation.
+/// @param frameGenResult Required interpolation-result output, separate from this function result.
+/// @param frameGenEnabled Required native FG enablement-status output.
+/// @return Zero on successful presentation/status query; local/HRESULT/SDK error otherwise.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgPresent(VulkanStoryXessFg* value,
     const VulkanStoryXessFrame* frame, uint32_t* framesPresented,
     int* frameGenResult, uint32_t* frameGenEnabled) {
@@ -770,13 +862,24 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgPresent(VulkanStoryXessFg*
     if (value && frame && value->queue && value->sharedFence &&
         frame->doneFenceValue > value->lastDoneSignalled &&
         frame->doneFenceValue > frame->readyFenceValue) {
-        value->queue->Wait(value->sharedFence, frame->readyFenceValue);
-        if (SUCCEEDED(value->queue->Signal(value->sharedFence, frame->doneFenceValue)))
-            value->lastDoneSignalled = frame->doneFenceValue;
+        HRESULT wait = value->queue->Wait(value->sharedFence, frame->readyFenceValue);
+        if (FAILED(wait)) return value->releaseFailure = static_cast<int>(wait);
+        uint64_t finished = ++value->completionValue;
+        HRESULT handoff = value->queue->Signal(value->sharedFence, frame->doneFenceValue);
+        if (SUCCEEDED(handoff)) value->lastDoneSignalled = frame->doneFenceValue;
+        HRESULT retire = value->queue->Signal(value->completionFence, finished);
+        if (FAILED(retire)) return value->releaseFailure = static_cast<int>(retire);
+        if (FAILED(handoff)) return value->releaseFailure = static_cast<int>(handoff);
     }
     return code;
 }
 
+/// @brief Forwards XeLL sleep-mode and minimum-interval options.
+/// @details The host must apply SDK options at an appropriate idle lifecycle boundary; this function does not drain the GPU.
+/// @param value Borrowed native owner with a live XeLL context.
+/// @param minimumIntervalUs Minimum frame interval in microseconds, or zero for no cap.
+/// @param enabled Nonzero enables XeLL low-latency mode.
+/// @return SDK result, or -1 without a XeLL context.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgSetLatencyMode(VulkanStoryXessFg* value,
     uint32_t minimumIntervalUs, uint32_t enabled) {
     if (!value || !value->xell) return -1;
@@ -786,6 +889,9 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgSetLatencyMode(VulkanStory
     return static_cast<int>(value->setSleepMode(value->xell, &mode));
 }
 
+/// @brief Invokes XeLL sleep for the supplied frame before host input polling.
+/// @details Optional timing measures CPU call duration only.
+/// @return SDK result, or -1 without a XeLL context.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgSleep(VulkanStoryXessFg* value,
     uint32_t frameId) {
     if (!value || !value->xell) return -1;
@@ -795,6 +901,8 @@ extern "C" __declspec(dllexport) int VulkanStoryXessFgSleep(VulkanStoryXessFg* v
     return result;
 }
 
+/// @brief Emits the supplied XeLL marker for the matching frame identity.
+/// @return SDK result, or -1 without a XeLL context.
 extern "C" __declspec(dllexport) int VulkanStoryXessFgMarker(VulkanStoryXessFg* value,
     uint32_t frameId, xell_latency_marker_type_t marker) {
     return value && value->xell ?

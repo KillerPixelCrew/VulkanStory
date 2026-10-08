@@ -38,6 +38,12 @@ internal sealed partial class GameGraphicsAdapter
         Stated.BindSampler(unit, sampler);
     }
 
+    /// <summary>Associates an original sampler name/unit with the matching adapter texture and cube/2D binding contract.</summary>
+    /// <param name="program">Original program associated with the backend program.</param>
+    /// <param name="name">Original declared sampler name.</param>
+    /// <param name="texture">Adapter texture identifier.</param>
+    /// <param name="unit">Original sampler unit index.</param>
+    /// <param name="cube">True for cube-map binding; false for 2D binding.</param>
     internal void BindProgramTexture(ShaderProgramBase program, string name, int texture, int unit, bool cube)
     {
         var renderer = RequireDevice();

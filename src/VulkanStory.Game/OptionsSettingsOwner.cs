@@ -12,6 +12,7 @@ using VulkanStory.Game.Input;
 namespace VulkanStory.Game;
 
 // Sidecar state only: the official Options composite and its host remain intact.
+/// <summary>Owns the custom editor beside the unchanged original main-menu/world Options composite, using weak host associations and deferred owner-thread returns.</summary>
 internal sealed class OptionsSettingsOwner
 {
     private static readonly ConditionalWeakTable<GuiCompositeSettings, OptionsSettingsOwner> Owners = new();
@@ -42,6 +43,7 @@ internal sealed class OptionsSettingsOwner
     private (int Width, int Height, double Scale)? lastGeometry;
     private (int Width, int Height, double Scale)? failedGeometry;
 
+    /// <summary>Checks the original Options handler, composer and main-menu geometry bindings before routing installation.</summary>
     internal static void ValidateProfile()
     {
         if (Handler == null || Composer?.FieldType != typeof(GuiComposer) || Graphics?.ReturnType != typeof(void) ||
@@ -53,10 +55,16 @@ internal sealed class OptionsSettingsOwner
     {
         composite = new(owner); host = new(Handler.GetValue(owner)!); Known.Add(new(this));
     }
+    /// <summary>Returns the weakly associated settings owner for one unchanged original Options composite.</summary>
+    /// <param name="owner">Original main-menu or world Options composite.</param>
+    /// <returns>Sidecar state for the exact composite.</returns>
     internal static OptionsSettingsOwner Get(GuiCompositeSettings owner) => Owners.GetValue(owner, value => new(value));
     private ICoreClientAPI Api(object owner) => (ICoreClientAPI)ApiGetter.Invoke(owner, null)!;
     private GuiComposerManager Manager(object owner) => (GuiComposerManager)ManagerGetter.Invoke(owner, null)!;
 
+    /// <summary>Adds the VulkanStory entry to the original Graphics landing page after clearing the prior custom editor.</summary>
+    /// <param name="composer">Original page composer receiving the entry.</param>
+    /// <param name="currentTab">Original tab identifier; only graphics receives the custom entry.</param>
     internal void AddTab(GuiComposer composer, string currentTab)
     {
         // Graphics is the original Options landing tab in both hosts. Its
@@ -308,6 +316,7 @@ internal sealed class OptionsSettingsOwner
         foreach (var state in Live())
             if (state.host.TryGetTarget(out var target) && ReferenceEquals(owner, target) && state.panel != null) state.Tick(owner);
     }
+    /// <summary>Applies deferred returns to original Graphics pages from the owner-thread pre-input boundary.</summary>
     internal static void ApplyPendingReturns()
     {
         foreach (var state in Live())
@@ -329,11 +338,14 @@ internal sealed class OptionsSettingsOwner
             throw;
         }
     }
+    /// <summary>Releases a custom Options editor only for the exact host being closed.</summary>
+    /// <param name="owner">Original dialog or screen host identity.</param>
     internal static void CloseHost(object owner)
     {
         foreach (var state in Live())
             if (state.host.TryGetTarget(out var target) && ReferenceEquals(owner, target)) state.Clear();
     }
+    /// <summary>Releases all live custom Options owners while routed texture deletion can still reach the device.</summary>
     internal static void ClearAll() { foreach (var state in Live()) state.Clear(); }
     internal static string? DiagnosticPage(GuiComposer composer) =>
         Live().FirstOrDefault(state => ReferenceEquals(state.current, composer))?.panel?.CurrentPageName;

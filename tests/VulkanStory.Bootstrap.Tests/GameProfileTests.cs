@@ -4,6 +4,8 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks SHA256 profile rejection and lexical path containment with isolated temporary reference files.</summary>
+/// <remarks>These file checks do not establish normal-shortcut activation or a supported live client.</remarks>
 public sealed class GameProfileTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "vulkanstory-profile-" + Guid.NewGuid().ToString("N"));

@@ -5,6 +5,7 @@ using System.Text;
 
 namespace VulkanStory.Render.Vulkan.Shaders;
 
+/// <summary>Top-level GLSL declaration categories recognized by the retained translator.</summary>
 internal enum GlslDeclarationKind
 {
     /// <summary>A loose <c>uniform float x;</c> - GL's default uniform block.</summary>
@@ -61,6 +62,7 @@ internal sealed class GlslDeclaration
     /// <summary>Absolute start of the storage keyword (<c>uniform</c>, <c>buffer</c>, <c>in</c>, ...), or -1.</summary>
     public int StorageKeywordStart = -1;
 
+    /// <summary>Exclusive end offset of this declaration in the original GLSL source.</summary>
     public int End => Start + Length;
 }
 
@@ -81,6 +83,7 @@ internal sealed class ParsedShader
     /// <summary>Span of the identifier <c>main</c> in its function signature.</summary>
     public int MainNameStart = -1;
 
+    /// <summary>Whether the parser recorded a main-function declaration.</summary>
     public bool HasMain => MainNameStart >= 0;
 }
 
@@ -98,6 +101,7 @@ internal sealed class ParsedShader
 /// </summary>
 internal static class GlslParser
 {
+    /// <summary>Parses retained top-level GLSL declarations and main/version source spans without compiling a shader.</summary>
     public static ParsedShader Parse(string source)
     {
         var result = new ParsedShader { Source = source };
@@ -904,11 +908,16 @@ internal readonly struct GlslType : IEquatable<GlslType>
     /// </summary>
     public int Alignment => ScalarSize;
 
+    /// <summary>Whether the recognized GLSL type has more than one matrix column.</summary>
     public bool IsMatrix => Columns > 1;
 
+    /// <inheritdoc/>
     public bool Equals(GlslType other) => Name == other.Name;
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => obj is GlslType other && Equals(other);
+    /// <inheritdoc/>
     public override int GetHashCode() => Name?.GetHashCode(StringComparison.Ordinal) ?? 0;
+    /// <inheritdoc/>
     public override string ToString() => Name;
 
     private static GlslType Numeric(string name, int columns, int rows) =>

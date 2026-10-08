@@ -5,10 +5,11 @@
  * NVIDIA driver: the runtime is dlopen()ed and every entry point dlsym()ed at
  * first use, so this object builds and loads on any machine.
  *
- *   cc -std=c99 -O2 -fPIC -shared -fvisibility=hidden \
- *      native/vulkanstory-ngx/vulkanstory_ngx.c -o libVulkanStoryNgx.so -ldl
+ *   cc -std=c99 -O2 -fPIC -shared -fvisibility=hidden -fno-optimize-sibling-calls \
+ *      native/ngx/vulkanstory_ngx.c -o libVulkanStoryNgx.so -ldl
  *
- * (`make native`, and a target in VulkanStory.Render.Vulkan.csproj, do this.)
+ * Use native/ngx/build.sh on Linux or scripts/build-provider-bridges.ps1 on
+ * Windows. The renderer project does not build or copy this shim implicitly.
  */
 #include "vulkanstory_ngx.h"
 
@@ -51,6 +52,8 @@
     X(evaluate_feature,     "NVSDK_NGX_VULKAN_EvaluateFeature")                        \
     X(release_feature,      "NVSDK_NGX_VULKAN_ReleaseFeature")
 
+/// @brief Process-retained addresses for the NGX runtime exports used by this shim.
+/// @details A missing symbol remains null and its wrapper returns the shim entry-point-missing result.
 struct vulkanstory_ngx_entries
 {
 #define VULKANSTORY_NGX_DECLARE(field, name) void *field;
@@ -65,6 +68,7 @@ static vulkanstory_module g_runtime = NULL;
 static struct vulkanstory_ngx_entries g_ngx;
 static char g_load_error[512] = { 0 };
 
+/// @brief Resolves an exported function in the borrowed native runtime module.
 static void *vulkanstory_symbol(vulkanstory_module module, const char *name)
 {
 #if defined(_WIN32)
@@ -74,6 +78,7 @@ static void *vulkanstory_symbol(vulkanstory_module module, const char *name)
 #endif
 }
 
+/// @brief Copies the native loader failure into bounded process-retained diagnostic storage.
 static void vulkanstory_record_load_error(void)
 {
 #if defined(_WIN32)
@@ -105,6 +110,8 @@ static void vulkanstory_record_load_error(void)
  * installed NVIDIA driver directories as a fallback, without hard-coding a
  * machine-specific INF hash or bundling the driver's own DLL with the game.
  */
+/// @brief Loads nvngx.dll from normal discovery or installed NVIDIA DriverStore directories.
+/// @details The successful module stays loaded for the process; this helper does not bundle or modify driver files.
 static vulkanstory_module vulkanstory_load_windows_runtime(void)
 {
     vulkanstory_module runtime = LoadLibraryA(VULKANSTORY_NGX_RUNTIME);
@@ -143,6 +150,8 @@ static vulkanstory_module vulkanstory_load_windows_runtime(void)
  * than taking a lock, which keeps this file free of pthread and of any
  * platform-specific synchronisation; the load happens once at renderer start.
  */
+/// @brief Serializes the one-time NGX module load and publishes success/failure through the atomic load-state word.
+/// @details Concurrent callers spin while loading is in progress. A published failure is terminal for this shim instance.
 static int vulkanstory_ensure_runtime(void)
 {
     int state = __atomic_load_n(&g_load_state, __ATOMIC_ACQUIRE);
@@ -388,6 +397,7 @@ enum
 
 #define VTABLE(p) (*(void ***)(p))
 
+/// @brief Generates typed parameter-set wrappers with ABI-specific vtable slots and null-argument checks.
 #define VULKANSTORY_NGX_SETTER(suffix, ctype, slot)                                  \
     VulkanStoryNgxResult VulkanStoryNgx_ParameterSet##suffix(                            \
         void *p, const char *name, ctype value)                                  \
@@ -399,6 +409,7 @@ enum
         return NGX_SUCCESS;                                                      \
     }
 
+/// @brief Generates typed parameter-get wrappers that preserve the native call-site return address.
 #define VULKANSTORY_NGX_GETTER(suffix, ctype, slot)                                  \
     VulkanStoryNgxResult VulkanStoryNgx_ParameterGet##suffix(                            \
         void *p, const char *name, ctype *value)                                 \
@@ -477,6 +488,7 @@ VulkanStoryNgxResult VulkanStoryNgx_ReleaseFeature(void *handle)
 /* NVSDK_NGX_Result_FAIL_OutOfDate, what the header's helper returns with no callback. */
 #define NGX_FAIL_OUT_OF_DATE 0xBAD0000Cu
 
+/// @brief Reads a typed NGX uint parameter or uses the supplied fallback when the accessor fails.
 static uint32_t vulkanstory_get_uint_or(void *p, const char *name, uint32_t fallback)
 {
     uint32_t value = 0;

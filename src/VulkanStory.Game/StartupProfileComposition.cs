@@ -2,6 +2,7 @@ using System.Reflection;
 
 namespace VulkanStory.Game;
 
+/// <summary>Assembles complete platform, window, graphics, loop and shutdown coverage into one startup transaction.</summary>
 internal static class StartupProfileComposition
 {
     internal static GameStartupPlan Create1227(ProcessRuntime runtime, GameSessionServices services,

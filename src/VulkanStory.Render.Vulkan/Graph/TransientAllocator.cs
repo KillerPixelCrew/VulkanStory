@@ -83,6 +83,7 @@ internal sealed class TransientAllocator
     /// <summary>Aliasing is off unless <c>VULKANSTORY_VULKAN_ALIAS=1</c>.</summary>
     public static bool AliasingFromEnvironment() => Environment.GetEnvironmentVariable(AliasVariable) == "1";
 
+    /// <summary>Physical transient texture with its description, lease intervals and GPU-use lifetime.</summary>
     private sealed class PhysicalImage
     {
         public int TextureId;

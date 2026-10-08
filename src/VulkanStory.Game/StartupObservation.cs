@@ -4,6 +4,7 @@ using HarmonyLib;
 namespace VulkanStory.Game;
 
 // B0 only observes startup; these prefixes never suppress or replace an original body.
+/// <summary>Observes exact official startup boundaries for bootstrap diagnostics without suppressing original method bodies.</summary>
 public static class StartupObservation
 {
     private const string Owner = "vulkanstory.bootstrap.observation";
@@ -12,6 +13,10 @@ public static class StartupObservation
     private static int installed;
     internal static event Action<string>? StageEntering;
 
+    /// <summary>Verifies original startup IL and installs observer-only prefixes/postfixes once.</summary>
+    /// <param name="gameDirectory">Expected official installation for VintagestoryLib location.</param>
+    /// <param name="write">Sink for ordered startup events.</param>
+    /// <remarks>Binding checks finish before patching. Installation failures roll back attempted observer patches; callback diagnostics swallow their own failures.</remarks>
     public static void Install(string gameDirectory, Action<string, string> write)
     {
         if (Interlocked.Exchange(ref installed, 1) != 0)

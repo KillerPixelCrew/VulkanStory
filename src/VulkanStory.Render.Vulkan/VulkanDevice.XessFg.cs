@@ -5,6 +5,7 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>XeSS-FG presentation handoff and Vulkan swapchain restoration portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     private IntPtr _presentationWindow;
@@ -24,16 +25,23 @@ public sealed unsafe partial class VulkanDevice
     private ulong _xessRenderedFrames;
     private ulong _xessPresentedFrames;
     private uint _xessEffectiveGeneratedFrames;
+    /// <summary>Interpolation count most recently configured by the active XeSS presenter.</summary>
     internal uint XessConfiguredGeneratedFrames => _xessEffectiveGeneratedFrames;
     // Historical SDK report for this device owner, including while FG is suspended.
+    /// <summary>Last SDK-reported interpolation limit for this device, retained while XeSS is suspended.</summary>
     internal uint? XessLastReportedGeneratedLimit { get; private set; }
     private long _lastSwapchainRestoreAttempt;
     private string? _lastSwapchainRestoreFailure;
 
+    /// <summary>Latest XeSS presentation/setup failure recorded by the renderer.</summary>
     internal string? XessProxyFailure => _xessFailure;
+    /// <summary>Whether a XeSS presenter owner is currently retained.</summary>
     internal bool XessProxyReady => _xessPresenter != null;
+    /// <summary>Stops the XeSS presentation owner and restores ordinary Vulkan presentation when possible.</summary>
     internal void SuspendXessFrameGeneration() => StopXessPresenter();
 
+    /// <summary>Validates current scene resources and converts motion before retaining sources/constants for XeSS presentation.</summary>
+    /// <returns>Zero on success, or a negative readiness/resource/conversion code.</returns>
     internal int PrepareXessFrame(int depthId, int motionId, int motionRgId,
         int hudlessId, int uiId, in XessPresentationFrame constants)
     {
@@ -54,6 +62,7 @@ public sealed unsafe partial class VulkanDevice
         return 0;
     }
 
+    /// <summary>Reuses compatible presenter resources or replaces Vulkan presentation with the XeSS DXGI owner.</summary>
     private bool EnsureXessPresenter(in XessSourceImages sources)
     {
         if (_xessPresenter is { } active)
@@ -99,6 +108,7 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
+    /// <summary>Recreates the Vulkan surface/swapchain after XeSS relinquishes the window.</summary>
     private void RestoreVulkanSwapchain()
     {
         if (_swapchain != null || _presentationSurfaceSource == null) return;
@@ -146,6 +156,7 @@ public sealed unsafe partial class VulkanDevice
     private static readonly bool XessGpuGate =
         Environment.GetEnvironmentVariable("VULKANSTORY_XESS_GPU_GATE") != "0";
 
+    /// <summary>Clears pending submit gates, disposes the XeSS presenter and attempts Vulkan swapchain restoration.</summary>
     private void StopXessPresenter()
     {
         _xessSources = null;

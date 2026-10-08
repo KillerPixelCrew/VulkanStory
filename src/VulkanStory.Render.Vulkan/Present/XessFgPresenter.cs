@@ -5,6 +5,7 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Borrowed Vulkan scene, depth, motion, HUD-free color and UI sources for one XeSS-FG frame.</summary>
 internal readonly record struct XessSourceImages(
     VulkanTexture Color, VulkanTexture Depth, VulkanTexture Motion,
     VulkanTexture Hudless, VulkanTexture Ui);
@@ -16,10 +17,12 @@ internal readonly record struct XessSourceImages(
 /// </summary>
 internal sealed unsafe class XessFgPresenter : IDisposable
 {
+    /// <summary>Extent and format fingerprint used to detect incompatible source-image replacement.</summary>
     private readonly record struct SourceImageLayout(uint Width, uint Height, Format Format)
     {
         internal static SourceImageLayout Of(VulkanTexture image) => new(image.Width, image.Height, image.Format);
     }
+    /// <summary>Source-image layout fingerprint that determines whether a presenter can be reused.</summary>
     private readonly record struct SourceLayout(SourceImageLayout Color, SourceImageLayout Depth,
         SourceImageLayout Motion, SourceImageLayout Hudless, SourceImageLayout Ui)
     {
@@ -28,6 +31,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             SourceImageLayout.Of(images.Motion), SourceImageLayout.Of(images.Hudless), SourceImageLayout.Of(images.Ui));
     }
     private readonly SourceLayout _sourceLayout;
+    /// <summary>One independent set of shared XeSS inputs and its latest DX12 completion value.</summary>
     private sealed class ImageSet : IDisposable
     {
         public required VulkanSharedImage Color { get; init; }
@@ -71,7 +75,6 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private ulong _queuedLatencyFrame;
     private nint _queuedPclToken;
     private PresentOutcome? _outcome;
-    private ulong _lastQueuedDone;
 
     private XessFgPresenter(VulkanContext context, XessFgRuntime runtime,
         XessSharedFence fence, ImageSet[] images, uint width, uint height,
@@ -113,7 +116,6 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         ulong latencyFrameId, nint pclToken)
     {
         RequireLive();
-        _lastQueuedDone = prepared.DoneByDx12;
         if (!PresentThreadEnabled)
         {
             // A/B and diagnostics: present on the render thread, as before the worker.
@@ -155,6 +157,17 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         }
     }
 
+    /// <summary>Joins CPU presentation and finishes both GPU queues before XeLL options change.</summary>
+    /// <remarks>DX12 completes shared done signals before Vulkan waits on them; failures retain resource ownership.</remarks>
+    public void WaitForGpuIdle()
+    {
+        WaitForPresentIdle();
+        if (_runtime.WaitIdle() != 0)
+            throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle before changing latency options.");
+        VulkanResult.Check(_context.WaitDeviceIdle(), "draining Vulkan before XeLL options change");
+    }
+
+    /// <summary>Services the bounded asynchronous present slot on the dedicated presenter thread.</summary>
     private void PresentLoop()
     {
         while (true)
@@ -187,6 +200,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private static readonly bool PresentThreadEnabled =
         Environment.GetEnvironmentVariable("VULKANSTORY_XESS_PRESENT_THREAD") != "0";
 
+    /// <summary>Executes native presentation and optional PCL boundaries without synthesizing GPU fence completion.</summary>
     private PresentOutcome RunPresent(in PreparedFrame prepared, in XessPresentationFrame constants,
         ulong latencyFrame, nint pclToken)
     {
@@ -215,32 +229,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         }
     }
 
-    /// <summary>
-    /// The graphics queue may be gated on a DX12 "done" value (VulkanDevice's XeSS GPU
-    /// gate), which is only ever the "done" value of a frame handed to
-    /// <see cref="QueuePresent" />. The bridge signals every value it is handed; should
-    /// one still be missing, WaitDeviceIdle would stall forever, so the fence is advanced
-    /// to it from the host. Every "ready" value still pending behind the gate is higher,
-    /// so the timeline stays monotonic.
-    /// </summary>
-    private unsafe void ReleaseGatedQueue()
-    {
-        ulong issued = _lastQueuedDone;
-        if (issued == 0) return;
-        Vk api = _context.Api;
-        VulkanResult.Check(api.GetSemaphoreCounterValue(_context.Device, _fence.Semaphore, out ulong current),
-            "reading XeSS-FG queue gate before release");
-        if (current >= issued) return;
-        var signal = new SemaphoreSignalInfo
-        {
-            SType = StructureType.SemaphoreSignalInfo,
-            Semaphore = _fence.Semaphore,
-            Value = issued,
-        };
-        VulkanResult.Check(api.SignalSemaphore(_context.Device, &signal),
-            "releasing XeSS-FG queue gate");
-    }
-
+    /// <summary>Requests presenter-thread shutdown and waits up to five seconds for it to leave native work.</summary>
+    /// <exception cref="InvalidOperationException">The presentation thread did not stop within the bounded join.</exception>
     private void StopPresentThread()
     {
         lock (_presentGate)
@@ -251,13 +241,21 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         _presentThread.Join();
     }
 
+    /// <summary>Presenter display width in pixels.</summary>
     public uint Width { get; }
+    /// <summary>Presenter display height in pixels.</summary>
     public uint Height { get; }
+    /// <summary>Reports whether live presenter resources match every source image extent and format.</summary>
     internal bool MatchesSources(in XessSourceImages sources) => !_disposed && _releaseFailure == null &&
         _sourceLayout == SourceLayout.Of(sources);
+    /// <summary>Shared timeline semaphore used by Vulkan submissions to coordinate DX12 image reuse.</summary>
     public Silk.NET.Vulkan.Semaphore SharedSemaphore { get { RequireLive(); return _fence.Semaphore; } }
+    /// <summary>Borrowed native presenter runtime owned by this presenter.</summary>
     public XessFgRuntime Runtime { get { RequireLive(); return _runtime; } }
 
+    /// <summary>Creates the XeSS presenter, imported fence and three shared input sets for a Win32 window.</summary>
+    /// <remarks>Partial setup is released on failure; a failed cleanup can return a retained owner to keep remaining resources reachable.</remarks>
+    /// <returns>Whether complete presenter setup succeeded.</returns>
     public static bool TryCreate(VulkanContext context, nint window, uint width,
         uint height, bool vsync, in XessSourceImages sources,
         Action<ulong, nint, LatencyMarker>? pclPresentMarker,
@@ -348,9 +346,13 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         return image;
     }
 
+    /// <summary>Shared image-set index and fence values reserved for one prepared XeSS presentation.</summary>
     public readonly record struct PreparedFrame(int SetIndex, ulong WaitForDx12,
         ulong ReadyForDx12, ulong DoneByDx12);
 
+    /// <summary>Rotates the shared image set, transitions sources and records vertically flipped copies for DX12.</summary>
+    /// <remarks>The submitting owner must wait for WaitForDx12 and signal ReadyForDx12; the recorded commands alone do not transfer completed work.</remarks>
+    /// <returns>The image-set index and fence values for the corresponding presentation.</returns>
     public PreparedFrame RecordCopies(CommandBuffer commands, TextureManager textures,
         BarrierBatcher barriers, in XessSourceImages sources)
     {
@@ -380,6 +382,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         return frame;
     }
 
+    /// <summary>Synchronously presents a prepared frame through the native bridge and returns its reported outcome.</summary>
     public int Present(in PreparedFrame prepared, in XessPresentationFrame constants,
         out uint framesPresented, out int frameGenResult, out bool frameGenEnabled)
     {
@@ -398,6 +401,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         return code;
     }
 
+    /// <summary>Rejects further resource release after a retained presenter cleanup failure.</summary>
     internal void RequireResourceLifetime()
     {
         if (_releaseFailure != null)
@@ -417,7 +421,10 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         {
             // The in-flight present finishes before anything it uses goes away.
             StopPresentThread();
-            ReleaseGatedQueue();
+            // DX12 owns the shared done signals. Finish its queued work before
+            // waiting for Vulkan submissions gated on those values.
+            if (_runtime.WaitIdle() != 0)
+                throw new InvalidOperationException("XeSS-FG DX12 queue did not become idle; inputs retained.");
             VulkanResult.Check(_context.WaitDeviceIdle(), "draining Vulkan before XeSS-FG release");
             int disable = _runtime.SetEnabled(false);
             if (disable < 0)

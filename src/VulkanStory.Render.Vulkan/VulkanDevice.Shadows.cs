@@ -2,6 +2,7 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Selected-device depth-format support used to choose compact shadow resources.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     /// <summary>D16 shadow maps need attachment, comparison sampling and linear filtering.</summary>

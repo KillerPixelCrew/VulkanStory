@@ -6,6 +6,7 @@ namespace VulkanStory.Game;
 // Retained per-object histories; baseline 386e0d05386d0b228b439d09aeca851428f7bbf3.
 // Session-owned frame/draw state replaces the injected API static holders.
 #nullable disable
+    /// <summary>Session-owned animated draw history keyed weakly by bone-array identity; validates consecutive frames, joint counts and camera views.</summary>
     internal sealed class EntityMotionHistory(TemporalFrameState temporal)
     {
         /// <summary>
@@ -192,6 +193,7 @@ namespace VulkanStory.Game;
     }
 
 
+    /// <summary>Tracks rigid draw transforms by stable object identity and rejects previous data after shape, view or frame discontinuity.</summary>
     internal sealed class StandardMotionHistory(TemporalFrameState temporal, EntityMotionHistory drawState)
     {
         private sealed class History

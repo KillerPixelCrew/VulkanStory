@@ -8,6 +8,7 @@ namespace VulkanStory.Game.Input;
 
 // PromptFont is private to our GUI composition. Never register an OS font or
 // substitute its symbol codepoints into ordinary game text.
+/// <summary>Private bundled prompt-font loading, glyph rasterization, and bounded Cairo surface cache for controller GUI hints.</summary>
 internal static class ControllerPromptFont
 {
     private static readonly object Gate = new();
@@ -56,6 +57,16 @@ internal static class ControllerPromptFont
             characters[entry.GetProperty("code-name").GetString()!] = char.ConvertFromUtf32(entry.GetProperty("codepoint").GetInt32());
     }
 
+    /// <summary>Draws a recognized controller label with a cached bundled-font glyph, returning false for fallback when unavailable.</summary>
+    /// <param name="context">Caller-owned Cairo drawing context whose saved state is restored after masking.</param>
+    /// <param name="api">Logger used for the first font/rasterization failure.</param>
+    /// <param name="label">Controller label mapped to a bundled glyph name.</param>
+    /// <param name="x">Destination left coordinate.</param>
+    /// <param name="y">Destination top coordinate.</param>
+    /// <param name="width">Finite positive destination width.</param>
+    /// <param name="height">Finite positive destination height.</param>
+    /// <param name="color">Cairo RGBA mask color.</param>
+    /// <remarks>Font/cache access is serialized; drawing failures log once and leave text/shape fallback to the caller.</remarks>
     internal static bool TryDraw(Context context, ICoreClientAPI api, string label,
         double x, double y, double width, double height, double[] color)
     {
@@ -129,6 +140,7 @@ internal static class ControllerPromptFont
         }
     }
 
+    /// <summary>Disposes all cached native surfaces and the typeface, then permits later initialization.</summary>
     internal static void Release()
     {
         lock (Gate)

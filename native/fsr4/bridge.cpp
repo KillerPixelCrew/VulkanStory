@@ -14,10 +14,13 @@
 #include "api/include/dx12/ffx_api_dx12.h"
 #include "upscalers/include/ffx_upscale.h"
 
+/// @brief Releases a local COM reference and clears its pointer without waiting for GPU work.
 template<class T> static void Release(T*& object) {
     if (object) { object->Release(); object = nullptr; }
 }
 
+/// @brief Fixed-layout reconstruction frame shared with the managed FSR4 ABI.
+/// @details All four resource pointers borrow caller-owned shared images in COMMON state. Vulkan signals readyValue after input copies; DX12 signals doneValue after reconstruction/output handoff.
 struct VulkanStoryFsr4Frame {
     ID3D12Resource* color;
     ID3D12Resource* depth;
@@ -31,6 +34,8 @@ struct VulkanStoryFsr4Frame {
 static_assert(sizeof(VulkanStoryFsr4Frame) == 96 &&
     offsetof(VulkanStoryFsr4Frame, readyValue) == 80);
 
+/// @brief Owns the signed-runtime module, matching DX12 adapter/device, SDK context, queue and allocator-completion tracking.
+/// @details Imported image/resource ownership stays with the caller. A checked release failure retains this owner and prevents later destructive cleanup.
 struct VulkanStoryFsr4 {
     HMODULE module{};
     IDXGIFactory4* factory{};
@@ -53,6 +58,9 @@ struct VulkanStoryFsr4 {
     int releaseFailure{};
 };
 
+/// @brief Checks the Vulkan adapter vendor required by this FSR4 bridge.
+/// @details The AMD vendor check is preliminary; actual signed-provider selection is verified during Create.
+/// @return Zero for an AMD Vulkan adapter, otherwise a negative availability code.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Probe(VkPhysicalDevice physical) {
     if (!physical) return -1;
     HMODULE loader = GetModuleHandleW(L"vulkan-1.dll");
@@ -64,6 +72,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Probe(VkPhysicalDevice physi
     return info.vendorID == 0x1002 ? 0 : -3;
 }
 
+/// @brief Locates the bridge directory used for its sibling signed FSR4 runtime.
 static std::wstring OwnDirectory() {
     HMODULE own{};
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -77,16 +86,36 @@ static std::wstring OwnDirectory() {
     return slash == std::wstring::npos ? std::wstring{} : result.substr(0, slash + 1);
 }
 
-extern "C" __declspec(dllexport) int VulkanStoryFsr4WaitIdle(VulkanStoryFsr4* value) {
-    if (!value || !value->completionFence || !value->completionValue ||
-        value->completionFence->GetCompletedValue() >= value->completionValue) return 0;
+/// @brief Waits up to ten seconds for a tracked local DX12 completion-fence value.
+/// @details Device removal is a failure, not completion; a retained release failure is returned before any new wait.
+static int WaitForCompletion(VulkanStoryFsr4* value, uint64_t target) {
+    if (value->releaseFailure != 0) return value->releaseFailure;
+    if (!target) return 0;
+    if (!value->completionFence) return value->releaseFailure = static_cast<int>(E_UNEXPECTED);
+    uint64_t completed = value->completionFence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+        return value->releaseFailure = static_cast<int>(DXGI_ERROR_DEVICE_REMOVED);
+    if (completed >= target) return 0;
     if (!value->completionEvent) return -1;
     HRESULT hr = value->completionFence->SetEventOnCompletion(
-        value->completionValue, value->completionEvent);
+        target, value->completionEvent);
     if (FAILED(hr)) return static_cast<int>(hr);
-    return WaitForSingleObject(value->completionEvent, 10000) == WAIT_OBJECT_0 ? 0 : -2;
+    if (WaitForSingleObject(value->completionEvent, 10000) != WAIT_OBJECT_0) return -2;
+    completed = value->completionFence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+        return value->releaseFailure = static_cast<int>(DXGI_ERROR_DEVICE_REMOVED);
+    return completed >= target ? 0 : -2;
 }
 
+/// @brief Waits for the most recent tracked submission on this DX12 queue.
+/// @return Zero when complete or value is null; nonzero on completion failure.
+extern "C" __declspec(dllexport) int VulkanStoryFsr4WaitIdle(VulkanStoryFsr4* value) {
+    return value ? WaitForCompletion(value, value->completionValue) : 0;
+}
+
+/// @brief Drains tracked DX12 work and destroys the SDK consumer before imported resources are retired.
+/// @details Failure is persisted as terminal releaseFailure; native ownership is retained.
+/// @return Zero when prepared, or the retained drain/SDK destruction error.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4PrepareDestroy(VulkanStoryFsr4* value) {
     if (!value) return 0;
     if (value->releaseFailure != 0) return value->releaseFailure;
@@ -101,6 +130,9 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4PrepareDestroy(VulkanStoryFs
     }
     return 0;
 }
+/// @brief Performs checked release preparation then frees native/COM owners and the context allocation.
+/// @details The caller must first drain Vulkan users and dispose imported shared images/fence imports before destroying their owning DX12 context. Failure leaves the owner attached.
+/// @return Zero after successful destruction; a nonzero preparation error preserves the value pointer.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4DestroyChecked(VulkanStoryFsr4* value) {
     if (!value) return 0;
     int prepared = VulkanStoryFsr4PrepareDestroy(value);
@@ -118,10 +150,21 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4DestroyChecked(VulkanStoryFs
     delete value;
     return 0;
 }
+/// @brief Legacy void destruction entry point that preserves ownership when checked preparation fails.
+/// @details New callers should use DestroyChecked to observe release failure.
 extern "C" __declspec(dllexport) void VulkanStoryFsr4Destroy(VulkanStoryFsr4* value) {
     VulkanStoryFsr4DestroyChecked(value);
 }
 
+/// @brief Creates the signed FSR4 DX12 context on the adapter matching the Vulkan device LUID.
+/// @details Verifies the returned provider version identifies FSR4. On initialization failure a failed checked cleanup can return a retained owner through output.
+/// @param physical Borrowed Vulkan physical device with a valid Windows LUID.
+/// @param renderWidth Maximum input width.
+/// @param renderHeight Maximum input height.
+/// @param displayWidth Maximum output width.
+/// @param displayHeight Maximum output height.
+/// @param output Required owner slot; release an attached owner only with checked destruction.
+/// @return Zero on success; local, HRESULT or FidelityFX failure code otherwise.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
     VkPhysicalDevice physical, uint32_t renderWidth, uint32_t renderHeight,
     uint32_t displayWidth, uint32_t displayHeight, VulkanStoryFsr4** output) {
@@ -148,14 +191,18 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         if (FAILED(hr)) { error = static_cast<int>(hr); break; }
         for (UINT index = 0; ; ++index) {
             IDXGIAdapter1* candidate{};
-            if (value->factory->EnumAdapters1(index, &candidate) == DXGI_ERROR_NOT_FOUND) break;
+            hr = value->factory->EnumAdapters1(index, &candidate);
+            if (hr == DXGI_ERROR_NOT_FOUND) break;
+            if (FAILED(hr)) { error = static_cast<int>(hr); break; }
             DXGI_ADAPTER_DESC1 description{};
-            candidate->GetDesc1(&description);
+            hr = candidate->GetDesc1(&description);
+            if (FAILED(hr)) { Release(candidate); error = static_cast<int>(hr); break; }
             uint64_t candidateLuid{};
             std::memcpy(&candidateLuid, &description.AdapterLuid, sizeof(candidateLuid));
             if (candidateLuid == luid) { value->adapter = candidate; break; }
             candidate->Release();
         }
+        if (error != 0) break;
         if (!value->adapter) { error = -5; break; }
         hr = D3D12CreateDevice(value->adapter, D3D_FEATURE_LEVEL_12_0,
             IID_PPV_ARGS(&value->device));
@@ -225,6 +272,15 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
     return 0;
 }
 
+/// @brief Creates a committed DX12 texture and NT handle for dedicated Vulkan import.
+/// @param value Borrowed live runtime owner.
+/// @param width Nonzero texture width.
+/// @param height Nonzero texture height.
+/// @param vkFormat Supported Vulkan format translated to DXGI.
+/// @param writable Requests unordered-access output; depth writable resources are rejected.
+/// @param handle Caller-owned NT handle output; close it after import/use.
+/// @param resource Caller-owned COM resource reference; release after both graphics APIs finish.
+/// @return Zero on success, or local/HRESULT failure; outputs are cleared before allocation.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4CreateSharedImage(
     VulkanStoryFsr4* value, uint32_t width, uint32_t height, uint32_t vkFormat,
     uint32_t writable, HANDLE* handle, ID3D12Resource** resource) {
@@ -261,10 +317,15 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4CreateSharedImage(
     return 0;
 }
 
+/// @brief Releases the caller-owned DX12 image reference; a null reference is accepted.
+/// @details This does not wait. Vulkan import users and DX12 queue users must already be complete.
 extern "C" __declspec(dllexport) void VulkanStoryFsr4ReleaseImage(ID3D12Resource* resource) {
     Release(resource);
 }
 
+/// @brief Creates or reuses the runtime-owned DX12 shared fence and exports a new NT handle.
+/// @details The caller owns and closes the returned handle after permanent Vulkan timeline import; the fence remains owned by value.
+/// @return Zero on success, or a local/HRESULT error.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4CreateSharedFence(
     VulkanStoryFsr4* value, HANDLE* handle) {
     if (!value || !handle) return -1;
@@ -279,6 +340,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4CreateSharedFence(
     return FAILED(hr) ? static_cast<int>(hr) : 0;
 }
 
+/// @brief Records an all-subresource DX12 state transition on the borrowed command list.
 static void Transition(ID3D12GraphicsCommandList* commands, ID3D12Resource* resource,
     D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after) {
     D3D12_RESOURCE_BARRIER barrier{};
@@ -290,19 +352,19 @@ static void Transition(ID3D12GraphicsCommandList* commands, ID3D12Resource* reso
     commands->ResourceBarrier(1, &barrier);
 }
 
+/// @brief Records and submits reconstruction after a GPU wait for the Vulkan ready value.
+/// @details Shared images enter and leave COMMON. The local completion value is tracked immediately after submission; the shared done signal follows dispatch. Resources remain live until the appropriate completion/handoff values.
+/// @param value Live runtime owner; calls are serialized by the host.
+/// @param frame Borrowed fixed-layout resources and temporal constants for this dispatch.
+/// @return Zero when submission/signals succeed; local, HRESULT or FidelityFX failure otherwise. Signal failure can retain a terminal release error.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Evaluate(
     VulkanStoryFsr4* value, const VulkanStoryFsr4Frame* frame) {
     if (!value || !frame || !frame->color || !frame->depth || !frame->motion ||
         !frame->output || !frame->readyValue || !frame->doneValue ||
         !value->sharedFence) return -1;
     uint32_t slot = value->nextAllocator++ % 3;
-    if (value->allocatorValues[slot] &&
-        value->completionFence->GetCompletedValue() < value->allocatorValues[slot]) {
-        HRESULT hr = value->completionFence->SetEventOnCompletion(
-            value->allocatorValues[slot], value->completionEvent);
-        if (FAILED(hr) || WaitForSingleObject(value->completionEvent, 10000) != WAIT_OBJECT_0)
-            return -2;
-    }
+    int idle = WaitForCompletion(value, value->allocatorValues[slot]);
+    if (idle != 0) return idle;
     HRESULT hr = value->allocators[slot]->Reset();
     if (FAILED(hr)) return static_cast<int>(hr);
     hr = value->commands->Reset(value->allocators[slot], nullptr);
@@ -347,11 +409,11 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Evaluate(
     if (FAILED(hr)) return static_cast<int>(hr);
     ID3D12CommandList* lists[] = {value->commands};
     value->queue->ExecuteCommandLists(1, lists);
-    hr = value->queue->Signal(value->sharedFence, frame->doneValue);
-    if (FAILED(hr)) return static_cast<int>(hr);
     uint64_t completed = ++value->completionValue;
-    hr = value->queue->Signal(value->completionFence, completed);
-    if (FAILED(hr)) return static_cast<int>(hr);
     value->allocatorValues[slot] = completed;
+    HRESULT handoff = value->queue->Signal(value->sharedFence, frame->doneValue);
+    hr = value->queue->Signal(value->completionFence, completed);
+    if (FAILED(hr)) return value->releaseFailure = static_cast<int>(hr);
+    if (FAILED(handoff)) return value->releaseFailure = static_cast<int>(handoff);
     return 0;
 }

@@ -189,8 +189,8 @@ void main () {
 
 			outColor = vec4(
 				(a1 * col1.r + col2.r * a2) / (a1+a2),
-				(a1 * col1.b + col2.g * a2) / (a1+a2),
-				(a1 * col1.g + col2.b * a2) / (a1+a2),
+				(a1 * col1.g + col2.g * a2) / (a1+a2),
+				(a1 * col1.b + col2.b * a2) / (a1+a2),
 				a1 + a2
 			) * color;
 

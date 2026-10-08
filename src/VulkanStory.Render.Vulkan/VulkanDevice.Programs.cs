@@ -10,15 +10,11 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Shader translation/linking, program lifetime and client uniform writes portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     // -------------------------------------------------------------------- shaders
 
-    /// <summary>
-    /// Stages a shader. No SPIR-V is produced here because GL resolves uniforms
-    /// and varyings by name across the whole program, so nothing about a stage is
-    /// final until its siblings are known.
-    /// </summary>
     /// <summary>
     /// Largest shader source accepted per stage. Vanilla's biggest stage is
     /// well under 100 KiB; the cap keeps a broken or hostile mod shader from
@@ -26,6 +22,7 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal const int MaxShaderSourceBytes = 2 * 1024 * 1024;
 
+    /// <summary>Stages source for linking without compiling an isolated stage that lacks program-wide interface context.</summary>
     public bool CompileShader(ShaderStageDefinition shader)
     {
         if (shader?.Code == null) return false;
@@ -52,6 +49,8 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
+    /// <summary>Builds the program interface and links native artifacts or translated client shader stages.</summary>
+    /// <returns>Registered program ID, or the retained failure sentinel when compilation/linking fails.</returns>
     public int LinkProgram(ShaderProgramDefinition program)
     {
         var stages = new List<ShaderStageSource>();
@@ -273,16 +272,19 @@ public sealed unsafe partial class VulkanDevice
         _ => ".gsh",
     };
 
+    /// <summary>Removes a program and schedules its GPU resources for safe frame retirement.</summary>
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
         _programNames.Remove(programId);
         // No background compile may still be reading its modules or layout.
         _pipelines.CancelProgram(program);
+        if (_pipelines.RemoveProgramPipelines(programId) is { } pipelines) _frames.DeferDeletion(pipelines);
         ForgetNativePipelines(programId);
         _frames.DeferDeletion(program);
     }
 
+    /// <summary>Returns the program's retained named-uniform location, or the missing-location sentinel.</summary>
     public int GetUniformLocation(int programId, string name) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
 
@@ -331,6 +333,8 @@ public sealed unsafe partial class VulkanDevice
     public void SetUniform(int programId, int location, float value) =>
         Write(programId, location, new ReadOnlySpan<byte>(&value, sizeof(float)));
 
+    /// <summary>Assigns a sampler's texture unit or writes an integer into the linked program's CPU uniform shadow.</summary>
+    /// <remarks>Sampler locations update the descriptor unit table; other unresolved locations are ignored.</remarks>
     public void SetUniform(int programId, int location, int value)
     {
         // Assigning a sampler its texture unit is an int write to its uniform
@@ -347,6 +351,8 @@ public sealed unsafe partial class VulkanDevice
         Write(programId, location, new ReadOnlySpan<byte>(&value, sizeof(int)));
     }
 
+    /// <summary>Writes a scalar/vector value into the linked program's CPU uniform shadow.</summary>
+    /// <remarks>A negative or unresolved location is ignored by the retained uniform-writing path.</remarks>
     public void SetUniform(int programId, int location, int x, int y, int z)
     {
         // Scalar block layout stores an ivec3 as three consecutive 32-bit ints.
@@ -354,18 +360,24 @@ public sealed unsafe partial class VulkanDevice
         Write(programId, location, new ReadOnlySpan<byte>(values, 3 * sizeof(int)));
     }
 
+    /// <summary>Writes a scalar/vector value into the linked program's CPU uniform shadow.</summary>
+    /// <remarks>A negative or unresolved location is ignored by the retained uniform-writing path.</remarks>
     public void SetUniform(int programId, int location, float x, float y)
     {
         float* values = stackalloc float[2] { x, y };
         Write(programId, location, new ReadOnlySpan<byte>(values, 2 * sizeof(float)));
     }
 
+    /// <summary>Writes a scalar/vector value into the linked program's CPU uniform shadow.</summary>
+    /// <remarks>A negative or unresolved location is ignored by the retained uniform-writing path.</remarks>
     public void SetUniform(int programId, int location, float x, float y, float z)
     {
         float* values = stackalloc float[3] { x, y, z };
         Write(programId, location, new ReadOnlySpan<byte>(values, 3 * sizeof(float)));
     }
 
+    /// <summary>Writes a scalar/vector value into the linked program's CPU uniform shadow.</summary>
+    /// <remarks>A negative or unresolved location is ignored by the retained uniform-writing path.</remarks>
     public void SetUniform(int programId, int location, float x, float y, float z, float w)
     {
         float* values = stackalloc float[4] { x, y, z, w };
@@ -386,24 +398,47 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
+    /// <summary>Writes 1-component float array elements to the program's CPU uniform shadow.</summary>
+    /// <param name="programId">Linked renderer program ID.</param>
+    /// <param name="location">Resolved uniform location.</param>
+    /// <param name="count">Number of array elements.</param>
+    /// <param name="values">Borrowed component values; writes are limited to the available values and requested element count.</param>
     public void SetUniformArray1(int programId, int location, int count, float[] values) =>
         WriteArray(programId, location, count, values, 1);
 
+    /// <summary>Writes 2-component float array elements to the program's CPU uniform shadow.</summary>
+    /// <param name="programId">Linked renderer program ID.</param>
+    /// <param name="location">Resolved uniform location.</param>
+    /// <param name="count">Number of array elements.</param>
+    /// <param name="values">Borrowed component values; writes are limited to the available values and requested element count.</param>
     public void SetUniformArray2(int programId, int location, int count, float[] values) =>
         WriteArray(programId, location, count, values, 2);
 
+    /// <summary>Writes 3-component float array elements to the program's CPU uniform shadow.</summary>
+    /// <param name="programId">Linked renderer program ID.</param>
+    /// <param name="location">Resolved uniform location.</param>
+    /// <param name="count">Number of array elements.</param>
+    /// <param name="values">Borrowed component values; writes are limited to the available values and requested element count.</param>
     public void SetUniformArray3(int programId, int location, int count, float[] values) =>
         WriteArray(programId, location, count, values, 3);
 
+    /// <summary>Writes 4-component float array elements to the program's CPU uniform shadow.</summary>
+    /// <param name="programId">Linked renderer program ID.</param>
+    /// <param name="location">Resolved uniform location.</param>
+    /// <param name="count">Number of array elements.</param>
+    /// <param name="values">Borrowed component values; writes are limited to the available values and requested element count.</param>
     public void SetUniformArray4(int programId, int location, int count, float[] values) =>
         WriteArray(programId, location, count, values, 4);
 
+    /// <summary>Writes one 4x4 float matrix into the program uniform shadow.</summary>
     public void SetUniformMatrix(int programId, int location, float[] matrix) =>
         WriteArray(programId, location, 1, matrix, 16);
 
+    /// <summary>Writes an array of 4x4 float matrices into the program uniform shadow.</summary>
     public void SetUniformMatrices(int programId, int location, int count, float[] matrices) =>
         WriteArray(programId, location, count, matrices, 16);
 
+    /// <summary>Copies client 4x3 matrices as twelve floats per element into the scalar-layout uniform shadow.</summary>
     public void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices) =>
         WriteArray(programId, location, count, matrices, 12);
 
@@ -424,6 +459,7 @@ public sealed unsafe partial class VulkanDevice
         return Array.Empty<string>();
     }
 
+    /// <summary>Associates a named sampler with a client texture unit in the linked program interface.</summary>
     public void SetSamplerUnit(int programId, string samplerName, int unit)
     {
         if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
@@ -434,17 +470,23 @@ public sealed unsafe partial class VulkanDevice
 
     // Uniform state is game-neutral; draw binding consumes its retained dictionaries.
     private readonly ClientUniformBufferManager _clientUniformBuffers = new();
+    /// <summary>Looks up a named client block's descriptor binding in the linked program.</summary>
     internal int? ClientUniformBlockBinding(int programId, string blockName) =>
         _programs.TryGetValue(programId, out var program)
             ? program.Interface.UniformBlocks.Where(block => block.BlockName == blockName)
                 .Select(block => (int?)block.Binding).FirstOrDefault() : null;
 
+    /// <summary>Creates and binds a CPU-shadowed named client uniform buffer.</summary>
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size) =>
         _clientUniformBuffers.CreateUniformBuffer(programId, bindingPoint, blockName, size);
+    /// <summary>Updates a valid byte range in the named client uniform-buffer shadow.</summary>
     public void UpdateUniformBuffer(int handle, IntPtr data, int offset, int size) =>
         _clientUniformBuffers.UpdateUniformBuffer(handle, data, offset, size);
+    /// <summary>Associates the buffer with its named block for subsequent draw snapshots.</summary>
     public void BindUniformBuffer(int handle) => _clientUniformBuffers.BindUniformBuffer(handle);
+    /// <summary>Preserves the indexed named-block binding when the client clears its generic UBO target.</summary>
     public void UnbindUniformBuffer(int handle) => _clientUniformBuffers.UnbindUniformBuffer(handle);
+    /// <summary>Removes the client uniform-buffer shadow and its current named-block association.</summary>
     public void DeleteUniformBuffer(int handle) => _clientUniformBuffers.DeleteUniformBuffer(handle);
     // Observation for changed game/renderer boundary fixtures; never exposes mutable storage.
     internal byte[]? UniformBufferShadowForTests(int handle) =>

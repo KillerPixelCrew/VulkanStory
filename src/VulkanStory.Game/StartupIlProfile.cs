@@ -15,6 +15,8 @@ public static class StartupIlProfile
     /// Checks original-body anchors before patch binding. A later transpiler must
     /// also check its incoming instructions, since another Harmony owner may alter them.
     /// </summary>
+    /// <param name="actual">Original-body inventory captured before patch installation.</param>
+    /// <remarks>Target identity, IL lengths and ordered member uses must match. Incoming Harmony instructions still require separate transpiler checks.</remarks>
     public static void VerifyProfile1227(IReadOnlyList<StartupMethodInventory> actual) =>
         Verify(Expected.Methods, actual);
 

@@ -7,6 +7,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Routes original UBO creation, binding, update and deletion into the shared adapter registry.</summary>
 internal static class UniformBufferRoutes
 {
     private static MethodInfo CreateTarget => Target(typeof(ClientPlatformWindows), "CreateUBO", typeof(UBORef),
@@ -30,12 +31,15 @@ internal static class UniformBufferRoutes
         if (instructions.Count(instruction => instruction.Calls(GlDelete)) != 1)
             throw new InvalidOperationException("UBO disposal must contain exactly one expected GL.DeleteBuffers call.");
     }
+    /// <summary>Checks original UBO creation, lifecycle and pointer-upload bindings before installation.</summary>
     internal static void ValidateBindings()
     {
         _ = CreateTarget; _ = BindTarget; _ = UnbindTarget; _ = UpdateTarget;
         Check(PatchProcessor.GetOriginalInstructions(DisposeTarget));
         UniformBufferUploads.ValidateBindings();
     }
+    /// <summary>Installs original UBO routing and the validated pointer-upload observers.</summary>
+    /// <param name="harmony">Startup Harmony owner responsible for removing these patches.</param>
     internal static void Install(Harmony harmony)
     {
         harmony.Patch(CreateTarget, prefix: new HarmonyMethod(typeof(UniformBufferRoutes), nameof(Create)));

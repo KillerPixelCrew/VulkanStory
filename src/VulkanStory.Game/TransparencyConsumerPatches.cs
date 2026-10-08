@@ -7,6 +7,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Scene subset; other native producers/motion hooks must join the scene group.
+/// <summary>Substitutes original weighted-transparency setup and merge calls with the owned OIT targets and pass.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class TransparencyConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-transparency";
@@ -20,6 +22,10 @@ internal static class TransparencyConsumerPatches
     private static MethodInfo Target(Type type, string name, Type[] parameters) =>
         type.GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly, null, parameters, null) ??
         throw new MissingMethodException(type.FullName, name);
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner);

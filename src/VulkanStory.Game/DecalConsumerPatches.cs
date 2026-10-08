@@ -8,6 +8,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Brackets original decal draws with the session native decal pass.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class DecalConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-decals";
@@ -20,6 +22,10 @@ internal static class DecalConsumerPatches
         if (body.Count(instruction => instruction.Calls(PoolDraw)) != 1)
             throw new InvalidOperationException("Original decal pool draw anchor changed.");
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

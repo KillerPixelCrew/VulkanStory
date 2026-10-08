@@ -193,6 +193,7 @@ internal sealed partial class GameRenderSession
         composer.OnMouseDown(new MouseEvent(x, y, EnumMouseButton.Left, 0));
         composer.OnMouseUp(new MouseEvent(x, y, EnumMouseButton.Left, 0));
     }
+    /// <summary>Completes pending original Options actions after rendering so persisted and applied settings can be compared.</summary>
     private void CompleteOptionsDiagnostic()
     {
         if (pendingOptionsPage is { } selected)

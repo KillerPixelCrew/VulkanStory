@@ -49,10 +49,14 @@ internal sealed class ShaderBinaryCache
     private long _misses;
     private long _writeFailures;
 
+    /// <summary>Root directory of the content-addressed SPIR-V binary cache.</summary>
     public string Directory { get; }
 
+    /// <summary>Number of recorded cache hits.</summary>
     public long Hits => Interlocked.Read(ref _hits);
+    /// <summary>Number of recorded cache misses.</summary>
     public long Misses => Interlocked.Read(ref _misses);
+    /// <summary>Interlocked count of failed best-effort cache writes.</summary>
     public long WriteFailures => Interlocked.Read(ref _writeFailures);
 
     public ShaderBinaryCache(string directory)
@@ -89,6 +93,7 @@ internal sealed class ShaderBinaryCache
         }
     }
 
+    /// <summary>Serializes SPIR-V bytes with the cache header and integrity metadata.</summary>
     internal static byte[] Wrap(byte[] spirv)
     {
         var file = new byte[HeaderSize + spirv.Length];

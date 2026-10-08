@@ -5,6 +5,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks the retained 64-byte quad record, UV packing, and per-corner render flags.</summary>
+/// <remarks>CPU layout assertion only; no SSBO upload or shader execution.</remarks>
 public sealed class SsboFacePackingTests
 {
     [Fact]

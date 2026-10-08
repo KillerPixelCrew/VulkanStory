@@ -5,6 +5,8 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Validates early dependency path/identity selection using copied framework assemblies in an isolated temporary directory.</summary>
+/// <remarks>Exercises resolver metadata and filesystem behavior; does not load the game runtime or graphics.</remarks>
 public sealed class BootstrapDependencyTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(),

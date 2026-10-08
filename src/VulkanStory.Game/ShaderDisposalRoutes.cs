@@ -6,6 +6,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Substitutes pinned GL cleanup calls from original shader disposal with the adapter resource lifecycle.</summary>
 internal static class ShaderDisposalRoutes
 {
     private sealed record Route(string GlName, Type[] Parameters, int Count, string Wrapper);
@@ -27,12 +28,15 @@ internal static class ShaderDisposalRoutes
             if (body.Count(instruction => instruction.Calls(Gl(route))) != route.Count)
                 throw new InvalidOperationException("Original shader disposal has an unexpected " + route.GlName + " count.");
     }
+    /// <summary>Checks the original shader-disposal calls and signatures before installation.</summary>
     internal static void ValidateBindings()
     {
         if (Target.ReturnType != typeof(void) || Target.GetMethodBody() is null)
             throw new InvalidOperationException("Original shader disposal signature changed.");
         Check(PatchProcessor.GetOriginalInstructions(Target));
     }
+    /// <summary>Installs the disposal transpiler without enabling graphics routing.</summary>
+    /// <param name="harmony">Startup Harmony owner responsible for removing the patch.</param>
     internal static void Install(Harmony harmony) => harmony.Patch(Target,
         transpiler: new HarmonyMethod(typeof(ShaderDisposalRoutes), nameof(Transpiler)));
     private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)

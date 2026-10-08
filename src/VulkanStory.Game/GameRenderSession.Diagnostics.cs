@@ -50,6 +50,7 @@ internal sealed partial class GameRenderSession
         }
     }
 
+    /// <summary>Writes the explicitly enabled diagnostic frame status from current session state after presentation.</summary>
     private void PublishDiagnosticFrame()
     {
         if (!DiagnosticsEnabled()) return;

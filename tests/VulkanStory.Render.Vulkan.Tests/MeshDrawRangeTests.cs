@@ -6,6 +6,8 @@ using VulkanStory.Render.Vulkan.Core;
 using Silk.NET.Vulkan;
 using Xunit;
 
+/// <summary>Checks pointer-sized mesh byte offsets and group counts when producing indirect draw commands.</summary>
+/// <remarks>Command-structure generation only; no native indirect draw is submitted.</remarks>
 public class MeshDrawRangeTests
 {
     [Fact]

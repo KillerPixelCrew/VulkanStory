@@ -5,6 +5,7 @@ using System.IO;
 namespace VulkanStory.Render.Vulkan.Core;
 
 // Included with the shader program types when their game-facing adapter is compiled.
+/// <summary>Opt-in trace formatting for shader source, uniforms and sampler bindings.</summary>
 internal static partial class RenderTrace
 {
     /// <summary>
@@ -58,7 +59,7 @@ internal static partial class RenderTrace
             {
                 File.WriteAllText(file, stage.Value);
             }
-            catch (IOException)
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 // Losing a debug dump must not disturb the run.
             }

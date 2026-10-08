@@ -5,6 +5,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Replaces original platform framebuffer operations with adapter-owned targets after startup routing commits.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class FramebufferConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-framebuffers";
@@ -36,6 +38,10 @@ internal static class FramebufferConsumerPatches
             throw new MissingMethodException(typeof(ClientPlatformWindows).FullName, binding.Name);
         return method;
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="routing">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateSubset(Func<bool> routing)
     {
         ArgumentNullException.ThrowIfNull(routing);

@@ -46,6 +46,13 @@ internal sealed partial class GameGraphicsAdapter
     /// The pipeline for one mesh program against one target and one mesh shape, rebuilt only
     /// when the program was relinked, the target's formats changed or the mesh's layout did.
     /// </summary>
+    /// <param name="pass">Per-pass cache and pre-resolved uniform/sampler slots.</param>
+    /// <param name="program">Original shader program whose backend identifier selects code.</param>
+    /// <param name="framebufferId">Backend target identifier.</param>
+    /// <param name="colorSlots">Selected target color-write mask.</param>
+    /// <param name="layoutId">Retained vertex layout identifier.</param>
+    /// <param name="description">Requested fixed draw state, completed with program/layout/target formats.</param>
+    /// <returns>Matching live pipeline, or null after target or pipeline refusal.</returns>
     private NativePipeline? NativeMeshPipelineFor(NativeMeshPass pass, ShaderProgramBase program, int framebufferId,
         uint colorSlots, int layoutId, NativePipelineDescription description)
     {

@@ -54,6 +54,7 @@ internal sealed unsafe class UploadManager : IDisposable
     // wider texels want their own size; 16 covers every format the client uploads.
     private const ulong StagingAlignment = 16;
 
+    /// <summary>Upload command pool, mapped staging storage and transfer completion for one reusable batch.</summary>
     private sealed class Batch
     {
         public CommandPool Pool;
@@ -366,8 +367,12 @@ internal sealed unsafe class UploadManager : IDisposable
             CommandBufferCount = 1,
         };
         CommandBuffer commandBuffer;
-        VulkanResult.Check(api.AllocateCommandBuffers(_context.Device, &allocateInfo, &commandBuffer),
-            "vkAllocateCommandBuffers for an upload batch");
+        Result allocated = api.AllocateCommandBuffers(_context.Device, &allocateInfo, &commandBuffer);
+        if (allocated != Result.Success)
+        {
+            api.DestroyCommandPool(_context.Device, pool, null);
+            VulkanResult.Check(allocated, "vkAllocateCommandBuffers for an upload batch");
+        }
 
         int index = _batches.Count;
         var batch = new Batch

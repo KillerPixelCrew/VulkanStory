@@ -5,10 +5,12 @@ namespace VulkanStory.Game;
 
 // Settings are captured by the process session from ordinary game settings
 // and VulkanStory settings. No renderer/provider reads a game singleton.
+/// <summary>One allocation-time snapshot of ordinary game and VulkanStory framebuffer policy.</summary>
 internal sealed record GameFramebufferSettings(int SsaoQuality, int ShadowMapQuality,
     float SsaaLevel, float RenderScale, bool TaaRequested, bool FrameGenerationRequested,
-    bool HandheldShadowTier);
+    bool HandheldShadowTier, string FrameGenerationProvider = "off");
 
+/// <summary>Borrowed session callbacks used to plan and publish framebuffer resources; the session owns providers and temporal history.</summary>
 internal sealed record GameFramebufferHost(
     Func<(int Width, int Height)> PixelSize,
     Func<GameFramebufferSettings> Settings,
@@ -21,6 +23,9 @@ internal sealed record GameFramebufferHost(
 internal sealed partial class GameGraphicsAdapter
 {
     private GameFramebufferHost? framebufferHost;
+    /// <summary>Binds the complete borrowed session framebuffer callback set once before allocation.</summary>
+    /// <param name="host">Session owner callbacks used for planning, resource resets and publication.</param>
+    /// <remarks>Runs on the adapter owner thread, including pre-commit configuration; every callback must be non-null.</remarks>
     internal void ConfigureFramebufferHost(GameFramebufferHost host)
     {
         if (Environment.CurrentManagedThreadId != ownerThread)

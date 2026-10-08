@@ -6,12 +6,18 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Connects original menu and world Graphics pages to the shared VulkanStory Options owner.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class MenuSettingsConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-menu-settings";
     private static Func<bool>? enabled;
     private static readonly MethodInfo Header = AccessTools.Method(typeof(GuiCompositeSettings), "ComposerHeader", [typeof(string), typeof(string)]);
     private static readonly Type Escape = AccessTools.TypeByName("Vintagestory.Client.NoObf.GuiDialogEscapeMenu");
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="routing">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(Func<bool> routing)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

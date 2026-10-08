@@ -33,20 +33,34 @@ public sealed class SdlWindowHost : IDisposable
 
     private readonly bool keepHidden;
     private SdlWindowHost(IntPtr window, bool keepHidden = false) { this.window = window; this.keepHidden = keepHidden; }
+    /// <summary>Whether visible/focus/capture operations are suppressed for an isolated hidden harness.</summary>
     public bool KeepsHidden => keepHidden;
 
+    /// <summary>Borrowed SDL_Window pointer; zero after disposal. It is not a Win32 HWND or a game window pointer.</summary>
     public IntPtr NativeHandle => window;
+    /// <summary>SDL window identity, or zero after disposal.</summary>
     public uint WindowId => window == IntPtr.Zero ? 0 : SDL_GetWindowID(window);
+    /// <summary>Current SDL keyboard/input focus flag.</summary>
     public bool IsFocused => (SDL_GetWindowFlags(RequireWindow()) & FocusFlag) != 0;
+    /// <summary>Whether SDL's hidden flag is clear.</summary>
     public bool IsVisible => (SDL_GetWindowFlags(RequireWindow()) & HiddenFlag) == 0;
+    /// <summary>Current SDL fullscreen flag.</summary>
     public bool IsFullscreen => (SDL_GetWindowFlags(RequireWindow()) & FullscreenFlag) != 0;
+    /// <summary>Current SDL minimized flag.</summary>
     public bool IsMinimized => (SDL_GetWindowFlags(RequireWindow()) & MinimizedFlag) != 0;
+    /// <summary>Current SDL maximized flag.</summary>
     public bool IsMaximized => (SDL_GetWindowFlags(RequireWindow()) & MaximizedFlag) != 0;
+    /// <summary>Whether the SDL window has no border.</summary>
     public bool IsBorderless => (SDL_GetWindowFlags(RequireWindow()) & BorderlessFlag) != 0;
+    /// <summary>Whether SDL allows user resizing.</summary>
     public bool IsResizable => (SDL_GetWindowFlags(RequireWindow()) & ResizableFlag) != 0;
+    /// <summary>Current per-window relative mouse mode used for gameplay capture.</summary>
     public bool RelativeMouseMode => SDL_GetWindowRelativeMouseMode(RequireWindow());
+    /// <summary>Whether SDL text input is enabled for this window.</summary>
     public bool TextInputActive => SDL_TextInputActive(RequireWindow());
+    /// <summary>SDL display identity associated with the current window.</summary>
     public uint DisplayId => SDL_GetDisplayForWindow(RequireWindow());
+    /// <summary>Current SDL mouse position in logical window coordinates.</summary>
     public (float X, float Y) MousePosition
     {
         get
@@ -56,6 +70,7 @@ public sealed class SdlWindowHost : IDisposable
             return (x, y);
         }
     }
+    /// <summary>Logical window extent; use PixelSize for drawable resolution.</summary>
     public (int Width, int Height) WindowSize
     {
         get
@@ -64,6 +79,7 @@ public sealed class SdlWindowHost : IDisposable
             return (width, height);
         }
     }
+    /// <summary>Drawable extent in pixels, which may differ from logical size under high DPI.</summary>
     public (int Width, int Height) PixelSize
     {
         get
@@ -73,6 +89,7 @@ public sealed class SdlWindowHost : IDisposable
             return (width, height);
         }
     }
+    /// <summary>Bounds extent of the window's current SDL display.</summary>
     public (int Width, int Height) DisplaySize
     {
         get
@@ -83,10 +100,19 @@ public sealed class SdlWindowHost : IDisposable
             return (bounds.Width, bounds.Height);
         }
     }
+    /// <summary>Borrowed native HWND on Windows, or zero on other platforms/after disposal.</summary>
     public nint Win32Handle => OperatingSystem.IsWindows() && window != IntPtr.Zero
         ? SDL_GetPointerProperty(SDL_GetWindowProperties(window), "SDL.window.win32.hwnd", IntPtr.Zero)
         : 0;
 
+    /// <summary>Initializes SDL video and creates a resizable high-DPI Vulkan window with native IME UI.</summary>
+    /// <param name="title">Initial window title.</param>
+    /// <param name="width">Positive initial logical width.</param>
+    /// <param name="height">Positive initial logical height.</param>
+    /// <param name="hidden">Whether the window begins hidden but may later be shown.</param>
+    /// <param name="keepHidden">Whether later show/focus/capture operations remain suppressed.</param>
+    /// <returns>The owner of the SDL window and video-subsystem reference.</returns>
+    /// <exception cref="InvalidOperationException">SDL video initialization or Vulkan window creation fails.</exception>
     public static SdlWindowHost Create(string title, int width, int height, bool hidden = false, bool keepHidden = false)
     {
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
@@ -104,7 +130,9 @@ public sealed class SdlWindowHost : IDisposable
         throw new InvalidOperationException("SDL3 Vulkan window creation failed: " + reason);
     }
 
+    /// <summary>Sets the SDL title, throwing when SDL refuses the operation.</summary>
     public void SetTitle(string title) => Check(SDL_SetWindowTitle(RequireWindow(), title), "SDL_SetWindowTitle");
+    /// <summary>Sets a tightly packed RGBA8 icon through a temporary SDL surface released before return.</summary>
     public unsafe void SetIcon(int width, int height, byte[] rgba)
     {
         RequireWindow();
@@ -121,41 +149,61 @@ public sealed class SdlWindowHost : IDisposable
             finally { SDL_DestroySurface(surface); }
         }
     }
+    /// <summary>Requests a positive logical window size, preserving SDL's error result.</summary>
     public void SetSize(int width, int height)
     {
         if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         Check(SDL_SetWindowSize(RequireWindow(), width, height), "SDL_SetWindowSize");
     }
+    /// <summary>Sets nonnegative logical minimum dimensions; zero leaves that axis without a minimum.</summary>
     public void SetMinimumSize(int width, int height)
     {
         if (width < 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height < 0) throw new ArgumentOutOfRangeException(nameof(height));
         Check(SDL_SetWindowMinimumSize(RequireWindow(), width, height), "SDL_SetWindowMinimumSize");
     }
+    /// <summary>Changes SDL fullscreen state unless the host is required to stay hidden.</summary>
     public void SetFullscreen(bool enabled) { if (!keepHidden) Check(SDL_SetWindowFullscreen(RequireWindow(), enabled), "SDL_SetWindowFullscreen"); }
+    /// <summary>Minimizes the window unless the host is required to stay hidden.</summary>
     public void Minimize() { if (!keepHidden) Check(SDL_MinimizeWindow(RequireWindow()), "SDL_MinimizeWindow"); }
+    /// <summary>Requests SDL's centered window position.</summary>
     public void Center() => Check(SDL_SetWindowPosition(RequireWindow(), 0x2FFF0000, 0x2FFF0000), "SDL_SetWindowPosition");
+    /// <summary>Maximizes the window unless the host is required to stay hidden.</summary>
     public void Maximize() { if (!keepHidden) Check(SDL_MaximizeWindow(RequireWindow()), "SDL_MaximizeWindow"); }
+    /// <summary>Restores the window unless the host is required to stay hidden.</summary>
     public void Restore() { if (!keepHidden) Check(SDL_RestoreWindow(RequireWindow()), "SDL_RestoreWindow"); }
+    /// <summary>Requests native window decorations.</summary>
     public void SetBordered(bool bordered) => Check(SDL_SetWindowBordered(RequireWindow(), bordered),
         "SDL_SetWindowBordered");
+    /// <summary>Changes whether user resizing is allowed.</summary>
     public void SetResizable(bool resizable) => Check(SDL_SetWindowResizable(RequireWindow(), resizable),
         "SDL_SetWindowResizable");
+    /// <summary>Sets SDL's process-wide minimize-on-focus-loss hint for fullscreen behavior.</summary>
+    /// <returns>Whether SDL accepted the hint.</returns>
     public bool SetMinimizeOnFocusLoss(bool enabled)
     {
         RequireWindow();
         return SDL_SetHint("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", enabled ? "1" : "0");
     }
+    /// <summary>Waits through SDL for pending asynchronous window operations to settle.</summary>
     public void Sync() => Check(SDL_SyncWindow(RequireWindow()), "SDL_SyncWindow");
+    /// <summary>Shows the window unless the host is required to stay hidden.</summary>
     public void Show() { if (!keepHidden) Check(SDL_ShowWindow(RequireWindow()), "SDL_ShowWindow"); }
+    /// <summary>Requests foreground raising unless the host is required to stay hidden.</summary>
     public void Raise() { if (!keepHidden) Check(SDL_RaiseWindow(RequireWindow()), "SDL_RaiseWindow"); }
+    /// <summary>Restores a minimized window and requests foreground raising.</summary>
     public void Focus()
     {
         if (IsMinimized) Restore();
         Raise();
     }
+    /// <summary>Hides the SDL window.</summary>
     public void Hide() => Check(SDL_HideWindow(RequireWindow()), "SDL_HideWindow");
+    /// <summary>Installs this window as the sole SDL Windows-message observer for the supplied latency ping ID.</summary>
+    /// <param name="messageId">Nonzero PCL ping message token.</param>
+    /// <param name="onPing">Callback invoked inside SDL's message pump; callback exceptions are suppressed.</param>
+    /// <returns>False off Windows, for a missing HWND/message ID, or while another host owns the hook.</returns>
     public bool InstallPclPingHook(uint messageId, Action onPing)
     {
         ArgumentNullException.ThrowIfNull(onPing);
@@ -171,6 +219,7 @@ public sealed class SdlWindowHost : IDisposable
         return true;
     }
 
+    /// <summary>Removes the global SDL message hook only when this host owns it.</summary>
     public void RemovePclPingHook()
     {
         if (!ReferenceEquals(pclHookOwner, this)) return;
@@ -194,17 +243,23 @@ public sealed class SdlWindowHost : IDisposable
         return true; // SDL must still process the Windows message.
     }
 
+    /// <summary>Matches a valid native MSG pointer against this HWND and PCL message ID.</summary>
     public static bool IsPclPingMessage(nint message, nint windowHandle, uint pingMessage) =>
         message != 0 && windowHandle != 0 && pingMessage != 0 &&
         Marshal.ReadIntPtr(message) == windowHandle &&
         unchecked((uint)Marshal.ReadInt32(message, IntPtr.Size)) == pingMessage;
+    /// <summary>Changes gameplay relative mouse capture unless the host is required to stay hidden.</summary>
     public void SetRelativeMouseMode(bool enabled) { if (!keepHidden) Check(
         SDL_SetWindowRelativeMouseMode(RequireWindow(), enabled), "SDL_SetWindowRelativeMouseMode"); }
+    /// <summary>Warps the cursor in logical SDL coordinates unless the host is required to stay hidden.</summary>
     public void WarpMouse(float x, float y) { if (!keepHidden) SDL_WarpMouseInWindow(RequireWindow(), x, y); }
+    /// <summary>Starts/stops committed SDL text input unless the host is required to stay hidden.</summary>
     public void SetTextInputActive(bool active) { if (keepHidden) return; Check(active
         ? SDL_StartTextInput(RequireWindow()) : SDL_StopTextInput(RequireWindow()),
         active ? "SDL_StartTextInput" : "SDL_StopTextInput"); }
+    /// <summary>Asks SDL to clear current IME composition and returns SDL's success result.</summary>
     public bool ClearComposition() => SDL_ClearComposition(RequireWindow());
+    /// <summary>Sets the logical IME rectangle and logical cursor offset, preserving SDL failure as an exception.</summary>
     public void SetTextInputArea(int x, int y, int width, int height, int cursor)
     {
         if (width < 0) throw new ArgumentOutOfRangeException(nameof(width));
@@ -213,6 +268,7 @@ public sealed class SdlWindowHost : IDisposable
         Check(SDL_SetTextInputArea(RequireWindow(), ref area, cursor), "SDL_SetTextInputArea");
     }
 
+    /// <summary>Copies clipboard UTF-8 text into managed storage and frees SDL's returned buffer.</summary>
     public string GetClipboardText()
     {
         RequireWindow();
@@ -222,12 +278,20 @@ public sealed class SdlWindowHost : IDisposable
         finally { SDL_free(utf8); }
     }
 
+    /// <summary>Replaces SDL clipboard text, throwing when SDL refuses the operation.</summary>
     public void SetClipboardText(string text)
     {
         RequireWindow();
         Check(SDL_SetClipboardText(text), "SDL_SetClipboardText");
     }
 
+    /// <summary>Creates/replaces an owned RGBA8 cursor, switching an active old cursor before its destruction.</summary>
+    /// <param name="code">Stable cursor key retained until replacement or window disposal.</param>
+    /// <param name="hotX">Horizontal hotspot passed to SDL.</param>
+    /// <param name="hotY">Vertical hotspot passed to SDL.</param>
+    /// <param name="width">Positive image width in pixels.</param>
+    /// <param name="height">Positive image height in pixels.</param>
+    /// <param name="rgba">Exactly four RGBA bytes per image texel; native creation occurs while pinned.</param>
     public unsafe void LoadCursor(string code, int hotX, int hotY, int width, int height, byte[] rgba)
     {
         RequireWindow();
@@ -265,6 +329,7 @@ public sealed class SdlWindowHost : IDisposable
         cursors[code] = cursor;
     }
 
+    /// <summary>Selects an owned cursor; an unknown key restores the default and returns false.</summary>
     public bool UseCursor(string code)
     {
         RequireWindow();
@@ -274,6 +339,7 @@ public sealed class SdlWindowHost : IDisposable
         return true;
     }
 
+    /// <summary>Selects SDL's default cursor and clears the active custom handle.</summary>
     public void RestoreCursor()
     {
         RequireWindow();
@@ -283,6 +349,8 @@ public sealed class SdlWindowHost : IDisposable
         activeCursor = 0;
     }
 
+    /// <summary>Copies the Vulkan instance-extension names required by SDL's video backend.</summary>
+    /// <remarks>The Vulkan instance owner must enable these before creating this window's surface.</remarks>
     public string[] RequiredInstanceExtensions()
     {
         uint count;
@@ -295,6 +363,11 @@ public sealed class SdlWindowHost : IDisposable
         return extensions;
     }
 
+    /// <summary>Attempts surface creation for the caller's Vulkan instance, converting failures/exceptions to a reason.</summary>
+    /// <param name="instanceHandle">Live Vulkan instance created with SDL's required extensions.</param>
+    /// <param name="surface">Created Vulkan surface on success; its destruction belongs to the Vulkan instance owner.</param>
+    /// <param name="failureReason">Null on success, otherwise the closed-window/null-instance/native failure detail.</param>
+    /// <returns>Whether SDL created the surface.</returns>
     public bool TryCreateVulkanSurface(nint instanceHandle, out ulong surface, out string? failureReason)
     {
         surface = 0;
@@ -325,6 +398,8 @@ public sealed class SdlWindowHost : IDisposable
         }
     }
 
+    /// <summary>Removes owned message hooks/cursors, destroys the SDL window, and releases its video-subsystem reference.</summary>
+    /// <remarks>Call after the Vulkan swapchain/device no longer uses this window. Repeated disposal is ignored.</remarks>
     public void Dispose()
     {
         if (window == IntPtr.Zero) return;
@@ -349,6 +424,7 @@ public sealed class SdlWindowHost : IDisposable
     }
     private static string Error() => Marshal.PtrToStringUTF8(SDL_GetError()) ?? "unknown SDL3 error";
 
+    /// <summary>Native SDL_Rect memory layout used for display bounds and text-input areas.</summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct SdlRect(int x, int y, int width, int height)
     {
@@ -358,6 +434,7 @@ public sealed class SdlWindowHost : IDisposable
         public int Height = height;
     }
 
+    /// <summary>SDL native callback ABI for observing a Windows MSG during the event pump.</summary>
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
     private delegate bool WindowsMessageHook(nint userdata, nint message);

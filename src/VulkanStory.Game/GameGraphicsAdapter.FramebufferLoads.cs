@@ -115,6 +115,8 @@ internal sealed partial class GameGraphicsAdapter
         else SelectDrawBuffer((OpenTK.Graphics.OpenGL.DrawBufferMode)1029);
     }
 
+    /// <summary>Releases the supplied default framebuffer list and related published target state through the adapter owner.</summary>
+    /// <param name="buffers">Target list whose owned resources should be released; null is accepted.</param>
     internal void DisposeFramebuffers(List<FrameBufferRef>? buffers)
     {
         var renderer = RequireDevice();

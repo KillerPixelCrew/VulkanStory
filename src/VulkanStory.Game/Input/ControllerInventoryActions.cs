@@ -5,10 +5,14 @@ using Vintagestory.API.Common;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Semantic slot operations routed through the game's official inventory grid.</summary>
 internal enum ControllerInventoryAction { Select, TakeHalf, QuickMove }
 
+/// <summary>Controller cursor-to-slot dispatch that preserves grid permissions and vanilla packet generation.</summary>
 internal static class ControllerInventoryActions
 {
+    /// <summary>Dispatches the first slot containing the cursor using select, half-stack, or quick-transfer semantics.</summary>
+    /// <returns>True when a slot consumed the operation, including a denied slot; false when no target contains the cursor.</returns>
     internal static bool TryClick(ICoreClientAPI api, IReadOnlyList<ControllerSlotTarget> targets,
         Vector2 cursor, ControllerInventoryAction action)
     {

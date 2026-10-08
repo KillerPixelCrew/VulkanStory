@@ -5,6 +5,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Matches the retained native/fsr4/bridge.cpp VulkanStoryFsr4Frame ABI.
+/// <summary>Checks x64 shared FSR4 dispatch size and field/fence offsets against the bridge ABI.</summary>
+/// <remarks>Does not execute Vulkan/DX12 interoperability or an AMD provider.</remarks>
 public sealed class Fsr4InteropTests
 {
     [Fact]

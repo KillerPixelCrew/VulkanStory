@@ -38,6 +38,7 @@ Add-Payload 'VulkanStory/tools/deploy-runtime.ps1' (Join-Path $projectRoot 'scri
 Add-Payload 'VulkanStory/tools/remove-runtime.ps1' (Join-Path $projectRoot 'scripts/remove-runtime.ps1')
 foreach ($project in @('Bootstrap','Contracts','Game','Input','Platform.Sdl','Render.Vulkan')) {
     Add-Payload "VulkanStory/managed/VulkanStory.$project.dll" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/net10.0/VulkanStory.$project.dll")
+    Add-Payload "VulkanStory/managed/VulkanStory.$project.xml" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/net10.0/VulkanStory.$project.xml")
 }
 # Explicit dependency inventory matches BootstrapDependencies; game/Harmony assemblies are excluded.
 $backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/net10.0"
@@ -48,13 +49,16 @@ foreach ($name in @('SDL3-CS','Silk.NET.Core','Silk.NET.Shaderc','Silk.NET.Vulka
 }
 Add-Payload 'VulkanStory/managed/profiles/vs-1.22.7-win-x64.json' (Join-Path $projectRoot 'profiles/vs-1.22.7-win-x64.json')
 Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.dll' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/net10.0/VulkanStory.Mod.dll")
+Add-Payload 'Mods/vulkanstory/VulkanStory.Mod.xml' (Join-Path $projectRoot "src/VulkanStory.Mod/bin/$Configuration/net10.0/VulkanStory.Mod.xml")
 Add-Payload 'Mods/vulkanstory/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Mod/modinfo.json')
 # The ordinary server-only mod also loads in the integrated single-player server.
 # Its shared Input DLL comes from the same build as the early payload, preserving
 # assembly identity. Dedicated servers receive the separate companion archive.
 foreach ($name in @('VulkanStory.Input.Companion','VulkanStory.Input')) {
     Add-Payload "Mods/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.dll")
+    Add-Payload "Mods/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.xml")
     Add-Payload "optional-server/vulkanstoryinput/$name.dll" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.dll")
+    Add-Payload "optional-server/vulkanstoryinput/$name.xml" (Join-Path $projectRoot "src/$name/bin/$Configuration/net10.0/$name.xml")
 }
 Add-Payload 'Mods/vulkanstoryinput/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Input.Companion/modinfo.json')
 Add-Payload 'optional-server/vulkanstoryinput/modinfo.json' (Join-Path $projectRoot 'src/VulkanStory.Input.Companion/modinfo.json')

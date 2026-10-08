@@ -63,6 +63,13 @@ internal sealed partial class GameGraphicsAdapter
         pass.Adopt(pipeline, formats);
         return pipeline;
     }
+    /// <summary>Opens an owned fullscreen pass with explicit texture-read dependencies, target and viewport dimensions.</summary>
+    /// <param name="name">Pass diagnostic name.</param>
+    /// <param name="framebuffer">Backend framebuffer or retained default target identifier.</param>
+    /// <param name="width">Viewport width in pixels.</param>
+    /// <param name="height">Viewport height in pixels.</param>
+    /// <param name="reads">Texture identifiers sampled by the pass.</param>
+    /// <returns>True when the native pass opened; false when the backend declines its description.</returns>
     private bool BeginNativeBlitPass(string name, int framebuffer, int width, int height, int[] reads) =>
         RequireDevice().BeginNativePass(new NativePassDescription
         {

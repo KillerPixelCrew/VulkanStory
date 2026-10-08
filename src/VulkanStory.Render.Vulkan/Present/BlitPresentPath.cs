@@ -29,8 +29,10 @@ internal sealed unsafe class BlitPresentPath
         _textures = textures;
     }
 
+    /// <summary>Transfer-stage wait mask for acquiring the image consumed by the present blit.</summary>
     public PipelineStageFlags AcquireWaitStage => PresentWaitStages.BlitAcquireWait;
 
+    /// <summary>Records source-to-swapchain image transitions and the final blit; a missing source records only swapchain transitions.</summary>
     public void Record(CommandBuffer commandBuffer, in PresentTarget target, VulkanTexture? source)
     {
         Image destination = target.Image;

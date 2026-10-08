@@ -10,6 +10,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks official query/capture patch ownership, supported token guards, and removal.</summary>
+/// <remarks>No GPU query result or screenshot file is produced.</remarks>
 public sealed class QueriesCaptureRoutingTests
 {
     [Fact]

@@ -13,6 +13,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 public static unsafe class VulkanPresentPreflight
 {
+    /// <summary>Runs the explicit hidden rendering, presentation and selected pixel/query/uniform checks preflight.</summary>
+    /// <remarks>This method creates native resources and may submit GPU work; it is an opt-in validation entry point.</remarks>
+    /// <returns>Null on successful completion, otherwise the failure detail.</returns>
     public static string? Check(bool draw = false, bool meshDraw = false, bool verifyPixels = false,
         bool verifyQueries = false, bool verifyUniforms = false)
     {

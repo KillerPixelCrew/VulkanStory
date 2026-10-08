@@ -6,6 +6,8 @@ namespace VulkanStory.Game;
 
 internal sealed partial class GameRenderSession
 {
+    /// <summary>Builds borrowed allocation and publication callbacks only after every required session subsystem exists.</summary>
+    /// <returns>Complete callback set borrowing this session and its provider/temporal owners.</returns>
     private GameFramebufferHost CreateFramebufferHost()
     {
         RequireOwner();
@@ -35,7 +37,8 @@ internal sealed partial class GameRenderSession
             RenderScale: state.Settings.RenderScale,
             TaaRequested: state.EffectiveTaa,
             FrameGenerationRequested: state.Settings.FrameGeneration != "off",
-            HandheldShadowTier: state.Settings.HandheldShadowTier);
+            HandheldShadowTier: state.Settings.HandheldShadowTier,
+            FrameGenerationProvider: state.Settings.FrameGeneration);
     }
     private void DisableFramebufferTaa(string reason)
     {

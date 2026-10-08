@@ -9,6 +9,8 @@ using Vintagestory.Client;
 
 namespace VulkanStory.Game;
 
+/// <summary>Replaces pinned platform-start graphics queries, default state and framebuffer setup after session commitment.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class PlatformStartupRoutingPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-platform-start";
@@ -44,6 +46,10 @@ internal static class PlatformStartupRoutingPatches
         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
         binder: null, types: binding.Parameters, modifiers: null) is { } method && method.ReturnType == binding.Result && method.GetMethodBody() != null
             ? method : throw new MissingMethodException(typeof(ClientPlatformWindows).FullName, binding.Name);
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateSubset(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

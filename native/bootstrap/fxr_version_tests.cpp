@@ -1,6 +1,9 @@
 #include "fxr_version.h"
 #include <iostream>
 
+/// @brief Runs the existing focused host-directory precedence examples.
+/// @details This executable checks numeric selection, release/prerelease ordering, metadata precedence and malformed directory names.
+/// @return Zero when every existing expectation passes, otherwise one.
 int main() {
     using vulkanstory::fxr_version;
     int failures = 0;

@@ -20,6 +20,7 @@ internal sealed class FramePlan
         _load = load;
     }
 
+    /// <summary>Number of recorded pass signatures retained by this cached plan.</summary>
     public int PassCount => _passes.Length;
 
     /// <summary>Snapshot the frame and identify attachments whose initial contents
@@ -81,6 +82,11 @@ internal sealed class FramePlan
         return _passes[pass].SameAs(signature);
     }
 
+    /// <summary>Returns the planned load operation for an indexed attachment.</summary>
+    /// <param name="pass">Zero-based pass index.</param>
+    /// <param name="attachment">Zero-based attachment index within that pass.</param>
+    /// <returns>The cached Load or DontCare operation.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The pass or attachment index is outside the recorded plan.</exception>
     public AttachmentLoadOp LoadOp(int pass, int attachment)
     {
         CheckIndex(pass, attachment);
@@ -120,6 +126,7 @@ internal sealed class FramePlan
         return info;
     }
 
+    /// <summary>First-pass use and eligibility to discard a resource's initial contents.</summary>
     private sealed class ResourceInfo
     {
         public ResourceInfo(int firstPass) => FirstPass = firstPass;

@@ -167,10 +167,8 @@ internal sealed unsafe class VulkanTexture : IDisposable
             SubresourceRange = new ImageSubresourceRange(Aspect, 0, MipLevels, layer, 1),
         };
 
-        if (_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view) != Result.Success)
-        {
-            return View;
-        }
+        VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
+            "creating an attachment view for one array layer");
         _layerViews[layer] = view;
         return view;
     }
@@ -204,6 +202,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -284,6 +283,7 @@ internal sealed unsafe class SamplerCache : IDisposable
         return sampler;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -576,9 +576,18 @@ internal sealed unsafe class TextureManager : IDisposable
         }
 
         MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
-        MemoryAllocation allocation = _context.Allocator.Allocate(
-            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height}x{depth} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
+        MemoryAllocation allocation;
+        try
+        {
+            allocation = _context.Allocator.Allocate(
+                requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
+                $"a {width}x{height}x{depth} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
+        }
+        catch
+        {
+            api.DestroyImage(_context.Device, image, null);
+            throw;
+        }
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);
@@ -851,6 +860,7 @@ internal sealed unsafe class TextureManager : IDisposable
     /// </summary>
     public Action<VulkanTexture>? Deleted { get; set; }
 
+    /// <summary>Removes the texture ID and releases or defers its owned Vulkan resources through the optional frame ring.</summary>
     public void Delete(int textureId, FrameRing? ring = null)
     {
         // Under the upload lock; see Upload. Retiring inside it keys the entry on
@@ -1005,6 +1015,7 @@ internal sealed unsafe class TextureManager : IDisposable
     public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target) =>
         TransitionTexture(commandBuffer, texture, UsageState.ForLayout(target));
 
+    /// <summary>Transitions every tracked mip/layer of the texture to the requested renderer usage.</summary>
     public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ResourceUsage usage,
         bool discard = false)
     {
@@ -1026,13 +1037,16 @@ internal sealed unsafe class TextureManager : IDisposable
 
     // -------------------------------------------------------------------- helpers
 
+    /// <summary>Returns the complete mip-chain level count for the supplied nonzero image extent.</summary>
     public static uint MipLevelsFor(uint width, uint height) =>
         (uint)Math.Floor(Math.Log2(Math.Max(width, height))) + 1;
 
+    /// <summary>Reports whether the renderer recognizes the format as a depth or depth/stencil image.</summary>
     public static bool IsDepthFormat(Format format) => format is
         Format.D16Unorm or Format.D32Sfloat or Format.D24UnormS8Uint or Format.D32SfloatS8Uint
         or Format.X8D24UnormPack32 or Format.D16UnormS8Uint;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

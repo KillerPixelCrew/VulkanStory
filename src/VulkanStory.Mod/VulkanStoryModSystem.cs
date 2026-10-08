@@ -6,12 +6,17 @@ namespace VulkanStory.Mod;
 // This lightweight entry must remain loadable when the early payload is absent.
 // Runtime status uses framework data; renderer/game/native dependencies are not
 // loaded a second time through the ordinary mod scanner.
+/// <summary>API-only client mod entry attaching settings, status commands, FPS HUD, and world callbacks to the early process runtime.</summary>
+/// <remarks>Runtime access uses framework callbacks so missing early renderer dependencies do not prevent status reporting.</remarks>
 public sealed class VulkanStoryModSystem : ModSystem
 {
     private ICoreClientAPI? client;
     private RendererSettingsDialog? settings;
     private RendererFpsHud? fpsHud;
+    /// <inheritdoc />
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
+    /// <inheritdoc />
+    /// <remarks>Registers world events and a weak-owner chat handler, then reports the early runtime's current status.</remarks>
     public override void StartClientSide(ICoreClientAPI api)
     {
         client = api;
@@ -35,12 +40,14 @@ public sealed class VulkanStoryModSystem : ModSystem
         else
             api.Logger.Warning("VulkanStory: renderer inactive ({0}). See the VulkanStory startup log.", status);
     }
+    /// <summary>Opens the FPS HUD and forwards world readiness to the already loaded runtime when its callback exists.</summary>
     private void WorldReady()
     {
         if (client != null) { fpsHud ??= new RendererFpsHud(client); fpsHud.TryOpen(); }
         if (client != null && AppContext.GetData("VulkanStory.Runtime.WorldReady") is Action<object> callback)
             callback(client.World);
     }
+    /// <summary>Closes owned GUI/HUD objects and forwards departure to the early runtime.</summary>
     private void WorldLeft()
     {
         settings?.TryClose(); settings?.Dispose(); settings = null;
@@ -48,6 +55,7 @@ public sealed class VulkanStoryModSystem : ModSystem
         if (client != null && AppContext.GetData("VulkanStory.Runtime.WorldLeft") is Action<object> callback)
             callback(client.World);
     }
+    /// <summary>Dispatches renderer settings/status/controller commands through process callbacks and returns user-visible availability/errors.</summary>
     private TextCommandResult Command(TextCommandCallingArgs args)
     {
         if (client == null) return TextCommandResult.Error("VulkanStory client mod is unavailable.");
@@ -107,6 +115,8 @@ public sealed class VulkanStoryModSystem : ModSystem
                 ? presentation() : "VulkanStory: " + (AppContext.GetData("VulkanStory.Runtime.Status") as string ?? "not loaded"))
             : TextCommandResult.Error("Use .vulkanstory [settings|controller|status|reload|set <setting> <value>].");
     }
+    /// <inheritdoc />
+    /// <remarks>Disposes owned GUI/HUD objects and detaches world events; the weak chat handler can remain in the public registry.</remarks>
     public override void Dispose()
     {
         settings?.TryClose(); settings?.Dispose(); settings = null;

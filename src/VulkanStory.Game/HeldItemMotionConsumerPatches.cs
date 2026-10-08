@@ -11,6 +11,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Brackets built-in first-person held-item draws with hand-view transform history and motion-mask restoration.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class HeldItemMotionConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-held-item-motion";
@@ -25,6 +27,11 @@ internal static class HeldItemMotionConsumerPatches
         if (body.Count(instruction => instruction.Calls(Draw)) != 1)
             throw new InvalidOperationException("Original held-item mesh draw anchor changed.");
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <param name="essentials">Original Essentials assembly containing the pinned built-in consumers.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly essentials)
     {
         Type type = essentials.GetType("Vintagestory.GameContent.EntityShapeRenderer", true)!;
@@ -81,6 +88,15 @@ internal static class HeldItemMotionConsumerPatches
             yield return instruction;
         }
     }
+    /// <summary>Preserves original held-item drawing while adding stable hand-view transform history inside one cleanup guard.</summary>
+    /// <param name="render">Original render API used for the actual textured mesh draw.</param>
+    /// <param name="mesh">Original held-item mesh identity.</param>
+    /// <param name="sampler">Original sampler receiving mesh textures.</param>
+    /// <param name="unit">Original starting texture unit.</param>
+    /// <param name="renderer">Stable held-item renderer identity.</param>
+    /// <param name="pose">Original attachment pose, used to identify the held draw.</param>
+    /// <param name="shadow">True for the original shadow-only draw; motion setup is skipped there.</param>
+    /// <remarks>The finally block closes only the motion window opened by this call, including failures during previous-transform uniform setup.</remarks>
     private static void DrawItem(IRenderAPI render, MultiTextureMeshRef mesh, string sampler, int unit,
         object renderer, object pose, bool shadow)
     {
@@ -91,18 +107,21 @@ internal static class HeldItemMotionConsumerPatches
         var program = ShaderProgramBase.CurrentShaderProgram;
         object? point = pose == null ? null : attachmentPoint!(pose);
         bool opened = false;
-        if (!shadow && temporal.EntityMotion.Enabled && temporal.State.JitterActive && program != null &&
-            program.HasUniform("taaHistoryValid") && point != null && model!(renderer) is { } transform)
+        try
         {
-            bool alreadyOpen = session.Graphics.FrameState.MotionWriteActive;
-            opened = session.Graphics.BeginMotionWrite(temporal);
-            if (opened || alreadyOpen)
+            if (!shadow && temporal.EntityMotion.Enabled && temporal.State.JitterActive && program != null &&
+                program.HasUniform("taaHistoryValid") && point != null && model!(renderer) is { } transform)
             {
-                object identity = identities.GetValue(renderer, _ => new()).GetValue(point, _ => new object());
-                temporal.StandardMotion.Apply(program, identity, mesh, transform.Values);
+                bool alreadyOpen = session.Graphics.FrameState.MotionWriteActive;
+                opened = session.Graphics.BeginMotionWrite(temporal);
+                if (opened || alreadyOpen)
+                {
+                    object identity = identities.GetValue(renderer, _ => new()).GetValue(point, _ => new object());
+                    temporal.StandardMotion.Apply(program, identity, mesh, transform.Values);
+                }
             }
+            render.RenderMultiTextureMesh(mesh, sampler, unit);
         }
-        try { render.RenderMultiTextureMesh(mesh, sampler, unit); }
         finally { if (opened) session.Graphics.EndMotionWrite(); }
     }
 }

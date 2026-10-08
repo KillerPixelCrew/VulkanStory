@@ -3,17 +3,23 @@ namespace VulkanStory.Game;
 internal sealed partial class GameRenderSession
 {
     private string presentation = "Waiting for the first Vulkan frame.";
+    /// <summary>Atomically published last-rendered-frame status for ordinary Options; provider requests and actual evaluation/readiness remain distinct.</summary>
     internal string Presentation => Volatile.Read(ref presentation);
+    /// <summary>Publishes last-frame requested/effective provider, motion, AO and controller status for the ordinary settings UI.</summary>
     private void PublishPresentation()
     {
         RendererSettings settings = services.RendererSettings.Settings;
         string sr = Graphics.UpscaledThisFrame ? services.RendererSettings.EffectiveUpscaler : "off";
         string fg = frameGeneration!.EffectiveProvider + ": " + frameGeneration.PreparationStatus;
+        FrameBufferRef? primary = platform.FrameBuffers is { Count: > 0 } targets &&
+            targets[0] is { Disposed: false } target ? target : null;
+        var display = Window.PixelSize;
         string text = "Last rendered frame\n" +
             "Upscaler requested: " + settings.Upscaler + " / " + settings.UpscalerQuality + "; evaluated: " + sr + "\n" +
             "Render resolution: " + (Graphics.AllocatedUpscalerPlan is { } plan
                 ? plan.RenderWidth + "x" + plan.RenderHeight + " -> " + plan.DisplayWidth + "x" + plan.DisplayHeight
-                : "no active upscaler plan") + "\n" +
+                : primary != null ? primary.Width + "x" + primary.Height + " -> " + display.Width + "x" + display.Height
+                    : "targets not allocated; output " + display.Width + "x" + display.Height) + "\n" +
             "Frame generation requested: " + settings.FrameGeneration + "; " + fg + "\n" +
             "TAA resolve: " + (Graphics.TaaResolvedThisFrame ? "completed" : "off") + "; motion: " +
             (Temporal.Snapshot().MotionValid ? "current" : "unavailable") + "\n" +

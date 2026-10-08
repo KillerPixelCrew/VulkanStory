@@ -5,6 +5,7 @@ using System.Text.Json;
 
 namespace VulkanStory.Bootstrap;
 
+/// <summary>Best-effort JSON-lines diagnostic sink available before game logging is initialized.</summary>
 internal sealed class BootstrapTrace
 {
     [DllImport("kernel32.dll")]
@@ -13,8 +14,12 @@ internal sealed class BootstrapTrace
     private readonly string path;
     private readonly object sync = new();
 
+    /// <summary>Creates a sink for an explicitly selected file; directories are created on the first write.</summary>
+    /// <param name="path">Destination JSON-lines path.</param>
     internal BootstrapTrace(string path) => this.path = path;
 
+    /// <summary>Consumes the optional bootstrap-log environment override and publishes the selected path to the process.</summary>
+    /// <returns>A sink using the override or the per-process file under LocalApplicationData.</returns>
     internal static BootstrapTrace Create()
     {
         string? path = Environment.GetEnvironmentVariable("VULKANSTORY_BOOTSTRAP_LOG");
@@ -25,6 +30,10 @@ internal sealed class BootstrapTrace
         return new BootstrapTrace(path);
     }
 
+    /// <summary>Serializes one event with process/thread identities and timing, suppressing diagnostic I/O failures.</summary>
+    /// <param name="name">Stable diagnostic event name.</param>
+    /// <param name="detail">Event detail serialized as JSON text.</param>
+    /// <remarks>Writes through this sink are serialized; readers and other file handles may coexist.</remarks>
     internal void Write(string name, string detail)
     {
         // Diagnostics must never turn an observer patch into a game startup failure.

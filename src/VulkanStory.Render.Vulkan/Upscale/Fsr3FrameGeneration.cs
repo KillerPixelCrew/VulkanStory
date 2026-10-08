@@ -18,11 +18,17 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
         Height = height;
     }
 
+    /// <summary>Interpolation output width in pixels.</summary>
     public uint Width { get; }
+    /// <summary>Interpolation output height in pixels.</summary>
     public uint Height { get; }
+    /// <summary>Whether the native interpolation context is still owned.</summary>
     public bool IsValid => handle != 0;
+    /// <summary>Last monotonically incremented interpolation evaluation ID.</summary>
     public ulong FrameId { get; private set; }
 
+    /// <summary>Creates a FidelityFX interpolation context using the renderer-selected format and device handles.</summary>
+    /// <returns>Zero on success, a negative local availability code or the native bridge failure code.</returns>
     public static int Create(VulkanDevice device, uint width, uint height,
         out Fsr3FrameGeneration? feature)
     {
@@ -40,6 +46,9 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
         return 0;
     }
 
+    /// <summary>Records interpolation for matching scene, UI, depth and motion resources.</summary>
+    /// <remarks>Temporal reset is forced after creation or disablement and clears after a successful dispatch.</remarks>
+    /// <returns>The native dispatch result code, or -8 when the context is absent.</returns>
     public int Evaluate(VulkanDevice device, int backbufferId, int depthId, int motionId,
         int motionRgId, int hudlessId, int uiId,
         int uprightSceneId, int uprightUiId, int uprightDepthId, int uprightMotionId,
@@ -56,6 +65,8 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
         return result;
     }
 
+    /// <summary>Disables interpolation for the supplied swapchain context and resets history on success.</summary>
+    /// <returns>The native result code; an already absent feature returns zero.</returns>
     public int Disable(nint swapchainContext)
     {
         int result = handle != 0 ? api.DisableFrameGeneration(handle, swapchainContext) : 0;
@@ -63,6 +74,7 @@ internal sealed unsafe class Fsr3FrameGeneration : IDisposable
         return result;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         nint current = handle;

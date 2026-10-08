@@ -5,6 +5,9 @@ using VulkanStory.Platform.Sdl;
 namespace VulkanStory.Game.Input;
 
 // Controller keyboard overlays supply their original editable target here.
+/// <summary>Callbacks recovering the editable field retained beneath controller keyboard screen/dialog overlays.</summary>
+/// <param name="Screen">Returns a screen overlay's original target, or null when it is not a controller keyboard.</param>
+/// <param name="Dialog">Returns a dialog overlay's original target, or null when it is not a controller keyboard.</param>
 internal sealed record ControllerTextTargets(
     Func<GuiScreen, GuiElementEditableTextBase?> Screen,
     Func<GuiDialog, GuiElementEditableTextBase?> Dialog);
@@ -19,8 +22,10 @@ internal sealed class SdlGuiTextInput
     private GuiElementEditableTextBase? target;
     private bool active;
     private (int X, int Y, int Width, int Height, int Cursor)? area;
+    /// <summary>Revision incremented when target identity or active text-input ownership changes.</summary>
     internal long TargetRevision { get; private set; }
 
+    /// <summary>Captures the SDL/GUI owner thread and creates validated game GUI field accessors.</summary>
     internal SdlGuiTextInput(SdlWindowHost window, ControllerTextTargets controllerTargets)
     {
         this.window = window;
@@ -28,12 +33,16 @@ internal sealed class SdlGuiTextInput
         bindings = new GameGuiBindings();
     }
 
+    /// <summary>Whether active text input still targets the focused editable field in a focused SDL window.</summary>
+    /// <exception cref="InvalidOperationException">Called from a different managed thread than construction.</exception>
     internal bool HasCurrentTarget()
     {
         RequireOwner();
         return active && window.IsFocused && target != null && ReferenceEquals(target, FocusedEditableText());
     }
 
+    /// <summary>Synchronizes GUI focus, logical IME rectangle/caret, and SDL text-input activation on the captured owner thread.</summary>
+    /// <remarks>Changing the target clears old composition; losing a target stops text input.</remarks>
     internal void Sync()
     {
         RequireOwner();
@@ -72,6 +81,7 @@ internal sealed class SdlGuiTextInput
         }
     }
 
+    /// <summary>Finds the active editable target, preferring controller keyboard targets before ordinary focused composer elements.</summary>
     internal GuiElementEditableTextBase? FocusedEditableText()
     {
         RequireOwner();
@@ -102,6 +112,7 @@ internal sealed class SdlGuiTextInput
         return focused is GuiElementEditableTextBase text && text.HasFocus ? text : null;
     }
 
+    /// <summary>Clears native composition/activation and the cached target/area on the captured owner thread.</summary>
     internal void Stop()
     {
         RequireOwner();

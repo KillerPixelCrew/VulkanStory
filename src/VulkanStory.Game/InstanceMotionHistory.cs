@@ -6,6 +6,7 @@ namespace VulkanStory.Game;
 
 // Retained 40-float instance layout and per-device/buffer history; baseline 386e0d05386d0b228b439d09aeca851428f7bbf3.
 #nullable disable
+    /// <summary>Session-owned previous-transform history keyed weakly by instance buffer and device identity, with one roll per temporal frame.</summary>
     internal sealed class InstanceMotionHistory(TemporalFrameState temporal, EntityMotionHistory drawState)
     {
         /// <summary>Floats per instance: light rgba, transform, previous transform, TAA metadata.</summary>
@@ -64,16 +65,9 @@ namespace VulkanStory.Game;
             return part;
         }
 
-        /// <summary>
-        /// Names the device whose instances are written next. Called once per
-        /// device per frame by the renderer's buffer fill, before the transforms
-        /// for that device reach any buffer.
-        /// </summary>
-        public void NoteDevice(object device)
-        {
-            currentDevice = device;
-        }
-
+        /// <summary>Replaces the current weak-history device scope and returns the prior scope for finally restoration.</summary>
+        /// <param name="device">Device identity for subsequent instance writes, or the prior identity being restored.</param>
+        /// <returns>Previous scope identity.</returns>
         internal object ExchangeDevice(object device)
         {
             object previous = currentDevice;

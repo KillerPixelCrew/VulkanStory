@@ -4,8 +4,15 @@ using System.Text.Json.Nodes;
 
 namespace VulkanStory.Mod;
 
+/// <summary>Typed chat-command edits to the existing renderer settings JSON object.</summary>
 internal static class RendererSettingCommand
 {
+    /// <summary>Updates one existing setting by case-insensitive key, validating supported choices and numeric/boolean syntax.</summary>
+    /// <param name="json">Current settings serialized as an object.</param>
+    /// <param name="key">Existing property name to change.</param>
+    /// <param name="input">User text parsed with invariant numeric culture.</param>
+    /// <returns>Edited JSON for the runtime's apply/persist callback; this method itself does not apply settings.</returns>
+    /// <exception cref="ArgumentException">The setting, choice, value, or JSON value type is unsupported.</exception>
     internal static string Update(string json, string key, string input)
     {
         var draft = JsonNode.Parse(json) as JsonObject ?? throw new ArgumentException("Renderer settings are unavailable.");

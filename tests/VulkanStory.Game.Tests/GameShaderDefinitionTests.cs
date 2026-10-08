@@ -4,8 +4,11 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks retained shader-stage identity, refreshed source text, and supported stage tokens.</summary>
+/// <remarks>Does not compile these fixture shaders or validate rendered output.</remarks>
 public sealed class GameShaderDefinitionTests
 {
+    /// <summary>Mutable game shader stub used to observe identity-preserving text refresh.</summary>
     private sealed class SourceShader(EnumShaderType type) : IShader
     {
         public EnumShaderType Type => type;

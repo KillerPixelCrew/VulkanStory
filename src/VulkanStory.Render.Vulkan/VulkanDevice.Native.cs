@@ -36,8 +36,10 @@ public sealed unsafe partial class VulkanDevice
     private long _nativeIndirectDraws;
     private ulong _nativeBoundPipelineSerial;
     private ulong _nativeBoundPipelineHandle;
+    /// <summary>Latest reason the retained native draw path refused a requested operation.</summary>
     internal string? NativeDrawRefusal { get; private set; }
 
+    /// <summary>Stores the native-operation refusal reason and returns false to the caller.</summary>
     private bool RefuseNativeDraw(string reason)
     {
         NativeDrawRefusal = reason;
@@ -100,11 +102,6 @@ public sealed unsafe partial class VulkanDevice
         return _targets.DeclaredFormats(target, colorSlots);
     }
 
-    /// <summary>
-    /// The viewport the GL-shaped state last set. A native pass that keeps the viewport - the
-    /// OIT merge and sky motion bind their target without touching it, as the OpenGL body's
-    /// bind-only setter does - states this as its own.
-    /// </summary>
     /// <summary>
     /// Unit assignments in linked sampler order. Writes from SetSamplerUnit and sampler
     /// uniform locations update this same array before the next stated draw.
@@ -299,6 +296,7 @@ public sealed unsafe partial class VulkanDevice
         _programs.TryGetValue(pipeline.ProgramId, out ShaderProgramResources? program) &&
         ReferenceEquals(program, pipeline.Program);
 
+    /// <summary>Invalidates cached native pipeline bindings for a deleted program.</summary>
     private void ForgetNativePipelines(int programId)
     {
         if (_nativePipelines.Count == 0) return;
@@ -339,6 +337,8 @@ public sealed unsafe partial class VulkanDevice
         GpuMark(label);
     }
 
+    /// <summary>Declares a native pass, resolves its target and prepares the native rendering scope.</summary>
+    /// <returns>Whether the declared pass could be prepared; NativeDrawRefusal records a rejected operation.</returns>
     internal bool BeginNativePass(NativePassDescription pass)
     {
         EndNativePass();
@@ -432,24 +432,34 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
+    /// <summary>Writes scalar or vector bytes to a resolved native uniform in the pipeline's owned CPU shadow.</summary>
+    /// <remarks>The NativeUniform block, offset and size must come from that pipeline's reflected interface.</remarks>
     internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float value) =>
         WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(&value, sizeof(float)));
 
+    /// <summary>Writes scalar or vector bytes to a resolved native uniform in the pipeline's owned CPU shadow.</summary>
+    /// <remarks>The NativeUniform block, offset and size must come from that pipeline's reflected interface.</remarks>
     internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, int value) =>
         WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(&value, sizeof(int)));
 
+    /// <summary>Writes scalar or vector bytes to a resolved native uniform in the pipeline's owned CPU shadow.</summary>
+    /// <remarks>The NativeUniform block, offset and size must come from that pipeline's reflected interface.</remarks>
     internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y)
     {
         float* values = stackalloc float[2] { x, y };
         WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 2 * sizeof(float)));
     }
 
+    /// <summary>Writes scalar or vector bytes to a resolved native uniform in the pipeline's owned CPU shadow.</summary>
+    /// <remarks>The NativeUniform block, offset and size must come from that pipeline's reflected interface.</remarks>
     internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y, float z)
     {
         float* values = stackalloc float[3] { x, y, z };
         WriteNative(pipeline, uniform, new ReadOnlySpan<byte>(values, 3 * sizeof(float)));
     }
 
+    /// <summary>Writes scalar or vector bytes to a resolved native uniform in the pipeline's owned CPU shadow.</summary>
+    /// <remarks>The NativeUniform block, offset and size must come from that pipeline's reflected interface.</remarks>
     internal void WriteNative(NativePipeline pipeline, NativeUniform uniform, float x, float y, float z, float w)
     {
         float* values = stackalloc float[4] { x, y, z, w };
@@ -478,7 +488,7 @@ public sealed unsafe partial class VulkanDevice
     /// shader-readable, the sampled textures resolve to bindless slots straight from their
     /// handles and sampler state, and the pipeline's fixed state is what the draw runs with.
     ///
-    /// The mesh-drawing siblings are in VulkanDevice.NativeMesh.cs; all of them share
+    /// The mesh-drawing siblings are in VulkanDevice.Resources.cs; all of them share
     /// <see cref="BeginNativeDraw" />, which is this method's old body.
     /// </summary>
     internal bool DrawNativeFullscreen(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures,
@@ -558,6 +568,7 @@ public sealed unsafe partial class VulkanDevice
         bool depthReadOnly = false;
         for (int i = 0; i < textures.Length; i++)
         {
+            if (!textures[i].Sampler.IsPresent) continue;
             VulkanTexture? texture = _textures.Get(textures[i].TextureId);
             if (texture == null) continue;
             if (_targets.IsBoundDepth(textures[i].TextureId))
@@ -578,18 +589,16 @@ public sealed unsafe partial class VulkanDevice
                         ", a non-colour attachment of its own target");
                 }
                 SnapshotColorAttachment(commandBuffer, textures[i].TextureId, texture);
+                if (_sampledTextureOverrides.TryGetValue(textures[i].TextureId, out int copyId) &&
+                    _textures.Get(copyId) is { } copy)
+                    RequireSamplerStages(commandBuffer, program, program.Interface.Samplers[textures[i].Sampler.Index], copy);
                 continue;
             }
             _targets.FlushPendingClears(commandBuffer, texture);
-            if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal)
-            {
-                _uploads.NoteUse(commandBuffer, texture);
-                continue;
-            }
-            _targets.EndRendering(commandBuffer);
-            _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.SampleFragment);
+            RequireSamplerStages(commandBuffer, program, program.Interface.Samplers[textures[i].Sampler.Index], texture);
         }
         PrepareUnnamedFrameTextures(commandBuffer, program, textures);
+        if (_barriers.Pending != 0) _targets.EndRendering(commandBuffer);
         _barriers.Flush(commandBuffer);
 
         // Decided before the scope opens, since it decides the depth attachment's layout.
@@ -706,7 +715,8 @@ public sealed unsafe partial class VulkanDevice
             BitConverter.TryWriteBytes(_pushShadow.AsSpan(sampler.PushOffset, ProgramInterfaceLayout.SlotBytes), slot);
         }
 
-        BindProgramSets(commandBuffer, program, meshId);
+        if (!BindProgramSets(commandBuffer, program, meshId))
+            return RefuseNativeDraw("uniform ring exhausted; this draw has no valid snapshot");
         EmitNativeDynamicState(commandBuffer, bound, pass, pipeline);
 
         target = bound;
@@ -762,13 +772,24 @@ public sealed unsafe partial class VulkanDevice
                 lock (_frameTextureLock) _frameTextureValues[index] = stale with { Layout = ImageLayout.ShaderReadOnlyOptimal };
             }
             _targets.FlushPendingClears(commandBuffer, texture);
-            if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal)
+            RequireSamplerStages(commandBuffer, program, declared, texture);
+        }
+    }
+
+    /// <summary>Requests visibility for every shader stage that reads a sampler, even without a layout change.</summary>
+    private void RequireSamplerStages(CommandBuffer commands, ShaderProgramResources program, SamplerBinding sampler, VulkanTexture texture)
+    {
+        foreach (ShaderStageKind stage in program.Modules.Keys)
+        {
+            if (program.Interface.SamplersByStage.Count != 0 &&
+                (!program.Interface.SamplersByStage.TryGetValue(stage, out var names) || !names.Contains(sampler.Name))) continue;
+            ResourceUsage usage = stage switch
             {
-                _uploads.NoteUse(commandBuffer, texture);
-                continue;
-            }
-            _targets.EndRendering(commandBuffer);
-            _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.SampleFragment);
+                ShaderStageKind.VertexShader => ResourceUsage.SampleVertex,
+                ShaderStageKind.GeometryShader => ResourceUsage.SampleGeometry,
+                _ => ResourceUsage.SampleFragment,
+            };
+            _textures.Require(_barriers, commands, texture, usage);
         }
     }
 

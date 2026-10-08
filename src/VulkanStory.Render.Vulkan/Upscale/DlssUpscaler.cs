@@ -458,7 +458,6 @@ internal sealed class DlssUpscaler : IDisposable
     public void Shutdown()
     {
         if (_disposed) return;
-        _disposed = true;
 
         IUpscalerDevice? device = _device;
         if (_ownsSession)
@@ -467,7 +466,9 @@ internal sealed class DlssUpscaler : IDisposable
             // Fail() - a driver that refuses to create the feature is the realistic
             // one - sets Unavailable while NGX is still initialised on a live device,
             // and skipping the shutdown would destroy the VkDevice under a live NGX.
-            NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);
+            NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);
+            if (outcome is NgxLifetimeOutcome.ShutdownFailed or NgxLifetimeOutcome.FeatureStillLive)
+                throw new InvalidOperationException("NGX shutdown did not release its owners: " + outcome);
             _session?.Dispose();
         }
         else
@@ -482,8 +483,10 @@ internal sealed class DlssUpscaler : IDisposable
         _vkDevice = IntPtr.Zero;
         Unavailable = "shut down";
         _state.ClearActivePlan();
+        _disposed = true;
     }
 
+    /// <inheritdoc/>
     public void Dispose() => Shutdown();
 
     // --------------------------------------------------------------- detail

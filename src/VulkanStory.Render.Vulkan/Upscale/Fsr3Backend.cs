@@ -4,6 +4,8 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>FidelityFX 3.1 reconstruction backend with Vulkan feature negotiation and plan-dependent context ownership.</summary>
+/// <remarks>Called by the renderer owner. Context release is deferred on its frame timeline; motion textures use the renderer deletion path.</remarks>
 internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementContributor
 {
     private readonly Fsr3Native? api;
@@ -15,12 +17,19 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
     private int motion;
     private bool ready, firstFrame;
     private bool shaderInt16, shaderFloat16;
+    /// <inheritdoc/>
     public string Id => "fsr3";
+    /// <inheritdoc/>
     public string Name => "FSR 3.1";
+    /// <inheritdoc/>
     public bool Active => ready && Unavailable == null;
+    /// <inheritdoc/>
     public string? Unavailable { get; private set; }
+    /// <inheritdoc/>
     public IDeviceRequirementContributor? Requirements => api == null ? null : this;
 
+    /// <summary>Loads the optional FidelityFX bridge and records its availability.</summary>
+    /// <param name="log">Destination for SDK-operation failures.</param>
     public Fsr3Backend(Action<string> log)
     {
         this.log = log;
@@ -34,7 +43,9 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         log("[VulkanStory] " + Unavailable);
         return false;
     }
+    /// <inheritdoc/>
     public void ContributeInstanceExtensions(InstanceRequirements requirements) { }
+    /// <inheritdoc/>
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
         // The SDK chooses its FP16 shader permutation from physical-device
@@ -47,6 +58,7 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         requirements.QueryFeatures(&supported);
         shaderFloat16 = supported.ShaderFloat16;
     }
+    /// <inheritdoc/>
     public void FinalizeDeviceFeatures(DeviceRequirements requirements, void** features)
     {
         for (BaseOutStructure* node = (BaseOutStructure*)*features; node != null; node = node->PNext)
@@ -57,6 +69,7 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
                 ((PhysicalDeviceVulkan12Features*)node)->ShaderFloat16 = shaderFloat16;
         }
     }
+    /// <inheritdoc/>
     public bool BringUp(IUpscalerDevice target, nint instance, nint physicalDevice, nint logicalDevice)
     {
         if (api == null) return false;
@@ -64,11 +77,13 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         ready = true;
         return true;
     }
+    /// <summary>Maps renderer quality names to the FidelityFX bridge quality enum; unknown names select Quality.</summary>
     internal static uint QualityOf(string? quality) => quality?.ToLowerInvariant() switch
     {
         "dlaa" or "native" => 0, "balanced" => 2, "performance" => 3,
         "ultraperformance" => 4, _ => 1,
     };
+    /// <inheritdoc/>
     public bool TryPlan(int displayWidth, int displayHeight, string quality,
         float lodBiasOffset, out UpscalerPlan plan)
     {
@@ -82,6 +97,7 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
             quality, null, lodBiasOffset);
         return plan.IsValid;
     }
+    /// <inheritdoc/>
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)
     {
         error = null;
@@ -90,7 +106,7 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         {
             if (initializedPlan.IsValid) RetireFeature();
             nint handle = 0;
-            if (!Check(api!.Create(logical, physical, (uint)plan.DisplayWidth,
+            if (!Check(api!.Create(logical, physical, (uint)plan.RenderWidth, (uint)plan.RenderHeight, (uint)plan.DisplayWidth,
                 (uint)plan.DisplayHeight, &handle), "FSR 3.1 context creation"))
             { error = Unavailable; return false; }
             context = new Fsr3Context(api, handle);
@@ -105,19 +121,25 @@ internal sealed unsafe class Fsr3Backend : IUpscalerBackend, IDeviceRequirementC
         error = Unavailable;
         return false;
     }
+    /// <inheritdoc/>
     public void RetireFeature()
     {
         if (context != null) { device!.RetireUpscalerResource(context); context = null; }
         if (motion != 0) { device!.DeleteTexture(motion); motion = 0; }
         initializedPlan = default;
     }
+    /// <inheritdoc/>
     public void Shutdown() { RetireFeature(); ready = false; }
+    /// <inheritdoc/>
     public void Dispose() => Shutdown();
 
+    /// <summary>Owns one native FidelityFX SR context until GPU-safe retirement.</summary>
+    /// <remarks>A failed checked destruction retains the handle and makes later release attempts terminal.</remarks>
     private sealed class Fsr3Context(Fsr3Native api, nint handle) : IDisposable
     {
         private Exception? releaseFailure;
         public nint Handle { get; private set; } = handle;
+        /// <inheritdoc/>
         public void Dispose()
         {
             if (releaseFailure != null)

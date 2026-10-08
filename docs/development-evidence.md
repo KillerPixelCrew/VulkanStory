@@ -1,7 +1,16 @@
 # Current development evidence
 
-Updated 2026-10-04. Checkout: master at f5388f74723a6da5de21379b5f9218e468906796 plus working changes.
+Updated 2026-10-08. Current source work: `codex/review-issue-fixes`, based on
+`ee2d870839efc58f3cf3f9c2a3513ced15477fb8`, with working changes.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
+
+The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
+review correction. This implementation pass also adds source-grounded XML
+documentation across maintained C# files. No new build, test, package, deployment
+or game run has occurred; the October-4 installed payload below is unchanged.
+Documentation coverage is 373 maintained C# files after removing obsolete copies,
+plus all nine active native source/header/test files. Compiler XML sidecars are
+enabled and included in the staging source; their emitted artifacts are unverified.
 
 | Area | Evidence | Limit |
 | --- | --- | --- |
@@ -24,7 +33,7 @@ with zero errors: Game has the existing CS8600 warning at Scenarios.cs:504; Mod 
 none. No game or runtime suite was launched. Earlier successful runs do not validate
 the simplified source's runtime behavior or negative GPU failure paths.
 
-Current development build installed in `C:/Users/N1GHT/AppData/Roaming/Vintagestory`
+The last recorded development build was installed in `C:/Users/N1GHT/AppData/Roaming/Vintagestory`
 for the user's manual test. [Installation batch](../artifacts/validation/install-current-20261004-115727/):
 Bootstrap, Game, Mod and Input.Companion Release builds passed; all 373 deployed
 package files matched staged hashes. Existing loader and client settings were

@@ -137,8 +137,9 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
             PValues = &target,
         };
         long waitStart = VulkanStats.WaitStart();
-        _context.Api.WaitSemaphores(_context.Device, &info, 5UL * 1000 * 1000 * 1000);
+        Result result = _context.Api.WaitSemaphores(_context.Device, &info, 5UL * 1000 * 1000 * 1000);
         VulkanStats.NoteWait(WaitSite.DeviceWaitIdle, waitStart);
+        VulkanResult.Check(result, "draining a timeline before teardown");
     }
 
     // --------------------------------------------------------------- Transfer
@@ -202,6 +203,7 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

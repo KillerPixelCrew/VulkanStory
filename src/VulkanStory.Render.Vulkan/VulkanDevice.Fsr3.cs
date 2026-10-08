@@ -5,8 +5,49 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>FidelityFX SR/interpolation command recording and presentation-orientation conversion.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    private int _fsr3ReactiveProgram, _fsr3ReactiveTexture;
+
+    /// <summary>Extracts the scene motion attachment's reactive channel into an SDK-readable mask.</summary>
+    /// <remarks>The device owns one reusable mask; resize retires its old image on the existing frame timeline.</remarks>
+    private VulkanTexture PrepareFsr3Reactive(int sourceId, VulkanTexture source)
+    {
+        if (_textures.Get(_fsr3ReactiveTexture) is not { } mask || mask.Width != source.Width || mask.Height != source.Height)
+        {
+            if (_fsr3ReactiveTexture != 0) DeleteTexture(_fsr3ReactiveTexture);
+            _fsr3ReactiveTexture = CreateUpscaleTexture((int)source.Width, (int)source.Height, Format.R8Unorm, true);
+            mask = _textures.Get(_fsr3ReactiveTexture)!;
+        }
+        if (_fsr3ReactiveProgram == 0)
+        {
+            _fsr3ReactiveProgram = CreateComputeProgram("""
+                #version 450
+                layout(local_size_x=8, local_size_y=8) in;
+                layout(set=0,binding=0) uniform sampler2D motion;
+                layout(set=0,binding=1,r8) writeonly uniform image2D reactive;
+                void main() {
+                    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+                    if (any(greaterThanEqual(pixel, imageSize(reactive)))) return;
+                    float value = texelFetch(motion, pixel, 0).b;
+                    value = isnan(value) || isinf(value) ? 0.9 : clamp(value, 0.0, 0.9);
+                    imageStore(reactive, pixel, vec4(value));
+                }
+                """, "fsr3-reactive", [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Storage)]);
+            if (_fsr3ReactiveProgram == 0) throw new InvalidOperationException("FSR3 reactive-mask shader did not compile.");
+        }
+        if (!RecordComputePass(new ComputePassDeclaration
+        {
+            Name = "FSR3 reactive mask", ProgramId = _fsr3ReactiveProgram,
+            Bindings = [new(0, sourceId, ComputeAccess.Sampled), new(1, _fsr3ReactiveTexture, ComputeAccess.StorageWrite)],
+            Dispatches = [ComputeDispatch.Covering(1)],
+        })) throw new InvalidOperationException("FSR3 reactive-mask extraction failed.");
+        return mask;
+    }
+
+    /// <summary>Converts motion, transitions reconstruction inputs/output and records native FidelityFX SR dispatch.</summary>
+    /// <returns>Zero on bridge success, or the local/native failure code.</returns>
     internal int EvaluateFsr3(Fsr3Native api, nint context, int motionRg,
         in UpscalerFrame frame, bool firstFrame)
     {
@@ -18,9 +59,12 @@ public sealed unsafe partial class VulkanDevice
         if (color == null || depth == null || sourceMotion == null || motion == null || output == null) return -4;
         CommandBuffer commands = Commands;
         if (!PrepareUpscalerMotion(sourceMotion, motion, color.Width, color.Height, commands)) return -4;
+        VulkanTexture reactive = PrepareFsr3Reactive(frame.Motion, sourceMotion);
+        commands = Commands;
         _textures.Require(_barriers, commands, color, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, depth, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, motion, ResourceUsage.SampleExternal);
+        _textures.Require(_barriers, commands, reactive, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, output, ResourceUsage.StorageWriteExternal);
         _barriers.Flush(commands);
         var args = new Fsr3Frame
@@ -28,6 +72,7 @@ public sealed unsafe partial class VulkanDevice
             Commands = (nint)commands.Handle,
             Color = Fsr3Image.From(color), Depth = Fsr3Image.From(depth),
             Motion = Fsr3Image.From(motion), Output = Fsr3Image.From(output),
+            Reactive = Fsr3Image.From(reactive),
             JitterX = frame.Temporal.JitterX, JitterY = frame.Temporal.JitterY,
             DeltaMs = frame.Temporal.DeltaTimeMs,
             NearPlane = frame.Temporal.NearPlane, FarPlane = frame.Temporal.FarPlane,
@@ -39,6 +84,7 @@ public sealed unsafe partial class VulkanDevice
         return result;
     }
 
+    /// <summary>Prepares interpolation inputs in the selected presentation orientation and records FidelityFX frame generation.</summary>
     internal int EvaluateFsr3FrameGeneration(Fsr3Native api, nint context,
         int backbufferId, int depthId, int motionId, int motionRgId, int hudlessId,
         int uiId, int uprightSceneId, int uprightUiId, int uprightDepthId,
@@ -119,13 +165,12 @@ public sealed unsafe partial class VulkanDevice
         return result;
     }
 
+    /// <summary>Records a vertically reversed blit between compatible interpolation textures.</summary>
     private bool FlipFrameGenerationInput(CommandBuffer commands, VulkanTexture source, VulkanTexture destination)
     {
         if (source.Format != destination.Format || source.Width != destination.Width ||
             source.Height != destination.Height) return false;
-        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice, source.Format,
-            out FormatProperties properties);
-        if ((properties.OptimalTilingFeatures &
+        if ((_context.OptimalFormatFeatures(source.Format) &
              (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit)) !=
             (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit)) return false;
         _textures.Require(_barriers, commands, source, ResourceUsage.TransferSrc);

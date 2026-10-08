@@ -10,6 +10,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Retained rigid contents histories attached at the original final mesh draws.
+/// <summary>Adds stable previous transforms around built-in rigid block-content draws and restores draw state on exit.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class RigidContentMotionConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-motion-rigid-content";
@@ -19,6 +21,11 @@ internal static class RigidContentMotionConsumerPatches
     private static readonly MethodInfo Single = AccessTools.Method(typeof(IRenderAPI), nameof(IRenderAPI.RenderMesh), [typeof(MeshRef)])!;
     private static readonly MethodInfo Multi = AccessTools.Method(typeof(IRenderAPI), nameof(IRenderAPI.RenderMultiTextureMesh),
         [typeof(MultiTextureMeshRef), typeof(string), typeof(int)])!;
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <param name="survival">Original Survival assembly containing the pinned built-in consumers.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly survival)
     {
         var targets = new Dictionary<MethodBase, (int Single, int Multi)>();

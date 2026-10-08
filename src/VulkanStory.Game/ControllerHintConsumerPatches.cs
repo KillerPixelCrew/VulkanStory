@@ -11,6 +11,8 @@ using VulkanStory.Game.Input;
 
 namespace VulkanStory.Game;
 
+/// <summary>Updates original settings and interaction labels from the active controller context and glyph selection.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class ControllerHintConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-controller-hints";
@@ -46,6 +48,10 @@ internal static class ControllerHintConsumerPatches
             ControllerHints.Subscribe(changed);
         }
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="routing">Predicate read by routed callbacks after the complete startup transaction commits.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(System.Func<bool> routing)
     {
         ConstructorInfo constructor = typeof(GuiCompositeSettings).GetConstructor([typeof(IGameSettingsHandler), typeof(bool)]) ??

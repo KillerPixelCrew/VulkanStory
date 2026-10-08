@@ -40,6 +40,8 @@ internal sealed unsafe class ReadbackManager : IDisposable
     private readonly ulong[] _cursors;
     private bool _disposed;
 
+    /// <summary>Borrows renderer owners and creates per-frame-slot readback arena bookkeeping.</summary>
+    /// <remarks>Mapped arenas are allocated lazily. Each ticket must be consumed before its slot is reused.</remarks>
     public ReadbackManager(VulkanContext context, TextureManager textures, FrameRing frames)
     {
         _context = context;
@@ -56,7 +58,7 @@ internal sealed unsafe class ReadbackManager : IDisposable
     internal ulong ArenaCapacity(int slotIndex) => _arenas[slotIndex]?.Size ?? 0;
 
     /// <summary>
-    /// Records a copy of level 0 of <paramref name="texture" /> (the given region
+    /// Records a copy of the requested <paramref name="mipLevel" /> of <paramref name="texture" /> (the given region
     /// and aspect) into the current slot's arena, and the transitions around it.
     /// The caller has closed any open rendering scope and submits afterwards.
     /// </summary>

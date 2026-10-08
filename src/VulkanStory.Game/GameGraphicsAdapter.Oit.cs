@@ -17,6 +17,8 @@ internal sealed partial class GameGraphicsAdapter
     private ICoreClientAPI? oitApi;
     private readonly NativeFullscreenPass nativeOitMerge = new("transparentcompose", [],
         ["accumulation", "revealage", "inGlow", "OITreveal", "OITaccumulation"]);
+    /// <summary>Allocates or selects weighted-transparency targets for the current original client API and scene size.</summary>
+    /// <param name="api">Original client API used to bind and draw the transparency path.</param>
     internal void BeginOit(ICoreClientAPI api)
     {
         var renderer = RequireDevice();
@@ -82,6 +84,7 @@ internal sealed partial class GameGraphicsAdapter
         if (oitDisabled || oitReveal == 0 || oitAccumulation == 0) return;
         Stated.BindTexture(6, oitReveal); Stated.BindTexture(7, oitAccumulation);
     }
+    /// <summary>Releases current weighted-transparency pass targets and its borrowed API association.</summary>
     internal void ReleaseOit()
     {
         if (oitAccumulation > 0) device?.DeleteTexture(oitAccumulation);
@@ -90,6 +93,7 @@ internal sealed partial class GameGraphicsAdapter
         oitApi = null;
     }
     internal void ReleaseOitFor(ICoreClientAPI api) { RequireDevice(); if (ReferenceEquals(api, oitApi)) ReleaseOit(); }
+    /// <summary>Merges weighted transparency into the current scene through native or retained composition.</summary>
     internal void MergeTransparent()
     {
         var renderer = RequireDevice();

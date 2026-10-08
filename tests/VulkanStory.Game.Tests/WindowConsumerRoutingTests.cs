@@ -6,6 +6,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks dormant original window calls and active routing rejection when no SDL adapter owns the platform.</summary>
+/// <remarks>Metadata/patch routing only; no native window is created.</remarks>
 public sealed class WindowConsumerRoutingTests
 {
     [Fact]

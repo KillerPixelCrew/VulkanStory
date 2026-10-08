@@ -96,6 +96,7 @@ internal sealed class LatencyPhaseTracker
     private long _presentStart;
     private long _presentEnd;
 
+    /// <summary>Creates a CPU marker tracker with an optional one-time interrupted-phase log sink.</summary>
     public LatencyPhaseTracker(Action<string>? log = null) => _log = log;
 
     /// <summary>How often a phase was still open when the next frame started.</summary>
@@ -203,12 +204,14 @@ internal sealed class LatencyReportBuffer
     /// <summary>How many of the slots hold a report that has not been taken.</summary>
     private int _count;
 
+    /// <summary>Allocates a bounded synchronized report ring with at least one entry.</summary>
     public LatencyReportBuffer(int capacity = DefaultCapacity)
     {
         if (capacity < 1) capacity = 1;
         _reports = new LatencyFrameReport[capacity];
     }
 
+    /// <summary>Maximum completed-frame reports retained before the oldest is overwritten.</summary>
     public int Capacity => _reports.Length;
 
     /// <summary>How many reports are waiting to be taken.</summary>
@@ -257,15 +260,19 @@ internal sealed class FrameTimingRecorder
     private readonly LatencyPhaseTracker _tracker;
     private readonly LatencyReportBuffer _reports = new();
 
+    /// <summary>Creates a CPU marker tracker with an optional one-time interrupted-phase log sink.</summary>
     public FrameTimingRecorder(Action<string>? log = null) => _tracker = new LatencyPhaseTracker(log);
 
+    /// <summary>Stamps a CPU latency marker using the shared monotonic microsecond clock.</summary>
     public void Marker(ulong frameId, LatencyMarker marker) =>
         _tracker.Mark(frameId, marker, LatencyClock.NowUs());
 
+    /// <summary>Completes the matching frame report and queues it for diagnostic consumption.</summary>
     public void OnPresent(ulong frameId, ulong presentId)
     {
         if (_tracker.TryComplete(frameId, presentId, out LatencyFrameReport report)) _reports.Add(report);
     }
 
+    /// <summary>Consumes completed CPU timing reports in chronological order.</summary>
     public LatencyFrameReport[] TakeReports() => _reports.Take();
 }

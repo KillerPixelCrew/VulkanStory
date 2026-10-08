@@ -9,6 +9,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks official framebuffer patch installation, CPU binding/state routes, ownership guards, and removal.</summary>
+/// <remarks>Uses a device without a native context; no GPU framebuffer pixels are asserted.</remarks>
 public sealed class FramebufferConsumerRoutingTests
 {
     [Fact]

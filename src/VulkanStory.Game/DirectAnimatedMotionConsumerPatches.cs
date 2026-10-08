@@ -8,6 +8,8 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Echo Chamber's direct draws share one animated pose and bypass the multi-texture seam.
+/// <summary>Adds previous-animation inputs around built-in Survival animated draws using the session motion owner.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class DirectAnimatedMotionConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-motion-direct-animated";
@@ -18,6 +20,11 @@ internal static class DirectAnimatedMotionConsumerPatches
         if (instructions.Count(instruction => instruction.Calls(Draw)) != 3)
             throw new InvalidOperationException("Original/incoming Echo Chamber animated draw anchors changed.");
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <param name="survival">Original Survival assembly containing the pinned built-in consumers.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly survival)
     {
         Type type = survival.GetType("Vintagestory.GameContent.EchoChamberRenderer", true)!;

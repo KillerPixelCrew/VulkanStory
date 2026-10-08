@@ -4,9 +4,13 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game;
 
 // Retained face-packing loop; returned storage is borrowed on the current thread.
+/// <summary>Packs original mesh attributes into the retained shader-storage face layout without changing its byte ABI.</summary>
 internal static class GameSsboFacePacking
 {
     [ThreadStatic] private static FaceData[] facedataBuffer = null!;
+    /// <summary>Converts original mesh vertices/indices into the retained FaceData storage layout.</summary>
+    /// <param name="data">Original mesh attributes and indices.</param>
+    /// <returns>Packed face records consumed by the SSBO terrain path.</returns>
     internal static FaceData[] Pack(MeshData data)
     {
         int verticesCount = data.VerticesCount;

@@ -364,7 +364,6 @@ void main()
 
 	// Was * 2 but that made water behind quartz glass super visible in the night
 	// Was * 0.5 but that made water columns hardly visible
-	float accuWeight = 1;
 
 	if (OPTIMUM_FOAMEFFECT > 0) {
 	if (rgbaFinal.a > 0) {
@@ -395,7 +394,6 @@ void main()
 			float rgbAdd = bright*(diff * 0.3 + noise/10);
 			texColor.rgb -= vec3(rgbAdd, rgbAdd, rgbAdd);
 			texColor.a=1; // Let's just do lava as opaque as we can
-			accuWeight=1;
 
 			float blackSpots = gnoise(fragWorldPos.xyz) + 0.5;
 
@@ -485,7 +483,6 @@ void main()
 	} else {
 	if (isLava) {
 		texColor.a=1;
-		accuWeight=1;
 	}
 	}
 

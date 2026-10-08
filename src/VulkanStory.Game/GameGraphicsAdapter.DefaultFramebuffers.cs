@@ -24,10 +24,13 @@ internal sealed partial class GameGraphicsAdapter
     private bool taaDisabled;
     private int sceneNoHudIndex = -1, uiTargetIndex = -1;
     internal bool TaaTargetsReady { get; private set; }
+    /// <summary>Whether the previous native TAA history is eligible for this target set; rebuild/reset invalidates it.</summary>
     internal bool TaaHistoryValid { get; set; }
+    /// <summary>Whether the current real frame copied its completed scene before UI composition.</summary>
     internal bool SceneNoHudCaptured { get; set; }
     internal int SceneNoHudFramebufferIndex => sceneNoHudIndex;
     internal int UiFramebufferIndex => uiTargetIndex;
+    /// <summary>Plan used to allocate the current SR input/output targets, or null on ordinary rendering/fallback.</summary>
     internal UpscalerPlan? AllocatedUpscalerPlan { get; private set; }
 
     private void ResetFramebufferPublication()
@@ -100,6 +103,9 @@ internal sealed partial class GameGraphicsAdapter
         host.RequestTemporalReset();
         host.Notification("(Re-)loaded frame buffers on the VulkanStory device");
     }
+    /// <summary>Allocates and publishes the retained framebuffer slots for current display dimensions and effective reconstruction plan.</summary>
+    /// <returns>The retained target-slot list published for this allocation.</returns>
+    /// <remarks>Must run through active adapter routing with a configured framebuffer host. Rebuilding withdraws previous motion/TAA/SR publication and requests a temporal reset after target completion.</remarks>
     internal List<FrameBufferRef> SetupDefaultFramebuffers()
     {
         var renderer = RequireDevice();
@@ -124,8 +130,9 @@ internal sealed partial class GameGraphicsAdapter
         int displayHeight = clientSize.Height;
         if (displayWidth < 0 || displayHeight < 0) throw new InvalidOperationException("Invalid SDL pixel size.");
         allocatedFramebuffers = list;
-        int width = (int)(displayWidth * ssaaLevel);
-        int height = (int)(displayHeight * ssaaLevel);
+        float sceneScale = ssaaLevel * settings.RenderScale;
+        int width = displayWidth == 0 ? 0 : Math.Max(1, (int)(displayWidth * sceneScale));
+        int height = displayHeight == 0 ? 0 : Math.Max(1, (int)(displayHeight * sceneScale));
         bool upscaling = TryPlanUpscale(displayWidth, displayHeight, out int plannedWidth, out int plannedHeight);
         if (upscaling)
         {
@@ -314,6 +321,8 @@ internal sealed partial class GameGraphicsAdapter
             catch (Exception error)
             {
                 DisableTaa("history targets (device): " + error.Message);
+                DisposeFramebuffer(list[TaaHistoryIndexA], disposeTextures: true);
+                DisposeFramebuffer(list[TaaHistoryIndexB], disposeTextures: true);
                 list[TaaHistoryIndexA] = null!;
                 list[TaaHistoryIndexB] = null!;
             }
@@ -398,7 +407,8 @@ internal sealed partial class GameGraphicsAdapter
 
         // World/UI separation: the HUD-less scene snapshot and the UI image (UiSeparation.cs).
         AllocateUiSeparationTargets(list, displayWidth, displayHeight);
-        AllocateFrameGenerationTarget(list, displayWidth, displayHeight);
+        if (settings.FrameGenerationProvider == "fsr3")
+            AllocateFrameGenerationTarget(list, displayWidth, displayHeight);
 
         FinishFramebuffers(list);
         return list;
@@ -456,6 +466,8 @@ internal sealed partial class GameGraphicsAdapter
         target.Height = height;
         target.FboId = renderer.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[3];
+        try
+        {
         target.ColorTextureIds[0] = renderer.CreateTexture2D(width, height,
             EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
         target.ColorTextureIds[1] = renderer.CreateTexture2D(width, height,
@@ -483,8 +495,18 @@ internal sealed partial class GameGraphicsAdapter
             throw new Exception("VulkanStory TAA history FBO: " + status);
         }
         return RegisterFramebuffer(target);
+        }
+        catch
+        {
+            ReleaseUnpublishedFramebuffer(target);
+            throw;
+        }
     }
 
+    /// <summary>Creates an owned framebuffer descriptor with dimensions but no color attachment storage.</summary>
+    /// <param name="width">Descriptor width in pixels.</param>
+    /// <param name="height">Descriptor height in pixels.</param>
+    /// <returns>Registered placeholder reference used to preserve retained slot shape.</returns>
     internal FrameBufferRef CreatePlaceholderTarget(int width, int height)
     {
         FrameBufferRef target = new FrameBufferRef();
@@ -494,6 +516,10 @@ internal sealed partial class GameGraphicsAdapter
         return RegisterFramebuffer(target);
     }
 
+    /// <summary>Builds the retained RGBA tangent-plane SSAO noise texture values.</summary>
+    /// <param name="random">Random source used for signed XY direction samples.</param>
+    /// <param name="noiseSize">Square noise side length in texels.</param>
+    /// <returns>Four floats per texel: normalized XY, zero Z and unit alpha.</returns>
     internal static float[] BuildSsaoNoise(Random random, int noiseSize)
     {
         float[] noise = new float[noiseSize * noiseSize * 4];
@@ -509,6 +535,10 @@ internal sealed partial class GameGraphicsAdapter
         return noise;
     }
 
+    /// <summary>Allocates display-sized HUD-free and UI targets independently, logging a fallback when either allocation fails.</summary>
+    /// <param name="list">Current retained target-slot list receiving the owned references.</param>
+    /// <param name="renderWidth">Retained caller render width; separate UI allocation uses actual window pixels.</param>
+    /// <param name="renderHeight">Retained caller render height; separate UI allocation uses actual window pixels.</param>
     internal void AllocateUiSeparationTargets(List<FrameBufferRef> list, int renderWidth, int renderHeight)
     {
         CloseUiScope();
@@ -558,6 +588,8 @@ internal sealed partial class GameGraphicsAdapter
         target.Height = height;
         target.FboId = renderer.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
+        try
+        {
         target.ColorTextureIds[0] = storage
             ? renderer.CreateUpscaleTexture(width, height,
                 frameGenerationStorage ? Silk.NET.Vulkan.Format.R8G8B8A8Unorm :
@@ -579,6 +611,23 @@ internal sealed partial class GameGraphicsAdapter
             throw new Exception("framebuffer incomplete: " + status);
         }
         return RegisterFramebuffer(target);
+        }
+        catch
+        {
+            ReleaseUnpublishedFramebuffer(target);
+            throw;
+        }
+    }
+
+    /// <summary>Unwinds locally created attachments and framebuffer state before publication fails.</summary>
+    private void ReleaseUnpublishedFramebuffer(FrameBufferRef target)
+    {
+        var renderer = RequireDevice();
+        Stated.ForgetFramebuffer(target.FboId);
+        renderer.DeleteFramebuffer(target.FboId);
+        foreach (int texture in target.ColorTextureIds)
+            if (texture > 0) renderer.DeleteTexture(texture);
+        if (target.DepthTextureId > 0) renderer.DeleteTexture(target.DepthTextureId);
     }
 
     private void AllocateFrameGenerationTarget(List<FrameBufferRef> buffers, int width, int height)

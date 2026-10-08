@@ -33,6 +33,9 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
             throw new InvalidOperationException("VulkanStory " + backend.Id + " release failed; dependent cleanup stopped.", error);
         }
     }
+    /// <summary>Registers SR backends and contributes their Vulkan device requirements before device initialization.</summary>
+    /// <param name="target">Session-owned device receiving requirements and later provider execution.</param>
+    /// <remarks>Can run once per registry; the registry borrows the device and owns its provider contexts.</remarks>
     internal void Prepare(VulkanDevice target)
     {
         RequireLifetime();
@@ -52,6 +55,8 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
                 if (backend.Requirements != null) options.RequirementContributors.Add(backend.Requirements);
         };
     }
+    /// <summary>Initializes registered providers against the created Vulkan device and removes unsupported backends.</summary>
+    /// <remarks>Initialization failures become provider refusal reasons. Checked shutdown failures propagate and retain ownership.</remarks>
     internal void BringUp()
     {
         RequireLifetime();
@@ -75,6 +80,11 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         ? reason : state.IsDisabled(provider)
         ? "this provider was disabled for this session" : !providers.TryGetValue(provider, out var backend)
         ? "this provider is unavailable on this Vulkan device" : backend.Active ? null : backend.Unavailable;
+    /// <summary>Plans render dimensions and LOD bias for the selected effective SR provider.</summary>
+    /// <param name="width">Display width in pixels.</param>
+    /// <param name="height">Display height in pixels.</param>
+    /// <returns>The selected plan, or null after falling back when no eligible provider can plan.</returns>
+    /// <remarks>Clears the prior active plan first; refusal retires the selected feature and requests target rebuild.</remarks>
     internal UpscalerPlan? Plan(int width, int height)
     {
         RequireLifetime();
@@ -91,6 +101,8 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         state.SetActivePlan(allocated.RenderScale, allocated.LodBias);
         return allocated;
     }
+    /// <summary>Records a session refusal, retires the selected provider feature and requests ordinary target rebuilding.</summary>
+    /// <param name="reason">Concrete provider failure displayed and logged for this session.</param>
     internal void Disable(string reason)
     {
         RequireLifetime();
@@ -100,6 +112,8 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         if (selected != null) ReleaseBackend(selected, shutdown: false);
         allocated = default; state.ClearActivePlan(); requestTargetRebuild();
     }
+    /// <summary>Retires current SR features and clears plans before the next settings-driven target allocation.</summary>
+    /// <remarks>Provider drain/release failures are terminal for this owner and propagate before dependent cleanup.</remarks>
     internal void ApplySettings()
     {
         RequireLifetime();
@@ -107,6 +121,12 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         allocated = lastEvaluated = default; state.ClearActivePlan();
         requestTargetRebuild(); applyTerrainLodBias(0);
     }
+    /// <summary>Evaluates the selected provider using matching primary color/depth/motion and planned output targets.</summary>
+    /// <param name="graphics">Borrowed adapter whose per-frame SR outcome is published.</param>
+    /// <param name="buffers">Current session target list using retained framebuffer slot identities.</param>
+    /// <param name="temporal">Camera, jitter and timing inputs for this rendered frame.</param>
+    /// <returns>True after provider output succeeds; false when prerequisites or evaluation fail.</returns>
+    /// <remarks>Evaluation refusal disables the provider. Unsupported late-overlay depth blit clears output depth to far and logs the limitation once.</remarks>
     internal bool Evaluate(GameGraphicsAdapter graphics, IReadOnlyList<Vintagestory.API.Client.FrameBufferRef> buffers,
         in TemporalProviderFrame temporal)
     {
@@ -135,6 +155,8 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         }
         graphics.UpscaledThisFrame = true; return true;
     }
+    /// <summary>Shuts down owned SR providers with checked release and clears the active plan.</summary>
+    /// <remarks>The borrowed device is not disposed here; release failure retains the remaining provider owners.</remarks>
     public void Dispose()
     {
         RequireLifetime();

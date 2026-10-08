@@ -35,23 +35,32 @@ internal static class CheckpointMarker
     private const ulong AMask = (1UL << 28) - 1;
     private const ulong BMask = 0xFFFFFFFFUL;
 
+    /// <summary>Packs a diagnostic kind and bounded integer payload into a non-dereferenced checkpoint marker.</summary>
     public static nint Pack(CheckpointKind kind, uint a, uint b) =>
         (nint)(long)(((ulong)kind << KindShift) | (((ulong)a & AMask) << AShift) | ((ulong)b & BMask));
 
+    /// <summary>Decodes the diagnostic kind from a packed checkpoint marker.</summary>
     public static CheckpointKind KindOf(nint marker) => (CheckpointKind)((ulong)(long)marker >> KindShift);
+    /// <summary>Decodes the first masked payload from a checkpoint marker.</summary>
     public static uint AOf(nint marker) => (uint)(((ulong)(long)marker >> AShift) & AMask);
+    /// <summary>Decodes the second masked payload from a checkpoint marker.</summary>
     public static uint BOf(nint marker) => (uint)((ulong)(long)marker & BMask);
 
+    /// <summary>Packs a diagnostic kind and bounded integer payload into a non-dereferenced checkpoint marker.</summary>
     public static nint FrameBegin(uint frame) => Pack(CheckpointKind.FrameBegin, 0, frame);
 
+    /// <summary>Encodes the diagnostic draw kind and retained program/target/mesh identifiers.</summary>
     public static nint Draw(CheckpointKind kind, int program, int target, int mesh) =>
         Pack(kind, ((uint)Math.Clamp(target, 0, 0xFFF) << 16) | ((uint)program & 0xFFFF), (uint)mesh);
 
+    /// <summary>Encodes a texture-upload checkpoint with texture identity and packed extent.</summary>
     public static nint Upload(int texture, uint width, uint height) =>
         Pack(CheckpointKind.Upload, (uint)texture, (Math.Min(width, 0xFFFFu) << 16) | Math.Min(height, 0xFFFFu));
 
+    /// <summary>Packs a diagnostic kind and bounded integer payload into a non-dereferenced checkpoint marker.</summary>
     public static nint Mipmaps(int texture, uint levels) => Pack(CheckpointKind.Mipmaps, (uint)texture, levels);
 
+    /// <summary>Packs a diagnostic kind and bounded integer payload into a non-dereferenced checkpoint marker.</summary>
     public static nint PresentBlit(uint image, uint frame) => Pack(CheckpointKind.PresentBlit, image, frame);
 
     /// <summary>Renders a marker for a person, naming the program where one is known.</summary>

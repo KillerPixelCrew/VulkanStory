@@ -8,6 +8,7 @@ internal sealed partial class GameRenderSession
     // Migrated from VulkanClientPlatform.SdlInput.cs at donor baseline
     // 386e0d05386d0b228b439d09aeca851428f7bbf3. Keep asset lookup and decoding
     // in the game integration; the SDL host receives only RGBA pixels.
+    /// <summary>Loads the game icon into the owned SDL window when the original assets are available.</summary>
     private void SetWindowIcon()
     {
         if (window is null || window.KeepsHidden) return;

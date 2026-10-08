@@ -3,6 +3,7 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Game;
 
+/// <summary>Converts the original game texture format enums to the retained renderer numeric format contract.</summary>
 internal static class GameTextureDefinitions
 {
     // Preserve unknown token values too: the retained backend decides fallback.

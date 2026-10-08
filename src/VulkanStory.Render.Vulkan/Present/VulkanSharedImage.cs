@@ -37,12 +37,19 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         Format = format;
     }
 
+    /// <summary>Imported Vulkan image borrowing the same allocation as the DX12 resource.</summary>
     public Image Image { get; }
+    /// <summary>Dedicated imported Vulkan memory owned by this wrapper.</summary>
     public DeviceMemory Memory { get; }
+    /// <summary>Owned Win32 shared-resource handle closed during disposal.</summary>
     public nint SharedHandle { get; }
+    /// <summary>Owned native DX12 resource reference released through the creating runtime.</summary>
     public nint D3D12Resource { get; }
+    /// <summary>Shared image width in pixels.</summary>
     public uint Width { get; }
+    /// <summary>Shared image height in pixels.</summary>
     public uint Height { get; }
+    /// <summary>Format agreed by the DX12 bridge and dedicated Vulkan import.</summary>
     public Format Format { get; }
 
     /// <summary>Reports whether a source can be flipped into this shared image.</summary>
@@ -65,12 +72,8 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
             reason = "source aspect or format is incompatible with shared DX12 image";
             return false;
         }
-        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice,
-            source.Format, out FormatProperties sourceProperties);
-        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice,
-            Format, out FormatProperties destinationProperties);
-        if ((sourceProperties.OptimalTilingFeatures & FormatFeatureFlags.BlitSrcBit) == 0 ||
-            (destinationProperties.OptimalTilingFeatures & FormatFeatureFlags.BlitDstBit) == 0)
+        if ((_context.OptimalFormatFeatures(source.Format) & FormatFeatureFlags.BlitSrcBit) == 0 ||
+            (_context.OptimalFormatFeatures(Format) & FormatFeatureFlags.BlitDstBit) == 0)
         {
             reason = "source or shared format does not support Vulkan image blits";
             return false;
@@ -87,6 +90,12 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
     public void RecordFlippedCopy(CommandBuffer commands, VulkanTexture source) =>
         RecordCopyFrom(commands, source, flip: true);
 
+    /// <summary>Records an input blit and queue-family ownership transfer to DX12.</summary>
+    /// <remarks>Before reuse the submission must wait for DX12 completion; DX12 must wait for the value signaled after this copy.</remarks>
+    /// <param name="commands">Current recording Vulkan command buffer.</param>
+    /// <param name="source">Matching source already in transfer-source layout.</param>
+    /// <param name="flip">Whether to reverse the source Y coordinates.</param>
+    /// <exception cref="InvalidOperationException">Source extent, usage, aspect, format or device blit support is incompatible.</exception>
     public void RecordCopyFrom(CommandBuffer commands, VulkanTexture source, bool flip)
     {
         if (!CanBlitFrom(source, out string reason))
@@ -196,9 +205,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
             (destination.Usage & ImageUsageFlags.TransferDstBit) == 0 ||
             Format == Format.D32Sfloat)
             throw new InvalidOperationException("DX12 output cannot copy to Vulkan target");
-        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice,
-            Format, out FormatProperties properties);
-        if ((properties.OptimalTilingFeatures &
+        if ((_context.OptimalFormatFeatures(Format) &
              (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit)) !=
             (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit))
             throw new InvalidOperationException("DX12 output format does not support Vulkan blit");
@@ -248,6 +255,9 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         _releasedToDx12 = true;
     }
 
+    /// <summary>Creates a DX12 image and imports its dedicated allocation into Vulkan.</summary>
+    /// <remarks>The returned owner releases the NT handle, Vulkan objects and DX12 reference; both APIs must be drained before disposal.</remarks>
+    /// <returns>Whether format support, resource creation and dedicated import all succeeded.</returns>
     public static bool TryCreate(VulkanContext context, IDx12SharedRuntime runtime,
         uint width, uint height, Format format, out VulkanSharedImage? result,
         out string reason, bool writable = false)
@@ -401,6 +411,7 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(nint handle);
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

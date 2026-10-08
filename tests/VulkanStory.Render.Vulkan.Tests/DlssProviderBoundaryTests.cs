@@ -4,8 +4,11 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks that an unrequested DLSS path leaves host selection unchanged before native preparation.</summary>
+/// <remarks>No NGX runtime or DLSS feature is loaded.</remarks>
 public sealed class DlssProviderBoundaryTests
 {
+    /// <summary>Unrequested DLSS host selection recording whether preparation attempts runtime stand-down.</summary>
     private sealed class Selection : IUpscalerRuntimeState
     {
         public bool DlssRequested => false;

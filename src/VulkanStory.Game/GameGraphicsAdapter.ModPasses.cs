@@ -141,6 +141,8 @@ internal sealed partial class GameGraphicsAdapter
         finally { Stated.SetDrawBuffers(modMotionFramebuffer, modMotionDrawBuffers); }
     }
 
+    /// <summary>Executes registrations for the current stage using validated attachment plans and restores render state after each callback.</summary>
+    /// <param name="stage">Original render stage whose bracket just completed.</param>
     internal void RunModPasses(EnumRenderStage stage)
     {
         var renderer = RequireDevice();

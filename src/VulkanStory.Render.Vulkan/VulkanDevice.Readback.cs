@@ -9,6 +9,7 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Occlusion queries, texture readback and framebuffer capture portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     // -------------------------------------------------------------------- queries
@@ -22,8 +23,10 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Occlusion query pools across every frame slot. Tests only.</summary>
     internal int OcclusionQueryPoolsForTests => _queryRing.PoolCount;
 
+    /// <summary>Creates a logical renderer occlusion-query ID.</summary>
     public int CreateOcclusionQuery() => _queryRing.Create();
 
+    /// <summary>Starts a known logical occlusion query in the current frame/rendering scope.</summary>
     public void BeginOcclusionQuery(int queryId)
     {
         if (!_frameActive || !_queryRing.CanBegin(queryId)) return;
@@ -45,6 +48,7 @@ public sealed unsafe partial class VulkanDevice
         _queryRing.Begin(queryId, commandBuffer, _targets.RenderingActive);
     }
 
+    /// <summary>Ends the active logical occlusion query while preserving segmented query results.</summary>
     public void EndOcclusionQuery(int queryId)
     {
         if (_frameActive) _queryRing.End(queryId, _frames.Current.FrameValue, Commands);
@@ -82,6 +86,7 @@ public sealed unsafe partial class VulkanDevice
         return submitted;
     }
 
+    /// <summary>Releases the logical query ID through the query-ring owner.</summary>
     public void DeleteQuery(int queryId) => _queryRing.Delete(queryId);
 
     // ------------------------------------------------------------------- readback
@@ -114,12 +119,6 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
-    /// <summary>
-    /// Copies level 0 of a texture into host memory, raw texels in the image's own
-    /// format, rows in memory order (GL order: the backend never flips Y). Inside
-    /// a frame it goes through <see cref="ReadBack" />, so the frame stays open.
-    /// Depth images are copied through their depth aspect.
-    /// </summary>
     /// <summary>Level 0 of a texture through the dump path's readback. Tests only.</summary>
     internal byte[] ReadBackLevel0ForTests(int textureId) =>
         ReadBackLevel0(_textures.Get(textureId) ?? throw new ArgumentException("no texture " + textureId));
@@ -141,6 +140,8 @@ public sealed unsafe partial class VulkanDevice
         return data;
     }
 
+    /// <summary>Copies level zero to host memory as raw texels in image format and GL row order, using the depth aspect for depth images.</summary>
+    /// <remarks>Inside an active frame the partial readback path leaves the frame open; outside a frame this uses an immediate GPU submission.</remarks>
     private byte[] ReadBackLevel0(VulkanTexture texture)
     {
         int width = (int)texture.Width;
@@ -253,25 +254,6 @@ public sealed unsafe partial class VulkanDevice
     /// readback size and the reader always agree on the stride.
     /// </summary>
     private static int BytesPerPixel(Format format) => TextureDump.BytesPerTexel(format);
-
-    /// <summary>Colour attachment 0 of an explicit target (the default one for <see cref="PassDeclaration.DefaultFramebuffer" />).</summary>
-    internal void ReadFramebufferColor(int framebufferId, int x, int y, int width, int height, IntPtr destination)
-    {
-        EndNativePass();
-        ReadFramebufferColor(_targets.Get(ResolveNativeFramebuffer(framebufferId)), x, y, width, height, destination);
-    }
-
-    private void ReadFramebufferColor(VulkanFramebuffer? target, int x, int y, int width, int height, IntPtr destination)
-    {
-        if (destination == IntPtr.Zero || width <= 0 || height <= 0) return;
-        if (target == null) return;
-
-        VulkanTexture? texture = _textures.Get(target.Color[0].TextureId);
-        if (texture == null) return;
-
-        ReadBack(texture, x, y, (uint)width, (uint)height, ImageAspectFlags.ColorBit,
-            (ulong)width * (ulong)height * 4, destination);
-    }
 
     /// <summary>
     /// The format of the default colour target, so the platform above knows the

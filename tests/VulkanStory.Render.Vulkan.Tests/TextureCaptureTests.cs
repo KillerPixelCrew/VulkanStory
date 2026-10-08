@@ -5,6 +5,8 @@ using Xunit;
 
 namespace VulkanStory.Render.Vulkan.Tests;
 
+/// <summary>Checks CPU texture decoding across RGBA/BGRA, half-float color, depth, and short-input rejection.</summary>
+/// <remarks>Synthetic byte payloads do not establish GPU attachment content.</remarks>
 public sealed class TextureCaptureTests
 {
     [Fact]

@@ -9,6 +9,8 @@ internal sealed partial class GameRenderSession
     private int controllerRadialStep;
     private long controllerRadialNextFrame;
 
+    /// <summary>Arms the isolated controller radial diagnostic for the loaded client under its explicit harness gate.</summary>
+    /// <param name="world">Original loaded client under the isolated diagnostic.</param>
     private void StartControllerRadialDiagnostic(ClientMain world)
     {
         if (!HeadlessHarnessOptions.Enabled || controllers?.OpenRadial(world) != true)

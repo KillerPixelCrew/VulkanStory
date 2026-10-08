@@ -8,6 +8,7 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>Stateful client bindings, descriptor synchronization and retained mesh drawing portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
     // ------------------------------------------------------------------- barriers
@@ -18,6 +19,7 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     private Graph.BarrierBatcher _barriers = null!;
 
+    /// <summary>Copies a sampled color attachment to a feedback texture before a draw reads its current rendering target.</summary>
     private void SnapshotColorAttachment(CommandBuffer commandBuffer, int textureId, VulkanTexture source)
     {
         if (_sampledTextureOverrides.ContainsKey(textureId)) return;
@@ -136,6 +138,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Forgets what the recording holds bound, after a bind this path did not make.</summary>
     private void ForgetBoundDescriptors() => _boundSerial = 0;
 
+    /// <summary>Refreshes descriptor state when the texture/sampler binding generation changes.</summary>
     private void SyncBoundDescriptors(CommandBuffer commandBuffer)
     {
         FrameSlot slot = _frames.Current;
@@ -151,6 +154,7 @@ public sealed unsafe partial class VulkanDevice
         _pushedLength = 0;
     }
 
+    /// <summary>Invalidates frame-texture bindings that still refer to the released texture identity.</summary>
     private void ForgetFrameTexture(ulong textureId)
     {
         lock (_frameTextureLock)
@@ -164,6 +168,7 @@ public sealed unsafe partial class VulkanDevice
         }
     }
 
+    /// <summary>Maps a frame-set binding number to its retained texture-array index.</summary>
     private static int FrameTextureIndex(int binding)
     {
         for (int i = 0; i < SetConvention.FrameTextures.Length; i++)
@@ -173,6 +178,7 @@ public sealed unsafe partial class VulkanDevice
         throw new ArgumentOutOfRangeException(nameof(binding), binding, "not a frame texture binding");
     }
 
+    /// <summary>Resolves a shader sampler declaration to its bindless texture-kind array.</summary>
     private static TextureKind KindOf(SamplerBinding sampler)
     {
         if (!sampler.IsFrameTexture) return sampler.Kind;
@@ -195,16 +201,18 @@ public sealed unsafe partial class VulkanDevice
     /// offset. Every draw that follows in the frame reads the same snapshot and only the
     /// dynamic offset moves when a value does.
     /// </summary>
-    private uint SnapshotFrameGlobals(ShaderProgramResources program)
+    private bool TrySnapshotFrameGlobals(ShaderProgramResources program, out uint offset)
     {
         if (_frameGlobalsSnapshotFrame == _frameCounter && _frameGlobalsSnapshotVersion == _frameGlobalsVersion)
         {
-            return _frameGlobalsSnapshotOffset;
+            offset = _frameGlobalsSnapshotOffset;
+            return true;
         }
         if (!_frames.Current.TryAllocateUniforms(_frameGlobals.Length, out RingAllocation allocation))
         {
             ReportUniformExhaustion(program, "the shared frame block");
-            return 0;
+            offset = 0;
+            return false;
         }
         fixed (byte* source = _frameGlobals)
         {
@@ -213,7 +221,8 @@ public sealed unsafe partial class VulkanDevice
         _frameGlobalsSnapshotFrame = _frameCounter;
         _frameGlobalsSnapshotVersion = _frameGlobalsVersion;
         _frameGlobalsSnapshotOffset = allocation.Offset;
-        return allocation.Offset;
+        offset = allocation.Offset;
+        return true;
     }
 
     /// <summary>
@@ -221,7 +230,7 @@ public sealed unsafe partial class VulkanDevice
     /// its sampler slots: the frame set, the texture set with the push block, and the storage
     /// set. Every native draw binds through here.
     /// </summary>
-    private void BindProgramSets(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
+    private bool BindProgramSets(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         Vk api = _context.Api;
         SharedPipelineLayout shared = _sharedLayout!;
@@ -230,7 +239,7 @@ public sealed unsafe partial class VulkanDevice
         // Set 0: the frame block and the fixed frame textures.
         if (program.Interface.UsesFrameBlock || program.Interface.UsesFrameTextures)
         {
-            uint offset = SnapshotFrameGlobals(program);
+            if (!TrySnapshotFrameGlobals(program, out uint offset)) return false;
             var samplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
             lock (_frameTextureLock)
             {
@@ -283,8 +292,9 @@ public sealed unsafe partial class VulkanDevice
 
         if (program.Interface.UsesStorageSet)
         {
-            BindStorageSet(commandBuffer, program, meshId);
+            if (!BindStorageSet(commandBuffer, program, meshId)) return false;
         }
+        return true;
     }
 
     /// <summary>
@@ -295,7 +305,7 @@ public sealed unsafe partial class VulkanDevice
     /// buffer at every binding the program does not read. A set naming a ring offset is
     /// new every frame, so it comes from the slot's arena.
     /// </summary>
-    private void BindStorageSet(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
+    private bool BindStorageSet(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         SharedPipelineLayout shared = _sharedLayout!;
         VulkanBuffer placeholder = _placeholderUniforms!;
@@ -328,9 +338,9 @@ public sealed unsafe partial class VulkanDevice
             }
             else
             {
-                // The draw reads offset zero of the ring, which is some other draw's record:
-                // wrong, and for a shader that loops on a uniform count, possibly fatal.
+                // Refuse this draw rather than aliasing another draw's record.
                 ReportUniformExhaustion(program, "its program record");
+                return false;
             }
             buffers[record] = new BufferBindingValue(record, _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length);
         }
@@ -433,13 +443,14 @@ public sealed unsafe partial class VulkanDevice
         DescriptorSet storageSet = namesRingOffset
             ? _descriptorArenas[_frames.Current.Index].Get(contents, shared.StorageSetLayout)
             : GetDescriptorSet(contents, shared.StorageSetLayout);
-        if (storageSet.Handle == _boundStorageSet.Handle && recordOffset == _boundRecordOffset) return;
+        if (storageSet.Handle == _boundStorageSet.Handle && recordOffset == _boundRecordOffset) return true;
 
         _context.Api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, shared.Layout,
             (uint)SetConvention.StorageSet, 1, &storageSet, 1, &recordOffset);
         _boundStorageSet = storageSet;
         _boundRecordOffset = recordOffset;
         VulkanStats.NoteStorageSetBind();
+        return true;
     }
 
     /// <summary>

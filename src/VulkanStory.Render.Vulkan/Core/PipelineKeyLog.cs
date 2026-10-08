@@ -47,6 +47,7 @@ internal sealed class PipelineKeyLogEntry
     /// <summary>A hash of everything above except <see cref="LastSeenUnixMs" />: equal ids build equal pipelines.</summary>
     public UInt128 ContentId => _contentId ??= ComputeContentId();
 
+    /// <summary>Snapshots the graphics pipeline request and settings identity for persistent prewarming.</summary>
     public static PipelineKeyLogEntry From(ulong settingsHash, GraphicsPipelineCache.PipelineRequest request)
     {
         Format[] colors = request.Targets.ColorFormats;
@@ -93,6 +94,7 @@ internal sealed class PipelineKeyLogEntry
         return new UInt128(BitConverter.ToUInt64(hash[..8]), BitConverter.ToUInt64(hash.Slice(8, 8)));
     }
 
+    /// <summary>Writes canonical pipeline-request content used by hashing and serialization.</summary>
     internal void WriteContent(BinaryWriter writer)
     {
         writer.Write(SettingsHash);
@@ -234,6 +236,7 @@ internal sealed class PipelineKeyLog
         Capacity = capacity;
     }
 
+    /// <summary>Maximum number of pipeline-request entries retained by this log.</summary>
     public int Capacity { get; }
 
     public int Count
@@ -364,6 +367,7 @@ internal sealed class PipelineKeyLog
         return log;
     }
 
+    /// <summary>Loads the bounded pipeline-request log, preserving the retained malformed/missing-file fallback.</summary>
     public static PipelineKeyLog Load(string path, int capacity = DefaultCapacity) =>
         Parse(CacheFileWriter.TryReadAll(path), capacity);
 

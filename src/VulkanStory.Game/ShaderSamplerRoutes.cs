@@ -6,6 +6,7 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Rewrites original shader sampler binding calls to adapter texture/sampler ownership while preserving inactive GL behavior.</summary>
 internal static class ShaderSamplerRoutes
 {
     private static MethodInfo PlatformSampler => Target(typeof(ClientPlatformWindows), "GenSampler", typeof(int), [typeof(bool)]);
@@ -29,11 +30,14 @@ internal static class ShaderSamplerRoutes
             throw new InvalidOperationException("Official shader Stop must contain exactly one GL.BindSampler(int,int) call.");
     }
 
+    /// <summary>Checks the original sampler binding IL against the supported call anchors.</summary>
     internal static void ValidateBindings()
     {
         _ = PlatformSampler; _ = Texture2D; _ = TextureCube;
         Check(PatchProcessor.GetOriginalInstructions(Stop));
     }
+    /// <summary>Installs the sampler binding transpilers while startup routing remains dormant.</summary>
+    /// <param name="harmony">Startup Harmony owner responsible for patch removal.</param>
     internal static void Install(Harmony harmony)
     {
         harmony.Patch(PlatformSampler, prefix: new HarmonyMethod(typeof(ShaderSamplerRoutes), nameof(Create)));

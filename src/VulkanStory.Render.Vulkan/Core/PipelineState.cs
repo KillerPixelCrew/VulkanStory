@@ -18,6 +18,7 @@ internal struct AttachmentBlend : IEquatable<AttachmentBlend>
     public BlendOp AlphaOp;
     public ColorComponentFlags WriteMask;
 
+    /// <summary>Retained default attachment blending state.</summary>
     public static AttachmentBlend Default => new()
     {
         Enabled = false,
@@ -109,8 +110,11 @@ internal struct AttachmentBlend : IEquatable<AttachmentBlend>
         return packed;
     }
 
+    /// <inheritdoc/>
     public readonly bool Equals(AttachmentBlend other) => Pack() == other.Pack();
+    /// <inheritdoc/>
     public override readonly bool Equals(object? obj) => obj is AttachmentBlend other && Equals(other);
+    /// <inheritdoc/>
     public override readonly int GetHashCode() => (int)Pack();
 }
 
@@ -128,6 +132,7 @@ internal sealed class Interner<T> where T : notnull
 
     public Interner(IEqualityComparer<T>? comparer = null) => _ids = new Dictionary<T, int>(comparer);
 
+    /// <summary>Returns a stable integer ID for an equal state value, storing it on first use.</summary>
     public int Intern(T value)
     {
         if (_ids.TryGetValue(value, out int id)) return id;
@@ -138,6 +143,7 @@ internal sealed class Interner<T> where T : notnull
         return id;
     }
 
+    /// <summary>Returns the interned state for a known ID.</summary>
     public T Get(int id) => _values[id];
     public int Count => _values.Count;
 }
@@ -145,7 +151,9 @@ internal sealed class Interner<T> where T : notnull
 /// <summary>The attachment formats a pipeline renders into.</summary>
 internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
 {
+    /// <summary>Ordered color attachment formats included in rendering/pipeline compatibility.</summary>
     public Format[] ColorFormats { get; }
+    /// <summary>Depth attachment format included in rendering/pipeline compatibility.</summary>
     public Format DepthFormat { get; }
 
     public RenderTargetFormats(Format[] colorFormats, Format depthFormat)
@@ -154,6 +162,7 @@ internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
         DepthFormat = depthFormat;
     }
 
+    /// <inheritdoc/>
     public bool Equals(RenderTargetFormats? other)
     {
         if (other is null) return false;
@@ -167,8 +176,10 @@ internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
         return true;
     }
 
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => Equals(obj as RenderTargetFormats);
 
+    /// <inheritdoc/>
     public override int GetHashCode()
     {
         var hash = new HashCode();
@@ -205,10 +216,13 @@ internal readonly struct BlendSignature : IEquatable<BlendSignature>
         _second = second;
     }
 
+    /// <inheritdoc/>
     public bool Equals(BlendSignature other) =>
         _count == other._count && _first == other._first && _second == other._second;
 
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => obj is BlendSignature other && Equals(other);
+    /// <inheritdoc/>
     public override int GetHashCode() => HashCode.Combine(_count, _first, _second);
 }
 
@@ -384,6 +398,7 @@ internal sealed class DynamicStateCache
         return dirty;
     }
 
+    /// <summary>Counts dynamic-state commands needed for the supplied dirty-state mask.</summary>
     public static int CommandCount(DynamicStateDirty dirty) => BitOperations.PopCount((uint)dirty);
 
     private static bool SameViewport(in Viewport a, in Viewport b) =>

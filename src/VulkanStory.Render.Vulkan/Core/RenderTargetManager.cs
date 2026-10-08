@@ -781,6 +781,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         return highest;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

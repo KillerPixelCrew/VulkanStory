@@ -4,6 +4,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks the game mesh boundary's borrowed arrays, counts, offsets, custom layouts, and topology tokens.</summary>
+/// <remarks>Does not allocate or draw GPU meshes.</remarks>
 public sealed class GameMeshLayoutTests
 {
     [Fact]

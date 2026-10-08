@@ -157,16 +157,27 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// </summary>
     public static readonly uint MinimumApiVersion = Vk.Version13;
 
+    /// <summary>Owned Vulkan API dispatch table, configured for the selected instance/device.</summary>
     public Vk Api { get; private set; } = null!;
+    /// <summary>Owned Vulkan instance; created before physical-device selection.</summary>
     public Instance Instance { get; private set; }
+    /// <summary>Selected physical device borrowed from the instance.</summary>
     public PhysicalDevice PhysicalDevice { get; private set; }
+    /// <summary>Owned logical device with the negotiated renderer/provider features.</summary>
     public Device Device { get; private set; }
+    /// <summary>Borrowed primary graphics queue used for rendering and direct presentation.</summary>
     public Queue GraphicsQueue { get; private set; }
+    /// <summary>Queue-family index selected for renderer graphics work.</summary>
     public uint GraphicsQueueFamily { get; private set; }
+    /// <summary>Borrowed queue selected for asynchronous FidelityFX swapchain work.</summary>
     public Queue Fsr3AsyncQueue { get; private set; }
+    /// <summary>Borrowed distinct queue selected for FidelityFX proxy presentation.</summary>
     public Queue Fsr3PresentQueue { get; private set; }
+    /// <summary>Borrowed distinct queue selected for FidelityFX proxy acquisition.</summary>
     public Queue Fsr3AcquireQueue { get; private set; }
+    /// <summary>Whether the selected family supplies the distinct queues required by the current FidelityFX proxy.</summary>
     public bool Fsr3SwapchainQueuesAvailable { get; private set; }
+    /// <summary>Diagnostic description of the sampled FidelityFX queue selection.</summary>
     internal string Fsr3QueueTopology { get; private set; } = "queue topology not sampled";
 
     /// <summary>
@@ -174,11 +185,9 @@ internal sealed unsafe class VulkanContext : IDisposable
     ///
     /// Vulkan requires a queue to be externally synchronised: vkQueueSubmit and
     /// vkQueuePresentKHR from two threads at once is undefined behaviour, and in
-    /// practice loses the device. The client does exactly that - asset loading
-    /// uploads textures off the main thread, each upload being its own
-    /// submit-and-wait, while the render thread is submitting frames. GL made
-    /// this impossible by having one context on one thread; here it has to be
-    /// enforced.
+    /// practice can lose the device. Asset uploads record batches; submission,
+    /// presentation and device-idle waits share this lock for host synchronization.
+    /// SDK-owned presentation workers additionally require their own checked quiesce.
     /// </summary>
     public object QueueLock { get; } = new();
 
@@ -195,6 +204,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// forces the heap x 0.7 fallback.
     /// </summary>
     public bool MemoryBudgetAvailable { get; private set; }
+    /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
 
     /// <summary>vkCmdSetColorWriteEnableEXT, when the enable tier is selected.</summary>
@@ -259,6 +269,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     private Action<string>? _debugCallback;
     private PfnDebugUtilsMessengerCallbackEXT _debugDelegate;
     private bool _disposed;
+    /// <summary>Optional owned Streamline session used for Vulkan proxy dispatch and vendor features.</summary>
     internal StreamlineRuntime? Streamline { get; private set; }
 
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
@@ -951,13 +962,22 @@ internal sealed unsafe class VulkanContext : IDisposable
             }
             finally { win32?.Dispose(); }
             Fsr3QueueTopology = string.Join("; ", topology);
-            Console.Error.WriteLine("[VulkanStory] Selected Vulkan queue topology: " + Fsr3QueueTopology);
         }
 
         for (uint i = 0; i < count; i++)
         {
-            if (families[i].QueueFlags.HasFlag(QueueFlags.GraphicsBit))
+            if (families[i].QueueCount > 0 &&
+                (families[i].QueueFlags & (QueueFlags.GraphicsBit | QueueFlags.ComputeBit)) ==
+                    (QueueFlags.GraphicsBit | QueueFlags.ComputeBit))
             {
+                if (describeWin32Present && OperatingSystem.IsWindows() &&
+                    Api.TryGetInstanceExtension(Instance, out KhrWin32Surface presentation))
+                {
+                    bool canPresent;
+                    try { canPresent = presentation.GetPhysicalDeviceWin32PresentationSupport(device, i); }
+                    finally { presentation.Dispose(); }
+                    if (!canPresent) continue;
+                }
                 family = i;
                 queueCount = families[i].QueueCount;
                 supportsCompute = families[i].QueueFlags.HasFlag(QueueFlags.ComputeBit);
@@ -975,10 +995,9 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         if (!TryFindGraphicsQueue(PhysicalDevice, out uint family,
             out uint availableQueues, out bool supportsCompute,
-            describeWin32Present: options.PrepareFrameGenerationQueues && !options.Headless &&
-                Array.IndexOf(options.RequiredInstanceExtensions, "VK_KHR_win32_surface") >= 0))
+            describeWin32Present: Array.IndexOf(options.RequiredInstanceExtensions, "VK_KHR_win32_surface") >= 0))
         {
-            failureReason = "graphics queue family disappeared between selection and creation";
+            failureReason = "no graphics/compute queue family supports the required presentation path";
             return false;
         }
         GraphicsQueueFamily = family;
@@ -1459,17 +1478,19 @@ internal sealed unsafe class VulkanContext : IDisposable
         };
     }
 
+    /// <summary>Formats a Vulkan packed API version as major.minor.patch.</summary>
     public static string VersionString(uint version) =>
         $"{version >> 22}.{(version >> 12) & 0x3FF}.{version & 0xFFF}";
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
-        _disposed = true;
 
         if (Device.Handle != 0)
         {
-            WaitDeviceIdle();
+            VulkanResult.Check(WaitDeviceIdle(), "draining the Vulkan device before context disposal");
+            _disposed = true;
 
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
@@ -1483,6 +1504,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
         else
         {
+            _disposed = true;
             Streamline?.Shutdown();
         }
 
@@ -1504,10 +1526,14 @@ internal sealed unsafe class VulkanContext : IDisposable
         Streamline = null;
     }
 
+    /// <summary>Waits for the logical device through its selected native/proxy dispatch.</summary>
+    /// <returns>The Vulkan wait result; callers must check it before releasing GPU-owned resources.</returns>
     internal Result WaitDeviceIdle()
     {
         long start = VulkanStats.WaitStart();
-        Result result = Streamline != null ? Streamline.DeviceWaitIdle(Device) : Api.DeviceWaitIdle(Device);
+        Result result;
+        lock (QueueLock)
+            result = Streamline != null ? Streamline.DeviceWaitIdle(Device) : Api.DeviceWaitIdle(Device);
         VulkanStats.NoteWait(WaitSite.DeviceWaitIdle, start);
         return result;
     }

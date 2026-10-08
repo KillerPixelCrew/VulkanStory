@@ -41,6 +41,8 @@ internal sealed partial class GameGraphicsAdapter
     /// blending back at the end. All of that is reproduced here, the stale <c>frameSize</c>
     /// included: it is what the vanilla image is made of, not a bug to fix.
     /// </summary>
+    /// <param name="scene">Completed reconstructed scene texture identifier.</param>
+    /// <param name="glow">Matching glow texture identifier.</param>
     internal void RenderBloomPost(int scene, int glow)
     {
         if (!GameFrameBindings.RenderBloom(platform!)) return;

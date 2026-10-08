@@ -7,8 +7,11 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // CPU expectations carried from the original ShaderBindingTests.
+/// <summary>Checks CPU bindless slot retirement and bounded sampler-variant eviction using a controlled timeline.</summary>
+/// <remarks>Does not allocate Vulkan descriptors or establish GPU completion.</remarks>
 public sealed class BindlessContractsTests
 {
+    /// <summary>Manually advanced render/transfer counters for bindless retirement decisions.</summary>
     private sealed class Clock : ITimelineClock
     {
         public ulong FrameRecorded { get; set; }

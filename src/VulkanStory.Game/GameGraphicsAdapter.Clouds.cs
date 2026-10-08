@@ -11,6 +11,8 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeMeshPass nativeCloudVolumetric = new("cloudvolumetric", [], []);
+    /// <summary>Draws the cloud volume using the active original program and compatible native target/layout when available.</summary>
+    /// <param name="mesh">Original cloud-volume mesh associated with this adapter.</param>
     internal void RenderCloudVolumetric(MeshRef mesh)
     {
         var renderer = RequireDevice();

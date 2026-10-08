@@ -9,6 +9,10 @@ namespace VulkanStory.Game;
 // Retained Cairo and six-face cube uploads from VulkanClientPlatform.Textures.cs.
 internal sealed partial class GameGraphicsAdapter
 {
+    /// <summary>Uploads a Cairo image surface as a backend texture using its retained BGRA pixel layout.</summary>
+    /// <param name="surface">Borrowed Cairo surface; uploaded synchronously without taking surface ownership.</param>
+    /// <param name="linearMag">Whether the original texture requests linear magnification.</param>
+    /// <returns>Owned backend texture identifier.</returns>
     internal int LoadCairoTexture(ImageSurface surface, bool linearMag)
     {
         if (Environment.CurrentManagedThreadId != ownerThread)

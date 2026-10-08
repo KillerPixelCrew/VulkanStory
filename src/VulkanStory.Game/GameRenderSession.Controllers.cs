@@ -10,10 +10,22 @@ internal sealed partial class GameRenderSession
     private SdlGamepadInput? controllers;
     private ControllerPerformanceDiagnostics? controllerPerformance;
     private SdlGuiTextInput? guiText;
+    /// <summary>Session-owned negotiated analog state shared by controller input and original client packet consumers.</summary>
     internal ControllerMovementState ControllerMovement { get; } = new();
+    /// <summary>Releases controller input/UI ownership for the departing original world.</summary>
+    /// <param name="client">Departing client identity.</param>
     internal void ReleaseControllerWorld(ClientMain client) => controllers?.WorldLeaving(client);
+    /// <summary>Finds the currently opened controller settings dialog for this world.</summary>
+    /// <param name="owner">Original client identity.</param>
+    /// <returns>The matching dialog, or null.</returns>
     internal ControllerSettingsDialog? OpenedControllerSettings(ClientMain owner) => controllers?.OpenedSettings(owner);
+    /// <summary>Checks whether the controller owner still owns this exact dialog/world pair.</summary>
+    /// <param name="owner">Original client identity.</param>
+    /// <param name="dialog">Dialog whose ownership is being checked.</param>
+    /// <returns>True only for the current owned dialog.</returns>
     internal bool OwnsControllerSettings(ClientMain owner, ControllerSettingsDialog dialog) => controllers?.OwnsSettings(owner, dialog) == true;
+    /// <summary>Attempts to open the active device profile settings from the session owner thread.</summary>
+    /// <returns>True when opening succeeded; false when no eligible controller/settings owner exists.</returns>
     internal bool TryOpenControllerSettings()
     {
         RequireActive();
@@ -25,6 +37,7 @@ internal sealed partial class GameRenderSession
         if (!TryOpenControllerSettings())
             Temporal.CurrentClient?.api?.ShowChatMessage("Connect a controller to open VulkanStory controller settings.");
     }
+    /// <summary>Connects the owned SDL loop to pacing, input markers, controller updates and frame rendering; diagnostic recording stays behind its recording gate.</summary>
     private GamePlatformCallbacks CreatePlatformCallbacks()
     {
         RequireOwner();
@@ -50,15 +63,14 @@ internal sealed partial class GameRenderSession
                 RequireActive();
                 AdvanceHeadlessScenarioBeforeInput();
                 RuntimeBootstrap.Current.ApplyPendingControls();
-                try { OptionsSettingsOwner.ApplyPendingReturns(); }
-                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
-                try { DriveMultiplierDiagnosticBeforeInput(); }
-                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
-                try { DriveInventoryCyclesBeforeInput(); }
-                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
-                try { DriveControllerInventoryDiagnosticBeforeInput(); }
-                catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
-                try { DriveControllerRadialDiagnosticBeforeInput(); }
+                try
+                {
+                    OptionsSettingsOwner.ApplyPendingReturns();
+                    DriveMultiplierDiagnosticBeforeInput();
+                    DriveInventoryCyclesBeforeInput();
+                    DriveControllerInventoryDiagnosticBeforeInput();
+                    DriveControllerRadialDiagnosticBeforeInput();
+                }
                 catch (Exception error) { RecordHeadlessRenderFailure(error); throw; }
                 bool enabled = services.RendererSettings.Settings.ControllerEnabled;
                 if (enabled != controllerEnabled)
@@ -73,13 +85,15 @@ internal sealed partial class GameRenderSession
                     controllerEnabled = enabled;
                 }
                 PrepareFramePacing();
+                Device.MarkLatency(inputFrameId, LatencyMarker.InputSample);
             },
-            InputPumped: () => Device.MarkLatency(inputFrameId, LatencyMarker.InputSample),
+            InputPumped: () => { },
             UpdateControllers: () =>
             {
-                long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                long started = performance.Recording ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
                 if (controllerEnabled) controllers.PrepareForEventPump();
-                performance.RecordGamepadUpdate(System.Diagnostics.Stopwatch.GetTimestamp() - started);
+                if (performance.Recording)
+                    performance.RecordGamepadUpdate(System.Diagnostics.Stopwatch.GetTimestamp() - started);
                 Device.MarkVendorInputStart(inputFrameId);
             },
             ControllersPumped: () =>
@@ -117,6 +131,7 @@ internal sealed partial class GameRenderSession
         Vintagestory.Client.ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
         temporal?.CurrentClient?.GuiComposers?.MarkAllDialogsForRecompose();
     }
+    /// <summary>Disposes controller ownership, stops text input and resets analog movement during session teardown.</summary>
     private void StopControllers()
     {
         var failures = new List<Exception>();

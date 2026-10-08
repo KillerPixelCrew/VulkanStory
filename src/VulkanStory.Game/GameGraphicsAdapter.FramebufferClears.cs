@@ -31,6 +31,9 @@ internal sealed partial class GameGraphicsAdapter
         Stated.SetDrawBuffers(target, mask);
     }
 
+    /// <summary>Translates the original draw-buffer selector array into a color-write mask for the currently bound target.</summary>
+    /// <param name="count">Number of selector entries to apply.</param>
+    /// <param name="selectors">Original GL-shaped color selectors for the current target.</param>
     internal void SelectDrawBuffers(int count, DrawBuffersEnum[] selectors)
     {
         int target = CurrentFramebufferHandle();

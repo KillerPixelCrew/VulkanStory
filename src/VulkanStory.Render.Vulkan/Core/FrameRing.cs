@@ -55,7 +55,9 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>The slot's position in the ring.</summary>
     public int Index { get; }
 
+    /// <summary>Owned command pool for this reusable in-flight frame slot.</summary>
     public CommandPool CommandPool { get; }
+    /// <summary>Current frame-slot recording command buffer.</summary>
     public CommandBuffer CommandBuffer { get; private set; }
 
     /// <summary>The Frame timeline value the command buffer being recorded signals when submitted.</summary>
@@ -480,9 +482,12 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>The frame associated with LastSignalledValue, including partial submits.</summary>
     public ulong LastSubmittedFrameId { get; private set; }
 
+    /// <summary>Bytes consumed within this frame slot's uniform-ring region.</summary>
     public ulong UniformBytesUsed => _cursor;
+    /// <summary>Byte capacity assigned to this frame slot's uniform-ring region.</summary>
     public ulong UniformCapacity => _regionSize;
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -566,6 +571,7 @@ internal sealed class FrameRing : IDisposable
         }
     }
 
+    /// <summary>Number of reusable frame slots retained by this ring.</summary>
     public int FramesInFlight => _slots.Length;
 
     /// <summary>
@@ -613,6 +619,7 @@ internal sealed class FrameRing : IDisposable
     /// <summary>The buffer every uniform descriptor points at.</summary>
     public Buffer UniformBuffer => _uniformRing.Handle;
 
+    /// <summary>Currently acquired frame slot; access requires an active ring frame.</summary>
     public FrameSlot Current => _index < 0
         ? throw new InvalidOperationException("BeginFrame has not been called yet")
         : _slots[_index];
@@ -644,6 +651,7 @@ internal sealed class FrameRing : IDisposable
     /// </summary>
     public ulong SubmitPartial() => Current.SubmitPartial();
 
+    /// <summary>Submits a partial frame with shared external timeline waits/signals while preserving frame identity.</summary>
     public ulong SubmitExternalPartial(Semaphore sharedFence, ulong waitValue,
         ulong signalValue) => Current.SubmitExternalPartial(sharedFence, waitValue, signalValue);
 
@@ -677,8 +685,10 @@ internal sealed class FrameRing : IDisposable
     /// </summary>
     public void DeferDeletion(IDisposable resource) => _retired.Retire(resource);
 
+    /// <summary>Resources awaiting frame/transfer completion before disposal.</summary>
     public int PendingDeletionCount => _retired.PendingCount;
 
+    /// <summary>Rejects cleanup after the retirement queue retained a terminal release failure.</summary>
     internal void RequireResourceLifetime() => _retired.RequireLifetime();
 
     /// <summary>Teardown only: release vendor handles before their runtime is shut down.</summary>
@@ -694,6 +704,7 @@ internal sealed class FrameRing : IDisposable
         return pending;
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         RequireResourceLifetime();
@@ -718,14 +729,17 @@ internal sealed class SubmitGate
     private Semaphore _semaphore;
     private ulong _value;
 
+    /// <summary>Sets the pending external timeline-semaphore gate for the next submission.</summary>
     public void Set(Semaphore semaphore, ulong value)
     {
         _semaphore = semaphore;
         _value = value;
     }
 
+    /// <summary>Clears the pending external submission-gate value.</summary>
     public void Clear() => _value = 0;
 
+    /// <summary>Consumes a pending external submission gate if its value is nonzero.</summary>
     public bool TryTake(out Semaphore semaphore, out ulong value)
     {
         semaphore = _semaphore;

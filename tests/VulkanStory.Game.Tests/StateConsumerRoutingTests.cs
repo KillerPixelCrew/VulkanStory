@@ -7,6 +7,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks original graphics state calls populating renderer-owned state through active patches.</summary>
+/// <remarks>Uses a device without a Vulkan context; no native draw is recorded.</remarks>
 public sealed class StateConsumerRoutingTests
 {
     [Fact]

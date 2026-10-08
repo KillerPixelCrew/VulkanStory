@@ -33,10 +33,11 @@ vec4 applyLightWithoutPointLight(vec4 sunColor, vec4 blockColor, float bGlow) {
 	float bBlock = (blockColor.r + blockColor.g + blockColor.b)/3;
 
 	// 1. Mix colors according to their brightness (very bright light has more influence on the color)
-	vec4 rgba = (2 * bSun * sunColor + bBlock * blockColor) / (2 * bSun + bBlock);
+	vec4 rgba = (2 * bSun * sunColor + bBlock * blockColor) / max(1e-6, 2 * bSun + bBlock);
+	blockLight = rgba.rgb;
 
 	// 2. Fix brightness
-	rgba *= max(bGlow, max(bSun, bBlock)) / ((rgba.r + rgba.g + rgba.b) / 3);
+	rgba *= max(bGlow, max(bSun, bBlock)) / max(1e-6, (rgba.r + rgba.g + rgba.b) / 3);
 
 	if (OPTIMUM_SHADOWQUALITY > 0) {
 		blockBrightness = clamp(max(bGlow, bBlock) - bSun/2, 0.0, 1.0);
@@ -61,8 +62,8 @@ vec4 getPointLightRgbv(vec3 worldPos, float sunlightIntensity) {
 		vec3 plc = pointLightColors[i];
 		if (plc.r + plc.g + plc.b < 0.02) continue;
 
-		vec3 color = normalize(plc);
-		float range = plc.r / color.r;
+		float range = length(plc);
+		vec3 color = plc / range;
 
 		// fugly hack for lightning
 		float extra = 1 - sunlightIntensity;

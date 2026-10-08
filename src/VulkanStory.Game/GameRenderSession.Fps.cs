@@ -15,13 +15,13 @@ internal sealed partial class GameRenderSession
         () => Interlocked.Increment(ref realPresents), count =>
         { Interlocked.Add(ref sdkPresents, count); Interlocked.Increment(ref sdkReports); },
         () => Interlocked.Increment(ref hostGeneratedPresents));
+    /// <summary>Samples real and reported/generated presentation counter rates over one-second intervals; these counters do not establish display scanout.</summary>
     private void SampleFps()
     {
         long now = Stopwatch.GetTimestamp(), real = Interlocked.Read(ref realPresents), output = Interlocked.Read(ref sdkPresents);
         string provider = frameGeneration!.EffectiveProvider;
         long reports = Interlocked.Read(ref sdkReports);
         long generated = Interlocked.Read(ref hostGeneratedPresents);
-        if (!ShowFpsCounter) { fpsSampleTicks = 0; return; }
         if (fpsSampleTicks == 0 || fpsProvider != provider)
         {
             fpsSampleTicks = now; previousRealPresents = real; previousSdkPresents = output; previousSdkReports = reports; fpsProvider = provider;

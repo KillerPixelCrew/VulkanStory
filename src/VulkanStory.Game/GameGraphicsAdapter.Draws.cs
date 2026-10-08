@@ -50,6 +50,9 @@ internal sealed partial class GameGraphicsAdapter
         if (TryDrawDecalPoolNative(mesh, starts, sizes, groups)) return;
         RecordStatedDraw((VAO)mesh, 1, starts, sizes, groups);
     }
+    /// <summary>Draws the adapter-owned mesh with the requested instance count and the current retained render state.</summary>
+    /// <param name="mesh">Owned original mesh reference.</param>
+    /// <param name="quantity">Instance count passed to the backend draw.</param>
     internal void RenderMeshInstanced(MeshRef mesh, int quantity)
     {
         RequireDevice();

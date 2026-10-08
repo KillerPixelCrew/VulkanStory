@@ -82,7 +82,6 @@ void main(void)
 		worldPos = applyGlobalWarping(worldPos);
 	}
 	if (dontWarpVertices == 2) {
-		int windMode = ((flags | addRenderFlags) >> WindModePosition) & 0xF;
 		vec4 newPos = applyVertexWarping(flags | addRenderFlags, worldPos);
 		worldPos = mix(worldPos, newPos, 0.25); // Hardcoded intensity downscale of 4x
 		worldPos = applyGlobalWarping(worldPos);

@@ -14,6 +14,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 internal static class GlEnums
 {
+    /// <summary>Maps the neutral texture format to Vulkan, using RGBA8 for unlisted values.</summary>
     public static Format TextureFormatFrom(VulkanStory.Contracts.TextureInternalFormat format) => format switch
     {
         VulkanStory.Contracts.TextureInternalFormat.Rgba16f => Format.R16G16B16A16Sfloat,
@@ -21,6 +22,7 @@ internal static class GlEnums
         VulkanStory.Contracts.TextureInternalFormat.DepthComponent32 => Format.D32Sfloat,
         _ => Format.R8G8B8A8Unorm,
     };
+    /// <summary>Maps neutral line modes to Vulkan; remaining modes use triangle lists.</summary>
     public static PrimitiveTopology TopologyFrom(VulkanStory.Contracts.MeshDrawMode mode) => mode switch
     {
         VulkanStory.Contracts.MeshDrawMode.Lines => PrimitiveTopology.LineList,
@@ -40,6 +42,7 @@ internal static class GlEnums
     private const int OneMinusDstColor = 0x0307;
     private const int SrcAlphaSaturate = 0x0308;
 
+    /// <summary>Maps retained GL blend-factor constants; unknown values use One.</summary>
     public static BlendFactor BlendFactorFrom(int glFactor) => glFactor switch
     {
         Zero => BlendFactor.Zero,
@@ -56,6 +59,7 @@ internal static class GlEnums
         _ => BlendFactor.One,
     };
 
+    /// <summary>Maps retained GL blend equations; unknown values use Add.</summary>
     public static BlendOp BlendOpFrom(int glEquation) => glEquation switch
     {
         0x8006 => BlendOp.Add,              // GL_FUNC_ADD
@@ -66,6 +70,7 @@ internal static class GlEnums
         _ => BlendOp.Add,
     };
 
+    /// <summary>Maps retained GL depth/stencil comparison constants; unknown values use Less.</summary>
     public static CompareOp CompareOpFrom(int glFunc) => glFunc switch
     {
         0x0200 => CompareOp.Never,
@@ -79,6 +84,7 @@ internal static class GlEnums
         _ => CompareOp.Less,
     };
 
+    /// <summary>Maps retained GL stencil operations; unknown values preserve stencil with Keep.</summary>
     public static StencilOp StencilOpFrom(int glOp) => glOp switch
     {
         0x1E00 => StencilOp.Keep,
@@ -129,6 +135,7 @@ internal static class GlEnums
         _ => Format.R8G8B8A8Unorm,
     };
 
+    /// <summary>Maps plain GL nearest/linear filters; unknown values use Nearest.</summary>
     public static Filter FilterFrom(int glFilter) => glFilter switch
     {
         0x2600 => Filter.Nearest,   // GL_NEAREST
@@ -158,6 +165,7 @@ internal static class GlEnums
     public static bool MinFilterUsesMipmaps(int glFilter) =>
         glFilter is 0x2700 or 0x2701 or 0x2702 or 0x2703;
 
+    /// <summary>Maps retained GL texture wrapping constants; unknown values use ClampToEdge.</summary>
     public static SamplerAddressMode AddressModeFrom(int glWrap) => glWrap switch
     {
         0x2901 => SamplerAddressMode.Repeat,             // GL_REPEAT

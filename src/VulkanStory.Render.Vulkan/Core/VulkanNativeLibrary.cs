@@ -11,7 +11,9 @@ internal static class VulkanNativeLibrary
     static VulkanNativeLibrary() => NativeLibrary.SetDllImportResolver(
         typeof(VulkanNativeLibrary).Assembly, Resolve);
 
+    /// <summary>Triggers the assembly's one-time native resolver initialization.</summary>
     internal static void EnsureRegistered() { }
+    /// <summary>Last exact NGX runtime path selected by this resolver, read with volatile semantics.</summary>
     internal static string? NgxPath => Volatile.Read(ref ngxPath);
 
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)

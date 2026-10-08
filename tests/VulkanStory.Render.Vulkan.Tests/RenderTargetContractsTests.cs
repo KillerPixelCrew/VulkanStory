@@ -7,6 +7,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Focused expectations carried from FramePlanningTests and UiSeparationTests.
+/// <summary>Checks CPU history-plan reuse and premultiplied UI blend-factor policy.</summary>
+/// <remarks>Does not create a target or validate visible UI composition.</remarks>
 public sealed class RenderTargetContractsTests
 {
     [Fact]

@@ -21,6 +21,17 @@ function Resolve-Child([string]$root, [string]$relative) {
     if (-not $path.StartsWith($root.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Payload path escapes directory: $relative"
     }
+    $node = $path
+    while ($node) {
+        if (Test-Path -LiteralPath $node) {
+            if (((Get-Item -LiteralPath $node -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Payload path traverses a reparse point: $node"
+            }
+        }
+        $parent = Split-Path $node -Parent
+        if ($parent -eq $node) { break }
+        $node = $parent
+    }
     return $path
 }
 function Is-OwnedPath([string]$relative) {
@@ -117,23 +128,50 @@ foreach ($relative in @($writes.Keys) + @($receiptRelative)) {
 # Dependencies and shaders precede Game, Bootstrap and finally the activation proxy.
 $last = @('VulkanStory/managed/VulkanStory.Game.dll','VulkanStory/managed/VulkanStory.Bootstrap.dll','hostfxr.dll')
 $order = @($writes.Keys | Where-Object { $_ -notin $last }) + @($last | Where-Object { $writes.Contains($_) })
+$newFiles = [ordered]@{}
+$receiptTemporary = $receiptPath + '.tmp'
+if (Test-Path -LiteralPath $receiptTemporary) { throw 'A receipt temporary file already exists; preserve it before retrying deployment.' }
 try {
     foreach ($relative in $order) {
         $destination = Resolve-Child $gameRoot $relative
         New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
+        if (-not (Test-Path -LiteralPath $destination)) {
+            $newFiles[$relative] = (Get-FileHash -LiteralPath $writes[$relative] -Algorithm SHA256).Hash
+        }
         [IO.File]::Copy($writes[$relative], $destination, $true)
     }
     $installed = [ordered]@{}
     foreach ($relative in $sources.Keys) { $installed[$relative] = (Get-FileHash -LiteralPath (Resolve-Child $gameRoot $relative) -Algorithm SHA256).Hash }
+    # Files omitted by a newer package remain owned until explicitly removed.
+    foreach ($relative in $owned.Keys) {
+        if (-not $installed.Contains($relative) -and (Test-Path -LiteralPath (Resolve-Child $gameRoot $relative) -PathType Leaf)) {
+            $installed[$relative] = $owned[$relative]
+        }
+    }
     if (Test-Path -LiteralPath $versionPath) {
         if ((Get-FileHash -LiteralPath $versionPath -Algorithm SHA256).Hash -ne $versionHash) { throw 'Existing version proxy changed during deployment.' }
     } elseif ($versionHash) { throw 'Existing version proxy disappeared during deployment.' }
     [ordered]@{ schema=1; product='VulkanStory'; profile=$package.profile; acceptance=$package.acceptance; files=$installed;
         backupDirectory=$backupRoot; existingVersionProxySha256=$versionHash } |
-        ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptPath -Encoding utf8
+        ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $receiptTemporary -Encoding utf8
+    Move-Item -LiteralPath $receiptTemporary -Destination $receiptPath -Force
 } catch {
-    # Restore overwritten files; keep new files for diagnosis. No deletion is performed.
-    foreach ($relative in $backedUp.Keys) { Copy-Item -LiteralPath (Resolve-Child $backupRoot $relative) -Destination (Resolve-Child $gameRoot $relative) -Force }
+    # Retire only unchanged new bytes from this batch; preserve them for diagnosis.
+    foreach ($relative in $newFiles.Keys) {
+        $created = Resolve-Child $gameRoot $relative
+        if ((Test-Path -LiteralPath $created -PathType Leaf) -and
+            (Get-FileHash -LiteralPath $created -Algorithm SHA256).Hash -eq $newFiles[$relative]) {
+            $failedCopy = Resolve-Child $backupRoot ('failed/' + $relative)
+            New-Item -ItemType Directory -Path (Split-Path $failedCopy -Parent) -Force | Out-Null
+            Move-Item -LiteralPath $created -Destination $failedCopy
+        }
+    }
+    if (Test-Path -LiteralPath $receiptTemporary -PathType Leaf) {
+        Move-Item -LiteralPath $receiptTemporary -Destination (Resolve-Child $backupRoot 'failed-install.json')
+    }
+    # Restore dependencies and receipt before restoring activation.
+    $restoreOrder = @($backedUp.Keys | Where-Object { $_ -notin $last }) + @($last | Where-Object { $backedUp.Contains($_) })
+    foreach ($relative in $restoreOrder) { Copy-Item -LiteralPath (Resolve-Child $backupRoot $relative) -Destination (Resolve-Child $gameRoot $relative) -Force }
     throw
 }
 Write-Host "Installed candidate in $gameRoot. Backups: $backupRoot. No game launch or runtime acceptance occurred."

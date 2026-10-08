@@ -1,10 +1,10 @@
-# Current port status — 2026-10-01
+# Historical port checkpoint — 2026-10-01
 
-The [ROADMAP](ROADMAP.md) is authoritative for status and remaining work. The bulk
+The [ROADMAP](ROADMAP.md) and [development evidence](development-evidence.md) are authoritative for current status and payloads. The descriptions below retain the October-1 checkpoint; later Options/controller work supersedes its pending/source-only statements. The bulk
 renderer/provider/SDL source migration is integrated; full feature parity remains
 open. Detailed chronology is retained in linked records and the archived plan.
 
-## Implemented and current evidence
+## Implementation and evidence at this checkpoint
 
 | Area | Current state | Remaining roadmap items |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ open. Detailed chronology is retained in linked records and the archived plan.
 
 ## Payload identities
 
-Latest candidate: [delivery-refresh-20261001-223159](validation-delivery-refresh-2026-10-01-01.md).
+Candidate at this checkpoint: [delivery-refresh-20261001-223159](validation-delivery-refresh-2026-10-01-01.md).
 Managed build has zero warnings/errors; stage/archive/script syntax checks passed.
 The later controller world/damage-ownership fix is **source-only** and absent from
 that ZIP (PORT-01). Installed Game DLL inspected during regroup was older (15:37)

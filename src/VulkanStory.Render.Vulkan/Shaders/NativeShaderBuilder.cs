@@ -13,10 +13,13 @@ namespace VulkanStory.Render.Vulkan.Shaders;
 /// <summary>What one build produced: the manifest, the SPIR-V files by name, and every error.</summary>
 internal sealed class NativeShaderBuildResult
 {
+    /// <summary>Manifest assembled from successfully compiled native program variants.</summary>
     public NativeShaderManifest Manifest = new();
     /// <summary>SPIR-V file name (relative to the manifest directory) to bytes.</summary>
     public SortedDictionary<string, byte[]> Files = new(StringComparer.Ordinal);
+    /// <summary>Compiler, reflection and interface-contract failures accumulated during the build.</summary>
     public List<string> Errors = new();
+    /// <summary>Whether no native-shader build errors were recorded.</summary>
     public bool Success => Errors.Count == 0;
 }
 
@@ -59,6 +62,7 @@ internal sealed class NativeShaderBuilder
 
     private readonly ShaderCompiler _compiler;
 
+    /// <summary>Borrows the shader compiler used for all native variant compilation.</summary>
     public NativeShaderBuilder(ShaderCompiler compiler)
     {
         _compiler = compiler;
@@ -563,35 +567,7 @@ internal sealed class NativeShaderBuilder
     }
 
     /// <summary>The text with <c>//</c> and <c>/* */</c> comments blanked out, line breaks kept.</summary>
-    internal static string StripComments(string text)
-    {
-        var builder = new StringBuilder(text.Length);
-        int i = 0;
-        while (i < text.Length)
-        {
-            if (text[i] == '/' && i + 1 < text.Length && text[i + 1] == '/')
-            {
-                while (i < text.Length && text[i] != '\n') i++;
-            }
-            else if (text[i] == '/' && i + 1 < text.Length && text[i + 1] == '*')
-            {
-                i += 2;
-                while (i < text.Length && !(text[i] == '*' && i + 1 < text.Length && text[i + 1] == '/'))
-                {
-                    if (text[i] == '\n') builder.Append('\n');
-                    i++;
-                }
-                i = Math.Min(i + 2, text.Length);
-                builder.Append(' ');
-            }
-            else
-            {
-                builder.Append(text[i]);
-                i++;
-            }
-        }
-        return builder.ToString();
-    }
+    internal static string StripComments(string text) => GlslParser.StripComments(text);
 
     // ------------------------------------------------------------------ output
 
@@ -703,6 +679,7 @@ public static class NativeShaderTool
         "       VulkanStory.Shaders.Compiler --verify <source dir> <output dir>\n" +
         "       VulkanStory.Shaders.Compiler --single <program> <source dir> <output dir>";
 
+    /// <summary>Executes the native-shader builder command-line entry point with supplied output/error writers.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         string mode = args.Length > 0 ? args[0] : "";

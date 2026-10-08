@@ -11,6 +11,11 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeMeshPass nativeSky = new("sky", ["modelViewMatrix"], ["sky", "glow"]);
+    /// <summary>Draws the sky dome with original sky/glow inputs and model-view transform through a compatible native sky pass.</summary>
+    /// <param name="mesh">Owned original sky-dome mesh.</param>
+    /// <param name="sky">Original sky texture backend identifier.</param>
+    /// <param name="glow">Original glow texture backend identifier.</param>
+    /// <param name="modelView">Original current sky model-view matrix.</param>
     internal void RenderSkyDome(MeshRef mesh, int sky, int glow, float[] modelView)
     {
         var renderer = RequireDevice();

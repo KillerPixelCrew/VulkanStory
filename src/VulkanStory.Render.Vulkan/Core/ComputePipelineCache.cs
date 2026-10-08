@@ -18,6 +18,7 @@ internal readonly record struct ComputeSlot(uint Binding, ComputeSlotKind Kind);
 /// <summary>What a compute program is built from.</summary>
 internal sealed class ComputeProgramDescription
 {
+    /// <summary>Compute program diagnostic name.</summary>
     public string Name = "compute";
 
     /// <summary>The compiled module (<see cref="Shaders.ShaderCompiler.CompileCompute" />), entry point <c>main</c>.</summary>
@@ -36,6 +37,7 @@ internal sealed class ComputeProgramDescription
     /// two can never disagree.
     /// </summary>
     public uint LocalSizeX = 8;
+    /// <summary>SPIR-V workgroup size in Y.</summary>
     public uint LocalSizeY = 8;
 }
 
@@ -57,6 +59,7 @@ internal static class SpirvLocalSize
     private const uint DecorationBuiltIn = 11;
     private const uint BuiltInWorkgroupSize = 25;
 
+    /// <summary>Reads the compute entry-point local workgroup dimensions from a SPIR-V module.</summary>
     public static bool TryRead(ReadOnlySpan<byte> spirv, out uint x, out uint y, out uint z)
     {
         x = y = z = 0;
@@ -119,16 +122,26 @@ internal sealed unsafe class ComputeProgram : IDisposable
     private readonly Dictionary<SpecializationKey, Pipeline> _pipelines = new();
     private bool _disposed;
 
+    /// <summary>Renderer compute-program identity.</summary>
     public int Id { get; }
+    /// <summary>Compute program diagnostic name.</summary>
     public string Name { get; }
+    /// <summary>Owned compiled compute shader module.</summary>
     public ShaderModule Module { get; }
+    /// <summary>Owned descriptor-set layout derived from compute slots.</summary>
     public DescriptorSetLayout SetLayout { get; }
+    /// <summary>Owned Vulkan pipeline layout for compute descriptors and push constants.</summary>
     public PipelineLayout Layout { get; }
+    /// <summary>Declared descriptor bindings required by this compute program.</summary>
     public ComputeSlot[] Slots { get; }
+    /// <summary>Byte size reserved for compute push constants.</summary>
     public uint PushConstantBytes { get; }
+    /// <summary>SPIR-V workgroup size in X.</summary>
     public uint LocalSizeX { get; }
+    /// <summary>SPIR-V workgroup size in Y.</summary>
     public uint LocalSizeY { get; }
 
+    /// <summary>Number of specialization-specific native compute pipelines retained by the program.</summary>
     public int PipelineCount => _pipelines.Count;
 
     public ComputeProgram(VulkanContext context, int id, ComputeProgramDescription description)
@@ -224,9 +237,11 @@ internal sealed unsafe class ComputeProgram : IDisposable
         Layout = layout;
     }
 
+    /// <summary>Maps a compute slot kind to its Vulkan descriptor type.</summary>
     public static DescriptorType TypeOf(ComputeSlotKind kind) =>
         kind == ComputeSlotKind.Storage ? DescriptorType.StorageImage : DescriptorType.CombinedImageSampler;
 
+    /// <summary>Looks up a declared compute descriptor slot by binding number.</summary>
     public bool TryGetSlot(uint binding, out ComputeSlot slot)
     {
         foreach (ComputeSlot candidate in Slots)
@@ -305,6 +320,7 @@ internal sealed unsafe class ComputeProgram : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -331,10 +347,13 @@ internal sealed unsafe class ComputeProgram : IDisposable
             _hash = hash.ToHashCode();
         }
 
+        /// <inheritdoc/>
         public bool Equals(SpecializationKey other) =>
             _hash == other._hash && _values.AsSpan().SequenceEqual(other._values);
 
+        /// <inheritdoc/>
         public override bool Equals(object? obj) => obj is SpecializationKey other && Equals(other);
+        /// <inheritdoc/>
         public override int GetHashCode() => _hash;
     }
 }
@@ -348,20 +367,27 @@ internal sealed class ComputePipelineCache : IDisposable
 {
     private readonly VulkanContext _context;
     private readonly Func<PipelineCache> _driverCache;
+    private readonly object _driverCacheLock;
     private readonly Dictionary<int, ComputeProgram> _programs = new();
     private int _nextId = 1;
     private bool _disposed;
 
-    public ComputePipelineCache(VulkanContext context, Func<PipelineCache> driverCache)
+    public ComputePipelineCache(VulkanContext context, Func<PipelineCache> driverCache, object driverCacheLock)
     {
         _context = context;
         _driverCache = driverCache;
+        _driverCacheLock = driverCacheLock;
     }
 
+    /// <summary>Number of registered live compute programs.</summary>
     public int ProgramCount => _programs.Count;
+    /// <summary>Number of recorded cache hits.</summary>
     public long Hits { get; private set; }
+    /// <summary>Number of recorded cache misses.</summary>
     public long Misses { get; private set; }
 
+    /// <summary>Creates and registers a compute program with its module and layouts.</summary>
+    /// <returns>Renderer compute-program ID.</returns>
     public int Create(ComputeProgramDescription description)
     {
         int id = _nextId++;
@@ -369,19 +395,25 @@ internal sealed class ComputePipelineCache : IDisposable
         return id;
     }
 
+    /// <summary>Returns the registered compute program, or null for an unknown ID.</summary>
     public ComputeProgram? Get(int id) => _programs.TryGetValue(id, out ComputeProgram? program) ? program : null;
 
     /// <summary>Removes a program; the caller retires it on the timeline (a submitted frame may still bind it).</summary>
     public ComputeProgram? Remove(int id) => _programs.Remove(id, out ComputeProgram? program) ? program : null;
 
+    /// <summary>Returns or compiles the compute pipeline for the supplied specialization values.</summary>
     public Pipeline PipelineFor(ComputeProgram program, ReadOnlySpan<uint> specialization)
     {
-        Pipeline pipeline = program.PipelineFor(specialization, _driverCache(), out bool compiled);
-        if (compiled) Misses++;
-        else Hits++;
-        return pipeline;
+        lock (_driverCacheLock)
+        {
+            Pipeline pipeline = program.PipelineFor(specialization, _driverCache(), out bool compiled);
+            if (compiled) Misses++;
+            else Hits++;
+            return pipeline;
+        }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

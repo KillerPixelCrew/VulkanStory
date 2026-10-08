@@ -6,6 +6,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Checks retained native allocation and mapped writes; does not render.</summary>
 public static unsafe class VulkanMeshPreflight
 {
+    /// <summary>Runs the explicit mesh allocation/upload and release preflight.</summary>
+    /// <remarks>This method creates native resources and may submit GPU work; it is an opt-in validation entry point.</remarks>
+    /// <returns>Null on successful completion, otherwise the failure detail.</returns>
     public static string? Check()
     {
         try

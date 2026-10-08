@@ -6,6 +6,8 @@ using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
+/// <summary>Redirects pinned sun, moon and night-sky mesh calls to the session graphics adapter.</summary>
+/// <remarks>Patch discovery and installation belong to startup. Callbacks use the committed routing predicate; game object identity remains in the integration assembly.</remarks>
 internal static class CelestialConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-celestial";
@@ -20,6 +22,10 @@ internal static class CelestialConsumerPatches
         if (body.Count(instruction => instruction.Calls(Draw)) != (method.Equals(Night) ? 1 : 2))
             throw new InvalidOperationException("Original celestial mesh draw anchors changed: " + method.Name);
     }
+    /// <summary>Creates the dormant patch group for this consumer path; validation and installation remain separate transaction steps.</summary>
+    /// <param name="owner">Process runtime that owns this group and its session.</param>
+    /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
+    /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner); bool attempted = false;

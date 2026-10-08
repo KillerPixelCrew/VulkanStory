@@ -65,6 +65,7 @@ internal sealed partial class GameGraphicsAdapter
     /// AO first, vanilla SSAO and its blur when that stood down, then the composite - under the
     /// vanilla branch while TAA or an upscaler is active, under the GTAO branch always.
     /// </summary>
+    /// <param name="projectMatrix">Original scene projection used to reconstruct AO camera coordinates.</param>
     internal void RenderAmbientOcclusionPost(float[] projectMatrix)
     {
         AmbientOcclusionInScene = false;

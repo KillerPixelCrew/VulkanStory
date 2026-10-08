@@ -11,6 +11,8 @@ internal sealed partial class GameRenderSession
     private int controllerInventoryStep, controllerInventoryQuantity;
     private long controllerInventoryNextFrame;
 
+    /// <summary>Arms the isolated inventory diagnostic for this client only when its explicit harness mode is requested.</summary>
+    /// <param name="world">Original loaded client under the isolated diagnostic.</param>
     private void StartControllerInventoryDiagnostic(ClientMain world)
     {
         if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Inventory diagnostics require the isolated harness.");

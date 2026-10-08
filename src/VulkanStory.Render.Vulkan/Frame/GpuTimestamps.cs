@@ -56,6 +56,7 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     private long _dropped;
     private bool _disposed;
 
+    /// <summary>Timestamp query indices and frame identity for one in-flight slot.</summary>
     private sealed class SlotMarks
     {
         public QueryPool Pool;
@@ -75,12 +76,21 @@ internal sealed unsafe class GpuTimestamps : IDisposable
             QueryType = QueryType.Timestamp,
             QueryCount = MarksPerFrame,
         };
-        for (int i = 0; i < framesInFlight; i++)
+        try
         {
-            var slot = new SlotMarks();
-            VulkanResult.Check(context.Api.CreateQueryPool(context.Device, &info, null, out slot.Pool),
-                "vkCreateQueryPool for GPU timestamps");
-            _slots[i] = slot;
+            for (int i = 0; i < framesInFlight; i++)
+            {
+                var slot = new SlotMarks();
+                VulkanResult.Check(context.Api.CreateQueryPool(context.Device, &info, null, out slot.Pool),
+                    "vkCreateQueryPool for GPU timestamps");
+                _slots[i] = slot;
+            }
+        }
+        catch
+        {
+            foreach (SlotMarks? slot in _slots)
+                if (slot != null && slot.Pool.Handle != 0) context.Api.DestroyQueryPool(context.Device, slot.Pool, null);
+            throw;
         }
     }
 
@@ -265,6 +275,7 @@ internal sealed unsafe class GpuTimestamps : IDisposable
         return line.ToString();
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

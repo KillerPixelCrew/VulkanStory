@@ -6,6 +6,8 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Sequential C-ABI constants and DX12 resources for one FSR 4 evaluation.</summary>
+/// <remarks>Pointer-sized resource fields and shared-fence values must match the native bridge layout.</remarks>
 [StructLayout(LayoutKind.Sequential)]
 internal struct Fsr4Frame
 {
@@ -45,6 +47,10 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
 
     private nint Export(string name) => NativeLibrary.GetExport(module, name);
 
+    /// <summary>Loads the FSR 4 bridge only when Windows and its sibling signed runtime are available.</summary>
+    /// <param name="bridge">Loaded module handle on success; owned by the backend until shutdown.</param>
+    /// <param name="reason">Availability or load-failure detail.</param>
+    /// <returns>Whether the required bridge exports were found.</returns>
     public static bool TryLoad(out nint bridge, out string reason)
     {
         bridge = 0;
@@ -77,6 +83,8 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         }
     }
 
+    /// <summary>Queries native FSR 4 adapter support using a borrowed Vulkan physical-device handle.</summary>
+    /// <returns>The native probe result; zero indicates support.</returns>
     public static int Probe(nint bridge, nint physical)
     {
         var probe = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(
@@ -84,6 +92,13 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         return probe(physical);
     }
 
+    /// <summary>Creates the DX12 provider context for the selected adapter and resolution plan.</summary>
+    /// <param name="bridge">Bridge module that must outlive the returned runtime.</param>
+    /// <param name="physical">Borrowed selected Vulkan physical-device handle.</param>
+    /// <param name="plan">Render and display extents used to create the provider.</param>
+    /// <param name="runtime">Created owner, or an owner retained when initialization cleanup fails.</param>
+    /// <param name="reason">Creation or cleanup-failure detail.</param>
+    /// <returns>Whether the context was created successfully.</returns>
     public static bool TryCreate(nint bridge, nint physical, in UpscalerPlan plan,
         out Fsr4Runtime? runtime, out string reason)
     {
@@ -125,6 +140,7 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         }
     }
 
+    /// <inheritdoc/>
     public int CreateSharedImage(uint width, uint height, Format format, bool writable,
         out nint sharedHandle, out nint resource)
     {
@@ -135,10 +151,12 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         resource = image;
         return code;
     }
+    /// <inheritdoc/>
     public void ReleaseImage(nint resource)
     {
         if (resource != 0) releaseImage(resource);
     }
+    /// <inheritdoc/>
     public int CreateSharedFence(out nint sharedHandle)
     {
         nint handle = 0;
@@ -146,12 +164,19 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         sharedHandle = handle;
         return code;
     }
+    /// <summary>Dispatches the native DX12 reconstruction using borrowed resources and shared-fence values.</summary>
+    /// <returns>The bridge result code; zero indicates success.</returns>
     public int Evaluate(in Fsr4Frame frame)
     {
         Fsr4Frame copy = frame;
         return context != 0 ? evaluate(context, &copy) : -1;
     }
+    /// <summary>Waits for the native DX12 queue to finish its tracked work.</summary>
+    /// <returns>Zero on successful completion; a nonzero bridge code on failure or an absent context.</returns>
     public int WaitIdle() => context != 0 ? waitIdle(context) : -1;
+    /// <summary>Prepares checked native-context release before dependent imported resources are destroyed.</summary>
+    /// <remarks>Release failure is retained and subsequent release attempts throw without relinquishing ownership.</remarks>
+    /// <exception cref="InvalidOperationException">The native bridge cannot safely prepare release, or an earlier release failed.</exception>
     internal void PrepareRelease()
     {
         if (releaseFailure != null)
@@ -164,6 +189,7 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
         }
         catch (Exception failure) { releaseFailure = failure; throw; }
     }
+    /// <inheritdoc/>
     public void Dispose()
     {
         PrepareRelease();

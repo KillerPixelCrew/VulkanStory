@@ -5,6 +5,8 @@ using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Runs FidelityFX 4 through a DX12 bridge on the Vulkan-selected adapter.</summary>
+/// <remarks>Owns the bridge module, DX12 runtime, shared image sets and renderer motion texture. Shared resources drain both GPU APIs before release.</remarks>
 internal sealed class Fsr4Backend : IUpscalerBackend
 {
     private readonly Action<string> log;
@@ -17,17 +19,24 @@ internal sealed class Fsr4Backend : IUpscalerBackend
     private int motion;
     private bool ready, firstFrame;
 
+    /// <inheritdoc/>
     public string Id => "fsr4";
+    /// <inheritdoc/>
     public bool Active => ready && Unavailable == null;
+    /// <inheritdoc/>
     public string? Unavailable { get; private set; }
+    /// <inheritdoc/>
     public IDeviceRequirementContributor? Requirements => null;
 
+    /// <summary>Loads the signed-runtime bridge from the selected private native directory.</summary>
+    /// <param name="log">Destination for provider creation and dispatch failures.</param>
     public Fsr4Backend(Action<string> log)
     {
         this.log = log;
         if (!Fsr4Runtime.TryLoad(out bridge, out string reason)) Unavailable = reason;
     }
 
+    /// <inheritdoc/>
     public bool BringUp(IUpscalerDevice target, nint instance, nint physicalDevice, nint logicalDevice)
     {
         if (bridge == 0) return false;
@@ -42,6 +51,7 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         return true;
     }
 
+    /// <inheritdoc/>
     public bool TryPlan(int displayWidth, int displayHeight, string quality,
         float lodBiasOffset, out UpscalerPlan plan)
     {
@@ -63,6 +73,7 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         return plan.IsValid;
     }
 
+    /// <inheritdoc/>
     public bool Evaluate(in UpscalerPlan plan, in UpscalerFrame frame, out string? error)
     {
         error = null;
@@ -92,6 +103,7 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         return Fail("FSR 4 DX12 dispatch failed (" + result.ToString("X8") + ")", out error);
     }
 
+    /// <summary>Persists and logs a provider-unavailability reason while returning a failed operation.</summary>
     private bool Fail(string reason, out string? error)
     {
         Unavailable = reason;
@@ -100,6 +112,7 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         return false;
     }
 
+    /// <inheritdoc/>
     public void RetireFeature()
     {
         // A shared DX12 image can still be used by either GPU queue. Wait for
@@ -112,11 +125,13 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         initializedPlan = default;
     }
 
+    /// <inheritdoc/>
     public void Shutdown()
     {
         RetireFeature();
         ready = false;
         if (bridge != 0) { NativeLibrary.Free(bridge); bridge = 0; }
     }
+    /// <inheritdoc/>
     public void Dispose() => Shutdown();
 }

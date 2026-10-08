@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Contracts.Tests;
 
+/// <summary>Checks reconstruction dimensions/mip-bias selection and the provider frame's inverse-view size gate.</summary>
+/// <remarks>Contract-only assertions do not execute reconstruction or frame generation.</remarks>
 public sealed class ProviderFrameContractsTests
 {
     [Fact]

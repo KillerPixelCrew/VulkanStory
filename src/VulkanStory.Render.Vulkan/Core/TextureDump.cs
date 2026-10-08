@@ -42,6 +42,7 @@ internal static class TextureDump
     private static bool _wantsTerrain =
         string.Equals(Requested?.Trim(), "terrain", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Whether the opt-in terrain dump is still waiting to latch the first terrain texture bindings.</summary>
     public static bool WantsTerrain => _wantsTerrain;
 
     /// <summary>Records the textures a chunk draw is using, and stops asking.</summary>
@@ -52,7 +53,6 @@ internal static class TextureDump
         if (linearTexture > 0 && linearTexture != baseTexture) Pending.Add(linearTexture);
     }
 
-    /// <summary>True while any requested texture has not been written yet.</summary>
     /// <summary>
     /// Frames to let pass before writing anything. VULKANSTORY_DUMP_AFTER_FRAMES
     /// (default 0) lets a dump of a frame target wait until a world is on
@@ -80,6 +80,7 @@ internal static class TextureDump
     private static double SecondsSinceStart =>
         (System.Diagnostics.Stopwatch.GetTimestamp() - StartedAt) / (double)System.Diagnostics.Stopwatch.Frequency;
 
+    /// <summary>Whether requested texture IDs remain and both configured capture delays have elapsed.</summary>
     public static bool Wanted =>
         Pending.Count > 0 && _framesSeen >= StartAfterFrames && SecondsSinceStart >= StartAfterSeconds;
 
@@ -168,6 +169,12 @@ internal static class TextureDump
         ReadOnlySpan<byte> data)
     {
         if (width <= 0 || height <= 0) return false;
+
+        // Refuse formats this PPM visualization does not decode rather than
+        // indexing arbitrary texels as four-byte RGBA.
+        if (format is not (Format.R16G16B16A16Sfloat or Format.R16Sfloat or
+            Format.R32Sfloat or Format.D32Sfloat or Format.R8Unorm or Format.R8Uint or Format.R8Srgb or
+            Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb or Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb)) return false;
 
         int bytesPerPixel = BytesPerTexel(format);
         if (data.Length < width * height * bytesPerPixel) return false;

@@ -6,6 +6,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks texture patch ownership failure before native GL access and matching removal.</summary>
+/// <remarks>Does not allocate, upload, or sample textures.</remarks>
 public sealed class TextureConsumerRoutingTests
 {
     [Fact]

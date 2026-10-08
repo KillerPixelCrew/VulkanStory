@@ -10,6 +10,7 @@ using ErrorCallback = OpenTK.Windowing.GraphicsLibraryFramework.GLFWCallbacks.Er
 
 namespace VulkanStory.Game;
 
+/// <summary>Replaces pinned platform construction and first-window ownership seams, leaving renderer creation outside the native loader lock.</summary>
 internal static unsafe class StartupWindowRoutingPatches
 {
     private const string ConstructOwner = "vulkanstory.routing.platform-construction";

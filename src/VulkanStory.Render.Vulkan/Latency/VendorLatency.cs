@@ -5,6 +5,7 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
+/// <summary>Selected Vulkan vendor-latency extension implementation.</summary>
 internal enum VendorLatencyKind { None, Reflex, AntiLag }
 
 /// <summary>Pairs one AMD INPUT mark with the same frame's PRESENT mark.</summary>
@@ -14,6 +15,7 @@ internal sealed class AmdAntiLagFrameKey
     private bool _inputMarked;
     private bool _presentOwed;
 
+    /// <summary>Starts an AMD frame key and clears any input/present pairing from the previous frame.</summary>
     public void BeginFrame(ulong frameId)
     {
         _frameId = frameId;
@@ -21,6 +23,7 @@ internal sealed class AmdAntiLagFrameKey
         _presentOwed = false;
     }
 
+    /// <summary>Accepts the first input boundary for the current AMD frame and schedules its paired present marker.</summary>
     public bool InputStart(ulong frameId)
     {
         if (frameId == 0 || frameId != _frameId || _inputMarked) return false;
@@ -29,6 +32,7 @@ internal sealed class AmdAntiLagFrameKey
         return true;
     }
 
+    /// <summary>Consumes an outstanding AMD present boundary only for the matching current frame.</summary>
     public bool PresentStart(ulong frameId)
     {
         if (frameId != _frameId || !_presentOwed) return false;
@@ -36,6 +40,7 @@ internal sealed class AmdAntiLagFrameKey
         return true;
     }
 
+    /// <summary>Cancels an outstanding AMD present marker when no present will occur.</summary>
     public void Cancel() => _presentOwed = false;
 }
 
@@ -45,17 +50,22 @@ internal sealed unsafe class VendorLatencyRequirements : IDeviceRequirementContr
     private readonly bool _headless;
     private readonly string _choice;
 
+    /// <summary>Reads the vendor-latency selection and disables extension requests for a headless device.</summary>
     public VendorLatencyRequirements(bool headless)
     {
         _headless = headless;
         _choice = Environment.GetEnvironmentVariable("VULKANSTORY_VULKAN_LATENCY")?.Trim().ToLowerInvariant() ?? "auto";
     }
 
+    /// <inheritdoc/>
     public string Name => "vendor latency";
+    /// <summary>Vendor implementation selected or loaded for this device.</summary>
     public VendorLatencyKind Kind { get; private set; }
 
+    /// <inheritdoc/>
     public void ContributeInstanceExtensions(InstanceRequirements requirements) { }
 
+    /// <inheritdoc/>
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
         if (_headless || _choice is "off" or "none" or "0") return;
@@ -122,6 +132,8 @@ internal sealed unsafe class VendorLatency : IDisposable
             "vkCreateSemaphore for Reflex sleep");
     }
 
+    /// <summary>Loads extension entry points and creates the selected vendor-latency owner.</summary>
+    /// <returns>A latency owner, or null when the selected extension functions are unavailable.</returns>
     public static VendorLatency? TryCreate(VulkanContext context, VendorLatencyKind kind)
     {
         if (kind == VendorLatencyKind.Reflex)
@@ -137,9 +149,14 @@ internal sealed unsafe class VendorLatency : IDisposable
         return null;
     }
 
+    /// <summary>Vendor implementation selected or loaded for this device.</summary>
     public VendorLatencyKind Kind => _nv != null ? VendorLatencyKind.Reflex : VendorLatencyKind.AntiLag;
+    /// <summary>Whether the active vendor mode currently owns the renderer frame cap.</summary>
     public bool OwnsFrameCap => !_disposed && _mode != 0 && (_amd != null || _reflexReady);
+    /// <summary>Optional renderer-owned sink for a failed native pacing operation.</summary>
+    internal Action<string>? Failure { get; set; }
 
+    /// <summary>Clamps latency mode to Off, On or Boost and applies it to the active extension.</summary>
     public void SetMode(int mode)
     {
         int next = Math.Clamp(mode, 0, 2);
@@ -153,6 +170,7 @@ internal sealed unsafe class VendorLatency : IDisposable
         }
     }
 
+    /// <summary>Stores a nonnegative FPS cap and updates Reflex mode when changed.</summary>
     public void SetFrameCap(int maxFps)
     {
         int cap = Math.Max(0, maxFps);
@@ -161,6 +179,8 @@ internal sealed unsafe class VendorLatency : IDisposable
         if (_nv != null) ApplyReflexMode();
     }
 
+    /// <summary>Adds stable Reflex latency-mode creation data to the caller-owned swapchain feature chain.</summary>
+    /// <remarks>The returned pointer is owned by this object and remains valid until disposal.</remarks>
     public void* ChainSwapchainCreateInfo(void* next)
     {
         if (_nv == null) return next;
@@ -179,12 +199,14 @@ internal sealed unsafe class VendorLatency : IDisposable
     private readonly SwapchainLatencyCreateInfoNV* _swapchainCreateInfo =
         (SwapchainLatencyCreateInfoNV*)System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(SwapchainLatencyCreateInfoNV));
 
+    /// <summary>Attaches the newly created swapchain and applies the current Reflex mode.</summary>
     public void OnSwapchainCreated(SwapchainKHR swapchain)
     {
         _swapchain = swapchain;
         ApplyReflexMode();
     }
 
+    /// <summary>Forgets the retired swapchain and cancels pending latency marker pairing.</summary>
     public void OnSwapchainRetired()
     {
         _swapchain = default;
@@ -205,6 +227,8 @@ internal sealed unsafe class VendorLatency : IDisposable
         _reflexReady = _nv.SetLatencySleepMode(_context.Device, _swapchain, ref mode) == Result.Success;
     }
 
+    /// <summary>Begins latency frame identity and runs supported Reflex sleep before input polling.</summary>
+    /// <remarks>Reflex semaphore waiting is bounded to one second. AMD records identity here and emits its input marker at the separate input boundary.</remarks>
     public void Sleep(ulong frameId, ulong presentId)
     {
         if (_disposed) return;
@@ -231,7 +255,12 @@ internal sealed unsafe class VendorLatency : IDisposable
             Value = value,
         };
         Result result = _nv.LatencySleep(_context.Device, _swapchain, ref sleep);
-        if (result != Result.Success) return;
+        if (result != Result.Success)
+        {
+            _reflexReady = false;
+            Failure?.Invoke("Native NVIDIA latency sleep failed: " + result);
+            return;
+        }
         Semaphore semaphore = _sleepSemaphore;
         var wait = new SemaphoreWaitInfo
         {
@@ -241,15 +270,22 @@ internal sealed unsafe class VendorLatency : IDisposable
             PValues = &value,
         };
         // Bound the wait so a driver failure cannot freeze the client forever.
-        _context.Api.WaitSemaphores(_context.Device, &wait, 1_000_000_000UL);
+        Result completion = _context.Api.WaitSemaphores(_context.Device, &wait, 1_000_000_000UL);
+        if (completion != Result.Success)
+        {
+            _reflexReady = false;
+            Failure?.Invoke("Native NVIDIA latency sleep did not complete: " + completion);
+        }
     }
 
+    /// <summary>Accepts the first input boundary for the current AMD frame and schedules its paired present marker.</summary>
     public void InputStart(ulong frameId)
     {
         if (_disposed || _amd == null || _mode == 0 || !_amdFrameKey.InputStart(frameId)) return;
         AntiLagUpdate(AntiLagStageAMD.InputAmd, frameId, modeOnly: false);
     }
 
+    /// <summary>Emits the supported vendor marker for the current frame or consumes the matching AMD present boundary.</summary>
     public void Marker(ulong frameId, LatencyMarker marker)
     {
         if (_disposed) return;
@@ -271,6 +307,7 @@ internal sealed unsafe class VendorLatency : IDisposable
         _nv.SetLatencyMarker(_context.Device, _swapchain, ref info);
     }
 
+    /// <summary>Cancels an outstanding AMD present marker when no present will occur.</summary>
     public void SkipPresent() => _amdFrameKey.Cancel();
 
     private void AntiLagUpdate(AntiLagStageAMD stage, ulong frameId, bool modeOnly)
@@ -291,6 +328,7 @@ internal sealed unsafe class VendorLatency : IDisposable
         _amd!.AntiLagUpdate(_context.Device, ref data);
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;

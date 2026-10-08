@@ -7,6 +7,8 @@ using Xunit;
 
 namespace VulkanStory.Game.Tests;
 
+/// <summary>Checks official mesh patch binding/ownership rejection and matching owner removal.</summary>
+/// <remarks>No GPU mesh upload or draw occurs.</remarks>
 public sealed class MeshConsumerRoutingTests
 {
     [Fact]

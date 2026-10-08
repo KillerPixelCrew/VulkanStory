@@ -3,6 +3,8 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks patch-group validation, commit, rollback order, and rollback-error reporting.</summary>
+/// <remarks>Delegates simulate mutation and failure; no graphics device or game window is created.</remarks>
 public sealed class StartupRoutingTransactionTests
 {
     private static StartupPatchGroup[] Groups(List<string> calls, string? failValidation = null,

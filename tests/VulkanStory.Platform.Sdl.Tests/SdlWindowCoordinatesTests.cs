@@ -5,6 +5,8 @@ using Xunit;
 namespace VulkanStory.Platform.Sdl.Tests;
 
 // Ported from the source renderer's SdlWindowCoordinatesTests.
+/// <summary>Checks logical/drawable coordinate round trips and bounded IME caret conversion.</summary>
+/// <remarks>Pure coordinate math; no physical high-DPI window or IME is exercised.</remarks>
 public sealed class SdlWindowCoordinatesTests
 {
     [Fact]

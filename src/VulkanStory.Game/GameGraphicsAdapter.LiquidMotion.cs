@@ -87,6 +87,10 @@ internal sealed partial class GameGraphicsAdapter
         return liquidMotionShader;
     }
 
+    /// <summary>Replays eligible transparent liquid geometry into the motion target using the current scene camera/history snapshot.</summary>
+    /// <param name="game">Current original client used to replay liquid geometry.</param>
+    /// <param name="temporal">Matching session camera/history owner.</param>
+    /// <returns>True when the eligible liquid motion pass completed; false when prerequisites or native setup decline.</returns>
     internal bool RenderLiquidMotion(ClientMain game, GameTemporalOwner temporal)
     {
         if (!AoSettings.EffectiveTemporalPipeline || !temporal.State.JitterActive ||

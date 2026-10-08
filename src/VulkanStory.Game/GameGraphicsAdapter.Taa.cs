@@ -51,6 +51,9 @@ internal sealed partial class GameGraphicsAdapter
     private void WriteNativeMatrix(NativePipeline pipeline, NativeUniform uniform, float[] values) =>
         RequireDevice().WriteNative(pipeline, uniform, MemoryMarshal.AsBytes(new ReadOnlySpan<float>(values)));
 
+    /// <summary>Resolves scene color into the current history target when temporal inputs and target readiness permit, then records the resolved output.</summary>
+    /// <param name="temporal">Matching camera/history owner for this real frame.</param>
+    /// <returns>True when this frame resolved to native TAA history; false when readiness or pass setup decline.</returns>
     internal bool RenderTaaResolve(GameTemporalOwner temporal)
     {
         RequireDevice();
@@ -213,6 +216,7 @@ internal sealed partial class GameGraphicsAdapter
         RequireDevice();
         return TaaResolvedThisFrame ? taaResolvedGlow : FramebufferAt(EnumFrameBuffer.Primary).ColorTextureIds[1];
     }
+    /// <summary>Invalidates retained native temporal program caches after shader reload.</summary>
     internal void ReloadTemporalPrograms()
     {
         var renderer = RequireDevice();

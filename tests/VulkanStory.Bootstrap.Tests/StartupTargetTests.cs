@@ -4,8 +4,11 @@ using Xunit;
 
 namespace VulkanStory.Bootstrap.Tests;
 
+/// <summary>Checks exact overload/staticness binding against controlled fixture methods.</summary>
+/// <remarks>Covers method metadata matching without installing game patches.</remarks>
 public sealed class StartupTargetTests
 {
+    /// <summary>Controlled instance overloads used to distinguish exact parameter types and staticness.</summary>
     private sealed class Overloads
     {
         public void Start(int value) { GC.KeepAlive(value); }

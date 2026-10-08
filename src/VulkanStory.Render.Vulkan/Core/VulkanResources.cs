@@ -22,6 +22,7 @@ internal static class ResourceIds
 {
     private static long _next;
 
+    /// <summary>Allocates a process-monotonic resource identity with an interlocked increment.</summary>
     public static ulong Next() => (ulong)Interlocked.Increment(ref _next);
 
     /// <summary>The highest id issued so far (0 before the first).</summary>
@@ -109,6 +110,7 @@ internal sealed unsafe class VulkanBuffer : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -199,6 +201,7 @@ internal sealed unsafe class VulkanImage : IDisposable
         }
     }
 
+    /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
@@ -237,6 +240,9 @@ internal static class VulkanResult
     /// </summary>
     public static Func<string?>? DescribeDeviceLoss;
 
+    /// <summary>Throws a checked Vulkan failure for any result other than Success.</summary>
+    /// <param name="result">Vulkan operation result.</param>
+    /// <param name="operation">Operation context included in the exception.</param>
     public static void Check(Result result, string operation)
     {
         if (result == Result.Success || result == Result.SuboptimalKhr) return;
@@ -272,11 +278,13 @@ internal static class VulkanResult
     }
 }
 
+/// <summary>Checked Vulkan allocation failure retaining the native result for caller diagnostics.</summary>
 internal sealed class VulkanMemoryAllocationException(Result result, string message) : InvalidOperationException(message)
 {
     internal Result Result { get; } = result;
 }
 
+/// <summary>Checked dedicated Vulkan memory allocation, mapping and memory-type selection helpers.</summary>
 internal static unsafe class VulkanMemory
 {
     /// <summary>
@@ -290,10 +298,13 @@ internal static unsafe class VulkanMemory
     /// </summary>
     private static int _liveAllocations;
 
+    /// <summary>Interlocked count of dedicated allocations recorded by the memory helper.</summary>
     public static int LiveAllocations => Volatile.Read(ref _liveAllocations);
 
+    /// <summary>Increments the dedicated-allocation diagnostic count.</summary>
     public static void NoteAllocation() => Interlocked.Increment(ref _liveAllocations);
 
+    /// <summary>Decrements the dedicated-allocation diagnostic count.</summary>
     public static void NoteFree() => Interlocked.Decrement(ref _liveAllocations);
 
     /// <summary>
@@ -400,21 +411,25 @@ internal static unsafe class VulkanPoison
     public const uint Word = 0xDEADBEEF;
     public const float Depth = 0.5f;
 
+    /// <summary>Reports whether the retained poison/readback path recognizes the format as compressed.</summary>
     public static bool IsCompressed(Format format) =>
         format.ToString().Contains("Block", StringComparison.Ordinal);
 
+    /// <summary>Reports whether poison clearing should use floating-point components for this format.</summary>
     public static bool IsFloat(Format format)
     {
         string name = format.ToString();
         return name.Contains("Sfloat", StringComparison.Ordinal) || name.Contains("Ufloat", StringComparison.Ordinal);
     }
 
+    /// <summary>Reports whether poison clearing should use integer components for this format.</summary>
     public static bool IsInteger(Format format)
     {
         string name = format.ToString();
         return name.Contains("Uint", StringComparison.Ordinal) || name.Contains("Sint", StringComparison.Ordinal);
     }
 
+    /// <summary>Constructs the debug poison clear color appropriate to the image's numeric format.</summary>
     public static ClearColorValue ColorFor(Format format)
     {
         var value = new ClearColorValue();

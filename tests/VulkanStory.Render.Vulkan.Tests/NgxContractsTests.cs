@@ -7,6 +7,8 @@ namespace VulkanStory.Render.Vulkan.Tests;
 
 // Selected CPU-only contracts from the source renderer's NGX evaluate,
 // lifetime, and frame generation suites.
+/// <summary>Checks NGX ABI layout, temporal evaluation mapping, controlled lifetime callbacks, and camera/parameter guards.</summary>
+/// <remarks>The create guard uses invalid handles; these cases do not establish real DLSS execution.</remarks>
 public sealed unsafe class NgxContractsTests
 {
     [Fact]

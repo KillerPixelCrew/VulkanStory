@@ -4,11 +4,15 @@ using System.Runtime.Loader;
 
 namespace VulkanStory.Bootstrap;
 
+/// <summary>Validates the Windows client profile and installs managed integration before game startup.</summary>
+/// <remarks>Graphics ownership remains with the original startup path until the integration commits routing.</remarks>
 internal static class BootstrapEntry
 {
     private static int started;
     private static BootstrapDependencies? dependencies;
 
+    /// <summary>Attempts process-local bootstrap once, installs dependency resolution, and invokes the integration entry.</summary>
+    /// <remarks>Ordinary failures unregister this resolver and publish a bypass; headless failures are rethrown.</remarks>
     internal static void Initialize()
     {
         if (Interlocked.Exchange(ref started, 1) != 0) return;
@@ -63,6 +67,7 @@ internal static class BootstrapEntry
         }
     }
 
+    /// <summary>Publishes the bootstrap state for the late mod entry and appends its diagnostic marker.</summary>
     private static void SetStatus(BootstrapTrace trace, string status, string reason)
     {
         AppContext.SetData("VulkanStory.Bootstrap.Status", status);

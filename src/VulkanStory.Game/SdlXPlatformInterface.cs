@@ -22,8 +22,11 @@ internal sealed class SdlXPlatformInterface(IXPlatformInterface inner, SdlWindow
         set => inner.Window = value;
     }
 
+    /// <inheritdoc />
     public bool ConfirmMessageBox(string title, string text) => inner.ConfirmMessageBox(title, text);
+    /// <inheritdoc />
     public void ShowMessageBox(string title, string text) => inner.ShowMessageBox(title, text);
+    /// <inheritdoc />
     public Size2i GetScreenSize()
     {
         if (!routingEnabled()) return inner.GetScreenSize();
@@ -31,6 +34,7 @@ internal sealed class SdlXPlatformInterface(IXPlatformInterface inner, SdlWindow
         (int width, int height) = window.DisplaySize;
         return new Size2i(width, height);
     }
+    /// <inheritdoc />
     public IAviWriter GetAviWriter(int recordingBufferSize, double framerate, string codeccode)
     {
         if (!routingEnabled()) return inner.GetAviWriter(recordingBufferSize, framerate, codeccode);
@@ -39,24 +43,32 @@ internal sealed class SdlXPlatformInterface(IXPlatformInterface inner, SdlWindow
         captureWriter?.Invoke(writer);
         return writer;
     }
+    /// <inheritdoc />
     public AvailableCodec[] AvailableCodecs() => inner.AvailableCodecs();
+    /// <inheritdoc />
     public void MoveFileToRecyclebin(string filepath) => inner.MoveFileToRecyclebin(filepath);
+    /// <inheritdoc />
     public long GetFreeDiskSpace(string filepath) => inner.GetFreeDiskSpace(filepath);
+    /// <inheritdoc />
     public long GetRamCapacity() => inner.GetRamCapacity();
+    /// <inheritdoc />
     public string GetCpuInfo() => inner.GetCpuInfo();
 
+    /// <inheritdoc />
     public void SetClipboardText(string text)
     {
         if (!routingEnabled()) { inner.SetClipboardText(text); return; }
         requireOwner();
         window.SetClipboardText(text);
     }
+    /// <inheritdoc />
     public string GetClipboardText()
     {
         if (!routingEnabled()) return inner.GetClipboardText();
         requireOwner();
         return window.GetClipboardText();
     }
+    /// <inheritdoc />
     public void FocusWindow()
     {
         if (!routingEnabled()) { inner.FocusWindow(); return; }

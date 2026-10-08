@@ -24,6 +24,8 @@ internal sealed class GamePlatformBindings
     internal Action<IXPlatformInterface> SetXPlatform { get; }
     internal Action<string?> SetCurrentCursor { get; }
 
+    /// <summary>Validates and caches original platform fields, setters and callback delegates.</summary>
+    /// <param name="platform">Borrowed original platform instance.</param>
     internal GamePlatformBindings(ClientPlatformWindows platform)
     {
         Validate();
@@ -53,6 +55,8 @@ internal sealed class GamePlatformBindings
     internal long LastKeyUpMs { get => keyUpMs(platform); set => keyUpMs(platform) = value; }
     internal int LastKeyUpKey { get => keyUpKey(platform); set => keyUpKey(platform) = value; }
 
+    /// <summary>Invokes the original close callback with a cancellable request.</summary>
+    /// <returns>True when the original game permits closing; false when its handler cancels.</returns>
     internal bool RequestClose()
     {
         var request = new CancelEventArgs();
@@ -61,8 +65,12 @@ internal sealed class GamePlatformBindings
     }
 
     // The sidecar must gate this call on complete graphics/window routing.
+    /// <summary>Invokes the original platform frame callback through the cached delegate.</summary>
+    /// <remarks>The adapter must gate this call on complete active startup routing.</remarks>
     internal void RenderFrame() => frame(default);
 
+    /// <summary>Invokes the original platform focus-change subscribers.</summary>
+    /// <param name="focused">Current SDL focus state.</param>
     internal void NotifyFocus(bool focused)
     {
         foreach (ClientPlatformAbstract.OnFocusChanged handler in focusHandlers(platform))
@@ -118,6 +126,7 @@ internal sealed class GamePlatformBindings
 /// <summary>Metadata-only check; does not construct a platform or invoke game callbacks.</summary>
 public static class GamePlatformBindingProfile
 {
+    /// <summary>Checks the supported original platform binding profile before routing installation.</summary>
     public static void Validate1227()
     {
         GamePlatformBindings.Validate();

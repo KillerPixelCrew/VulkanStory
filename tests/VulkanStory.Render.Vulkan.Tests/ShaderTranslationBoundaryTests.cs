@@ -5,6 +5,8 @@ using Xunit;
 namespace VulkanStory.Render.Vulkan.Tests;
 
 // Focused expectation carried from the source ShaderTranslationTests.
+/// <summary>Checks bindless GLSL rewriting through native shader compilation and damaged binary-cache rejection.</summary>
+/// <remarks>Compilation produces SPIR-V; no Vulkan pipeline or rendered image is validated.</remarks>
 public sealed class ShaderTranslationBoundaryTests
 {
     [Fact]

@@ -12,6 +12,7 @@ public static class ControllerHints
     private static readonly List<WeakReference<Action>> listeners = new();
     private static readonly object listenerLock = new();
 
+    /// <summary>Returns the active controller glyph for a game hotkey only while controller input owns the hints.</summary>
     public static string? GlyphFor(string hotkeyCode)
     {
         Dictionary<string, string>? snapshot = Volatile.Read(ref active);
@@ -19,6 +20,8 @@ public static class ControllerHints
             snapshot.TryGetValue(hotkeyCode, out string? glyph) ? glyph : null;
     }
 
+    /// <summary>Changes prompt ownership atomically and notifies listeners only when ownership changes.</summary>
+    /// <returns>True if the active-controller flag changed.</returns>
     public static bool SetControllerActive(bool value)
     {
         bool changed = Interlocked.Exchange(ref controllerActive, value ? 1 : 0) != (value ? 1 : 0);
@@ -26,12 +29,15 @@ public static class ControllerHints
         return changed;
     }
 
+    /// <summary>Prefixes a keyboard label with the active controller glyph when one exists.</summary>
     public static string LabelFor(string hotkeyCode, string keyboardLabel)
     {
         string? glyph = GlyphFor(hotkeyCode);
         return glyph == null ? keyboardLabel : "[" + glyph + "] " + keyboardLabel;
     }
 
+    /// <summary>Copies and publishes a prompt snapshot, then synchronously notifies listeners.</summary>
+    /// <param name="glyphs">Hotkey-to-glyph map, or null to clear prompts and controller ownership.</param>
     public static void Publish(IReadOnlyDictionary<string, string>? glyphs)
     {
         Volatile.Write(ref active, glyphs == null ? null : new Dictionary<string, string>(glyphs));
@@ -39,6 +45,8 @@ public static class ControllerHints
         NotifyChanged();
     }
 
+    /// <summary>Registers a weak callback; the subscriber must retain its delegate for continued notifications.</summary>
+    /// <param name="listener">Callback invoked on the publishing thread; callback failures are suppressed.</param>
     public static void Subscribe(Action listener)
     {
         ArgumentNullException.ThrowIfNull(listener);

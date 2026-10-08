@@ -31,6 +31,16 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         this.shaderCallbacks = shaderCallbacks;
     }
 
+    /// <summary>Associates one original platform with a borrowed Vulkan device and installs owned mod-pass hooks.</summary>
+    /// <param name="platform">Original platform key for routed operations.</param>
+    /// <param name="device">Device whose lifetime remains with the process session.</param>
+    /// <param name="routingEnabled">Predicate permitting game drawing only after complete startup commitment.</param>
+    /// <param name="mipmapsEnabled">Original game mipmap policy read at texture operations.</param>
+    /// <param name="mipmapLevel">Original maximum mip level.</param>
+    /// <param name="errorChecking">Original diagnostic graphics-error policy.</param>
+    /// <param name="shaderCallbacks">Borrowed shader policy/logging callbacks.</param>
+    /// <returns>The new sidecar adapter.</returns>
+    /// <remarks>Duplicate platform attachment is rejected by the association table. Access and detachment remain on the constructing thread.</remarks>
     internal static GameGraphicsAdapter Attach(ClientPlatformWindows platform, VulkanDevice device,
         Func<bool> routingEnabled, Func<bool> mipmapsEnabled, Func<int> mipmapLevel, Func<bool> errorChecking,
         GameShaderCallbacks shaderCallbacks)
@@ -54,6 +64,9 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
     internal static bool TryGet(ClientPlatformWindows platform, out GameGraphicsAdapter? adapter) =>
         Adapters.TryGetValue(platform, out adapter);
 
+    /// <summary>Returns the borrowed device only for owner-thread calls while game graphics routing is active.</summary>
+    /// <returns>The live session device.</returns>
+    /// <remarks>Configuration and post-drain detachment use the separate lifecycle accessor and do not authorize game drawing.</remarks>
     private VulkanDevice RequireDevice()
     {
         VulkanDevice owned = RequireLifecycleDevice();
@@ -63,6 +76,9 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
 
     // Configuration and owned-resource destruction also run before commit or
     // after routing stops. This accessor never authorizes game draw dispatch.
+    /// <summary>Returns the borrowed device for owner-thread setup or owned-resource teardown independent of draw routing.</summary>
+    /// <returns>The live session device.</returns>
+    /// <remarks>Rejects a disposed adapter and never authorizes game draw dispatch.</remarks>
     private VulkanDevice RequireLifecycleDevice()
     {
         if (Environment.CurrentManagedThreadId != ownerThread)
@@ -71,6 +87,8 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
     }
 
     // Retained VulkanClientPlatform.Textures bodies; GL tokens stay sampler data.
+    /// <summary>Allocates an empty 2D backend texture and publishes its identifier into the original RawTexture.</summary>
+    /// <param name="texture">Original descriptor receiving the owned texture identifier and sampler parameters.</param>
     internal void GenTexture(RawTexture texture)
     {
         VulkanDevice renderer = RequireDevice();
@@ -84,15 +102,26 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         texture.TextureId = id;
     }
 
+    /// <summary>Generates and configures mipmaps only when the original platform mipmap policy is enabled.</summary>
+    /// <param name="id">Adapter texture identifier.</param>
     internal void BuildMipMaps(int id)
     {
         VulkanDevice renderer = RequireDevice();
         if (!mipmapsEnabled()) return;
         renderer.GenerateMipmaps(id);
+        ConfigureMipMapSampling(id);
+    }
+
+    /// <summary>Applies the retained minification filter and game mip-level ceiling without regenerating texels.</summary>
+    private void ConfigureMipMapSampling(int id)
+    {
+        VulkanDevice renderer = RequireDevice();
         renderer.SetTextureParameter(id, 10241, 9986);
         renderer.SetTextureParameter(id, 33085, mipmapLevel());
     }
 
+    /// <summary>Retires the owned backend texture through active graphics routing.</summary>
+    /// <param name="id">Adapter texture identifier to delete.</param>
     internal void DeleteTexture(int id) => RequireDevice().DeleteTexture(id);
 
     private void CheckGraphicsError(string message)
@@ -103,6 +132,8 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
             throw new Exception(message + " - the graphics backend reported: " + error);
     }
 
+    /// <summary>Removes platform associations and hooks after the session has disabled routing and drained its graphics resources.</summary>
+    /// <remarks>Does not dispose the borrowed Vulkan device. Active routing or another thread is rejected.</remarks>
     public void Dispose()
     {
         if (Environment.CurrentManagedThreadId != ownerThread)
