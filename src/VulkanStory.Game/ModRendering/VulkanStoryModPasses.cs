@@ -468,6 +468,7 @@ namespace VulkanStory.Game.ModRendering
         /// broken rule when the declaration does not satisfy <see cref="VulkanStoryPassContract.Validate" />.
         /// </summary>
         /// <param name="capi">Original client API used for automatic LeaveWorld cleanup.</param>
+        /// <param name="modId">Nonempty owning mod identifier; together with the declaration name, selects the registration to replace.</param>
         /// <param name="decl">Declaration whose arrays and optional motion writer are copied.</param>
         /// <param name="reason">Broken contract rule on failure; null after success.</param>
         /// <returns>True after registration; false after contract refusal.</returns>

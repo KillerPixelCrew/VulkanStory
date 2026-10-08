@@ -29,8 +29,8 @@ internal sealed partial class GameGraphicsAdapter
             try
             {
                 includes.Add(name);
-                // The retained warp include supplies previousWarpState; vanilla does not.
-                string code = name == "vertexwarp.vsh" ? RetainedLiquidWarpSource() :
+                // Both retained includes belong to this assembly, not the game's asset map.
+                string code = name is "vertexwarp.vsh" or "vulkanstory-motion.ash" ? RetainedLiquidIncludeSource(name) :
                     (platform!.AssetManager?.TryGet(new AssetLocation("shaderincludes/" + name))?.ToText()
                     ?? throw new InvalidOperationException("Liquid shader include missing: " + name));
                 return ExpandLiquidIncludes(code, includes, active);
@@ -39,10 +39,11 @@ internal sealed partial class GameGraphicsAdapter
         }, RegexOptions.Multiline);
     }
 
-    private static string RetainedLiquidWarpSource()
+    /// <summary>Reads an owned liquid include from the same embedded sources used by ordinary shader routing.</summary>
+    private static string RetainedLiquidIncludeSource(string name)
     {
         using Stream stream = typeof(GameGraphicsAdapter).Assembly.GetManifestResourceStream(
-            "VulkanStory.Game.Shaders.vertexwarp.vsh") ?? throw new InvalidOperationException("Retained liquid warp shader missing.");
+            "VulkanStory.Game.Shaders." + name) ?? throw new InvalidOperationException("Owned liquid shader include missing: " + name);
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }

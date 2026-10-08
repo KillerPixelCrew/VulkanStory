@@ -60,9 +60,8 @@ internal sealed partial class GameGraphicsAdapter
     private const int NativeSsaoBlurHorizontalIndex = 15;
 
     /// <summary>
-    /// The AO step, natively. Reproduces
-    /// <see cref="ClientPlatformWindows.OptimumPostAmbientOcclusion" /> exactly: the platform's own
-    /// AO first, vanilla SSAO and its blur when that stood down, then the composite - under the
+    /// The session's native AO step: <see cref="RenderGtao" /> first,
+    /// <see cref="NativeVanillaSsaoPass" /> and its blur when GTAO declines, then the composite - under the
     /// vanilla branch while TAA or an upscaler is active, under the GTAO branch always.
     /// </summary>
     /// <param name="projectMatrix">Original scene projection used to reconstruct AO camera coordinates.</param>
@@ -381,7 +380,7 @@ internal sealed partial class GameGraphicsAdapter
 
     /// <summary>
     /// Runs GTAO when the live shaders were built for it (OPTIMUMAO, stamped from
-    /// <see cref="OptimumConfig.EffectiveGtao" /> and the SSAO G-buffer's condition) and returns
+    /// <see cref="AmbientOcclusionShadersUseGtao" /> and the SSAO G-buffer's condition) and returns
     /// the denoised visibility; 0 hands the frame to vanilla SSAO.
     /// </summary>
     internal int RenderGtao(float[] projectMatrix)

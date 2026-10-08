@@ -62,9 +62,8 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     /// <summary>
-    /// False runs the seam's neutral body - the OpenGL body's RenderMesh - on the Vulkan device
-    /// instead of the native pass: the old route the differential tests compare against, in the
-    /// pattern of <see cref="NativeBlitEnabled" /> and <see cref="NativeSkyEnabled" />.
+    /// False routes entity draws through <see cref="RenderMesh(MeshRef)" /> on the Vulkan device
+    /// instead of selecting the dedicated native entity pass.
     /// </summary>
     // On by default; VULKANSTORY_VK_NATIVE_ENTITIES=0 sends every entity draw to the neutral body.
     internal bool NativeEntitiesEnabled { get; set; } = Environment.GetEnvironmentVariable("VULKANSTORY_VK_NATIVE_ENTITIES") != "0";
@@ -76,9 +75,8 @@ internal sealed partial class GameGraphicsAdapter
 
     /// <summary>
     /// The texture the client declared for a sampler, or 0 - which resolves to the placeholder.
-    /// The table itself is <see cref="nativeProgramTextures" /> in
-    /// VulkanClientPlatform.NativeChunks.cs, filled by NoteNativeProgramTexture from
-    /// BindProgramTexture2D/Cube - the client saying "this program's sampler is this texture".
+    /// The table is <see cref="programTextures" />, filled by <see cref="BindProgramTexture" />
+    /// when the client binds a texture to an original program sampler.
     /// A program whose draws are all native never runs the emulated resolve that fills the push
     /// block's slots from the texture units, so the native draw has to resolve every sampler the
     /// program declares, not only the one the seam names.

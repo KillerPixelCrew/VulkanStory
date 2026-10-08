@@ -184,6 +184,8 @@ public static class HeadlessParityDump
     /// <param name="path">Output pathname.</param>
     /// <param name="width">Image width in pixels.</param>
     /// <param name="height">Image height in pixels.</param>
+    /// <param name="pixels">Tightly packed four-channel pixels in the retained capture row order.</param>
+    /// <param name="bgra">True for BGRA source order; false for RGBA. The file contains RGB without alpha.</param>
     /// <returns>True after writing; false when dimensions/storage are malformed.</returns>
     /// <remarks>File errors propagate.</remarks>
     public static bool WriteFrame(string path, int width, int height, byte[] pixels, bool bgra) =>

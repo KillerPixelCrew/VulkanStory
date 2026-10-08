@@ -376,8 +376,15 @@ namespace VulkanStory.Game
         /// camera matrices frozen later in the frame. <see cref="CaptureCameraPosition" />
         /// does that half, next to <see cref="CaptureCamera" />.
         /// </summary>
+        /// <param name="deltaTimeMs">Elapsed rendered-frame time in milliseconds, published to temporal consumers.</param>
+        /// <param name="renderWidth">Current internal scene width in pixels, used to normalize jitter and detect resize resets.</param>
+        /// <param name="renderHeight">Current internal scene height in pixels, used to normalize jitter and detect resize resets.</param>
         /// <param name="renderScale">The renderer's render scale (1 = native). The jitter
         /// sequence gets more phases the more the image is upscaled.</param>
+        /// <param name="zNear">Current original camera near clipping distance.</param>
+        /// <param name="zFar">Current original camera far clipping distance.</param>
+        /// <param name="fov">Current world-camera field of view in the original camera convention.</param>
+        /// <param name="uniforms">Current original deformation uniforms to copy after rotating the preceding frame's warp state.</param>
         public void Advance(
             float deltaTimeMs,
             int renderWidth,

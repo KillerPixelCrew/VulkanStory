@@ -141,6 +141,7 @@ internal sealed class StatedRenderState
     /// functions and enable, written only when the attachment is a selected draw buffer and
     /// the colour mask allows it.
     /// </summary>
+    /// <param name="framebufferId">Backend target identifier whose stated draw-buffer mask selects writable attachments.</param>
     /// <param name="slot">Zero-based color attachment slot.</param>
     /// <returns>Effective state, or a zero-write state for an unsupported slot.</returns>
     /// <remarks>Separate UI targets use the retained premultiplied blend conversion.</remarks>
@@ -230,7 +231,7 @@ internal sealed class StatedRenderState
 /// unrecognised draws take.
 ///
 /// What it states, and from where:
-/// - target: <paramref name="framebufferId" />; every colour slot attached to it on the device is in
+/// - target: the framebuffer identifier passed to <see cref="Record" />; every colour slot attached to it on the device is in
 ///   the pass (not the FrameBufferRef's own list: the OIT accumulation targets are attached to
 ///   Transparent at slots 3-5 without being in its ColorTextureIds, and a pass without them drops the
 ///   accumulated colour - 2026-09-17, water drew black until the slots came from the attachments);
