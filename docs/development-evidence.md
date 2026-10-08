@@ -1,20 +1,27 @@
 # Current development evidence
 
-Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
+Updated 2026-10-08. Installed implementation: `9a14715` on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
+
+Current source `ae53b49` forces history reset on the first enabled XeSS present,
+wraps the Windows activation inventory as an array and propagates Linux RID to
+referenced libraries with Linux-only IsRidAgnostic=false. Source diff inspection
+completed; no builds, tests, packages, deployment or runtime checks ran in this
+implementation turn. The next bounded batch is prepared with existing XeSS SDK
+callback logging enabled. Success of these corrections remains unverified.
 
 Latest [platform batch](../artifacts/validation/platform-increment-20261008-225349/results.json)
 at `0892584` passed all eight managed Release builds, Linux helper syntax and Windows
 staging. GL startup registration passed in real world loading; no third-party mod
 refusal was exercised. Windows ZIP generation failed because a scalar activation
 string concatenated the required array; Linux staging lacked per-project referenced
-RID outputs. Proposed source corrections are array wrapping and Linux-only
-IsRidAgnostic=false propagation, without changing Windows default outputs.
+RID outputs. Both packaging corrections are now applied in `ae53b49`, without
+changing Windows default outputs; their validation is pending.
 Both XeSS profiles no longer crashed with -15, but stopped at world120 because
 first-enabled presentation reported -12 and FG was disabled. Source inspection
 confirmed reset was applied to disabled pass-through, which the SDK says retains
-no history. The next increment resets the first enabled present; the SDK callback
+no history. `ae53b49` resets the first enabled present; the SDK callback
 log is needed to prove the specific missing input if -12 remains. No repairs/reruns
 occurred in this validation turn. The installed implementation remains `9a14715`.
 

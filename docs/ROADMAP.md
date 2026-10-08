@@ -6,11 +6,12 @@ Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.
 Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
-Current source increment: `9767c89` (XeLL repair, GL01 discovery and Linux activation/package);
-All Windows/Linux managed builds and helper syntax now pass. Windows staging and
-normal startup pass; packaging and first-enabled XeSS history corrections are next.
+Current source increment: `ae53b49` (first-enabled XeSS history and packaging/RID corrections),
+following XeLL repair, GL01 discovery and Linux activation. The preceding source
+passed all managed builds/helper syntax and Windows staging/startup; these latest
+corrections await one bounded validation batch.
 Installed identity remains below.
-Latest compiled/staged/installed implementation: `9a14715`.
+Installed implementation: `9a14715`.
 Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
@@ -21,13 +22,12 @@ The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4
 Working upscaling/frame generation across supported vendors, and usable original
 Options menus from both the main menu and a loaded world. The goal is **not complete**.
 
-1. **SDK-01/SDK-04: validate repaired XeSS FG enablement.** The current-build
-   scenarios crashed with SDK -15. Source now enables required XeLL before FG and
-   retains it through generic Off/frame-cap changes, with requested/effective
-   state shown separately. Build and rerun the corrected bounded profiles next.
-   Compilation/startup now pass. Both scenarios instead fail after the first enabled
-   present reports SDK -12. The disabled pass-through consumed reset; first-enabled
-   history initialization is the next source correction, with SDK detail logging.
+1. **SDK-01/SDK-04: validate repaired XeSS FG enablement.** Required XeLL now
+   enables before FG and remains active through generic Off/frame-cap changes.
+   The preceding batch resolved the -15 crash but failed after the first enabled
+   present reported SDK -12. `ae53b49` seeds history on the first enabled present;
+   disabled pass-through retains no history. Build and run the existing bounded
+   profiles once with SDK detail logging; the precise -12 resource remains unproven.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
@@ -74,7 +74,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
 | DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
-| XeSS FG | Mandatory XeLL enables without -15 crash; first enabled present reports -12 | Correct first-enabled history reset and inspect SDK input detail; then handoff/latency/visible/eligible Intel acceptance |
+| XeSS FG | Mandatory XeLL enables without -15 crash; first-enabled history reset now applied in source | Validate reset and inspect SDK input detail if -12 persists; then handoff/latency/visible/eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
 | Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works | Broader transitions/resize |
@@ -82,7 +82,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 
 ## Source and delivery
 
-The latest compiled/staged/installed source is `9a14715`. Game/Mod Release builds,
+The installed source is `9a14715`. Its Game/Mod Release builds,
 staging and the focused world/gain scenario passed. Liquid motion is ready and
 Game XML warnings are resolved; the existing CS8600 warning remains. Used mesh
 writes stage only changed ranges, while rare raw pointer access synchronizes
@@ -142,7 +142,7 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | All managed cross-builds/helper syntax passed; RID-reference output and package activation list corrections pending; actual Linux runtime/install/providers/URI proof open |
+| LINUX-01 | All preceding managed cross-builds/helper syntax passed; RID-reference output and package activation list corrected in source, validation pending; actual Linux runtime/install/providers/URI proof open |
 | GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
