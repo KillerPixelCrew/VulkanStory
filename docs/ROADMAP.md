@@ -7,8 +7,9 @@ Persistent goal is active in the current chat; T01 is in progress.
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
 Current source increment: `9767c89` (XeLL repair, GL01 discovery and Linux activation/package);
-Game compilation failed on new GL delegate ambiguity; `c5ba14d` corrects it in source.
-Bootstrap/Mod/Companion cross-build and Linux helper syntax passed. Installed identity remains below.
+All Windows/Linux managed builds and helper syntax now pass. Windows staging and
+normal startup pass; packaging and first-enabled XeSS history corrections are next.
+Installed identity remains below.
 Latest compiled/staged/installed implementation: `9a14715`.
 Current development package: `artifacts/validation/fg-foreground-20261008-211805/stage`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
@@ -24,8 +25,9 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    scenarios crashed with SDK -15. Source now enables required XeLL before FG and
    retains it through generic Off/frame-cap changes, with requested/effective
    state shown separately. Build and rerun the corrected bounded profiles next.
-   The GL delegate name collision has a committed source correction; build
-   confirmation is pending before staging and executing these profiles.
+   Compilation/startup now pass. Both scenarios instead fail after the first enabled
+   present reports SDK -12. The disabled pass-through consumed reset; first-enabled
+   history initialization is the next source correction, with SDK detail logging.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
@@ -72,7 +74,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
 | DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
-| XeSS FG | Source enable-order/dependency repair committed after SDK -15 crashes | Compile and validate handoff/latency repair; visible output/pacing and eligible Intel coverage |
+| XeSS FG | Mandatory XeLL enables without -15 crash; first enabled present reports -12 | Correct first-enabled history reset and inspect SDK input detail; then handoff/latency/visible/eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
 | Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works | Broader transitions/resize |
@@ -140,8 +142,8 @@ findings to their broader feature and acceptance areas.
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
 | HW-01 | Supported AMD FSR4 execution |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
-| LINUX-01 | Bootstrap/Mod/Companion cross-build and helper syntax passed; Game compile/package blocked by GL ambiguity; actual runtime/install/providers/URI proof pending |
-| GL-01 | Loader-bound discovery/refusal and delegate-namespace correction committed; Game compilation/startup execution pending |
+| LINUX-01 | All managed cross-builds/helper syntax passed; RID-reference output and package activation list corrections pending; actual Linux runtime/install/providers/URI proof open |
+| GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
 
