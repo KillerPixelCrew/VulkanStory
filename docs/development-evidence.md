@@ -4,14 +4,15 @@ Updated 2026-10-08. Validated/installed implementation: `ae53b49`, checkout `e4d
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
-Current source `ab85ef8` implements scheduled main/world Options lifecycle and SDL
-resize, matching PowerShell preflight/result checks, and Linux `core/` notice paths.
-Its [lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232520/results.json)
+Current source `bc85817` adds the missing VulkanStory.Settings import to `ab85ef8`
+lifecycle/SDL-resize and Linux notice changes. No builds, runs or deployment occurred
+in this correction turn; validation is pending. The preceding
+[lifecycle batch](../artifacts/validation/options-lifecycle-20261008-232520/results.json)
 ran once at checkout `90ed6f4`. Both Windows/Linux Game Release builds failed with
 CS0103 at HeadlessScenario.cs:215: RendererSettingsPanel is unavailable because
 the parser lacks the VulkanStory.Settings import. The existing CS8600 warning
 remains. Stage/package, both runtime scenarios and deployment were skipped;
-installed identity remains above. Next implementation adds the missing import.
+installed identity remains above. The missing import is now corrected in source.
 No production-source correction or repeated batch occurred in this validation turn.
 
 Latest [platform batch](../artifacts/validation/platform-increment-20261008-230846/results.json)
