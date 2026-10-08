@@ -4,6 +4,15 @@ Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+The first autonomous T01 [handoff/latency batch](../artifacts/validation/provider-handoffs-20261008-220016/results.json)
+ran once against the same deployed implementation. Both profiles crashed before
+active XeSS FG: SetEnabled(true) returned -15. The pinned XeSS FG SDK defines this
+as unmet latency-reduction requirements and requires XeLL enabled before FG;
+the current deferred-first-frame path applies the calls in the opposite order.
+The next implementation increment must repair that order and mandatory dependency
+through LowLatency Off/frame-cap updates. No rerun or source repair occurred in this
+validation turn; earlier XeSS execution records do not validate the current source.
+
 All 118 [review implementation findings](completed-review-findings-2026-10-08.md)
 are completed. The latest runtime correction addresses the mapped-buffer regression
 introduced by `6df3105`: small updates after any GPU use cloned whole capacities,

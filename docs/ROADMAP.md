@@ -16,16 +16,20 @@ The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4
 Working upscaling/frame generation across supported vendors, and usable original
 Options menus from both the main menu and a loaded world. The goal is **not complete**.
 
-1. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
+1. **SDK-01/SDK-04: repair XeSS FG enablement.** The current-build handoff and
+   latency scenarios both crashed with SDK -15 because FG was enabled before
+   required XeLL. Apply XeLL first and retain that dependency through requested
+   latency Off/frame-cap changes, then rerun the corrected bounded profiles.
+2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
    updates; ordered range uploads now preserve buffer identity and placement.
    Wider camera/object/transparency, menu-resume and cadence checks remain.
-2. **HW-01/HW-02: obtain AMD execution evidence.** Current recorded hardware is
+3. **HW-01/HW-02: obtain AMD execution evidence.** Current recorded hardware is
    RTX 4070 Laptop GPU and Intel UHD 770; no AMD adapter. Unsupported fallback is
    verified, actual AMD SR/FG is not. Intel FSR3 SR/FG executes; XeSS-FG requires
    eligible hardware rather than UHD 770.
-3. **UI-01: finish ordinary Options use.** Both hosts render all five pages;
+4. **UI-01: finish ordinary Options use.** Both hosts render all five pages;
    Save/Cancel, persistence and 6x slider callbacks have scoped diagnostic evidence.
    Live adjustment and Cancel/close restoration are now implemented in source;
    Image shows current provider, internal/output resolution and FPS. Release builds
@@ -62,7 +66,7 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | DLSS SR | Successful world evaluations/captures | Historical sky issue and moving-scene acceptance |
 | DLSS FG | Focused strict gain scenario passed on RTX 4070; 2x SDK presentation observed | Moving-scene quality, HUD/occlusion and pacing; wider transitions |
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
-| XeSS FG | NVIDIA scoped execution/handoff/cadence | Visible output/pacing; eligible Intel coverage |
+| XeSS FG | Implemented; current-build first enable crashes with SDK -15 | Correct mandatory XeLL enable order and effective latency state; then handoff/visible output/pacing and eligible Intel coverage |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
 | FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
 | Options | Original Graphics entry, five shared pages, live adjustment, Save/Cancel and status; user reports it works | Broader transitions/resize |
