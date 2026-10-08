@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
@@ -37,6 +38,8 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
     private static readonly System.Collections.Generic.List<XessFgRuntime> FailedCreates = new();
     private nint _module;
     private nint _context;
+    private readonly object _sleptFramesGate = new();
+    private readonly HashSet<ulong> _sleptFrames = new();
     private readonly delegate* unmanaged[Cdecl]<nint, int> _destroy;
     private readonly delegate* unmanaged[Cdecl]<nint, int> _prepareDestroy;
     private Exception? _releaseFailure;
@@ -159,16 +162,26 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         _setLatencyMode(_context, maxFps > 0 ? (uint)Math.Max(1, 1_000_000 / maxFps) : 0,
             enabled ? 1u : 0u) : -1;
     /// <summary>Runs native XeLL sleep using the low 32 bits of the renderer frame ID.</summary>
-    private uint lastSleptFrame;
+    /// <remarks>Registers a successful sleep until its PresentEnd marker, including while later frames record on the render thread.</remarks>
     public int Sleep(ulong frameId)
     {
         int result = _context != 0 ? _sleep(_context, (uint)frameId) : -1;
-        if (result >= 0) lastSleptFrame = (uint)frameId;
+        if (result == 0)
+            lock (_sleptFramesGate) _sleptFrames.Add(frameId);
         return result;
     }
     /// <summary>Emits a native XeLL latency marker for the supplied frame ID.</summary>
-    public int Marker(ulong frameId, LatencyMarker marker) => _context == 0 ? -1 :
-        lastSleptFrame != (uint)frameId ? 0 : _marker(_context, (uint)frameId, (int)marker);
+    /// <remarks>Suppresses the initial pass-through frame without sleep; asynchronous presentation retains eligibility for earlier slept frames.</remarks>
+    public int Marker(ulong frameId, LatencyMarker marker)
+    {
+        if (_context == 0) return -1;
+        lock (_sleptFramesGate)
+            if (!_sleptFrames.Contains(frameId)) return 0;
+        int result = _marker(_context, (uint)frameId, (int)marker);
+        if (marker == LatencyMarker.PresentEnd)
+            lock (_sleptFramesGate) _sleptFrames.Remove(frameId);
+        return result;
+    }
     /// <inheritdoc/>
     public int CreateSharedImage(uint width, uint height, Format format, bool writable,
         out nint sharedHandle, out nint resource)

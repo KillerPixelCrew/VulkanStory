@@ -392,7 +392,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','sdkReportedPresents')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -429,7 +429,7 @@ foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset')) 
 foreach ($name in @('temporalFrameId','renderWidth','renderHeight','configuredDlssGeneratedFrames','dlssStateQueryFrameId','dlssStateQueryResult','dlssMaximumGenerated','dlssDynamicMfgSupport','successfulUpscaleFrames','preparedFrames')) {
     $script:assertionKinds.Add($name, 'number?')
 }
-foreach ($name in @('displayWidth','displayHeight','realPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId')) {
+foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId')) {
     $script:assertionKinds.Add($name, 'number')
 }
 foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase')) {

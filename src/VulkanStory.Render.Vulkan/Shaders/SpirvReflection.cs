@@ -90,7 +90,7 @@ internal sealed class SpirvModuleReflection
     public List<SpirvSpecConstant> SpecConstants = new();
     /// <summary>Descriptor, push and interface variables some function body actually uses.</summary>
     public HashSet<uint> UsedVariables = new();
-    /// <summary>Locations of the outputs a function body stores to (array outputs contribute every element).</summary>
+    /// <summary>Locations of outputs stored to, preserving constant aggregate indices and covering every possible dynamically indexed element.</summary>
     public SortedSet<int> WrittenOutputLocations = new();
     /// <summary>
     /// For every push-constant member whose value is used as the first index into an arrayed
@@ -166,6 +166,7 @@ internal static class SpirvReflection
     private const int DecorationMatrixStride = 7;
     private const int DecorationBuiltIn = 11;
     private const int DecorationLocation = 30;
+    private const int DecorationComponent = 31;
     private const int DecorationBinding = 33;
     private const int DecorationDescriptorSet = 34;
     private const int DecorationOffset = 35;
@@ -424,6 +425,8 @@ internal static class SpirvReflection
     {
         // Pointer results rooted at a global variable.
         var roots = new Dictionary<uint, uint>();
+        // Output access paths retain aggregate indices; null means unbounded pointer arithmetic.
+        var outputIndexes = new Dictionary<uint, uint[]?>();
         // Pointer results that address one top-level member of the push block.
         var pushMemberPointers = new Dictionary<uint, int>();
         // Values that carry a push member's value unchanged (or through an integer cast).
@@ -447,10 +450,13 @@ internal static class SpirvReflection
             {
                 return;
             }
-            if (!TryDecoration(module, root, DecorationLocation, out uint location)) return;
             uint pointee = module.Types[variable.PointerType].Operands[1];
-            UnwrapArray(module, pointee, out _, out int length, out _);
-            for (int i = 0; i < Math.Max(1, length); i++) result.WrittenOutputLocations.Add((int)location + i);
+            int location = TryDecoration(module, root, DecorationLocation, out uint decoratedLocation)
+                ? (int)decoratedLocation : -1;
+            TryDecoration(module, root, DecorationComponent, out uint component);
+            outputIndexes.TryGetValue(pointer, out uint[]? indices);
+            AddOutputWrites(module, result.WrittenOutputLocations, pointee, location, (int)component,
+                indices ?? Array.Empty<uint>());
         }
 
         foreach ((int op, uint[] operands) in module.Body)
@@ -467,6 +473,23 @@ internal static class SpirvReflection
                     Use(baseId);
 
                     int firstIndex = op == OpPtrAccessChain ? 4 : 3;
+                    if (module.Variables.TryGetValue(Root(baseId), out var output) && output.StorageClass == StorageOutput)
+                    {
+                        uint[]? prefix = outputIndexes.TryGetValue(baseId, out uint[]? path) ? path : Array.Empty<uint>();
+                        if (prefix == null || (op == OpPtrAccessChain &&
+                            (!TryConstant(module, operands[3], out long element) || element != 0)))
+                        {
+                            // Pointer arithmetic has no bounded aggregate here; retain full-root coverage.
+                            outputIndexes[id] = null;
+                        }
+                        else
+                        {
+                            var indices = new uint[prefix.Length + operands.Length - firstIndex];
+                            prefix.CopyTo(indices, 0);
+                            Array.Copy(operands, firstIndex, indices, prefix.Length, operands.Length - firstIndex);
+                            outputIndexes[id] = indices;
+                        }
+                    }
                     if (pushVariable.HasValue && baseId == pushVariable.Value && operands.Length == firstIndex + 1 &&
                         TryConstant(module, operands[firstIndex], out long member))
                     {
@@ -528,11 +551,105 @@ internal static class SpirvReflection
                     if (roots.ContainsKey(operands[2]) || module.Variables.ContainsKey(operands[2]))
                     {
                         roots[operands[1]] = Root(operands[2]);
+                        if (outputIndexes.TryGetValue(operands[2], out uint[]? indices)) outputIndexes[operands[1]] = indices;
                     }
                     break;
             }
         }
     }
+
+    /// <summary>Follows an output pointer's aggregate indices and records only the addressed interface locations.</summary>
+    /// <remarks>Whole aggregates and nonconstant indices cover every possible element; vector components retain their containing location.</remarks>
+    private static void AddOutputWrites(Module module, SortedSet<int> locations, uint typeId,
+        int location, int component, ReadOnlySpan<uint> indices)
+    {
+        TypeInfo type = module.Types[typeId];
+        uint elementType;
+        int count, stride;
+        switch (type.Op)
+        {
+            case OpTypeStruct:
+            {
+                int offset = 0;
+                long member = -1;
+                bool constant = indices.Length > 0 && TryConstant(module, indices[0], out member);
+                for (int i = 0; i < type.Operands.Length; i++)
+                {
+                    uint memberType = type.Operands[i];
+                    if (TryMemberDecoration(module, typeId, i, DecorationBuiltIn, out _)) continue;
+                    if (!constant || member == i)
+                    {
+                        int memberLocation = TryMemberDecoration(module, typeId, i, DecorationLocation, out uint assigned)
+                            ? (int)assigned : location < 0 ? -1 : location + offset;
+                        TryMemberDecoration(module, typeId, i, DecorationComponent, out uint memberComponent);
+                        AddOutputWrites(module, locations, memberType, memberLocation, (int)memberComponent,
+                            indices.Length == 0 ? indices : indices[1..]);
+                    }
+                    offset += OutputLocationSpan(module, memberType);
+                }
+                return;
+            }
+            case OpTypeArray:
+                elementType = type.Operands[0];
+                count = TryConstant(module, type.Operands[1], out long length) ? (int)length : 1;
+                stride = OutputLocationSpan(module, elementType);
+                break;
+            case OpTypeMatrix:
+                elementType = type.Operands[0];
+                count = (int)type.Operands[1];
+                stride = OutputLocationSpan(module, elementType);
+                break;
+            case OpTypeVector:
+                elementType = type.Operands[0];
+                count = (int)type.Operands[1];
+                stride = 0;
+                break;
+            default:
+                if (location >= 0)
+                    for (int i = component / 4; i < (component + OutputComponentWidth(type) + 3) / 4; i++)
+                        locations.Add(location + i);
+                return;
+        }
+
+        int first = 0, last = Math.Max(1, count);
+        if (indices.Length > 0 && TryConstant(module, indices[0], out long index) && index >= 0 && index < last)
+        {
+            first = (int)index;
+            last = first + 1;
+        }
+        for (int i = first; i < last; i++)
+            AddOutputWrites(module, locations, elementType, location < 0 ? -1 : location + i * stride,
+                type.Op == OpTypeVector ? component + i * OutputComponentWidth(module.Types[elementType]) : component,
+                indices.Length == 0 ? indices : indices[1..]);
+    }
+
+    /// <summary>Counts contiguous interface locations occupied by one aggregate element or struct member.</summary>
+    private static int OutputLocationSpan(Module module, uint typeId)
+    {
+        TypeInfo type = module.Types[typeId];
+        switch (type.Op)
+        {
+            case OpTypeArray:
+                return Math.Max(1, TryConstant(module, type.Operands[1], out long length) ? (int)length : 1) *
+                    OutputLocationSpan(module, type.Operands[0]);
+            case OpTypeMatrix:
+                return (int)type.Operands[1] * OutputLocationSpan(module, type.Operands[0]);
+            case OpTypeStruct:
+                int span = 0;
+                for (int i = 0; i < type.Operands.Length; i++)
+                    if (!TryMemberDecoration(module, typeId, i, DecorationBuiltIn, out _))
+                        span += OutputLocationSpan(module, type.Operands[i]);
+                return span;
+            case OpTypeVector:
+                return (OutputComponentWidth(module.Types[type.Operands[0]]) * (int)type.Operands[1] + 3) / 4;
+            default:
+                return 1;
+        }
+    }
+
+    /// <summary>Number of 32-bit interface components occupied by one scalar.</summary>
+    private static int OutputComponentWidth(TypeInfo type) =>
+        type.Op is OpTypeInt or OpTypeFloat ? Math.Max(1, (int)type.Operands[0] / 32) : 1;
 
     private static SpirvBlock ReadBlock(Module module, uint structType, uint variable)
     {
