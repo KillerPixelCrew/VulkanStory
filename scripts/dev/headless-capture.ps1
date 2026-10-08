@@ -1,3 +1,69 @@
+<#
+.SYNOPSIS
+Runs an isolated renderer capture against a copied world or the original main-menu Options host.
+.DESCRIPTION
+Validates scenario input before creating a fresh run. World mode uses SQLite backup of the named save; menu-only mode skips save copying. Copies client settings/mods into isolated data, verifies six muted audio settings, launches only its own dotnet client child with the staged startup hook, records stdout/stderr, and verifies result artifacts. Default window mode stays hidden; Visible/KeepOpen require explicit selection. Timeout terminates only this child. PreflightOnly validates scenario/path/input-profile preparation without creating a run or launching a child.
+.PARAMETER PackageDirectory
+Complete staged runtime root supplying the startup hook and ordinary mod directories.
+.PARAMETER OutputDirectory
+Fresh run directory; existing runs are rejected and never merged or deleted.
+.PARAMETER GameDirectory
+Official client installation used for runtimeconfig/deps/game assemblies; defaults to APPDATA/Vintagestory.
+.PARAMETER SourceDataDirectory
+User data root supplying clientsettings.json and the named save; defaults to APPDATA/VintagestoryData.
+.PARAMETER World
+Existing save basename without .vcdbs or directory components; defaults to foggy village story.
+.PARAMETER Commands
+Optional command file forwarded to the child after resolving its path.
+.PARAMETER Frames
+Optional explicit frame list forwarded to the child; unique nonnegative parsed entries determine the verifier's expected count.
+.PARAMETER Count
+Requested ordinary capture count when no explicit Frames list is supplied.
+.PARAMETER Stride
+Requested interval between ordinary captures, forwarded to the child.
+.PARAMETER First
+First requested ordinary capture frame and default parity-capture frame.
+.PARAMETER CommandFrame
+Frame boundary at which the child runs the supplied commands.
+.PARAMETER FixedDt
+Fixed frame timestep in seconds forwarded to the child, constrained to zero through one.
+.PARAMETER TimeoutSeconds
+Child timeout in seconds; the launcher checks at 30-second intervals and kills its own child after the additional grace.
+.PARAMETER Upscaler
+Initial isolated upscaler token: off, dlss, fsr3, fsr4, or xess.
+.PARAMETER FrameGeneration
+Initial isolated frame-generation token: off, dlss, fsr3, or xess.
+.PARAMETER Scenario
+Optional schema-one scenario JSON, validated then copied verbatim with its SHA256/identity into the run.
+.PARAMETER ControllerEnabled
+Currently rejected because the deferred child-owned controller input profile is required.
+.PARAMETER TouchEnabled
+Currently rejected because the deferred child-owned touch input profile is required.
+.PARAMETER CompanionMode
+Copies the input companion into isolated Mods when present; absent omits it.
+.PARAMETER PreflightOnly
+Returns compact JSON and exit 0/1 for preparation validation without creating a run directory or starting the client.
+.PARAMETER ParityDump
+Requests attachment dumps beneath the run's attachments directory; cannot combine with MainMenuOptions.
+.PARAMETER ParityFrame
+Explicit attachment-capture frame; a negative value uses First.
+.PARAMETER AoOutputs
+Enables the child's diagnostic AO output environment flag.
+.PARAMETER AsyncPipelines
+Enables asynchronous pipelines in the isolated child via its environment flag.
+.PARAMETER Visible
+Allows the diagnostic child window to be visible and changes verifier visibility expectations.
+.PARAMETER KeepOpen
+Requires Visible and disables child exit-on-capture-completion; the launcher's timeout still applies.
+.PARAMETER MainMenuOptions
+Selects menu-only Options capture without opening/copying a world; rejects world scenarios, commands, parity, and input switches.
+.PARAMETER MainOptionsAction
+Menu-only open/save/cancel action; Save/Cancel require the Image page.
+.PARAMETER OptionsPage
+Requested original Options page: Image, Generation, Effects, Device, or Status.
+.PARAMETER Python
+Python command used by snapshot-world.py for SQLite backup.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$PackageDirectory,
@@ -43,6 +109,16 @@ function Throw-ScenarioError([string]$Category, [string]$Message) {
     throw "H01SCENARIO|$Category|$Message"
 }
 
+<#
+.SYNOPSIS
+Reads a scenario object with duplicate-name rejection.
+.DESCRIPTION
+Returns an ordinal JsonElement dictionary backed by the caller's live document. Nonobject values use Category; duplicate fields use DuplicateProperty.
+.PARAMETER Element
+Live JSON object element.
+.PARAMETER Category
+Shape-error category.
+#>
 function Get-ScenarioProperties($Element, [string]$Category) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
         Throw-ScenarioError $Category 'Expected a JSON object.'
@@ -57,6 +133,20 @@ function Get-ScenarioProperties($Element, [string]$Category) {
     return ,$properties
 }
 
+<#
+.SYNOPSIS
+Checks allowed and required scenario property names.
+.DESCRIPTION
+Uses ordinal names and throws a categorized error for unknown or missing fields without mutating the dictionary.
+.PARAMETER Properties
+Scenario property dictionary.
+.PARAMETER Allowed
+Complete accepted field-name set.
+.PARAMETER Required
+Names that must occur.
+.PARAMETER Category
+Shape-error category.
+#>
 function Require-ScenarioProperties($Properties, [string[]]$Allowed, [string[]]$Required, [string]$Category) {
     $allowedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($name in $Allowed) { [void]$allowedSet.Add($name) }
@@ -94,6 +184,18 @@ function Get-ScenarioName($Element) {
     return $value
 }
 
+<#
+.SYNOPSIS
+Decodes one setting using its declared scalar type.
+.DESCRIPTION
+Accepts bool, Int32, finite Single, or string as selected by Type; wrong JSON kinds/ranges throw SettingsType. Choice normalization is separate.
+.PARAMETER Name
+Exact renderer setting name used in errors.
+.PARAMETER Type
+Declared scalar token: bool, int, float, or string.
+.PARAMETER Element
+Live JSON value to decode.
+#>
 function Get-ScenarioSettingValue([string]$Name, [string]$Type, $Element) {
     switch ($Type) {
         'bool' {
@@ -135,6 +237,14 @@ function Normalize-ScenarioChoice([string]$Value, [string[]]$Choices, [string]$N
     Throw-ScenarioError 'SettingsEnum' ("Unknown choice for RendererSettings." + $Name + ": " + $Value)
 }
 
+<#
+.SYNOPSIS
+Validates a scenario settings action and advances validation choice state.
+.DESCRIPTION
+Rejects unknown fields, wrong scalar types, unsupported choices, and enabling deferred input. Mutates only the script-owned sequential validation state; it does not execute renderer settings.
+.PARAMETER Values
+Live JSON object holding setting changes.
+#>
 function Apply-ScenarioSettings($Values) {
     $properties = Get-ScenarioProperties $Values 'SettingsShape'
     foreach ($name in $properties.Keys) {
@@ -187,6 +297,14 @@ function Get-ScenarioNumber($Element, [string]$Category) {
     return $number
 }
 
+<#
+.SYNOPSIS
+Checks schema-one scenario actions before run creation.
+.DESCRIPTION
+Validates bounded ordered actions, unique identities, capture/checkpoint names, settings/assertions, and earlier delta baselines. Advances script-owned choice validation state and returns Id/ActionCount; errors carry H01SCENARIO categories.
+.PARAMETER Root
+Root element retained by the caller's live JsonDocument.
+#>
 function Test-ScenarioDocument($Root) {
     $rootProperties = Get-ScenarioProperties $Root 'ScenarioField'
     Require-ScenarioProperties $rootProperties @('schema','id','actions') @('schema','id','actions') 'ScenarioField'
@@ -410,6 +528,14 @@ if (-not (Test-Path -LiteralPath $clientPath)) {
 }
 if (Test-Path -LiteralPath $clientPath) {
     $client = Get-Content -LiteralPath $clientPath -Raw | ConvertFrom-Json -AsHashtable
+    <#
+    .SYNOPSIS
+    Adjusts copied client settings for the diagnostic child.
+    .DESCRIPTION
+    Recursively mutates dictionaries to mute audio, disable VSync/fullscreen/focus-pausing, and enable the two VulkanStory mods while preserving other disabled choices. Uses the enclosing silentAudioKeys.
+    .PARAMETER node
+    Copied settings node; nondictionary values are ignored.
+    #>
     function Set-IsolatedSettings($node) {
         if ($node -isnot [System.Collections.IDictionary]) { return }
         foreach ($key in @($node.Keys)) {

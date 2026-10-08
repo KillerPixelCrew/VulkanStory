@@ -3,7 +3,7 @@
 Updated 2026-10-08. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
-ee2d870839efc58f3cf3f9c2a3513ced15477fb8; continuation after implementation commit `e507ef5`.
+ee2d870839efc58f3cf3f9c2a3513ced15477fb8; implementation commit `6df3105`.
 Current development package: `artifacts/validation/controller-prompt-polish-20261004-160020/stage`,
 installed in the user's Vintage Story directory; hashes verified, manual test pending.
 

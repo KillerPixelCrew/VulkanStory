@@ -1,3 +1,21 @@
+<#
+.SYNOPSIS
+Builds the five Windows x64 provider bridges into a fresh output directory.
+.DESCRIPTION
+Requires Windows x64 PowerShell 7, declared SDK headers, g++, and gcc or cc. Validates inputs before creating OutputDirectory, then invokes the retained NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
+.PARAMETER Fsr3SdkRoot
+FidelityFX SDK root containing ffx-api/include/ffx_api/ffx_api.h.
+.PARAMETER Fsr4SdkRoot
+FidelityFX DX12 SDK root containing Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h.
+.PARAMETER XessSdkRoot
+XeSS SDK root containing inc/xess_fg/xefg_swapchain_d3d12.h.
+.PARAMETER StreamlineSdkRoot
+Streamline SDK root containing include/sl.h.
+.PARAMETER OutputDirectory
+Fresh destination for the five compiled bridge DLLs; an existing directory is rejected.
+.PARAMETER VulkanSdkRoot
+Vulkan SDK root containing Include/vulkan/vulkan.h; defaults to VULKAN_SDK.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Fsr3SdkRoot,

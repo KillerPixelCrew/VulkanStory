@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Installs the historical observation-only B0 package into a fresh game installation.
+.DESCRIPTION
+Verifies the five-file B0 inventory and official game profile before writing. Refuses existing hostfxr.dll/VulkanStory paths and running game/server/crash-reporter processes. Copies payload and receipt before activation; a failed copy may leave diagnostic payload files. Current full runtime deployment uses deploy-runtime.ps1.
+.PARAMETER GameDirectory
+Existing official installation containing Vintagestory.exe, without a B0/runtime collision.
+.PARAMETER PackageDirectory
+Directory containing the historical b0-package.json and its five listed payload files.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$GameDirectory,

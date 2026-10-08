@@ -1,4 +1,12 @@
-"""Create a consistent local snapshot, including committed WAL content, without copying a live database file."""
+"""Create a consistent SQLite world snapshot including committed WAL content.
+
+Usage: snapshot-world.py <source.vcdbs> <fresh-destination.vcdbs>
+The source must be an existing file and the destination must not exist. Parent
+directories are created before SQLite backup copies the read-only source in
+256-page batches. Source settings/save files are not modified by this script.
+Bad inputs exit with a message; argument, filesystem, and SQLite failures
+propagate. An interrupted backup may leave a destination for inspection.
+"""
 import pathlib
 import sqlite3
 import sys

@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Compiles the retained NGX caller shim into VulkanStoryNgx.dll.
+.DESCRIPTION
+Uses gcc.exe or cc.exe and builds to VulkanStoryNgx.tmp.dll before replacing the target. Skips compilation when the target is newer than both source and header. Missing compiler or failed compilation throws; failed temporary output is removed. The caller-frame-preserving compiler flag remains part of the bridge contract.
+.PARAMETER OutputDirectory
+Destination directory for VulkanStoryNgx.dll; created if needed.
+#>
 param([Parameter(Mandatory = $true)][string]$OutputDirectory)
 
 $ErrorActionPreference = 'Stop'

@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+Moves unchanged inventoried VulkanStory files into a fresh external recovery backup.
+.DESCRIPTION
+Reads the install/package inventory, rejects invalid paths/reparse traversal/running client processes, and preserves modified nonactivation files. ShouldProcess supports WhatIf/Confirm. Activation moves first; failure restores dependencies before activation without overwriting recovery conflicts. Saves/settings, version.dll, and empty directories remain.
+.PARAMETER GameDirectory
+Installation containing a recognized VulkanStory/install.json or package.json ownership inventory.
+.PARAMETER BackupDirectory
+Fresh directory outside the game root receiving unchanged owned files and removal.json.
+#>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)][string]$GameDirectory,
@@ -11,6 +21,16 @@ if ($backupRoot.Equals($gameRoot, [StringComparison]::OrdinalIgnoreCase) -or
     $backupRoot.StartsWith($gameRoot.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The removal backup must be outside the game directory.'
 }
+<#
+.SYNOPSIS
+Resolves an ownership path without traversing a junction.
+.DESCRIPTION
+Rejects rooted/drive-qualified/parent paths, verifies lexical containment, and checks existing ancestry through the selected root. Returns an absolute path without moving files.
+.PARAMETER root
+Absolute installation or backup root.
+.PARAMETER relative
+Relative ownership path beneath the root.
+#>
 function Resolve-Child([string]$root, [string]$relative) {
     if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or $relative.Replace('\','/').Split('/') -contains '..') { throw "Invalid ownership path: $relative" }
     $path = [IO.Path]::GetFullPath((Join-Path $root $relative))
@@ -72,6 +92,14 @@ if (-not $PSCmdlet.ShouldProcess($gameRoot, "Move $($planned.Count) unchanged Vu
 New-Item -ItemType Directory -Path $backupRoot | Out-Null
 $moved = [ordered]@{}
 $recordPath = Join-Path $backupRoot 'removal.json'
+<#
+.SYNOPSIS
+Persists removal/recovery progress in the backup.
+.DESCRIPTION
+Writes the enclosing game root, moved files, and preserved modified files to recordPath; I/O failures propagate.
+.PARAMETER status
+Recorded phase token: prepared, moving, complete, or rolled-back.
+#>
 function Write-RemovalRecord([string]$status) {
     [ordered]@{schema=1;product='VulkanStory';gameDirectory=$gameRoot;status=$status;files=$moved;preserved=$preserved} |
         ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $recordPath -Encoding utf8

@@ -57,6 +57,12 @@ class ParityError(Exception):
 # ------------------------------------------------------------------ file io
 
 def _header_tokens(data, count):
+    """Read ASCII header tokens, skipping comments, and return the raster offset.
+
+    data is the complete byte payload; count is the required token count.
+    A truncated header raises ParityError. The raster starts after the single
+    whitespace byte immediately following the last token.
+    """
     tokens = []
     pos = 0
     size = len(data)
@@ -100,6 +106,11 @@ def read_image(path):
 
 
 def write_netpbm(path, array):
+    """Replace path with P5/P6 bytes from caller-supplied grayscale/RGB pixels.
+
+    array is converted to uint8 and written in its existing row order. A 2-D
+    array is grayscale; three channels select P6. I/O/array failures propagate.
+    """
     array = np.asarray(array, dtype=np.uint8)
     channels = 1 if array.ndim == 2 else array.shape[2]
     height, width = array.shape[:2]
@@ -109,6 +120,11 @@ def write_netpbm(path, array):
 
 
 def write_pfm(path, array):
+    """Replace path with little-endian float32 PFM in the array's row order.
+
+    The caller supplies grayscale or RGB samples. A 2-D array selects Pf and
+    three channels select PF. No vertical flip is applied; I/O errors propagate.
+    """
     array = np.asarray(array, dtype="<f4")
     channels = 1 if array.ndim == 2 else array.shape[2]
     height, width = array.shape[:2]
@@ -129,6 +145,11 @@ KERNEL = _kernel()
 
 
 def _filter_valid(plane):
+    """Apply the separable Gaussian kernel only where its complete window fits.
+
+    plane is a 2-D array with both dimensions at least WINDOW; callers enforce
+    that size. Returns a reduced 2-D filtered array without modifying plane.
+    """
     height, width = plane.shape
     rows = np.zeros((height, width - WINDOW + 1), dtype=np.float64)
     for i in range(WINDOW):
@@ -144,6 +165,12 @@ def _ssim_terms(mu_a, mu_b, var_a, var_b, cov, c1, c2):
 
 
 def ssim_plane(a, b, dynamic_range):
+    """Compute mean SSIM for equal-shaped 2-D planes and the supplied range.
+
+    a and b are input planes; dynamic_range sets the two stability constants.
+    Small images use global moments. Larger images use complete Gaussian
+    windows in row batches, preserving the caller's row order.
+    """
     c1 = (0.01 * dynamic_range) ** 2
     c2 = (0.03 * dynamic_range) ** 2
     height, width = a.shape
@@ -236,6 +263,10 @@ def parse_allowlist(path):
 
 
 def allowlist_row(rows, name):
+    """Return the first case-sensitive glob match's bounds, or None.
+
+    rows is the ordered list from parse_allowlist; name is an attachment filename.
+    """
     for pattern, bounds in rows:
         if fnmatch.fnmatchcase(name, pattern):
             return bounds
@@ -243,6 +274,11 @@ def allowlist_row(rows, name):
 
 
 def within(bounds, ssim, mad):
+    """Whether scores meet every explicit SSIM/MAD bound, or the any override.
+
+    A missing-only row does not accept a present comparison. NaN mad cannot
+    satisfy an explicit MAD limit. The bounds dictionary is not modified.
+    """
     if bounds.get("any"):
         return True
     if "ssim" not in bounds and "mad" not in bounds:
@@ -257,12 +293,25 @@ def within(bounds, ssim, mad):
 # ---------------------------------------------------------------------- main
 
 def list_dump(directory):
+    """Return sorted immediate PPM/PGM/PFM entry names or reject a missing directory.
+
+    The extension filter does not open or recursively enumerate image payloads.
+    """
     if not os.path.isdir(directory):
         raise ParityError("not a directory: %s" % directory)
     return sorted(name for name in os.listdir(directory) if name.endswith(EXTENSIONS))
 
 
 def run(dir_a, dir_b, allowlist=None, threshold=0.98, csv_path=None, out=sys.stdout):
+    """Compare captured attachments and return 0 for pass or 1 for deviations.
+
+    dir_a and dir_b are capture directories paired by immediate filename.
+    allowlist optionally supplies ordered markdown bounds; a matched row's
+    explicit limits take precedence over threshold. csv_path optionally receives
+    an overwritten CSV table, and out receives the markdown result table.
+    Empty attachment unions and malformed inputs raise ParityError; filesystem
+    and image-decoding failures can propagate. No capture files are modified.
+    """
     rows = parse_allowlist(allowlist) if allowlist else []
     names_a, names_b = set(list_dump(dir_a)), set(list_dump(dir_b))
     if not names_a | names_b:
@@ -312,6 +361,11 @@ def run(dir_a, dir_b, allowlist=None, threshold=0.98, csv_path=None, out=sys.std
 
 
 def self_test():
+    """Exercise comparison/encoding behavior using deterministic temporary images.
+
+    Creates and removes its temporary directory, prints success, and returns
+    zero after all assertions pass. Does not launch a game or use a GPU.
+    """
     import io
 
     rng = np.random.default_rng(1234)
@@ -378,6 +432,12 @@ def self_test():
 
 
 def main(argv):
+    """Parse CLI argument strings and return the comparison/self-test exit code.
+
+    argv excludes the executable name. Missing directories return usage code
+    two; ParityError is reported to stderr and returns two. argparse usage
+    errors use its own SystemExit path; other execution failures propagate.
+    """
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("dir_a", nargs="?")
     parser.add_argument("dir_b", nargs="?")

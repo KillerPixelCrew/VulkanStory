@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Compiles the retained FSR3 Vulkan bridge DLL with a static compiler runtime.
+.DESCRIPTION
+Checks SDK/Vulkan headers, invokes g++ in C++17 mode to a sibling temporary DLL, and replaces Output only after compilation succeeds. Compilation failure removes the temporary output and throws; the existing target remains.
+.PARAMETER SdkRoot
+FidelityFX SDK v1.1.4 root containing ffx-api/include/ffx_api/ffx_api.h.
+.PARAMETER Output
+Target bridge DLL path; its parent is created and a successful build replaces the target.
+.PARAMETER VulkanSdkRoot
+Vulkan SDK root supplying Include headers; defaults to VULKAN_SDK.
+#>
 param(
     [Parameter(Mandatory)][string]$SdkRoot,
     [Parameter(Mandatory)][string]$Output,

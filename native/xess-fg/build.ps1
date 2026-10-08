@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Compiles the retained XeSS frame-generation Vulkan/DX12 bridge DLL.
+.DESCRIPTION
+Checks XeSS FG/Vulkan headers and invokes g++ in C++20 mode with static compiler runtime and d3d12/dxgi linkage. Builds a sibling temporary DLL and replaces Output only after success; failure removes the temporary and throws.
+.PARAMETER SdkRoot
+XeSS SDK root containing inc/xess_fg/xefg_swapchain_d3d12.h.
+.PARAMETER Output
+Target bridge DLL path; parent directories are created and successful output replaces this file.
+.PARAMETER VulkanSdkRoot
+Vulkan SDK root supplying Include headers for adapter matching; defaults to VULKAN_SDK.
+#>
 param(
     [Parameter(Mandatory = $true)][string]$SdkRoot,
     [Parameter(Mandatory = $true)][string]$Output,

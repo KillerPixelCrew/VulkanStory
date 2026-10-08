@@ -1,3 +1,27 @@
+<#
+.SYNOPSIS
+Verifies recorded isolated capture results and exits with a compact JSON verdict.
+.DESCRIPTION
+Checks child exit/timeout/crash evidence, ordinary PNG/PPM counts, and world or main-menu result invariants. Optional scenario checks bind hashes/identities/actions to the copied input and verify capture containment, file hashes, session/frame pairing, counts, and terminal state. It reads existing run artifacts; it does not launch a client or generate captures. Returns exit 0 on pass or 1 with accumulated failure categories.
+.PARAMETER RunDirectory
+Existing isolated run root containing frames/, data/, and scenario input when required.
+.PARAMETER ExpectedFrameCount
+Expected ordinary capture count used for result fields and PNG/PPM inventory.
+.PARAMETER ProcessExitCode
+Actual exit code recorded from the owned child process.
+.PARAMETER TimedOut
+Whether the launcher terminated its child after the deadline; true fails verification.
+.PARAMETER RequireScenario
+Requires scenario result/capture manifests and binding to copied input actions/files.
+.PARAMETER Visible
+Whether a visible diagnostic child was requested; determines expected hidden/focus invariants.
+.PARAMETER MainMenuOptions
+Verifies main-menu Options artifacts instead of the loaded-world result.
+.PARAMETER MainOptionsAction
+Expected main-menu open/save/cancel transition.
+.PARAMETER ExpectedGameAssembly
+Staged Game assembly path required to match the main-menu diagnostic's recorded assembly.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$RunDirectory,
@@ -21,6 +45,14 @@ $clientCrash = Join-Path $RunDirectory 'data/Logs/client-crash.log'
 if ((Test-Path -LiteralPath $clientCrash -PathType Leaf) -and
     (Get-Item -LiteralPath $clientCrash).Length -gt 0) { $failures.Add('ClientCrash') }
 
+<#
+.SYNOPSIS
+Rejects duplicate names throughout a result tree.
+.DESCRIPTION
+Recurses object/array nodes with ordinal name matching and throws on the first duplicate.
+.PARAMETER Element
+Live result element to inspect.
+#>
 function Assert-UniqueResultProperties($Element) {
     if ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
         $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -33,12 +65,28 @@ function Assert-UniqueResultProperties($Element) {
         foreach ($item in $Element.EnumerateArray()) { Assert-UniqueResultProperties $item }
     }
 }
+<#
+.SYNOPSIS
+Copies result object values into independent JSON element storage.
+.DESCRIPTION
+Requires an object and clones values so the dictionary survives source-document disposal.
+.PARAMETER Element
+Live JSON object to copy.
+#>
 function Get-ResultObject($Element) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) { throw 'Expected JSON object.' }
     $properties = [Collections.Generic.Dictionary[string,System.Text.Json.JsonElement]]::new([StringComparer]::Ordinal)
     foreach ($property in $Element.EnumerateObject()) { $properties.Add($property.Name, $property.Value.Clone()) }
     return ,$properties
 }
+<#
+.SYNOPSIS
+Reads a strict bounded-depth JSON result object.
+.DESCRIPTION
+Requires an existing file, rejects comments/trailing commas/duplicate fields, limits depth to 32, and clones root values before disposing the document. I/O/parse/shape failures propagate.
+.PARAMETER Path
+Existing JSON result file.
+#>
 function Read-ResultObject([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Missing result file.' }
     $options = [System.Text.Json.JsonDocumentOptions]::new()
@@ -52,6 +100,16 @@ function Read-ResultObject([string]$Path) {
     }
     finally { $document.Dispose() }
 }
+<#
+.SYNOPSIS
+Requires named fields in a result object.
+.DESCRIPTION
+Throws for the first missing field; additional fields are accepted and the object is unchanged.
+.PARAMETER Properties
+Result-property dictionary.
+.PARAMETER Names
+Exact required field names.
+#>
 function Require-ResultFields($Properties, [string[]]$Names) {
     foreach ($name in $Names) {
         if (-not $Properties.ContainsKey($name)) { throw "Missing result field: $name" }
@@ -86,6 +144,16 @@ function Assert-NullableResultString($Element) {
 function Assert-NullableResultInteger($Element) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Null) { [void](Get-ResultInteger $Element) }
 }
+<#
+.SYNOPSIS
+Resolves an artifact beneath its recorded root.
+.DESCRIPTION
+Rejects rooted/parent paths and reparse traversal through Root, then returns an absolute path. The caller checks existence/hash.
+.PARAMETER Root
+Absolute run or frames root.
+.PARAMETER Relative
+Recorded relative artifact path.
+#>
 function Resolve-ResultPath([string]$Root, [string]$Relative) {
     if ([IO.Path]::IsPathRooted($Relative) -or $Relative.Replace('\','/').Split('/') -contains '..') {
         throw 'Invalid result path.'

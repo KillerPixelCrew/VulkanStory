@@ -3,6 +3,14 @@
 #
 #   build.sh <output directory>
 #
+# The first positional argument is the output directory (created if needed).
+# CC selects one compiler executable, default cc. The output name is
+# VulkanStoryNgx.dll on MinGW/MSYS/Cygwin and libVulkanStoryNgx.so otherwise;
+# Linux additionally links libdl. A target newer than source/header is reused.
+# Missing arguments exit 2. Missing compiler or compilation failure exits 0
+# after removing target/temporary output, so callers must inspect the artifact.
+# Successful compilation replaces the target through its sibling .tmp file.
+#
 # The shim is the only call site NGX will accept: libnvidia-ngx.so.1 resolves
 # its caller's module from the return address, and a .NET P/Invoke stub lives in
 # anonymous JIT memory, which aborts the process inside the driver.

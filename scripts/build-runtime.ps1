@@ -1,3 +1,17 @@
+<#
+.SYNOPSIS
+Builds production managed projects, native bootstrap, and the maintained shader corpus.
+.DESCRIPTION
+Runs dotnet builds for Bootstrap, Game, Mod, and Input.Companion and a CMake bootstrap build. Unless SkipShaders is set, it builds/runs the shader CLI into artifacts/runtime-shaders/<Configuration>. Native provider bridges are built separately. Any checked external failure terminates the script; no tests, staging, deployment, or game launch are performed.
+.PARAMETER Configuration
+Debug or Release configuration used for managed, shader-tool, and native bootstrap outputs.
+.PARAMETER VintageStoryPath
+Optional official game assembly directory passed through the VintageStoryPath MSBuild property.
+.PARAMETER Generator
+CMake generator, default Ninja; Visual Studio generators select x64, and an empty value omits the explicit generator.
+.PARAMETER SkipShaders
+Skips both the shader-tool build and the complete native shader compilation.
+#>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug','Release')][string]$Configuration = 'Release',

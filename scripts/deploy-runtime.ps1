@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Installs or updates an owned runtime candidate with an external backup and installation receipt.
+.DESCRIPTION
+Verifies package/game hashes and ownership, rejects reparse traversal/collisions/running client processes, and preserves an owned loader.ini. Backs up overwritten files and receipt, writes dependencies before activation, and retains ownership for omitted older files. On copy failure, unchanged new files move into the failed-batch backup and old dependencies/activation are restored. The existing version.dll hash is checked; no game launch occurs.
+.PARAMETER GameDirectory
+Existing official game installation matching the package profile.
+.PARAMETER PackageDirectory
+Candidate tree containing VulkanStory/package.json and all client payload files.
+.PARAMETER BackupDirectory
+Fresh backup root outside both game and package directories; retains deployment metadata and recovery files.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$GameDirectory,
@@ -15,6 +27,16 @@ foreach ($root in @($gameRoot,$packageRoot)) {
         throw 'Backups must be outside the game and package directories.'
     }
 }
+<#
+.SYNOPSIS
+Resolves a payload path without traversal or reparse points.
+.DESCRIPTION
+Rejects rooted/parent paths, verifies lexical containment, and inspects existing ancestry for reparse points. Returns an absolute path without writing.
+.PARAMETER root
+Absolute package/game/backup root.
+.PARAMETER relative
+Relative inventory path beneath the root.
+#>
 function Resolve-Child([string]$root, [string]$relative) {
     if ([IO.Path]::IsPathRooted($relative) -or $relative.Replace('\','/').Split('/') -contains '..') { throw "Invalid payload path: $relative" }
     $path = [IO.Path]::GetFullPath((Join-Path $root $relative))

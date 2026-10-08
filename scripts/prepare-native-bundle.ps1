@@ -1,3 +1,29 @@
+<#
+.SYNOPSIS
+Collects declared Windows native runtimes, provider bridges, and redistribution notices.
+.DESCRIPTION
+Maps packaging/native-win-x64.json to explicit bridge/core/vendor sources, checks the selected Streamline 2.14.1 version and runtime hashes, then copies native/ and licenses/ into a fresh tree with bundle.json hashes. Missing inputs or identity mismatches throw; no provider execution, builds, tests, installation, or game launch occur.
+.PARAMETER BridgesDirectory
+Directory containing the compiled VulkanStory provider bridge DLLs.
+.PARAMETER CoreNativeDirectory
+Directory supplying inventory-listed SDL/shader compiler core binaries.
+.PARAMETER CoreNoticesDirectory
+Nonempty recursive tree of SDL/shader compiler redistribution notices.
+.PARAMETER DlssSdkRoot
+DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt.
+.PARAMETER Fsr3SdkRoot
+FidelityFX SDK root supplying PrebuiltSignedDLL runtimes and license files.
+.PARAMETER Fsr4SdkRoot
+FidelityFX DX12 SDK root supplying Kits/FidelityFX/signedbin runtimes and notices.
+.PARAMETER XessSdkRoot
+XeSS SDK root supplying bin runtimes and LICENSE.txt.
+.PARAMETER StreamlineSdkRoot
+Matching Streamline 2.14.1 release SDK root supplying headers, reference runtime hashes, and notices.
+.PARAMETER StreamlineRuntimeDirectory
+Optional runtime source directory; defaults to StreamlineSdkRoot/bin/x64 and must match its release binary hashes.
+.PARAMETER OutputDirectory
+Fresh bundle destination, with native/ and licenses/ subtrees plus bundle.json.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$BridgesDirectory,
@@ -24,6 +50,16 @@ foreach ($part in @(@{ name='MAJOR'; value=2 }, @{ name='MINOR'; value=14 }, @{ 
     }
 }
 $files = [ordered]@{}
+<#
+.SYNOPSIS
+Registers a verified native bundle input.
+.DESCRIPTION
+Stores an absolute source path without copying; absent inputs and duplicate bundle destinations throw.
+.PARAMETER relative
+Bundle-relative native/license destination key.
+.PARAMETER source
+Existing input file.
+#>
 function Add-Input([string]$relative, [string]$source) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing native bundle input: $source" }
     if ($files.Contains($relative)) { throw "Duplicate bundle destination: $relative" }

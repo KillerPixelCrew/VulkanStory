@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Builds the historical B0 managed test-project dependency graph and native hostfxr proxy.
+.DESCRIPTION
+Runs dotnet build for Bootstrap.Tests, then configures/builds native/bootstrap under artifacts/native-bootstrap. External build failures terminate the script. It does not execute tests, stage/deploy a payload, or launch the game.
+.PARAMETER Configuration
+Managed/CMake build configuration: Debug or Release.
+.PARAMETER VintageStoryPath
+Optional official game reference directory forwarded as the MSBuild VintageStoryPath property.
+.PARAMETER Generator
+CMake generator, default Ninja; Visual Studio generators receive the x64 platform, and an empty value omits -G.
+#>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug','Release')][string]$Configuration = 'Release',

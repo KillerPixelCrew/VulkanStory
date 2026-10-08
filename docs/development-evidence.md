@@ -1,7 +1,7 @@
 # Current development evidence
 
-Updated 2026-10-08. Implementation source: `codex/review-issue-fixes`, continuing
-after `e507ef5` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
+Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
+`6df3105` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
 The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
@@ -22,7 +22,9 @@ below is unchanged. The 26 renderer XML warning causes were corrected in source,
 with compiler confirmation pending.
 
 Documentation covers 376 maintained C# files after pruning and adding shared
-implementations, plus all nine active native source/header/test files. Compiler
+implementations, plus all nine active native source/header/test files and 22
+maintained scripts (19 PowerShell, two Python, one shell). Six migrated native
+reference build scripts are excluded from active documentation work. Compiler
 XML sidecars are enabled and included in staging; Game/Mod sidecars and a complete
 package remain unverified. Earlier runtime evidence below belongs to its recorded
 payloads and does not validate these review corrections.

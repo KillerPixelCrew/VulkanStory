@@ -12,6 +12,10 @@ internal static class RendererChoices
     private static readonly (string Value, string Label)[] OcclusionQuality = [("low", "Low"), ("medium", "Medium"), ("high", "High"), ("ultra", "Ultra")];
 
     /// <summary>Returns supported values and labels; XeSS adds its SDK-specific quality choices.</summary>
+    /// <param name="key">Renderer setting name shared by commands and the settings panel.</param>
+    /// <param name="xess">Whether quality values should include XeSS-specific modes.</param>
+    /// <returns>Shared supported values and user-facing labels; callers must not mutate the underlying array.</returns>
+    /// <exception cref="ArgumentException">The setting name has no defined choices.</exception>
     internal static IReadOnlyList<(string Value, string Label)> Get(string key, bool xess = false) => key switch
     {
         "Upscaler" => Upscalers,

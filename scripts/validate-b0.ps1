@@ -1,3 +1,21 @@
+<#
+.SYNOPSIS
+Rejects the retired observation-only B0 validation entry.
+.DESCRIPTION
+Always throws before builds, tests, staging, deployment, or game launch. Use the current runtime build/stage flow and isolated headless harness.
+.PARAMETER Configuration
+Retained legacy build configuration; unused by this retired entry.
+.PARAMETER RunId
+Retained legacy validated run identifier; no validation run is created.
+.PARAMETER VintageStoryPath
+Retained legacy official-reference path; not read.
+.PARAMETER Generator
+Retained legacy CMake generator; no native build runs.
+.PARAMETER Deploy
+Retained legacy deployment switch; no deployment occurs.
+.PARAMETER GameDirectory
+Retained legacy deployment target; not modified.
+#>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',

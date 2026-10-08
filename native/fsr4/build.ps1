@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Compiles the retained FSR4 Vulkan/DX12 bridge DLL.
+.DESCRIPTION
+Checks FidelityFX DX12/Vulkan headers and invokes g++ in C++20 mode with static compiler runtime and d3d12/dxgi linkage. Builds a sibling temporary DLL, replacing Output only after success; compilation failure removes the temporary and throws.
+.PARAMETER SdkRoot
+FidelityFX SDK root containing Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h.
+.PARAMETER Output
+Target bridge DLL path; a successful build replaces this file.
+.PARAMETER VulkanSdkRoot
+Vulkan SDK root supplying Include headers for adapter matching; defaults to VULKAN_SDK.
+#>
 param(
     [Parameter(Mandatory = $true)][string]$SdkRoot,
     [Parameter(Mandatory = $true)][string]$Output,

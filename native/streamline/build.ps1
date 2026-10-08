@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Compiles the retained Streamline Vulkan bridge with its compiler runtime linked statically.
+.DESCRIPTION
+Checks Streamline/Vulkan headers, invokes g++ in C++20 mode with wintrust/advapi32 linkage, and builds a sibling temporary DLL. Successful compilation replaces Output; failure removes temporary output and throws. SDK plugin binaries are supplied separately by native bundle preparation.
+.PARAMETER SdkRoot
+Streamline SDK root containing include/sl.h.
+.PARAMETER Output
+Target bridge DLL path; parent directories are created and successful output replaces the file.
+.PARAMETER VulkanSdkRoot
+Vulkan SDK root containing Include/vulkan/vulkan.h; defaults to VULKAN_SDK.
+#>
 param(
     [Parameter(Mandatory = $true)][string]$SdkRoot,
     [Parameter(Mandatory = $true)][string]$Output,

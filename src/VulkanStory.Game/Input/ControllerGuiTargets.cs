@@ -23,11 +23,13 @@ internal static class ControllerGuiTargets
     private static readonly FieldInfo? InteractiveElementsField = typeof(GuiComposer).GetField(
         "interactiveElements", BindingFlags.Instance | BindingFlags.NonPublic);
 
-    /// <summary>Collects enabled screen/front-dialog composers, including inventory HUD grids when foreground inventory is active.</summary>
-    /// <remarks>Uses the pinned game's private fields; absent fields reduce the available navigation targets.</remarks>
     /// <summary>One GUI discovery snapshot shared by context ownership and navigation in a controller poll.</summary>
+    /// <param name="Owner">Unfocused host or foreground dialog/screen used by input-context release guards.</param>
+    /// <param name="Composers">Enabled foreground composers and eligible inventory HUD composers discovered by this snapshot.</param>
     internal sealed record GuiSnapshot(object? Owner, List<GuiComposer> Composers);
 
+    /// <summary>Collects enabled screen/front-dialog composers, including inventory HUD grids when foreground inventory is active.</summary>
+    /// <remarks>Uses the pinned game's private fields; absent fields reduce the available navigation targets.</remarks>
     public static List<GuiComposer> ActiveComposers(IControllerPlatformHost platform) => Snapshot(platform).Composers;
 
     /// <summary>Collects the last foreground dialog at the lowest input order and its enabled composers.</summary>

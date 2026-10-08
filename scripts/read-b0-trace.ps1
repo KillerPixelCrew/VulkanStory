@@ -1,3 +1,15 @@
+<#
+.SYNOPSIS
+Checks recorded B0 activation/bypass marker ordering and process/thread identity.
+.DESCRIPTION
+Reads JSON-lines events, rejects mixed process/clock identities and native-forwarding failures, then verifies the requested active or bypass path. Active checks include marker order, unique entries, and entry-thread identity. Emits selected event fields after success; marker checks alone do not establish renderer or MFG behavior.
+.PARAMETER Path
+Existing bootstrap JSON-lines trace file.
+.PARAMETER Expected
+Active requires the ordered activation sequence; Bypassed requires a bypass marker and no ready patches.
+.PARAMETER RequireExit
+Also requires native host return or managed process-exit evidence.
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Path,

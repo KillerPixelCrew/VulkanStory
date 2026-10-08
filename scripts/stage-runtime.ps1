@@ -1,3 +1,21 @@
+<#
+.SYNOPSIS
+Assembles a fresh runtime staging tree from existing managed, native, shader, and license inputs.
+.DESCRIPTION
+Resolves the explicit payload inventory, required XML documentation sidecars, controller assets/notices, and shader manifest/blob hashes before copying. Writes VulkanStory/package.json with SHA256 inventory and unverified acceptance. It neither builds inputs nor installs/launches the game; copy failure can leave a partial fresh tree.
+.PARAMETER Configuration
+Build configuration used to locate existing managed DLL/XML and bootstrap outputs.
+.PARAMETER NativeDirectory
+Directory containing every binary required by packaging/native-win-x64.json.
+.PARAMETER NativeLicensesDirectory
+Nonempty notice tree copied under VulkanStory/licenses/native.
+.PARAMETER ManagedLicensesDirectory
+Nonempty managed notice tree copied under VulkanStory/licenses/managed.
+.PARAMETER ShadersDirectory
+Compiled shader corpus containing schema-one shaders.manifest.json and its hashed SPIR-V files.
+.PARAMETER OutputDirectory
+Fresh staging root; existing destinations are rejected rather than merged.
+#>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug','Release')][string]$Configuration = 'Release',
@@ -12,11 +30,31 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 $stage = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $stage) { throw 'Choose a fresh output directory; staging never merges or deletes packages.' }
 $sources = [ordered]@{}
+<#
+.SYNOPSIS
+Registers one verified staging source.
+.DESCRIPTION
+Rejects absent files/duplicate destinations, then records an absolute path in the script-owned sources map without copying.
+.PARAMETER relative
+Package-relative destination key.
+.PARAMETER source
+Existing input file.
+#>
 function Add-Payload([string]$relative, [string]$source) {
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing package input: $source" }
     if ($sources.Contains($relative)) { throw "Duplicate package destination: $relative" }
     $sources[$relative] = [IO.Path]::GetFullPath($source)
 }
+<#
+.SYNOPSIS
+Registers a nonempty recursive input tree.
+.DESCRIPTION
+Enumerates files through Add-Payload beneath the destination prefix. Missing/empty trees or duplicate destinations throw.
+.PARAMETER relative
+Package-relative destination prefix.
+.PARAMETER directory
+Existing nonempty source directory.
+#>
 function Add-Tree([string]$relative, [string]$directory) {
     $root = [IO.Path]::GetFullPath($directory)
     if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Missing input directory: $root" }
