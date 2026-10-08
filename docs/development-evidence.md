@@ -5,8 +5,8 @@ Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
 Latest compiled/staged source: `014fef2`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
-The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
-review correction: all 118 findings have source corrections, including the three
+The [completed review ledger](completed-review-findings-2026-10-08.md) records
+all 118 completed implementation findings, including the three
 introduced regressions found by the read-only re-review of `cdd2cfa`. XeLL keeps
 successful sleeps eligible through their asynchronous PresentEnd, fragment-output
 reflection preserves constant aggregate indices, and both launcher whitelists now
