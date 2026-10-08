@@ -3,7 +3,7 @@
 Updated 2026-10-08. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
 Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
-ee2d870839efc58f3cf3f9c2a3513ced15477fb8 plus current issue-remediation changes.
+ee2d870839efc58f3cf3f9c2a3513ced15477fb8; implementation commit `e507ef5`.
 Current development package: `artifacts/validation/controller-prompt-polish-20261004-160020/stage`,
 installed in the user's Vintage Story directory; hashes verified, manual test pending.
 
@@ -79,7 +79,7 @@ compiled payloads, not automatically the latest worktree.
 
 ## Cleanup audit backlog
 
-Issue work started 2026-10-08 on `codex/review-issue-fixes`. Rows marked **Applied in source** have corrections in the current working tree; none has new build/runtime proof yet. All other rows remain open and unapplied. CLEAN-05 was rechecked
+Issue work started 2026-10-08 on `codex/review-issue-fixes`. Rows marked **Applied in source** have corrections committed at `e507ef5`; none has new build/runtime proof yet. All other rows remain open and unapplied. CLEAN-05 was rechecked
 and needs no change at this baseline. Audit baseline:
 ee2d870839efc58f3cf3f9c2a3513ced15477fb8. CLEAN-01 through CLEAN-17 came
 from the 78 changed code/script/scenario files in that 80-path commit, plus

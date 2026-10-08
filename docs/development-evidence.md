@@ -1,11 +1,12 @@
 # Current development evidence
 
-Updated 2026-10-08. Current source work: `codex/review-issue-fixes`, based on
-`ee2d870839efc58f3cf3f9c2a3513ced15477fb8`, with working changes.
+Updated 2026-10-08. Implementation source: `codex/review-issue-fixes` at
+`e507ef5` (based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`).
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
 The [Roadmap audit rows](ROADMAP.md#cleanup-audit-backlog) record each applied
-review correction. This implementation pass also adds source-grounded XML
+review correction: 99 source-corrected findings and 16 unapplied findings.
+This implementation pass also adds source-grounded XML
 documentation across maintained C# files. No new build, test, package, deployment
 or game run has occurred; the October-4 installed payload below is unchanged.
 Documentation coverage is 373 maintained C# files after removing obsolete copies,
