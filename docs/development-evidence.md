@@ -4,6 +4,18 @@ Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+Source-only increment `9767c89`: `cab1cf5` applies mandatory XeLL before XeSS FG
+and retains it through requested latency Off/frame-cap changes, publishing the
+effective dependency; `c2f33e0` adds loader-bound metadata GL discovery/refusal
+and ordinary status output; `9767c89` adds verified Linux startup/profile selection,
+tagged original-run.sh activation/install/remove and RID-aware build/stage/package.
+Official archive inspection confirmed identical managed game-library hashes, so
+the existing startup IL inventory is shared. Shell checkout/staging uses LF.
+No builds, tests, packages, installation or runtime checks ran for this increment.
+Linux display/runtime/provider, installer lifecycle and direct URI launches remain
+unverified; GL01 execution remains unverified. User selected no third-party mods
+on 2026-10-08, so concrete GL02/03 adapters/profiles are explicitly deferred.
+
 The first autonomous T01 [handoff/latency batch](../artifacts/validation/provider-handoffs-20261008-220016/results.json)
 ran once against the same deployed implementation. Both profiles crashed before
 active XeSS FG: SetEnabled(true) returned -15. The pinned XeSS FG SDK defines this
