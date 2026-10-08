@@ -4,6 +4,11 @@ Updated 2026-10-08. Compiled/staged/installed implementation: `9a14715` on
 `codex/review-issue-fixes`, based on `ee2d870839efc58f3cf3f9c2a3513ced15477fb8`.
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
+`c5ba14d` corrects all five delegate declaration/creation references in the two
+GL source files using System.Func/System.Action. Source diff inspection passed;
+no builds or runtime checks ran in this implementation turn. The installed
+implementation remains `9a14715` until validation and delivery of the new increment.
+
 The [platform-increment batch](../artifacts/validation/platform-increment-20261008-224404/results.json)
 ran once at checkout `f92e8ea`: Windows and Linux-target Bootstrap/Mod/Companion
 Release builds passed; bash and embedded Python helper syntax passed. Both Game
