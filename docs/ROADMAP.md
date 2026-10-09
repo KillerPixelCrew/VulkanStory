@@ -23,14 +23,14 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Planned
 
-- **PACK-01: Shader packs**.
+- **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
   2. Loader: `shaderpacks/` folder, pack selection and per-pack options in the Options menu, hot reload; compiled at runtime with the shipped shaderc.
   3. Per-program fallback to the built-in shaders on compile/link errors, with in-game error reporting.
   4. Pipeline cache keyed by the active pack.
   5. Pack-declared composite/deferred passes in the frame graph.
 
-- **VR-01: OpenXR VR**.
+- **VR-01: OpenXR VR**
   1. OpenXR session and swapchains on the existing Vulkan device; headset presentation alongside or instead of the SDL window.
   2. Stereo rendering (two views or multiview) with per-eye projection/view from head tracking.
   3. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
