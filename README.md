@@ -116,15 +116,14 @@ your own installation.
 | `sdk/` | Vendor SDKs as pinned submodules; `streamline-release-2.14.1/` is fetched, not tracked |
 | `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
 | `tests/` | Unit and integration tests |
-| `porting/` | Source migration inventory and reference material from the original implementation |
-| `docs/` | Design documents, roadmap and implementation/validation records |
+| `docs/` | Design documents and roadmap; dated implementation/validation records in `docs/records/` |
 
 ## Documentation
 
 - [Roadmap](docs/ROADMAP.md): current status, known defects and remaining work
 - [Architecture](docs/architecture.md): components, ownership, rendering contracts, mod compatibility
 - [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, install/update/removal, Linux
-- [Porting plan](docs/porting-plan.md) and [source inventory](porting/README.md): how the original implementation was migrated
+- [Porting plan](docs/porting-plan.md): how the original implementation was migrated
 - [Development evidence](docs/development-evidence.md): what has been built, run and verified, and on which hardware
 
 ## Background
@@ -138,8 +137,9 @@ its provenance preserved.
 
 ## License and attribution
 
-Migrated source files keep their original license and attribution; a rename or move
-does not change a file's license (see the [source inventory](porting/README.md)).
+Code migrated from Optimum keeps its original license and attribution; a rename or
+move does not change a file's license. The Optimum license texts, notice and per-path
+license scope are in [`packaging/notices/source-provenance`](packaging/notices/source-provenance).
 Third-party notices for SDL, Shaderc, Silk.NET, PromptFont and the vendor SDK runtimes
 are under [`packaging/notices`](packaging/notices) and ship with every package under
 `VulkanStory/licenses`. Vendor SDKs are subject to their own license terms.

@@ -1,8 +1,8 @@
 # XeSS frame-generation bridge
 
 Migrated from `native/optimum-xess-fg` at source revision
-`386e0d05386d0b228b439d09aeca851428f7bbf3`; reference sources remain in
-`native/migrated/optimum-xess-fg`. Own symbols and runtime filename use
+`386e0d05386d0b228b439d09aeca851428f7bbf3` of the Optimum repository
+(StratumServer/Optimum). Own symbols and runtime filename use
 `VulkanStoryXessFg`, and diagnostic environment keys use `VULKANSTORY_XESS`.
 SDK entry points, resource formats, matrix/frame ABI, queue ownership and
 presentation behavior are retained. Preserve inherited provenance/notices.

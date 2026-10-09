@@ -10,7 +10,7 @@ namespace VulkanStory.Game;
 internal readonly record struct DlssQueryObservation(ulong QueryFrameId, int Result,
     StreamlineFrameGenerationState? State);
 
-// Direct host migration from porting/old-platform/VulkanClientPlatform.FrameGeneration.cs.
+// Direct host migration from the original Optimum VulkanClientPlatform.FrameGeneration.cs.
 // Baseline: 386e0d05386d0b228b439d09aeca851428f7bbf3. SDK wrappers,
 // upright image formats, camera conversion and presentation ownership are retained.
 /// <summary>Coordinates session frame-generation eligibility, matching scene inputs and effective provider state around presentation.</summary>

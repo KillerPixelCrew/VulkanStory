@@ -116,9 +116,9 @@ Add-Payload 'optional-server/vulkanstoryinput/modinfo.json' (Join-Path $projectR
 Add-Payload 'VulkanStory/assets/gamecontrollerdb.txt' (Join-Path $projectRoot 'src/VulkanStory.Platform.Sdl/assets/gamecontrollerdb.txt')
 Add-Payload 'VulkanStory/licenses/SDL_GameControllerDB-LICENSE.txt' (Join-Path $projectRoot 'src/VulkanStory.Platform.Sdl/assets/SDL_GameControllerDB-LICENSE.txt')
 Add-Tree 'VulkanStory/licenses/PromptFont' (Join-Path $projectRoot 'packaging/notices/promptfont')
-Add-Tree 'VulkanStory/licenses/source-provenance' (Join-Path $projectRoot 'porting/provenance')
-Add-Tree 'optional-server/vulkanstoryinput/licenses/source-provenance' (Join-Path $projectRoot 'porting/provenance')
-Add-Tree 'Mods/vulkanstoryinput/licenses/source-provenance' (Join-Path $projectRoot 'porting/provenance')
+Add-Tree 'VulkanStory/licenses/source-provenance' (Join-Path $projectRoot 'packaging/notices/source-provenance')
+Add-Tree 'optional-server/vulkanstoryinput/licenses/source-provenance' (Join-Path $projectRoot 'packaging/notices/source-provenance')
+Add-Tree 'Mods/vulkanstoryinput/licenses/source-provenance' (Join-Path $projectRoot 'packaging/notices/source-provenance')
 Add-Tree 'VulkanStory/licenses/native' $NativeLicensesDirectory
 Add-Tree 'VulkanStory/licenses/managed' $ManagedLicensesDirectory
 Add-Payload 'VulkanStory/licenses/dependency-notice-sources.json' (Join-Path $projectRoot 'packaging/notices/sources.json')

@@ -1,8 +1,8 @@
 # FSR 4 bridge
 
 Source migrated from `native/optimum-fsr4` at baseline revision
-`386e0d05386d0b228b439d09aeca851428f7bbf3`. The reference copy remains in
-`native/migrated/optimum-fsr4`. Own `OptimumFsr4` identifiers/exports become
+`386e0d05386d0b228b439d09aeca851428f7bbf3` of the Optimum repository
+(StratumServer/Optimum). Own `OptimumFsr4` identifiers/exports become
 `VulkanStoryFsr4`; SDK calls, frame layout, adapter selection, image sharing,
 queue waits/signals and destruction are retained. Preserve the repository's
 inherited provenance and notices.
@@ -20,4 +20,4 @@ copies vendor binaries. Ship the separately authorized signed
 `amd_fidelityfx_upscaler_dx12.dll` beside `VulkanStoryFsr4.dll` in the payload's
 native RID directory. Players do not run this script.
 
-Native compilation was recorded in the [October-1 native build](../../docs/validation-native-and-shaders-2026-10-01-01.md). That result applies to its recorded source, not subsequent fixes. Consult the [Roadmap](../../docs/ROADMAP.md) for current source and validation status. Supported AMD initialization, shared-resource/fence execution, real-scene quality, switching and shutdown remain acceptance gates.
+Native compilation was recorded in the [October-1 native build](../../docs/records/validation-native-and-shaders-2026-10-01-01.md). That result applies to its recorded source, not subsequent fixes. Consult the [Roadmap](../../docs/ROADMAP.md) for current source and validation status. Supported AMD initialization, shared-resource/fence execution, real-scene quality, switching and shutdown remain acceptance gates.

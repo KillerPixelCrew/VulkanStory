@@ -7,7 +7,7 @@ not maintain a second chronological progress ledger.
 ## Scope and reference
 
 Port the retained custom Vulkan renderer, upscalers, frame generation and SDL3
-into the fresh VulkanStory mod at D:/Coding/VulkanStory-Rewrite. Retained source
+into the fresh VulkanStory mod in this repository. Retained source
 baseline: 386e0d05386d0b228b439d09aeca851428f7bbf3. Existing provenance records and
 license notices stay with the migrated implementations.
 
@@ -36,7 +36,7 @@ compatibility work remain explicit tracks in the roadmap.
   SDK locations may be external; players need neither SDKs nor the old project.
 
 See [architecture](architecture.md), [bootstrap/install contract](bootstrap-and-installation.md)
-and [source inventory](../porting/README.md) for the detailed boundaries.
+and source inventory for the detailed boundaries.
 
 ## Workflow
 
@@ -66,8 +66,8 @@ Linux activation/release. Their current statuses and exact work are in [ROADMAP]
 ## Historical evidence
 
 The full previous plan is preserved in
-[porting-plan-history-2026-10-01.md](porting-plan-history-2026-10-01.md).
+[porting-plan-history-2026-10-01.md](records/porting-plan-history-2026-10-01.md).
 Detailed dated implementation/validation records remain in this directory.
 Historical statements such as no world rendered/no provider evaluated are superseded
-by later recorded world/SDK runs. The [current summary](current-port-status.md) links
+by later recorded world/SDK runs. The [current summary](records/current-port-status.md) links
 those runs without treating their limited scope as full acceptance.

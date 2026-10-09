@@ -5,7 +5,7 @@ Updated 2026-10-08. Validated/installed implementation: `bc85817`, checkout `801
 This is the single current evidence summary. Raw runs remain under artifacts/validation.
 
 Current source `6a3fab6` removes full-backbuffer tags from scene tagging/invalidation.
-Pinned [Streamline 2.14.1 guide](../sdk/streamline-2.14.1/docs/ProgrammingGuideDLSS_G.md)
+Pinned [Streamline 2.14.1 guide](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.1/docs/ProgrammingGuideDLSS_G.md)
 §5.2 uses backbuffer tags only for subregions; this renderer presents the full image.
 SDK-owned sizing includes deferred resize. Four scene tags/lifetimes and native ABI
 remain. Source inspection only: no builds, tests, probes, packages, runs or deployment
@@ -149,7 +149,7 @@ The next implementation increment must repair that order and mandatory dependenc
 through LowLatency Off/frame-cap updates. No rerun or source repair occurred in this
 validation turn; earlier XeSS execution records do not validate the current source.
 
-All 118 [review implementation findings](completed-review-findings-2026-10-08.md)
+All 118 [review implementation findings](records/completed-review-findings-2026-10-08.md)
 are completed. The latest runtime correction addresses the mapped-buffer regression
 introduced by `6df3105`: small updates after any GPU use cloned whole capacities,
 churned descriptors and changed VRAM placement. `e4de738` uses the existing ordered
@@ -180,8 +180,8 @@ shows intact scene/HUD and a 50 / 101 FPS sample. Backend timing showed no stead
 allocation/blocking-upload churn and negligible Reflex waits. These are scoped
 SDK-output/capture measurements, not physical scanout or moving-scene quality acceptance.
 
-The same stage was deployed to `C:/Users/N1GHT/AppData/Roaming/Vintagestory` with
-[backups](../artifacts/validation/fg-foreground-20261008-211805/install-backup/).
+The same stage was deployed to the developer's Vintage Story installation with
+[backups](../artifacts/validation/fg-foreground-20261008-211805/install-backup).
 [All 400 receipt hashes match](../artifacts/validation/fg-foreground-20261008-211805/install-verification.json),
 including Renderer/Game DLLs against stage. User settings/save and loader policy
 were preserved; no normal installed client was launched after delivery. The only
@@ -200,27 +200,27 @@ evidence below belongs to its recorded payloads and does not validate later sour
 
 | Area | Evidence | Limit |
 | --- | --- | --- |
-| Intel UHD 770 FSR3 SR/FG | [Actual generated image and same-frame UI](../artifacts/validation/intel-generated-output-20261004-081416/); upright scene, nonduplicate pixels, opaque HUD match | Stationary camera; scanout/pacing unproved |
-| Intel XeSS SR | [201 successful evaluations, current motion](../artifacts/validation/intel-motion-20261004-062918/) | Quality/interactive acceptance incomplete |
-| Intel XeSS FG | [XeLL initialization rejection](../artifacts/validation/intel-fg-stage-20261004-064938/) | UHD 770 outside supported Arc/Core Ultra families |
-| NVIDIA XeSS/FSR3 | [21-action handoff and normal teardown](../artifacts/validation/resource-bindings-20261004-103435/) | SDK counts are not display quality/pacing proof |
-| NVIDIA DLSS FG | [Focused strict gain scenario passed](../artifacts/validation/fg-foreground-20261008-211805/); sampled 38.4 real / 76.9 SDK output FPS | Moving-scene/generated-image quality, scanout and sustained pacing remain unaccepted |
-| Main/world Options | [Save/Cancel/persistence/Graphics return](../artifacts/validation/options-current-save-cancel-20261004-082438/); [6x slider interaction](../artifacts/validation/multiplier-world-20261004-055122/) | Diagnostic input; physical input, resize and error paths incomplete |
-| Status/FPS UI | [Provider limits](../artifacts/validation/suspended-limits-20261004-090105/); [unclipped HUD](../artifacts/validation/fps-hud-sizing-20261004-091348/) | Narrow-window/scale coverage incomplete |
-| Silent harness | [Exact settings block checked offline](../artifacts/validation/headless-audio-offline-20261004-105627/) | Six volumes zero, cache excluded; no acoustic measurement or new launch |
-| AMD FSR4 | [Unsupported NVIDIA fallback](../artifacts/validation/fsr4-fallback-20261004-050856/) | No AMD execution evidence |
+| Intel UHD 770 FSR3 SR/FG | [Actual generated image and same-frame UI](../artifacts/validation/intel-generated-output-20261004-081416); upright scene, nonduplicate pixels, opaque HUD match | Stationary camera; scanout/pacing unproved |
+| Intel XeSS SR | [201 successful evaluations, current motion](../artifacts/validation/intel-motion-20261004-062918) | Quality/interactive acceptance incomplete |
+| Intel XeSS FG | [XeLL initialization rejection](../artifacts/validation/intel-fg-stage-20261004-064938) | UHD 770 outside supported Arc/Core Ultra families |
+| NVIDIA XeSS/FSR3 | [21-action handoff and normal teardown](../artifacts/validation/resource-bindings-20261004-103435) | SDK counts are not display quality/pacing proof |
+| NVIDIA DLSS FG | [Focused strict gain scenario passed](../artifacts/validation/fg-foreground-20261008-211805); sampled 38.4 real / 76.9 SDK output FPS | Moving-scene/generated-image quality, scanout and sustained pacing remain unaccepted |
+| Main/world Options | [Save/Cancel/persistence/Graphics return](../artifacts/validation/options-current-save-cancel-20261004-082438); [6x slider interaction](../artifacts/validation/multiplier-world-20261004-055122) | Diagnostic input; physical input, resize and error paths incomplete |
+| Status/FPS UI | [Provider limits](../artifacts/validation/suspended-limits-20261004-090105); [unclipped HUD](../artifacts/validation/fps-hud-sizing-20261004-091348) | Narrow-window/scale coverage incomplete |
+| Silent harness | [Exact settings block checked offline](../artifacts/validation/headless-audio-offline-20261004-105627) | Six volumes zero, cache excluded; no acoustic measurement or new launch |
+| AMD FSR4 | [Unsupported NVIDIA fallback](../artifacts/validation/fsr4-fallback-20261004-050856) | No AMD execution evidence |
 
 The cleanup removed speculative constructor-retention plumbing, the auxiliary
 reflection checker, production shutdown-trace wrappers and one-off SR/generated
 capture hooks. Their existing images/logs remain available. Ordinary constructor
 cleanup, checked Vulkan results and the normal hidden harness remain.
-Game/Mod [cleanup builds passed](../artifacts/validation/cleanup-build-20261004-114649/)
+Game/Mod [cleanup builds passed](../artifacts/validation/cleanup-build-20261004-114649)
 with zero errors: Game has the existing CS8600 warning at Scenarios.cs:504; Mod has
 none. No game or runtime suite was launched. Earlier successful runs do not validate
 the simplified source's runtime behavior or negative GPU failure paths.
 
-The last recorded development build was installed in `C:/Users/N1GHT/AppData/Roaming/Vintagestory`
-for the user's manual test. [Installation batch](../artifacts/validation/install-current-20261004-115727/):
+The last recorded development build was installed in the developer's Vintage Story installation
+for the user's manual test. [Installation batch](../artifacts/validation/install-current-20261004-115727):
 Bootstrap, Game, Mod and Input.Companion Release builds passed; all 373 deployed
 package files matched staged hashes. Existing loader and client settings were
 preserved; replaced files are in the batch's `backup/`. No game was launched.
@@ -233,7 +233,7 @@ These logs prove a changed provider input, not visible quality or FPS gain.
 Subsequent source changes apply Options edits at the next frame boundary without
 persisting them; Save persists, Cancel/closing restores the previous settings.
 Image now displays current provider, render/output resolution and FPS. This source
-increment's [Release build/deployment batch](../artifacts/validation/live-options-install-20261004-121233/)
+increment's [Release build/deployment batch](../artifacts/validation/live-options-install-20261004-121233)
 passed and installed the updated package in the same game directory. All 373 deployed
 files matched staged hashes; loader, client settings and mod settings were preserved.
 Game has the existing CS8600 warning at Scenarios.cs:504; other builds have none.
@@ -249,12 +249,12 @@ the same result while disabling FG during framebuffer disposal. The bundled SDK
 defines 39 as `eWarnOutOfVRAM`. Source now handles Off with that warning through
 checked device drain and explicit feature release before framebuffer deletion;
 other disable/release failures still stop cleanup. Native bridge and managed source
-were rebuilt together in [controller/crash installation](../artifacts/validation/controller-crash-install-20261004-124437/).
+were rebuilt together in [controller/crash installation](../artifacts/validation/controller-crash-install-20261004-124437).
 Native Streamline bridge and four managed Release builds passed (existing Game
 CS8600 warning only); the package was deployed and all 373 installed payload hashes
 matched. Backups are in that batch's `backup/`. No game was launched by the agent.
 Runtime correction/input acceptance and the origin of memory pressure remain open.
-Automatic controller logging is now [built and deployed](../artifacts/validation/controller-logging-install-20261004-125817/).
+Automatic controller logging is now [built and deployed](../artifacts/validation/controller-logging-install-20261004-125817).
 It records device-count changes, SDL open failures, routing/blocking transitions,
 the first raw SDL input per connection (before routing guards), and panel-open
 results/failures. It does not log every frame. Game/Mod builds passed with the
@@ -264,7 +264,7 @@ The prepared [visible DLSS launcher](../artifacts/validation/visible-dlss-curren
 pins an older compiled payload; do not silently treat it as the simplified source.
 
 Controller fixes and performance instrumentation are now
-[built and deployed](../artifacts/validation/controller-performance-install-20261004-134736/).
+[built and deployed](../artifacts/validation/controller-performance-install-20261004-134736).
 The initial Game build failed on two incorrect diagnostic settings references;
 these were corrected to use CaptureFrameSettings and the corrected Release build
 passed with the existing Scenarios.cs:504 CS8600 warning. Mod Release passed
@@ -290,7 +290,7 @@ stick changes are included in this deployment. Live controller acceptance and
 the FPS slowdown's cause remain unverified.
 
 Minecraft-style controller mapping is now
-[built and staged](../artifacts/validation/controller-minecraft-install-20261004-135210/),
+[built and staged](../artifacts/validation/controller-minecraft-install-20261004-135210),
 not deployed: the user is continuing their test in the running game. Game/Mod
 Release builds passed (existing Game CS8600 warning only). RT attacks/breaks,
 LT uses/places, LB/RB wheel directions are swapped, A jumps/accepts, B toggles
@@ -302,7 +302,7 @@ are preserved. No installed files/settings were changed during the user's test.
 Live mapping acceptance remains pending.
 
 The user's 13:54:07 inventory crash is preserved in
-[controller-inventory-install-20261004-135616](../artifacts/validation/controller-inventory-install-20261004-135616/).
+[controller-inventory-install-20261004-135616](../artifacts/validation/controller-inventory-install-20261004-135616).
 The primary failure is ErrorOutOfDeviceMemory allocating a 5,898,240-byte dedicated
 DeviceImages block with 168 live allocations; frame-retention cleanup exceptions
 followed it. This does not establish a leak, global VRAM exhaustion or a PCL cause.
@@ -319,7 +319,7 @@ No game was launched. Inventory stability, mapping acceptance and the cause of
 the memory pressure remain open; the cursor correction is not a proven OOM fix.
 
 The inventory allocation correction is
-[built, checked and deployed](../artifacts/validation/inventory-memory-fix-20261004-135926/).
+[built, checked and deployed](../artifacts/validation/inventory-memory-fix-20261004-135926).
 For ordinary DeviceImages, a typed ErrorOutOfDeviceMemory allocation failure now
 falls through once to a host-visible, non-device-local type allowed by the image's
 memoryTypeBits. Dedicated-image requirements, resource identity, usage and GPU
@@ -342,7 +342,7 @@ The checked `stage-inventory-gateway` payload was deployed with backups; all
 375 installed receipt hashes matched. The user's game was not launched.
 
 The focused VRAM/lifetime investigation and corrections are
-[built, exercised and deployed](../artifacts/validation/vram-investigation-20261004-141424/).
+[built, exercised and deployed](../artifacts/validation/vram-investigation-20261004-141424).
 Source inspection found two allocation-policy defects: empty-block pressure used
 only allocator-owned heap bytes rather than driver/provider usage, and persistent
 mesh buffers took mapped VRAM until allocation failure without reserving image
@@ -384,7 +384,7 @@ launched. The exact original crash cause, vendor FG pressure and full fencing/
 streaming/performance acceptance remain open.
 
 The remaining DLSS-G pressure failure from the preceding check is now addressed
-by [fg-vram-headroom-20261004-142525](../artifacts/validation/fg-vram-headroom-20261004-142525/).
+by [fg-vram-headroom-20261004-142525](../artifacts/validation/fg-vram-headroom-20261004-142525).
 The prior one-block 128 MiB mesh reserve was inadequate for the observed image
 and provider working sets. Persistent mesh allocation now reserves the measured
 image/transient physical-block footprint on that heap plus driver usage outside
@@ -415,9 +415,9 @@ launched. Current exact summaries and hashes are in `pressure-summary.json` and
 `deployment-result.json` in this batch.
 
 The first Control Flex implementation increment is
-[built and deployed](../artifacts/validation/controlflex-controller-20261004-145551/).
+[built and deployed](../artifacts/validation/controlflex-controller-20261004-145551).
 It is a fresh C# implementation informed by the published artifact inventory at
-`D:/Coding/VulkanStory/refs/control-flex-analysis/INVENTORY.md`; no reconstructed
+a local, unpublished ControlFlex analysis inventory; no reconstructed
 Java was transplanted. Controller samples now cache supported buttons/axes.
 Context transitions, focus/device changes and world exit release owned input,
 drop old GUI owners and suppress held controls until neutral/release. A context
@@ -455,7 +455,7 @@ menus and narrowly justified mod/overlay adapters remain separate increments;
 this is not a claim that every Control Flex feature has been reproduced.
 
 The configurable controller radial action menu is
-[built, rendered and deployed](../artifacts/validation/controller-radial-20261004-152654/).
+[built, rendered and deployed](../artifacts/validation/controller-radial-20261004-152654).
 Default entry is right-stick click. Hold mode selects with the right stick and
 executes on release; press mode opens and confirms with A or another opener press;
 B/Start cancels. The eight slots can be cycled among inventory, pause, controller
@@ -481,7 +481,7 @@ settings/save edited. Gesture/modifier layers and physical-input acceptance are
 still part of the active controller goal.
 
 Gesture modes and a modifier layer are now
-[built and deployed](../artifacts/validation/controller-gestures-20261004-153854/).
+[built and deployed](../artifacts/validation/controller-gestures-20261004-153854).
 The per-action monotonic-time state supports Hold, Press, Release, Tap, LongPress,
 Toggle and DoublePress/Tap/Hold/Toggle. Thresholds are configurable; defaults
 leave the prior mappings/legacy sneak toggle intact. Inventory actions consume
@@ -505,7 +505,7 @@ hashes matched. No normal game or physical controller input was operated. Timing
 combination execution and live acceptance remain part of the active goal.
 
 The gesture/modifier integration corrections are
-[built and deployed](../artifacts/validation/controller-action-polish-20261004-155417/).
+[built and deployed](../artifacts/validation/controller-action-polish-20261004-155417).
 Explicit shifted bindings now consume their physical buttons, suppressing inherited
 main actions on those buttons; assigning a shifted button removes its prior shifted
 owner and cannot bind the modifier itself. This corrects the case where shifted
@@ -522,7 +522,7 @@ backups and all 375 installed receipt hashes matched. No game was launched in
 this increment. The active goal still requires live controller acceptance.
 
 Context-specific controller prompts are
-[built and deployed](../artifacts/validation/controller-prompt-polish-20261004-160020/).
+[built and deployed](../artifacts/validation/controller-prompt-polish-20261004-160020).
 Gameplay retains RT/LT prompts; GUI shows A select, X take-half, Y quick-transfer
 and B close. Modifier prompts resolve actual shifted ownership, include the
 modifier glyph, and omit inherited actions whose buttons are consumed. Hint
@@ -540,6 +540,6 @@ question covers movement/look, hotbar, inventory, radial, gesture/modifier behav
 stuck/repeated input, FPS slowdown and crashes; absence of a reply is not acceptance.
 
 Superseded session reports and the overgrown Roadmap are recoverable in
-[the cleanup backup](../.codex/cleanup-backup-20261004/). They are historical evidence,
+a local, unpublished cleanup backup. They are historical evidence,
 not another active plan. Earlier tracked architecture, installation and porting
 documents remain in place.

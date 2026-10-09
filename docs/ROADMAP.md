@@ -1,24 +1,16 @@
 # VulkanStory Roadmap
 
 Updated 2026-10-09. Authoritative current status; detailed results are in
-[development-evidence.md](development-evidence.md).
-Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.md).
-Persistent goal is active in the current chat; T01 is in progress.
-Workspace: D:/Coding/VulkanStory-Rewrite, `codex/review-issue-fixes`, based on
-ee2d870839efc58f3cf3f9c2a3513ced15477fb8.
-Current validated/installed implementation: `bc85817`, checkout `80158f3`
-(Options lifecycle/SDL resize, namespace correction and Linux notice paths).
-Both Game builds, both platform stage/packages and main/focused DLSS world lifecycle
-scenarios passed. Scoped software acceptance does not close the defects/gaps below.
-Current source `6a3fab6` removes redundant full-backbuffer tags per the pinned SDK
-guide; native build/runtime validation is pending. Installed identity remains above.
-The working tree on `17e1172` carries the uncommitted 2026-10-09 code-quality
-implementation (managed plus both native bridges); it is **not built, tested or
-validated**, and the next turn must be its validation batch (CQ-01 below).
-Current development package: `artifacts/validation/options-lifecycle-20261008-232950/stage-win`,
-installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
-The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
-76.9 SDK output FPS after the mapped-mesh regression correction.
+[development-evidence.md](development-evidence.md) and the dated implementation and
+validation records under [records/](records/).
+
+Last installed development package: the 2026-10-09 code-quality build (Release managed
+build, all five provider bridges, win-x64 stage/package/deploy passed). Its runtime
+behaviour checks (CQ-01) are outstanding. The REN-06 composition gate and the REN-07
+sky-edge jitter fix are implemented but not yet built.
+
+Commit hashes quoted in older records predate the 2026-10-09 history rewrite (which
+removed the vendored Streamline SDK and local agent files) and no longer resolve.
 
 ## Immediate goal and next work
 
@@ -108,7 +100,7 @@ prepared visible launchers retain their older recorded payloads.
 
 From the 2026-10-08 review, all **118 findings have completed implementations**;
 CLEAN-05 needed no change, and none of its implementation findings is open. The detailed
-[completed ledger](completed-review-findings-2026-10-08.md) retains every ID,
+[completed ledger](records/completed-review-findings-2026-10-08.md) retains every ID,
 original finding, source reference, audit coverage and recorded proof limit.
 
 ### Pending review verification
@@ -124,7 +116,7 @@ from these checks. Broader feature, platform and hardware work remains below.
 
 ### Code-quality review (2026-10-09)
 
-The [code-quality review record](code-quality-review-2026-10-09.md) holds every
+The [code-quality review record](records/code-quality-review-2026-10-09.md) holds every
 finding (I, E, R, S, A, C IDs) with its per-row implementation outcome. All rows
 except S13 (not attempted: tests deferred) and the partial rows below are
 implemented in the working tree, which is **unbuilt and unvalidated**. Every
@@ -152,7 +144,7 @@ row below is implemented-unvalidated unless marked open.
 
 These IDs retain remaining feature/compatibility work and verification boundaries.
 Pending acceptance does not reopen completed review implementation findings.
-The [completed ledger](completed-review-findings-2026-10-08.md) maps the closed
+The [completed ledger](records/completed-review-findings-2026-10-08.md) maps the closed
 findings to their broader feature and acceptance areas.
 
 | ID | Remaining completion boundary |
@@ -191,5 +183,5 @@ findings to their broader feature and acceptance areas.
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
 
 Older plans, detailed session reports and pre-cleanup source are recoverable from
-[the cleanup backup](../.codex/cleanup-backup-20261004/). Raw validation artifacts
+a local, unpublished cleanup backup. Raw validation artifacts
 remain intact. Historical claims do not supersede this Roadmap.

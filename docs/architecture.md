@@ -1,6 +1,6 @@
 # VulkanStory architecture
 
-Current work/status is tracked in [ROADMAP](ROADMAP.md), with recorded evidence in [current port status](current-port-status.md).
+Current work/status is tracked in [ROADMAP](ROADMAP.md), with recorded evidence in [current port status](records/current-port-status.md).
 The dated design and milestone observations below are historical checkpoints;
 they do not supersede that ledger's later implementation or recorded runs.
 
@@ -10,7 +10,7 @@ Design date: 2026-09-28. Updated 2026-09-29: B0 bootstrap, focused tests, and a 
 
 The user installs VulkanStory into an existing Vintage Story installation and continues using the normal shortcut. VulkanStory starts early enough to own the first graphics window, renders the menu and game with Vulkan, and supplies SDL windowing and input. It runs inside the game's existing .NET process. Its ordinary mod entry supplies settings and world-lifecycle integration once the standard mod loader runs.
 
-The agreed Windows delivery direction is a native DLL proxy plus a contained VulkanStory payload. B0 uses an app-local `hostfxr.dll` proxy, preserving MFG Enabler's `version.dll` name. The live run proved pre-`Main` activation, but Harmony observation failed before patch installation. Runtime acceptance is still open. See [bootstrap and installation](bootstrap-and-installation.md) and the [B0 validation record](validation-b0-2026-09-29-03.md).
+The agreed Windows delivery direction is a native DLL proxy plus a contained VulkanStory payload. B0 uses an app-local `hostfxr.dll` proxy, preserving MFG Enabler's `version.dll` name. The live run proved pre-`Main` activation, but Harmony observation failed before patch installation. Runtime acceptance is still open. See [bootstrap and installation](bootstrap-and-installation.md) and the [B0 validation record](records/validation-b0-2026-09-29-03.md).
 
 The project replaces Optimum completely. Reusable graphics algorithms and source files may be migrated with their provenance. Runtime ownership, project references, configuration, patch registration, and installation are new.
 
