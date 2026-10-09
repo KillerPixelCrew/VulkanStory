@@ -50,7 +50,7 @@ Other source trees:
 | `native/bootstrap` | Windows `hostfxr.dll` proxy (CMake) |
 | `native/ngx`, `fsr3`, `fsr4`, `xess-fg`, `streamline` | C/C++ provider bridges loaded by the renderer |
 | `shaders/native` | Maintained GLSL corpus for native (non-translated) pipelines |
-| `tools/VulkanStory.Shaders.Compiler` | Compiles `shaders/native` to SPIR-V plus `shaders.manifest.json` |
+| `tools/VulkanStory.Shaders.Compiler` | Compiles `shaders/native` to SPIR-V plus `shaders.manifest.json`, packed into `shaders-vk.pak` |
 | `tools/VulkanStory.GameProfile` | Verifies an installation against the startup IL profile and writes an operand inventory |
 | `tools/VulkanStory.Preflight` | Standalone Vulkan/SDL device, surface and swapchain preflights |
 | `profiles/` | Supported game profiles: file hashes per platform and the startup IL profile |
@@ -138,8 +138,12 @@ Shaders:
 - Game GLSL is parsed, rewritten to Vulkan GLSL and compiled with shaderc at
   runtime. Results and the Vulkan pipeline cache live in
   `<game cache>/vulkanstory-vulkan`.
-- Programs with a native replacement use precompiled SPIR-V from `shaders-vk`
-  (built from `shaders/native`), selected through `shaders.manifest.json`.
+- Programs with a native replacement use precompiled SPIR-V (built from
+  `shaders/native`), selected through `shaders.manifest.json`. The package ships
+  both in one container, `VulkanStory/shaders-vk.pak` (`NativeShaderPack`: indexed
+  entries with a SHA-256 each); a loose `shaders-vk/` directory is the development
+  fallback when no pack is present. `VULKANSTORY_VK_SHADER_SOURCE` compiles a source
+  tree at device start instead.
 - `ShaderOverridePolicy` tracks shader assets changed by mods or resource packs and
   only uses a retained source where the original asset is unchanged.
 

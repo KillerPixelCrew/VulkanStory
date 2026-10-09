@@ -574,7 +574,7 @@ internal sealed class NativeShaderBuilder
     /// <summary>
     /// Writes a full build to <c>&lt;outputRoot&gt;/shaders-vk</c>: every SPIR-V file and the
     /// manifest, rewriting only files whose bytes changed, and deleting SPIR-V the build no longer
-    /// produces.
+    /// produces. Then packs that directory into <c>&lt;outputRoot&gt;/shaders-vk.pak</c>.
     /// </summary>
     public static void Write(NativeShaderBuildResult result, string outputRoot)
     {
@@ -586,6 +586,47 @@ internal sealed class NativeShaderBuilder
         }
         foreach ((string name, byte[] bytes) in result.Files) WriteIfChanged(Path.Combine(directory, name), bytes);
         WriteIfChanged(Path.Combine(directory, NativeShaderManifest.FileName), Encoding.UTF8.GetBytes(result.Manifest.ToJson()));
+        WritePack(directory, Path.Combine(outputRoot, NativeShaderManifest.PackFileName));
+    }
+
+    /// <summary>The pack entries of a manifest and its SPIR-V: the manifest first, then the SPIR-V names in ordinal order.</summary>
+    internal static List<(string Name, byte[] Bytes)> PackEntries(byte[] manifest, IEnumerable<KeyValuePair<string, byte[]>> files)
+    {
+        var sorted = new List<KeyValuePair<string, byte[]>>(files);
+        sorted.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
+        var entries = new List<(string Name, byte[] Bytes)>(sorted.Count + 1) { (NativeShaderManifest.FileName, manifest) };
+        foreach ((string name, byte[] bytes) in sorted) entries.Add((name, bytes));
+        return entries;
+    }
+
+    /// <summary>
+    /// Packs a <c>shaders-vk</c> directory into <paramref name="packPath" />: its manifest and every SPIR-V file the
+    /// manifest names, each checked against the manifest's SHA-256. Files the manifest does not name are left out.
+    /// </summary>
+    public static void WritePack(string directory, string packPath)
+    {
+        string manifestPath = Path.Combine(directory, NativeShaderManifest.FileName);
+        if (!File.Exists(manifestPath)) throw new InvalidDataException("no manifest at " + manifestPath);
+        byte[] manifestBytes = File.ReadAllBytes(manifestPath);
+        NativeShaderManifest manifest = NativeShaderManifest.Load(manifestPath);
+
+        var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (NativeStage stage in manifest.Programs.SelectMany(p => p.Variants).SelectMany(v => v.Stages))
+        {
+            if (!files.TryGetValue(stage.Spirv, out byte[]? bytes))
+            {
+                string path = Path.Combine(directory, stage.Spirv);
+                if (!File.Exists(path)) throw new InvalidDataException("the manifest names " + stage.Spirv + ", missing from " + directory);
+                bytes = File.ReadAllBytes(path);
+                files[stage.Spirv] = bytes;
+            }
+            string actual = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (actual != stage.Sha256) throw new InvalidDataException(stage.Spirv + " sha256 " + actual + ", manifest says " + stage.Sha256);
+        }
+
+        string? parent = Path.GetDirectoryName(Path.GetFullPath(packPath));
+        if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+        WriteIfChanged(packPath, NativeShaderPack.Build(PackEntries(manifestBytes, files)));
     }
 
     /// <summary>
@@ -622,9 +663,13 @@ internal sealed class NativeShaderBuilder
 
         foreach ((string name, byte[] bytes) in result.Files) WriteIfChanged(Path.Combine(directory, name), bytes);
         WriteIfChanged(manifestPath, Encoding.UTF8.GetBytes(existing.ToJson()));
+        WritePack(directory, Path.Combine(outputRoot, NativeShaderManifest.PackFileName));
     }
 
-    /// <summary>Every way the files in <c>&lt;outputRoot&gt;/shaders-vk</c> differ from a fresh build; empty when identical.</summary>
+    /// <summary>
+    /// Every way the files in <c>&lt;outputRoot&gt;/shaders-vk</c> and <c>&lt;outputRoot&gt;/shaders-vk.pak</c> differ
+    /// from a fresh build; empty when identical.
+    /// </summary>
     public static List<string> Compare(NativeShaderBuildResult result, string outputRoot)
     {
         var differences = new List<string>();
@@ -655,6 +700,17 @@ internal sealed class NativeShaderBuilder
                 if (!result.Files.ContainsKey(Path.GetFileName(file))) differences.Add("unexpected " + Path.GetFileName(file));
             }
         }
+
+        string packPath = Path.Combine(outputRoot, NativeShaderManifest.PackFileName);
+        if (!File.Exists(packPath))
+        {
+            differences.Add("missing " + packPath);
+        }
+        else
+        {
+            byte[] fresh = NativeShaderPack.Build(PackEntries(Encoding.UTF8.GetBytes(result.Manifest.ToJson()), result.Files));
+            if (!File.ReadAllBytes(packPath).AsSpan().SequenceEqual(fresh)) differences.Add(NativeShaderManifest.PackFileName + " differs from a fresh build");
+        }
         return differences;
     }
 
@@ -669,7 +725,8 @@ internal sealed class NativeShaderBuilder
 /// The command line of <c>tools/shader-compiler</c>, kept here so tests drive exactly what the
 /// build runs:
 /// <c>--build &lt;src&gt; &lt;out&gt;</c>, <c>--verify &lt;src&gt; &lt;out&gt;</c>,
-/// <c>--single &lt;program&gt; &lt;src&gt; &lt;out&gt;</c>. Output lands in <c>&lt;out&gt;/shaders-vk</c>.
+/// <c>--single &lt;program&gt; &lt;src&gt; &lt;out&gt;</c>, <c>--pack &lt;shaders-vk dir&gt; &lt;pak file&gt;</c>.
+/// Output lands in <c>&lt;out&gt;/shaders-vk</c> and, packed, <c>&lt;out&gt;/shaders-vk.pak</c>.
 /// Exit codes: 0 success, 1 build or verify failure, 2 usage.
 /// </summary>
 public static class NativeShaderTool
@@ -677,17 +734,33 @@ public static class NativeShaderTool
     public const string Usage =
         "usage: VulkanStory.Shaders.Compiler --build <source dir> <output dir>\n" +
         "       VulkanStory.Shaders.Compiler --verify <source dir> <output dir>\n" +
-        "       VulkanStory.Shaders.Compiler --single <program> <source dir> <output dir>";
+        "       VulkanStory.Shaders.Compiler --single <program> <source dir> <output dir>\n" +
+        "       VulkanStory.Shaders.Compiler --pack <shaders-vk dir> <pak file>";
 
     /// <summary>Executes the native-shader builder command-line entry point with supplied output/error writers.</summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         string mode = args.Length > 0 ? args[0] : "";
         int expected = mode == "--single" ? 4 : 3;
-        if (mode is not ("--build" or "--verify" or "--single") || args.Length != expected)
+        if (mode is not ("--build" or "--verify" or "--single" or "--pack") || args.Length != expected)
         {
             error.WriteLine(Usage);
             return 2;
+        }
+
+        if (mode == "--pack")
+        {
+            try
+            {
+                NativeShaderBuilder.WritePack(args[1], args[2]);
+                output.WriteLine("shader-compiler: packed " + args[1] + " into " + args[2]);
+                return 0;
+            }
+            catch (Exception failure) when (failure is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                error.WriteLine("error: " + failure.Message);
+                return 1;
+            }
         }
 
         string? program = mode == "--single" ? args[1] : null;
@@ -711,7 +784,8 @@ public static class NativeShaderTool
             {
                 case "--build":
                     NativeShaderBuilder.Write(result, outputRoot);
-                    output.WriteLine("shader-compiler: built " + summary + " into " + Path.Combine(outputRoot, NativeShaderManifest.DirectoryName));
+                    output.WriteLine("shader-compiler: built " + summary + " into " + Path.Combine(outputRoot, NativeShaderManifest.DirectoryName) +
+                                     " and " + Path.Combine(outputRoot, NativeShaderManifest.PackFileName));
                     return 0;
                 case "--single":
                     NativeShaderBuilder.WriteSingle(result, outputRoot);

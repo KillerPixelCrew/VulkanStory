@@ -15,10 +15,11 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - Render-pass extension points for other mods
 - Windows install, update and removal
 - Loading screen stays up until the first world frame is complete
+- Shaders ship as one container, `shaders-vk.pak`
 
 ## Known defects
 
-- **REN-07:** Geometry edges against the sky jitter with TAA and FSR. Cause found: the native TAA resolve (`shaders/native/taa-resolve.glsl`) read the sky's reactive value at sky-edge pixels and dropped history there. Fixed in source, not yet built.
+- **REN-07:** Geometry edges against the sky jitter with TAA. The native TAA resolve read the sky's reactive value at sky-edge pixels; fixed and deployed, edge flicker down ~4–5× in the foggy-village capture. Awaiting the user's in-game check.
 - **REN-08:** A pipeline first used mid-game (new entity, particle or mod shader) skips its draw while compiling, causing one jittered frame and a TAA/SR history reset.
 
 ## Planned

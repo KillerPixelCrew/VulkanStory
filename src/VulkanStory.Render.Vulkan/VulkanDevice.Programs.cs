@@ -161,30 +161,35 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>
-    /// Loads the native shaders once, at device start: the manifest beside the renderer assembly, the directory a
-    /// test named, or the source tree <c>OPTIMUM_VK_SHADER_SOURCE</c> names. One log line says what came of it.
+    /// Loads the native shaders once, at device start: the directory or pack a test named, the source tree
+    /// <c>VULKANSTORY_VK_SHADER_SOURCE</c> names, or <c>shaders-vk.pak</c> (else a <c>shaders-vk</c> directory) in
+    /// <see cref="NativeShaderPackageDirectory" /> or beside the renderer assembly. One log line says what came of it.
     /// </summary>
     private void LoadNativeShaders()
     {
-        string? assemblyDirectory = null;
-        try
+        string? searchDirectory = NativeShaderPackageDirectory;
+        if (string.IsNullOrEmpty(searchDirectory))
         {
-            assemblyDirectory = System.IO.Path.GetDirectoryName(typeof(VulkanDevice).Assembly.Location);
-        }
-        catch (Exception error) when (error is ArgumentException or System.IO.PathTooLongException)
-        {
-            // An assembly loaded from bytes has no location; the resolution below reports it.
+            try
+            {
+                searchDirectory = System.IO.Path.GetDirectoryName(typeof(VulkanDevice).Assembly.Location);
+            }
+            catch (Exception error) when (error is ArgumentException or System.IO.PathTooLongException)
+            {
+                // An assembly loaded from bytes has no location; the resolution below reports it.
+            }
         }
 
         (NativeShaderLibrary.Mode mode, string? path, string reason) = NativeShaderLibrary.Resolve(
             NativeShadersEnabled, NativeShaderDirectory,
             Environment.GetEnvironmentVariable(NativeShaderLibrary.EnabledVariable),
             Environment.GetEnvironmentVariable(NativeShaderLibrary.SourceVariable),
-            assemblyDirectory);
+            searchDirectory);
 
         _nativeShaders = mode switch
         {
             NativeShaderLibrary.Mode.Directory => NativeShaderLibrary.Load(path!, _shaderCompiler.Identity, out reason),
+            NativeShaderLibrary.Mode.Pack => NativeShaderLibrary.LoadPack(path!, _shaderCompiler.Identity, out reason),
             NativeShaderLibrary.Mode.Source => NativeShaderLibrary.BuildFromSource(path!, _shaderCompiler, out reason),
             _ => null,
         };

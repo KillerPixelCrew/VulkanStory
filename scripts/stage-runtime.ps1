@@ -2,7 +2,7 @@
 .SYNOPSIS
 Assembles a fresh runtime staging tree from existing managed, native, shader, and license inputs.
 .DESCRIPTION
-Resolves the explicit payload inventory, required XML documentation sidecars, controller assets/notices, and shader manifest/blob hashes before copying. Writes VulkanStory/package.json with SHA256 inventory and unverified acceptance. It neither builds inputs nor installs/launches the game; copy failure can leave a partial fresh tree.
+Resolves the explicit payload inventory, required XML documentation sidecars, controller assets/notices, and the shader pack index, blob hashes and manifest coverage before copying. Writes VulkanStory/package.json with SHA256 inventory and unverified acceptance. It neither builds inputs nor installs/launches the game; copy failure can leave a partial fresh tree.
 .PARAMETER Configuration
 Build configuration used to locate existing managed DLL/XML and bootstrap outputs.
 .PARAMETER NativeDirectory
@@ -11,8 +11,8 @@ Directory containing every binary required by packaging/native-<RuntimeIdentifie
 Nonempty notice tree copied under VulkanStory/licenses/native.
 .PARAMETER ManagedLicensesDirectory
 Nonempty managed notice tree copied under VulkanStory/licenses/managed.
-.PARAMETER ShadersDirectory
-Compiled shader corpus containing schema-one shaders.manifest.json and its hashed SPIR-V files.
+.PARAMETER ShaderPack
+Compiled shader corpus as one VSSHPAK1 container (shaders-vk.pak beside the shaders-vk directory the shader tool's --build writes, e.g. artifacts/runtime-shaders/Release/shaders-vk.pak). It must hold schema-one shaders.manifest.json and exactly the SPIR-V entries the manifest names. Staged as VulkanStory/shaders-vk.pak; no loose shader files are staged.
 .PARAMETER OutputDirectory
 Fresh staging root; existing destinations are rejected rather than merged.
 .PARAMETER RuntimeIdentifier
@@ -24,7 +24,7 @@ param(
     [Parameter(Mandatory)][string]$NativeDirectory,
     [Parameter(Mandatory)][string]$NativeLicensesDirectory,
     [Parameter(Mandatory)][string]$ManagedLicensesDirectory,
-    [Parameter(Mandatory)][string]$ShadersDirectory,
+    [Parameter(Mandatory)][string]$ShaderPack,
     [Parameter(Mandatory)][string]$OutputDirectory,
     [ValidateSet('win-x64','linux-x64')][string]$RuntimeIdentifier = $(if ($IsLinux) { 'linux-x64' } else { 'win-x64' })
 )
@@ -143,29 +143,76 @@ foreach ($component in $nativeInventory.optionalComponents.PSObject.Properties) 
     foreach ($optional in $present) { Add-Payload "VulkanStory/native/$RuntimeIdentifier/$optional" (Join-Path $NativeDirectory $optional) }
 }
 Add-Payload 'VulkanStory/native-inventory.json' $nativeInventoryPath
-$shaderRoot = [IO.Path]::GetFullPath($ShadersDirectory)
-$manifest = Get-Content -LiteralPath (Join-Path $shaderRoot 'shaders.manifest.json') -Raw | ConvertFrom-Json
+# Shader pack layout (NativeShaderPack.cs): "VSSHPAK1", u32 version 1, u32 entry count; per entry u16 name
+# length, UTF-8 name, u64 offset, u64 length, SHA-256; 4-byte aligned blobs after the index. Little-endian.
+$shaderPack = [IO.Path]::GetFullPath($ShaderPack)
+if (-not (Test-Path -LiteralPath $shaderPack -PathType Leaf)) { throw "Missing shader pack: $shaderPack" }
+if (-not [BitConverter]::IsLittleEndian) { throw 'Shader pack checks require a little-endian host.' }
+$packBytes = [IO.File]::ReadAllBytes($shaderPack)
+if ($packBytes.Length -lt 16 -or [Text.Encoding]::ASCII.GetString($packBytes, 0, 8) -cne 'VSSHPAK1') { throw "Not a VSSHPAK1 shader pack: $shaderPack" }
+if ([BitConverter]::ToUInt32($packBytes, 8) -ne 1) { throw 'Unsupported shader pack format version.' }
+$entryCount = [BitConverter]::ToUInt32($packBytes, 12)
+if ($entryCount -gt ($packBytes.Length - 16) / 51) { throw 'Shader pack entry count exceeds the file.' }
+$utf8 = [Text.UTF8Encoding]::new($false, $true)
+$packEntries = [Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+$position = 16
+for ($index = 0; $index -lt $entryCount; $index++) {
+    if ($position + 2 -gt $packBytes.Length) { throw 'Shader pack index is truncated.' }
+    $nameLength = [int][BitConverter]::ToUInt16($packBytes, $position)
+    $position += 2
+    if ($nameLength -eq 0 -or $position + $nameLength + 48 -gt $packBytes.Length) { throw 'Shader pack index is truncated or has an empty name.' }
+    $name = $utf8.GetString($packBytes, $position, $nameLength)
+    $position += $nameLength
+    $entry = [pscustomobject]@{
+        Name = $name
+        Offset = [BitConverter]::ToUInt64($packBytes, $position)
+        Size = [BitConverter]::ToUInt64($packBytes, $position + 8)
+        Sha256 = [Convert]::ToHexString($packBytes, $position + 16, 32)
+    }
+    $position += 48
+    if ($packEntries.ContainsKey($name)) { throw "Duplicate shader pack entry: $name" }
+    if ($entry.Offset -gt [uint64]$packBytes.Length -or $entry.Size -gt ([uint64]$packBytes.Length - $entry.Offset)) { throw "Shader pack entry runs past the end of the file: $name" }
+    if ($entry.Offset % 4 -ne 0) { throw "Unaligned shader pack entry: $name" }
+    $packEntries[$name] = $entry
+}
+$previousEnd = [uint64]$position
+$hasher = [Security.Cryptography.SHA256]::Create()
+try {
+    foreach ($entry in @($packEntries.Values | Sort-Object Offset)) {
+        if ($entry.Offset -lt $previousEnd) { throw "Shader pack entry overlaps the index or another entry: $($entry.Name)" }
+        $previousEnd = $entry.Offset + $entry.Size
+        $actual = [Convert]::ToHexString($hasher.ComputeHash($packBytes, [int]$entry.Offset, [int]$entry.Size))
+        if ($actual -ine $entry.Sha256) { throw "Shader pack blob hash mismatch: $($entry.Name)" }
+    }
+} finally { $hasher.Dispose() }
+if (-not $packEntries.ContainsKey('shaders.manifest.json')) { throw 'Shader pack has no shaders.manifest.json.' }
+$manifestEntry = $packEntries['shaders.manifest.json']
+$manifest = $utf8.GetString($packBytes, [int]$manifestEntry.Offset, [int]$manifestEntry.Size).TrimStart([char]0xFEFF) | ConvertFrom-Json
 if ($manifest.schemaVersion -ne 1) { throw 'Unsupported shader manifest schema.' }
 $expected = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'shaders/native') -Filter '*.glsl' -File | Select-Object -ExpandProperty BaseName)
 foreach ($name in $expected) {
     if (-not (@($manifest.programs.name) -ccontains $name)) { throw "Incomplete shader corpus: $name" }
 }
-Add-Payload 'VulkanStory/shaders-vk/shaders.manifest.json' (Join-Path $shaderRoot 'shaders.manifest.json')
+$referenced = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+[void]$referenced.Add('shaders.manifest.json')
 foreach ($program in $manifest.programs) {
     if (@($program.variants).Count -eq 0) { throw "Shader has no variants: $($program.name)" }
     foreach ($variant in $program.variants) {
         if (@($variant.stages).Count -eq 0) { throw "Shader has no stages: $($program.name)" }
-        foreach ($entry in $variant.stages) {
-            if ([string]::IsNullOrWhiteSpace($entry.spirv) -or [IO.Path]::IsPathRooted($entry.spirv)) { throw 'Invalid shader blob path.' }
-            $blob = [IO.Path]::GetFullPath((Join-Path $shaderRoot $entry.spirv))
-            if (-not $blob.StartsWith($shaderRoot.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Shader blob escapes its input directory.' }
-            $hash = (Get-FileHash -LiteralPath $blob -Algorithm SHA256).Hash
-            if ($hash -ine $entry.sha256) { throw "Shader blob hash mismatch: $blob" }
-            $relative = "VulkanStory/shaders-vk/$($entry.spirv.Replace('\','/'))"
-            if (-not $sources.Contains($relative)) { Add-Payload $relative $blob }
+        foreach ($stageEntry in $variant.stages) {
+            if ([string]::IsNullOrWhiteSpace($stageEntry.spirv)) { throw 'Invalid shader blob name.' }
+            if (-not $packEntries.ContainsKey($stageEntry.spirv)) { throw "Shader pack lacks a manifest blob: $($stageEntry.spirv)" }
+            # The index hash was checked against the blob above; it must also be the manifest's.
+            if ($packEntries[$stageEntry.spirv].Sha256 -ine $stageEntry.sha256) { throw "Shader blob hash mismatch: $($stageEntry.spirv)" }
+            [void]$referenced.Add($stageEntry.spirv)
         }
     }
 }
+foreach ($name in $packEntries.Keys) {
+    if (-not $referenced.Contains($name)) { throw "Shader pack entry not named by the manifest: $name" }
+}
+$packBytes = $null
+Add-Payload 'VulkanStory/shaders-vk.pak' $shaderPack
 # All inputs are resolved before the fresh staging directory is created.
 $inventory = [ordered]@{}
 foreach ($relative in $sources.Keys) {

@@ -82,9 +82,9 @@ internal sealed class GlslUniformOracle
 }
 
 /// <summary>
-/// The native shaders at runtime (docs/vulkan.md): the manifest and SPIR-V
-/// beside <c>VulkanStory.Render.Vulkan.dll</c>, or a source tree compiled at device start, looked up per
-/// program at <c>VulkanDevice.LinkProgram</c>.
+/// The native shaders at runtime (docs/vulkan.md): the manifest and SPIR-V from <c>shaders-vk.pak</c> or a
+/// <c>shaders-vk</c> directory, or a source tree compiled at device start, looked up per program at
+/// <c>VulkanDevice.LinkProgram</c>.
 ///
 /// Loaded once. SPIR-V is read and its SHA-256 checked the first time a variant is linked; a file that
 /// fails the check fails that variant for the life of the library, and the program links through the
@@ -108,8 +108,8 @@ internal sealed class NativeShaderLibrary
     /// <summary>A <c>sources/shaders-vk</c> tree to compile at device start instead of the shipped manifest.</summary>
     public const string SourceVariable = "VULKANSTORY_VK_SHADER_SOURCE";
 
-    /// <summary>Native shader loading mode: disabled, precompiled directory or source compilation.</summary>
-    public enum Mode { Off, Directory, Source }
+    /// <summary>Native shader loading mode: disabled, precompiled directory, precompiled pack or source compilation.</summary>
+    public enum Mode { Off, Directory, Pack, Source }
 
     /// <summary>How a link request came out.</summary>
     public enum Outcome
@@ -128,17 +128,18 @@ internal sealed class NativeShaderLibrary
     /// <summary>Where the manifest came from, for the log.</summary>
     public string Origin { get; }
 
-    private readonly string? _directory;
+    /// <summary>Reads one SPIR-V file by manifest name from a directory or pack; null for an in-memory build.</summary>
+    private readonly Func<string, byte[]>? _read;
     private readonly IReadOnlyDictionary<string, byte[]>? _files;
     private readonly Dictionary<string, byte[]> _verified = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _rejected = new(StringComparer.Ordinal);
     private readonly object _lock = new();
 
-    private NativeShaderLibrary(NativeShaderManifest manifest, string origin, string? directory, IReadOnlyDictionary<string, byte[]>? files)
+    private NativeShaderLibrary(NativeShaderManifest manifest, string origin, Func<string, byte[]>? read, IReadOnlyDictionary<string, byte[]>? files)
     {
         Manifest = manifest;
         Origin = origin;
-        _directory = directory;
+        _read = read;
         _files = files;
     }
 
@@ -146,18 +147,27 @@ internal sealed class NativeShaderLibrary
 
     /// <summary>
     /// Decides where native shaders come from. Off wins (the environment's <c>0</c> or the device setting);
-    /// then an explicit directory (tests), then <see cref="SourceVariable" />, then <c>shaders-vk</c> beside
-    /// the renderer assembly.
+    /// then an explicit directory or pack file (tests), then <see cref="SourceVariable" />, then
+    /// <c>shaders-vk.pak</c> in <paramref name="searchDirectory" /> (the shipped form), then a <c>shaders-vk</c>
+    /// directory there (development). A pack that exists but is damaged fails; it does not fall back.
     /// </summary>
     public static (Mode Mode, string? Path, string Reason) Resolve(
-        bool? enabledSetting, string? directorySetting, string? enabledVariable, string? sourceVariable, string? assemblyDirectory)
+        bool? enabledSetting, string? directorySetting, string? enabledVariable, string? sourceVariable, string? searchDirectory)
     {
         if (enabledSetting == false) return (Mode.Off, null, "native shaders off by device setting");
         if (enabledVariable?.Trim() == "0") return (Mode.Off, null, EnabledVariable + "=0");
-        if (!string.IsNullOrEmpty(directorySetting)) return (Mode.Directory, directorySetting, "");
+        if (!string.IsNullOrEmpty(directorySetting))
+        {
+            return (File.Exists(directorySetting) ? Mode.Pack : Mode.Directory, directorySetting, "");
+        }
         if (!string.IsNullOrWhiteSpace(sourceVariable)) return (Mode.Source, sourceVariable, "");
-        if (string.IsNullOrEmpty(assemblyDirectory)) return (Mode.Off, null, "renderer assembly location unknown");
-        return (Mode.Directory, System.IO.Path.Combine(assemblyDirectory, NativeShaderManifest.DirectoryName), "");
+        if (string.IsNullOrEmpty(searchDirectory)) return (Mode.Off, null, "renderer assembly location unknown");
+
+        string pack = System.IO.Path.Combine(searchDirectory, NativeShaderManifest.PackFileName);
+        if (File.Exists(pack)) return (Mode.Pack, pack, "");
+        string directory = System.IO.Path.Combine(searchDirectory, NativeShaderManifest.DirectoryName);
+        if (Directory.Exists(directory)) return (Mode.Directory, directory, "");
+        return (Mode.Off, null, "neither " + pack + " nor " + directory + " exists");
     }
 
     /// <summary>
@@ -178,15 +188,45 @@ internal sealed class NativeShaderLibrary
             return null;
         }
 
+        return LoadManifest(path, () => File.ReadAllText(path),
+            name => File.ReadAllBytes(System.IO.Path.Combine(directory, name)), toolchain, out reason);
+    }
+
+    /// <summary>
+    /// Reads <c>shaders.manifest.json</c> from the <see cref="NativeShaderPack" /> at <paramref name="packPath" />, and
+    /// later the SPIR-V from the same pack. Null with the reason as <see cref="Load" />, or when the pack is rejected.
+    /// </summary>
+    public static NativeShaderLibrary? LoadPack(string packPath, string toolchain, out string reason)
+    {
+        if (!NativeShaderPack.TryOpen(packPath, out NativeShaderPack? opened, out string packError))
+        {
+            reason = "shader pack " + packPath + " rejected: " + packError;
+            return null;
+        }
+        if (!opened.Contains(NativeShaderManifest.FileName))
+        {
+            reason = "shader pack " + packPath + " has no " + NativeShaderManifest.FileName;
+            return null;
+        }
+
+        NativeShaderPack pack = opened;
+        return LoadManifest(packPath + " (" + NativeShaderManifest.FileName + ")",
+            () => pack.ReadText(NativeShaderManifest.FileName), pack.ReadBytes, toolchain, out reason);
+    }
+
+    /// <summary>The manifest checks of <see cref="Load" /> over any source of the manifest text and SPIR-V bytes.</summary>
+    private static NativeShaderLibrary? LoadManifest(string origin, Func<string> readManifest, Func<string, byte[]> read,
+        string toolchain, out string reason)
+    {
         NativeShaderManifest manifest;
         try
         {
-            manifest = NativeShaderManifest.Load(path);
+            manifest = NativeShaderManifest.Parse(readManifest());
         }
         catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException
                                           or InvalidOperationException or FormatException or System.Text.Json.JsonException)
         {
-            reason = "manifest " + path + " rejected: " + error.Message;
+            reason = "manifest " + origin + " rejected: " + error.Message;
             return null;
         }
 
@@ -197,14 +237,14 @@ internal sealed class NativeShaderLibrary
             (string ownOptions, string ownLibrary) = SplitToolchain(toolchain);
             if (builtOptions != ownOptions)
             {
-                reason = "manifest " + path + " was built by toolchain '" + manifest.Toolchain + "', this renderer compiles with '" + toolchain + "'";
+                reason = "manifest " + origin + " was built by toolchain '" + manifest.Toolchain + "', this renderer compiles with '" + toolchain + "'";
                 return null;
             }
             reason = "manifest built with shader library '" + builtLibrary + "', this renderer has '" + ownLibrary +
                      "' (same options; the SPIR-V is pinned by its per-stage sha256)";
         }
 
-        return new NativeShaderLibrary(manifest, path, directory, null);
+        return new NativeShaderLibrary(manifest, origin, read, null);
     }
 
     /// <summary>A toolchain identity split at its last <c>;</c>: the compile options and the shaderc library.</summary>
@@ -271,12 +311,11 @@ internal sealed class NativeShaderLibrary
             }
             else
             {
-                string path = System.IO.Path.Combine(_directory!, stage.Spirv);
                 try
                 {
-                    bytes = File.ReadAllBytes(path);
+                    bytes = _read!(stage.Spirv);
                 }
-                catch (Exception readError) when (readError is IOException or UnauthorizedAccessException)
+                catch (Exception readError) when (readError is IOException or UnauthorizedAccessException or InvalidDataException)
                 {
                     error = stage.Spirv + " unreadable: " + readError.Message;
                 }

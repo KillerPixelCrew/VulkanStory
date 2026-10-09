@@ -119,6 +119,7 @@
     <Compile Include="Shaders/NativeShaderBuilder.cs" />
     <Compile Include="Shaders/NativeShaderLibrary.cs" />
     <Compile Include="Shaders/NativeShaderManifest.cs" />
+    <Compile Include="Shaders/NativeShaderPack.cs" />
     <Compile Include="Shaders/SetConvention.cs" />
     <Compile Include="Shaders/SpirvReflection.cs" />
     <Compile Include="Upscale/Ngx/NgxDeviceRequirements.cs" />

@@ -87,7 +87,7 @@ pwsh scripts/build-provider-bridges.ps1 -OutputDirectory <fresh-dir>
 
 # Collect redistributables, stage a package and build the ZIPs
 pwsh scripts/prepare-native-bundle.ps1 -BridgesDirectory <bridges> -CoreNativeDirectory ... -OutputDirectory <fresh-dir>
-pwsh scripts/stage-runtime.ps1 -NativeDirectory ... -ShadersDirectory artifacts/runtime-shaders/Release/shaders-vk -OutputDirectory <fresh-dir> ...
+pwsh scripts/stage-runtime.ps1 -NativeDirectory ... -ShaderPack artifacts/runtime-shaders/Release/shaders-vk.pak -OutputDirectory <fresh-dir> ...
 pwsh scripts/package-runtime.ps1 -StagingDirectory <stage> -OutputDirectory <fresh-dir>
 ```
 

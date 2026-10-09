@@ -23,8 +23,11 @@ internal sealed class NativeShaderManifest
 
     public const string FileName = "shaders.manifest.json";
 
-    /// <summary>The output directory, beside <c>VulkanStory.Render.Vulkan.dll</c>; never under <c>assets/</c>.</summary>
+    /// <summary>The loose output directory (development builds and <c>--verify</c>); never under <c>assets/</c>.</summary>
     public const string DirectoryName = "shaders-vk";
+
+    /// <summary>The shipped form: the directory's manifest and SPIR-V in one <see cref="NativeShaderPack" /> file beside it.</summary>
+    public const string PackFileName = "shaders-vk.pak";
 
     public int SchemaVersion = CurrentSchemaVersion;
 

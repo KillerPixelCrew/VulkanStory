@@ -133,9 +133,7 @@ directory; on Linux the installer copies it there:
       SDL3-CS.dll, Silk.NET.*.dll, Microsoft.*.dll
       profiles/vs-1.22.7-<rid>.json
     native/<rid>/                  # SDL3, shaderc, provider bridges, vendor runtimes
-    shaders-vk/
-      shaders.manifest.json
-      <SPIR-V files>
+    shaders-vk.pak                 # Native SPIR-V and shaders.manifest.json in one file
     assets/gamecontrollerdb.txt
     tools/                         # deploy/remove (Windows) or install/remove (Linux)
     licenses/
@@ -172,10 +170,10 @@ pinned submodules under `sdk/` (`dlss`, `fidelityfx-vk`, `fidelityfx`, `xess`,
 | Step | Script | Result |
 | --- | --- | --- |
 | 1 | `fetch-streamline-release.ps1` | Hash-checked Streamline 2.14.1 release ZIP extracted to the git-ignored `sdk/streamline-release-2.14.1`. The production `bin/x64` runtimes come only from this ZIP |
-| 2 | `build-runtime.ps1` | Managed projects, the Windows proxy (CMake) and the shader corpus in `artifacts/runtime-shaders/<Configuration>`. `-RuntimeIdentifier linux-x64` builds for Linux |
+| 2 | `build-runtime.ps1` | Managed projects, the Windows proxy (CMake) and the shader corpus in `artifacts/runtime-shaders/<Configuration>` (`shaders-vk/` and the shipped `shaders-vk.pak`). `-RuntimeIdentifier linux-x64` builds for Linux |
 | 3 | `build-provider-bridges.ps1` | The five Windows bridges (needs `g++`/`gcc` and `VULKAN_SDK`) |
 | 4 | `prepare-native-bundle.ps1` | Bridges, core binaries, vendor runtimes and notices from `native-win-x64.json`. Streamline runtimes must match the release hashes |
-| 5 | `stage-runtime.ps1` | The layout above plus `optional-server/`. Checks shader manifest coverage and writes the SHA256 inventory `package.json` |
+| 5 | `stage-runtime.ps1` | The layout above plus `optional-server/`. Checks the `-ShaderPack` index, blob hashes and manifest coverage, and writes the SHA256 inventory `package.json` |
 | 6 | `package-runtime.ps1` | Verifies the staged hashes and writes `VulkanStory-<rid>.zip`, `VulkanStory-Input-Companion.zip` and `archives.json` |
 
 ## Install, update, disable, remove

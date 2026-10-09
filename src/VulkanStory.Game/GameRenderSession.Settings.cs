@@ -12,7 +12,7 @@ internal sealed partial class GameRenderSession
         Device.ShaderCacheDirectory = Path.Combine(GamePaths.Cache, "vulkanstory-vulkan");
         string managed = Path.GetDirectoryName(typeof(GameRenderSession).Assembly.Location) ??
             throw new InvalidOperationException("The game integration assembly has no package directory.");
-        Device.NativeShaderDirectory = Path.GetFullPath(Path.Combine(managed, "..", "shaders-vk"));
+        Device.NativeShaderPackageDirectory = Path.GetFullPath(Path.Combine(managed, ".."));
         Device.DebugMode = ClientSettings.GlDebugMode;
         if (HeadlessHarnessOptions.Enabled && Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_ASYNC_PIPELINES") == "1")
             Device.SynchronousPipelines = false;

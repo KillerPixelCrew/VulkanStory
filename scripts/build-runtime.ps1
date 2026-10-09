@@ -2,7 +2,7 @@
 .SYNOPSIS
 Builds production managed projects, native bootstrap, and the maintained shader corpus.
 .DESCRIPTION
-Runs dotnet builds for Bootstrap, Game, Mod, and Input.Companion. Windows additionally builds the CMake activation proxy; Linux uses the original run.sh startup-hook integration and has no native activation proxy. Unless SkipShaders is set, it builds/runs the shader CLI into artifacts/runtime-shaders/<Configuration>. Native provider bridges are built separately. Any checked external failure terminates the script; no tests, staging, deployment, or game launch are performed.
+Runs dotnet builds for Bootstrap, Game, Mod, and Input.Companion. Windows additionally builds the CMake activation proxy; Linux uses the original run.sh startup-hook integration and has no native activation proxy. Unless SkipShaders is set, it builds/runs the shader CLI into artifacts/runtime-shaders/<Configuration>: the loose shaders-vk directory and the shipped single-file shaders-vk.pak that stage-runtime.ps1 -ShaderPack takes. Native provider bridges are built separately. Any checked external failure terminates the script; no tests, staging, deployment, or game launch are performed.
 .PARAMETER Configuration
 Debug or Release configuration used for managed, shader-tool, and native bootstrap outputs.
 .PARAMETER VintageStoryPath

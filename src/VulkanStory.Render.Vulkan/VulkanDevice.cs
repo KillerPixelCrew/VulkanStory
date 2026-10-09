@@ -345,10 +345,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     public bool? NativeShadersEnabled { get; set; }
 
     /// <summary>
-    /// The directory holding <c>shaders.manifest.json</c>, in place of <c>shaders-vk</c> beside the renderer
-    /// assembly (and of <c>VULKANSTORY_VK_SHADER_SOURCE</c>). Read at <see cref="Initialize" />. For tests.
+    /// A directory holding <c>shaders.manifest.json</c>, or a <c>shaders-vk.pak</c> file, used in place of
+    /// <c>VULKANSTORY_VK_SHADER_SOURCE</c> and of the package search. Read at <see cref="Initialize" />. For tests.
     /// </summary>
     internal string? NativeShaderDirectory { get; set; }
+
+    /// <summary>
+    /// The directory searched for <c>shaders-vk.pak</c>, then a <c>shaders-vk</c> directory, in place of the renderer
+    /// assembly's directory. The game sets the VulkanStory package root. Read at <see cref="Initialize" />.
+    /// </summary>
+    internal string? NativeShaderPackageDirectory { get; set; }
 
     /// <summary>
     /// The launcher's mod shader scan (<c>OptimumConfig.IsShaderProgramOverriddenByMods</c>): true for a pass name
