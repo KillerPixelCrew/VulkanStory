@@ -4,6 +4,8 @@
 
 - User world-validation preference (2026-10-01): use the created foggy village story save for world loading and representative rendering. Do not use development superflat.
 
+- Harness runs must be silent: all six audio levels are zeroed and verified before launch, and the copied cache is excluded. DLSS-FG checks run visible and focused (hidden windows cannot show its output gain); other routine checks stay hidden.
+
 - Current user priority (2026-09-30): defer writing or expanding tests until the renderer, SDL and provider integration is finished. Prioritize implementation and runtime wiring; do not insert routine test batches between each source increment. Preserve recorded evidence and report unverified work honestly.
 
 - A turn is either implementation or validation. Do not alternate between coding and testing in the same turn. During an implementation turn, inspect and edit code without launching builds, tests, probes, packages, or game runs.
@@ -25,6 +27,6 @@
 
 # Roadmap maintenance
 
-- `docs/ROADMAP.md` is authoritative for current feature status and remaining work. Update the relevant task ID/status/evidence and current source/package identity; do not append overlapping chronological progress sections to the active roadmap or porting plan.
-- Do not create per-session or dated record files in `docs/`. Record status in `docs/ROADMAP.md` and keep only concise, current evidence in `docs/development-evidence.md`; raw run output stays in the ignored `artifacts/` folder.
-- Keep implementation gaps, known defects, scoped verification gaps, unavailable-hardware gates and subsequent compatibility/platform work distinct. Test writing stays deferred until integration is finished.
+- `docs/ROADMAP.md` lists only the current release, implemented features, known defects and explicitly deferred work. Keep it short and current; no working rules, verification backlogs, evidence logs or chronological progress sections.
+- The user tests deployed builds. Record defects they report; do not track acceptance or verification gaps as open items.
+- Do not create per-session or dated record files in `docs/`. Keep only concise, current evidence in `docs/development-evidence.md`; raw run output stays in the ignored `artifacts/` folder.

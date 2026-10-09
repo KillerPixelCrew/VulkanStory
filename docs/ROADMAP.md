@@ -39,17 +39,3 @@ Current release: [`v0.1.0-dev`](https://github.com/KillerPixelCrew/VulkanStory/r
 | GL-03 | Concrete mod compatibility profiles | No target mods yet (user, 2026-10-08) |
 | TEST-01 | Write tests, including a decision on the unused `*ForTests` hooks | Tests are deferred until integration is finished |
 | LINUX-01 | Linux release package | Linux is not part of the current release |
-
-## Working rules
-
-- Official Vintage Story 1.22.7, Windows x64; use the complete **foggy village story**.
-- Routine checks use the isolated harness. DLSS-FG checks run visible and focused;
-  hidden windows cannot establish its output gain. Other routine checks stay hidden.
-  The harness must be silent: all six audio levels are zeroed and verified before
-  launch; the copied cache is excluded.
-- Do not change installed settings/save or deploy/open/focus/close the user's game
-  for routine checks. Visible launches/deployment require the user's instruction.
-- Keep implementation and validation turns separate. A validation turn has one
-  bounded batch, once. New tests stay deferred until integration is finished.
-- Preserve working donor algorithms, attribution and architecture boundaries.
-  No launcher/transplant pipeline or modified official game assemblies.
