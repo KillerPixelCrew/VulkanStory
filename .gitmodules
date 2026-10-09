@@ -1,0 +1,16 @@
+[submodule "sdk/streamline"]
+	path = sdk/streamline
+	url = https://github.com/NVIDIA-RTX/Streamline.git
+[submodule "sdk/xess"]
+	path = sdk/xess
+	url = https://github.com/intel/xess.git
+[submodule "sdk/fidelityfx-vk"]
+	path = sdk/fidelityfx-vk
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git
+[submodule "sdk/fidelityfx"]
+	path = sdk/fidelityfx
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK.git
+[submodule "sdk/dlss"]
+	path = sdk/dlss
+	url = https://github.com/NVIDIA/DLSS.git
+	shallow = true

@@ -4,13 +4,13 @@ Builds the five Windows x64 provider bridges into a fresh output directory.
 .DESCRIPTION
 Requires Windows x64 PowerShell 7, declared SDK headers, g++, and gcc or cc. Validates inputs before creating OutputDirectory, then invokes the retained NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
 .PARAMETER Fsr3SdkRoot
-FidelityFX SDK root containing ffx-api/include/ffx_api/ffx_api.h.
+FidelityFX SDK root containing ffx-api/include/ffx_api/ffx_api.h; defaults to the sdk/fidelityfx-vk submodule (v1.1.4).
 .PARAMETER Fsr4SdkRoot
-FidelityFX DX12 SDK root containing Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h.
+FidelityFX DX12 SDK root containing Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h; defaults to the sdk/fidelityfx submodule (v2.3.0).
 .PARAMETER XessSdkRoot
-XeSS SDK root containing inc/xess_fg/xefg_swapchain_d3d12.h.
+XeSS SDK root containing inc/xess_fg/xefg_swapchain_d3d12.h; defaults to the sdk/xess submodule.
 .PARAMETER StreamlineSdkRoot
-Streamline SDK root containing include/sl.h.
+Streamline SDK root containing include/sl.h; defaults to the sdk/streamline submodule (v2.14.1).
 .PARAMETER OutputDirectory
 Fresh destination for the five compiled bridge DLLs; an existing directory is rejected.
 .PARAMETER VulkanSdkRoot
@@ -18,10 +18,10 @@ Vulkan SDK root containing Include/vulkan/vulkan.h; defaults to VULKAN_SDK.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Fsr3SdkRoot,
-    [Parameter(Mandatory)][string]$Fsr4SdkRoot,
-    [Parameter(Mandatory)][string]$XessSdkRoot,
-    [Parameter(Mandatory)][string]$StreamlineSdkRoot,
+    [string]$Fsr3SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx-vk'),
+    [string]$Fsr4SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx'),
+    [string]$XessSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/xess'),
+    [string]$StreamlineSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/streamline'),
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$VulkanSdkRoot = $env:VULKAN_SDK
 )

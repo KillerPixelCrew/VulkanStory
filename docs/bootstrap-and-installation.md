@@ -143,9 +143,12 @@ builds the five Windows provider bridges from explicit SDK paths. Redistributabl
 SDK runtimes and notices remain separate inputs. `scripts/prepare-native-bundle.ps1`
 selects them and the built bridges through `packaging/native-win-x64.json` into
 a fresh native/licenses input bundle. All listed provider binaries are required
-by runtime staging. The matching local Streamline release SDK is now at
-`sdk/streamline-2.14.1`; preparation defaults to its production `bin/x64` and
-requires supplied plugin binaries to match that release's hashes.
+by runtime staging. Vendor SDKs are pinned git submodules under `sdk/` (`dlss`,
+`fidelityfx-vk`, `fidelityfx`, `xess`, `streamline`) and are the scripts' default
+SDK roots. The Streamline production runtimes ship only in the release ZIP:
+`scripts/fetch-streamline-release.ps1` extracts it (hash-pinned) into the ignored
+`sdk/streamline-release-2.14.1`, which preparation uses for `bin/x64` and requires
+supplied plugin binaries to match.
 `scripts/stage-runtime.ps1` assembles already
 built outputs into a fresh directory, with explicit managed dependencies,
 redistributable native and managed notices, controller mappings, the client mod

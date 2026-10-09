@@ -1,5 +1,5 @@
 // Small ABI boundary for the signed AMD FidelityFX SDK 1.1.4 Vulkan runtime.
-// The SDK headers and binary are supplied from _ref/fsr-vulkan at build time.
+// The SDK headers and binary are supplied from the sdk/fidelityfx-vk submodule at build time.
 #include <windows.h>
 #include <cstdint>
 #include <cstddef>

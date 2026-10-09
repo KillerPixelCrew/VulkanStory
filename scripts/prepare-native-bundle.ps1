@@ -10,15 +10,15 @@ Directory supplying inventory-listed SDL/shader compiler core binaries.
 .PARAMETER CoreNoticesDirectory
 Nonempty recursive tree of SDL/shader compiler redistribution notices.
 .PARAMETER DlssSdkRoot
-DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt.
+DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt; defaults to the sdk/dlss submodule.
 .PARAMETER Fsr3SdkRoot
-FidelityFX SDK root supplying PrebuiltSignedDLL runtimes and license files.
+FidelityFX SDK root supplying PrebuiltSignedDLL runtimes and license files; defaults to the sdk/fidelityfx-vk submodule.
 .PARAMETER Fsr4SdkRoot
-FidelityFX DX12 SDK root supplying Kits/FidelityFX/signedbin runtimes and notices.
+FidelityFX DX12 SDK root supplying Kits/FidelityFX/signedbin runtimes and notices; defaults to the sdk/fidelityfx submodule.
 .PARAMETER XessSdkRoot
-XeSS SDK root supplying bin runtimes and LICENSE.txt.
+XeSS SDK root supplying bin runtimes and LICENSE.txt; defaults to the sdk/xess submodule.
 .PARAMETER StreamlineSdkRoot
-Matching Streamline 2.14.1 release SDK root supplying headers, reference runtime hashes, and notices.
+Matching Streamline 2.14.1 release SDK root supplying headers, reference runtime hashes, and notices; defaults to sdk/streamline-release-2.14.1 (populate with scripts/fetch-streamline-release.ps1).
 .PARAMETER StreamlineRuntimeDirectory
 Optional runtime source directory; defaults to StreamlineSdkRoot/bin/x64 and must match its release binary hashes.
 .PARAMETER OutputDirectory
@@ -29,11 +29,11 @@ param(
     [Parameter(Mandatory)][string]$BridgesDirectory,
     [Parameter(Mandatory)][string]$CoreNativeDirectory,
     [Parameter(Mandatory)][string]$CoreNoticesDirectory,
-    [Parameter(Mandatory)][string]$DlssSdkRoot,
-    [Parameter(Mandatory)][string]$Fsr3SdkRoot,
-    [Parameter(Mandatory)][string]$Fsr4SdkRoot,
-    [Parameter(Mandatory)][string]$XessSdkRoot,
-    [Parameter(Mandatory)][string]$StreamlineSdkRoot,
+    [string]$DlssSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/dlss'),
+    [string]$Fsr3SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx-vk'),
+    [string]$Fsr4SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx'),
+    [string]$XessSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/xess'),
+    [string]$StreamlineSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/streamline-release-2.14.1'),
     [string]$StreamlineRuntimeDirectory,
     [Parameter(Mandatory)][string]$OutputDirectory
 )

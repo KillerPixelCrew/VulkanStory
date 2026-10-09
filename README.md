@@ -72,19 +72,23 @@ Prerequisites:
   `VintageStoryPath` at it. Game assemblies are only compiled against, never shipped.
 - CMake and Ninja (native bootstrap), the Vulkan SDK, and MinGW-w64 `g++`/`gcc`
   (provider bridges)
-- Vendor SDKs for the provider bridges and redistributables: DLSS, FidelityFX
-  (FSR 3 and FSR 4), XeSS, and Streamline 2.14.1
+- Vendor SDKs are pinned git submodules under `sdk/` (DLSS, FidelityFX for FSR 3
+  and FSR 4, XeSS, Streamline 2.14.1). Clone with `--recurse-submodules`, or run
+  `git submodule update --init`.
 
 ```powershell
+# Vendor SDKs (submodules) and the Streamline 2.14.1 release runtimes (hash-pinned download)
+git submodule update --init
+pwsh scripts/fetch-streamline-release.ps1
+
 # Managed projects, native bootstrap and the full shader corpus
 pwsh scripts/build-runtime.ps1 -Configuration Release
 
-# The five native provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline)
-pwsh scripts/build-provider-bridges.ps1 -Fsr3SdkRoot <fidelityfx-vulkan> -Fsr4SdkRoot <fidelityfx-dx12> `
-    -XessSdkRoot <xess> -StreamlineSdkRoot <streamline> -OutputDirectory <fresh-dir>
+# The five native provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline); SDK roots default to sdk/
+pwsh scripts/build-provider-bridges.ps1 -OutputDirectory <fresh-dir>
 
 # Collect redistributables, stage a package and build the ZIPs
-pwsh scripts/prepare-native-bundle.ps1 ...
+pwsh scripts/prepare-native-bundle.ps1 -BridgesDirectory <bridges> -CoreNativeDirectory ... -OutputDirectory <fresh-dir>
 pwsh scripts/stage-runtime.ps1 -NativeDirectory ... -ShadersDirectory artifacts/runtime-shaders/Release/shaders-vk -OutputDirectory <fresh-dir> ...
 pwsh scripts/package-runtime.ps1 -StagingDirectory <stage> -OutputDirectory <fresh-dir>
 ```
@@ -109,6 +113,7 @@ your own installation.
 | `shaders/native` | Native GLSL shader corpus |
 | `tools/` | Shader compiler, game-profile and preflight tools |
 | `scripts/` | Build, stage, package, deploy and removal scripts |
+| `sdk/` | Vendor SDKs as pinned submodules; `streamline-release-2.14.1/` is fetched, not tracked |
 | `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
 | `tests/` | Unit and integration tests |
 | `porting/` | Source migration inventory and reference material from the original implementation |
