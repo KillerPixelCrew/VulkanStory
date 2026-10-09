@@ -1,38 +1,143 @@
 # VulkanStory
 
-Fresh Vintage Story Vulkan renderer and SDL window/input mod, targeting the official 1.22.7 Windows x64 client.
+A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
+generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
+unmodified game.
 
-The [Roadmap](docs/ROADMAP.md) is authoritative for current feature status, source/package identity and remaining work. [Development evidence](docs/development-evidence.md) separates applied source from build, runtime and hardware checks. The full port remains open.
+> **Status: development builds.** Windows x64 builds install and run on recorded
+> NVIDIA and Intel hardware. Release acceptance is still open: AMD execution, the
+> Linux path, and parts of moving-scene quality and pacing have not been verified yet.
+> The [roadmap](docs/ROADMAP.md) is the authoritative feature and defect status.
 
-**Historical checkpoint — 2026-10-01:** the Vulkan backend, SDL host, official-game integration, providers and mod API were wired and compiled; isolated native/DLSS/FSR3/XeSS captures and a development ZIP were recorded. These scoped results do not certify later source or full feature parity.
+## Features
 
-Routine runtime work uses the [isolated hidden harness](docs/headless-harness.md) with a snapshot of **foggy village story**. It does not deploy to or control the user's game. New test writing remains deferred; implementation and validation turns stay separate.
+- **Native Vulkan 1.3 renderer** replacing the game's OpenGL path: frame graph,
+  bindless textures, asynchronous pipeline compilation with a persistent pipeline
+  cache, and a native shader corpus compiled offline to SPIR-V.
+- **Temporal rendering**: native TAA with per-object, sky and liquid motion vectors,
+  plus GTAO ambient occlusion alongside the vanilla SSAO path.
+- **Upscaling**: NVIDIA DLSS, AMD FSR 3.1 and FSR 4, and Intel XeSS, selected in the
+  game's own Options menu, with automatic fallback when a provider is unavailable.
+- **Frame generation**: DLSS-G (via NVIDIA Streamline), FSR 3 frame generation and
+  XeSS-FG, with latency control (Reflex / PC Latency, Anti-Lag, XeLL).
+- **SDL3 window and input**: high-DPI aware windowing, raw mouse, touch, and full
+  gamepad support with remapping, a radial menu, on-screen glyphs and analog movement
+  (with an optional server-side input companion).
+- **Extension points** for other mods to add renderer passes. A separate
+  compatibility module for translating supported OpenGL usage by other mods is planned.
 
-The intended Windows install is to extract a package into the existing game directory and launch the usual Vintage Story shortcut. A native DLL proxy activates VulkanStory before graphics startup. The game keeps its original executable, assemblies, assets, and data directory. VulkanStory owns its renderer, window, settings, and runtime patches.
+## Requirements
 
-This is a mod with an early native bootstrap. Its initial installation goes beside the executable; a ZIP placed only in `Mods` cannot supply the required early startup. Windows activation uses a `hostfxr.dll` proxy and a .NET startup hook. Player instructions ship in [the client README](packaging/README-client.txt). Existing `version.dll` is a separate coexistence acceptance item.
+- Vintage Story **1.22.7** (official installation). Other versions are refused at startup.
+- **Windows 10/11 x64** with a Vulkan 1.3 capable GPU and driver.
+  Linux x64 packages exist but have not yet been built or run on Linux.
+- Vendor features need matching hardware: DLSS / DLSS-G need NVIDIA RTX, FSR 4 needs
+  AMD RDNA 4, and XeSS-FG needs eligible Intel Arc hardware. FSR 3 and XeSS upscaling
+  run more widely.
 
-## Design documents
+## Installation (players)
 
-- [Architecture](docs/architecture.md): components, dependencies, runtime ownership, rendering contracts, and compatibility with other mods.
-- [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, normal-shortcut installation, existing DLL proxies, failure handling, and Linux activation.
-- [Porting plan](docs/porting-plan.md): source migration map, development workflow, and bounded acceptance milestones.
-- [Imported source inventory](porting/README.md): renderer, SDL, shader, native bridge, contract, and test source moved into this repository.
+VulkanStory starts **before** the game creates its window, so it is installed beside
+the game executable, not only into `Mods`.
 
-## Project direction
+1. Close the game.
+2. Extract the client ZIP into the folder that contains `Vintagestory.exe`, keeping
+   the folder layout. This adds `hostfxr.dll`, `VulkanStory/`, `Mods/vulkanstory` and
+   `Mods/vulkanstoryinput`. The game's own files are not modified.
+3. Start the game with your normal shortcut.
 
-- Develop entirely in this repository against official, unmodified game assemblies.
-- Use `D:\Coding\VulkanStory` as reference material for reusable graphics and SDL implementations. The runtime loads no donor code/assemblies from that checkout; vendor SDK build inputs are supplied separately.
-- Replace the old inheritance and injected-member integration with a Harmony adapter that owns its additional state outside game objects.
-- Transplant working renderer, shader, SDL, and provider code as directly as possible. The fresh project changes ownership and integration; it is not a rewrite of the rendering algorithms. Defer optional internal refactors until feature parity.
-- Preserve the feature target: native Vulkan rendering, SDL input/windowing, temporal rendering, ambient occlusion, upscaling, frame generation, latency control, capture, and renderer extension points.
-- Add a distinct compatibility module for translating supported OpenGL usage by other mods into Vulkan.
-- Exclude the Optimum launcher, donor assemblies, Cecil transplantation, binary delta runtime, installer, and unrelated server/gameplay optimizations.
+Updating, disabling, removal and coexistence with other DLL proxies are described in
+the [client README](packaging/README-client.txt) (Windows) and the
+[Linux client README](packaging/README-linux-client.txt). In short:
 
-## Development entry points
+- **Update**: use `VulkanStory/tools/deploy-runtime.ps1`. It verifies ownership and
+  backs up everything it replaces.
+- **Disable**: turn the mod off in the mod manager, or set `Enabled=0` under
+  `[Bootstrap]` in `VulkanStory/loader.ini` to skip early startup entirely.
+- **Remove**: use `VulkanStory/tools/remove-runtime.ps1`. Saves and settings stay.
 
-Set `VintageStoryPath` in `Directory.Build.local.props` to the official installation. Production build scripts are `scripts/build-runtime.ps1` and `scripts/build-provider-bridges.ps1`; staging/archive scripts are `scripts/stage-runtime.ps1` and `scripts/package-runtime.ps1`. SDK inputs are development dependencies; players receive the packaged redistributables.
+In game, renderer options live in the regular **Options** menu. Chat commands:
+`.vulkanstory settings`, `.vulkanstory status`, `.vulkanstory controller`.
 
-Use the harness against a fresh stage for routine renderer checks. The ownership-aware updater is `scripts/deploy-runtime.ps1`; installed deployment is separate from harness work. No automatic replacement of the user's running game is part of development checks.
+When reporting a problem, include `%LOCALAPPDATA%\VulkanStory\Logs\bootstrap-*.jsonl`
+and the game's `Logs/client-main.log`.
 
-The [October-1 candidate](docs/validation-client-candidate-2026-10-01-01.md) and [native-resolution world checkpoint](docs/validation-graph-native-world-2026-10-01-01.md) are historical payloads. Use the Roadmap for the current stage and its acceptance limits.
+## Building from source
+
+Prerequisites:
+
+- .NET SDK 10.0.100 or newer (see `global.json`)
+- An official Vintage Story 1.22.7 installation. Copy
+  `Directory.Build.local.props.example` to `Directory.Build.local.props` and point
+  `VintageStoryPath` at it. Game assemblies are only compiled against, never shipped.
+- CMake and Ninja (native bootstrap), the Vulkan SDK, and MinGW-w64 `g++`/`gcc`
+  (provider bridges)
+- Vendor SDKs for the provider bridges and redistributables: DLSS, FidelityFX
+  (FSR 3 and FSR 4), XeSS, and Streamline 2.14.1
+
+```powershell
+# Managed projects, native bootstrap and the full shader corpus
+pwsh scripts/build-runtime.ps1 -Configuration Release
+
+# The five native provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline)
+pwsh scripts/build-provider-bridges.ps1 -Fsr3SdkRoot <fidelityfx-vulkan> -Fsr4SdkRoot <fidelityfx-dx12> `
+    -XessSdkRoot <xess> -StreamlineSdkRoot <streamline> -OutputDirectory <fresh-dir>
+
+# Collect redistributables, stage a package and build the ZIPs
+pwsh scripts/prepare-native-bundle.ps1 ...
+pwsh scripts/stage-runtime.ps1 -NativeDirectory ... -ShadersDirectory artifacts/runtime-shaders/Release/shaders-vk -OutputDirectory <fresh-dir> ...
+pwsh scripts/package-runtime.ps1 -StagingDirectory <stage> -OutputDirectory <fresh-dir>
+```
+
+Every script documents its parameters (`Get-Help scripts/<name>.ps1 -Full`). None of
+them launch the game. Renderer checks normally run in the isolated
+[headless harness](docs/headless-harness.md) against a world snapshot rather than in
+your own installation.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `src/VulkanStory.Bootstrap` | Early managed startup, activated by the native `hostfxr.dll` proxy |
+| `src/VulkanStory.Render.Vulkan` | Vulkan device, frame graph, pipelines, upscalers, frame generation, presentation, latency |
+| `src/VulkanStory.Platform.Sdl` | SDL3 window, events and coordinates (game-independent) |
+| `src/VulkanStory.Game` | Game integration: Harmony patches, graphics/platform adapters, temporal state, controller input |
+| `src/VulkanStory.Mod` | Mod entry point, settings UI and chat commands |
+| `src/VulkanStory.Contracts`, `src/Shared` | Shared contracts and settings choices |
+| `src/VulkanStory.Input`, `src/VulkanStory.Input.Companion` | Analog movement protocol and the optional server companion |
+| `native/` | Native bootstrap and provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline) |
+| `shaders/native` | Native GLSL shader corpus |
+| `tools/` | Shader compiler, game-profile and preflight tools |
+| `scripts/` | Build, stage, package, deploy and removal scripts |
+| `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
+| `tests/` | Unit and integration tests |
+| `porting/` | Source migration inventory and reference material from the original implementation |
+| `docs/` | Design documents, roadmap and implementation/validation records |
+
+## Documentation
+
+- [Roadmap](docs/ROADMAP.md): current status, known defects and remaining work
+- [Architecture](docs/architecture.md): components, ownership, rendering contracts, mod compatibility
+- [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, install/update/removal, Linux
+- [Porting plan](docs/porting-plan.md) and [source inventory](porting/README.md): how the original implementation was migrated
+- [Development evidence](docs/development-evidence.md): what has been built, run and verified, and on which hardware
+
+## Background
+
+VulkanStory began as part of [Optimum](https://github.com/StratumServer/Optimum), a
+modified-client fork. This branch is a fresh implementation as an ordinary mod: it
+compiles against the official game assemblies, keeps its own state outside game
+objects, and integrates through Harmony instead of a modified client. Working
+renderer, shader, SDL and provider code was migrated as directly as possible, with
+its provenance preserved.
+
+## License and attribution
+
+Migrated source files keep their original license and attribution; a rename or move
+does not change a file's license (see the [source inventory](porting/README.md)).
+Third-party notices for SDL, Shaderc, Silk.NET, PromptFont and the vendor SDK runtimes
+are under [`packaging/notices`](packaging/notices) and ship with every package under
+`VulkanStory/licenses`. Vendor SDKs are subject to their own license terms.
+
+Vintage Story is © Anego Studios. This project is not affiliated with or endorsed by
+Anego Studios, NVIDIA, AMD or Intel.
