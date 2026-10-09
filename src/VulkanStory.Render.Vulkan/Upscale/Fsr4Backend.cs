@@ -42,7 +42,7 @@ internal sealed class Fsr4Backend : IUpscalerBackend
         if (bridge == 0) return false;
         if (Fsr4Runtime.Probe(bridge, physicalDevice) != 0)
         {
-            Unavailable = "FSR 4 requires a supported AMD GPU";
+            Unavailable = "FSR 4 is not supported on this GPU";
             return false;
         }
         device = target;

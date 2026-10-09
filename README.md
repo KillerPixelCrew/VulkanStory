@@ -31,9 +31,9 @@ unmodified game.
 - Vintage Story **1.22.7** (official installation). Other versions are refused at startup.
 - **Windows 10/11 x64** with a Vulkan 1.3 capable GPU and driver.
   Linux x64 packages exist but have not yet been built or run on Linux.
-- Vendor features need matching hardware: DLSS / DLSS-G need NVIDIA RTX, FSR 4 needs
-  AMD RDNA 4, and XeSS-FG needs eligible Intel Arc hardware. FSR 3 and XeSS upscaling
-  run more widely.
+- Some vendor features need matching hardware: DLSS and DLSS-G need an NVIDIA RTX GPU,
+  and XeSS-FG needs a supported Intel Arc GPU. The FSR and XeSS upscalers run on GPUs
+  from all vendors; any upscaler the GPU doesn't support falls back automatically.
 
 ## Installation (players)
 
