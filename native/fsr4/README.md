@@ -20,4 +20,4 @@ copies vendor binaries. Ship the separately authorized signed
 `amd_fidelityfx_upscaler_dx12.dll` beside `VulkanStoryFsr4.dll` in the payload's
 native RID directory. Players do not run this script.
 
-Native compilation was recorded in the [October-1 native build](../../docs/records/validation-native-and-shaders-2026-10-01-01.md). That result applies to its recorded source, not subsequent fixes. Consult the [Roadmap](../../docs/ROADMAP.md) for current source and validation status. Supported AMD initialization, shared-resource/fence execution, real-scene quality, switching and shutdown remain acceptance gates.
+Consult the [Roadmap](../../docs/ROADMAP.md) for current source and validation status. AMD initialization, shared-resource/fence execution, real-scene quality, switching and shutdown remain acceptance gates.

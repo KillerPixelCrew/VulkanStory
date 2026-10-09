@@ -84,7 +84,7 @@ Use later scheduled PNGs to inspect world rendering after chunk streaming.
 
 ## First runtime checkpoint
 
-The first completed run is recorded in [validation-headless-2026-10-01-03.md](records/validation-headless-2026-10-01-03.md): clean build, isolated snapshot, three frames and attachment/AO files, automatic shutdown. World source pixels are visible. SDK constants/release errors and remaining command/concurrency/visual gates stay open. No installed deployment occurred.
+The first completed run (2026-10-01) achieved a clean build, isolated snapshot, three frames and attachment/AO files, automatic shutdown. World source pixels are visible. SDK constants/release errors and remaining command/concurrency/visual gates stay open. No installed deployment occurred.
 
 ## Normal asynchronous pipeline mode
 
@@ -100,7 +100,7 @@ The launcher explicitly adds run/data/Mods. The latest checkpoint confirms the l
 
 ## Scripted settings checkpoint
 
-[The latest run](records/validation-headless-commands-2026-10-01-02.md) dispatched sequential
+A scripted run dispatched sequential
 `.vulkanstory set` commands at world frame 90, switching FSR3 SR/FG to XeSS balanced
 SR/FG. All changes persisted and executed; three later frame captures completed.
 One Streamline options warning during the transition remains unresolved.

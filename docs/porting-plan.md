@@ -62,12 +62,3 @@ and source inventory for the detailed boundaries.
 B0 activation; P0 migration; G0/G1 original platform/graphics/menu routing; G2 scene/
 temporal/post; G3 providers/controls; R0 Windows delivery; C0 targeted mod GL support;
 Linux activation/release. Their current statuses and exact work are in [ROADMAP](ROADMAP.md).
-
-## Historical evidence
-
-The full previous plan is preserved in
-[porting-plan-history-2026-10-01.md](records/porting-plan-history-2026-10-01.md).
-Detailed dated implementation/validation records remain in this directory.
-Historical statements such as no world rendered/no provider evaluated are superseded
-by later recorded world/SDK runs. The [current summary](records/current-port-status.md) links
-those runs without treating their limited scope as full acceptance.

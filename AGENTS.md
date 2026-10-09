@@ -26,5 +26,5 @@
 # Roadmap maintenance
 
 - `docs/ROADMAP.md` is authoritative for current feature status and remaining work. Update the relevant task ID/status/evidence and current source/package identity; do not append overlapping chronological progress sections to the active roadmap or porting plan.
-- Keep detailed implementation/validation chronology in linked records. The 2026-10-01 history snapshots retain older plans and baseline ideas; historical claims do not supersede current evidence.
+- Do not create per-session or dated record files in `docs/`. Record status in `docs/ROADMAP.md` and keep only concise, current evidence in `docs/development-evidence.md`; raw run output stays in the ignored `artifacts/` folder.
 - Keep implementation gaps, known defects, scoped verification gaps, unavailable-hardware gates and subsequent compatibility/platform work distinct. Test writing stays deferred until integration is finished.

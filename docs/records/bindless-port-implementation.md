@@ -1,9 +1,0 @@
-# Bindless descriptor boundary for shader translation
-
-Date: 2026-09-29. **Implementation turn: source changed; no build, test, package, or game run was launched.** The [first shader validation batch](validation-p0-shaders-2026-09-29-01.md) stopped before tests because `ProgramInterfaceLayout` could not see `TextureKind`.
-
-The backend compile list now includes the complete retained `BindlessTextureTable` and `SharedPipelineLayout` sources. `TextureKind`, `BindlessKinds.TryFromGlslType`, sampler-kind legality, per-kind capacities, slot allocation, deferred retirement, descriptor writes, placeholder textures, and the shared set layout remain together in their original source. This gives shader interface layout the exact kind table the live descriptor path uses, with no duplicate definition.
-
-The `--sdl-present` preflight now creates the bindless table and shared pipeline layout before recording its render-target clear. Its frame start calls `BindlessTextureTable.BeginFrame`; teardown disposes the shared layout before the table it names, then textures and timelines after the swapchain's device-idle wait. This checks construction and lifetime ordering on the local device, while the actual frame still uses the already-retained blit path. It does not yet bind a shader pipeline or sample a bindless slot in a draw.
-
-Two CPU cases carried from the source `ShaderBindingTests` check that a slot is not reused until its recorded Frame value completes and that sampler variants evict the least recently used key without rewriting a live slot. The next bounded validation should run the focused backend tests, build the shader compiler tool, build one real native shader through `--build` on a single-program fixture, and run `--sdl-present` once with a short timeout. This source repair remains unvalidated until that batch.

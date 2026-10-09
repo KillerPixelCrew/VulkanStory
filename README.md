@@ -116,7 +116,7 @@ your own installation.
 | `sdk/` | Vendor SDKs as pinned submodules; `streamline-release-2.14.1/` is fetched, not tracked |
 | `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
 | `tests/` | Unit and integration tests |
-| `docs/` | Design documents and roadmap; dated implementation/validation records in `docs/records/` |
+| `docs/` | Roadmap, architecture, installation, harness and development-evidence documents |
 
 ## Documentation
 

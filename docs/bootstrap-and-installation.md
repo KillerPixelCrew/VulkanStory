@@ -1,10 +1,10 @@
 # Bootstrap and installation
 
-Current work/status is tracked in [ROADMAP](ROADMAP.md), with recorded evidence in [current port status](records/current-port-status.md).
+Current work/status is tracked in [ROADMAP](ROADMAP.md), with recorded evidence in [development evidence](development-evidence.md).
 Player instructions are in [the packaged client README](../packaging/README-client.txt).
 The dated B0 observations below remain historical evidence for their own payloads.
 
-Design date: 2026-09-28. Updated 2026-09-29: B0 implements an app-local `hostfxr.dll` proxy and managed startup hook. A normal-shortcut run proved pre-`Main` activation; the revised early resolver passed its build/test/stage batch but has not had a live Harmony check. See [latest validation](records/validation-b0-2026-09-29-04.md).
+Design date: 2026-09-28. Updated 2026-09-29: B0 implements an app-local `hostfxr.dll` proxy and managed startup hook. A normal-shortcut run proved pre-`Main` activation; the revised early resolver passed its build/test/stage batch but has not had a live Harmony check.
 
 ## Required user experience
 

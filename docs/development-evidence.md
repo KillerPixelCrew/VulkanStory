@@ -149,7 +149,7 @@ The next implementation increment must repair that order and mandatory dependenc
 through LowLatency Off/frame-cap updates. No rerun or source repair occurred in this
 validation turn; earlier XeSS execution records do not validate the current source.
 
-All 118 [review implementation findings](records/completed-review-findings-2026-10-08.md)
+All 118 review implementation findings
 are completed. The latest runtime correction addresses the mapped-buffer regression
 introduced by `6df3105`: small updates after any GPU use cloned whole capacities,
 churned descriptors and changed VRAM placement. `e4de738` uses the existing ordered

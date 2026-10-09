@@ -1,7 +1,0 @@
-# SDL3 Vulkan surface boundary
-
-Date: 2026-09-29. **Source-only implementation; not built or run in this turn.** The compiled backend project now references `VulkanStory.Platform.Sdl` and includes the SDL-only `IVulkanWindowSurface` adapter. The retained GLFW adapter and its OpenTK dependency were removed from this backend path. The staged `VulkanDevice.Initialize` entry now accepts an `SdlWindowHost` and wraps it in `SdlVulkanWindowSurface`.
-
-`SdlWindowHost` still owns SDL window operations and supplies the required Vulkan instance extensions and `SDL_Vulkan_CreateSurface`. The backend owns Vulkan surface cleanup and, when Streamline owns the Vulkan proxy, the existing Win32 surface creation branch using SDL's HWND. Surface destruction precedes context and window disposal. The SDL project now declares the same pinned `ppy.SDL3-CS` package used by the working source so developer output can resolve the SDL3 native asset; release packaging still needs to stage `SDL3.dll` under `VulkanStory/native/win-x64/` with its notice.
-
-`tools/VulkanStory.Preflight --sdl-surface` creates a hidden SDL window, creates a Vulkan context with SDL's instance extensions, creates/destroys its surface, and releases the context/window. The next bounded validation may build and run that mode. A successful SDL surface preflight will establish the actual SDL/Vulkan handoff on this machine. It will not establish a swapchain, presentation, the game frame loop, input mapping, menu rendering, or frame generation. Those remain G0/G1/G3 work.

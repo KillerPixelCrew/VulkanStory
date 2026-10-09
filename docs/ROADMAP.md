@@ -1,8 +1,7 @@
 # VulkanStory Roadmap
 
 Updated 2026-10-09. Authoritative current status; detailed results are in
-[development-evidence.md](development-evidence.md) and the dated implementation and
-validation records under [records/](records/).
+[development-evidence.md](development-evidence.md).
 
 Current release: [`v0.1.0-dev`](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.0-dev)
 (pre-release, win-x64), built from `artifacts/validation/ren-fixes-20261009-230744`
@@ -101,9 +100,7 @@ remain unverified. Exact payloads and proof limits of earlier builds are in
 ## Review findings
 
 From the 2026-10-08 review, all **118 findings have completed implementations**;
-CLEAN-05 needed no change, and none of its implementation findings is open. The detailed
-[completed ledger](records/completed-review-findings-2026-10-08.md) retains every ID,
-original finding, source reference, audit coverage and recorded proof limit.
+CLEAN-05 needed no change, and none of its implementation findings is open.
 
 ### Pending review verification
 
@@ -118,8 +115,7 @@ from these checks. Broader feature, platform and hardware work remains below.
 
 ### Code-quality review (2026-10-09)
 
-The [code-quality review record](records/code-quality-review-2026-10-09.md) holds every
-finding (I, E, R, S, A, C IDs) with its per-row implementation outcome. All rows
+All 2026-10-09 code-quality findings (I, E, R, S, A, C IDs) were implemented. All rows
 except S13 (not attempted: tests deferred) are implemented, built, deployed and
 released in `v0.1.0-dev`. Every row below is implemented and **runtime-unvalidated**
 unless marked open.
@@ -146,8 +142,6 @@ unless marked open.
 
 These IDs retain remaining feature/compatibility work and verification boundaries.
 Pending acceptance does not reopen completed review implementation findings.
-The [completed ledger](records/completed-review-findings-2026-10-08.md) maps the closed
-findings to their broader feature and acceptance areas.
 
 | ID | Remaining completion boundary |
 | --- | --- |
@@ -184,5 +178,3 @@ findings to their broader feature and acceptance areas.
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
 
-Dated implementation and validation records are in [records/](records/); historical
-claims there do not supersede this Roadmap.
