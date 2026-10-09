@@ -4,10 +4,8 @@ A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
 generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
 unmodified game.
 
-> **Status: development builds.** Windows x64 builds install and run on recorded
-> NVIDIA and Intel hardware. Release acceptance is still open: AMD execution, the
-> Linux path, and parts of moving-scene quality and pacing have not been verified yet.
-> The [roadmap](docs/ROADMAP.md) is the authoritative feature and defect status.
+> **Status: development build** (`v0.1.0-dev`) for Windows x64. Known defects and
+> remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
 
@@ -30,7 +28,7 @@ unmodified game.
 
 - Vintage Story **1.22.7** (official installation). Other versions are refused at startup.
 - **Windows 10/11 x64** with a Vulkan 1.3 capable GPU and driver.
-  Linux x64 packages exist but have not yet been built or run on Linux.
+  Linux is not part of the current release.
 - Some vendor features need matching hardware: DLSS and DLSS-G need an NVIDIA RTX GPU,
   and XeSS-FG needs a supported Intel Arc GPU. The FSR and XeSS upscalers run on GPUs
   from all vendors; any upscaler the GPU doesn't support falls back automatically.
