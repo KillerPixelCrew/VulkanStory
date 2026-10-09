@@ -23,21 +23,21 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Planned
 
-- **PACK-01: Shader packs** (an Iris/Oculus equivalent for Vintage Story).
+- **PACK-01: Shader packs**.
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
   2. Loader: `shaderpacks/` folder, pack selection and per-pack options in the Options menu, hot reload; compiled at runtime with the shipped shaderc.
   3. Per-program fallback to the built-in shaders on compile/link errors, with in-game error reporting.
   4. Pipeline cache keyed by the active pack.
   5. Pack-declared composite/deferred passes in the frame graph.
 
-- **VR-01: OpenXR VR** (a Vivecraft equivalent for Vintage Story).
+- **VR-01: OpenXR VR**.
   1. OpenXR session and swapchains on the existing Vulkan device; headset presentation alongside or instead of the SDL window.
   2. Stereo rendering (two views or multiview) with per-eye projection/view from head tracking.
   3. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
   4. Motion-controller input through OpenXR actions: movement, look, interaction, hotbar, inventory, with bindings for common controllers.
   5. GUI on world-space panels, plus comfort options (snap/smooth turn, vignette, seated/standing).
   6. Full-body pose from head and hand tracking via inverse kinematics on the player model.
-  7. Server companion mod that streams head/hand poses so other players see VR players' tracked movement (like Vivecraft's server plugin), with fallback to normal animation for players without it.
+  7. Server companion mod that streams head/hand poses so other players see VR players' tracked movement, with fallback to normal animation for players without it.
 
 ## Deferred
 
