@@ -42,7 +42,10 @@ internal sealed partial class GameRenderSession
                 services.RendererSettings.Settings.RenderScale >= 1f,
             Ssao: ClientSettings.SSAOQuality > 0 && post,
             ShadowQuality: ClientSettings.ShadowMapQuality,
-            Vsync: ClientSettings.VsyncMode == 1,
+            // Original semantics: any nonzero mode enables the swap interval, and
+            // every mode except 1 (VSync only) applies the frame-sleep limiter.
+            Vsync: ClientSettings.VsyncMode != 0,
+            FrameSleep: ClientSettings.VsyncMode != 1,
             MaxFps: platform.MaxFps);
     }
 }

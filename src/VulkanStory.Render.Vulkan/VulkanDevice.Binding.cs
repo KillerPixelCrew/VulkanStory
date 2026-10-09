@@ -129,6 +129,8 @@ public sealed unsafe partial class VulkanDevice
     private readonly object _frameTextureLock = new();
     private readonly SamplerBindingValue[] _frameSamplerScratch = new SamplerBindingValue[SetConvention.FrameTextures.Length];
     private readonly SamplerBindingValue[] _lastFrameSamplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
+    /// <summary>Set 0's one buffer binding (the frame block), borrowed by the lookup key.</summary>
+    private readonly BufferBindingValue[] _frameBufferScratch = new BufferBindingValue[1];
     private readonly BufferBindingValue[] _storageBufferScratch = new BufferBindingValue[SetConvention.StorageSetBindingCount];
     private readonly BufferBindingValue[] _lastStorageBuffers = new BufferBindingValue[SetConvention.StorageSetBindingCount];
 
@@ -255,12 +257,11 @@ public sealed unsafe partial class VulkanDevice
             DescriptorSet frameSet = _boundFrameSet;
             if (frameSet.Handle == 0 || !samplers.AsSpan().SequenceEqual(_lastFrameSamplers))
             {
-                var contents = new DescriptorSetContents(0, SetConvention.FrameSet, samplers.ToArray(), new[]
-                {
-                    new BufferBindingValue((uint)SetConvention.FrameGlobalsBinding, _frames.UniformBuffer, 0,
-                        (ulong)_frameGlobals.Length),
-                });
-                frameSet = GetDescriptorSet(contents, shared.FrameSetLayout);
+                // The key borrows the scratch arrays; a cache miss copies it into an owned key.
+                _frameBufferScratch[0] = new BufferBindingValue((uint)SetConvention.FrameGlobalsBinding,
+                    _frames.UniformBuffer, 0, (ulong)_frameGlobals.Length);
+                var key = new DescriptorSetKey(0, SetConvention.FrameSet, samplers, _frameBufferScratch);
+                frameSet = GetDescriptorSet(key, shared.FrameSetLayout);
                 samplers.CopyTo(_lastFrameSamplers, 0);
             }
             if (frameSet.Handle != _boundFrameSet.Handle || offset != _boundFrameOffset)
@@ -450,10 +451,11 @@ public sealed unsafe partial class VulkanDevice
         DescriptorSet storageSet = _boundStorageSet;
         if (storageSet.Handle == 0 || !buffers.AsSpan().SequenceEqual(_lastStorageBuffers))
         {
-            var contents = new DescriptorSetContents(0, SetConvention.StorageSet, Array.Empty<SamplerBindingValue>(), buffers.ToArray());
+            // The key borrows the scratch array; a cache miss copies it into an owned key.
+            var key = new DescriptorSetKey(0, SetConvention.StorageSet, ReadOnlySpan<SamplerBindingValue>.Empty, buffers);
             storageSet = namesRingOffset
-                ? _descriptorArenas[_frames.Current.Index].Get(contents, shared.StorageSetLayout)
-                : GetDescriptorSet(contents, shared.StorageSetLayout);
+                ? _descriptorArenas[_frames.Current.Index].Get(key, shared.StorageSetLayout)
+                : GetDescriptorSet(key, shared.StorageSetLayout);
             buffers.CopyTo(_lastStorageBuffers, 0);
         }
         if (storageSet.Handle == _boundStorageSet.Handle && recordOffset == _boundRecordOffset) return true;
@@ -591,10 +593,10 @@ public sealed unsafe partial class VulkanDevice
     /// atlas tasks, fresh meshes, overflow uniform copies), otherwise to the
     /// long-lived cache.
     /// </summary>
-    private DescriptorSet GetDescriptorSet(DescriptorSetContents contents, DescriptorSetLayout layout) =>
-        _resourceAge.NamesShortLived(contents)
-            ? _descriptorArenas[_frames.Current.Index].Get(contents, layout)
-            : _descriptors.Get(contents, layout);
+    private DescriptorSet GetDescriptorSet(DescriptorSetKey key, DescriptorSetLayout layout) =>
+        _resourceAge.NamesShortLived(key)
+            ? _descriptorArenas[_frames.Current.Index].Get(key, layout)
+            : _descriptors.Get(key, layout);
 
     /// <summary>The frames a resource's sets stay in the arena; 0 sends every set to the cache. Tests only.</summary>
     internal int ShortLivedFramesForTests

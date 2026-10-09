@@ -40,6 +40,8 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         public required VulkanSharedImage Hudless { get; init; }
         public required VulkanSharedImage Ui { get; init; }
         public ulong LastDx12Done;
+        /// <summary>Whether every input image of this set has received a complete copy.</summary>
+        public bool InputsWritten;
 
         public void Dispose()
         {
@@ -229,7 +231,15 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         }
     }
 
+    private static readonly TimeSpan PresentThreadStopTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>Requests presenter-thread shutdown and waits up to five seconds for it to leave native work.</summary>
+    /// <remarks>
+    /// The caller (the render/window thread) does not pump window messages while it waits, and
+    /// a DXGI Present can wait on them. A thread still inside native work after the timeout may
+    /// use every shared resource, so the caller must not release them: the failure is retained
+    /// and the owners stay alive instead.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">The presentation thread did not stop within the bounded join.</exception>
     private void StopPresentThread()
     {
@@ -238,7 +248,11 @@ internal sealed unsafe class XessFgPresenter : IDisposable
             _presentStopping = true;
             Monitor.PulseAll(_presentGate);
         }
-        _presentThread.Join();
+        if (_presentThread.Join(PresentThreadStopTimeout)) return;
+        string message = "XeSS-FG present thread did not stop within " +
+            PresentThreadStopTimeout.TotalSeconds + " s; presenter resources are retained.";
+        Console.Error.WriteLine("[VulkanStory] " + message);
+        throw new InvalidOperationException(message);
     }
 
     /// <summary>Presenter display width in pixels.</summary>
@@ -248,6 +262,12 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     /// <summary>Reports whether live presenter resources match every source image extent and format.</summary>
     internal bool MatchesSources(in XessSourceImages sources) => !_disposed && _releaseFailure == null &&
         _sourceLayout == SourceLayout.Of(sources);
+    /// <summary>
+    /// Reports whether a color-only pass-through copy can use the next shared set: the color
+    /// layout matches and the set's other inputs already hold a complete earlier copy.
+    /// </summary>
+    internal bool CanPassThrough(VulkanTexture color) => !_disposed && _releaseFailure == null &&
+        _sourceLayout.Color == SourceImageLayout.Of(color) && _images[_nextImageSet].InputsWritten;
     /// <summary>Shared timeline semaphore used by Vulkan submissions to coordinate DX12 image reuse.</summary>
     public Silk.NET.Vulkan.Semaphore SharedSemaphore { get { RequireLive(); return _fence.Semaphore; } }
     /// <summary>Borrowed native presenter runtime owned by this presenter.</summary>
@@ -378,6 +398,35 @@ internal sealed unsafe class XessFgPresenter : IDisposable
         set.Motion.RecordFlippedCopy(commands, sources.Motion);
         set.Hudless.RecordFlippedCopy(commands, sources.Hudless);
         set.Ui.RecordFlippedCopy(commands, sources.Ui);
+        set.InputsWritten = true;
+        return ReserveFrame(set);
+    }
+
+    /// <summary>Rotates the shared image set and records only the flipped color copy for a pass-through present.</summary>
+    /// <remarks>
+    /// Generation must be disabled: the set's depth, motion, HUD-free and UI images keep the
+    /// contents of an earlier complete copy (see <see cref="CanPassThrough" />). The fence
+    /// protocol is the same as <see cref="RecordCopies" />.
+    /// </remarks>
+    /// <returns>The image-set index and fence values for the corresponding presentation.</returns>
+    public PreparedFrame RecordColorCopy(CommandBuffer commands, TextureManager textures,
+        BarrierBatcher barriers, VulkanTexture color)
+    {
+        RequireLive();
+        ImageSet set = _images[_nextImageSet];
+        if (!set.InputsWritten)
+            throw new InvalidOperationException("XeSS-FG pass-through needs a shared set with complete earlier inputs.");
+        if (!set.Color.CanBlitFrom(color, out string reason))
+            throw new InvalidOperationException(reason);
+        textures.Require(barriers, commands, color, ResourceUsage.TransferSrc);
+        barriers.Flush(commands);
+        set.Color.RecordFlippedCopy(commands, color);
+        return ReserveFrame(set);
+    }
+
+    /// <summary>Reserves the ready/done fence values for the current set and advances the rotation.</summary>
+    private PreparedFrame ReserveFrame(ImageSet set)
+    {
         ulong ready = _nextFenceValue++;
         ulong done = _nextFenceValue++;
         PreparedFrame frame = new(_nextImageSet, set.LastDx12Done, ready, done);

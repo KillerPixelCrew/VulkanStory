@@ -9,6 +9,7 @@ internal sealed class GeneratedFramePacer
 {
     private readonly Func<long> now;
     private readonly Action<int> sleep;
+    private readonly bool precise;
     private long lastGenerated;
     private long realTarget;
     private double renderIntervalTicks = Stopwatch.Frequency / 60.0;
@@ -16,8 +17,10 @@ internal sealed class GeneratedFramePacer
     /// <summary>Creates a CPU present pacer with optional clock and sleep functions.</summary>
     /// <param name="now">Timestamp source in Stopwatch ticks; defaults to Stopwatch.GetTimestamp.</param>
     /// <param name="sleep">Millisecond sleep callback; defaults to Thread.Sleep.</param>
+    /// <remarks>Without injected functions the wait uses <see cref="PreciseSleep" />; Thread.Sleep alone rounds to the ~15.6 ms system timer period.</remarks>
     internal GeneratedFramePacer(Func<long>? now = null, Action<int>? sleep = null)
     {
+        precise = now == null && sleep == null;
         this.now = now ?? Stopwatch.GetTimestamp;
         this.sleep = sleep ?? Thread.Sleep;
     }
@@ -41,12 +44,17 @@ internal sealed class GeneratedFramePacer
     internal long PendingRealTargetTicks => realTarget;
 
     /// <summary>Consumes the pending real-present target and blocks until its clock deadline.</summary>
-    /// <remarks>Uses millisecond sleeps for coarse waits and spinning for the final interval. Call on the presentation owner thread.</remarks>
+    /// <remarks>Uses a high-resolution coarse wait (or the injected millisecond sleep) and spinning for the final interval. Call on the presentation owner thread.</remarks>
     internal void WaitForRealPresent()
     {
         long target = realTarget;
         realTarget = 0;
         if (target == 0) return;
+        if (precise)
+        {
+            PreciseSleep.Until(target);
+            return;
+        }
         while (true)
         {
             long remaining = target - now();

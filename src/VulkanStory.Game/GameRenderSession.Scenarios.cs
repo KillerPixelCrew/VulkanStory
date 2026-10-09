@@ -95,7 +95,8 @@ internal sealed partial class GameRenderSession
                     if (error != null) throw new InvalidOperationException(error);
                 }
                 else if (action.Kind == HeadlessScenarioActionKind.Options) ExecuteScenarioOptions(action);
-                else Window.SetSize(action.Width, action.Height); // SDL events own resize and GUI recomposition.
+                // Drawable pixels, the unit of captures and platform.WindowSize; SDL events own resize and GUI recomposition.
+                else Window.SetPixelSize(action.Width, action.Height);
                 if (!scenarioExecutedActions.Add(action.Index))
                 {
                     FailHeadlessRun("Pre-input action was executed more than once: " + action.Id, phase);
@@ -261,8 +262,7 @@ internal sealed partial class GameRenderSession
         in GameTemporalFrame raw, bool currentWorldSample, int width, int height)
     {
         object? temporalFrameId = currentWorldSample ? raw.FrameId : null;
-        FrameBufferRef? primary = platform.FrameBuffers is { Count: > 0 } targets &&
-            targets[0] is { Disposed: false } target ? target : null;
+        FrameBufferRef? primary = PrimaryTarget;
         File.WriteAllText(Path.Combine(directory, "frame-inputs.json"), JsonSerializer.Serialize(new
         {
             phase = "preGenerateReadback",
@@ -403,8 +403,7 @@ internal sealed partial class GameRenderSession
         var raw = Temporal.Snapshot();
         bool currentWorldSample = raw.WorldCaptured && raw.FrameId == completedFrameId;
         RendererSettings settings = services.RendererSettings.Settings;
-        FrameBufferRef? primary = platform.FrameBuffers is { Count: > 0 } targets &&
-            targets[0] is { Disposed: false } target ? target : null;
+        FrameBufferRef? primary = PrimaryTarget;
         var display = Window.PixelSize;
         var window = Window.WindowSize;
         var options = SnapshotScenarioOptions();
@@ -711,7 +710,7 @@ internal sealed partial class GameRenderSession
         var result = new
         {
             success,
-            context = HeadlessHarnessOptions.Scenario?.Context ?? (HeadlessHarnessOptions.MainMenuOptions ? "main" : "world"),
+            context = HeadlessHarnessOptions.Scenario?.Context ?? (HeadlessHarnessOptions.MainMenuContext ? "main" : "world"),
             gameAssembly = typeof(GameRenderSession).Assembly.Location,
             reason,
             hidden,
@@ -727,11 +726,6 @@ internal sealed partial class GameRenderSession
         WriteJsonAtomically(Path.Combine(directory, "headless-result.json"), result);
     }
 
-    private static void WriteJsonAtomically(string path, object value)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        string temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(value));
-        File.Move(temporary, path, overwrite: true);
-    }
+    private static void WriteJsonAtomically(string path, object value) =>
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(value));
 }

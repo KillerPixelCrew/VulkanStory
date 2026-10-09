@@ -36,6 +36,9 @@ public sealed unsafe partial class VulkanDevice
     private long _nativeIndirectDraws;
     private ulong _nativeBoundPipelineSerial;
     private ulong _nativeBoundPipelineHandle;
+    /// <summary>The recording and buffer the default-attribute binding was last bound in; it persists for the recording.</summary>
+    private ulong _nativeBoundDefaultsSerial;
+    private ulong _nativeBoundDefaultsHandle;
     /// <summary>Latest reason the retained native draw path refused a requested operation.</summary>
     internal string? NativeDrawRefusal { get; private set; }
 
@@ -282,13 +285,45 @@ public sealed unsafe partial class VulkanDevice
             Topology = description.Topology,
         };
 
-        var pipeline = new NativePipeline(program, description, key, request, -(rawBlendId + 1));
+        var pipeline = new NativePipeline(program, description, key, request, -(rawBlendId + 1),
+            NativeColorWrite(description, program));
         _nativePipelines[cacheKey] = pipeline;
 
         // Created here rather than at the first draw where it can be; an async cache queues
         // the compile and the first draws are skipped until it is published.
         _pipelines.Prepare(key, request);
         return pipeline;
+    }
+
+    /// <summary>
+    /// The colour write state a native pipeline's draws emit: each described write mask, cleared
+    /// for an output the program never writes, packed for the device's tier (one enable bit per
+    /// attachment, or four mask bits). It depends only on the pipeline, its program and the device,
+    /// so <see cref="NativePipeline.ColorWrite" /> holds it instead of every draw recomputing it.
+    /// </summary>
+    private uint NativeColorWrite(NativePipelineDescription description, ShaderProgramResources program)
+    {
+        ColorWriteTier tier = _context.Capabilities.ColorWriteTier;
+        if (tier == ColorWriteTier.PipelineKey) return 0;
+
+        int colorStates = (int)Math.Min(_context.Capabilities.MaxColorAttachments, (uint)RenderLimits.MaxColorAttachments);
+        var written = program.Interface.WrittenFragmentOutputs;
+        uint colorWrite = 0;
+        for (int i = 0; i < colorStates; i++)
+        {
+            ColorComponentFlags mask = i < description.Blend.Length ? description.Blend[i].WriteMask : 0;
+            // An output the program never writes keeps the attachment's contents, as it does on GL.
+            if (!written.Contains(i)) mask = 0;
+            if (tier == ColorWriteTier.DynamicEnable)
+            {
+                if (mask != 0) colorWrite |= 1u << i;
+            }
+            else
+            {
+                colorWrite |= (uint)mask << (i * 4);
+            }
+        }
+        return colorWrite;
     }
 
     /// <summary>Whether a pipeline's program is still the linked one of that id (a shader reload replaces it).</summary>
@@ -355,15 +390,20 @@ public sealed unsafe partial class VulkanDevice
 
         CommandBuffer commandBuffer = Commands;
         MarkNativePassSection(pass.Name);
-        _targets.DeclarePass(commandBuffer, new PassDeclaration
+        // A pass that coalesces into the current declaration (a GUI quad after the last one, an
+        // entity in the stage's pass) would build a declaration DeclarePass then ignores.
+        if (!_targets.IsCurrentDeclaration(id, pass.Name, pass.ColorSlots))
         {
-            Name = pass.Name,
-            FramebufferId = id,
-            ColorSlots = pass.ColorSlots,
-            Reads = pass.Reads,
-            TransientSlots = pass.TransientSlots,
-            Flags = pass.Flags,
-        }, id);
+            _targets.DeclarePass(commandBuffer, new PassDeclaration
+            {
+                Name = pass.Name,
+                FramebufferId = id,
+                ColorSlots = pass.ColorSlots,
+                Reads = pass.Reads,
+                TransientSlots = pass.TransientSlots,
+                Flags = pass.Flags,
+            }, id);
+        }
         if (!ReferenceEquals(_targets.Bound, target)) _targets.Bind(commandBuffer, id);
 
         for (int slot = 0; slot < RenderLimits.MaxColorAttachments && pass.ClearSlots != 0; slot++)
@@ -591,13 +631,13 @@ public sealed unsafe partial class VulkanDevice
                 SnapshotColorAttachment(commandBuffer, textures[i].TextureId, texture);
                 if (_sampledTextureOverrides.TryGetValue(textures[i].TextureId, out int copyId) &&
                     _textures.Get(copyId) is { } copy)
-                    RequireSamplerStages(commandBuffer, program, program.Interface.Samplers[textures[i].Sampler.Index], copy);
+                    RequireSamplerStages(commandBuffer, pipeline.SamplerStageUsages(textures[i].Sampler.Index), copy);
                 continue;
             }
             _targets.FlushPendingClears(commandBuffer, texture);
-            RequireSamplerStages(commandBuffer, program, program.Interface.Samplers[textures[i].Sampler.Index], texture);
+            RequireSamplerStages(commandBuffer, pipeline.SamplerStageUsages(textures[i].Sampler.Index), texture);
         }
-        PrepareUnnamedFrameTextures(commandBuffer, program, textures);
+        PrepareUnnamedFrameTextures(commandBuffer, pipeline, textures);
         if (_barriers.Pending != 0) _targets.EndRendering(commandBuffer);
         _barriers.Flush(commandBuffer);
 
@@ -605,8 +645,7 @@ public sealed unsafe partial class VulkanDevice
         _targets.SetDepthReadOnly(depthReadOnly);
         _targets.EnsureRendering(commandBuffer);
 
-        RenderTargetFormats scope = _targets.ScopeFormats(bound);
-        if (!scope.Equals(pipeline.Description.Targets))
+        if (!_targets.ScopeFormatsMatch(bound, pipeline.Description.Targets))
         {
             return RefuseNativeDraw("native pass '" + pass.Name + "' has target formats its pipeline was not built for");
         }
@@ -635,15 +674,23 @@ public sealed unsafe partial class VulkanDevice
             _nativeBoundPipelineHandle = handle.Handle;
         }
 
+        // The default-attribute binding persists for the recording, and mesh binds start at
+        // binding 0 and never reach it, so it is bound once per recording like the pipeline.
         VertexLayoutDescription vertexLayout = pipeline.Request.VertexLayout;
         if (vertexLayout.Bindings.Length > 0 &&
             vertexLayout.Bindings[^1].Binding == VertexLayoutDescription.DefaultAttributeBinding &&
             _defaultAttributes != null)
         {
             Silk.NET.Vulkan.Buffer defaults = _defaultAttributes.Handle;
-            ulong offset = 0;
-            api.CmdBindVertexBuffers(commandBuffer,
-                VertexLayoutDescription.DefaultAttributeBinding, 1, &defaults, &offset);
+            if (recordingSerial == 0 || _nativeBoundDefaultsSerial != recordingSerial ||
+                _nativeBoundDefaultsHandle != defaults.Handle)
+            {
+                ulong offset = 0;
+                api.CmdBindVertexBuffers(commandBuffer,
+                    VertexLayoutDescription.DefaultAttributeBinding, 1, &defaults, &offset);
+                _nativeBoundDefaultsSerial = recordingSerial;
+                _nativeBoundDefaultsHandle = defaults.Handle;
+            }
         }
 
         // The program's push block, then this draw's slots over it.
@@ -731,12 +778,15 @@ public sealed unsafe partial class VulkanDevice
     /// replaced by the placeholder when it is an attachment of this draw's own target, which a
     /// shader cannot read.
     /// </summary>
-    private void PrepareUnnamedFrameTextures(CommandBuffer commandBuffer, ShaderProgramResources program,
+    private void PrepareUnnamedFrameTextures(CommandBuffer commandBuffer, NativePipeline pipeline,
         ReadOnlySpan<NativeTexture> textures)
     {
+        ShaderProgramResources program = pipeline.Program;
         if (!program.Interface.UsesFrameTextures) return;
-        foreach (SamplerBinding declared in program.Interface.Samplers)
+        List<SamplerBinding> samplers = program.Interface.Samplers;
+        for (int samplerIndex = 0; samplerIndex < samplers.Count; samplerIndex++)
         {
+            SamplerBinding declared = samplers[samplerIndex];
             if (!declared.IsFrameTexture) continue;
             bool named = false;
             for (int i = 0; i < textures.Length && !named; i++)
@@ -772,23 +822,19 @@ public sealed unsafe partial class VulkanDevice
                 lock (_frameTextureLock) _frameTextureValues[index] = stale with { Layout = ImageLayout.ShaderReadOnlyOptimal };
             }
             _targets.FlushPendingClears(commandBuffer, texture);
-            RequireSamplerStages(commandBuffer, program, declared, texture);
+            RequireSamplerStages(commandBuffer, pipeline.SamplerStageUsages(samplerIndex), texture);
         }
     }
 
-    /// <summary>Requests visibility for every shader stage that reads a sampler, even without a layout change.</summary>
-    private void RequireSamplerStages(CommandBuffer commands, ShaderProgramResources program, SamplerBinding sampler, VulkanTexture texture)
+    /// <summary>
+    /// Requests visibility for every shader stage that reads a sampler, even without a layout change.
+    /// The stages come from the pipeline (<see cref="NativePipeline.SamplerStageUsages" />), resolved
+    /// when it was created.
+    /// </summary>
+    private void RequireSamplerStages(CommandBuffer commands, ReadOnlySpan<ResourceUsage> stageUsages, VulkanTexture texture)
     {
-        foreach (ShaderStageKind stage in program.Modules.Keys)
+        foreach (ResourceUsage usage in stageUsages)
         {
-            if (program.Interface.SamplersByStage.Count != 0 &&
-                (!program.Interface.SamplersByStage.TryGetValue(stage, out var names) || !names.Contains(sampler.Name))) continue;
-            ResourceUsage usage = stage switch
-            {
-                ShaderStageKind.VertexShader => ResourceUsage.SampleVertex,
-                ShaderStageKind.GeometryShader => ResourceUsage.SampleGeometry,
-                _ => ResourceUsage.SampleFragment,
-            };
             _textures.Require(_barriers, commands, texture, usage);
         }
     }
@@ -801,22 +847,8 @@ public sealed unsafe partial class VulkanDevice
         bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
         int colorStates = (int)Math.Min(_context.Capabilities.MaxColorAttachments, (uint)RenderLimits.MaxColorAttachments);
         NativePipelineDescription description = pipeline.Description;
-
-        uint colorWrite = 0;
-        for (int i = 0; i < colorStates && tier != ColorWriteTier.PipelineKey; i++)
-        {
-            ColorComponentFlags mask = i < description.Blend.Length ? description.Blend[i].WriteMask : 0;
-            // An output the program never writes keeps the attachment's contents, as it does on GL.
-            if (!pipeline.Program.Interface.WrittenFragmentOutputs.Contains(i)) mask = 0;
-            if (tier == ColorWriteTier.DynamicEnable)
-            {
-                if (mask != 0) colorWrite |= 1u << i;
-            }
-            else
-            {
-                colorWrite |= (uint)mask << (i * 4);
-            }
-        }
+        // Fixed per pipeline, program and device tier (NativeColorWrite).
+        uint colorWrite = pipeline.ColorWrite;
 
         int width = pass.ViewportWidth >= 0 ? pass.ViewportWidth : (int)target.Width;
         int height = pass.ViewportHeight >= 0 ? pass.ViewportHeight : (int)target.Height;

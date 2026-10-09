@@ -259,17 +259,6 @@ internal static class RenderLimits
     /// game never calls glFrontFace, so nothing varies it.
     /// </summary>
     public const FrontFace FrontFace = Silk.NET.Vulkan.FrontFace.Clockwise;
-
-    /// <summary>Bit i set when the program statically writes fragment output i.</summary>
-    public static uint OutputBits(HashSet<int> writtenOutputs)
-    {
-        uint bits = 0;
-        for (int i = 0; i < MaxColorAttachments; i++)
-        {
-            if (writtenOutputs.Contains(i)) bits |= 1u << i;
-        }
-        return bits;
-    }
 }
 
 /// <summary>One bit per dynamic-state command a draw may record.</summary>

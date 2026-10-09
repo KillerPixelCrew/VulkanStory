@@ -98,6 +98,13 @@ internal sealed partial class GameGraphicsAdapter
     private int[] nativeEntityReads = Array.Empty<int>();
     private bool nativeEntityReported;
 
+    /// <summary>
+    /// The entity pass description for the last target drawn into. The device keeps it only
+    /// between BeginNativePass and EndNativePass, which clears its reference even with keepScope,
+    /// so one description serves every draw on that target; only its reads change per draw.
+    /// </summary>
+    private NativePassDescription? nativeEntityPass;
+
     /// <summary>An entity's shape: the native draw inside the stage's pass, or the neutral body.</summary>
     /// <param name="mesh">Owned entity mesh.</param>
     /// <param name="samplerName">Original program sampler receiving the supplied texture.</param>
@@ -109,7 +116,8 @@ internal sealed partial class GameGraphicsAdapter
             RenderMesh(mesh!);
             return;
         }
-        RequireDevice().GpuMark("entities");
+        VulkanDevice renderer = RequireDevice();
+        renderer.GpuMark("entities");
 
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         FrameBufferRef? target = currentFramebuffer;
@@ -121,7 +129,7 @@ internal sealed partial class GameGraphicsAdapter
             return;
         }
 
-        int layoutId = RequireDevice().NativeMeshLayoutId(vao.VaoId);
+        int layoutId = renderer.NativeMeshLayoutId(vao.VaoId);
         if (layoutId < 0)
         {
             RenderMesh(mesh);
@@ -139,27 +147,39 @@ internal sealed partial class GameGraphicsAdapter
         // this draw's own texture for the sampler the seam names.
         ResolveNativeEntityTextures(pipeline, program.ProgramId, samplerName, textureId);
 
+        NativePassDescription pass = NativeEntityPassFor(target.FboId);
+        pass.Reads = nativeEntityReads;
+
         bool drawn = false;
         bool passOpened = false;
         try
         {
-            if (passOpened = RequireDevice().BeginNativePass(new NativePassDescription
+            if (passOpened = renderer.BeginNativePass(pass))
             {
-                // The stage's own pass, so the declaration coalesces and the scope stays open across
-                // the whole loop. Closed with keepScope below for the same reason.
-                Name = "Entities/" + target.FboId,
-                FramebufferId = target.FboId,
-                ColorSlots = uint.MaxValue,
-                Reads = nativeEntityReads,
-                Flags = PassFlags.AllowSplit,
-            }))
-            {
-                drawn = RequireDevice().DrawNativeMesh(pipeline, vao.VaoId, nativeEntityTextures);
+                drawn = renderer.DrawNativeMesh(pipeline, vao.VaoId, nativeEntityTextures);
             }
         }
-        finally { RequireDevice().EndNativePass(keepScope: true); }
+        finally { renderer.EndNativePass(keepScope: true); }
         if (drawn) RuntimeStats.drawCallsCount++;
         else RejectSceneDraw(passOpened ? "entity native mesh draw rejected" : "entity native pass declined");
+    }
+
+    /// <summary>
+    /// The stage's own pass on <paramref name="framebufferId" />, so the declaration coalesces and
+    /// the scope stays open across the whole loop; the draw closes it with keepScope for the same
+    /// reason. Rebuilt only when the stage moves to another target.
+    /// </summary>
+    private NativePassDescription NativeEntityPassFor(int framebufferId)
+    {
+        if (nativeEntityPass != null && nativeEntityPass.FramebufferId == framebufferId) return nativeEntityPass;
+        nativeEntityPass = new NativePassDescription
+        {
+            Name = "Entities/" + framebufferId,
+            FramebufferId = framebufferId,
+            ColorSlots = uint.MaxValue,
+            Flags = PassFlags.AllowSplit,
+        };
+        return nativeEntityPass;
     }
 
     /// <summary>Whether the program in use is one this file draws natively.</summary>

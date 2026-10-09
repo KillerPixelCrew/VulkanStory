@@ -52,6 +52,6 @@ internal sealed partial class GameGraphicsAdapter
         Stated.BindTexture(unit, texture);
         if (!cube)
             Stated.BindSampler(unit, program.customSamplers.TryGetValue(name, out int sampler) ? sampler : 0);
-        if (program.clampTToEdge) renderer.SetTextureParameter(texture, 10243, 33071);
+        if (program.clampTToEdge) renderer.SetTextureParameter(texture, GameGlTextureTokens.TextureWrapT, 33071);
     }
 }

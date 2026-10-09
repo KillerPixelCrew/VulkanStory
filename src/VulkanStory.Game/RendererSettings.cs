@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VulkanStory.Contracts;
+using VulkanStory.Settings;
 
 namespace VulkanStory.Game;
 
@@ -57,24 +58,28 @@ internal sealed record RendererSettings
     /// <returns>A normalized copy; device/provider availability is evaluated separately.</returns>
     internal RendererSettings Normalize()
     {
-        static string Choice(string? value, string fallback, params string[] choices) =>
-            choices.FirstOrDefault(choice => string.Equals(choice, value?.Trim(), StringComparison.OrdinalIgnoreCase)) ?? fallback;
-        string provider = Choice(Upscaler, "off", "off", "dlss", "xess", "fsr3", "fsr4");
-        string quality = provider == "xess"
-            ? Choice(UpscalerQuality, "quality", "dlaa", "ultraquality", "ultraqualityplus", "quality", "balanced", "performance", "ultraperformance")
-            : Choice(UpscalerQuality, "quality", "dlaa", "quality", "balanced", "performance", "ultraperformance");
+        // RendererChoices is the single source of supported values and ranges.
+        static string Choice(string? value, string key, string fallback, bool xess = false)
+        {
+            string? trimmed = value?.Trim();
+            foreach (var (choice, _) in RendererChoices.Get(key, xess))
+                if (string.Equals(choice, trimmed, StringComparison.OrdinalIgnoreCase)) return choice;
+            return fallback;
+        }
+        string provider = Choice(Upscaler, nameof(Upscaler), "off");
+        string quality = Choice(UpscalerQuality, nameof(UpscalerQuality), "quality", xess: provider == "xess");
         return this with
         {
-            RenderScale = float.IsFinite(RenderScale) ? Math.Clamp(RenderScale, .25f, 1f) : 1f,
-            TaaSharpness = float.IsFinite(TaaSharpness) ? Math.Clamp(TaaSharpness, 0f, 1f) : .2f,
-            TaaMipBias = float.IsFinite(TaaMipBias) ? Math.Clamp(TaaMipBias, -2f, 0f) : -.5f,
+            RenderScale = RendererChoices.Range(nameof(RenderScale)).Clamp(RenderScale),
+            TaaSharpness = RendererChoices.Range(nameof(TaaSharpness)).Clamp(TaaSharpness),
+            TaaMipBias = RendererChoices.Range(nameof(TaaMipBias)).Clamp(TaaMipBias),
             Upscaler = provider, UpscalerQuality = quality,
-            UpscalerLodBiasOffset = float.IsFinite(UpscalerLodBiasOffset) ? Math.Clamp(UpscalerLodBiasOffset, 0f, 1f) : 1f,
-            FrameGeneration = Choice(FrameGeneration, "off", "off", "dlss", "fsr3", "xess"),
-            FrameGenerationMultiplier = Math.Clamp(FrameGenerationMultiplier, 2, 6),
-            LowLatencyMode = Choice(LowLatencyMode, "on", "off", "on", "boost"),
-            AmbientOcclusion = Choice(AmbientOcclusion, "auto", "auto", "vanilla", "gtao"),
-            AmbientOcclusionPreset = Choice(AmbientOcclusionPreset, "medium", "low", "medium", "high", "ultra"),
+            UpscalerLodBiasOffset = RendererChoices.Range(nameof(UpscalerLodBiasOffset)).Clamp(UpscalerLodBiasOffset),
+            FrameGeneration = Choice(FrameGeneration, nameof(FrameGeneration), "off"),
+            FrameGenerationMultiplier = RendererChoices.Range(nameof(FrameGenerationMultiplier)).Clamp(FrameGenerationMultiplier),
+            LowLatencyMode = Choice(LowLatencyMode, nameof(LowLatencyMode), "on"),
+            AmbientOcclusion = Choice(AmbientOcclusion, nameof(AmbientOcclusion), "auto"),
+            AmbientOcclusionPreset = Choice(AmbientOcclusionPreset, nameof(AmbientOcclusionPreset), "medium"),
             TaaDebugView = Math.Max(0, TaaDebugView),
         };
     }
@@ -123,13 +128,26 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     }
     internal bool IsDisabled(string provider) { lock (gate) return disabled.Contains(provider); }
     internal void DisableTaa() => TaaDisabled = true;
-    internal RendererLatencySelection LatencySelection => new(Settings.LowLatencyMode, Settings.FrameGeneration);
+    /// <summary>Latency selection using the requested FG provider, before provider availability is known.</summary>
+    internal RendererLatencySelection LatencySelection => EffectiveLatencySelection(null);
+    /// <summary>Latency selection whose FG input excludes a requested provider that has failed for this session.</summary>
+    /// <param name="unavailable">Returns a refusal for a failed FG provider, or null while it remains usable; null treats the request as effective.</param>
+    /// <returns>Requested latency mode paired with the requested FG provider, or Off when that provider is unavailable.</returns>
+    /// <remarks>A failed provider no longer forces low latency On; the user's requested latency mode applies.</remarks>
+    internal RendererLatencySelection EffectiveLatencySelection(Func<string, string?>? unavailable)
+    {
+        RendererSettings current = Settings;
+        string generation = current.FrameGeneration != "off" && unavailable?.Invoke(current.FrameGeneration) != null
+            ? "off" : current.FrameGeneration;
+        return new(current.LowLatencyMode, generation);
+    }
 }
 
 /// <summary>Loads and saves VulkanStory-owned settings under the selected game data path.</summary>
 internal sealed class RendererSettingsStore(string dataPath)
 {
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+    /// <summary>Settings JSON options shared by the file store and the runtime control bridge.</summary>
+    internal static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     internal string Pathname => Path.Combine(dataPath, "ModConfig", "vulkanstory.json");
     /// <summary>Reads and normalizes VulkanStory settings from the selected data path.</summary>
     /// <returns>Persisted normalized settings, or defaults when the file does not exist.</returns>
@@ -140,11 +158,6 @@ internal sealed class RendererSettingsStore(string dataPath)
     /// <summary>Writes normalized JSON to a sibling temporary file and replaces the settings pathname.</summary>
     /// <param name="settings">Requested settings to persist.</param>
     /// <remarks>Creates the ModConfig directory. Serialization/file errors propagate; applying the settings belongs to the runtime control queue.</remarks>
-    internal void Save(RendererSettings settings)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(Pathname)!);
-        string temporary = Pathname + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(settings.Normalize(), Json));
-        File.Move(temporary, Pathname, overwrite: true);
-    }
+    internal void Save(RendererSettings settings) =>
+        AtomicFile.WriteAllText(Pathname, JsonSerializer.Serialize(settings.Normalize(), Json));
 }

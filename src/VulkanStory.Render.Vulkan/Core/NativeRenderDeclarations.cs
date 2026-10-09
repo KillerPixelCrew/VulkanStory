@@ -116,15 +116,17 @@ internal sealed class NativePipeline
     private readonly Dictionary<string, NativeUniform> _uniforms = new(StringComparer.Ordinal);
     private readonly Dictionary<string, NativeSamplerSlot> _samplers = new(StringComparer.Ordinal);
     private readonly NativeSamplerSlot[] _samplerSlots;
+    private readonly ResourceUsage[][] _samplerStageUsages;
 
     internal NativePipeline(ShaderProgramResources program, NativePipelineDescription description,
-        PipelineKey key, GraphicsPipelineCache.PipelineRequest request, int dynamicBlendId)
+        PipelineKey key, GraphicsPipelineCache.PipelineRequest request, int dynamicBlendId, uint colorWrite)
     {
         Program = program;
         Description = description;
         Key = key;
         Request = request;
         DynamicBlendId = dynamicBlendId;
+        ColorWrite = colorWrite;
 
         ProgramInterfaceLayout layout = program.Interface;
         foreach (UniformMember member in layout.Members)
@@ -144,6 +146,7 @@ internal sealed class NativePipeline
         }
         SamplerNames = program.SamplerNames;
         _samplerSlots = new NativeSamplerSlot[layout.Samplers.Count];
+        _samplerStageUsages = new ResourceUsage[layout.Samplers.Count][];
         for (int i = 0; i < layout.Samplers.Count; i++)
         {
             SamplerBinding sampler = layout.Samplers[i];
@@ -152,7 +155,30 @@ internal sealed class NativePipeline
             NativeSamplerSlot slot = new(i, sampler.PushOffset, sampler.FrameBinding, kind);
             _samplers[sampler.Name] = slot;
             _samplerSlots[i] = slot;
+            _samplerStageUsages[i] = StageUsagesOf(program, sampler);
         }
+    }
+
+    /// <summary>
+    /// The sampled-texture usage of every shader stage that reads <paramref name="sampler" />, in
+    /// the program's module order. A program without per-stage sampler lists counts every stage.
+    /// </summary>
+    private static ResourceUsage[] StageUsagesOf(ShaderProgramResources program, SamplerBinding sampler)
+    {
+        var usages = new List<ResourceUsage>(program.Modules.Count);
+        foreach (ShaderStageKind stage in program.Modules.Keys)
+        {
+            if (program.Interface.SamplersByStage.Count != 0 &&
+                (!program.Interface.SamplersByStage.TryGetValue(stage, out HashSet<string>? names) ||
+                 !names.Contains(sampler.Name))) continue;
+            usages.Add(stage switch
+            {
+                ShaderStageKind.VertexShader => ResourceUsage.SampleVertex,
+                ShaderStageKind.GeometryShader => ResourceUsage.SampleGeometry,
+                _ => ResourceUsage.SampleFragment,
+            });
+        }
+        return usages.ToArray();
     }
 
     /// <summary>
@@ -180,6 +206,22 @@ internal sealed class NativePipeline
 
     /// <summary>The interned blend set the dynamic-state cache compares on, with the mask tier's dynamic blend.</summary>
     internal int DynamicBlendId { get; }
+
+    /// <summary>
+    /// The colour write state every draw through this pipeline emits (DynamicStateValues.ColorWrite):
+    /// the described write masks with the outputs the program never writes cleared, packed for the
+    /// device's colour write tier. It depends only on the pipeline, its program and the device, so
+    /// it is computed once when the pipeline is created.
+    /// </summary>
+    internal uint ColorWrite { get; }
+
+    /// <summary>
+    /// The sampled-texture usage of each shader stage that reads the sampler at
+    /// <paramref name="index" />, resolved once here rather than per draw. Empty for an index the
+    /// program does not declare.
+    /// </summary>
+    internal ReadOnlySpan<ResourceUsage> SamplerStageUsages(int index) =>
+        (uint)index < (uint)_samplerStageUsages.Length ? _samplerStageUsages[index] : ReadOnlySpan<ResourceUsage>.Empty;
 
     /// <summary>The placement of a uniform, resolved once here rather than per draw.</summary>
     public NativeUniform Uniform(string name) =>
@@ -222,8 +264,15 @@ internal sealed class NativePassDescription
     /// </summary>
     public uint ClearSlots;
 
-    /// <summary>The value <see cref="ClearSlots" /> clears to.</summary>
-    public float[] ClearValue = { 0f, 0f, 0f, 0f };
+    /// <summary>
+    /// The value <see cref="ClearSlots" /> clears to. By default every description shares one
+    /// all-zero array, so a pass with another clear assigns its own array and never writes
+    /// into this one.
+    /// </summary>
+    public float[] ClearValue = DefaultClearValue;
+
+    /// <summary>The shared all-zero <see cref="ClearValue" />; read-only by convention.</summary>
+    private static readonly float[] DefaultClearValue = { 0f, 0f, 0f, 0f };
 
     public int ViewportX;
     public int ViewportY;

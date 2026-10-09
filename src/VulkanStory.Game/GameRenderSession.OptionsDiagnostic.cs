@@ -158,7 +158,7 @@ internal sealed partial class GameRenderSession
     }
     private (bool Before, bool Expected) ClickOptionsTaaAction(GuiComposer shown, string action)
     {
-        bool before = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!.Taa;
+        bool before = RuntimeBootstrap.Current.RequestedSettings.Taa;
         ClickOptionsControl(shown, shown.GetSwitch("Taa").Bounds, "TAA switch");
         ClickOptionsFooter(shown, action);
         return (before, action == "save" ? !before : before);
@@ -278,7 +278,7 @@ internal sealed partial class GameRenderSession
         if (!ReferenceEquals(Temporal.CurrentClient, pending.World) ||
             shown?.DialogName.StartsWith("gamesettings-graphics", StringComparison.Ordinal) != true)
             throw new InvalidOperationException("Multiplier Save did not return to original Graphics.");
-        int requested = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!.FrameGenerationMultiplier;
+        int requested = RuntimeBootstrap.Current.RequestedSettings.FrameGenerationMultiplier;
         int persisted = new RendererSettingsStore(services.DataPath).Load().FrameGenerationMultiplier;
         int applied = services.RendererSettings.Settings.FrameGenerationMultiplier;
         if (requested != 6 || persisted != 6 || applied != 6)

@@ -41,19 +41,21 @@ public sealed class SdlWindowHost : IDisposable
     /// <summary>SDL window identity, or zero after disposal.</summary>
     public uint WindowId => window == IntPtr.Zero ? 0 : SDL_GetWindowID(window);
     /// <summary>Current SDL keyboard/input focus flag.</summary>
-    public bool IsFocused => (SDL_GetWindowFlags(RequireWindow()) & FocusFlag) != 0;
+    public bool IsFocused => HasFlag(FocusFlag);
     /// <summary>Whether SDL's hidden flag is clear.</summary>
-    public bool IsVisible => (SDL_GetWindowFlags(RequireWindow()) & HiddenFlag) == 0;
+    public bool IsVisible => !HasFlag(HiddenFlag);
     /// <summary>Current SDL fullscreen flag.</summary>
-    public bool IsFullscreen => (SDL_GetWindowFlags(RequireWindow()) & FullscreenFlag) != 0;
+    public bool IsFullscreen => HasFlag(FullscreenFlag);
     /// <summary>Current SDL minimized flag.</summary>
-    public bool IsMinimized => (SDL_GetWindowFlags(RequireWindow()) & MinimizedFlag) != 0;
+    public bool IsMinimized => HasFlag(MinimizedFlag);
     /// <summary>Current SDL maximized flag.</summary>
-    public bool IsMaximized => (SDL_GetWindowFlags(RequireWindow()) & MaximizedFlag) != 0;
+    public bool IsMaximized => HasFlag(MaximizedFlag);
+    /// <summary>Whether the window is in its normal state: neither fullscreen, minimized nor maximized.</summary>
+    public bool IsRestored => !HasFlag(FullscreenFlag | MinimizedFlag | MaximizedFlag);
     /// <summary>Whether the SDL window has no border.</summary>
-    public bool IsBorderless => (SDL_GetWindowFlags(RequireWindow()) & BorderlessFlag) != 0;
+    public bool IsBorderless => HasFlag(BorderlessFlag);
     /// <summary>Whether SDL allows user resizing.</summary>
-    public bool IsResizable => (SDL_GetWindowFlags(RequireWindow()) & ResizableFlag) != 0;
+    public bool IsResizable => HasFlag(ResizableFlag);
     /// <summary>Current per-window relative mouse mode used for gameplay capture.</summary>
     public bool RelativeMouseMode => SDL_GetWindowRelativeMouseMode(RequireWindow());
     /// <summary>Whether SDL text input is enabled for this window.</summary>
@@ -89,7 +91,9 @@ public sealed class SdlWindowHost : IDisposable
             return (width, height);
         }
     }
-    /// <summary>Bounds extent of the window's current SDL display.</summary>
+    /// <summary>Bounds extent of the window's current SDL display, in drawable pixels like <see cref="PixelSize"/>.</summary>
+    /// <remarks>SDL reports display bounds in logical window units; they are scaled by this window's
+    /// pixel/logical ratio, so the result equals the SDL bounds where logical units are pixels.</remarks>
     public (int Width, int Height) DisplaySize
     {
         get
@@ -97,7 +101,8 @@ public sealed class SdlWindowHost : IDisposable
             uint display = SDL_GetDisplayForWindow(RequireWindow());
             if (display == 0) throw new InvalidOperationException("SDL_GetDisplayForWindow failed: " + Error());
             Check(SDL_GetDisplayBounds(display, out SdlRect bounds), "SDL_GetDisplayBounds");
-            return (bounds.Width, bounds.Height);
+            System.Numerics.Vector2 pixels = SdlWindowCoordinates.ToPixels(new(bounds.Width, bounds.Height), WindowSize, PixelSize);
+            return ((int)MathF.Round(pixels.X), (int)MathF.Round(pixels.Y));
         }
     }
     /// <summary>Borrowed native HWND on Windows, or zero on other platforms/after disposal.</summary>
@@ -133,21 +138,14 @@ public sealed class SdlWindowHost : IDisposable
     /// <summary>Sets the SDL title, throwing when SDL refuses the operation.</summary>
     public void SetTitle(string title) => Check(SDL_SetWindowTitle(RequireWindow(), title), "SDL_SetWindowTitle");
     /// <summary>Sets a tightly packed RGBA8 icon through a temporary SDL surface released before return.</summary>
-    public unsafe void SetIcon(int width, int height, byte[] rgba)
+    public void SetIcon(int width, int height, byte[] rgba)
     {
         RequireWindow();
-        ArgumentNullException.ThrowIfNull(rgba);
-        if (width <= 0 || height <= 0 || rgba.Length != checked(width * height * 4))
-            throw new ArgumentException("Window icon must contain width × height RGBA pixels", nameof(rgba));
-        uint format = SDL_GetPixelFormatForMasks(32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
-        if (format == 0) throw new InvalidOperationException("SDL icon pixel format unavailable: " + Error());
-        fixed (byte* pixels = rgba)
+        WithRgbaSurface(width, height, rgba, "Window icon", surface =>
         {
-            nint surface = SDL_CreateSurfaceFrom(width, height, format, (nint)pixels, width * 4);
-            if (surface == 0) throw new InvalidOperationException("SDL_CreateSurfaceFrom failed: " + Error());
-            try { Check(SDL_SetWindowIcon(window, surface), "SDL_SetWindowIcon"); }
-            finally { SDL_DestroySurface(surface); }
-        }
+            Check(SDL_SetWindowIcon(window, surface), "SDL_SetWindowIcon");
+            return true;
+        });
     }
     /// <summary>Requests a positive logical window size, preserving SDL's error result.</summary>
     public void SetSize(int width, int height)
@@ -156,12 +154,33 @@ public sealed class SdlWindowHost : IDisposable
         if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
         Check(SDL_SetWindowSize(RequireWindow(), width, height), "SDL_SetWindowSize");
     }
+    /// <summary>Requests a window whose drawable extent is approximately the given pixel size.</summary>
+    /// <remarks>Converts through the current logical/pixel ratio, so it equals <see cref="SetSize"/> where SDL logical units are pixels.</remarks>
+    public void SetPixelSize(int width, int height)
+    {
+        if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0) throw new ArgumentOutOfRangeException(nameof(height));
+        System.Numerics.Vector2 logical = SdlWindowCoordinates.ToLogical(new(width, height), WindowSize, PixelSize);
+        SetSize(Math.Max(1, (int)MathF.Round(logical.X)), Math.Max(1, (int)MathF.Round(logical.Y)));
+    }
     /// <summary>Sets nonnegative logical minimum dimensions; zero leaves that axis without a minimum.</summary>
     public void SetMinimumSize(int width, int height)
     {
         if (width < 0) throw new ArgumentOutOfRangeException(nameof(width));
         if (height < 0) throw new ArgumentOutOfRangeException(nameof(height));
         Check(SDL_SetWindowMinimumSize(RequireWindow(), width, height), "SDL_SetWindowMinimumSize");
+    }
+    /// <summary>Sets nonnegative minimum dimensions in drawable pixels; zero leaves that axis without a minimum.</summary>
+    /// <remarks>Converts through the current logical/pixel ratio like <see cref="SetPixelSize"/>; the limit is not
+    /// re-derived if the window later moves to a display with a different pixel density.</remarks>
+    public void SetMinimumPixelSize(int width, int height)
+    {
+        if (width < 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height < 0) throw new ArgumentOutOfRangeException(nameof(height));
+        System.Numerics.Vector2 logical = SdlWindowCoordinates.ToLogical(new(width, height), WindowSize, PixelSize);
+        // Round up (ignoring float noise) so the drawable minimum is not undershot; zero keeps "no minimum".
+        SetMinimumSize(width == 0 ? 0 : Math.Max(1, (int)MathF.Ceiling(logical.X - 0.01f)),
+            height == 0 ? 0 : Math.Max(1, (int)MathF.Ceiling(logical.Y - 0.01f)));
     }
     /// <summary>Changes SDL fullscreen state unless the host is required to stay hidden.</summary>
     public void SetFullscreen(bool enabled) { if (!keepHidden) Check(SDL_SetWindowFullscreen(RequireWindow(), enabled), "SDL_SetWindowFullscreen"); }
@@ -292,23 +311,12 @@ public sealed class SdlWindowHost : IDisposable
     /// <param name="width">Positive image width in pixels.</param>
     /// <param name="height">Positive image height in pixels.</param>
     /// <param name="rgba">Exactly four RGBA bytes per image texel; native creation occurs while pinned.</param>
-    public unsafe void LoadCursor(string code, int hotX, int hotY, int width, int height, byte[] rgba)
+    public void LoadCursor(string code, int hotX, int hotY, int width, int height, byte[] rgba)
     {
         RequireWindow();
         ArgumentNullException.ThrowIfNull(code);
-        ArgumentNullException.ThrowIfNull(rgba);
-        if (width <= 0 || height <= 0 || rgba.Length != checked(width * height * 4))
-            throw new ArgumentException("Cursor image must contain width × height RGBA pixels", nameof(rgba));
-        uint format = SDL_GetPixelFormatForMasks(32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
-        if (format == 0) throw new InvalidOperationException("SDL cursor pixel format unavailable: " + Error());
-        nint cursor;
-        fixed (byte* pixels = rgba)
-        {
-            nint surface = SDL_CreateSurfaceFrom(width, height, format, (nint)pixels, width * 4);
-            if (surface == 0) throw new InvalidOperationException("SDL_CreateSurfaceFrom failed: " + Error());
-            try { cursor = SDL_CreateColorCursor(surface, hotX, hotY); }
-            finally { SDL_DestroySurface(surface); }
-        }
+        nint cursor = WithRgbaSurface(width, height, rgba, "Cursor image",
+            surface => SDL_CreateColorCursor(surface, hotX, hotY));
         if (cursor == 0) throw new InvalidOperationException("SDL_CreateColorCursor failed: " + Error());
         if (cursors.TryGetValue(code, out nint old))
         {
@@ -418,6 +426,26 @@ public sealed class SdlWindowHost : IDisposable
     }
 
     private IntPtr RequireWindow() => window != IntPtr.Zero ? window : throw new ObjectDisposedException(nameof(SdlWindowHost));
+    private bool HasFlag(ulong flag) => (SDL_GetWindowFlags(RequireWindow()) & flag) != 0;
+
+    /// <summary>Validates tightly packed RGBA8 pixels and lends a temporary SDL surface over them, destroyed before return.</summary>
+    /// <param name="what">Image description used in validation and failure messages.</param>
+    /// <param name="use">Consumer of the surface; it must not retain the surface after returning.</param>
+    private static unsafe T WithRgbaSurface<T>(int width, int height, byte[] rgba, string what, Func<nint, T> use)
+    {
+        ArgumentNullException.ThrowIfNull(rgba);
+        if (width <= 0 || height <= 0 || rgba.Length != checked(width * height * 4))
+            throw new ArgumentException(what + " must contain width × height RGBA pixels", nameof(rgba));
+        uint format = SDL_GetPixelFormatForMasks(32, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+        if (format == 0) throw new InvalidOperationException("SDL " + what + " pixel format unavailable: " + Error());
+        fixed (byte* pixels = rgba)
+        {
+            nint surface = SDL_CreateSurfaceFrom(width, height, format, (nint)pixels, width * 4);
+            if (surface == 0) throw new InvalidOperationException("SDL_CreateSurfaceFrom failed: " + Error());
+            try { return use(surface); }
+            finally { SDL_DestroySurface(surface); }
+        }
+    }
     private static void Check(bool success, string operation)
     {
         if (!success) throw new InvalidOperationException(operation + " failed: " + Error());

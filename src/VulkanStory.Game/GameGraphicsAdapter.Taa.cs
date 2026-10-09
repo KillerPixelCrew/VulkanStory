@@ -51,6 +51,27 @@ internal sealed partial class GameGraphicsAdapter
     private void WriteNativeMatrix(NativePipeline pipeline, NativeUniform uniform, float[] values) =>
         RequireDevice().WriteNative(pipeline, uniform, MemoryMarshal.AsBytes(new ReadOnlySpan<float>(values)));
 
+    /// <summary>
+    /// The world reprojection the TAA resolve and the sky motion pass both state, built one way so
+    /// they agree exactly: this frame's world projection jittered for a
+    /// <paramref name="width" /> x <paramref name="height" /> target, times the origin camera matrix,
+    /// inverted; and the previous frame's unjittered projection times its camera matrix.
+    /// </summary>
+    /// <returns>The inverse jittered view-projection (null when singular; each caller keeps its own fallback) and the previous view-projection.</returns>
+    private static (float[]? Inverse, float[] Previous) JitteredReprojection(TemporalFrameState frame, int width, int height)
+    {
+        float[] projection = frame.GetProjection(EnumTemporalView.World);
+        var jittered = new double[16];
+        for (int index = 0; index < 16; index++) jittered[index] = projection[index];
+        TemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, width, height);
+        var projectionJittered = new float[16];
+        for (int index = 0; index < 16; index++) projectionJittered[index] = (float)jittered[index];
+        float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
+        float[]? inverse = Mat4f.Invert(new float[16], viewProj);
+        float[] previous = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
+        return (inverse, previous);
+    }
+
     /// <summary>Resolves scene color into the current history target when temporal inputs and target readiness permit, then records the resolved output.</summary>
     /// <param name="temporal">Matching camera/history owner for this real frame.</param>
     /// <returns>True when this frame resolved to native TAA history; false when readiness or pass setup decline.</returns>
@@ -74,15 +95,7 @@ internal sealed partial class GameGraphicsAdapter
         int program = OwnedProgram("taa-resolve", ref taaResolveProgram, ref taaResolveFailed);
         if (program <= 0) { TaaHistoryValid = false; return false; }
         TemporalFrameState frame = temporal.State;
-        float[] projection = frame.GetProjection(EnumTemporalView.World);
-        var jittered = new double[16];
-        for (int index = 0; index < 16; index++) jittered[index] = projection[index];
-        TemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, write.Width, write.Height);
-        var projectionJittered = new float[16];
-        for (int index = 0; index < 16; index++) projectionJittered[index] = (float)jittered[index];
-        float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
-        float[] inverse = Mat4f.Invert(new float[16], viewProj);
-        float[] previous = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
+        (float[]? inverse, float[] previous) = JitteredReprojection(frame, write.Width, write.Height);
         bool reset = frame.Reset || !TaaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || inverse == null;
         inverse ??= Mat4f.Identity(new float[16]);
         bool drawn = DrawTaaResolve(program, primary, write, read, frame, inverse, previous, reset);

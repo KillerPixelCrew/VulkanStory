@@ -58,8 +58,7 @@ internal sealed class SessionControllerHost(GameRenderSession session, ClientPla
     {
         get
         {
-            var logical = window.MousePosition;
-            var pixels = SdlWindowCoordinates.ToPixels(new System.Numerics.Vector2(logical.X, logical.Y), window.WindowSize, window.PixelSize);
+            var pixels = session.Input.CursorPixels();
             return new Vector2(pixels.X, pixels.Y);
         }
         set => session.Input.WarpControllerCursor(value.X, value.Y);

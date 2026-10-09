@@ -86,7 +86,7 @@ internal sealed class DlssUpscaler : IDisposable
     private readonly IUpscalerRuntimeState _state;
     private readonly Action<string> _log;
     private NgxSession? _session;
-    private bool _ownsSession;
+    private bool _sessionAdopted;
     private IUpscalerDevice? _device;
     private IntPtr _vkDevice;
     private NgxDlssFeature? _feature;
@@ -173,7 +173,6 @@ internal sealed class DlssUpscaler : IDisposable
         }
 
         host._session = new NgxSession("1.0.0", dataPath, paths);
-        host._ownsSession = true;
         host.Requirements = new NgxDeviceRequirements(
             host._session, new[] { NgxFeature.SuperSampling, NgxFeature.FrameGeneration },
             line => host._log("[VulkanStory] NGX: " + line));
@@ -242,16 +241,17 @@ internal sealed class DlssUpscaler : IDisposable
     }
 
     /// <summary>
-    /// Adopts an NGX session somebody else brought up - the one-per-process test
-    /// runtime - without taking over its lifetime. Init and Shutdown stay the
-    /// owner's business; everything else (plans, features, evaluates) is this
-    /// host's, exactly as in the client.
+    /// Test seam: adopts an NGX session somebody else brought up - the
+    /// one-per-process test runtime - without taking over its lifetime. Init and
+    /// Shutdown stay the owner's business; everything else (plans, features,
+    /// evaluates) is this host's, exactly as in the client. Refused once the host
+    /// holds a session of its own, whose shutdown it must not give up.
     /// </summary>
     internal bool AdoptSession(NgxSession session, IUpscalerDevice device, IntPtr vkDevice)
     {
-        if (_disposed) return false;
+        if (_disposed || (_session != null && !_sessionAdopted)) return false;
         _session = session;
-        _ownsSession = false;
+        _sessionAdopted = true;
         _device = device;
         _vkDevice = vkDevice;
         Unavailable = null;
@@ -305,51 +305,6 @@ internal sealed class DlssUpscaler : IDisposable
         {
             NgxInterop.DestroyParameters(handle);
         }
-    }
-
-    /// <summary>
-    /// What the frame buffers must be allocated at, for a display size the client
-    /// has already computed - the sizing question, answered for the frame that is
-    /// being built.
-    ///
-    /// <para><b>The setting is asked first, before the host is asked anything at
-    /// all.</b> A host stays alive and <see cref="Active" /> across a settings
-    /// change: switching the upscaler off retires the feature and rebuilds the
-    /// targets, and the host is still up while that rebuild runs (it has to be -
-    /// NGX allows one lifetime per process and the user may switch back on). A
-    /// sizing answer taken from the host's liveness therefore rebuilt Primary at
-    /// the vendor's reduced size on the very rebuild that stood the upscaler down,
-    /// and the in-house TAA resolve then resolved a 1707x993 frame into a
-    /// 2560x1490 chain - the "Quality profile still applies with DLSS off" report
-    /// on PR #3, invisible at DLAA because its ratio is 1. The setting in force
-    /// (the active upscaler selection, which a runtime stand-down has
-    /// already turned off) is the only thing that may decide it.</para>
-    ///
-    /// False leaves both sizes at the display size, which is exactly what the
-    /// client allocates when no upscaler was ever enabled.
-    /// </summary>
-    public static bool TryPlanForFrame(
-        DlssUpscaler? host, int displayWidth, int displayHeight,
-        out int renderWidth, out int renderHeight, out UpscalePlan plan)
-    {
-        renderWidth = displayWidth;
-        renderHeight = displayHeight;
-        plan = default;
-        // Requested, not UpscalerReplacesTaa: the slot has more than one upscaler in
-        // it now, and they own the resolve alike. A host asked with the slot on
-        // "passthrough" would otherwise plan a render size and, one step later,
-        // create a vendor feature for a frame that is never going to evaluate it -
-        // today only the order of the two branches in OptimumTryPlanUpscaleRenderSize
-        // prevents it. Requested is the narrower question and the right one, and it
-        // still goes false on a runtime stand-down, which is what the rule above is
-        // about.
-        if (host == null || !host.Requested) return false;
-        if (!host.Active) return false;
-        if (!host.TryPlan(displayWidth, displayHeight, host._state.Quality,
-                host._state.LodBiasOffset, out plan)) return false;
-        renderWidth = plan.RenderWidth;
-        renderHeight = plan.RenderHeight;
-        return true;
     }
 
     /// <summary>
@@ -452,15 +407,21 @@ internal sealed class DlssUpscaler : IDisposable
     /// never comes here: it retires the feature and leaves NGX up, because the
     /// process cannot bring it back afterwards.</para>
     ///
-    /// A host that adopted somebody else's session retires its feature and drains,
-    /// but shuts nothing down; the owner does that, through the same call.
+    /// A host that adopted somebody else's session (<see cref="AdoptSession" />)
+    /// retires its feature and drains, but shuts nothing down; the owner does that.
     /// </summary>
     public void Shutdown()
     {
         if (_disposed) return;
 
         IUpscalerDevice? device = _device;
-        if (_ownsSession)
+        if (_sessionAdopted)
+        {
+            // An adopted session: the feature is this host's, the lifetime is not.
+            RetireFeature();
+            device?.DrainDeferredDeletions();
+        }
+        else if (_session != null)
         {
             // Gated on "NGX is up", never on "the upscaler still works": every later
             // Fail() - a driver that refuses to create the feature is the realistic
@@ -469,16 +430,11 @@ internal sealed class DlssUpscaler : IDisposable
             NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);
             if (outcome is NgxLifetimeOutcome.ShutdownFailed or NgxLifetimeOutcome.FeatureStillLive)
                 throw new InvalidOperationException("NGX shutdown did not release its owners: " + outcome);
-            _session?.Dispose();
-        }
-        else
-        {
-            // An adopted session: the feature is this host's, the lifetime is not.
-            RetireFeature();
-            device?.DrainDeferredDeletions();
+            _session.Dispose();
         }
 
         _session = null;
+        _sessionAdopted = false;
         _device = null;
         _vkDevice = IntPtr.Zero;
         Unavailable = "shut down";

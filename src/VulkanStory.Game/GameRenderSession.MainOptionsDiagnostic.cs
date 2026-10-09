@@ -17,7 +17,7 @@ internal sealed partial class GameRenderSession
     /// <summary>Advances the explicitly selected original-main-menu Options diagnostic from the session event loop.</summary>
     private void PrepareMainOptionsDiagnostic()
     {
-        if (headlessDone || HeadlessHarnessOptions.Scenario != null) return;
+        if (headlessDone) return;
         if (Temporal.CurrentClient != null || HeadlessGameBindings.CurrentRunningClient() != null)
             throw new InvalidOperationException("Main-menu diagnostic must not have a running world.");
         if (mainOptionsDiagnostic == null)
@@ -48,7 +48,7 @@ internal sealed partial class GameRenderSession
     }
     private void CompleteMainOptionsAction()
     {
-        if (HeadlessHarnessOptions.Scenario != null || !HeadlessHarnessOptions.MainMenuOptions ||
+        if (!HeadlessHarnessOptions.LegacyMainOptionsDiagnostic ||
             mainActionValues is not { } values || mainActionComplete) return;
         if (mainActionAwaitFrame) { mainActionAwaitFrame = false; return; }
         if (mainOptionsDiagnostic?.IsOpened != true ||
@@ -67,7 +67,7 @@ internal sealed partial class GameRenderSession
     }
     private void CaptureMainOptionsDiagnostic()
     {
-        if (HeadlessHarnessOptions.Scenario != null || headlessDone || mainOptionsDiagnostic == null || headlessWorldFrame < 0) return;
+        if (headlessDone || mainOptionsDiagnostic == null || headlessWorldFrame < 0) return;
         if (HeadlessHarnessOptions.ShouldCapture(headlessWorldFrame))
         {
             if (WriteCapturedFrame(headlessWorldFrame)) headlessWritten++;

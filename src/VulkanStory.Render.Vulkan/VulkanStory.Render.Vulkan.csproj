@@ -21,6 +21,7 @@
     <Compile Include="VulkanDevice.Binding.cs" />
     <Compile Include="VulkanDevice.Dlss.cs" />
     <Compile Include="VulkanDevice.FrameGeneration.cs" />
+    <Compile Include="VulkanDevice.HeldFrame.cs" />
     <Compile Include="VulkanDevice.Fsr3.cs" />
     <Compile Include="VulkanDevice.Fsr4.cs" />
     <Compile Include="VulkanDevice.Native.cs" />
@@ -93,6 +94,7 @@
     <Compile Include="Latency/SdlInputAgeRecorder.cs" />
     <Compile Include="Latency/VendorLatency.cs" />
     <Compile Include="Present/GeneratedFramePacer.cs" />
+    <Compile Include="Present/PreciseSleep.cs" />
     <Compile Include="Present/Fsr3SwapchainRuntime.cs" />
     <Compile Include="Present/Swapchain.cs" />
     <Compile Include="Present/BlitPresentPath.cs" />

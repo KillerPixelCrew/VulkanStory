@@ -172,6 +172,7 @@ internal static class VulkanStats
     public static long UniformOverflows => Interlocked.Read(ref _uniformOverflows);
 
     public static void NoteAllocation() => Interlocked.Increment(ref _allocations);
+    /// <summary>A texture image registered by <c>TextureManager</c> (every create path).</summary>
     public static void NoteTextureCreated() => Interlocked.Increment(ref _texturesCreated);
     public static void NoteTextureDeleted() => Interlocked.Increment(ref _texturesDeleted);
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
@@ -204,8 +205,12 @@ internal static class VulkanStats
     public static long TexturesDeleted => Interlocked.Read(ref _texturesDeleted);
 
     /// <summary>
-    /// A synchronous setup submission of any kind (uploads and readbacks alike).
-    /// Feeds the original line's "blocking uploads" figure, whose meaning is kept.
+    /// Upload-path work that held up its caller, with the <see cref="Stopwatch" />
+    /// ticks it cost: a standalone setup submission between frames (uploads and
+    /// readbacks alike, <c>UploadManager.SubmitStandalone</c>; the caller's later
+    /// wait is counted at its own <see cref="WaitSite" />), or an upload recording
+    /// that found the upload lock held. Feeds the original line's "blocking
+    /// uploads" figure.
     /// </summary>
     public static void NoteUpload(long elapsedTicks)
     {
@@ -216,7 +221,11 @@ internal static class VulkanStats
     /// <summary>A texture upload or mip generation was requested, whether or not it waited.</summary>
     public static void NoteUploadRequest() => Interlocked.Increment(ref _uploadRequests);
 
-    /// <summary>An upload that really waited on a fence or the queue lock.</summary>
+    /// <summary>
+    /// An upload or standalone submission that really waited: it found the upload
+    /// lock held (a frame or standalone submission, a texture table change or another
+    /// thread's upload). Feeds <c>blocking_uploads</c> on the counters line.
+    /// </summary>
     public static void NoteBlockingUpload() => Interlocked.Increment(ref _blockingUploads);
 
     public static long BlockingUploads => Interlocked.Read(ref _blockingUploads);

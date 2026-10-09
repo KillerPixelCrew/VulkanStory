@@ -15,42 +15,36 @@ internal sealed partial class GameGraphicsAdapter
     /// <returns>Owned backend texture identifier.</returns>
     internal int LoadCairoTexture(ImageSurface surface, bool linearMag)
     {
-        if (Environment.CurrentManagedThreadId != ownerThread)
-        {
-            throw new InvalidOperationException("Graphics routing requires the session owner thread.");
-        }
-        int retainedTextureId = RequireDevice().CreateTexture2DRaw(surface.Width, surface.Height,
+        var renderer = RequireDevice();
+        int retainedTextureId = renderer.CreateTexture2DRaw(surface.Width, surface.Height,
             GameGlTextureTokens.Bgra, surface.DataPtr, 4);
-        RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMinFilter, 9729);
-        RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
+        renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMinFilter, 9729);
+        renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
         return retainedTextureId;
     }
 
 
     internal void LoadOrUpdateCairoTexture(ImageSurface surface, bool linearMag, ref LoadedTexture intoTexture)
     {
-        if (Environment.CurrentManagedThreadId != ownerThread)
-        {
-            throw new InvalidOperationException("Graphics routing requires the session owner thread.");
-        }
+        var renderer = RequireDevice();
         if (intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height)
         {
             if (intoTexture.TextureId != 0)
             {
-                RequireDevice().DeleteTexture(intoTexture.TextureId);
+                renderer.DeleteTexture(intoTexture.TextureId);
             }
-            intoTexture.TextureId = RequireDevice().CreateTexture2DRaw(surface.Width, surface.Height,
+            intoTexture.TextureId = renderer.CreateTexture2DRaw(surface.Width, surface.Height,
                 GameGlTextureTokens.Bgra, surface.DataPtr, 4);
             intoTexture.Width = surface.Width;
             intoTexture.Height = surface.Height;
-            RequireDevice().SetTextureParameter(intoTexture.TextureId, GameGlTextureTokens.TextureMinFilter, 9729);
-            RequireDevice().SetTextureParameter(intoTexture.TextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
+            renderer.SetTextureParameter(intoTexture.TextureId, GameGlTextureTokens.TextureMinFilter, 9729);
+            renderer.SetTextureParameter(intoTexture.TextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
         }
         else
         {
             // The image is BGRA-ordered; the upload is a byte copy at four
             // bytes per pixel, which is what Rgba selects here.
-            RequireDevice().UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
+            renderer.UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
                 surface.Width, surface.Height, VulkanStory.Contracts.TexturePixelFormat.Rgba, surface.DataPtr);
         }
         CheckGraphicsError("LoadOrUpdateCairoTexture");
@@ -59,7 +53,7 @@ internal sealed partial class GameGraphicsAdapter
 
     internal unsafe int Load3DTextureCube(BitmapRef[] bmps)
     {
-        RequireDevice();
+        var renderer = RequireDevice();
         IntPtr[] retainedFaces = new IntPtr[6];
         int retainedSize = 0;
         for (int k = 0; k < 6; k++)
@@ -70,12 +64,9 @@ internal sealed partial class GameGraphicsAdapter
         }
         // BGRA like the other bitmap uploads, so the raw overload rather than
         // the EnumTextureInternalFormat one.
-        int retainedCubeId = RequireDevice().CreateTextureCubeRaw(retainedSize,
+        int retainedCubeId = renderer.CreateTextureCubeRaw(retainedSize,
             GameGlTextureTokens.Bgra, retainedFaces, 4);
-        RequireDevice().SetTextureParameter(retainedCubeId, GameGlTextureTokens.TextureMinFilter, 9729);
-        RequireDevice().SetTextureParameter(retainedCubeId, GameGlTextureTokens.TextureMagFilter, 9729);
-        RequireDevice().SetTextureParameter(retainedCubeId, GameGlTextureTokens.TextureWrapS, 33071);
-        RequireDevice().SetTextureParameter(retainedCubeId, GameGlTextureTokens.TextureWrapT, 33071);
+        SetupTextureSampler(retainedCubeId, 9729, 33071);
         return retainedCubeId;
     }
 

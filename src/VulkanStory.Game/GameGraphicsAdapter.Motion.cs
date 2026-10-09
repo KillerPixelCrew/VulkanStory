@@ -95,13 +95,8 @@ internal sealed partial class GameGraphicsAdapter
             MotionProgramPrefix(motion));
         if (program <= 0) return false;
         var frame = temporal.State;
-        float[] projection = frame.GetProjection(EnumTemporalView.World);
-        var jittered = new double[16]; for (int index = 0; index < 16; index++) jittered[index] = projection[index];
-        TemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, primary.Width, primary.Height);
-        var currentProjection = new float[16]; for (int index = 0; index < 16; index++) currentProjection[index] = (float)jittered[index];
-        float[] current = Mat4f.Mul(new float[16], currentProjection, frame.CameraMatrixOrigin);
-        float[] inverse = Mat4f.Invert(new float[16], current); if (inverse == null) return false;
-        float[] previous = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
+        (float[]? inverse, float[] previous) = JitteredReprojection(frame, primary.Width, primary.Height);
+        if (inverse == null) return false;
         uint slots = 1u << motion;
         NativePipeline? pipeline = NativePostPipeline(nativeSkyMotion, program, primary.FboId, slots, NativeOpaqueBlend(slots), true, false, CompareOp.LessOrEqual);
         if (pipeline == null) return false;

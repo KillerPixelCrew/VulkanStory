@@ -27,11 +27,20 @@ namespace {
 enum TimingPhase { kAllocatorWait, kRecord, kSubmit, kPresent, kRetire, kSleep, kPhaseCount };
 const char* const kPhaseNames[kPhaseCount] = {
     "allocator_wait", "record", "submit", "dxgi_present", "retire", "xell_sleep" };
+/// @brief Guards the diagnostic accumulators: the render thread records XeLL sleep while the present thread records present phases.
+SRWLOCK timingLock = SRWLOCK_INIT;
+/// @brief Holds timingLock exclusively for one scope.
+struct TimingGuard {
+    TimingGuard() { AcquireSRWLockExclusive(&timingLock); }
+    ~TimingGuard() { ReleaseSRWLockExclusive(&timingLock); }
+    TimingGuard(const TimingGuard&) = delete;
+    TimingGuard& operator=(const TimingGuard&) = delete;
+};
 /// @brief Bounded opt-in CPU phase and calibrated GPU timing accumulators.
-/// @details The serialized presenter owner updates this global diagnostic state. Every 120 presents the formatted record is written and accumulators reset.
+/// @details enabled and frequency are fixed at load. The accumulators are written from the render thread (XeLL sleep) and the present thread, so every access holds timingLock. Every 120 presents the formatted record is written and the accumulators reset.
 struct PresentTiming {
-    bool enabled = std::getenv("VULKANSTORY_XESS_FG_TIMING") != nullptr;
-    double frequency = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return static_cast<double>(f.QuadPart); }();
+    const bool enabled = std::getenv("VULKANSTORY_XESS_FG_TIMING") != nullptr;
+    const double frequency = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return static_cast<double>(f.QuadPart); }();
     double sum[kPhaseCount]{};
     double max[kPhaseCount]{};
     uint32_t presents = 0;
@@ -48,11 +57,13 @@ struct PresentTiming {
     int64_t Now() const { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
     void Add(TimingPhase phase, int64_t start, int64_t end) {
         double ms = (end - start) * 1000.0 / frequency;
+        TimingGuard guard;
         sum[phase] += ms;
         if (ms > max[phase]) max[phase] = ms;
         if (phase == kPresent && sequenceCount < 24) sequence[sequenceCount++] = ms;
     }
     void EndPresent() {
+        TimingGuard guard;
         if (++presents < 120) return;
         std::fprintf(stderr, "[xess-fg timing] presents=%u", presents);
         for (int i = 0; i < kPhaseCount; i++)
@@ -66,7 +77,19 @@ struct PresentTiming {
         for (uint32_t i = 0; i < sequenceCount; i++) std::fprintf(stderr, i ? ",%.1f" : "%.1f", sequence[i]);
         std::fputc('\n', stderr);
         std::fflush(stderr);
-        *this = PresentTiming{};
+        ResetAccumulators();
+    }
+    /// @brief Clears every accumulator; the caller holds timingLock.
+    void ResetAccumulators() {
+        for (int i = 0; i < kPhaseCount; i++) { sum[i] = 0; max[i] = 0; }
+        presents = 0;
+        gpuSum = gpuMax = 0;
+        copiesSum = 0;
+        startAfterEnterSum = 0;
+        exitAfterGpuEndSum = 0;
+        gpuSamples = 0;
+        for (double& value : sequence) value = 0;
+        sequenceCount = 0;
     }
 };
 PresentTiming timing;
@@ -678,6 +701,7 @@ void HarvestGpuTiming(VulkanStoryXessFg* value, uint32_t slot) {
     };
     double msPerTick = 1000.0 / timing.frequency;
     double duration = (gpuEnd - gpuStart) * 1000.0 / value->gpuFrequency;
+    TimingGuard guard;
     timing.gpuSum += duration;
     if (gpuCopiesEnd >= gpuStart && gpuCopiesEnd <= gpuEnd)
         timing.copiesSum += (gpuCopiesEnd - gpuStart) * 1000.0 / value->gpuFrequency;

@@ -700,8 +700,16 @@ internal sealed class FrameRing : IDisposable
         RequireResourceLifetime();
         // Device idle covers every submitted frame. A command buffer still being recorded
         // cannot reach the GPU, so its retired resources may be destroyed as well.
-        _timeline.WaitForSignalledFramesAtTeardown();
-        _timeline.WaitForSignalledTransfersAtTeardown();
+        // Unlike Dispose, a failed wait must not fall through: the caller (NGX
+        // shutdown) would release a feature a running evaluate still names and then
+        // shut the runtime down under it. The failure was already reported; the
+        // throw keeps the retired resources queued and stops that shutdown.
+        if (!_timeline.WaitForSignalledFramesAtTeardown() ||
+            !_timeline.WaitForSignalledTransfersAtTeardown())
+        {
+            throw new InvalidOperationException(
+                "The Frame and Transfer timelines did not drain before teardown; retired resources stay queued.");
+        }
         int pending = _retired.PendingCount;
         _retired.DisposeAll();
         return pending;
@@ -716,7 +724,9 @@ internal sealed class FrameRing : IDisposable
 
         // Callers normally wait for the device to go idle first (VulkanDevice.Dispose
         // does); this covers the ones that did not, such as a test unwinding from a
-        // failed assert. The last submission may still name everything below.
+        // failed assert. The last submission may still name everything below. The
+        // wait never throws: a lost device is reported there and the ring is still
+        // destroyed rather than leaked behind _disposed.
         _timeline.WaitForSignalledFramesAtTeardown();
         _uploads.Dispose();
         _retired.DisposeAll();

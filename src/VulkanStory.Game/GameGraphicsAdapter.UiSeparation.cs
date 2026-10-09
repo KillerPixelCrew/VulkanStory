@@ -25,10 +25,7 @@ internal sealed partial class GameGraphicsAdapter
         // The same map contains selected mod overrides after their normal load.
         IAsset? replacement = platform!.AssetManager?.TryGet_BaseAssets(new AssetLocation("shaders/" + pass + "." + stage));
         if (replacement != null) return replacement.ToText();
-        using Stream stream = typeof(GameGraphicsAdapter).Assembly.GetManifestResourceStream(
-            "VulkanStory.Game.Shaders." + pass + "." + stage) ?? throw new InvalidOperationException("Owned shader is missing: " + pass);
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        return EmbeddedShaderSource(pass + "." + stage) ?? throw new InvalidOperationException("Owned shader is missing: " + pass);
     }
     private int UiComposeProgram() => OwnedProgram("ui-compose", ref uiComposeProgram, ref uiComposeFailed);
     private int OwnedProgram(string pass, ref int program, ref bool failed, string prefix = "")

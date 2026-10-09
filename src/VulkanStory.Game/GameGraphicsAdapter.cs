@@ -95,10 +95,10 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         int id = renderer.CreateTexture2D(texture.Width, texture.Height,
             GameTextureDefinitions.Internal(texture.PixelInternalFormat),
             GameTextureDefinitions.Pixels(texture.PixelFormat), IntPtr.Zero, false);
-        renderer.SetTextureParameter(id, 10241, (int)texture.MinFilter);
-        renderer.SetTextureParameter(id, 10240, (int)texture.MagFilter);
-        renderer.SetTextureParameter(id, 10242, (int)texture.WrapS);
-        renderer.SetTextureParameter(id, 10243, (int)texture.WrapT);
+        renderer.SetTextureParameter(id, GameGlTextureTokens.TextureMinFilter, (int)texture.MinFilter);
+        renderer.SetTextureParameter(id, GameGlTextureTokens.TextureMagFilter, (int)texture.MagFilter);
+        renderer.SetTextureParameter(id, GameGlTextureTokens.TextureWrapS, (int)texture.WrapS);
+        renderer.SetTextureParameter(id, GameGlTextureTokens.TextureWrapT, (int)texture.WrapT);
         texture.TextureId = id;
     }
 
@@ -116,7 +116,7 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
     private void ConfigureMipMapSampling(int id)
     {
         VulkanDevice renderer = RequireDevice();
-        renderer.SetTextureParameter(id, 10241, 9986);
+        renderer.SetTextureParameter(id, GameGlTextureTokens.TextureMinFilter, 9986);
         renderer.SetTextureParameter(id, 33085, mipmapLevel());
     }
 

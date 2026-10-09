@@ -6,6 +6,38 @@ using VulkanStory.Platform.Sdl;
 
 namespace VulkanStory.Game.Input;
 
+/// <summary>Converts game Skia bitmaps to the tightly packed, unpremultiplied RGBA8 pixels accepted by the SDL host.</summary>
+internal static class SdlBitmapPixels
+{
+    /// <summary>Copies the bitmap as width × height unpremultiplied RGBA8 texels in row order.</summary>
+    /// <remarks>Uses one Skia pixel conversion; falls back to per-texel reads only when the pixels cannot be read directly.</remarks>
+    internal static unsafe byte[] ToRgba(SKBitmap bitmap)
+    {
+        ArgumentNullException.ThrowIfNull(bitmap);
+        int width = bitmap.Width, height = bitmap.Height;
+        byte[] rgba = new byte[checked(width * height * 4)];
+        if (rgba.Length == 0) return rgba;
+        using (SKPixmap? source = bitmap.PeekPixels())
+        {
+            var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+            fixed (byte* destination = rgba)
+                if (source != null && source.ReadPixels(info, (nint)destination, width * 4, 0, 0)) return rgba;
+        }
+        // GetPixel also returns unpremultiplied colour, so both paths produce the same bytes.
+        int offset = 0;
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            SKColor pixel = bitmap.GetPixel(x, y);
+            rgba[offset++] = pixel.Red;
+            rgba[offset++] = pixel.Green;
+            rgba[offset++] = pixel.Blue;
+            rgba[offset++] = pixel.Alpha;
+        }
+        return rgba;
+    }
+}
+
 // Retained bitmap conversion and cursor ownership from VulkanClientPlatform.SdlInput.
 /// <summary>Converts game cursor bitmaps to SDL RGBA cursors and keeps the original platform's cursor identity in sync.</summary>
 /// <param name="platform">Original platform supplying cursor state and failure logging.</param>
@@ -32,17 +64,7 @@ internal sealed class GameCursorController(ClientPlatformWindows platform,
             if (bitmap is null) return false;
             try
             {
-                byte[] rgba = new byte[checked(bitmap.Width * bitmap.Height * 4)];
-                int offset = 0;
-                for (int y = 0; y < bitmap.Height; y++)
-                for (int x = 0; x < bitmap.Width; x++)
-                {
-                    SKColor pixel = bitmap.GetPixel(x, y);
-                    rgba[offset++] = pixel.Red;
-                    rgba[offset++] = pixel.Green;
-                    rgba[offset++] = pixel.Blue;
-                    rgba[offset++] = pixel.Alpha;
-                }
+                byte[] rgba = SdlBitmapPixels.ToRgba(bitmap);
                 window.LoadCursor(code, Math.Clamp((int)(hotX * scale), 0, bitmap.Width - 1),
                     Math.Clamp((int)(hotY * scale), 0, bitmap.Height - 1), bitmap.Width, bitmap.Height, rgba);
             }

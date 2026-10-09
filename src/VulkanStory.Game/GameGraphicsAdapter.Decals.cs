@@ -55,25 +55,20 @@ internal sealed partial class GameGraphicsAdapter
                 blend[index].DstColor = blend[index].DstAlpha = BlendFactor.Zero;
             }
         }
-        NativePipeline? pipeline = NativeMeshPipelineFor(nativeDecals, ShaderPrograms.Decals, CurrentTargetId, slots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(nativeDecals, ShaderPrograms.Decals, formats, layout,
             new NativePipelineDescription
             {
                 Blend = blend, DepthTest = true, DepthWrite = true, DepthCompare = CompareOp.Less,
                 Cull = CullModeFlags.None, Topology = PrimitiveTopology.TriangleList,
             });
         if (pipeline == null) return false;
-        Rect2D viewport = Stated.Viewport;
         bool drawn = false;
         try
         {
-            if (renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = "Decals/" + CurrentTargetId, FramebufferId = CurrentTargetId, ColorSlots = slots,
-                Reads = [decalAtlas, decalBlockAtlas], Flags = PassFlags.AllowSplit,
-                ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            })) drawn = renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups,
-                [new NativeTexture(nativeDecals.Samplers[0], decalAtlas), new NativeTexture(nativeDecals.Samplers[1], decalBlockAtlas)]);
+            if (renderer.BeginNativePass(StatedViewportPass("Decals/" + CurrentTargetId, CurrentTargetId, slots,
+                    [decalAtlas, decalBlockAtlas], PassFlags.AllowSplit)))
+                drawn = renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups,
+                    [new NativeTexture(nativeDecals.Samplers[0], decalAtlas), new NativeTexture(nativeDecals.Samplers[1], decalBlockAtlas)]);
         }
         finally { renderer.EndNativePass(); }
         if (drawn) RuntimeStats.drawCallsCount++;

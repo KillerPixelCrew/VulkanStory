@@ -107,6 +107,7 @@ internal static class WindowConsumerPatches
     private static bool ScreenSize(ClientPlatformWindows __instance, ref Size2i __result)
     {
         if (!TryAdapter(__instance, out var adapter)) return true;
+        // Pixels, like the original's monitor size (e.g. the >3000 GUI-scale range check).
         var size = adapter.Window.DisplaySize;
         __result = new Size2i(size.Width, size.Height);
         return false;
@@ -122,7 +123,7 @@ internal static class WindowConsumerPatches
     private static bool SetMouseGrabbed(ClientPlatformWindows __instance, bool __0)
     {
         if (!TryAdapter(__instance, out var adapter)) return true;
-        adapter.Window.SetRelativeMouseMode(__0);
+        adapter.SetMouseGrabbed(__0);
         return false;
     }
 
@@ -150,7 +151,7 @@ internal static class WindowConsumerPatches
     private static bool Size(ClientPlatformWindows __instance, int __0, int __1)
     {
         if (!TryAdapter(__instance, out var adapter)) return true;
-        adapter.Window.SetSize(__0, __1);
+        adapter.SetWindowSize(__0, __1);
         return false;
     }
 

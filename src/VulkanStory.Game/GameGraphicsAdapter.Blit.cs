@@ -43,9 +43,12 @@ internal sealed partial class GameGraphicsAdapter
             int rcas = OwnedProgram("fsr-rcas", ref fsrRcasProgram, ref fsrRcasFailed);
             try
             {
+                // Both passes are presentation's scene path, like the ordinary blit below: a cold
+                // pipeline compiles blocking once rather than refusing as "still compiling", which
+                // would have disabled FSR for the whole session. A refusal left here is a real one.
                 if (easu > 0 && rcas > 0 && DrawBlit(nativeFsrEasu, easu, target!.FboId, target.Width, target.Height,
-                    [scene], primary.Width, primary.Height) && DrawBlit(nativeFsrRcas, rcas, NativeDefaultTarget,
-                    display.Width, display.Height, [target.ColorTextureIds[0]], target.Width, target.Height))
+                    [scene], primary.Width, primary.Height, requirePipeline: true) && DrawBlit(nativeFsrRcas, rcas, NativeDefaultTarget,
+                    display.Width, display.Height, [target.ColorTextureIds[0]], target.Width, target.Height, requirePipeline: true))
                 { FinishBlit(true); return; }
                 fsrDisabled = true;
                 platform!.Logger.Warning("VulkanStory: FSR blit unavailable; using the ordinary blit for this session.");

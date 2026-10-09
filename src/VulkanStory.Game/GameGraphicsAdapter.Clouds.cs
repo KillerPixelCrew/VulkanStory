@@ -26,7 +26,7 @@ internal sealed partial class GameGraphicsAdapter
         uint slots = Stated.DrawBuffers(CurrentTargetId);
         RenderTargetFormats? formats = renderer.NativeTargetFormats(CurrentTargetId, slots);
         if (layout < 0 || formats == null || slots == 0) { RenderMesh(mesh); return; }
-        NativePipeline? pipeline = NativeMeshPipelineFor(nativeCloudVolumetric, program, CurrentTargetId, slots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(nativeCloudVolumetric, program, formats, layout,
             new NativePipelineDescription
             {
                 Blend = Stated.BlendFor(CurrentTargetId, Math.Max(formats.ColorFormats.Length, 1)),
@@ -48,16 +48,11 @@ internal sealed partial class GameGraphicsAdapter
             }
             textures[index] = new NativeTexture(pipeline.Sampler(names[index]), texture); reads[index] = texture;
         }
-        Rect2D viewport = Stated.Viewport;
         try
         {
-            if (renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = "CloudVolumetric/" + CurrentTargetId, FramebufferId = CurrentTargetId, ColorSlots = slots,
-                Reads = reads, Flags = PassFlags.AllowSplit,
-                ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            }) && renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
+            if (renderer.BeginNativePass(StatedViewportPass("CloudVolumetric/" + CurrentTargetId, CurrentTargetId, slots,
+                    reads, PassFlags.AllowSplit)) &&
+                renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
         }
         finally { renderer.EndNativePass(); }
     }

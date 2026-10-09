@@ -408,8 +408,9 @@ internal sealed unsafe class VulkanSharedImage : IDisposable
         }
     }
 
+    /// <summary>Closes a Win32 handle; shared by the DX12 interop wrappers.</summary>
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(nint handle);
+    internal static extern bool CloseHandle(nint handle);
 
     /// <inheritdoc/>
     public void Dispose()

@@ -8,8 +8,9 @@ using VulkanStory.Render.Vulkan.Core;
 namespace VulkanStory.Game;
 
 /// <summary>One pre-input snapshot of ordinary post-processing, shadow and frame-pacing settings.</summary>
+/// <remarks><c>Vsync</c> selects the swap interval; <c>FrameSleep</c> enables the CPU frame limiter (both follow the original VSync mode).</remarks>
 internal sealed record GameFrameSettings(bool Bloom, bool GodRays, bool Fxaa,
-    bool Ssao, int ShadowQuality, bool Vsync, float MaxFps);
+    bool Ssao, int ShadowQuality, bool Vsync, bool FrameSleep, float MaxFps);
 
 // The process session owns its concrete services. Startup supplies the selected
 // game data path and normalized renderer settings, without placeholder callbacks.
@@ -42,11 +43,11 @@ internal sealed partial class GameRenderSession : IDisposable
     private RuntimeFrameGeneration? frameGeneration;
     private RuntimeUpscalers? upscalers;
     private GameTemporalOwner? temporal;
+    private CompositionReadiness? composition;
     private bool rebuildTargetsPending, reloadTerrainPending;
     private bool rendering, stopping, coreDisposed;
     private Exception? graphicsReleaseFailure;
     private Exception? renderCycleFailure;
-    private bool? appliedVsync;
     private int? appliedFrameCap;
     private VulkanStory.Contracts.RendererLatencySelection? appliedLatency;
     private GameFrameSettings? pendingFrameSettings;
@@ -67,8 +68,8 @@ internal sealed partial class GameRenderSession : IDisposable
     /// <param name="routing">Prepared startup transaction whose predicate gates game draws.</param>
     /// <param name="services">Resolved data path and normalized session settings.</param>
     /// <param name="title">Original game window title.</param>
-    /// <param name="width">Requested logical window width.</param>
-    /// <param name="height">Requested logical window height.</param>
+    /// <param name="width">Requested window width in drawable pixels.</param>
+    /// <param name="height">Requested window height in drawable pixels.</param>
     /// <param name="windowState">Original window-state numeric value; hidden harness policy still controls visibility.</param>
     /// <param name="windowBorder">Original border numeric value mapped to SDL border/resizability.</param>
     /// <returns>A fully prepared session to be committed by the startup transaction.</returns>
@@ -85,10 +86,16 @@ internal sealed partial class GameRenderSession : IDisposable
         {
             session.window = SdlWindowHost.Create(title, width, height, hidden: HeadlessHarnessOptions.KeepWindowHidden,
                 keepHidden: HeadlessHarnessOptions.KeepWindowHidden);
+            // The game requests (and remembers) drawable pixels; SDL creates logical units,
+            // which differ only under high-density scaling.
+            if (session.window.WindowSize != session.window.PixelSize) session.window.SetPixelSize(width, height);
             session.SetWindowIcon();
-            session.window.SetMinimumSize(600, 400);
+            // The original enforces a 600x400 ClientSize floor, and ClientSize is its drawable/viewport extent.
+            session.window.SetMinimumPixelSize(600, 400);
             session.window.SetBordered(windowBorder != 2);
-            session.window.SetResizable(windowBorder == 0);
+            // Borderless (Hidden) startup stays resizable so SDL_MaximizeWindow can
+            // honour windowed fullscreen; only Fixed disables resizing.
+            session.window.SetResizable(windowBorder != 1);
             if (!HeadlessHarnessOptions.Enabled && windowState == 3) session.window.SetFullscreen(true);
             else if (windowState == 2) session.window.Maximize();
             else if (windowState == 1) session.window.Minimize();
@@ -106,6 +113,11 @@ internal sealed partial class GameRenderSession : IDisposable
             var pixels = session.window.PixelSize;
             if (!session.device.Initialize(session.window, pixels.Width, pixels.Height, out string reason))
                 throw new InvalidOperationException("Vulkan session initialization failed: " + reason);
+            // Streamline PCL pings arrive as a registered Windows message inside SDL's event
+            // pump. StopAndDrain removes the hook before device disposal (window disposal repeats it).
+            uint pclMessage = session.device.PclWindowMessage;
+            if (pclMessage != 0 && !session.window.InstallPclPingHook(pclMessage, () => session.device?.MarkPclLatencyPing()))
+                platform.Logger.Warning("SDL could not install the Streamline PCL Windows message hook");
             // SDK requirements were contributed by the owned SR registry before
             // initialization; provider contexts now receive the real device.
             // Bring-up failures use the same preparation rollback and drain.
@@ -115,6 +127,12 @@ internal sealed partial class GameRenderSession : IDisposable
             session.frameGeneration = new RuntimeFrameGeneration(session.device, services.RendererSettings,
                 message => platform.Logger.Notification("{0}", message),
                 message => platform.Logger.Error("{0}", message), session.temporal.RequestReset);
+            // The headless harness is not held unless a validation run opts in; its captures
+            // read the composed frame before any hold either way.
+            session.composition = new CompositionReadiness(!HeadlessHarnessOptions.Active ||
+                Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_COMPOSITION_HOLD") == "1",
+                message => platform.Logger.Notification("{0}", message),
+                message => platform.Logger.Warning("{0}", message));
             session.AttachPresentationCounters();
             session.graphics = GameGraphicsAdapter.Attach(platform, session.device,
                 () => routing.RoutingEnabled && !session.stopping, () => platform.ENABLE_MIPMAPS,
@@ -124,7 +142,7 @@ internal sealed partial class GameRenderSession : IDisposable
             session.graphics.ConfigureShaderOverrides(session.shaderOverrides ??
                 throw new InvalidOperationException("Shader override policy was not prepared."));
             session.graphics.ConfigureFramebufferHost(session.CreateFramebufferHost());
-            session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks());
+            session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
             platform.WindowSize.Width = pixels.Width;
             platform.WindowSize.Height = pixels.Height;
             return session;
@@ -162,7 +180,8 @@ internal sealed partial class GameRenderSession : IDisposable
             float delta = (float)frameClock.Elapsed.TotalSeconds;
             frameClock.Restart();
             PrepareHeadlessFrame(ref delta);
-            if (appliedVsync != settings.Vsync) { Device.SetVSync(settings.Vsync); appliedVsync = settings.Vsync; }
+            // The session is the only swap-interval owner; SetVSync ignores an unchanged value.
+            Device.SetVSync(settings.Vsync);
             ScreenManager.FrameProfiler.Begin(null);
             ScreenManager.FrameProfiler.Mark("sleep");
             GameFrameBindings.Adopt(platform, settings);
@@ -174,13 +193,18 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.RedirectDefaultFramebuffer(0);
             gpuCycleStarted = true;
             Device.BeginFrame();
+            // Background pipeline results publish at BeginFrame; skips counted after it are this frame's.
+            long pipelineSkipsAtStart = Device.PipelineDrawsSkipped;
             GameFrameBindings.Dispatch(platform, delta);
             Graphics.ComposeUiTarget(); // Flush any still-open owned UI scope before provider presentation.
             CompleteOptionsDiagnostic();
             CaptureDiagnosticWorldFrame();
             CaptureHeadlessFrame();
             CaptureScenarioReadbacks();
-            frameGeneration!.Generate(Graphics, platform.FrameBuffers, Temporal.Snapshot());
+            // Diagnostics above read the composed frame; a hold replaces only what is presented.
+            bool hold = ApplyCompositionHold();
+            frameGeneration!.Generate(Graphics, platform.FrameBuffers, Temporal.Snapshot(), hold);
+            ObserveCompositionReadiness(pipelineSkipsAtStart);
             Device.Present();
             SampleFps();
             PublishPresentation();
@@ -201,7 +225,8 @@ internal sealed partial class GameRenderSession : IDisposable
     private void PrepareFramePacing()
     {
         RequireActive();
-        Device.LatencySelection = services.RendererSettings.LatencySelection;
+        // A failed/unavailable FG provider no longer forces low latency On.
+        Device.LatencySelection = services.RendererSettings.EffectiveLatencySelection(frameGeneration!.Unavailable);
         GameFrameSettings settings = CaptureFrameSettings();
         int frameCap = float.IsFinite(settings.MaxFps) && settings.MaxFps > 0 ? (int)settings.MaxFps : 0;
         if (appliedFrameCap != frameCap || appliedLatency != Device.LatencySelection)
@@ -210,10 +235,13 @@ internal sealed partial class GameRenderSession : IDisposable
             appliedFrameCap = frameCap; appliedLatency = Device.LatencySelection;
         }
         // Limiting occurs before collecting input, alongside vendor sleep.
-        if (!settings.Vsync && !Device.VendorLatencyOwnsFrameCap && settings.MaxFps > 10 && settings.MaxFps < 241)
+        // The original applies frame sleep in every VSync mode except "VSync only".
+        if (settings.FrameSleep && !Device.VendorLatencyOwnsFrameCap && settings.MaxFps > 10 && settings.MaxFps < 241)
         {
-            int delay = (int)(1000f / settings.MaxFps - frameClock.Elapsed.TotalMilliseconds);
-            if (delay > 0) Thread.Sleep(delay);
+            // Fractional, high-resolution wait: Thread.Sleep(int) truncates and can
+            // overshoot by a whole ~15.6 ms timer tick without 1 ms resolution.
+            double delay = 1000.0 / settings.MaxFps - frameClock.Elapsed.TotalMilliseconds;
+            if (delay > 0) VulkanStory.Render.Vulkan.Present.PreciseSleep.For(delay);
         }
         pendingFrameSettings = settings;
         inputFrameId = Device.BeginLatencyFrame();
@@ -275,15 +303,19 @@ internal sealed partial class GameRenderSession : IDisposable
     }
     /// <summary>Normalizes and applies requested options to this active session.</summary>
     /// <param name="next">Requested settings snapshot.</param>
-    /// <remarks>Pacing/input/FPS and multiplier-only changes retain scene resources. Other changes reset FG/SR/history and request target/shader rebuilding.</remarks>
+    /// <remarks>Pacing/input/FPS, multiplier-only, per-frame cosmetic and restart-only changes retain scene resources. Other changes reset FG/SR/history and request target/shader rebuilding.</remarks>
     internal void ApplyRendererSettings(RendererSettings next)
     {
         RequireActive();
         next = next.Normalize();
         RendererSettings previous = services.RendererSettings.Settings;
         // Pacing/input options are consumed at pre-input; the FPS overlay reads
-        // settings directly. These saves do not invalidate scene resources or
-        // temporal history. Any other changed property keeps the full reset path.
+        // settings directly. Sharpening strength, debug views and the god-ray
+        // sample cap are read per frame as shader constants or pass selection.
+        // Enabled, NativeShaders and Streamline are consumed only at startup and
+        // are marked restart in the panel. These saves do not invalidate scene
+        // resources or temporal history. Any other changed property keeps the
+        // full reset path.
         if ((previous with
         {
             LowLatencyMode = next.LowLatencyMode,
@@ -291,6 +323,13 @@ internal sealed partial class GameRenderSession : IDisposable
             ControllerEnabled = next.ControllerEnabled,
             TouchEnabled = next.TouchEnabled,
             FrameGenerationMultiplier = next.FrameGenerationMultiplier,
+            TaaSharpness = next.TaaSharpness,
+            TaaDebugView = next.TaaDebugView,
+            AmbientOcclusionDebugView = next.AmbientOcclusionDebugView,
+            GodRaysSampleCap = next.GodRaysSampleCap,
+            Enabled = next.Enabled,
+            NativeShaders = next.NativeShaders,
+            Streamline = next.Streamline,
         }) == next)
         {
             services.RendererSettings.Apply(next);
@@ -321,6 +360,9 @@ internal sealed partial class GameRenderSession : IDisposable
         var failures = new List<Exception>();
         try
         {
+            // Unhook PCL pings before any provider/device release, so SDL's message pump can no
+            // longer reach the device. Window disposal repeats this as an idempotent no-op.
+            window?.RemovePclPingHook();
             // Failed/unsubmitted recording can still own provider references and
             // pending timeline retirements. Preserve the entire graph before
             // clearing GUI owners or beginning any dependent release.

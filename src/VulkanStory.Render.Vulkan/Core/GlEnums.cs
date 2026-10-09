@@ -84,20 +84,6 @@ internal static class GlEnums
         _ => CompareOp.Less,
     };
 
-    /// <summary>Maps retained GL stencil operations; unknown values preserve stencil with Keep.</summary>
-    public static StencilOp StencilOpFrom(int glOp) => glOp switch
-    {
-        0x1E00 => StencilOp.Keep,
-        0x0000 => StencilOp.Zero,
-        0x1E01 => StencilOp.Replace,
-        0x1E02 => StencilOp.IncrementAndClamp,
-        0x1E03 => StencilOp.DecrementAndClamp,
-        0x150A => StencilOp.Invert,
-        0x8507 => StencilOp.IncrementAndWrap,
-        0x8508 => StencilOp.DecrementAndWrap,
-        _ => StencilOp.Keep,
-    };
-
     /// <summary>
     /// Vulkan can only change topology dynamically within a class, so the class
     /// is part of the pipeline key while the exact topology is not.
@@ -184,6 +170,5 @@ internal static class GlEnums
     public const int TextureLodBias = 0x8501;
     public const int TextureMaxLevel = 0x813D;
     public const int TextureBorderColor = 0x1004;
-    public const int TextureCompareModeNone = 0;
     public const int TextureCompareRefToTexture = 0x884E;
 }

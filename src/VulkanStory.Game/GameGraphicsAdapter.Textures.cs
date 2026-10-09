@@ -26,10 +26,10 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal unsafe void LoadIntoTexture(IBitmap srcBmp, int targetTextureId, int destX, int destY, bool generateMipmaps = false)
     {
-        RequireDevice();
+        var renderer = RequireDevice();
         if (srcBmp is BitmapExternal retainedExternal)
         {
-            RequireDevice().UploadTexture2D(targetTextureId, 0, destX, destY,
+            renderer.UploadTexture2D(targetTextureId, 0, destX, destY,
                 srcBmp.Width, srcBmp.Height, VulkanStory.Contracts.TexturePixelFormat.Rgba,
                 (IntPtr)retainedExternal.PixelsPtrAndLock);
         }
@@ -40,7 +40,7 @@ internal sealed partial class GameGraphicsAdapter
             GCHandle retainedPin = GCHandle.Alloc(srcBmp.Pixels, GCHandleType.Pinned);
             try
             {
-                RequireDevice().UploadTexture2D(targetTextureId, 0, destX, destY,
+                renderer.UploadTexture2D(targetTextureId, 0, destX, destY,
                     srcBmp.Width, srcBmp.Height, VulkanStory.Contracts.TexturePixelFormat.Rgba,
                     retainedPin.AddrOfPinnedObject());
             }
@@ -62,14 +62,11 @@ internal sealed partial class GameGraphicsAdapter
     /// </summary>
     internal unsafe int LoadTexture(IBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
     {
-        if (Environment.CurrentManagedThreadId != ownerThread)
-        {
-            throw new InvalidOperationException("Graphics routing requires the session owner thread.");
-        }
+        var renderer = RequireDevice();
         int retainedTextureId;
         if (bmp is BitmapExternal retainedExternal)
         {
-            retainedTextureId = RequireDevice().CreateTexture2DRaw(bmp.Width, bmp.Height,
+            retainedTextureId = renderer.CreateTexture2DRaw(bmp.Width, bmp.Height,
                 GameGlTextureTokens.Bgra, (IntPtr)retainedExternal.PixelsPtrAndLock, 4,
                 mipmapsEnabled() && generateMipmaps);
         }
@@ -78,7 +75,7 @@ internal sealed partial class GameGraphicsAdapter
             GCHandle retainedPin = GCHandle.Alloc(bmp.Pixels, GCHandleType.Pinned);
             try
             {
-                retainedTextureId = RequireDevice().CreateTexture2DRaw(bmp.Width, bmp.Height,
+                retainedTextureId = renderer.CreateTexture2DRaw(bmp.Width, bmp.Height,
                     GameGlTextureTokens.Bgra, retainedPin.AddrOfPinnedObject(), 4,
                     mipmapsEnabled() && generateMipmaps);
             }
@@ -90,16 +87,16 @@ internal sealed partial class GameGraphicsAdapter
         switch (clampMode)
         {
         case 1:
-            RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapS, 33071);
-            RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapT, 33071);
+            renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapS, 33071);
+            renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapT, 33071);
             break;
         case 2:
-            RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapS, 10497);
-            RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapT, 10497);
+            renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapS, 10497);
+            renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureWrapT, 10497);
             break;
         }
-        RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMinFilter, 9729);
-        RequireDevice().SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
+        renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMinFilter, 9729);
+        renderer.SetTextureParameter(retainedTextureId, GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
         if (mipmapsEnabled() && generateMipmaps)
         {
             ConfigureMipMapSampling(retainedTextureId);
@@ -130,10 +127,7 @@ internal sealed partial class GameGraphicsAdapter
     /// </summary>
     private void LoadOrUpdateTextureFromPixels(int[] rgbaPixels, bool linearMag, int clampMode, ref LoadedTexture intoTexture, bool bgra, bool makeMipMap)
     {
-        if (Environment.CurrentManagedThreadId != ownerThread)
-        {
-            throw new InvalidOperationException("Graphics routing requires the session owner thread.");
-        }
+        var renderer = RequireDevice();
         int retainedGlFormat = bgra
             ? GameGlTextureTokens.Bgra
             : GameGlTextureTokens.Rgba8;
@@ -145,7 +139,7 @@ internal sealed partial class GameGraphicsAdapter
             {
                 if (intoTexture.TextureId != 0)
                 {
-                    RequireDevice().DeleteTexture(intoTexture.TextureId);
+                    renderer.DeleteTexture(intoTexture.TextureId);
                 }
                 // The mip chain has to be requested at creation; asking for
                 // mipmaps afterwards on a one-level image does nothing. GL
@@ -154,20 +148,20 @@ internal sealed partial class GameGraphicsAdapter
                 // the atlas manager calls BuildMipMaps later, in StageB. So
                 // the chain is sized whenever mipmapping is on at all, and
                 // makeMipMap only decides whether to fill it here.
-                intoTexture.TextureId = RequireDevice().CreateTexture2DRaw(
+                intoTexture.TextureId = renderer.CreateTexture2DRaw(
                     intoTexture.Width, intoTexture.Height, retainedGlFormat,
                     retainedPin.AddrOfPinnedObject(), 4, mipmapsEnabled());
 
                 if (clampMode == 1)
                 {
-                    RequireDevice().SetTextureParameter(intoTexture.TextureId,
+                    renderer.SetTextureParameter(intoTexture.TextureId,
                         GameGlTextureTokens.TextureWrapS, 33071);
-                    RequireDevice().SetTextureParameter(intoTexture.TextureId,
+                    renderer.SetTextureParameter(intoTexture.TextureId,
                         GameGlTextureTokens.TextureWrapT, 33071);
                 }
-                RequireDevice().SetTextureParameter(intoTexture.TextureId,
+                renderer.SetTextureParameter(intoTexture.TextureId,
                     GameGlTextureTokens.TextureMinFilter, 9729);
-                RequireDevice().SetTextureParameter(intoTexture.TextureId,
+                renderer.SetTextureParameter(intoTexture.TextureId,
                     GameGlTextureTokens.TextureMagFilter, linearMag ? 9729 : 9728);
 
                 if (makeMipMap)
@@ -177,7 +171,7 @@ internal sealed partial class GameGraphicsAdapter
             }
             else
             {
-                RequireDevice().UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
+                renderer.UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
                     intoTexture.Width, intoTexture.Height,
                     VulkanStory.Contracts.TexturePixelFormat.Rgba, retainedPin.AddrOfPinnedObject());
             }

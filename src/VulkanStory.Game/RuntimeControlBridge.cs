@@ -43,7 +43,6 @@ internal sealed partial class ProcessRuntime
 {
     private readonly ConcurrentQueue<Action> pendingControls = new();
     private RendererSettings? requestedSettings;
-    private static readonly JsonSerializerOptions SettingsJson = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private GameSessionServices ControlServices => selectedServices ??= GameSessionServices.Load(GamePaths.DataPath);
     /// <summary>Queues controller settings opening when the renderer and controller option are active.</summary>
     /// <returns>Null when queued; a reason when the request is unavailable.</returns>
@@ -55,10 +54,30 @@ internal sealed partial class ProcessRuntime
         pendingControls.Enqueue(() => { if (IsActive) Session.OpenControllerSettings(); });
         return null;
     }
-    /// <summary>Serializes the latest requested settings, or effective session settings before any request exists.</summary>
+    /// <summary>Latest requested settings, or effective session settings before any request exists.</summary>
+    /// <remarks>Reading does not apply or persist a change.</remarks>
+    internal RendererSettings RequestedSettings => Volatile.Read(ref requestedSettings) ?? ControlServices.RendererSettings.Settings;
+    /// <summary>Serializes <see cref="RequestedSettings" />.</summary>
     /// <returns>Renderer settings JSON for the editor.</returns>
     /// <remarks>Reading does not apply or persist a change.</remarks>
-    internal string ReadSettings() => JsonSerializer.Serialize(Volatile.Read(ref requestedSettings) ?? ControlServices.RendererSettings.Settings, SettingsJson);
+    internal string ReadSettings() => JsonSerializer.Serialize(RequestedSettings, RendererSettingsStore.Json);
+    private static RendererSettings ParseSettings(string json) =>
+        (JsonSerializer.Deserialize<RendererSettings>(json, RendererSettingsStore.Json) ??
+            throw new ArgumentException("Settings are empty.")).Normalize();
+    /// <summary>Publishes normalized settings as the latest request and queues their owner-thread application.</summary>
+    /// <param name="next">Normalized requested settings.</param>
+    /// <param name="services">Session services captured by the caller; used while no session is active.</param>
+    /// <param name="latestOnly">Skip application when a newer request superseded this one before the boundary.</param>
+    private void EnqueueApply(RendererSettings next, GameSessionServices services, bool latestOnly = false)
+    {
+        Volatile.Write(ref requestedSettings, next);
+        pendingControls.Enqueue(() =>
+        {
+            if (latestOnly && !ReferenceEquals(Volatile.Read(ref requestedSettings), next)) return;
+            if (IsActive) Session.ApplyRendererSettings(next);
+            else services.RendererSettings.Apply(next);
+        });
+    }
     /// <summary>Queues one supported Options/controller diagnostic for the currently loaded isolated harness world.</summary>
     /// <param name="action">Supported harness action identifier.</param>
     /// <returns>Null when queued; a reason when the action or harness context is invalid.</returns>
@@ -87,8 +106,7 @@ internal sealed partial class ProcessRuntime
         if (!live()) return "The settings editor is no longer active.";
         try
         {
-            RendererSettings next = (JsonSerializer.Deserialize<RendererSettings>(json, SettingsJson) ??
-                throw new ArgumentException("Settings are empty.")).Normalize();
+            RendererSettings next = ParseSettings(json);
             if (!next.ControllerEnabled) return "Enable Controllers before opening controller settings.";
             new RendererSettingsStore(ControlServices.DataPath).Save(next);
             Volatile.Write(ref requestedSettings, next);
@@ -134,18 +152,10 @@ internal sealed partial class ProcessRuntime
     {
         try
         {
-            RendererSettings next = (JsonSerializer.Deserialize<RendererSettings>(json, SettingsJson) ??
-                throw new ArgumentException("Settings are empty.")).Normalize();
-            var services = ControlServices;
-            Volatile.Write(ref requestedSettings, next);
-            pendingControls.Enqueue(() =>
-            {
-                // Slider events can arrive faster than frame boundaries. Apply only
-                // the latest request, not every intermediate resource rebuild.
-                if (!ReferenceEquals(Volatile.Read(ref requestedSettings), next)) return;
-                if (IsActive) Session.ApplyRendererSettings(next);
-                else services.RendererSettings.Apply(next);
-            });
+            RendererSettings next = ParseSettings(json);
+            // Slider events can arrive faster than frame boundaries. Apply only
+            // the latest request, not every intermediate resource rebuild.
+            EnqueueApply(next, ControlServices, latestOnly: true);
             return null;
         }
         catch (Exception error) when (error is JsonException or ArgumentException)
@@ -159,16 +169,10 @@ internal sealed partial class ProcessRuntime
     {
         try
         {
-            RendererSettings next = (JsonSerializer.Deserialize<RendererSettings>(json, SettingsJson) ??
-                throw new ArgumentException("Settings are empty.")).Normalize();
+            RendererSettings next = ParseSettings(json);
             var services = ControlServices;
             new RendererSettingsStore(services.DataPath).Save(next);
-            Volatile.Write(ref requestedSettings, next);
-            pendingControls.Enqueue(() =>
-            {
-                if (IsActive) Session.ApplyRendererSettings(next);
-                else services.RendererSettings.Apply(next);
-            });
+            EnqueueApply(next, services);
             return null;
         }
         catch (Exception error) when (error is JsonException or ArgumentException or IOException or UnauthorizedAccessException)
@@ -181,13 +185,7 @@ internal sealed partial class ProcessRuntime
         try
         {
             var services = ControlServices;
-            RendererSettings next = new RendererSettingsStore(services.DataPath).Load();
-            Volatile.Write(ref requestedSettings, next);
-            pendingControls.Enqueue(() =>
-            {
-                if (IsActive) Session.ApplyRendererSettings(next);
-                else services.RendererSettings.Apply(next);
-            });
+            EnqueueApply(new RendererSettingsStore(services.DataPath).Load(), services);
             return null;
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)

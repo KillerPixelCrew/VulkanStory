@@ -85,8 +85,9 @@ public sealed unsafe partial class VulkanDevice
             frame.Up[0] = camera.UpX; frame.Up[1] = camera.UpY; frame.Up[2] = camera.UpZ;
             frame.Right[0] = camera.RightX; frame.Right[1] = camera.RightY; frame.Right[2] = camera.RightZ;
             frame.Forward[0] = camera.ForwardX; frame.Forward[1] = camera.ForwardY; frame.Forward[2] = camera.ForwardZ;
-            return _context.Streamline!.TagFrame(commands, &d, &m, &h, &u, &frame,
-                _swapchain!.Extent.Width, _swapchain.Extent.Height);
+            // The native call can replace earlier tags even when it fails part-way.
+            _streamlineTagsClearedFrame = 0;
+            return _context.Streamline!.TagFrame(commands, &d, &m, &h, &u, &frame);
         }
     }
 
@@ -96,16 +97,11 @@ public sealed unsafe partial class VulkanDevice
         _context.Streamline.SetFrameGeneration(enabled, generatedFrames, _swapchain.Extent.Width,
             _swapchain.Extent.Height, _swapchain.Format, _swapchain.ImageCount);
 
-    /// <summary>Queries DLSS-G status, presented count and generated-frame limit.</summary>
-    internal int GetStreamlineFrameGenerationState(out uint status, out uint presented,
-        out uint maxGenerated)
-    {
-        status = 0; presented = 0; maxGenerated = 0;
-        return _context.Streamline?.GetFrameGenerationState(out status, out presented,
-            out maxGenerated) ?? -1;
-    }
-
     /// <summary>Consumes a recorded Streamline presentation error, or returns zero without a runtime.</summary>
+    /// <remarks>
+    /// OUT_OF_DATE and SUBOPTIMAL are not reported here: the Streamline swapchain dispatch
+    /// turns them into its present result, so the swapchain rebuilds them on any frame.
+    /// </remarks>
     internal int TakeStreamlinePresentError() => _context.Streamline?.TakePresentError() ?? 0;
     /// <summary>Vertical-synchronization state requested by the renderer host.</summary>
     internal bool PresentationVsyncEnabled => _vsync;
@@ -116,16 +112,17 @@ public sealed unsafe partial class VulkanDevice
         return _context.Streamline?.GetFrameGenerationStateDetails(out state) ?? -1;
     }
 
-    /// <summary>Requests recreation of the active swapchain using current window dimensions and VSync.</summary>
-    internal void RebuildStreamlineSwapchain() =>
-        _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
-
     /// <summary>Invalidates current frame tags and disables DLSS-G before the consuming resources change.</summary>
+    /// <remarks>Tags the current frame token already cleared, and has not replaced since, are not cleared again.</remarks>
     internal void SuspendStreamlineFrameGeneration()
     {
         if (_context.Streamline == null) return;
-        int tags = _context.Streamline.InvalidateFrameTags(_swapchain?.Extent.Width ?? 0, _swapchain?.Extent.Height ?? 0);
-        if (tags != 0) throw new InvalidOperationException("Invalidating DLSS-G frame tags failed (" + tags + ").");
+        if (!StreamlineTagsClearedThisFrame)
+        {
+            int tags = _context.Streamline.InvalidateFrameTags();
+            if (tags != 0) throw new InvalidOperationException("Invalidating DLSS-G frame tags failed (" + tags + ").");
+            if (_streamlineFrameTokenReady) _streamlineTagsClearedFrame = _streamlineTokenFrameId;
+        }
         if (_swapchain != null)
         {
             int options = SetStreamlineFrameGeneration(false);
@@ -152,6 +149,12 @@ public sealed unsafe partial class VulkanDevice
         if (result != 0) throw new InvalidOperationException("Releasing DLSS-G resources before NGX shutdown failed (" + result + ").");
     }
 
+    /// <summary>Latency frame whose Streamline token has cleared scene tags and not tagged since; zero when none.</summary>
+    private ulong _streamlineTagsClearedFrame;
+
+    private bool StreamlineTagsClearedThisFrame => _streamlineFrameTokenReady &&
+        _streamlineTokenFrameId != 0 && _streamlineTagsClearedFrame == _streamlineTokenFrameId;
+
     private void BeginStreamlineFrameTags()
     {
         if (!_streamlineFrameGenerationReady || !_streamlineFrameTokenReady ||
@@ -159,8 +162,9 @@ public sealed unsafe partial class VulkanDevice
         // Default every new token to a non-scene frame before any game draws.
         // Generate may supply fresh scene inputs later. The SDK resolves the
         // full backbuffer size after any deferred recreation during acquire.
-        int result = _context.Streamline.InvalidateFrameTags(_swapchain.Extent.Width, _swapchain.Extent.Height);
-        RequireStreamlineProtocol(result, "current-frame tag initialization");
+        int result = _context.Streamline.InvalidateFrameTags();
+        RequireLatencyProtocol("Streamline", result, "current-frame tag initialization");
+        _streamlineTagsClearedFrame = _streamlineTokenFrameId;
     }
 
     private int _generatedFrameForPresent;
@@ -206,18 +210,25 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Changes presentation-provider ownership and disables competing vendor pacing for XeSS.</summary>
     internal void SetFrameGenerationPresentation(string provider)
     {
-        if (provider != "xess") StopXessPresenter();
+        if (provider != XessProvider) StopXessPresenter();
         _frameGenerationProvider = provider;
         _xessFailure = null;
-        if (provider == "xess")
+        if (XessSelected)
         {
             _vendorLatency?.SetMode(0);
             if (_streamlineReflexReady && _context.Streamline is { } streamline)
-                RequireStreamlineProtocol(streamline.SetReflex(0, 0), "Reflex off for XeSS pacing handoff");
+                RequireLatencyProtocol("Streamline", streamline.SetReflex(0, 0), "Reflex off for XeSS pacing handoff");
         }
         _appliedLatencyMode = -1;
-        _swapchain?.SetFrameGenerationProvider(provider == "xess" ? "off" : provider);
+        _swapchain?.SetFrameGenerationProvider(SwapchainFrameGenerationProvider);
     }
+
+    /// <summary>
+    /// The provider a Vulkan swapchain presents for. The Vulkan fallback never
+    /// generates XeSS frames: only the Intel DXGI proxy owns that provider's
+    /// present mode and frame cadence.
+    /// </summary>
+    private string SwapchainFrameGenerationProvider => XessSelected ? "off" : _frameGenerationProvider;
 
     /// <summary>Reserves the real-present ID and, when requested, an earlier generated-present ID.</summary>
     internal void ReserveFramePresentIds(bool mayGenerate)

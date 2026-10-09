@@ -595,20 +595,19 @@ internal sealed unsafe class MeshManager : IDisposable
             if (mesh.Indices != null) _uploads.NoteUse(commandBuffer, mesh.Indices);
         }
 
-        if (mesh.BindingOrder.Count > 0)
+        int bindingCount = mesh.BindingOrder.Count;
+        if (bindingCount > 0)
         {
-            var buffers = new Buffer[mesh.BindingOrder.Count];
-            var offsets = new ulong[mesh.BindingOrder.Count];
-            for (int i = 0; i < mesh.BindingOrder.Count; i++)
+            // At most one binding per buffer slot (MaxBuffers), so the stack holds them.
+            Buffer* buffers = stackalloc Buffer[bindingCount];
+            ulong* offsets = stackalloc ulong[bindingCount];
+            for (int i = 0; i < bindingCount; i++)
             {
                 buffers[i] = mesh.Buffers[mesh.BindingOrder[i]]!.Handle;
+                offsets[i] = 0;
             }
 
-            fixed (Buffer* buffersPtr = buffers)
-            fixed (ulong* offsetsPtr = offsets)
-            {
-                api.CmdBindVertexBuffers(commandBuffer, 0, (uint)buffers.Length, buffersPtr, offsetsPtr);
-            }
+            api.CmdBindVertexBuffers(commandBuffer, 0, (uint)bindingCount, buffers, offsets);
         }
 
         if (mesh.Indices != null)

@@ -170,8 +170,12 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (inScene) motionFailed = true;
     }
     /// <summary>Returns current camera/provider inputs and complete motion eligibility for this temporal frame.</summary>
-    /// <returns>A borrowed camera snapshot; pause, reset or incomplete motion prevents generation.</returns>
-    /// <remarks>Matrix storage remains owned by the temporal state and is updated on later frame advance.</remarks>
+    /// <returns>A borrowed camera snapshot; pause or incomplete motion prevents generation.</returns>
+    /// <remarks>
+    /// Matrix storage remains owned by the temporal state and is updated on later frame advance.
+    /// A history reset does not prevent generation: frame generation passes the frame's provider
+    /// reset flag on, so providers discard history at the cut instead of skipping it.
+    /// </remarks>
     internal GameTemporalFrame Snapshot() => State.Snapshot(motionValid,
-        client != null && !client.IsPaused && !State.Reset && motionValid);
+        client != null && !client.IsPaused && motionValid);
 }

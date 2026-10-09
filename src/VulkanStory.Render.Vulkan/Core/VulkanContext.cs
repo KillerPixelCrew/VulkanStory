@@ -343,20 +343,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
+        // The loader-level extensions, enumerated once for every check below.
+        HashSet<string> available = InstanceExtensions(Api, null);
         if (options.RequirementContributors.Count != 0)
         {
-            var available = new HashSet<string>(StringComparer.Ordinal);
-            uint availableCount = 0;
-            if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, null) == Result.Success && availableCount != 0)
-            {
-                var properties = new ExtensionProperties[availableCount];
-                fixed (ExtensionProperties* pointer = properties)
-                {
-                    if (Api.EnumerateInstanceExtensionProperties((byte*)null, &availableCount, pointer) == Result.Success)
-                        for (int i = 0; i < availableCount; i++)
-                            available.Add(SilkMarshal.PtrToString((nint)pointer[i].ExtensionName) ?? "");
-                }
-            }
             var requests = new InstanceRequirements(available, extensions);
             foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
                 contributor.ContributeInstanceExtensions(requests);
@@ -364,11 +354,11 @@ internal sealed unsafe class VulkanContext : IDisposable
         // Surface maintenance dependencies are instance extensions; enable them before
         // choosing a device, then query that device's optional maintenance feature.
         if (!options.Headless && extensions.Contains("VK_KHR_surface")
-            && LayerAdvertisesExtension(Api, null, "VK_KHR_get_surface_capabilities2"))
+            && available.Contains("VK_KHR_get_surface_capabilities2"))
         {
             foreach (string maintenance in new[] { "VK_KHR_surface_maintenance1", "VK_EXT_surface_maintenance1" })
             {
-                if (!LayerAdvertisesExtension(Api, null, maintenance)) continue;
+                if (!available.Contains(maintenance)) continue;
                 if (!extensions.Contains("VK_KHR_get_surface_capabilities2")) extensions.Add("VK_KHR_get_surface_capabilities2");
                 if (!extensions.Contains(maintenance)) extensions.Add(maintenance);
             }
@@ -387,13 +377,16 @@ internal sealed unsafe class VulkanContext : IDisposable
         // variable into a silent fall back to OpenGL (rule 1).
         List<ValidationLayerSetting> settings = ValidationLayerSettings(options.ValidationFeatures);
         List<ValidationFeatureEnableEXT> enables = ParseValidationFeatures(options.ValidationFeatures);
+        HashSet<string> layerExtensions = validation && (settings.Count > 0 || enables.Count > 0)
+            ? InstanceExtensions(Api, ValidationLayer)
+            : new HashSet<string>(StringComparer.Ordinal);
         bool chainLayerSettings = validation && settings.Count > 0
-            && LayerAdvertisesExtension(Api, ValidationLayer, LayerSettingsExtensionName);
+            && layerExtensions.Contains(LayerSettingsExtensionName);
         bool chainValidationFeatures = validation && !chainLayerSettings && enables.Count > 0
-            && LayerAdvertisesExtension(Api, ValidationLayer, ValidationFeaturesExtensionName);
+            && layerExtensions.Contains(ValidationFeaturesExtensionName);
         // Streamline uses debug-utils for Vulkan resource names and profiling even
         // when the optional validation layer is off. Enable only if advertised.
-        if (validation || (Streamline != null && LayerAdvertisesExtension(Api, null, ExtDebugUtils.ExtensionName)))
+        if (validation || (Streamline != null && available.Contains(ExtDebugUtils.ExtensionName)))
         {
             if (!extensions.Contains(ExtDebugUtils.ExtensionName)) extensions.Add(ExtDebugUtils.ExtensionName);
         }
@@ -605,13 +598,14 @@ internal sealed unsafe class VulkanContext : IDisposable
     }
 
     /// <summary>
-    /// Whether <paramref name="layerName" /> advertises <paramref name="extensionName" />
-    /// as an instance extension. A layer's extensions are invisible to the
-    /// loader-level enumeration, so the layer has to be named explicitly. Null queries
-    /// the loader-level extensions instead.
+    /// The instance extensions <paramref name="layerName" /> advertises. A layer's
+    /// extensions are invisible to the loader-level enumeration, so the layer has to
+    /// be named explicitly. Null enumerates the loader-level extensions instead. Empty
+    /// when the enumeration fails (an absent layer, for one).
     /// </summary>
-    internal static bool LayerAdvertisesExtension(Vk api, string? layerName, string extensionName)
+    internal static HashSet<string> InstanceExtensions(Vk api, string? layerName)
     {
+        var names = new HashSet<string>(StringComparer.Ordinal);
         nint layer = layerName == null ? 0 : SilkMarshal.StringToPtr(layerName);
         try
         {
@@ -619,7 +613,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             if (api.EnumerateInstanceExtensionProperties((byte*)layer, &count, null) != Result.Success
                 || count == 0)
             {
-                return false;
+                return names;
             }
 
             var properties = new ExtensionProperties[count];
@@ -627,18 +621,16 @@ internal sealed unsafe class VulkanContext : IDisposable
             {
                 if (api.EnumerateInstanceExtensionProperties((byte*)layer, &count, propertiesPtr) != Result.Success)
                 {
-                    return false;
+                    return names;
                 }
                 for (int i = 0; i < count; i++)
                 {
                     // The name is a fixed-size buffer, readable only through a pointer.
-                    if (SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName) == extensionName)
-                    {
-                        return true;
-                    }
+                    string? name = SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName);
+                    if (name != null) names.Add(name);
                 }
             }
-            return false;
+            return names;
         }
         finally
         {

@@ -10,7 +10,7 @@ namespace VulkanStory.Game;
 /// <param name="FrameId">Device latency-frame identity captured by the temporal owner.</param>
 /// <param name="WorldCaptured">Whether this frame supplied a world projection.</param>
 /// <param name="MotionValid">Whether the complete current scene motion chain was accepted.</param>
-/// <param name="CanGenerate">Whether pause/reset/current-producer conditions allow FG preparation.</param>
+/// <param name="CanGenerate">Whether pause/current-producer conditions allow FG preparation; reset frames still generate with Provider.Reset set.</param>
 /// <param name="Provider">Provider-facing dimensions, timing, jitter and clip planes.</param>
 /// <param name="View">Current unjittered 16-float column-major world view.</param>
 /// <param name="Projection">Current unjittered 16-float column-major world projection.</param>

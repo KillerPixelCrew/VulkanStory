@@ -101,27 +101,6 @@ internal sealed class StatedRenderState
         _blend[slot].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
     }
 
-    /// <summary><c>glBlendEquationi</c>: one attachment's equation, its factors kept.</summary>
-    public void SetSlotEquation(int slot, int glEquation)
-    {
-        if ((uint)slot >= MaxColorAttachments) return;
-        _blendSnapshots.Clear();
-        BlendOp op = GlEnums.BlendOpFrom(glEquation);
-        _blend[slot].ColorOp = op;
-        _blend[slot].AlphaOp = op;
-    }
-
-    /// <summary><c>glBlendFuncSeparatei</c>: one attachment's factors, its equation kept.</summary>
-    public void SetSlotFunc(int slot, int srcColor, int dstColor, int srcAlpha, int dstAlpha)
-    {
-        if ((uint)slot >= MaxColorAttachments) return;
-        _blendSnapshots.Clear();
-        _blend[slot].SrcColor = GlEnums.BlendFactorFrom(srcColor);
-        _blend[slot].DstColor = GlEnums.BlendFactorFrom(dstColor);
-        _blend[slot].SrcAlpha = GlEnums.BlendFactorFrom(srcAlpha);
-        _blend[slot].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
-    }
-
     /// <summary>Sets the global writable RGBA channel mask and invalidates cached attachment snapshots.</summary>
     /// <param name="r">Whether red is writable.</param>
     /// <param name="g">Whether green is writable.</param>
@@ -244,6 +223,15 @@ internal sealed class StatedRenderState
 /// </summary>
 internal static class StatedDraw
 {
+    /// <summary>Sampled textures up to this count live on the stack; a larger program allocates.</summary>
+    private const int StackTextureLimit = 16;
+
+    /// <summary>Distinct target ids before <see cref="StatedPassNames" /> starts over; ids grow with each target rebuild.</summary>
+    private const int StatedPassNameLimit = 256;
+
+    /// <summary>"Stated/&lt;target&gt;" per target id, so an undeclared draw does not build its pass name each time.</summary>
+    private static readonly Dictionary<int, string> StatedPassNames = new();
+
     /// <summary>
     /// Records the draw. <paramref name="meshId" /> 0 is the fullscreen triangle;
     /// <paramref name="starts" /> is a pool's multi-draw. False with a reason: nothing was recorded.
@@ -258,7 +246,8 @@ internal static class StatedDraw
         RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue);
         if (all == null) return Refused("framebuffer " + framebufferId + " does not exist", out refusal);
         int attached = all.ColorFormats.Length;
-        uint slots = attached >= 32 ? uint.MaxValue : (1u << attached) - 1u;
+        uint allSlots = attached >= 32 ? uint.MaxValue : (1u << attached) - 1u;
+        uint slots = allSlots;
         if (declared != null) slots &= declared.ColorSlots;
 
         int layoutId = meshId > 0 ? device.NativeMeshLayoutId(meshId) : MeshManager.EmptyLayoutId;
@@ -295,7 +284,8 @@ internal static class StatedDraw
             int attachment = device.NativeFramebufferColorTexture(framebufferId, slot);
             if (attachment != 0 && Array.IndexOf(reads, attachment) >= 0) slots &= ~(1u << slot);
         }
-        RenderTargetFormats? formats = device.NativeTargetFormats(framebufferId, slots);
+        // Every attached slot states exactly the formats already read for the whole target.
+        RenderTargetFormats? formats = slots == allSlots ? all : device.NativeTargetFormats(framebufferId, slots);
         if (formats == null) return Refused("no formats for framebuffer " + framebufferId, out refusal);
 
         AttachmentBlend[] blend = stated.BlendFor(framebufferId, Math.Max(formats.ColorFormats.Length, 1));
@@ -318,7 +308,9 @@ internal static class StatedDraw
         NativePipeline? pipeline = device.RequestNativePipeline(description, out string error);
         if (pipeline == null) return Refused(error, out refusal);
 
-        var textures = new NativeTexture[names.Length];
+        Span<NativeTexture> textures = names.Length <= StackTextureLimit
+            ? stackalloc NativeTexture[names.Length]
+            : new NativeTexture[names.Length];
         for (int i = 0; i < names.Length; i++)
         {
             int sampler = stated.SamplerAt(units[i]);
@@ -333,7 +325,7 @@ internal static class StatedDraw
         bool drawn = false;
         if (device.BeginNativePass(new NativePassDescription
         {
-            Name = declared?.Name ?? "Stated/" + framebufferId,
+            Name = declared?.Name ?? StatedPassName(framebufferId),
             FramebufferId = framebufferId,
             ColorSlots = slots,
             Reads = passReads,
@@ -359,6 +351,15 @@ internal static class StatedDraw
         if (!drawn && refusal == null) refusal = device.NativeDrawRefusal ?? "native draw declined";
         device.EndNativePass(keepScope: true);
         return drawn;
+    }
+
+    private static string StatedPassName(int framebufferId)
+    {
+        if (StatedPassNames.TryGetValue(framebufferId, out string? name)) return name;
+        if (StatedPassNames.Count >= StatedPassNameLimit) StatedPassNames.Clear();
+        name = "Stated/" + framebufferId;
+        StatedPassNames.Add(framebufferId, name);
+        return name;
     }
 
     private static bool Refused(string reason, out string? refusal)

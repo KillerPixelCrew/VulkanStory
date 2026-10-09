@@ -286,18 +286,33 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             return;
         }
 
-        PassDeclaration? current = _recorder.Declared;
-        if (current != null && ReferenceEquals(_recorder.DeclaredOn, target) && ReferenceEquals(_bound, target) &&
-            current.Name == declaration.Name && current.ColorSlots == declaration.ColorSlots)
-        {
-            return;
-        }
+        if (IsCurrentDeclaration(target, declaration.Name, declaration.ColorSlots)) return;
 
         EndPass(commandBuffer);
         Bind(commandBuffer, target.Id);
 
         ApplyPassExclusion(commandBuffer, target, declaration.ColorSlots);
         _recorder.Declare(declaration, target);
+    }
+
+    /// <summary>
+    /// Whether <see cref="DeclarePass" /> with this name and these colour slots on
+    /// <paramref name="framebufferId" /> (0: the bound target) would coalesce into the current
+    /// declaration and change nothing, so a caller can skip building the declaration. False with
+    /// the frame graph off, where a declaration still applies the pass's slots.
+    /// </summary>
+    public bool IsCurrentDeclaration(int framebufferId, string name, uint colorSlots)
+    {
+        if (!_graph.Enabled) return false;
+        VulkanFramebuffer? target = framebufferId > 0 ? Get(framebufferId) : _bound;
+        return target != null && IsCurrentDeclaration(target, name, colorSlots);
+    }
+
+    private bool IsCurrentDeclaration(VulkanFramebuffer target, string name, uint colorSlots)
+    {
+        PassDeclaration? current = _recorder.Declared;
+        return current != null && ReferenceEquals(_recorder.DeclaredOn, target) && ReferenceEquals(_bound, target) &&
+            current.Name == name && current.ColorSlots == colorSlots;
     }
 
     /// <summary>
@@ -734,11 +749,24 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public RenderTargetFormats FormatsOf(int formatsId) => _formats.Get(formatsId);
 
     /// <summary>
-    /// The attachment formats of the scope <paramref name="framebuffer" /> opens now, without
-    /// interning them: what a native draw checks its pipeline against.
+    /// Whether the attachment formats of the scope <paramref name="framebuffer" /> opens now are
+    /// <paramref name="expected" />: what a native draw checks its pipeline against. The same
+    /// comparison as building <see cref="DeclaredFormats" /> for the scope and calling Equals,
+    /// without allocating anything per draw.
     /// </summary>
-    public RenderTargetFormats ScopeFormats(VulkanFramebuffer framebuffer) =>
-        DeclaredFormats(framebuffer, ~framebuffer.PassExclusion);
+    public bool ScopeFormatsMatch(VulkanFramebuffer framebuffer, RenderTargetFormats? expected)
+    {
+        if (expected is null) return false;
+
+        uint colorSlots = ~framebuffer.PassExclusion;
+        int count = DeclaredColorCount(framebuffer, colorSlots);
+        if (expected.ColorFormats.Length != count) return false;
+        for (int i = 0; i < count; i++)
+        {
+            if (DeclaredColorFormat(framebuffer, colorSlots, i) != expected.ColorFormats[i]) return false;
+        }
+        return DepthFormatOf(framebuffer) == expected.DepthFormat;
+    }
 
     /// <summary>
     /// The attachment formats of the scope a pass declared with <paramref name="colorSlots" /> opens
@@ -747,25 +775,40 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// </summary>
     public RenderTargetFormats DeclaredFormats(VulkanFramebuffer framebuffer, uint colorSlots)
     {
+        int count = DeclaredColorCount(framebuffer, colorSlots);
+
+        var colorFormats = new Format[count];
+        for (int i = 0; i < count; i++)
+        {
+            colorFormats[i] = DeclaredColorFormat(framebuffer, colorSlots, i);
+        }
+
+        return new RenderTargetFormats(colorFormats, DepthFormatOf(framebuffer));
+    }
+
+    /// <summary>Colour attachments of the scope a pass declared with <paramref name="colorSlots" /> opens (highest bound slot among them + 1).</summary>
+    private static int DeclaredColorCount(VulkanFramebuffer framebuffer, uint colorSlots)
+    {
         int count = 0;
         for (int i = 0; i < RenderLimits.MaxColorAttachments; i++)
         {
             if (framebuffer.Color[i].IsBound && ((colorSlots >> i) & 1) != 0) count = i + 1;
         }
+        return count;
+    }
 
-        var colorFormats = new Format[count];
-        for (int i = 0; i < count; i++)
-        {
-            bool inScope = framebuffer.Color[i].IsBound && ((colorSlots >> i) & 1) != 0;
-            VulkanTexture? texture = inScope ? _textures.Get(framebuffer.Color[i].TextureId) : null;
-            colorFormats[i] = texture?.Format ?? Format.Undefined;
-        }
+    /// <summary>The format of colour slot <paramref name="index" /> in that scope; Undefined for a slot it leaves out.</summary>
+    private Format DeclaredColorFormat(VulkanFramebuffer framebuffer, uint colorSlots, int index)
+    {
+        bool inScope = framebuffer.Color[index].IsBound && ((colorSlots >> index) & 1) != 0;
+        VulkanTexture? texture = inScope ? _textures.Get(framebuffer.Color[index].TextureId) : null;
+        return texture?.Format ?? Format.Undefined;
+    }
 
-        Format depthFormat = framebuffer.DepthTextureId > 0
+    private Format DepthFormatOf(VulkanFramebuffer framebuffer) =>
+        framebuffer.DepthTextureId > 0
             ? _textures.Get(framebuffer.DepthTextureId)?.Format ?? Format.Undefined
             : Format.Undefined;
-        return new RenderTargetFormats(colorFormats, depthFormat);
-    }
 
     /// <summary>Colour attachments of the scope the framebuffer opens (highest participating slot + 1).</summary>
     public int EnabledAttachmentCount(VulkanFramebuffer framebuffer) =>

@@ -124,14 +124,8 @@ internal sealed partial class GameGraphicsAdapter
         {
             try
             {
-                Rect2D viewport = Stated.Viewport;
-                if (renderer.BeginNativePass(new NativePassDescription
-                {
-                    Name = "MergeTransparent/0", FramebufferId = primary.FboId, ColorSlots = slots,
-                    Reads = inputs.Where(value => value > 0).ToArray(), Flags = PassFlags.None,
-                    ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                    ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-                }))
+                if (renderer.BeginNativePass(StatedViewportPass("MergeTransparent/0", primary.FboId, slots,
+                        inputs.Where(value => value > 0).ToArray(), PassFlags.None)))
                 {
                     var textures = new NativeTexture[inputs.Length];
                     for (int index = 0; index < inputs.Length; index++) textures[index] = new NativeTexture(nativeOitMerge.Samplers[index], inputs[index]);

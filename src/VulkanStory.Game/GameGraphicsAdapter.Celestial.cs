@@ -51,7 +51,7 @@ internal sealed partial class GameGraphicsAdapter
                 blend[index].DstColor = blend[index].DstAlpha = BlendFactor.Zero;
             }
         }
-        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, CurrentTargetId, slots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, formats, layout,
             new NativePipelineDescription
             {
                 Blend = blend, DepthTest = false, DepthWrite = false,
@@ -68,16 +68,11 @@ internal sealed partial class GameGraphicsAdapter
             textures[index] = new NativeTexture(pipeline.Sampler(names[index]), texture);
             if (texture > 0 && !reads.Contains(texture)) reads.Add(texture);
         }
-        Rect2D viewport = Stated.Viewport;
         try
         {
-            if (renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = name + "/" + CurrentTargetId, FramebufferId = CurrentTargetId, ColorSlots = slots,
-                Reads = reads.ToArray(), Flags = PassFlags.AllowSplit,
-                ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            }) && renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
+            if (renderer.BeginNativePass(StatedViewportPass(name + "/" + CurrentTargetId, CurrentTargetId, slots,
+                    reads.ToArray(), PassFlags.AllowSplit)) &&
+                renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
         }
         finally { renderer.EndNativePass(); }
     }

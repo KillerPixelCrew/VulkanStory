@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
+using HarmonyLib;
 using OpenTK.Mathematics;
 using Vintagestory.API.Client;
 using Vintagestory.Client;
@@ -10,18 +10,21 @@ using Vintagestory.Client.NoObf;
 namespace VulkanStory.Game.Input;
 
 /// <summary>
-/// Reads active composer geometry for controller cursor snapping. The two
-/// non-public fields belong to the pinned game version; if either changes,
+/// Reads active composer geometry for controller cursor snapping. Screen and
+/// client fields use the validated <see cref="GameGuiBindings"/> accessors.
+/// The composer element map belongs to the pinned game version; if it changes,
 /// D-pad movement falls back to a fixed cursor step.
 /// </summary>
+/// <remarks>Runs in the controller poll, so lookups use cached field accessors and avoid LINQ.</remarks>
 internal static class ControllerGuiTargets
 {
-    private static readonly FieldInfo? CurrentScreenField = typeof(ScreenManager).GetField(
-        "CurrentScreen", BindingFlags.Instance | BindingFlags.NonPublic);
-    private static readonly FieldInfo? RunningGameField = typeof(GuiScreenRunningGame).GetField(
-        "runningGame", BindingFlags.Instance | BindingFlags.NonPublic);
-    private static readonly FieldInfo? InteractiveElementsField = typeof(GuiComposer).GetField(
-        "interactiveElements", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static GameGuiBindings? gui;
+    private static readonly AccessTools.FieldRef<GuiComposer, Dictionary<string, GuiElement>>? InteractiveElements =
+        CreateInteractiveElements();
+
+    // The session host already constructs these bindings, so a changed field
+    // fails at session startup rather than in the first controller poll.
+    private static GameGuiBindings Gui => gui ??= new GameGuiBindings();
 
     /// <summary>One GUI discovery snapshot shared by context ownership and navigation in a controller poll.</summary>
     /// <param name="Owner">Unfocused host or foreground dialog/screen used by input-context release guards.</param>
@@ -29,27 +32,23 @@ internal static class ControllerGuiTargets
     internal sealed record GuiSnapshot(object? Owner, List<GuiComposer> Composers);
 
     /// <summary>Collects enabled screen/front-dialog composers, including inventory HUD grids when foreground inventory is active.</summary>
-    /// <remarks>Uses the pinned game's private fields; absent fields reduce the available navigation targets.</remarks>
+    /// <remarks>An absent composer element map reduces the available navigation targets.</remarks>
     public static List<GuiComposer> ActiveComposers(IControllerPlatformHost platform) => Snapshot(platform).Composers;
 
     /// <summary>Collects the last foreground dialog at the lowest input order and its enabled composers.</summary>
     internal static GuiSnapshot Snapshot(IControllerPlatformHost platform)
     {
         var composers = new List<GuiComposer>();
-        ScreenManager? manager = platform.Original.keyEventHandlers.OfType<ScreenManager>().FirstOrDefault();
-        GuiScreen? screen = manager != null ? CurrentScreenField?.GetValue(manager) as GuiScreen : null;
+        GuiScreen? screen = CurrentScreen(platform);
         if (screen != null &&
             screen.IsOpened && screen.ElementComposer is { Enabled: true } screenComposer)
             composers.Add(screenComposer);
 
-        ClientMain? game = screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
+        ClientMain? game = RunningGame(screen);
         GuiDialog? foreground = null;
-        if (game?.api?.OpenedGuis != null)
+        if (game?.api?.OpenedGuis is { } opened)
         {
-            GuiDialog[] dialogs = game.api.OpenedGuis.OfType<GuiDialog>().Where(dialog => dialog.IsOpened()).ToArray();
-            foreach (GuiDialog dialog in dialogs)
-                if (dialog.DialogType == EnumDialogType.Dialog &&
-                    (foreground == null || dialog.InputOrder <= foreground.InputOrder)) foreground = dialog;
+            foreground = ForegroundDialog(game);
             if (foreground != null)
             {
                 composers.Clear();
@@ -59,43 +58,82 @@ internal static class ControllerGuiTargets
             // The hotbar remains a HUD dialog while inventory is open. Include
             // its grids only when the foreground UI is itself an inventory,
             // so a modal settings page cannot operate on slots behind it.
-            bool inventory = composers.Any(composer => InteractiveElementsField?.GetValue(composer) is
-                Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase));
+            bool inventory = false;
+            foreach (GuiComposer composer in composers)
+                if (HasSlotGrid(composer)) { inventory = true; break; }
             if (inventory)
-                foreach (GuiDialog dialog in dialogs)
-                    if (dialog.DialogType == EnumDialogType.HUD)
+                foreach (object item in opened)
+                    if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.HUD)
                         foreach (GuiComposer composer in dialog.Composers.Values)
-                            if (composer.Enabled && InteractiveElementsField?.GetValue(composer) is
-                                Dictionary<string, GuiElement> elements && elements.Values.Any(element => element is GuiElementItemSlotGridBase)) composers.Add(composer);
+                            if (composer.Enabled && HasSlotGrid(composer)) composers.Add(composer);
         }
-        return new GuiSnapshot(!platform.IsFocused ? platform : foreground ?? (object?)screen, composers);
+        return new GuiSnapshot(Owner(platform, screen, foreground), composers);
     }
 
     /// <summary>Returns the client owned by the current running-game screen, or null outside a loaded game.</summary>
-    public static ClientMain? ActiveGame(IControllerPlatformHost platform)
-    {
-        ScreenManager? manager = platform.Original.keyEventHandlers.OfType<ScreenManager>().FirstOrDefault();
-        GuiScreen? screen = manager != null ? CurrentScreenField?.GetValue(manager) as GuiScreen : null;
-        return screen is GuiScreenRunningGame ? RunningGameField?.GetValue(screen) as ClientMain : null;
-    }
+    public static ClientMain? ActiveGame(IControllerPlatformHost platform) => RunningGame(CurrentScreen(platform));
 
     /// <summary>Returns the input-context owner used for release guards: unfocused host, front dialog, or current screen.</summary>
-    /// <remarks>For equal dialog input orders, the last encountered dialog owns the context.</remarks>
+    /// <remarks>For equal dialog input orders, the last encountered dialog owns the context. Recomputes only the
+    /// owner, without composer discovery, so a guard after key dispatch still observes a synchronously opened dialog.</remarks>
     internal static object? ForegroundOwner(IControllerPlatformHost platform)
     {
-        return Snapshot(platform).Owner;
+        GuiScreen? screen = CurrentScreen(platform);
+        return Owner(platform, screen, ForegroundDialog(RunningGame(screen)));
+    }
+
+    private static object? Owner(IControllerPlatformHost platform, GuiScreen? screen, GuiDialog? foreground) =>
+        !platform.IsFocused ? platform : foreground ?? (object?)screen;
+
+    /// <summary>Current screen of the screen manager registered as a platform key handler.</summary>
+    private static GuiScreen? CurrentScreen(IControllerPlatformHost platform)
+    {
+        foreach (object handler in platform.Original.keyEventHandlers)
+            if (handler is ScreenManager manager) return Gui.CurrentScreenOf(manager);
+        return null;
+    }
+
+    private static ClientMain? RunningGame(GuiScreen? screen) =>
+        screen is GuiScreenRunningGame running ? Gui.RunningGame(running) : null;
+
+    /// <summary>Last open regular dialog with the lowest input order.</summary>
+    private static GuiDialog? ForegroundDialog(ClientMain? game)
+    {
+        GuiDialog? foreground = null;
+        if (game?.api?.OpenedGuis is not { } opened) return null;
+        foreach (object item in opened)
+            if (item is GuiDialog dialog && dialog.IsOpened() && dialog.DialogType == EnumDialogType.Dialog &&
+                (foreground == null || dialog.InputOrder <= foreground.InputOrder)) foreground = dialog;
+        return foreground;
+    }
+
+    private static bool HasSlotGrid(GuiComposer composer)
+    {
+        if (Elements(composer) is not { } elements) return false;
+        foreach (GuiElement element in elements.Values)
+            if (element is GuiElementItemSlotGridBase) return true;
+        return false;
+    }
+
+    private static Dictionary<string, GuiElement>? Elements(GuiComposer composer) =>
+        InteractiveElements is { } accessor ? accessor(composer) : null;
+
+    private static AccessTools.FieldRef<GuiComposer, Dictionary<string, GuiElement>>? CreateInteractiveElements()
+    {
+        FieldInfo? field = typeof(GuiComposer).GetField("interactiveElements", BindingFlags.Instance | BindingFlags.NonPublic);
+        return field != null && field.FieldType == typeof(Dictionary<string, GuiElement>)
+            ? AccessTools.FieldRefAccess<GuiComposer, Dictionary<string, GuiElement>>(field) : null;
     }
 
     /// <summary>Extracts visible grid-slot geometry in reverse composer order for semantic inventory operations.</summary>
     internal static List<ControllerSlotTarget> SlotTargets(IReadOnlyList<GuiComposer> composers)
     {
         var targets = new List<ControllerSlotTarget>();
-        if (InteractiveElementsField == null) return targets;
+        if (InteractiveElements == null) return targets;
         for (int c = composers.Count - 1; c >= 0; c--)
         {
             GuiComposer composer = composers[c];
-            if (!composer.Enabled || !composer.Composed ||
-                InteractiveElementsField.GetValue(composer) is not Dictionary<string, GuiElement> elements) continue;
+            if (!composer.Enabled || !composer.Composed || Elements(composer) is not { } elements) continue;
             foreach (GuiElement element in elements.Values)
             {
                 if (element is not GuiElementItemSlotGridBase grid || grid.SlotBounds == null) continue;
@@ -109,12 +147,11 @@ internal static class ControllerGuiTargets
     public static List<Vector2> Collect(IControllerPlatformHost platform, IReadOnlyList<GuiComposer> composers)
     {
         var targets = new List<Vector2>();
-        if (InteractiveElementsField == null || !platform.HasControllerWindow) return targets;
+        if (InteractiveElements == null || !platform.HasControllerWindow) return targets;
         (int width, int height) = platform.ControllerWindowSize;
         foreach (GuiComposer composer in composers)
         {
-            if (!composer.Composed || InteractiveElementsField.GetValue(composer) is not Dictionary<string, GuiElement> elements)
-                continue;
+            if (!composer.Composed || Elements(composer) is not { } elements) continue;
             foreach (GuiElement element in elements.Values)
             {
                 if (element is GuiElementItemSlotGridBase grid && grid.SlotBounds != null)

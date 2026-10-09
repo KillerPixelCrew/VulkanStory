@@ -17,7 +17,8 @@ public static class AnalogMovement
     public const int AckPacketId = 0x4F505443;
     /// <summary>Version byte required by the companion's negotiation packet.</summary>
     public const byte ProtocolVersion = 1;
-    private const long MaxAgeMs = 600;
+    /// <summary>Lifetime in milliseconds of one received analog sample before both sides fall back to vanilla movement.</summary>
+    public const long MaxAgeMs = 600;
 
     /// <summary>Weakly associated control state whose axis sample expires after the bounded input window.</summary>
     private sealed class Axes
@@ -42,20 +43,20 @@ public static class AnalogMovement
 
     /// <summary>Quantizes a speed factor to an unsigned byte; nonfinite input uses full speed.</summary>
     public static byte Encode(float factor) =>
-        (byte)Math.Clamp((int)MathF.Round(Math.Clamp(float.IsFinite(factor) ? factor : 1f, 0f, 1f) * 255f), 0, 255);
+        (byte)(int)MathF.Round(Math.Clamp(float.IsFinite(factor) ? factor : 1f, 0f, 1f) * 255f);
 
     /// <summary>Decodes an unsigned speed factor to zero through one.</summary>
     public static float Decode(byte encoded) => encoded / 255f;
 
     /// <summary>Quantizes a clamped signed axis to signed-byte bits; nonfinite input uses zero.</summary>
-    public static byte EncodeAxis(float axis) => (byte)(sbyte)Math.Clamp(
-        (int)MathF.Round(Math.Clamp(float.IsFinite(axis) ? axis : 0f, -1f, 1f) * 127f), -127, 127);
+    public static byte EncodeAxis(float axis) => (byte)(sbyte)(int)MathF.Round(
+        Math.Clamp(float.IsFinite(axis) ? axis : 0f, -1f, 1f) * 127f);
 
     /// <summary>Interprets signed-byte axis bits using the protocol's 127-step scale.</summary>
     /// <remarks>Protocol-generated values exclude -128; arbitrary byte 128 decodes slightly below -1.</remarks>
     public static float DecodeAxis(byte encoded) => (sbyte)encoded / 127f;
 
-    /// <summary>Associates a bounded axis sample with controls for 600 ms, clearing invalid or zero input.</summary>
+    /// <summary>Associates a bounded axis sample with controls for <see cref="MaxAgeMs"/>, clearing invalid or zero input.</summary>
     /// <param name="controls">Control object receiving the weakly associated state; null is ignored.</param>
     /// <param name="x">Horizontal movement axis, clamped to minus one through one.</param>
     /// <param name="y">Forward/back movement axis, clamped to minus one through one.</param>

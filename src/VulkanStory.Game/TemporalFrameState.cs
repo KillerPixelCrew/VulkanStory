@@ -333,7 +333,7 @@ namespace VulkanStory.Game
 
         /// <summary>Borrows current/previous world camera arrays and provider constants for the owning frame.</summary>
         /// <param name="motionValid">Complete scene producer eligibility determined by the game owner.</param>
-        /// <param name="canGenerate">Generation eligibility determined by pause/reset/producer state.</param>
+        /// <param name="canGenerate">Generation eligibility determined by pause/producer state.</param>
         /// <returns>Camera/provider snapshot referring to owner storage until the next advance.</returns>
         internal GameTemporalFrame Snapshot(bool motionValid, bool canGenerate)
         {

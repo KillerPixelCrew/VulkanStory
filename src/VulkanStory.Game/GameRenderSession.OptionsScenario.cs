@@ -1,4 +1,3 @@
-using System.Text.Json;
 using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.Client;
@@ -194,7 +193,7 @@ internal sealed partial class GameRenderSession
             page = shown.DialogName.StartsWith("gamesettings-graphics", StringComparison.Ordinal) ? "Graphics"
                 : shown.DialogName == "escapemenu" ? "Home" : null;
         string host = shown == null ? "none" : HeadlessHarnessOptions.Scenario!.Context;
-        bool requested = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!.Taa;
+        bool requested = RuntimeBootstrap.Current.RequestedSettings.Taa;
         bool persisted = new RendererSettingsStore(services.DataPath).Load().Taa;
         return (host, page, scenarioOriginalWorld?.IsPaused, scenarioPauseMenu?.IsOpened() == true,
             requested, services.RendererSettings.Settings.Taa, persisted);

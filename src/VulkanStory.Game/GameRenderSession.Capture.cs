@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text.Json;
 using Vintagestory.API.Client;
 
 namespace VulkanStory.Game;
@@ -55,7 +54,7 @@ internal sealed partial class GameRenderSession
     /// <exception cref="InvalidOperationException">At least one owner differs from the expected TAA setting.</exception>
     private (bool Requested, bool Persisted, bool Applied) CheckCapturedTaa(bool expected, string action)
     {
-        bool requested = JsonSerializer.Deserialize<RendererSettings>(RuntimeBootstrap.Current.ReadSettings())!.Taa;
+        bool requested = RuntimeBootstrap.Current.RequestedSettings.Taa;
         bool persisted = new RendererSettingsStore(services.DataPath).Load().Taa;
         bool applied = services.RendererSettings.Settings.Taa;
         if (requested != expected || persisted != expected || applied != expected)

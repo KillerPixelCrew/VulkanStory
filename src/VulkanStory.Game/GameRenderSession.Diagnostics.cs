@@ -63,8 +63,7 @@ internal sealed partial class GameRenderSession
             Directory.CreateDirectory(diagnosticDirectory!);
             var frame = Temporal.Snapshot();
             var settings = services.RendererSettings.Settings;
-            FrameBufferRef? primary = platform.FrameBuffers is { Count: > 0 } targets &&
-                targets[0] is { Disposed: false } target ? target : null;
+            FrameBufferRef? primary = PrimaryTarget;
             var display = Window.PixelSize;
             string json = JsonSerializer.Serialize(new
             {

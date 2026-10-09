@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using Silk.NET.Vulkan.Extensions.KHR;
 
@@ -92,7 +91,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
             };
             VulkanResult.Check(external.ImportSemaphoreWin32Handle(context.Device, &import),
                 "vkImportSemaphoreWin32HandleKHR for DX12 shared fence");
-            CloseHandle(handle);
+            VulkanSharedImage.CloseHandle(handle);
             handle = 0;
             result = new XessSharedFence(context, external, semaphore);
             reason = "ready";
@@ -100,7 +99,7 @@ internal sealed unsafe class XessSharedFence : IDisposable
         }
         catch (Exception error)
         {
-            if (handle != 0) CloseHandle(handle);
+            if (handle != 0) VulkanSharedImage.CloseHandle(handle);
             if (semaphore.Handle != 0)
                 context.Api.DestroySemaphore(context.Device, semaphore, null);
             external.Dispose();
@@ -108,9 +107,6 @@ internal sealed unsafe class XessSharedFence : IDisposable
             return false;
         }
     }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(nint handle);
 
     /// <inheritdoc/>
     public void Dispose()

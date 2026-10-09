@@ -129,23 +129,6 @@ public sealed unsafe partial class VulkanDevice
         return id;
     }
 
-    /// <summary>Creates a renderer cube texture from six borrowed face-pixel pointers.</summary>
-    public int CreateTextureCube(
-        int size, EnumTextureInternalFormat internalFormat,
-        EnumTexturePixelFormat pixelFormat, IntPtr[] facePixels)
-    {
-        Format format = GlEnums.TextureFormatFrom(internalFormat);
-        int id = _textures.Create((uint)size, (uint)size, format, cube: true);
-
-        for (uint face = 0; face < 6 && face < facePixels.Length; face++)
-        {
-            if (facePixels[face] == IntPtr.Zero) continue;
-            _textures.Upload(id, 0, 0, 0, (uint)size, (uint)size,
-                facePixels[face], BytesPerPixel(internalFormat), face);
-        }
-        return id;
-    }
-
     /// <summary>Creates an array texture with the requested layer count and neutral client format.</summary>
     public int CreateTexture2DArray(
         int width, int height, int layers,
@@ -161,15 +144,6 @@ public sealed unsafe partial class VulkanDevice
         FlushPendingClears(textureId);
         _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels,
             pixelFormat == EnumTexturePixelFormat.Red ? 1 : 4);
-    }
-
-    /// <summary>Uploads borrowed raw texels into a texture mip rectangle with the supplied byte size.</summary>
-    public void UploadTexture2DRaw(
-        int textureId, int level, int x, int y, int width, int height, IntPtr pixels, int bytesPerPixel)
-    {
-        if (bytesPerPixel <= 0) return;
-        FlushPendingClears(textureId);
-        _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels, bytesPerPixel);
     }
 
     /// <summary>Records mip generation for a live texture using the renderer upload/resource path.</summary>
@@ -220,25 +194,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Updates the texture's retained RGBA sampler-border state.</summary>
     public void SetTextureBorderColor(int textureId, float r, float g, float b, float a) =>
         _textures.SetBorderColor(textureId, r, g, b, a);
-
-    /// <summary>Returns a supported retained texture parameter, using the renderer's fallback for an unknown ID/name.</summary>
-    public int GetTextureParameter(int textureId, int parameterName)
-    {
-        VulkanTexture? texture = _textures.Get(textureId);
-        if (texture == null) return 0;
-
-        return parameterName == GlEnums.TextureCompareMode
-            ? texture.State.CompareEnable ? GlEnums.TextureCompareRefToTexture : GlEnums.TextureCompareModeNone
-            : 0;
-    }
-
-    /// <summary>Uploads a borrowed pixel rectangle into one array-texture layer.</summary>
-    public void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
-        int width, int height, IntPtr pixels)
-    {
-        FlushPendingClears(textureId);
-        _textures.Upload(textureId, 0, x, y, (uint)width, (uint)height, pixels, 4, (uint)layer);
-    }
 
     /// <summary>Uploads normalized-short pixel data into a texture mip rectangle.</summary>
     public void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
@@ -429,44 +384,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Writes packed face-record bytes into a mesh's SSBO-backed position slot.</summary>
     public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize) =>
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
-    /// <summary>Returns writable mapped storage for this update, or zero when absent/unmapped.</summary>
-    /// <remarks>Use on the renderer owner thread. Write before the next draw/update and reacquire after GPU use. This rare raw access completes queued writes and GPU readers before exposing the original storage.</remarks>
-    public IntPtr GetMappedPointer(int meshId, VulkanStory.Contracts.MeshBufferSlot slot)
-    {
-        if ((int)slot >= MeshManager.MaxBuffers) return IntPtr.Zero;
-        VulkanBuffer? buffer = _meshes.BufferOf(meshId, (int)slot);
-        if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
-        if (buffer.FrameUse == 0) return buffer.Mapped;
-
-        // Ordinary updates stay asynchronous. Only explicit CPU pointer access
-        // needs queued transfers visible to the host and previous readers finished.
-        CommandBuffer commands = _uploads.BeginRecording(inlineInFrame: _frameActive);
-        try
-        {
-            var barrier = new BufferMemoryBarrier2
-            {
-                SType = StructureType.BufferMemoryBarrier2,
-                SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-                SrcAccessMask = AccessFlags2.MemoryWriteBit,
-                DstStageMask = PipelineStageFlags2.HostBit,
-                DstAccessMask = AccessFlags2.HostReadBit,
-                SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-                DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
-                Buffer = buffer.Handle, Size = Vk.WholeSize,
-            };
-            var dependency = new DependencyInfo
-            {
-                SType = StructureType.DependencyInfo,
-                BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier,
-            };
-            _context.Api.CmdPipelineBarrier2(commands, &dependency);
-        }
-        finally { _uploads.EndRecording(); }
-        if (_frameActive) _frames.Timeline.WaitForFrame(SubmitPartial(), WaitSite.Readback);
-        else _frames.Timeline.WaitForTransfer(_uploads.SubmitStandalone(), WaitSite.Readback);
-        return buffer.Mapped;
-    }
-
     /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
     internal void UpdateParticleHistory(int meshId, float[] values) => _meshes.UpdateParticleHistory(meshId, values);
 
@@ -491,7 +408,7 @@ internal enum NativeDrawKind : byte
 /// Mesh draws on the native device API (docs/vulkan.md, decision 4:
 /// "fullscreen triangle, mesh, multi-draw or instanced").
 ///
-/// Stage 1 recorded fullscreen draws only. World systems are mesh draws, so these four entry
+/// Stage 1 recorded fullscreen draws only. World systems are mesh draws, so these three entry
 /// points join <see cref="VulkanDevice.DrawNativeFullscreen" /> on the same preparation
 /// (<c>BeginNativeDraw</c>) and swap the draw command for the mesh manager's:
 ///
@@ -569,7 +486,7 @@ public sealed unsafe partial class VulkanDevice
         ReadOnlySpan<NativeTexture> textures)
     {
         if (instanceCount <= 0) return false;
-        if (!NativeMeshIsDrawable(pipeline, meshId, indexed: true, out VulkanMesh? mesh)) return false;
+        if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -591,36 +508,6 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>
-    /// One non-indexed draw of a mesh's vertex buffers: <paramref name="vertexCount" /> vertices,
-    /// <paramref name="instanceCount" /> instances, no index buffer. GL's glDrawArrays, for a
-    /// system whose geometry carries no index array.
-    /// </summary>
-    internal bool DrawNativeMeshArrays(NativePipeline pipeline, int meshId, int vertexCount, int instanceCount,
-        ReadOnlySpan<NativeTexture> textures)
-    {
-        if (vertexCount <= 0 || instanceCount <= 0) return false;
-        if (!NativeMeshIsDrawable(pipeline, meshId, indexed: false, out VulkanMesh? mesh)) return false;
-        if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
-        {
-            return false;
-        }
-
-        Checkpoint(commandBuffer,
-            CheckpointMarker.Draw(CheckpointKind.Draw, pipeline.ProgramId, target!.Id, meshId));
-        if (RenderTrace.Enabled)
-        {
-            RenderTrace.Write("native mesh arrays=" + meshId + " program=" + pipeline.ProgramId + " pass='" +
-                _nativePass!.Name + "' target=" + target.Id + " vertices=" + vertexCount +
-                " instances=" + instanceCount);
-        }
-
-        _meshes.Bind(commandBuffer, mesh!);
-        _context.Api.CmdDraw(commandBuffer, (uint)vertexCount, (uint)instanceCount, 0, 0);
-        NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
-        return true;
-    }
-
-    /// <summary>
     /// The multi-draw one mesh pool issues per pass - every surviving range of a chunk pool or
     /// the decal pool in one command - through the existing per-slot indirect ring. The OpenGL
     /// body is <c>ClientPlatformWindows.RenderMesh(MeshRef, int[], int[], int)</c> (glMultiDrawElements).
@@ -633,7 +520,7 @@ public sealed unsafe partial class VulkanDevice
         int groupCount, ReadOnlySpan<NativeTexture> textures)
     {
         if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
-        if (!NativeMeshIsDrawable(pipeline, meshId, indexed: true, out VulkanMesh? mesh)) return false;
+        if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -667,7 +554,7 @@ public sealed unsafe partial class VulkanDevice
     /// layout would read attributes out of buffers that are not there, which no validation layer
     /// can see because the descriptors are all valid.
     /// </summary>
-    private bool NativeMeshIsDrawable(NativePipeline pipeline, int meshId, bool indexed, out VulkanMesh? mesh)
+    private bool NativeMeshIsDrawable(NativePipeline pipeline, int meshId, out VulkanMesh? mesh)
     {
         mesh = _meshes.Get(meshId);
         if (mesh == null)
@@ -675,7 +562,7 @@ public sealed unsafe partial class VulkanDevice
             if (RenderTrace.Enabled) RenderTrace.Write("native draw skipped: no mesh " + meshId);
             return false;
         }
-        if (indexed && (mesh.Indices == null || mesh.IndexCount == 0))
+        if (mesh.Indices == null || mesh.IndexCount == 0)
         {
             if (RenderTrace.Enabled) RenderTrace.Write("native draw skipped: mesh " + meshId + " has no indices");
             return false;

@@ -731,7 +731,8 @@ internal sealed partial class ProgramInterfaceLayout
         }
     }
 
-    private static int Align(int value, int alignment) =>
+    /// <summary>Rounds <paramref name="value" /> up to a multiple of <paramref name="alignment" /> (std140 offsets; also <see cref="FrameGlobals" />).</summary>
+    internal static int Align(int value, int alignment) =>
         alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
 }
 

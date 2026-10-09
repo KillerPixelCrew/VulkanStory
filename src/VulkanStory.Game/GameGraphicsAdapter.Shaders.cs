@@ -15,6 +15,25 @@ internal sealed partial class GameGraphicsAdapter
     private readonly ConditionalWeakTable<Shader, object> injectedHandheldShadowStages = new();
     internal int StatedProgram { get; private set; }
 
+    /// <summary>
+    /// The shader includes this assembly owns. The general include route
+    /// (<see cref="ShaderSourceConsumerPatches" />) and the liquid motion program both resolve
+    /// them from the embedded shaders, so the two paths cannot disagree on the list.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> OwnedShaderIncludes =
+        new HashSet<string>(StringComparer.Ordinal) { "vertexwarp.vsh", "vulkanstory-motion.ash" };
+
+    /// <summary>An embedded shader file of this assembly by its file name, or null when it has none.</summary>
+    /// <param name="name">File name, such as <c>chunkliquidmotion.vsh</c> or <c>vertexwarp.vsh</c>.</param>
+    /// <returns>The file's text, or null.</returns>
+    internal static string? EmbeddedShaderSource(string name)
+    {
+        using Stream? stream = typeof(GameGraphicsAdapter).Assembly.GetManifestResourceStream("VulkanStory.Game.Shaders." + name);
+        if (stream == null) return null;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>Applies the owned handheld-shadow define and submits the original stage source to backend compilation.</summary>
     /// <param name="shader">Original stage object.</param>
     /// <returns>Whether stage acceptance succeeded.</returns>

@@ -68,8 +68,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
     }
     private int DesiredLatencyMode => LatencySelection.EffectiveMode;
+    /// <summary>Whether XeSS-FG is the selected presentation provider; its presenter then owns XeLL pacing instead of the generic vendor latency path.</summary>
+    private bool XessSelected => _frameGenerationProvider == XessProvider;
+    private const string XessProvider = "xess";
+    /// <summary>
+    /// The generic vendor latency path (Reflex/Anti-Lag via <see cref="VendorLatency" />), or null while
+    /// XeSS-FG is selected and its presenter owns pacing. Only for calls whose XeSS branch does nothing else.
+    /// </summary>
+    private VendorLatency? GenericLatency => XessSelected ? null : _vendorLatency;
     /// <summary>Whether the selected active vendor presenter or extension currently owns frame limiting.</summary>
-    internal bool VendorLatencyOwnsFrameCap => _frameGenerationProvider == "xess"
+    internal bool VendorLatencyOwnsFrameCap => XessSelected
         ? _xessPresenter != null
         : _vendorLatency?.OwnsFrameCap == true || _streamlineReflexReady;
     /// <summary>Stores the host FPS limit and forwards it to the active vendor pacing authority.</summary>
@@ -78,36 +86,42 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _vendorFrameCap = Math.Max(0, maxFps);
         if (_xessPresenter is { } intel)
         {
-            if (!_xessProtocolReady || (_xellAppliedFrameCap == _vendorFrameCap && _appliedLatencyMode == DesiredLatencyMode)) return;
-            // XeLL requires GPU work to be finished before its mode changes.
-            intel.WaitForGpuIdle();
-            // XeSS-FG requires XeLL enabled even when the generic preference is Off.
-            RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, true),
-                "frame-cap options");
-            _xellAppliedFrameCap = _vendorFrameCap;
-            _appliedLatencyMode = DesiredLatencyMode;
+            // Until the first pre-input sleep boundary configures XeLL, that boundary applies the cap.
+            if (_xessProtocolReady) ApplyXellOptions(intel, "frame-cap options");
             return;
         }
-        if (_frameGenerationProvider == "xess") return;
+        if (XessSelected) return;
         _vendorLatency?.SetFrameCap(maxFps);
         if (_streamlineReflexReady && _context.Streamline is { } streamline)
-            RequireStreamlineProtocol(streamline.SetReflex(DesiredLatencyMode, _vendorFrameCap), "Reflex frame-cap options");
+            RequireLatencyProtocol("Streamline", streamline.SetReflex(DesiredLatencyMode, _vendorFrameCap),
+                "Reflex frame-cap options");
+    }
+    /// <summary>Applies XeLL options when the presenter has not configured them yet or the frame cap changed.</summary>
+    /// <remarks>XeSS-FG requires XeLL enabled even when the generic preference is Off, so the generic latency mode does not select these options.</remarks>
+    private void ApplyXellOptions(XessFgPresenter intel, string operation)
+    {
+        if (_xessProtocolReady && _xellAppliedFrameCap == _vendorFrameCap) return;
+        // XeLL requires GPU work to be finished before its mode changes.
+        intel.WaitForGpuIdle();
+        RequireLatencyProtocol("XeLL", intel.Runtime.SetLatencyMode(_vendorFrameCap, true), operation);
+        _xessProtocolReady = true;
+        _xellAppliedFrameCap = _vendorFrameCap;
     }
     /// <summary>Begins vendor frame identity and performs the selected latency sleep before input collection.</summary>
     internal void SleepVendorLatency(ulong frameId, bool mayGenerate)
     {
         // PCL needs a frame token even when another vendor owns low-latency sleep.
         StreamlineRuntime? streamline = _context.Streamline;
-        int tokenResult = (_streamlinePclReady || _streamlineReflexReady ||
-            _streamlineFrameGenerationReady) && streamline != null
-            ? streamline.BeginFrame(frameId) : -1;
+        bool streamlineActive = streamline != null &&
+            (_streamlinePclReady || _streamlineReflexReady || _streamlineFrameGenerationReady);
+        int tokenResult = streamlineActive ? streamline!.BeginFrame(frameId) : -1;
         bool streamlineFrameBegun = tokenResult == 0;
         _streamlineFrameTokenReady = streamlineFrameBegun;
         _streamlineTokenFrameId = streamlineFrameBegun ? frameId : 0;
         _streamlineTokenPointer = streamlineFrameBegun ? streamline!.CurrentFrameToken() : 0;
-        if (streamline != null && (_streamlinePclReady || _streamlineReflexReady || _streamlineFrameGenerationReady))
+        if (streamlineActive)
         {
-            RequireStreamlineProtocol(tokenResult, "frame-token creation");
+            RequireLatencyProtocol("Streamline", tokenResult, "frame-token creation");
             if (_streamlineTokenPointer == 0)
             {
                 _streamlineFrameTokenReady = false;
@@ -116,11 +130,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
         if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " token=" + tokenResult);
         int latencyMode = DesiredLatencyMode;
-        if (_frameGenerationProvider != "xess" && _appliedLatencyMode != latencyMode)
+        if (!XessSelected && _appliedLatencyMode != latencyMode)
         {
             _vendorLatency?.SetMode(latencyMode);
             if (_streamlineReflexReady && streamline != null)
-                RequireStreamlineProtocol(streamline.SetReflex(latencyMode, _vendorFrameCap), "Reflex mode options");
+                RequireLatencyProtocol("Streamline", streamline.SetReflex(latencyMode, _vendorFrameCap), "Reflex mode options");
             _appliedLatencyMode = latencyMode;
         }
         // Streamline requires one sleep call per frame even with Reflex Off. Keep
@@ -131,31 +145,26 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             int result;
             try { result = streamline!.ReflexSleep(); }
             finally { VulkanStats.NoteWait(WaitSite.ReflexSleep, sleepStarted); }
-            RequireStreamlineProtocol(result, "Reflex sleep");
+            RequireLatencyProtocol("Streamline", result, "Reflex sleep");
             _reflexSleepSuccessCount++;
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " reflexSleep=" + result +
-                " mode=" + (_frameGenerationProvider == "xess" ? 0 : latencyMode));
+                " mode=" + (XessSelected ? 0 : latencyMode));
         }
         if (_xessPresenter is { } intel)
         {
-            if (!_xessProtocolReady || _appliedLatencyMode != latencyMode || _xellAppliedFrameCap != _vendorFrameCap)
-            {
-                intel.WaitForGpuIdle();
-                // XeLL must be enabled before FG and remain enabled for its presenter.
-                RequireXellProtocol(intel.Runtime.SetLatencyMode(_vendorFrameCap, true),
-                    "mode options");
-                if (!_xessProtocolReady) RequireXellProtocol(intel.Runtime.SetEnabled(true), "enabling a complete XeSS frame");
-                _xessProtocolReady = true;
-                _appliedLatencyMode = latencyMode;
-                _xellAppliedFrameCap = _vendorFrameCap;
-            }
+            ApplyXellOptions(intel, "mode options");
+            // XeLL must be enabled before FG and remain enabled for its presenter.
+            // A paused presenter resumes generation at the first sleep boundary
+            // after a frame prepared complete inputs again.
+            if (!_xessGenerationEnabled && !_xessGenerationPaused)
+                SetXessGenerationEnabled(intel, true);
             ReserveFramePresentIds(mayGenerate);
             int sleepResult = intel.Runtime.Sleep(frameId);
-            RequireXellProtocol(sleepResult, "sleep");
+            RequireLatencyProtocol("XeLL", sleepResult, "sleep");
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xellSleep=" + sleepResult);
             return;
         }
-        if (_frameGenerationProvider == "xess")
+        if (XessSelected)
         {
             ReserveFramePresentIds(mayGenerate);
             return;
@@ -163,16 +172,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         if (_swapchain != null) ReserveFramePresentIds(mayGenerate);
         _vendorLatency?.Sleep(frameId, RealPresentId);
     }
-    private void RequireStreamlineProtocol(int result, string operation)
+    /// <summary>Throws when a required vendor latency or presentation-protocol call reports failure.</summary>
+    /// <param name="vendor">Protocol owner named in the failure, such as Streamline or XeLL.</param>
+    private void RequireLatencyProtocol(string vendor, int result, string operation)
     {
         if (result != 0)
-            throw new InvalidOperationException("Streamline " + operation + " failed (" + result +
-                ") at frame " + _latencyFrameId + ".");
-    }
-    private void RequireXellProtocol(int result, string operation)
-    {
-        if (result != 0)
-            throw new InvalidOperationException("XeLL " + operation + " failed (" + result +
+            throw new InvalidOperationException(vendor + " " + operation + " failed (" + result +
                 ") at frame " + _latencyFrameId + ".");
     }
     /// <summary>Marks the actual input-start boundary for the active AMD latency extension.</summary>
@@ -221,8 +226,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xell=" + marker + " result=" + result);
             return;
         }
-        if (_frameGenerationProvider == "xess") return;
-        _vendorLatency?.Marker(frameId, marker);
+        GenericLatency?.Marker(frameId, marker);
     }
     /// <summary>Registered PCL latency-ping message, or zero when PCL is unavailable.</summary>
     internal uint PclWindowMessage => _streamlinePclReady ? _context.Streamline?.PclWindowMessage() ?? 0 : 0;
@@ -366,10 +370,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     /// <summary>Programs linked from the manifest, through the rewriter, and native programs that fell back, since the device came up.</summary>
     internal (int Native, int Rewritten, int Failed) ShaderLinkCounts => (_nativeLinks, _rewrittenLinks, _failedNativeLinks);
-
-    /// <summary>Whether a linked program came from the native manifest.</summary>
-    internal bool IsNativeProgram(int programId) =>
-        _programs.TryGetValue(programId, out ShaderProgramResources? program) && program.IsNative;
 
     /// <summary>The pipeline cache and key-log files and their saves; null when there is no cache root.</summary>
     private PipelineCachePersistence? _pipelinePersistence;
@@ -933,10 +933,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
                 return false;
             }
 
+            // Swapchain.TryCreate enables VkPresentIdKHR chaining from the device capabilities (seam S2).
             _swapchain = swapchain;
-            // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id and its
-            // feature were actually enabled; chaining it otherwise is a validation error.
-            _swapchain!.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
             _presentPath = new BlitPresentPath(_context, _textures);
         }
 
@@ -1316,6 +1314,23 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             ? new Graph.ComputeImageInfo(texture.Width, texture.Height, texture.MipLevels, texture.Cube ? 6u : texture.Layers)
             : null;
 
+    /// <summary><see cref="ComputeImageInfoOf" /> as one cached delegate, so a compute pass allocates none per use.</summary>
+    private Func<int, Graph.ComputeImageInfo?> ComputeImageInfoLookup => _computeImageInfoLookup ??= ComputeImageInfoOf;
+    private Func<int, Graph.ComputeImageInfo?>? _computeImageInfoLookup;
+
+    /// <summary>Frame-graph pass names ("compute:" + pass name) by compute pass name.</summary>
+    private readonly Dictionary<string, string> _computePassGraphNames = new(StringComparer.Ordinal);
+
+    private string ComputePassGraphName(string passName)
+    {
+        if (!_computePassGraphNames.TryGetValue(passName, out string? name))
+        {
+            name = "compute:" + passName;
+            _computePassGraphNames[passName] = name;
+        }
+        return name;
+    }
+
     private static readonly SamplerState ComputeNearest = new(Filter.Nearest, Filter.Nearest, SamplerMipmapMode.Nearest,
         SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, 0f, false, 1f, BorderColor.FloatOpaqueBlack,
         Mipmapped: true);
@@ -1342,7 +1357,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         ComputeProgram? program = _compute.Get(pass.ProgramId);
         string? error = program == null
             ? "no compute program " + pass.ProgramId
-            : Graph.ComputePassPlanner.Validate(pass, ComputeImageInfoOf);
+            : Graph.ComputePassPlanner.Validate(pass, ComputeImageInfoLookup);
         if (error == null && program != null)
         {
             foreach (Graph.ComputeBinding binding in pass.Bindings)
@@ -1369,7 +1384,14 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             foreach (ComputeSlot slot in program.Slots)
             {
                 if (error != null) break;
-                if (Array.FindIndex(pass.Bindings, b => b.Binding == slot.Binding) < 0)
+                bool bound = false;
+                foreach (Graph.ComputeBinding binding in pass.Bindings)
+                {
+                    if (binding.Binding != slot.Binding) continue;
+                    bound = true;
+                    break;
+                }
+                if (!bound)
                     error = "program '" + program.Name + "' binding " + slot.Binding + " is not bound";
             }
             foreach (Graph.ComputeDispatch dispatch in pass.Dispatches)
@@ -1397,8 +1419,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             _targets.FlushPendingClears(commandBuffer, _textures.Get(binding.TextureId)!);
         }
 
-        _graph.OpenComputePass(Graph.ComputePassPlanner.Signature(_graph.NameId("compute:" + pass.Name), pass,
-            ComputeImageInfoOf));
+        _graph.OpenComputePass(Graph.ComputePassPlanner.Signature(_graph.NameId(ComputePassGraphName(pass.Name)), pass,
+            ComputeImageInfoLookup));
 
         foreach (Graph.ComputeBinding binding in pass.Bindings)
         {
@@ -1438,7 +1460,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
                         data);
                 }
             }
-            (uint x, uint y, uint z) = Graph.ComputePassPlanner.Groups(dispatch, pass, ComputeImageInfoOf,
+            (uint x, uint y, uint z) = Graph.ComputePassPlanner.Groups(dispatch, pass, ComputeImageInfoLookup,
                 program.LocalSizeX, program.LocalSizeY);
             if (x == 0 || y == 0 || z == 0) continue;
             api.CmdDispatch(commandBuffer, x, y, z);
@@ -1640,6 +1662,16 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     /// <summary>The swapchain, null when headless. Tests only.</summary>
     internal Swapchain? SwapchainForTests => _swapchain;
+
+    /// <summary>
+    /// Whether the last frame could not present to the window: the swapchain is parked
+    /// (zero-extent surface), its last acquire returned no image (out of date after a
+    /// rebuild, or a failed rebuild), or a windowed device has no swapchain because a
+    /// restore after XeSS-FG is still failing. False when headless or while the XeSS-FG
+    /// presenter owns the window. The frame owner uses it to idle instead of spinning.
+    /// </summary>
+    internal bool PresentationStalled => _presentationWindow != IntPtr.Zero && _xessPresenter == null &&
+        (_swapchain is not { } swapchain || swapchain.Parked || swapchain.LastAcquireSkipped);
 
     private void ReportRebuildFailure()
     {

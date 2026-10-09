@@ -1,4 +1,5 @@
 using Vintagestory.Client.NoObf;
+using VulkanStory.Render.Vulkan;
 
 namespace VulkanStory.Game;
 
@@ -23,17 +24,23 @@ internal sealed partial class GameGraphicsAdapter
             renderer.SetTextureParameter(texture, 34049, bias);
             terrainTextureBias[texture] = bias;
         }
-        foreach (ShaderProgramBase? program in new ShaderProgramBase?[] { ShaderPrograms.Chunkopaque, ShaderPrograms.Chunktopsoil })
+        ApplyTerrainSamplerLodBias(renderer, ShaderPrograms.Chunkopaque, bias);
+        ApplyTerrainSamplerLodBias(renderer, ShaderPrograms.Chunktopsoil, bias);
+    }
+
+    /// <summary>The terrain samplers a chunk program may carry its own sampler object for.</summary>
+    private static readonly string[] TerrainSamplerNames = { "terrainTex", "terrainTexLinear" };
+
+    private void ApplyTerrainSamplerLodBias(VulkanDevice renderer, ShaderProgramBase? program, float bias)
+    {
+        if (program == null || program.Disposed) return;
+        foreach (string name in TerrainSamplerNames)
         {
-            if (program == null || program.Disposed) continue;
-            foreach (string name in new[] { "terrainTex", "terrainTexLinear" })
-            {
-                if (!program.customSamplers.TryGetValue(name, out int sampler) ||
-                    (!terrainSamplerBias.TryGetValue(sampler, out float previous) && bias == 0f) ||
-                    (terrainSamplerBias.ContainsKey(sampler) && Math.Abs(previous - bias) < .0001f)) continue;
-                renderer.SetSamplerParameter(sampler, 34049, bias);
-                terrainSamplerBias[sampler] = bias;
-            }
+            if (!program.customSamplers.TryGetValue(name, out int sampler) ||
+                (!terrainSamplerBias.TryGetValue(sampler, out float previous) && bias == 0f) ||
+                (terrainSamplerBias.ContainsKey(sampler) && Math.Abs(previous - bias) < .0001f)) continue;
+            renderer.SetSamplerParameter(sampler, 34049, bias);
+            terrainSamplerBias[sampler] = bias;
         }
     }
 }

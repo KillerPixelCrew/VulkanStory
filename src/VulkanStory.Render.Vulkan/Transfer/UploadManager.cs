@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using Silk.NET.Vulkan;
 
@@ -165,7 +166,7 @@ internal sealed unsafe class UploadManager : IDisposable
     /// </summary>
     public CommandBuffer BeginRecording(bool inlineInFrame)
     {
-        Monitor.Enter(_lock);
+        EnterCounted();
         try
         {
             if (inlineInFrame && IsFrameRecordingThread)
@@ -185,6 +186,22 @@ internal sealed unsafe class UploadManager : IDisposable
     }
 
     public void EndRecording() => Monitor.Exit(_lock);
+
+    /// <summary>
+    /// Takes the lock for an upload. One that finds it held (a frame or standalone
+    /// submission, a texture table change or another thread's upload) really waited, and is
+    /// counted as a blocking upload costing the time it waited
+    /// (<see cref="VulkanStats.NoteBlockingUpload" />, <see cref="VulkanStats.NoteUpload" />).
+    /// </summary>
+    private void EnterCounted()
+    {
+        if (Monitor.TryEnter(_lock)) return;
+
+        long start = Stopwatch.GetTimestamp();
+        Monitor.Enter(_lock);
+        VulkanStats.NoteBlockingUpload();
+        VulkanStats.NoteUpload(Stopwatch.GetTimestamp() - start);
+    }
 
     /// <summary>
     /// Bump-allocates <paramref name="size" /> staging bytes for the upload being
@@ -444,7 +461,13 @@ internal sealed unsafe class UploadManager : IDisposable
     /// </summary>
     public ulong SubmitStandalone()
     {
-        lock (_lock)
+        // A synchronous setup submission, counted with the time it held up its
+        // caller: the lock and the submit (the caller's wait on the returned value
+        // is counted at its own site). Finding the lock held makes it a blocking one.
+        long start = Stopwatch.GetTimestamp();
+        bool contended = !Monitor.TryEnter(_lock);
+        if (contended) Monitor.Enter(_lock);
+        try
         {
             if (Volatile.Read(ref _frameCommandsHandle) != 0)
             {
@@ -482,14 +505,21 @@ internal sealed unsafe class UploadManager : IDisposable
             }
             VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
             _timeline.NoteTransferSubmitted(transferValue);
+            if (contended) VulkanStats.NoteBlockingUpload();
+            VulkanStats.NoteUpload(Stopwatch.GetTimestamp() - start);
             return transferValue;
+        }
+        finally
+        {
+            Monitor.Exit(_lock);
         }
     }
 
     /// <summary>
-    /// Waits for every signalled Transfer value (teardown only, never throws),
-    /// then destroys the pools and the staging ring. Retired dedicated staging
-    /// buffers belong to the retire queue.
+    /// Waits for every signalled Transfer value (teardown only, never throws; a
+    /// failed wait is reported and teardown continues), then destroys the pools
+    /// and the staging ring. Retired dedicated staging buffers belong to the
+    /// retire queue.
     /// </summary>
     public void Dispose()
     {

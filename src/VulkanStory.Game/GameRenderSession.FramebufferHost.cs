@@ -58,6 +58,9 @@ internal sealed partial class GameRenderSession
         Graphics.ReleaseOit();
         frameGeneration!.Reset();
         Temporal.PublishMotionCoverage(false);
+        // Start the temporal stages' pipeline compiles now rather than when each first becomes
+        // valid in a world frame; the composition gate then waits for fewer of them.
+        Graphics.PrepareTemporalPipelines(targets, worldLoaded: Temporal.CurrentClient != null);
         // FinishFramebuffers invokes the owned temporal reset after this callback.
     }
 }

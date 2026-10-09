@@ -20,6 +20,9 @@ internal sealed partial class GameGraphicsAdapter
     private readonly Dictionary<string, NativeMeshPass> chunkPasses = new(StringComparer.Ordinal);
     private NativeTexture[] chunkTextures = [];
     private int[] chunkReads = [];
+    private AttachmentBlend[]? chunkBlendSource;
+    private AttachmentBlend[] chunkBlendCopy = [];
+    private bool chunkBlendCopyEnabled;
 
     /// <summary>Captures target/write-mask and fixed draw state for a named terrain pool; native pass opening is deferred to its first draw.</summary>
     /// <param name="name">Retained terrain pool/pass name.</param>
@@ -70,12 +73,10 @@ internal sealed partial class GameGraphicsAdapter
         }
         if (!chunkPasses.TryGetValue(program.PassName, out var pass))
             chunkPasses.Add(program.PassName, pass = new NativeMeshPass(program.PassName, [], []));
-        var blend = Stated.BlendFor(chunkTarget, Math.Max(formats.ColorFormats.Length, 1)).ToArray();
-        for (int index = 0; index < blend.Length; index++) blend[index].Enabled = chunkBlend;
-        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, chunkTarget, chunkSlots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, formats, layout,
             new NativePipelineDescription
             {
-                Blend = blend, DepthTest = chunkDepthTest, DepthWrite = chunkDepthWrite, DepthCompare = CompareOp.Less,
+                Blend = ChunkBlend(Math.Max(formats.ColorFormats.Length, 1)), DepthTest = chunkDepthTest, DepthWrite = chunkDepthWrite, DepthCompare = CompareOp.Less,
                 Cull = chunkCull, Topology = PrimitiveTopology.TriangleList, SamplesBoundDepth = sampledDepth,
             });
         if (pipeline == null) return RefuseOpenChunkDraw();
@@ -83,14 +84,8 @@ internal sealed partial class GameGraphicsAdapter
             chunkTextures[index] = chunkTextures[index] with { Sampler = pipeline.Sampler(names[index]) };
         if (!chunkPassOpen)
         {
-            Rect2D viewport = Stated.Viewport;
-            if (!renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = chunkScopeName + "/" + chunkTarget, FramebufferId = chunkTarget, ColorSlots = chunkSlots,
-                Reads = chunkReads.AsSpan(0, names.Length).ToArray(), Flags = PassFlags.AllowSplit,
-                ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            })) return false;
+            if (!renderer.BeginNativePass(StatedViewportPass(chunkScopeName + "/" + chunkTarget, chunkTarget, chunkSlots,
+                    chunkReads.AsSpan(0, names.Length).ToArray(), PassFlags.AllowSplit))) return false;
             chunkPassOpen = true;
         }
         if (renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups, chunkTextures.AsSpan(0, names.Length)))
@@ -98,6 +93,21 @@ internal sealed partial class GameGraphicsAdapter
         else RejectSceneDraw("chunk native multi-draw rejected");
         // Once opened, this scope owns the pool even if a later pipeline/draw is skipped.
         return true;
+    }
+    /// <summary>
+    /// The stated blend of the pool's target with every attachment's enable taken from the pool
+    /// scope. The copy is reused while the stated snapshot and the scope's enable are the same;
+    /// a pipeline description keeps the array it was given, so a change builds a new copy and
+    /// never writes into one already handed out.
+    /// </summary>
+    private AttachmentBlend[] ChunkBlend(int count)
+    {
+        AttachmentBlend[] source = Stated.BlendFor(chunkTarget, count);
+        if (ReferenceEquals(source, chunkBlendSource) && chunkBlendCopyEnabled == chunkBlend) return chunkBlendCopy;
+        var copy = source.ToArray();
+        for (int index = 0; index < copy.Length; index++) copy[index].Enabled = chunkBlend;
+        chunkBlendSource = source; chunkBlendCopyEnabled = chunkBlend; chunkBlendCopy = copy;
+        return copy;
     }
     private bool RefuseOpenChunkDraw()
     {

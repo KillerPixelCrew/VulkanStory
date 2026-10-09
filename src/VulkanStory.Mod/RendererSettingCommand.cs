@@ -37,7 +37,8 @@ internal static class RendererSettingCommand
                 if (property.Key is "TaaDebugView" or "FrameGenerationMultiplier")
                 {
                     if (!int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number) ||
-                        number < 0 || (property.Key == "FrameGenerationMultiplier" && number is < 2 or > 6))
+                        number < 0 || (property.Key == "FrameGenerationMultiplier" &&
+                            RendererChoices.Range(property.Key).Clamp(number) != number))
                         throw new ArgumentException("Invalid integer value for " + property.Key + ".");
                     value = JsonValue.Create(number);
                 }

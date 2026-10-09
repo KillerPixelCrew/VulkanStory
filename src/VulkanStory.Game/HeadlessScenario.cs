@@ -18,7 +18,7 @@ internal enum HeadlessScenarioActionKind
     Assert
 }
 
-/// <summary>Validated action scheduled at a scenario tick, including host operations, logical resize and observation expectations.</summary>
+/// <summary>Validated action scheduled at a scenario tick, including host operations, drawable-pixel resize and observation expectations.</summary>
 internal sealed record HeadlessScenarioAction(
     int Index,
     string Id,
@@ -342,26 +342,16 @@ internal sealed class HeadlessScenario
             ?? throw Error("SettingsShape", "Settings action did not produce an object.");
         string nextUpscaler = properties.TryGetValue(nameof(RendererSettings.Upscaler), out JsonElement upscalerValue)
             ? upscalerValue.GetString()! : current.Upscaler;
+        // Supported choices come from RendererChoices, the shared single source.
         if (properties.ContainsKey(nameof(RendererSettings.Upscaler)))
-            ValidateChoice(nextUpscaler, ["off", "dlss", "xess", "fsr3", "fsr4"], "Upscaler");
+            ValidateChoice(nextUpscaler, nameof(RendererSettings.Upscaler));
         if (properties.ContainsKey(nameof(RendererSettings.UpscalerQuality)))
             ValidateChoice(properties[nameof(RendererSettings.UpscalerQuality)].GetString()!,
-                Canonical(nextUpscaler) == "xess"
-                    ? ["dlaa", "ultraquality", "ultraqualityplus", "quality", "balanced", "performance", "ultraperformance"]
-                    : ["dlaa", "quality", "balanced", "performance", "ultraperformance"],
-                "UpscalerQuality");
-        if (properties.ContainsKey(nameof(RendererSettings.FrameGeneration)))
-            ValidateChoice(properties[nameof(RendererSettings.FrameGeneration)].GetString()!,
-                ["off", "dlss", "fsr3", "xess"], "FrameGeneration");
-        if (properties.ContainsKey(nameof(RendererSettings.LowLatencyMode)))
-            ValidateChoice(properties[nameof(RendererSettings.LowLatencyMode)].GetString()!,
-                ["off", "on", "boost"], "LowLatencyMode");
-        if (properties.ContainsKey(nameof(RendererSettings.AmbientOcclusion)))
-            ValidateChoice(properties[nameof(RendererSettings.AmbientOcclusion)].GetString()!,
-                ["auto", "vanilla", "gtao"], "AmbientOcclusion");
-        if (properties.ContainsKey(nameof(RendererSettings.AmbientOcclusionPreset)))
-            ValidateChoice(properties[nameof(RendererSettings.AmbientOcclusionPreset)].GetString()!,
-                ["low", "medium", "high", "ultra"], "AmbientOcclusionPreset");
+                nameof(RendererSettings.UpscalerQuality), xess: Canonical(nextUpscaler) == "xess");
+        foreach (string choice in new[] { nameof(RendererSettings.FrameGeneration), nameof(RendererSettings.LowLatencyMode),
+                     nameof(RendererSettings.AmbientOcclusion), nameof(RendererSettings.AmbientOcclusionPreset) })
+            if (properties.TryGetValue(choice, out JsonElement choiceValue))
+                ValidateChoice(choiceValue.GetString()!, choice);
         return next.Normalize();
     }
 
@@ -375,13 +365,16 @@ internal sealed class HeadlessScenario
         if (!valid) throw Error("SettingsType", "RendererSettings." + name + " has the wrong JSON type.");
     }
 
-    private static void ValidateChoice(string value, string[] choices, string property)
+    private static void ValidateChoice(string value, string property, bool xess = false)
     {
-        if (!choices.Contains(Canonical(value), StringComparer.Ordinal))
+        if (!RendererChoices.Contains(property, Canonical(value), xess))
             throw Error("SettingsEnum", "Unknown choice for RendererSettings." + property + ": " + value);
     }
 
     private static string Canonical(string value) => value.Trim().ToLowerInvariant();
+
+    private static string[] ChoiceValues(string property) =>
+        RendererChoices.Get(property).Select(choice => choice.Value).ToArray();
 
     private static void ValidateEqualityExpected(string field, (JsonValueKind Kind, bool Nullable) fieldSpec, JsonElement expected)
     {
@@ -400,8 +393,8 @@ internal sealed class HeadlessScenario
     {
         string[]? choices = field switch
         {
-            "requestedUpscaler" or "effectiveUpscaler" => ["off", "dlss", "xess", "fsr3", "fsr4"],
-            "requestedFrameGeneration" or "effectiveFrameGeneration" => ["off", "dlss", "fsr3", "xess"],
+            "requestedUpscaler" or "effectiveUpscaler" => ChoiceValues(nameof(RendererSettings.Upscaler)),
+            "requestedFrameGeneration" or "effectiveFrameGeneration" => ChoiceValues(nameof(RendererSettings.FrameGeneration)),
             "phase" => ["completedFrame"],
             "optionsHost" => ["none", "main", "world"],
             "optionsPage" => ["Image", "Generation", "Effects", "Device", "Status", "Graphics", "Home"],

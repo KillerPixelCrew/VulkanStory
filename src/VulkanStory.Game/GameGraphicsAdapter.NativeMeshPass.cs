@@ -2,6 +2,7 @@ using Silk.NET.Vulkan;
 using Vintagestory.Client.NoObf;
 using VulkanStory.Render.Vulkan;
 using VulkanStory.Render.Vulkan.Core;
+using VulkanStory.Render.Vulkan.Graph;
 
 namespace VulkanStory.Game;
 
@@ -48,17 +49,16 @@ internal sealed partial class GameGraphicsAdapter
     /// </summary>
     /// <param name="pass">Per-pass cache and pre-resolved uniform/sampler slots.</param>
     /// <param name="program">Original shader program whose backend identifier selects code.</param>
-    /// <param name="framebufferId">Backend target identifier.</param>
-    /// <param name="colorSlots">Selected target color-write mask.</param>
+    /// <param name="formats">
+    /// The draw's target formats for its selected colour slots, as the caller already read them
+    /// through <see cref="VulkanDevice.NativeTargetFormats" />.
+    /// </param>
     /// <param name="layoutId">Retained vertex layout identifier.</param>
     /// <param name="description">Requested fixed draw state, completed with program/layout/target formats.</param>
-    /// <returns>Matching live pipeline, or null after target or pipeline refusal.</returns>
-    private NativePipeline? NativeMeshPipelineFor(NativeMeshPass pass, ShaderProgramBase program, int framebufferId,
-        uint colorSlots, int layoutId, NativePipelineDescription description)
+    /// <returns>Matching live pipeline, or null after pipeline refusal.</returns>
+    private NativePipeline? NativeMeshPipelineFor(NativeMeshPass pass, ShaderProgramBase program,
+        RenderTargetFormats formats, int layoutId, NativePipelineDescription description)
     {
-        RenderTargetFormats? formats = RequireDevice().NativeTargetFormats(framebufferId, colorSlots);
-        if (formats == null) return null;
-
         if (pass.Pipeline != null && pass.Pipeline.ProgramId == program.ProgramId &&
             formats.Equals(pass.Formats) && pass.LayoutId == layoutId &&
             SameFixedState(pass.Pipeline.Description, description) && RequireDevice().IsNativePipelineLive(pass.Pipeline))
@@ -117,4 +117,25 @@ internal sealed partial class GameGraphicsAdapter
         return true;
     }
 
+    /// <summary>
+    /// A native pass drawn with the stated viewport: what the client last set through
+    /// glViewport, which a framebuffer bind does not change.
+    /// </summary>
+    /// <param name="name">Pass name the declaration coalesces on.</param>
+    /// <param name="framebufferId">Backend target identifier.</param>
+    /// <param name="colorSlots">Colour slots the pass writes.</param>
+    /// <param name="reads">Textures the pass samples.</param>
+    /// <param name="flags">Pass scheduling flags.</param>
+    /// <returns>A new description; the caller hands it to BeginNativePass.</returns>
+    private NativePassDescription StatedViewportPass(string name, int framebufferId, uint colorSlots, int[] reads,
+        PassFlags flags)
+    {
+        Rect2D viewport = Stated.Viewport;
+        return new NativePassDescription
+        {
+            Name = name, FramebufferId = framebufferId, ColorSlots = colorSlots, Reads = reads, Flags = flags,
+            ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
+            ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
+        };
+    }
 }

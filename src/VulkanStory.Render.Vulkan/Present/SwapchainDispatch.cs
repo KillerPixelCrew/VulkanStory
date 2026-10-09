@@ -97,7 +97,19 @@ internal sealed unsafe class StreamlineSwapchainDispatch : ISwapchainDispatch
     public Result Acquire(Device device, SwapchainKHR chain, Semaphore semaphore, ref uint index) =>
         _runtime.Acquire(device, chain, semaphore, ref index);
     /// <inheritdoc/>
-    public Result Present(Queue queue, PresentInfoKHR* info) => _runtime.Present(_device, queue, info);
+    /// <remarks>
+    /// DLSS-G presents asynchronously and reports OUT_OF_DATE/SUBOPTIMAL through its error
+    /// callback, not this call's result. A recorded one turns an accepted present into
+    /// SUBOPTIMAL, so the swapchain rebuilds before its next acquire on every frame,
+    /// including frames that do not generate. Other recorded codes stay for the
+    /// frame-generation owner.
+    /// </remarks>
+    public Result Present(Queue queue, PresentInfoKHR* info)
+    {
+        Result result = _runtime.Present(_device, queue, info);
+        Result recorded = _runtime.TakeSwapchainPresentError();
+        return result == Result.Success && recorded != Result.Success ? Result.SuboptimalKhr : result;
+    }
     /// <inheritdoc/>
     public void Destroy(Device device, SwapchainKHR chain) => _runtime.DestroySwapchain(device, chain);
     // Global DLSS-G disable belongs to the transition owner; retiring an old

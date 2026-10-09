@@ -118,14 +118,18 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     private readonly delegate* unmanaged[Cdecl]<uint, int> _marker;
     private readonly delegate* unmanaged[Cdecl]<nint, uint, int> _markerForToken;
     private readonly delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int> _setFg;
-    private readonly delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int> _getFgState;
-    private readonly delegate* unmanaged[Cdecl]<uint, uint, int> _invalidateFrameTags;
+    private readonly delegate* unmanaged[Cdecl]<int> _invalidateFrameTags;
     private readonly delegate* unmanaged[Cdecl]<int> _freeFrameGenerationResources;
     private readonly delegate* unmanaged[Cdecl]<int> _disableFrameGenerationForRelease;
     private readonly delegate* unmanaged[Cdecl]<uint*, uint, int> _getFgStateDetails;
     private readonly delegate* unmanaged[Cdecl]<int> _takePresentError;
     private readonly delegate* unmanaged[Cdecl]<CommandBuffer, StreamlineTaggedImage*, StreamlineTaggedImage*,
-        StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, uint, uint, int> _tagFrame;
+        StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, int> _tagFrame;
+    // The bridge keeps one latest asynchronous present error. Its swapchain-recreation
+    // codes go to the Streamline swapchain dispatch, every other code to the frame-
+    // generation owner, so each reader takes only its own codes from these latches.
+    private int _pendingRecreatePresentError;
+    private int _pendingFailurePresentError;
     private bool _disposed;
     private bool _shutdownComplete;
 
@@ -163,14 +167,13 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
         _marker = (delegate* unmanaged[Cdecl]<uint, int>)Export("VulkanStorySlMarker");
         _markerForToken = (delegate* unmanaged[Cdecl]<nint, uint, int>)Export("VulkanStorySlMarkerForToken");
         _setFg = (delegate* unmanaged[Cdecl]<int, uint, uint, uint, uint, uint, int>)Export("VulkanStorySlSetFrameGeneration");
-        _getFgState = (delegate* unmanaged[Cdecl]<uint*, uint*, uint*, int>)Export("VulkanStorySlGetFrameGenerationState");
-        _invalidateFrameTags = (delegate* unmanaged[Cdecl]<uint, uint, int>)Export("VulkanStorySlInvalidateFrameTagsWithExtent");
+        _invalidateFrameTags = (delegate* unmanaged[Cdecl]<int>)Export("VulkanStorySlInvalidateFrameTags");
         _freeFrameGenerationResources = (delegate* unmanaged[Cdecl]<int>)Export("VulkanStorySlFreeFrameGenerationResources");
         _disableFrameGenerationForRelease = (delegate* unmanaged[Cdecl]<int>)Export("VulkanStorySlDisableFrameGenerationForRelease");
         _getFgStateDetails = (delegate* unmanaged[Cdecl]<uint*, uint, int>)Export("VulkanStorySlGetFrameGenerationStateDetails");
         _takePresentError = (delegate* unmanaged[Cdecl]<int>)Export("VulkanStorySlTakePresentError");
         _tagFrame = (delegate* unmanaged[Cdecl]<CommandBuffer, StreamlineTaggedImage*, StreamlineTaggedImage*,
-            StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, uint, uint, int>)Export("VulkanStorySlTagFrame");
+            StreamlineTaggedImage*, StreamlineTaggedImage*, StreamlineFrameCamera*, int>)Export("VulkanStorySlTagFrame");
     }
 
     /// <summary>Loads the private Streamline bridge and initializes selected PCL, Reflex and DLSS-G plugins.</summary>
@@ -339,18 +342,33 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     internal int SetFrameGeneration(bool enabled, uint generatedFrames, uint width,
         uint height, Format colorFormat, uint buffers) =>
         _setFg(enabled ? 1 : 0, generatedFrames, width, height, (uint)colorFormat, buffers);
-    /// <summary>Queries provider status, presented count and maximum generated-frame count.</summary>
-    internal int GetFrameGenerationState(out uint status, out uint presented,
-        out uint maxGenerated)
+    /// <summary>Consumes a recorded asynchronous presentation error other than OUT_OF_DATE or SUBOPTIMAL.</summary>
+    /// <remarks>Swapchain-recreation codes stay for <see cref="TakeSwapchainPresentError" />.</remarks>
+    /// <returns>The Vulkan result code, or zero when none is pending.</returns>
+    internal int TakePresentError()
     {
-        status = 0; presented = 0; maxGenerated = 0;
-        fixed (uint* statusPtr = &status)
-        fixed (uint* presentedPtr = &presented)
-        fixed (uint* maxPtr = &maxGenerated)
-            return _getFgState(statusPtr, presentedPtr, maxPtr);
+        CollectPresentError();
+        return System.Threading.Interlocked.Exchange(ref _pendingFailurePresentError, 0);
     }
-    /// <summary>Consumes the bridge-recorded asynchronous presentation error.</summary>
-    internal int TakePresentError() => _takePresentError();
+    /// <summary>Consumes a recorded asynchronous OUT_OF_DATE or SUBOPTIMAL presentation result.</summary>
+    /// <returns>The recorded recreation result, or <see cref="Result.Success" /> when none is pending.</returns>
+    internal Result TakeSwapchainPresentError()
+    {
+        CollectPresentError();
+        return (Result)System.Threading.Interlocked.Exchange(ref _pendingRecreatePresentError, 0);
+    }
+    private static bool IsSwapchainRecreation(int result) =>
+        result is (int)Result.ErrorOutOfDateKhr or (int)Result.SuboptimalKhr;
+    /// <summary>Moves the bridge's latest error into the latch of the reader that handles it.</summary>
+    private void CollectPresentError()
+    {
+        int error = _takePresentError();
+        if (error == 0) return;
+        if (IsSwapchainRecreation(error))
+            System.Threading.Interlocked.Exchange(ref _pendingRecreatePresentError, error);
+        else
+            System.Threading.Interlocked.Exchange(ref _pendingFailurePresentError, error);
+    }
     /// <summary>Reads all six frame-generation capability/state words from the bridge.</summary>
     internal int GetFrameGenerationStateDetails(out StreamlineFrameGenerationState state)
     {
@@ -359,10 +377,8 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
             return _getFgStateDetails((uint*)pointer, 6);
     }
     /// <summary>Clears scene inputs before a lifecycle transition; the SDK resolves full backbuffer dimensions at presentation.</summary>
-    /// <param name="width">Presentation width retained by the native ABI; no backbuffer subregion is tagged.</param>
-    /// <param name="height">Presentation height retained by the native ABI; no backbuffer subregion is tagged.</param>
     /// <returns>The native resource-tagging result.</returns>
-    internal int InvalidateFrameTags(uint width, uint height) => _invalidateFrameTags(width, height);
+    internal int InvalidateFrameTags() => _invalidateFrameTags();
     /// <summary>Requests DLSS-G resource release after its rendering and presentation work is drained.</summary>
     internal int FreeFrameGenerationResources() => _freeFrameGenerationResources();
 
@@ -381,10 +397,11 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     /// <summary>Disables DLSS-G through the bridge before releasing provider-owned resources.</summary>
     internal int DisableFrameGenerationForRelease() => _disableFrameGenerationForRelease();
     /// <summary>Tags matching borrowed depth, motion, HUD-free scene, UI and camera constants on the current command buffer.</summary>
+    /// <remarks>Full-window rendering leaves the backbuffer size to the SDK, which resolves it after any deferred swapchain recreation.</remarks>
     internal int TagFrame(CommandBuffer commands, StreamlineTaggedImage* depth,
         StreamlineTaggedImage* motion, StreamlineTaggedImage* hudless, StreamlineTaggedImage* ui,
-        StreamlineFrameCamera* camera, uint width, uint height) =>
-        _tagFrame(commands, depth, motion, hudless, ui, camera, width, height);
+        StreamlineFrameCamera* camera) =>
+        _tagFrame(commands, depth, motion, hudless, ui, camera);
     /// <summary>Shuts down the native Streamline session once; module unloading belongs to disposal.</summary>
     internal void Shutdown()
     {

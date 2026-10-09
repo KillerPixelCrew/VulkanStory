@@ -21,6 +21,7 @@ internal sealed class GameInputBridge
     private HashSet<EnumMouseButton>? physicalMouseButtons;
     private Dictionary<EnumMouseButton, int>? controllerMouseButtons;
     private HashSet<EnumMouseButton>? touchMouseButtons;
+    private float motionRemainderX, motionRemainderY;
 
     /// <summary>Retains original handlers, shared mouse/wheel state, and callbacks for input ownership and cursor lookup.</summary>
     internal GameInputBridge(ClientPlatformWindows platform, GamePlatformBindings bindings,
@@ -106,12 +107,27 @@ internal sealed class GameInputBridge
 	}
 
 	/// <summary>Marks physical input activity, updates shared pixel coordinates, and forwards relative mouse motion.</summary>
+	/// <remarks>The original handlers take whole deltas; the fractional part is carried into the next motion instead of being dropped.</remarks>
 	public void InjectPhysicalMouseMotion(float x, float y, float deltaX, float deltaY)
 	{
 		notePhysicalInput();
 		bindings.SetMousePosition(x, y);
+		(int wholeX, int wholeY) = WholeMotion(deltaX, deltaY);
 		foreach (MouseEventHandler handler in platform.mouseEventHandlers)
-			handler.OnMouseMove(new MouseEvent((int)bindings.MouseX, (int)bindings.MouseY, (int)deltaX, (int)deltaY));
+			handler.OnMouseMove(new MouseEvent((int)bindings.MouseX, (int)bindings.MouseY, wholeX, wholeY));
+	}
+
+	/// <summary>Discards carried fractional physical motion, for example after focus or capture changes.</summary>
+	internal void ResetMouseMotionRemainder() => (motionRemainderX, motionRemainderY) = (0f, 0f);
+
+	private (int X, int Y) WholeMotion(float deltaX, float deltaY)
+	{
+		float x = float.IsFinite(deltaX) ? deltaX + motionRemainderX : motionRemainderX;
+		float y = float.IsFinite(deltaY) ? deltaY + motionRemainderY : motionRemainderY;
+		int wholeX = (int)x, wholeY = (int)y;
+		motionRemainderX = x - wholeX;
+		motionRemainderY = y - wholeY;
+		return (wholeX, wholeY);
 	}
 
 	/// <summary>Updates shared pixel coordinates and forwards synthetic cursor motion without claiming physical input ownership.</summary>
@@ -264,6 +280,7 @@ internal sealed class GameInputBridge
 	{
 		if (!focused)
 		{
+			ResetMouseMotionRemainder();
 			if (physicalKeys != null)
 			{
 				foreach (int keyCode in physicalKeys)

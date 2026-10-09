@@ -53,8 +53,6 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
     private readonly delegate* unmanaged[Cdecl]<nint, uint, uint, uint, nint*, nint*, int> _createSharedImage;
     private readonly delegate* unmanaged[Cdecl]<nint, void> _releaseImage;
     private readonly delegate* unmanaged[Cdecl]<nint, nint*, int> _createSharedFence;
-    private readonly delegate* unmanaged[Cdecl]<nint, ulong, int> _waitSharedFence;
-    private readonly delegate* unmanaged[Cdecl]<nint, ulong, int> _signalSharedFence;
     private readonly delegate* unmanaged[Cdecl]<nint, XessPresentationFrame*, uint*, int*, uint*, int> _present;
     private readonly delegate* unmanaged[Cdecl]<nint, int> _waitIdle;
 
@@ -75,8 +73,6 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         _createSharedImage = (delegate* unmanaged[Cdecl]<nint, uint, uint, uint, nint*, nint*, int>)Export("VulkanStoryXessFgCreateSharedImage");
         _releaseImage = (delegate* unmanaged[Cdecl]<nint, void>)Export("VulkanStoryXessFgReleaseImage");
         _createSharedFence = (delegate* unmanaged[Cdecl]<nint, nint*, int>)Export("VulkanStoryXessFgCreateSharedFence");
-        _waitSharedFence = (delegate* unmanaged[Cdecl]<nint, ulong, int>)Export("VulkanStoryXessFgWaitSharedFence");
-        _signalSharedFence = (delegate* unmanaged[Cdecl]<nint, ulong, int>)Export("VulkanStoryXessFgSignalSharedFence");
         _present = (delegate* unmanaged[Cdecl]<nint, XessPresentationFrame*, uint*, int*, uint*, int>)Export("VulkanStoryXessFgPresent");
         _waitIdle = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryXessFgWaitIdle");
     }
@@ -208,10 +204,6 @@ internal sealed unsafe class XessFgRuntime : IDisposable, IDx12SharedRuntime
         sharedHandle = handle;
         return code;
     }
-    /// <summary>Waits for the native shared fence to reach the supplied value.</summary>
-    public int WaitSharedFence(ulong value) => _context != 0 ? _waitSharedFence(_context, value) : -1;
-    /// <summary>Queues a native shared-fence signal; callers must ensure the value represents completed work.</summary>
-    public int SignalSharedFence(ulong value) => _context != 0 ? _signalSharedFence(_context, value) : -1;
     /// <summary>Waits for the native DX12 queue to finish its tracked work.</summary>
     /// <returns>Zero on successful completion; a nonzero bridge code on failure or an absent context.</returns>
     public int WaitIdle() => _context != 0 ? _waitIdle(_context) : -1;

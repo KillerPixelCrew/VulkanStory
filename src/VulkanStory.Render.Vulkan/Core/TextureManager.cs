@@ -381,6 +381,9 @@ internal sealed unsafe class TextureManager : IDisposable
 
     private int Register(VulkanTexture texture)
     {
+        // Every created image (2D, array, cube, storage, volume) reaches here once.
+        VulkanStats.NoteTextureCreated();
+
         // Under the upload lock, like Delete: an upload from another thread
         // looks its texture up again under the same lock.
         _uploads.EnterLock();

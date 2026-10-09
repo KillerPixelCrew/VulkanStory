@@ -31,29 +31,6 @@ internal static class TextureDump
     private static readonly HashSet<int> Pending = Parse(Requested);
 
     /// <summary>
-    /// Set by VULKANSTORY_DUMP_TEXTURES=terrain, which asks for whatever the chunk
-    /// pass binds rather than for an id.
-    ///
-    /// Atlas ids are only handed out once a world loads, and are not stable
-    /// between runs, so naming one up front means guessing. Latching onto the
-    /// first storage-buffer multi-draw instead catches the block atlas at the
-    /// one moment it is certainly the texture the terrain is being drawn with.
-    /// </summary>
-    private static bool _wantsTerrain =
-        string.Equals(Requested?.Trim(), "terrain", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Whether the opt-in terrain dump is still waiting to latch the first terrain texture bindings.</summary>
-    public static bool WantsTerrain => _wantsTerrain;
-
-    /// <summary>Records the textures a chunk draw is using, and stops asking.</summary>
-    public static void RequestTerrain(int baseTexture, int linearTexture)
-    {
-        _wantsTerrain = false;
-        if (baseTexture > 0) Pending.Add(baseTexture);
-        if (linearTexture > 0 && linearTexture != baseTexture) Pending.Add(linearTexture);
-    }
-
-    /// <summary>
     /// Frames to let pass before writing anything. VULKANSTORY_DUMP_AFTER_FRAMES
     /// (default 0) lets a dump of a frame target wait until a world is on
     /// screen instead of capturing the menu's black first frame.

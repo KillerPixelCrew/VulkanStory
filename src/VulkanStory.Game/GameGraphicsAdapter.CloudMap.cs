@@ -92,7 +92,7 @@ internal sealed partial class GameGraphicsAdapter
         var blend = new AttachmentBlend[formats.ColorFormats.Length];
         for (int index = 0; index < blend.Length; index++) blend[index] = AttachmentBlend.Default;
         uint slots = formats.ColorFormats.Length >= 32 ? uint.MaxValue : (1u << formats.ColorFormats.Length) - 1u;
-        NativePipeline? pipeline = NativeMeshPipelineFor(nativeCloudMap, program, CurrentTargetId, slots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(nativeCloudMap, program, formats, layout,
             new NativePipelineDescription
             {
                 Blend = blend, DepthTest = false, DepthWrite = false, Cull = CullModeFlags.None,
@@ -106,15 +106,11 @@ internal sealed partial class GameGraphicsAdapter
             int texture = programTextures.GetValueOrDefault((program.ProgramId, names[index]));
             textures[index] = new NativeTexture(pipeline.Sampler(names[index]), texture); reads[index] = texture;
         }
-        var viewport = Stated.Viewport;
         try
         {
-            if (renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = "CloudMap/" + CurrentTargetId, FramebufferId = CurrentTargetId, ColorSlots = slots,
-                Reads = reads, Flags = PassFlags.AllowSplit, ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            }) && renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
+            if (renderer.BeginNativePass(StatedViewportPass("CloudMap/" + CurrentTargetId, CurrentTargetId, slots,
+                    reads, PassFlags.AllowSplit)) &&
+                renderer.DrawNativeMesh(pipeline, handle, textures)) RuntimeStats.drawCallsCount++;
         }
         finally { renderer.EndNativePass(); }
     }

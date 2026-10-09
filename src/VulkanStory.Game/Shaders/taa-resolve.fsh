@@ -170,7 +170,10 @@ void main(void)
 	vec4 glow = texelFetch(glowTex, pixel, 0);
 
 	// ---- motion: written vector when its depth matches, else camera reprojection
-	float reactive = clamp(texelFetch(motionTex, pixel, 0).b, 0.0, 1.0);
+	// Reactive comes from the same nearest-depth tap as the motion vector. A sky-side
+	// silhouette pixel would otherwise take its own sky reactive (cloud/fog coverage)
+	// and drop history whenever the jitter phase lands it on sky, flickering the edge.
+	float reactive = clamp(texelFetch(motionTex, closestPixel, 0).b, 0.0, 1.0);
 	vec4 motion = texelFetch(motionTex, closestPixel, 0);
 	vec2 currentUnjittered = closestCentre - jitterPx;
 	vec2 mv;

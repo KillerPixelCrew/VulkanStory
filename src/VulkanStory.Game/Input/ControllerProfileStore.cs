@@ -299,14 +299,8 @@ internal sealed class ControllerProfileStore
     }
 
     /// <summary>Writes serialized settings to a sibling temporary file before replacing the destination.</summary>
-    private static void Write(string path, ControllerProfileStore store)
-    {
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-        string temporary = path + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(store, JsonOptions) + Environment.NewLine);
-        File.Move(temporary, path, overwrite: true);
-    }
+    private static void Write(string path, ControllerProfileStore store) =>
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(store, JsonOptions) + Environment.NewLine);
 
     /// <summary>Reads schemas one through three and upgrades legacy defaults only while the stored version requires migration.</summary>
     private static ControllerProfileStore Read(string path)

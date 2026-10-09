@@ -69,64 +69,67 @@ internal sealed partial class GameGraphicsAdapter
     {
         AmbientOcclusionInScene = false;
         AmbientOcclusionTexture = 0;
-        if (GameFrameBindings.RenderSsao(platform!) && projectMatrix != null)
-        {
-            AmbientOcclusionTexture = RenderGtao(projectMatrix);
-        }
+        if (!GameFrameBindings.RenderSsao(platform!) || projectMatrix == null) return;
 
-        if (AmbientOcclusionTexture == 0 && GameFrameBindings.RenderSsao(platform!) && projectMatrix != null)
-        {
-            float ssaa = GameFramebufferBindings.SsaaLevel(platform!);
-            FrameBufferRef primary = platform!.FrameBuffers[0];
-
-            // Outside every native pass, exactly where the OpenGL body puts them: this is the
-            // GL-shaped state the steps after this one inherit.
-            ToggleBlend(false, EnumBlendMode.Standard);
-            NativeVanillaSsaoPass(projectMatrix, ssaa);
-            NativeBilateralBlurPasses();
-            // The body's tail: the blur's last target is what it leaves bound, with the viewport
-            // back at full render resolution - the Luma step inherits that viewport.
-            LoadFramebuffer(EnumFrameBuffer.SSAOBlurVertical);
-            ToggleBlend(true, EnumBlendMode.Standard);
-            Viewport(primary.Width, primary.Height);
-            if (NativeAoTemporalActive)
-            {
-                NativeSceneSsaoPass();
-            }
-        }
-
+        AmbientOcclusionTexture = RenderGtao(projectMatrix);
         if (AmbientOcclusionTexture != 0)
+        {
+            NativeSceneSsaoPass();
+            return;
+        }
+
+        if (!NativeVanillaSsaoReady()) return;
+        float ssaa = GameFramebufferBindings.SsaaLevel(platform!);
+        FrameBufferRef primary = platform!.FrameBuffers[0];
+
+        // Outside every native pass, exactly where the OpenGL body puts them: this is the
+        // GL-shaped state the steps after this one inherit.
+        ToggleBlend(false, EnumBlendMode.Standard);
+        NativeVanillaSsaoPass(projectMatrix, ssaa);
+        NativeBilateralBlurPasses();
+        // The body's tail: the blur's last target is what it leaves bound, with the viewport
+        // back at full render resolution - the Luma step inherits that viewport.
+        LoadFramebuffer(EnumFrameBuffer.SSAOBlurVertical);
+        ToggleBlend(true, EnumBlendMode.Standard);
+        Viewport(primary.Width, primary.Height);
+        if (NativeAoTemporalActive)
         {
             NativeSceneSsaoPass();
         }
     }
 
+    private bool nativeVanillaSsaoUnreadyReported;
+
     /// <summary>
-    /// Whether the native route can run this step at all. The shader programs are the OpenGL
-    /// body's own - it uses them unguarded - so a frame that has none of them falls back to the
-    /// body rather than drawing nothing.
+    /// Whether the vanilla SSAO passes have what they index without a check: Primary with the
+    /// SSAO G-buffer (slots 2 and 3), Transparent's revealage, the SSAO target and both blur
+    /// targets, and the two program objects. The GTAO route checks its own inputs in
+    /// <see cref="RenderGtao" />, and the final composition reads the blur target null-safely;
+    /// only this route dereferences them unguarded. The old platform fell back to the OpenGL body
+    /// here; there is no such body now, so a frame without them goes without vanilla AO instead
+    /// of throwing mid-frame. A program that failed to load is not refused here: its pipeline
+    /// request already declines and reports that pass, as before.
     /// </summary>
-    private bool NativeAmbientOcclusionReady()
+    private bool NativeVanillaSsaoReady()
     {
-        if (device == null) return false;
-        List<FrameBufferRef> buffers = platform!.FrameBuffers;
-        if (buffers == null || buffers.Count <= NativeSsaoBlurHorizontalIndex) return false;
-        if (buffers[0] == null || buffers[1] == null) return false;
-        if (!GameFrameBindings.RenderSsao(platform!)) return true;
-
-        FrameBufferRef primary = buffers[0];
-        if (primary.ColorTextureIds == null || primary.ColorTextureIds.Length < 4) return false;
-        if (buffers[NativeSsaoTargetIndex] == null || buffers[NativeSsaoBlurVerticalIndex] == null ||
-            buffers[NativeSsaoBlurHorizontalIndex] == null)
+        List<FrameBufferRef>? buffers = platform!.FrameBuffers;
+        bool ready = buffers != null && buffers.Count > NativeSsaoBlurHorizontalIndex &&
+            buffers[0]?.ColorTextureIds is { Length: >= 4 } &&
+            buffers[1]?.ColorTextureIds is { Length: >= 2 } &&
+            buffers[NativeSsaoTargetIndex]?.ColorTextureIds is { Length: >= 2 } &&
+            buffers[NativeSsaoBlurVerticalIndex]?.ColorTextureIds is { Length: >= 1 } &&
+            buffers[NativeSsaoBlurHorizontalIndex]?.ColorTextureIds is { Length: >= 1 } &&
+            ShaderPrograms.Ssao != null && ShaderPrograms.Bilateralblur != null;
+        if (ready)
         {
-            return false;
+            nativeVanillaSsaoUnreadyReported = false;
         }
-
-        ShaderProgramSsao ssao = ShaderPrograms.Ssao;
-        ShaderProgramBilateralblur blur = ShaderPrograms.Bilateralblur;
-        if (ssao == null || ssao.LoadError || ssao.Disposed) return false;
-        if (blur == null || blur.LoadError || blur.Disposed) return false;
-        return true;
+        else if (!nativeVanillaSsaoUnreadyReported)
+        {
+            nativeVanillaSsaoUnreadyReported = true;
+            platform!.Logger.Warning("VulkanStory: vanilla SSAO skipped; its targets or programs are not available.");
+        }
+        return ready;
     }
 
     // ------------------------------------------------------------------ 1: vanilla SSAO
@@ -383,7 +386,7 @@ internal sealed partial class GameGraphicsAdapter
     /// <see cref="AmbientOcclusionShadersUseGtao" /> and the SSAO G-buffer's condition) and returns
     /// the denoised visibility; 0 hands the frame to vanilla SSAO.
     /// </summary>
-    internal int RenderGtao(float[] projectMatrix)
+    private int RenderGtao(float[] projectMatrix)
     {
         ambientOcclusionOutput = 0;
         if (device == null || projectMatrix == null || ambientOcclusionFailure != null) return 0;

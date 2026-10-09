@@ -116,16 +116,18 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
 
     /// <summary>
     /// Teardown only: waits for every signalled frame before the caller destroys
-    /// what those frames name, and never throws (a lost device or an exception
-    /// unwinding past the caller's own idle wait must not turn into a driver crash
-    /// on destroying objects a queued command buffer still uses).
+    /// what those frames name (a caller unwinding past its own idle wait must not
+    /// destroy objects a queued command buffer still uses), and never throws. A
+    /// failed wait (a lost device, or the 5 s bound passing) is reported through
+    /// <see cref="VulkanResult.OnFailure" /> and returns false; the caller still
+    /// destroys what it owns, so a lost device does not leak the whole ring.
     /// </summary>
-    public void WaitForSignalledFramesAtTeardown() => WaitAtTeardown(Frame, FrameSignalled);
+    public bool WaitForSignalledFramesAtTeardown() => WaitAtTeardown(Frame, FrameSignalled);
 
     /// <summary>The Transfer timeline's counterpart of <see cref="WaitForSignalledFramesAtTeardown" />.</summary>
-    public void WaitForSignalledTransfersAtTeardown() => WaitAtTeardown(Transfer, TransferSignalled);
+    public bool WaitForSignalledTransfersAtTeardown() => WaitAtTeardown(Transfer, TransferSignalled);
 
-    private void WaitAtTeardown(Semaphore semaphore, ulong signalled)
+    private bool WaitAtTeardown(Semaphore semaphore, ulong signalled)
     {
         Semaphore handle = semaphore;
         ulong target = signalled;
@@ -139,7 +141,13 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
         long waitStart = VulkanStats.WaitStart();
         Result result = _context.Api.WaitSemaphores(_context.Device, &info, 5UL * 1000 * 1000 * 1000);
         VulkanStats.NoteWait(WaitSite.DeviceWaitIdle, waitStart);
-        VulkanResult.Check(result, "draining a timeline before teardown");
+        if (result == Result.Success) return true;
+
+        // Check reports the failure (once, for a lost device) and throws; the
+        // throw is what this method must not pass on.
+        try { VulkanResult.Check(result, "draining a timeline before teardown"); }
+        catch (Exception) { }
+        return false;
     }
 
     // --------------------------------------------------------------- Transfer
@@ -222,6 +230,10 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
 /// <see cref="Collect" /> that sees both counters at or past its values, never
 /// earlier, and ready entries are destroyed in the order they were retired.
 ///
+/// Entries are appended under the lock with the clock's recorded values, which
+/// only grow, so both values are non-decreasing along the list: the entries
+/// that completed are always a prefix of it, removed in one step.
+///
 /// <see cref="Retire" /> is safe from any thread (the game's VAO and UBO
 /// finalizers release from the finalizer thread). <see cref="Collect" /> runs on
 /// the render thread at the start of a frame, and disposes outside the lock so a
@@ -254,8 +266,9 @@ internal sealed class RetireQueue
 
     /// <summary>
     /// Destroys every entry whose Frame and Transfer values have both completed,
-    /// oldest first. An entry that has not passed stays queued without holding back
-    /// later entries that have. Returns how many were destroyed.
+    /// oldest first. Those are a prefix of the queue (see the class remarks), so
+    /// the scan stops at the first entry that has not passed. Returns how many
+    /// were destroyed.
     /// </summary>
     public int Collect()
     {
@@ -267,22 +280,23 @@ internal sealed class RetireQueue
         ulong frameCompleted = _clock.FrameCompleted;
         ulong transferCompleted = _clock.TransferCompleted;
 
-        List<Entry>? ready = null;
+        Entry[] ready;
         lock (_lock)
         {
-            foreach (Entry entry in _entries)
+            int count = 0;
+            while (count < _entries.Count &&
+                   _entries[count].Frame <= frameCompleted &&
+                   _entries[count].Transfer <= transferCompleted)
             {
-                if (entry.Frame <= frameCompleted && entry.Transfer <= transferCompleted)
-                {
-                    ready ??= new List<Entry>();
-                    ready.Add(entry);
-                }
+                count++;
             }
+            if (count == 0) return 0;
+            ready = new Entry[count];
+            _entries.CopyTo(0, ready, 0, count);
         }
 
-        if (ready == null) return 0;
-        foreach (Entry entry in ready) DisposeEntry(entry);
-        return ready.Count;
+        DisposePrefix(ready);
+        return ready.Length;
     }
 
     /// <summary>A failed release is terminal: retain its owner and never retry it.</summary>
@@ -295,6 +309,37 @@ internal sealed class RetireQueue
         }
     }
 
+    /// <summary>
+    /// Destroys <paramref name="prefix" />, the oldest entries of the queue in
+    /// order, outside the lock (a Dispose that retires something appends behind
+    /// them), then removes the ones destroyed with a single RemoveRange. A failed
+    /// Dispose is terminal (<see cref="RequireLifetime" />): the entries before it
+    /// are still removed; it and the ones after it stay queued.
+    /// </summary>
+    private void DisposePrefix(Entry[] prefix)
+    {
+        int disposed = 0;
+        try
+        {
+            foreach (Entry entry in prefix)
+            {
+                DisposeEntry(entry);
+                disposed++;
+            }
+        }
+        finally
+        {
+            if (disposed > 0)
+            {
+                lock (_lock)
+                {
+                    _entries.RemoveRange(0, disposed);
+                    Volatile.Write(ref _count, _entries.Count);
+                }
+            }
+        }
+    }
+
     private void DisposeEntry(Entry entry)
     {
         RequireLifetime();
@@ -304,29 +349,25 @@ internal sealed class RetireQueue
             lock (_lock) { _lifetimeFailure ??= error; }
             throw;
         }
-        lock (_lock)
-        {
-            _entries.RemoveAt(_entries.FindIndex(candidate => ReferenceEquals(candidate, entry)));
-            Volatile.Write(ref _count, _entries.Count);
-        }
     }
 
     /// <summary>
     /// Destroys everything regardless of the timelines, oldest first. Teardown
-    /// only, after the GPU has finished all submitted work.
+    /// only, after the GPU has finished all submitted work. Repeats until the
+    /// queue is empty, since a Dispose may retire further resources.
     /// </summary>
     public void DisposeAll()
     {
         while (true)
         {
             RequireLifetime();
-            Entry entry;
+            Entry[] all;
             lock (_lock)
             {
                 if (_entries.Count == 0) return;
-                entry = _entries[0];
+                all = _entries.ToArray();
             }
-            DisposeEntry(entry);
+            DisposePrefix(all);
         }
     }
 }
@@ -400,13 +441,19 @@ internal sealed class ResourceAge
     }
 
     /// <summary>Whether any resource a set names is short-lived.</summary>
-    public bool NamesShortLived(DescriptorSetContents contents)
+    public bool NamesShortLived(DescriptorSetContents contents) =>
+        NamesShortLived(contents.Samplers, contents.Buffers);
+
+    /// <summary>Whether any resource a borrowed set key names is short-lived.</summary>
+    public bool NamesShortLived(DescriptorSetKey key) => NamesShortLived(key.Samplers, key.Buffers);
+
+    private bool NamesShortLived(ReadOnlySpan<SamplerBindingValue> samplers, ReadOnlySpan<BufferBindingValue> buffers)
     {
-        foreach (SamplerBindingValue sampler in contents.Samplers)
+        foreach (SamplerBindingValue sampler in samplers)
         {
             if (IsShortLived(sampler.Resource)) return true;
         }
-        foreach (BufferBindingValue buffer in contents.Buffers)
+        foreach (BufferBindingValue buffer in buffers)
         {
             if (IsShortLived(buffer.Resource)) return true;
         }

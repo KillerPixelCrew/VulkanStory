@@ -490,6 +490,9 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     /// <summary>Compiles queued or running, prewarm included.</summary>
     public int PendingCompiles => _pendingJobs.Count;
 
+    /// <summary>Keys a lookup or a <see cref="Prepare" /> is waiting for; a prewarm no lookup asked for is not one.</summary>
+    public int PendingDemandKeys => _pendingByKey.Count;
+
     /// <summary>Prewarmed pipelines published and not yet claimed by a lookup.</summary>
     public int PrewarmedWaiting => _prewarmed.Count;
 

@@ -68,12 +68,7 @@ internal static class ShaderSourceConsumerPatches
             throw new InvalidOperationException("Active shader source routing lost its session.");
         return session.Graphics;
     }
-    private static string? Source(string name)
-    {
-        using Stream? stream = typeof(GameGraphicsAdapter).Assembly.GetManifestResourceStream("VulkanStory.Game.Shaders." + name);
-        if (stream == null) return null;
-        using var reader = new StreamReader(stream); return reader.ReadToEnd();
-    }
+    private static string? Source(string name) => GameGraphicsAdapter.EmbeddedShaderSource(name);
     private static bool LoadSource(ShaderProgram __0, EnumShaderType __1)
     {
         if (Adapter() is not { } graphics) return true;
@@ -92,7 +87,8 @@ internal static class ShaderSourceConsumerPatches
     private static bool LoadInclude(ShaderProgram __0, string __1, HashSet<string>? __2, ref string __result)
     {
         if (Adapter() is not { } graphics ||
-            (__1 != "vertexwarp.vsh" && __1 != "vulkanstory-motion.ash") || Source(__1) is not { } code) return true;
+            !GameGraphicsAdapter.OwnedShaderIncludes.Contains(__1) || Source(__1) is not { } code) return true;
+        // Only the shared vertexwarp include defers to an asset override; the motion include is ours alone.
         if (__1 == "vertexwarp.vsh" && !graphics.ShaderOverrides.MayReplaceInclude(__1)) return true;
         __0.includes.Add(__1);
         __result = Expand(__0, code, __2 ?? new HashSet<string>());

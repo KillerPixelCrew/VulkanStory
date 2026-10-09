@@ -25,9 +25,13 @@ public static class HeadlessHarnessOptions
     /// <summary>The validated scenario, or null when the bounded scenario runner is not active.</summary>
     internal static readonly HeadlessScenario? Scenario = ResolveScenario();
 
-    /// <summary>Main scenarios own their Options lifecycle and do not require loading a world.</summary>
-    internal static readonly bool MainMenuOptions = Enabled &&
+    /// <summary>The harness runs in the main-menu context (a main scenario or the legacy main-options diagnostic) and does not load a world.</summary>
+    internal static readonly bool MainMenuContext = Enabled &&
         (Scenario?.Context == "main" || ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS"));
+
+    /// <summary>The legacy main-menu Options diagnostic drives the menu; main scenarios own their Options lifecycle instead.</summary>
+    internal static readonly bool LegacyMainOptionsDiagnostic = Enabled &&
+        ResolveFlag("VULKANSTORY_HEADLESS_MAIN_OPTIONS") && Scenario == null;
 
     /// <summary>The in-world frames to write, ascending and without duplicates. Never null.</summary>
     public static readonly long[] Frames = ResolveFrames();

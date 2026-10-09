@@ -50,10 +50,25 @@ public sealed class VulkanStoryModSystem : ModSystem
     /// <summary>Closes owned GUI/HUD objects and forwards departure to the early runtime.</summary>
     private void WorldLeft()
     {
-        settings?.TryClose(); settings?.Dispose(); settings = null;
-        fpsHud?.TryClose(); fpsHud?.Dispose(); fpsHud = null;
+        CloseOwnedGui();
         if (client != null && AppContext.GetData("VulkanStory.Runtime.WorldLeft") is Action<object> callback)
             callback(client.World);
+    }
+    /// <summary>Closes and disposes the owned settings dialog and FPS HUD.</summary>
+    private void CloseOwnedGui()
+    {
+        settings?.TryClose(); settings?.Dispose(); settings = null;
+        fpsHud?.TryClose(); fpsHud?.Dispose(); fpsHud = null;
+    }
+    /// <summary>Reads the runtime's settings read/apply callbacks when the early runtime published them.</summary>
+    private static bool TryGetSettingsCallbacks(out System.Func<string> read, out System.Func<string, string?> apply)
+    {
+        read = null!; apply = null!;
+        if (AppContext.GetData("VulkanStory.Runtime.ReadSettings") is not System.Func<string> reader ||
+            AppContext.GetData("VulkanStory.Runtime.ApplySettings") is not System.Func<string, string?> applier)
+            return false;
+        read = reader; apply = applier;
+        return true;
     }
     /// <summary>Dispatches renderer settings/status/controller commands through process callbacks and returns user-visible availability/errors.</summary>
     private TextCommandResult Command(TextCommandCallingArgs args)
@@ -79,8 +94,7 @@ public sealed class VulkanStoryModSystem : ModSystem
             if (args[1] is not string key || string.IsNullOrWhiteSpace(key) ||
                 args[2] is not string value || string.IsNullOrWhiteSpace(value))
                 return TextCommandResult.Error("Use .vulkanstory set <setting> <value>.");
-            if (AppContext.GetData("VulkanStory.Runtime.ReadSettings") is not System.Func<string> read ||
-                AppContext.GetData("VulkanStory.Runtime.ApplySettings") is not System.Func<string, string?> apply)
+            if (!TryGetSettingsCallbacks(out var read, out var apply))
                 return TextCommandResult.Error("VulkanStory runtime is unavailable.");
             try
             {
@@ -93,8 +107,7 @@ public sealed class VulkanStoryModSystem : ModSystem
         }
         if (string.IsNullOrEmpty(action) || action == "settings")
         {
-            if (AppContext.GetData("VulkanStory.Runtime.ReadSettings") is not System.Func<string> read ||
-                AppContext.GetData("VulkanStory.Runtime.ApplySettings") is not System.Func<string, string?> apply)
+            if (!TryGetSettingsCallbacks(out var read, out var apply))
             { return TextCommandResult.Error("VulkanStory runtime is unavailable. Restart after installing or enabling it."); }
             settings?.TryClose(); settings?.Dispose();
             settings = new RendererSettingsDialog(client, read(), apply);
@@ -119,8 +132,7 @@ public sealed class VulkanStoryModSystem : ModSystem
     /// <remarks>Disposes owned GUI/HUD objects and detaches world events; the weak chat handler can remain in the public registry.</remarks>
     public override void Dispose()
     {
-        settings?.TryClose(); settings?.Dispose(); settings = null;
-        fpsHud?.TryClose(); fpsHud?.Dispose(); fpsHud = null;
+        CloseOwnedGui();
         if (client != null)
         {
             client.Event.LevelFinalize -= WorldReady; client.Event.LeaveWorld -= WorldLeft;

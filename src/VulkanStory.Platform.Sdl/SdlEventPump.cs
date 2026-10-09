@@ -28,8 +28,10 @@ public static unsafe class SdlEventPump
     public const uint GamepadRemapped = 0x655;
     /// <summary>SDL gamepad axis event sampled for active-device handoff.</summary>
     public const uint GamepadAxisMotion = 0x650;
-    /// <summary>SDL gamepad button press event sampled for active-device handoff.</summary>
+    /// <summary>SDL gamepad button press event sampled for active-device handoff and forwarded as a button transition.</summary>
     public const uint GamepadButtonDown = 0x651;
+    /// <summary>SDL gamepad button release event forwarded as a button transition.</summary>
+    public const uint GamepadButtonUp = 0x652;
     /// <summary>Physical key press event; committed text is carried separately.</summary>
     public const uint KeyDown = 0x300;
     /// <summary>Physical key release event.</summary>
@@ -100,11 +102,12 @@ public static unsafe class SdlEventPump
     /// <param name="onInputPumped">Runs after PumpEvents and gamepad refresh, before event dispatch.</param>
     /// <param name="onGamepadActivity">Receives a device ID on a button press or axis movement of at least half travel.</param>
     /// <param name="updateGamepads">Optional refresh callback invoked before the completed-pump marker.</param>
+    /// <param name="onGamepadButton">Receives every gamepad button transition in queue order as (instance ID, SDL_GamepadButton index, down).</param>
     /// <returns>Whether any gamepad added/removed/remapped event was observed.</returns>
     /// <remarks>The frame owner must call this once; independent SDL_PollEvent readers would remove each other's events.</remarks>
     public static bool Drain(Action<SdlInputEvent>? onWindowEvent = null,
         Action? onInputPumped = null, Action<int>? onGamepadActivity = null,
-        Action? updateGamepads = null)
+        Action? updateGamepads = null, Action<int, int, bool>? onGamepadButton = null)
     {
         SdlNativeLibrary.EnsureRegistered();
         SDL_PumpEvents();
@@ -118,6 +121,9 @@ public static unsafe class SdlEventPump
         {
             uint type = *(uint*)buffer;
             deviceChanged |= type is GamepadAdded or GamepadRemoved or GamepadRemapped;
+            // SDL_GamepadButtonEvent: which (SDL_JoystickID) at 16, button at 20; the type gives the direction.
+            if (onGamepadButton != null && type is GamepadButtonDown or GamepadButtonUp)
+                onGamepadButton(*(int*)(buffer + 16), buffer[20], type == GamepadButtonDown);
             if (onGamepadActivity != null && type == GamepadButtonDown && buffer[21] != 0)
                 onGamepadActivity(*(int*)(buffer + 16));
             if (onGamepadActivity != null && type == GamepadAxisMotion &&
@@ -127,6 +133,18 @@ public static unsafe class SdlEventPump
                 onWindowEvent(input);
         }
         return deviceChanged;
+    }
+
+    /// <summary>Blocks until SDL has a queued event or the timeout elapses, leaving any event queued for <see cref="Drain"/>.</summary>
+    /// <param name="timeoutMilliseconds">Maximum wait; zero only checks the queue.</param>
+    /// <returns>Whether an event is queued.</returns>
+    /// <remarks>Used to throttle a frame owner whose presentation is idle without delaying input or window events.</remarks>
+    public static bool WaitForEvent(int timeoutMilliseconds)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(timeoutMilliseconds);
+        SdlNativeLibrary.EnsureRegistered();
+        // A null event pointer peeks: SDL does not remove the event it waited for.
+        return SDL_WaitEventTimeout(null, timeoutMilliseconds);
     }
 
     /// <summary>Decodes a live SDL_Event buffer into the supported neutral input/window/display shape.</summary>
@@ -199,6 +217,8 @@ public static unsafe class SdlEventPump
     private static extern ulong SDL_GetTicksNS();
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_PollEvent(void* eventBuffer);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_WaitEventTimeout(void* eventBuffer, int timeoutMilliseconds);
 }
 
 /// <summary>Managed copy of one supported SDL input/window/display event; only fields relevant to its Type are populated.</summary>

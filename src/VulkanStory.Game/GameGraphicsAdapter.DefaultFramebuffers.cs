@@ -273,10 +273,10 @@ internal sealed partial class GameGraphicsAdapter
             }
             finally { noiseHandle.Free(); }
             renderer.SetTextureParameter(ssao.ColorTextureIds[1],
-                10242,
+                GameGlTextureTokens.TextureWrapS,
                 10497);
             renderer.SetTextureParameter(ssao.ColorTextureIds[1],
-                10243,
+                GameGlTextureTokens.TextureWrapT,
                 10497);
 
             float[] ssaoKernel = GameFramebufferBindings.SsaoKernel(platform!);
@@ -417,10 +417,10 @@ internal sealed partial class GameGraphicsAdapter
     private void SetupTextureSampler(int textureId, int filter, int wrap)
     {
         var renderer = RequireDevice();
-        renderer.SetTextureParameter(textureId, 10241, filter);
-        renderer.SetTextureParameter(textureId, 10240, filter);
-        renderer.SetTextureParameter(textureId, 10242, wrap);
-        renderer.SetTextureParameter(textureId, 10243, wrap);
+        renderer.SetTextureParameter(textureId, GameGlTextureTokens.TextureMinFilter, filter);
+        renderer.SetTextureParameter(textureId, GameGlTextureTokens.TextureMagFilter, filter);
+        renderer.SetTextureParameter(textureId, GameGlTextureTokens.TextureWrapS, wrap);
+        renderer.SetTextureParameter(textureId, GameGlTextureTokens.TextureWrapT, wrap);
     }
 
     private FrameBufferRef CreateColorTarget(int width, int height, EnumTextureInternalFormat format)

@@ -87,14 +87,14 @@ public sealed class AnalogInputCompanion : ModSystem
 /// <param name="player">Owning connection whose identity and base movement speed are retained.</param>
 internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IServerPlayer player) : EntityBehavior(entity)
 {
-    private bool negotiated, hasInput;
+    private bool negotiated;
     private float factor = 1f;
     private long expires;
     private EntityControls? bound;
     /// <inheritdoc />
     public override string PropertyName() => "vulkanstoryanalog";
     /// <inheritdoc />
-    /// <remarks>Only the owning connection's entity is accepted; input requires prior version negotiation and expires after 600 ms.</remarks>
+    /// <remarks>Only the owning connection's entity is accepted; input requires prior version negotiation and expires after <see cref="AnalogMovement.MaxAgeMs"/>.</remarks>
     public override void OnReceivedClientPacket(IServerPlayer sender, int packetid, byte[] data, ref EnumHandling handled)
     {
         if (packetid is not (AnalogMovement.ProbePacketId or AnalogMovement.PacketId)) return;
@@ -109,11 +109,11 @@ internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IS
             api.Network.SendEntityPacket(sender, entity.EntityId, AnalogMovement.AckPacketId, [AnalogMovement.ProtocolVersion]);
             return;
         }
-        if (!negotiated || data == null || (data.Length != 1 && data.Length != 3) || entity is not EntityPlayer current) return;
+        if (!negotiated || data is not { Length: 1 or 3 } || entity is not EntityPlayer current) return;
         EntityControls value = current.Controls;
         if (bound != null && !ReferenceEquals(bound, value)) ClearInput();
         bound = value; factor = AnalogMovement.Decode(data[0]);
-        expires = Environment.TickCount64 + 600; hasInput = true;
+        expires = Environment.TickCount64 + AnalogMovement.MaxAgeMs;
         AnalogInputCompanion.Bind(value, this);
         AnalogMovement.SetAxes(value, data.Length == 3 ? AnalogMovement.DecodeAxis(data[1]) : 0f,
             data.Length == 3 ? AnalogMovement.DecodeAxis(data[2]) : 0f);
@@ -123,13 +123,13 @@ internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IS
     /// <summary>Restores the current base-speed-scaled factor before vector calculation or clears an expired sample.</summary>
     internal void PrepareSpeed()
     {
-        if (!hasInput || bound == null) return;
+        if (bound == null) return;
         if (Environment.TickCount64 > expires) { ClearInput(); return; }
         bound.MovespeedMultiplier = player.WorldData.MoveSpeedMultiplier * factor;
     }
     /// <inheritdoc />
     public override void OnGameTick(float deltaTime)
-    { if (hasInput && Environment.TickCount64 > expires) ClearInput(); }
+    { if (bound != null && Environment.TickCount64 > expires) ClearInput(); }
     /// <inheritdoc />
     public override void OnEntityDespawn(EntityDespawnData despawn)
     { ClearInput(); negotiated = false; base.OnEntityDespawn(despawn); }
@@ -142,7 +142,7 @@ internal sealed class AnalogPlayerBehavior(Entity entity, ICoreServerAPI api, IS
             bound.MovespeedMultiplier = player.WorldData.MoveSpeedMultiplier;
             AnalogInputCompanion.Unbind(bound); bound = null;
         }
-        hasInput = false; factor = 1f; expires = 0;
+        factor = 1f; expires = 0;
     }
     /// <summary>Clears movement overrides and requires a fresh protocol handshake.</summary>
     internal void ResetConnection() { ClearInput(); negotiated = false; }

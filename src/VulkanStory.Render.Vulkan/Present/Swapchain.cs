@@ -128,6 +128,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     private readonly List<Fence> _pendingPresents = new();
     private readonly Stack<Fence> _freePresentFences = new();
     private bool _disposed;
+    private bool _destroyPrepared;
     private Exception? _disposalFailure;
 
     public SwapchainSlot(VulkanContext context, ISwapchainDispatch api, SwapchainKHR handle,
@@ -279,10 +280,19 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         try { DisposeCore(); _disposed = true; }
         catch (Exception failure) { _disposalFailure = failure; throw; }
     }
+    /// <summary>Runs the dispatch owner's disable/drain preparation for this chain once.</summary>
+    /// <remarks>Disposal prepares an unprepared slot itself; an owner that must drain first calls this earlier.</remarks>
+    public void PrepareDestroy()
+    {
+        if (_destroyPrepared) return;
+        _api.PrepareDestroy(Handle);
+        _destroyPrepared = true;
+    }
+
     private void DisposeCore()
     {
         // SDK work must stop before its image views or synchronization go away.
-        _api.PrepareDestroy(Handle);
+        PrepareDestroy();
 
         // Teardown waits; ordinary retirement polls these fences before disposing.
         foreach (Fence pending in _pendingPresents)
@@ -469,6 +479,9 @@ internal sealed unsafe class Swapchain : IDisposable
         }
         else dispatch = new NativeSwapchainDispatch(swapchainApi);
         var created = new Swapchain(context, surfaceApi, dispatch, surface, clock);
+        // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id and its
+        // feature were actually enabled; chaining it otherwise is a validation error.
+        created.PresentIdEnabled = context.Capabilities.PresentIdEnabled;
         created._vendorLatency = vendorLatency;
         created._width = width;
         created._height = height;
@@ -533,7 +546,7 @@ internal sealed unsafe class Swapchain : IDisposable
             // create the successor through the same context. Switching owner
             // follows this path too, so acquire/present never mix providers.
             if (old != null) DisableStreamlineForRebuild(old);
-            if (old != null) _swapchainApi.PrepareDestroy(old.Handle);
+            old?.PrepareDestroy();
             // Retained slots still belong to the departing dispatch even if a
             // failed creation left no current slot. Release them before switching.
             VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before FG proxy transition");
@@ -776,6 +789,20 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     public bool TryAcquire(out PresentTarget target)
     {
+        bool acquired = TryAcquireCore(out target);
+        LastAcquireSkipped = !acquired;
+        return acquired;
+    }
+
+    /// <summary>
+    /// Whether the most recent <see cref="TryAcquire" /> returned no image (parked,
+    /// still out of date after a rebuild, or a failed rebuild). False before the
+    /// first acquire and after any acquire that produced an image.
+    /// </summary>
+    public bool LastAcquireSkipped { get; private set; }
+
+    private bool TryAcquireCore(out PresentTarget target)
+    {
         target = default;
         _retirement.Collect();
 
@@ -932,7 +959,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
         // Teardown, not recreation: everything this chain ever presented must be
         // finished before its slots go.
-        if (_current != null) _swapchainApi.PrepareDestroy(_current.Handle);
+        _current?.PrepareDestroy();
         VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle for swapchain teardown");
         _retirement.DisposeAll();
         _vendorLatency?.OnSwapchainRetired();

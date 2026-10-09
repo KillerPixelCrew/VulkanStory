@@ -36,6 +36,9 @@ PFun_slPCLGetState* pclState{};
 PFun_slPCLSetOptions* pclOptions{};
 PFun_slDLSSGSetOptions* fgOptions{};
 PFun_slDLSSGGetState* fgState{};
+// True between a successful slInit and the matching slShutdown. The module can
+// stay loaded after shutdown, so it does not mean the SDK is initialized.
+bool initialized{};
 bool fgConfigured{};
 bool fgResourcesMayExist{};
 bool fgEnabled{};
@@ -52,17 +55,32 @@ const wchar_t* pluginPath{};
 /// @brief Resolves a function from the currently loaded interposer without acquiring another module reference.
 template<class T> T proc(const char* name) { return reinterpret_cast<T>(GetProcAddress(module, name)); }
 
+/// @brief Clears the SDK entry points and frame token that slShutdown or a failed slInit invalidates.
+/// @details The Vulkan dispatch entry points stay: Vulkan objects may still use interposer code until the module is unloaded.
+void clearSdkFunctions() {
+    init = nullptr; shutdown = nullptr; featureFunction = nullptr; newFrameToken = nullptr;
+    isFeatureSupported = nullptr; setTagForFrame = nullptr; setConstants = nullptr; freeResources = nullptr;
+    reflexOptions = nullptr; reflexSleep = nullptr; reflexState = nullptr; pclMarker = nullptr;
+    pclState = nullptr; pclOptions = nullptr;
+    fgOptions = nullptr; fgState = nullptr; frameToken = nullptr;
+}
+
 /// @brief Resolves one feature function only when Streamline reports success and a nonnull address.
 bool loadFeature(sl::Feature feature, const char* name, void*& target) {
     return featureFunction && featureFunction(feature, name, target) == sl::Result::eOk && target;
 }
 
-/// @brief Checks offline Authenticode status and the pinned Streamline interposer SHA-256.
-/// @details This helper releases all WinTrust, file and cryptographic handles before returning; failed verification leaves initialization unavailable.
-bool verifyRelease(wchar_t* path) {
+/// @brief Opens the interposer without write/delete sharing and checks its offline Authenticode status and pinned SHA-256 through that handle.
+/// @details The returned handle keeps the verified file from being written, renamed or deleted; the caller holds it across LoadLibraryExW and closes it afterwards. WinTrust and cryptographic handles are released before returning.
+/// @return The open verified file handle, or INVALID_HANDLE_VALUE when opening or verification fails.
+HANDLE openVerifiedRelease(const wchar_t* path) {
+    HANDLE input = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (input == INVALID_HANDLE_VALUE) return INVALID_HANDLE_VALUE;
     WINTRUST_FILE_INFO file{};
     file.cbStruct = sizeof(file);
     file.pcwszFilePath = path;
+    file.hFile = input;
     WINTRUST_DATA trust{};
     trust.cbStruct = sizeof(trust);
     trust.dwUIChoice = WTD_UI_NONE;
@@ -75,7 +93,11 @@ bool verifyRelease(wchar_t* path) {
     const LONG signature = WinVerifyTrust(nullptr, &action, &trust);
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &action, &trust);
-    if (signature != ERROR_SUCCESS) return false;
+    LARGE_INTEGER start{};
+    if (signature != ERROR_SUCCESS || !SetFilePointerEx(input, start, nullptr, FILE_BEGIN)) {
+        CloseHandle(input);
+        return INVALID_HANDLE_VALUE;
+    }
 
     // The 2.14.1 release shipped with this repository is pinned byte-for-byte.
     // This is stricter than accepting any Authenticode publisher and avoids
@@ -86,9 +108,6 @@ bool verifyRelease(wchar_t* path) {
         0xd6, 0x7d, 0x7b, 0x94, 0xeb, 0xb1, 0xc1, 0xa5,
         0xed, 0x54, 0xef, 0x49, 0x34, 0xe1, 0xea, 0x4c,
     };
-    HANDLE input = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
-        nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-    if (input == INVALID_HANDLE_VALUE) return false;
     HCRYPTPROV provider{};
     HCRYPTHASH hash{};
     uint8_t digest[32]{};
@@ -106,8 +125,9 @@ bool verifyRelease(wchar_t* path) {
         size == sizeof(expected) && memcmp(digest, expected, size) == 0;
     if (hash) CryptDestroyHash(hash);
     if (provider) CryptReleaseContext(provider, 0);
+    if (valid) return input;
     CloseHandle(input);
-    return valid;
+    return INVALID_HANDLE_VALUE;
 }
 
 /// @brief Borrowed Vulkan image/view metadata passed through the Streamline C ABI.
@@ -172,21 +192,32 @@ void onStreamlineMessage(sl::LogType type, const char* message) {
 
 extern "C" {
 /// @brief Loads the verified interposer and initializes the selected PCL/Reflex/DLSS-G feature set.
-/// @details Global bridge state is owned by one serialized host session. Plugin path and project identity are copied into persistent strings; repeated initialization with a loaded module returns zero.
+/// @details Global bridge state is owned by one serialized host session. Plugin path and project identity are copied into persistent strings. Repeated initialization while initialized returns zero. After VulkanStorySlShutdown the interposer stays loaded, so a later call re-runs slInit on that module, which must come from the same directory.
 /// @param directory Borrowed terminated directory path containing the private interposer/plugins.
 /// @param projectId Borrowed terminated project identity copied for SDK use.
 /// @param loadReflex Requests Reflex plus PCL when DLSS-G is not requested.
 /// @param loadDlssG Requests DLSS-G, Reflex and PCL.
-/// @return Zero on successful/already-loaded initialization, a negative local failure or native Streamline result.
+/// @return Zero on successful/already-initialized state, a negative local failure or native Streamline result.
 __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, const char* projectId,
     uint32_t loadReflex, uint32_t loadDlssG) {
-    if (module) return 0;
+    if (initialized) return 0;
     if (!directory || !projectId) return -1;
-    wchar_t path[MAX_PATH]{};
-    if (swprintf(path, MAX_PATH, L"%ls\\sl.interposer.dll", directory) < 0) return -2;
-    if (!verifyRelease(path)) return -5;
-    module = LoadLibraryExW(path, nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-    if (!module) return -3;
+    // A module kept loaded after shutdown may still back Vulkan dispatch tables;
+    // only a module loaded by this call is released on failure.
+    const bool loadedHere = !module;
+    if (loadedHere) {
+        wchar_t path[MAX_PATH]{};
+        if (swprintf(path, MAX_PATH, L"%ls\\sl.interposer.dll", directory) < 0) return -2;
+        // The verified handle denies writes, renames and deletes until the loader
+        // has mapped the same file.
+        HANDLE verified = openVerifiedRelease(path);
+        if (verified == INVALID_HANDLE_VALUE) return -5;
+        module = LoadLibraryExW(path, nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        CloseHandle(verified);
+        if (!module) return -3;
+    } else if (pluginDirectory != directory) {
+        return -6;
+    }
     init = proc<PFun_slInit*>("slInit");
     shutdown = proc<PFun_slShutdown*>("slShutdown");
     featureFunction = proc<PFun_slGetFeatureFunction*>("slGetFeatureFunction");
@@ -199,7 +230,9 @@ __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, cons
     deviceProc = proc<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
     if (!init || !shutdown || !featureFunction || !newFrameToken || !isFeatureSupported || !setTagForFrame ||
         !setConstants || !freeResources || !instanceProc || !deviceProc) {
-        FreeLibrary(module); module = nullptr; return -4;
+        clearSdkFunctions();
+        if (loadedHere) { FreeLibrary(module); module = nullptr; }
+        return -4;
     }
     pluginDirectory = directory;
     projectIdentity = projectId;
@@ -224,19 +257,23 @@ __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, cons
     preferences.pathsToPlugins = &pluginPath;
     preferences.numPathsToPlugins = 1;
     const auto result = init(preferences, sl::kSDKVersion);
-    if (result != sl::Result::eOk) { FreeLibrary(module); module = nullptr; return static_cast<int>(result); }
+    if (result != sl::Result::eOk) {
+        clearSdkFunctions();
+        if (loadedHere) { FreeLibrary(module); module = nullptr; }
+        return static_cast<int>(result);
+    }
+    initialized = true;
     return 0;
 }
 
-/// @brief Shuts down Streamline and clears feature pointers/state while retaining the interposer module.
-/// @details Call after provider work is retired. Vulkan dispatch pointers can still reference interposer code until Vulkan devices/instances are destroyed.
+/// @brief Shuts down Streamline and clears SDK function pointers/state while retaining the interposer module.
+/// @details Call after provider work is retired. Vulkan dispatch pointers can still reference interposer code until Vulkan devices/instances are destroyed. A later VulkanStorySlInitialize re-runs slInit.
 __declspec(dllexport) void VulkanStorySlShutdown() {
     if (!module) return;
-    if (shutdown) shutdown();
-    reflexOptions = nullptr; reflexSleep = nullptr; reflexState = nullptr; pclMarker = nullptr;
-    pclState = nullptr; pclOptions = nullptr;
-    fgOptions = nullptr; fgState = nullptr; frameToken = nullptr;
-    freeResources = nullptr;
+    if (initialized && shutdown) shutdown();
+    initialized = false;
+    // Only the Vulkan dispatch entry points remain valid after slShutdown.
+    clearSdkFunctions();
     fgConfigured = false;
     fgResourcesMayExist = false;
     fgEnabled = false;
@@ -251,6 +288,7 @@ __declspec(dllexport) void VulkanStorySlShutdown() {
 __declspec(dllexport) void VulkanStorySlUnload() {
     if (module) FreeLibrary(module);
     module = nullptr;
+    initialized = false;
     instanceProc = nullptr;
     deviceProc = nullptr;
 }
@@ -470,24 +508,20 @@ __declspec(dllexport) int VulkanStorySlMarkerForToken(uintptr_t token, uint32_t 
     return pclMarker && frame ? static_cast<int>(pclMarker(static_cast<sl::PCLMarker>(marker), *frame)) : -1;
 }
 /// @brief Sets matching camera constants and tags depth, motion, HUD-free color and UI on the current token.
-/// @details Input resources use eOnlyValidNow so the SDK records copies on commandBuffer before renderer staging images are reused. Full-window rendering leaves backbuffer size to the SDK; client backbuffer tags are needed only for subregions.
+/// @details Input resources use eOnlyValidNow so the SDK records copies on commandBuffer before renderer staging images are reused. Full-window rendering leaves backbuffer size to the SDK, which resolves it after any deferred swapchain recreation; client backbuffer tags are needed only for subregions.
 /// @param commandBuffer Borrowed recording Vulkan command buffer used for immediate resource copies.
 /// @param depth Borrowed depth metadata.
 /// @param motion Borrowed motion-vector metadata.
 /// @param hudless Borrowed HUD-free color metadata.
 /// @param ui Borrowed premultiplied UI metadata.
 /// @param camera Borrowed matching constants/matrix pointers.
-/// @param backbufferWidth Nonzero presentation width.
-/// @param backbufferHeight Nonzero presentation height.
-/// @return SDK result, -1 for missing required bindings/pointers or -2 for an empty backbuffer extent.
+/// @return SDK result, or -1 for missing required bindings/pointers.
 __declspec(dllexport) int VulkanStorySlTagFrame(VkCommandBuffer commandBuffer,
     const TaggedImage* depth, const TaggedImage* motion, const TaggedImage* hudless,
-    const TaggedImage* ui, const FrameCamera* camera, uint32_t backbufferWidth,
-    uint32_t backbufferHeight) {
+    const TaggedImage* ui, const FrameCamera* camera) {
     if (!setTagForFrame || !setConstants || !frameToken || !depth || !motion ||
         !hudless || !ui || !camera || !camera->viewToClip || !camera->clipToView ||
         !camera->clipToPrevClip || !camera->prevClipToClip) return -1;
-    if (!backbufferWidth || !backbufferHeight) return -2;
 
     sl::Constants constants{};
     rowMajor(constants.cameraViewToClip, camera->viewToClip);
@@ -533,11 +567,8 @@ __declspec(dllexport) int VulkanStorySlTagFrame(VkCommandBuffer commandBuffer,
 }
 /// @brief Clears scene resource tags for the current frame token.
 /// @details Use at non-scene frames or before resources/provider state change. The SDK resolves the full backbuffer after deferred swapchain recreation; no client subregion is supplied.
-/// @param width Retained for native ABI compatibility; full-backbuffer sizing is SDK-owned.
-/// @param height Retained for native ABI compatibility; full-backbuffer sizing is SDK-owned.
 /// @return SDK result, or -1 without tagging/token availability.
-__declspec(dllexport) int VulkanStorySlInvalidateFrameTagsWithExtent([[maybe_unused]] uint32_t width,
-    [[maybe_unused]] uint32_t height) {
+__declspec(dllexport) int VulkanStorySlInvalidateFrameTags() {
     if (!setTagForFrame || !frameToken) return -1;
     sl::ResourceTag tags[] = {
         {nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr},

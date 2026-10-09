@@ -1,6 +1,6 @@
 # VulkanStory Roadmap
 
-Updated 2026-10-08. Authoritative current status; detailed results are in
+Updated 2026-10-09. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md).
 Execution queue and acceptance criteria: [autonomous task list](../.codex/TASKS.md).
 Persistent goal is active in the current chat; T01 is in progress.
@@ -12,6 +12,9 @@ Both Game builds, both platform stage/packages and main/focused DLSS world lifec
 scenarios passed. Scoped software acceptance does not close the defects/gaps below.
 Current source `6a3fab6` removes redundant full-backbuffer tags per the pinned SDK
 guide; native build/runtime validation is pending. Installed identity remains above.
+The working tree on `17e1172` carries the uncommitted 2026-10-09 code-quality
+implementation (managed plus both native bridges); it is **not built, tested or
+validated**, and the next turn must be its validation batch (CQ-01 below).
 Current development package: `artifacts/validation/options-lifecycle-20261008-232950/stage-win`,
 installed in the user's Vintage Story directory with backup; all 400 receipt hashes verified.
 The focused DLSS-G gain scenario passed. A 2.055 s steady interval measured 38.4 real /
@@ -103,8 +106,8 @@ prepared visible launchers retain their older recorded payloads.
 
 ## Review findings
 
-All **118 review findings have completed implementations**; CLEAN-05 needed no
-change. There are **zero open review implementation findings**. The detailed
+From the 2026-10-08 review, all **118 findings have completed implementations**;
+CLEAN-05 needed no change, and none of its implementation findings is open. The detailed
 [completed ledger](completed-review-findings-2026-10-08.md) retains every ID,
 original finding, source reference, audit coverage and recorded proof limit.
 
@@ -119,6 +122,32 @@ original finding, source reference, audit coverage and recorded proof limit.
 The [current evidence](development-evidence.md) separates completed source work
 from these checks. Broader feature, platform and hardware work remains below.
 
+### Code-quality review (2026-10-09)
+
+The [code-quality review record](code-quality-review-2026-10-09.md) holds every
+finding (I, E, R, S, A, C IDs) with its per-row implementation outcome. All rows
+except S13 (not attempted: tests deferred) and the partial rows below are
+implemented in the working tree, which is **unbuilt and unvalidated**. Every
+row below is implemented-unvalidated unless marked open.
+
+| Finding | Kind | Status | Validation or remaining work |
+| --- | --- | --- | --- |
+| I2/C5 PCL ping hook | Implementation gap (migration dropped the install call) | Implemented, unvalidated | PCL ping markers reach PC Latency stats on Streamline hardware; hook removed before device disposal (SDK-04) |
+| I1 VSync mode 2 | Known defect (ran VSync off + sleep) | Implemented, unvalidated; behaviour change | Modes 0/1/2 give swap interval off/on/on and limiter on/off/on; vanilla `SetVSync` calls now ignored |
+| C1 startup window border | Known defect (Hidden start not maximizable) | Implemented, unvalidated; behaviour change | Hidden + Maximized startup fills the screen; border kept after leaving fullscreen (visible check, needs user instruction; SDL-01) |
+| C2 mouse delta scaling | Known defect (relative deltas scaled by DPI, truncated) | Implemented, unvalidated; behaviour change | Look speed at >100% scaling matches vanilla; unchanged at scale 1; SDL3 relative units per platform |
+| C14/C27 window size units | Known defect (logical vs pixel sizes) | Implemented, unvalidated; behaviour change | Saved size round-trips across launches at 150%; maximized size not saved; scenario resize, minimum size and `ScreenSize` are pixels (options-lifecycle scenario now asserts `displayWidth/Height`); possible creation flash |
+| C4 DLSS-G reset tagging | Known defect (reset frames never reached providers) | Implemented, unvalidated; behaviour change | Teleport/rebase frame is reset-tagged and does not ghost; diagnostics now show `CanGenerate=true` on reset frames (SDK-02) |
+| C3 XeSS FG transient pause | Known defect (presenter torn down on every wait) | Implemented, unvalidated; behaviour change | Pause/rebase/FOV change keeps the DX12 presenter with pass-through presents; first re-enabled frame resets history (I6); XeSS-FG-eligible hardware |
+| C8 settings reset scope | Known defect (cosmetic settings caused full reset) | Implemented, unvalidated; behaviour change | TAA sharpness drag no longer resets FG/SR/targets/history; restart-only fields saved without reset |
+| C9 minimized/parked throttle | Known defect (full load while minimized) | Implemented, unvalidated; behaviour change | Minimized window or renderer-reported stall (`VulkanDevice.PresentationStalled`: parked swapchain or skipped acquire) waits up to ~33 ms per frame and wakes on events; restore and resize resume normally |
+| C26 event-tracked gamepad buttons | Efficiency | Implemented, unvalidated | Button mask maintained from forwarded `GAMEPAD_BUTTON_DOWN/UP` events with full resync on open/remap/focus/2 s rescan; no stuck or missed buttons, pressed edges unchanged |
+| E1, A3 follow-ups | Efficiency / simplification | Implemented, unvalidated | Descriptor cache hits allocate nothing (span alternate lookup); single-source XeSS latency selection with unchanged call order |
+| C10 precise sleep | Known defect (15.6 ms sleep granularity) | Implemented, unvalidated; behaviour change | maxFps 60 cadence and FSR3 direct-FG pacing with `PreciseSleep` (high-resolution timer + spin) |
+| I4, C15, C17, C18 native bridges | Known defects (stale params, timing race, re-init, TOCTOU) | Implemented, unvalidated | Rebuild and ship `native/streamline` and `native/xess-fg` with the managed assembly (renamed `VulkanStorySlInvalidateFrameTags`); no sanitize warning; Streamline re-init; verified interposer load |
+| I5, C16, C21, C22, C23, E11, I9 | Known defects / correctness risks | Implemented, unvalidated | Streamline OUT_OF_DATE during waits rebuilds the swapchain; teardown after a failed wait; depth blit formats; latency follows effective FG; default vertex binding persists across vendor passes; vanilla SSAO guard |
+| S13 test hooks; `porting/renderer-tests` | Deferred test work | **Open**, deferred by test policy | Decide on `*ForTests` hooks; fixture must map GL stencil ops locally (`StencilOpFrom` removed) and fix the stale `DlssUpscaler` constructor at migration |
+
 ## Remaining feature and verification work
 
 These IDs retain remaining feature/compatibility work and verification boundaries.
@@ -128,12 +157,16 @@ findings to their broader feature and acceptance areas.
 
 | ID | Remaining completion boundary |
 | --- | --- |
+| CQ-01 | Validate the 2026-10-09 code-quality implementation: Game builds, rebuilt Streamline/XeSS-FG bridges, package, harness on the foggy village snapshot, and the behaviour changes in the code-quality table (including the C9 renderer stall throttle, C26 event-tracked controller buttons, C14 pixel units and the E1 descriptor lookup). Progress 2026-10-09 (`artifacts/validation/code-quality-20261009-212939`): Release managed build, shaders and all five Windows bridges built (6 compiler warnings: CS1573 at `SdlWindowHost.cs:434` and `VulkanDevice.cs:177`, CS8600 at `GameRenderSession.Scenarios.cs:525`); win-x64 staged, packaged and deployed to the user game (366 payload files verified, owned `loader.ini` preserved). Harness run and runtime behaviour checks still open |
+| CQ-02 | Open code-quality remainders: S13 `*ForTests` hooks and `porting/renderer-tests` fixture fixes (`StencilOpFrom`, `DlssUpscaler` constructor), deferred to test migration |
 | PORT-01 | Controller world ownership/damage cleanup acceptance |
 | REN-01 | Historical DLSS sky pattern: current nonreproduction is not a fix |
 | REN-02 | Moving camera/object/animation/transparency motion parity |
 | REN-03 | History reset, resize, option changes and shader reload |
 | REN-04 | Post-processing/material parity |
 | REN-05 | Graph/resource ownership and bounded fallback |
+| REN-06 | First world load showed the renderer assembling itself (missing draws, raw jitter, then TAA/SR/FG). Implemented 2026-10-09, **unbuilt and unvalidated**: a composition gate holds the last loading image until no draw waits on a pipeline, motion is valid, TAA/SR composed a full jitter cycle and FG is ready to enable (15 s timeout logs the unmet condition); temporal/FSR-blit pipelines are requested when targets are built; a cold FSR-blit pipeline no longer disables FSR for the session. Validate on the foggy village snapshot with `VULKANSTORY_HEADLESS_COMPOSITION_HOLD=1` (the harness bypasses the gate otherwise) and visibly per provider. Mid-game first-use pipeline drops (new entity/mod variants) are a separate defect |
+| REN-07 | Geometry edges against sky/fog/clouds jittered under native TAA and FSR3 (user report 2026-10-09; foliage against terrain stable). Cause: the sky reactive value (cloud/fog coverage) was read at the sky-side edge pixel while motion came from the nearest-depth tap, so edge pixels dropped history on sky jitter phases. Implemented 2026-10-09, **unbuilt and unvalidated**: `taa-resolve.fsh` reads reactive from `closestPixel`; the FSR3 reactive mask takes the 3x3 minimum. FSR4 passes no reactive mask; an unavailable FSR4 falls back to native TAA. Needs a visible check on the foggy village save with TAA, FSR3 and FSR4 |
 | SDK-01 | SR settings, unsupported behavior and live switching |
 | SDK-02 | Broader FG HUD/occlusion quality, moving-scene and pacing coverage; RTX 4070 DLSS-G functional output gain passed |
 | SDK-03 | Verify DLSS-G framebuffer teardown after SDK VRAM warning 39; the checked drain/free correction is implemented |

@@ -192,11 +192,11 @@ internal sealed class RendererSettingsPanel
             case 0:
                 DefinedChoice("Upscaler", "Upscaler");
                 DefinedChoice("Quality", "UpscalerQuality");
-                Slider("Render scale (%)", "RenderScale", 25, 100, 5, 100);
+                Slider("Render scale (%)", "RenderScale");
                 Switch("Temporal anti-aliasing", "Taa");
-                Slider("TAA sharpness (%)", "TaaSharpness", 0, 100, 5, 100);
-                Slider("TAA mip bias", "TaaMipBias", -20, 0, 1, 10);
-                Slider("Upscaler mip adjustment (%)", "UpscalerLodBiasOffset", 0, 100, 5, 100);
+                Slider("TAA sharpness (%)", "TaaSharpness");
+                Slider("TAA mip bias", "TaaMipBias");
+                Slider("Upscaler mip adjustment (%)", "UpscalerLodBiasOffset");
                 const string imageStatusKey = "vulkanstory-image-status";
                 string ImageStatus() => AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> read
                     ? string.Join("\n", read().Split('\n').Where(line =>
@@ -210,7 +210,7 @@ internal sealed class RendererSettingsPanel
                 break;
             case 1:
                 DefinedChoice("Frame generation", "FrameGeneration");
-                Slider("Requested multiplier", "FrameGenerationMultiplier", 2, 6, 1, 1);
+                Slider("Requested multiplier", "FrameGenerationMultiplier");
                 DefinedChoice("Low latency", "LowLatencyMode");
                 Switch("Show FPS counter", "ShowFpsCounter");
                 Text("Available providers and multipliers depend on your GPU. Unsupported settings fall back automatically.");
@@ -278,17 +278,22 @@ internal sealed class RendererSettingsPanel
             Label("Temporal debug view", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, labelWidth, labelHeight))
                 .AddSmallButton(labels[value], () => { if (Editable()) { draft["TaaDebugView"] = (value + 1) % labels.Length; Preview(); refresh = true; } return true; },
                     ElementBounds.Fixed(controlX, controlY, controlWidth, 28));
-            y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
+            NextRow();
         }
+        void NextRow() => y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
         void Switch(string label, string key)
         {
             bool value = draft[key]?.GetValue<bool>() ?? false;
             Label(label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, labelWidth, labelHeight))
                 .AddSwitch(next => { if (Editable()) { draft[key] = next; Preview(); } }, ElementBounds.Fixed(controlX, controlY, 35, 26), key);
-            initialize.Add(() => composer.GetSwitch(key).SetValue(value)); y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
+            initialize.Add(() => composer.GetSwitch(key).SetValue(value)); NextRow();
         }
-        void Slider(string label, string key, int min, int max, int step, float scale)
+        void Slider(string label, string key)
         {
+            // Normalization, the chat command and this slider share one range.
+            RendererRange range = RendererChoices.Range(key);
+            int min = range.SliderMin, max = range.SliderMax, step = range.Step;
+            float scale = range.Scale;
             int value = (int)MathF.Round((draft[key]?.Deserialize<float>() ?? 0f) * scale);
             string? valueKey = key == "FrameGenerationMultiplier" ? "vulkanstory-multiplier-value" : null;
             string Caption(int current) => valueKey == null ? label : label + " (" + current + "x)";
@@ -303,7 +308,7 @@ internal sealed class RendererSettingsPanel
                         composer.GetDynamicText(valueKey).SetNewText(Caption(next), false, true, false);
                     return true;
                 }, ElementBounds.Fixed(controlX, controlY, controlWidth, 26), key);
-            initialize.Add(() => composer.GetSlider(key).SetValues(Math.Clamp(value, min, max), min, max, step)); y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
+            initialize.Add(() => composer.GetSlider(key).SetValues(Math.Clamp(value, min, max), min, max, step)); NextRow();
         }
         void Choice(string label, string key, string[] values, string[] labels)
         {
@@ -314,14 +319,17 @@ internal sealed class RendererSettingsPanel
                 {
                     if (!Editable()) return true;
                     draft[key] = values[(index + 1) % values.Length];
+                    // XeSS-only quality modes fall back when another provider is selected.
                     if (key == "Upscaler" && draft[key]?.GetValue<string>() != "xess" &&
-                        draft["UpscalerQuality"]?.GetValue<string>() is "ultraquality" or "ultraqualityplus")
+                        draft["UpscalerQuality"]?.GetValue<string>() is string quality &&
+                        RendererChoices.Contains("UpscalerQuality", quality, xess: true) &&
+                        !RendererChoices.Contains("UpscalerQuality", quality))
                         draft["UpscalerQuality"] = "quality";
                     Preview();
                     refresh = true; return true;
                 },
                     ElementBounds.Fixed(controlX, controlY, controlWidth, 28));
-            y += stacked ? lastLabelHeight + 46 : Math.Max(rowHeight, lastLabelHeight + 12);
+            NextRow();
         }
     }
     /// <summary>Adds guarded Cancel and Save buttons; Save is disabled while a controller transition is pending.</summary>

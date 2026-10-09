@@ -25,8 +25,15 @@ public sealed unsafe partial class VulkanDevice
     private ulong _xessRenderedFrames;
     private ulong _xessPresentedFrames;
     private uint _xessEffectiveGeneratedFrames;
+    /// <summary>Whether the active presenter's XeLL options were applied at a pre-input sleep boundary.</summary>
     private bool _xessProtocolReady;
     private int _xellAppliedFrameCap = -1;
+    /// <summary>Whether interpolation is currently enabled in the active presenter.</summary>
+    private bool _xessGenerationEnabled;
+    /// <summary>Set by <see cref="PauseXessFrameGeneration" />; cleared once a frame prepares complete inputs again.</summary>
+    private bool _xessGenerationPaused;
+    /// <summary>Generation was (re-)enabled; the next generating present resets XeSS history.</summary>
+    private bool _xessHistoryResetPending;
     /// <summary>Whether the active XeSS presenter has enabled its required XeLL latency dependency, independently of the host's generic preference.</summary>
     internal bool XessRequiresLowLatency => _xessPresenter != null && _xessProtocolReady;
     /// <summary>Interpolation count most recently configured by the active XeSS presenter.</summary>
@@ -42,7 +49,43 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Whether a XeSS presenter owner is currently retained.</summary>
     internal bool XessProxyReady => _xessPresenter != null;
     /// <summary>Stops the XeSS presentation owner and restores ordinary Vulkan presentation when possible.</summary>
+    /// <remarks>
+    /// This replaces the DX12 presenter and the Vulkan swapchain. Use it for a real disable,
+    /// a provider change or input teardown; <see cref="PauseXessFrameGeneration" /> covers
+    /// frames that only cannot generate.
+    /// </remarks>
     internal void SuspendXessFrameGeneration() => StopXessPresenter();
+
+    /// <summary>
+    /// Pauses interpolation for frames without complete inputs (pause, menus, a camera
+    /// rebase) while the DX12 presenter keeps the window.
+    /// </summary>
+    /// <remarks>
+    /// Frames that prepare no inputs present the current image through the presenter
+    /// with generation disabled. The first pre-input sleep boundary after a frame that
+    /// prepared complete inputs again re-enables generation, and that frame's present
+    /// resets XeSS history. A changed output extent, or a presenter whose next shared
+    /// input set was never written, still falls back to Vulkan presentation.
+    /// </remarks>
+    internal void PauseXessFrameGeneration()
+    {
+        _xessSources = null;
+        _xessGenerationPaused = true;
+        if (_xessGenerationEnabled && _xessPresenter is { } presenter)
+            SetXessGenerationEnabled(presenter, false);
+    }
+
+    /// <summary>Applies interpolation enablement once the presenter thread has finished its in-flight present.</summary>
+    private void SetXessGenerationEnabled(XessFgPresenter presenter, bool enabled)
+    {
+        // Native presenter calls are serialized with the present thread's proxy Present.
+        presenter.WaitForPresentIdle();
+        RequireLatencyProtocol("XeLL", presenter.Runtime.SetEnabled(enabled),
+            enabled ? "enabling a complete XeSS frame" : "pausing XeSS frame generation");
+        _xessGenerationEnabled = enabled;
+        // The first enabled present after a disabled pass-through has no usable history.
+        if (enabled) _xessHistoryResetPending = true;
+    }
 
     /// <summary>Validates current scene resources and converts motion before retaining sources/constants for XeSS presentation.</summary>
     /// <returns>Zero on success, or a negative readiness/resource/conversion code.</returns>
@@ -50,7 +93,7 @@ public sealed unsafe partial class VulkanDevice
         int hudlessId, int uiId, in XessPresentationFrame constants)
     {
         using GpuSection gpuSection = BeginGpuSection("fg_xess_prepare");
-        if (!_frameActive || _frameGenerationProvider != "xess") return -1;
+        if (!_frameActive || !XessSelected) return -1;
         VulkanTexture? color = DefaultColorTexture();
         VulkanTexture? depth = _textures.Get(depthId);
         VulkanTexture? sourceMotion = _textures.Get(motionId);
@@ -63,6 +106,7 @@ public sealed unsafe partial class VulkanDevice
             return -3;
         _xessSources = new XessSourceImages(color, depth, motion, hudless, ui);
         _xessConstants = constants;
+        _xessGenerationPaused = false;
         return 0;
     }
 
@@ -106,7 +150,9 @@ public sealed unsafe partial class VulkanDevice
         _xessEffectiveGeneratedFrames = 0;
         _xessProtocolReady = false;
         _xellAppliedFrameCap = -1;
-        RequireXellProtocol(_xessPresenter!.Runtime.SetLatencyMode(0, false), "initial pass-through options");
+        _xessGenerationEnabled = false;
+        _xessHistoryResetPending = false;
+        RequireLatencyProtocol("XeLL", _xessPresenter!.Runtime.SetLatencyMode(0, false), "initial pass-through options");
         _appliedLatencyMode = -1;
         MirrorValidationMessage("--- XeSS-FG DX12 proxy active on the Vulkan window");
         return true;
@@ -132,11 +178,7 @@ public sealed unsafe partial class VulkanDevice
         }
         _swapchain = swapchain;
         _lastSwapchainRestoreFailure = null;
-        _swapchain.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
-        // The Vulkan fallback never generates XeSS frames. Only the Intel DXGI
-        // proxy owns that provider's present mode and frame cadence.
-        if (_frameGenerationProvider != "xess")
-            _swapchain.SetFrameGenerationProvider(_frameGenerationProvider);
+        _swapchain.SetFrameGenerationProvider(SwapchainFrameGenerationProvider);
     }
 
     private void ReportSwapchainRestoreFailure(string message)
@@ -170,6 +212,8 @@ public sealed unsafe partial class VulkanDevice
         {
             active.Dispose();
             _xessPresenter = null;
+            _xessGenerationEnabled = false;
+            _xessHistoryResetPending = false;
             _appliedLatencyMode = -1;
             RestoreVulkanSwapchain();
         }
@@ -177,11 +221,31 @@ public sealed unsafe partial class VulkanDevice
 
     private bool PresentXessFrame(ulong renderValue, long presentEntry, long frameSubmitted)
     {
-        if (_frameGenerationProvider != "xess" || _xessSources is not { } sources)
-            return false;
+        if (!XessSelected) return false;
+        XessSourceImages? staged = _xessSources;
         _xessSources = null;
-        if (!EnsureXessPresenter(sources)) return false;
-        XessFgPresenter presenter = _xessPresenter!;
+        XessFgPresenter presenter;
+        VulkanTexture? passThroughColor = null;
+        if (staged is { } sources)
+        {
+            if (!EnsureXessPresenter(sources)) return false;
+            presenter = _xessPresenter!;
+        }
+        else
+        {
+            // A paused presenter keeps the window: this frame's image is presented
+            // through it with generation disabled.
+            if (!_xessGenerationPaused || _xessGenerationEnabled || _xessPresenter is not { } paused)
+                return false;
+            passThroughColor = DefaultColorTexture();
+            if (passThroughColor == null || !paused.CanPassThrough(passThroughColor))
+            {
+                // A new extent needs a new DXGI swapchain; Vulkan presents this frame.
+                StopXessPresenter();
+                return false;
+            }
+            presenter = paused;
+        }
         try
         {
             // The previous frame's proxy Present ran on the present thread while
@@ -203,8 +267,9 @@ public sealed unsafe partial class VulkanDevice
             }
             CommandBuffer commands = _frames.BeginPresentCommands();
             _gpuTimestamps?.Mark(commands, "fg_xess_handoff_copies");
-            XessFgPresenter.PreparedFrame prepared = presenter.RecordCopies(commands,
-                _textures, _barriers, sources);
+            XessFgPresenter.PreparedFrame prepared = staged is { } frameSources
+                ? presenter.RecordCopies(commands, _textures, _barriers, frameSources)
+                : presenter.RecordColorCopy(commands, _textures, _barriers, passThroughColor!);
             ulong presentValue = _frames.SubmitExternalPresent(renderValue,
                 presenter.SharedSemaphore, prepared.WaitForDx12, prepared.ReadyForDx12);
             // XeLL's sleep/markers and XeSS-FG's DXGI present must carry the
@@ -222,8 +287,12 @@ public sealed unsafe partial class VulkanDevice
                 ? _streamlineTokenPointer : 0;
             // Disabled pass-through retains no interpolation history; seed the
             // first enabled present before XeSS uses a previous frame's inputs.
-            if (_xessProtocolReady && _xessRenderedFrames <= 1)
+            if (passThroughColor != null) _xessConstants.Reset = 1;
+            else if (_xessHistoryResetPending && _xessGenerationEnabled)
+            {
                 _xessConstants.Reset = 1;
+                _xessHistoryResetPending = false;
+            }
             presenter.QueuePresent(prepared, _xessConstants, _latencyFrameId, pclToken);
             // The DX12 and Vulkan contexts time-slice the GPU: run concurrently, XeSS-FG's
             // ~2 ms of interpolation took ~5.4 ms and both queues idled at the switches.

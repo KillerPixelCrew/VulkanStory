@@ -129,7 +129,8 @@ public sealed unsafe partial class VulkanDevice
     ///
     /// NEAREST is not a quality choice: filtering a depth buffer invents depths that lie
     /// on neither surface, and Vulkan refuses a linear blit of a depth format outright.
-    /// The blit needs <c>VK_FORMAT_FEATURE_BLIT_DST_BIT</c> on the destination format,
+    /// The blit needs both images in the same depth format, <c>VK_FORMAT_FEATURE_BLIT_SRC_BIT</c>
+    /// on the source and <c>VK_FORMAT_FEATURE_BLIT_DST_BIT</c> on the destination format,
     /// which is not guaranteed for depth formats by the specification; it is present on
     /// the drivers that can run this path at all (DLSS is NVIDIA-only), and a driver
     /// without it gets false - and, from the caller, one log line - rather than a
@@ -142,7 +143,7 @@ public sealed unsafe partial class VulkanDevice
         VulkanTexture? source = _textures.Get(sourceTexture);
         VulkanTexture? destination = _textures.Get(destinationTexture);
         if (source == null || destination == null) return false;
-        if (!SupportsDepthBlitDestination(destination.Format)) return false;
+        if (!SupportsDepthBlit(source.Format, destination.Format)) return false;
 
         CommandBuffer commandBuffer = Commands;
         _targets.FlushAllPendingClears(commandBuffer);
@@ -211,22 +212,18 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
-    private int _depthBlitDestinationSupport;
-
     /// <summary>
-    /// Whether this device can be the destination of a depth blit, asked once and
-    /// remembered. A refusal is logged once, not once a frame.
+    /// Whether a depth image of <paramref name="source" /> format can be blitted into
+    /// one of <paramref name="destination" /> format: vkCmdBlitImage requires the two
+    /// depth/stencil formats to be identical, BLIT_SRC on the source format and
+    /// BLIT_DST on the destination format. The format features are cached per format
+    /// by the context, so a pair is answered from the cache after its first frame;
+    /// the caller logs a refusal once, not once a frame.
     /// </summary>
-    private bool SupportsDepthBlitDestination(Format format)
-    {
-        if (_depthBlitDestinationSupport != 0) return _depthBlitDestinationSupport > 0;
-        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice, format, out FormatProperties properties);
-        bool supported = (properties.OptimalTilingFeatures &
-            (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit)) ==
-            (FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit);
-        _depthBlitDestinationSupport = supported ? 1 : -1;
-        return supported;
-    }
+    private bool SupportsDepthBlit(Format source, Format destination) =>
+        source == destination &&
+        (_context.OptimalFormatFeatures(source) & FormatFeatureFlags.BlitSrcBit) != 0 &&
+        (_context.OptimalFormatFeatures(destination) & FormatFeatureFlags.BlitDstBit) != 0;
 
     /// <summary>
     /// Runs DLSS on this frame's command buffer: colour, depth and motion

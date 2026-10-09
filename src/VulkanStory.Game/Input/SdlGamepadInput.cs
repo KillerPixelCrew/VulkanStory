@@ -38,6 +38,12 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private uint sampledButtons, previousButtons;
     private uint supportedButtons;
     private bool sampleValid;
+    // Button state of the open pad, kept from the SDL button events the process adapter
+    // forwards from its queue drain. Valid only after a full native read of this device
+    // with SDL gamepad events enabled; anything that may skip events clears it, and the
+    // next read resynchronizes from SDL_GetGamepadButton.
+    private uint trackedButtons;
+    private bool trackedButtonsValid;
     private ControllerProfile profile = new();
     private string? profilePath;
     private string? profileKey;
@@ -76,6 +82,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     internal List<ControllerSlotTarget> CurrentSlotTargets() =>
         ControllerGuiTargets.SlotTargets(ControllerGuiTargets.ActiveComposers(platform));
     private string? loggedRoutingState;
+    private string? routingName;
+    private string routingWorld = "", routingMenu = "";
     private bool firstInputLogged;
     private int loggedGamepadCount = -1, failedOpenId;
     private int requestedGamepadId;
@@ -214,13 +222,6 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         pendingProfileRetryDue = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 5;
     }
 
-    /// <summary>Pumps SDL and processes one controller sample when this object owns the event-drain boundary.</summary>
-    /// <param name="onWindowEvent">Optional neutral window/input event consumer.</param>
-    /// <param name="onInputPumped">Optional callback at the completed input-pump boundary.</param>
-    /// <remarks>The process adapter uses PrepareForEventPump/PollAfterEventPump to avoid a second queue drain.</remarks>
-    public void Poll(Action<SdlInputEvent>? onWindowEvent = null, Action? onInputPumped = null)
-        => PollCore(onWindowEvent, onInputPumped, false, false);
-
     // The process adapter owns the queue. These phases preserve the retained
     // native-update/input-marker ordering without draining SDL a second time.
     /// <summary>Prepares the subsystem and refreshes SDL gamepad state before the process-owned queue drain.</summary>
@@ -231,26 +232,36 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     }
     /// <summary>Requests an active-device switch for a focused, live window when another gamepad emits activity.</summary>
     internal void NoteGamepadActivity(int id) => onGamepadActivity(id);
+    /// <summary>Applies one SDL gamepad button transition from the process-owned queue drain to the tracked button state.</summary>
+    /// <param name="instanceId">SDL joystick instance ID of the emitting gamepad; other devices are ignored.</param>
+    /// <param name="button">SDL_GamepadButton index.</param>
+    /// <param name="down">Whether the event is a press.</param>
+    /// <remarks>Transitions are absolute, so replaying one already folded into a resync read is harmless.</remarks>
+    internal void NoteGamepadButton(int instanceId, int button, bool down)
+    {
+        if (!trackedButtonsValid || gamepad == 0 || instanceId != gamepadId || button is < 0 or >= 32) return;
+        uint bit = 1u << button;
+        if ((supportedButtons & bit) == 0) return;
+        if (down) trackedButtons |= bit;
+        else trackedButtons &= ~bit;
+    }
+    /// <summary>Forces the next button read to resynchronize from SDL's device state, for example after focus changes.</summary>
+    internal void ResyncButtons() => trackedButtonsValid = false;
     /// <summary>Processes controller state after the process adapter already drained SDL, propagating its hotplug flag.</summary>
-    internal void PollAfterEventPump(bool deviceChanged) => PollCore(null, null, true, deviceChanged);
+    internal void PollAfterEventPump(bool deviceChanged) => PollCore(deviceChanged);
 
     /// <summary>Samples input, manages context/dialog ownership, and dispatches gameplay or GUI actions for one frame.</summary>
     /// <remarks>SDL missing-library/entry failures disable this optional path; synthetic controls release on context loss.</remarks>
-    private void PollCore(Action<SdlInputEvent>? onWindowEvent, Action? onInputPumped,
-        bool alreadyPumped, bool externalDeviceChanged)
+    /// <param name="deviceChanged">Whether the process-owned queue drain observed a gamepad hot-plug/remap event.</param>
+    private void PollCore(bool deviceChanged)
     {
         InputActive = false;
         sampleValid = false;
         try
         {
+            // The process adapter is the single SDL queue reader; it already
+            // refreshed gamepad state before the input marker and event dispatch.
             Prepare();
-            if (unavailable && onWindowEvent == null) return;
-
-            // One queue reader owns gamepad and window events. Keep the SDL
-            // window responsive when the optional gamepad subsystem is absent.
-            // The gamepad refresh precedes the input marker and event dispatch.
-            bool deviceChanged = alreadyPumped ? externalDeviceChanged : SdlEventPump.Drain(onWindowEvent, onInputPumped,
-                onGamepadActivity, initialized ? SDL_UpdateGamepads : null);
             if (unavailable) return;
             long now = Stopwatch.GetTimestamp();
             FlushProfile(false);
@@ -260,19 +271,25 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             {
                 RefreshGamepad(deviceChanged);
                 nextGamepadScan = now + Stopwatch.Frequency * 2;
+                // The slow rescan also bounds any drift from an event SDL dropped.
+                trackedButtonsValid = false;
             }
             SyncDamageHaptics();
             ApplyDamageHaptics();
-            LogFirstInput();
-            sampledButtons = ReadButtonMask();
+            sampledButtons = CurrentButtons();
             for (int axis = 0; axis < sampledAxes.Length; axis++) sampledAxes[axis] = gamepad == 0 ? (short)0 : SDL_GetGamepadAxis(gamepad, axis);
             sampleValid = true;
-            bool inWorld = platform.IsFocused && platform.MouseGrabbed;
+            // Reads this poll's sample instead of issuing a second native button/axis read.
+            LogFirstInput();
+            bool focused = platform.IsFocused, grabbed = platform.MouseGrabbed;
+            bool inWorld = focused && grabbed;
             Vector2 rawMoveStick = ReadStick(profile.MoveXAxis, profile.MoveYAxis, profile.MoveDeadzone, profile.MoveOuterDeadzone);
             rawMoveStick *= new Vector2(profile.InvertMoveX ? -1f : 1f, profile.InvertMoveY ? -1f : 1f);
             Vector2 movementStick = ControllerStickProcessing.Process(rawMoveStick, 0f, 0f, profile.MoveCurveExponent);
             Vector2 lookStick = ReadStick(profile.LookXAxis, profile.LookYAxis, profile.LookDeadzone, profile.LookOuterDeadzone);
-            var guiSnapshot = inWorld ? null : ControllerGuiTargets.Snapshot(platform);
+            // Without a pad every control is idle and the poll ends below, so
+            // keyboard/mouse menus skip GUI discovery entirely.
+            var guiSnapshot = inWorld || gamepad == 0 ? null : ControllerGuiTargets.Snapshot(platform);
             object? foreground = guiSnapshot?.Owner;
             if (inputContext.Update(inWorld, foreground, sampledButtons,
                 RawTrigger(profile.PrimaryTriggerAxis, profile.PrimaryTriggerNegative),
@@ -293,20 +310,22 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 modifierActive = modifier;
             }
             layerBlockedButtons &= sampledButtons;
-            if (publishedGuiContext != !inWorld || publishedModifierContext != modifierActive) PublishControllerHints();
+            // Prompts exist only for an open pad; connect/disconnect publishes from RefreshGamepad.
+            if (gamepad != 0 && (publishedGuiContext != !inWorld || publishedModifierContext != modifierActive))
+                PublishControllerHints();
             float dt = lastPoll == 0 ? 0f : Math.Clamp((now - lastPoll) / (float)Stopwatch.Frequency, 0f, 0.05f);
             lastPoll = now;
             settingsDialog?.ApplyPendingRefresh();
-            if (gamepad == 0 || !platform.IsFocused || ScreenManager.hotkeyManager == null || platform.Original.keyEventHandlers.Count == 0)
+            if (gamepad == 0 || !focused || ScreenManager.hotkeyManager == null || platform.Original.keyEventHandlers.Count == 0)
             {
                 Status = gamepad == 0 ? "no SDL gamepad connected" : gamepadName + ": " +
-                    (!platform.IsFocused ? "window not focused" : ScreenManager.hotkeyManager == null
+                    (!focused ? "window not focused" : ScreenManager.hotkeyManager == null
                         ? "game hotkeys unavailable" : "game key handlers unavailable");
                 LogRoutingState(Status);
                 ReleaseAll();
                 return;
             }
-            LogRoutingState(gamepadName + ": routing to " + (platform.MouseGrabbed ? "world" : "menu"));
+            LogRoutingState(RoutingState(grabbed));
 
             if (radialDialog != null)
             {
@@ -445,8 +464,14 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             GuiElementItemSlotGridBase? focusedGrid = menuNavigation ? FocusedSlotGrid(composers!) : null;
             GuiElementSlider? focusedSlider = menuNavigation && focusedGrid == null ? FocusedSlider(composers!) : null;
             List<ControllerSlotTarget>? slotTargets = menuNavigation ? ControllerGuiTargets.SlotTargets(composers!) : null;
-            bool overSlot = slotTargets?.Exists(target => target.Bounds.PointInside(
-                platform.ControllerCursorPosition.X, platform.ControllerCursorPosition.Y)) == true;
+            bool overSlot = false;
+            if (slotTargets != null)
+            {
+                // One cursor read per poll; each read is several native window queries.
+                Vector2 slotCursor = platform.ControllerCursorPosition;
+                foreach (ControllerSlotTarget target in slotTargets)
+                    if (target.Bounds.PointInside(slotCursor.X, slotCursor.Y)) { overSlot = true; break; }
+            }
             SetKey("jump", inWorld && south, GlKeys.Space); // South / A
             bool sneakPressed = inWorld && ActionDown("sneak", profile.SneakButton);
             SetKey("sneak", profile.ActionModes.ContainsKey("sneak") ? sneakPressed :
@@ -540,7 +565,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
                 bool left = DpadPulse(13, now), right = DpadPulse(14, now);
                 List<Vector2>? targets = (up || down || left || right)
                     ? focusedGrid != null && slotTargets is { Count: > 0 }
-                        ? slotTargets.Select(target => target.Center).ToList()
+                        ? slotTargets.ConvertAll(target => target.Center)
                         : ControllerGuiTargets.Collect(platform, composers ?? ControllerGuiTargets.ActiveComposers(platform)) : null;
                 if (up) DpadMove(GlKeys.Up, new Vector2(0, -1), step, focusedGrid, focusedSlider, targets, ref pos);
                 if (down) DpadMove(GlKeys.Down, new Vector2(0, 1), step, focusedGrid, focusedSlider, targets, ref pos);
@@ -605,6 +630,18 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         return ids.IsEmpty ? 0 : ids[0];
     }
 
+    /// <summary>Cached routing text, rebuilt only when the selected device name changes.</summary>
+    private string RoutingState(bool world)
+    {
+        if (!ReferenceEquals(routingName, gamepadName))
+        {
+            routingName = gamepadName;
+            routingWorld = gamepadName + ": routing to world";
+            routingMenu = gamepadName + ": routing to menu";
+        }
+        return world ? routingWorld : routingMenu;
+    }
+
     private void LogRoutingState(string state)
     {
         if (state == loggedRoutingState) return;
@@ -616,12 +653,12 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     {
         if (gamepad == 0 || firstInputLogged) return;
         uint buttons = PressedButtonMask();
-        short lx = SDL_GetGamepadAxis(gamepad, profile.MoveXAxis), ly = SDL_GetGamepadAxis(gamepad, profile.MoveYAxis);
-        short rx = SDL_GetGamepadAxis(gamepad, profile.LookXAxis), ry = SDL_GetGamepadAxis(gamepad, profile.LookYAxis);
+        short lx = Axis(profile.MoveXAxis), ly = Axis(profile.MoveYAxis);
+        short rx = Axis(profile.LookXAxis), ry = Axis(profile.LookYAxis);
         if (buttons == 0 && Math.Abs((int)lx) < 8192 && Math.Abs((int)ly) < 8192 &&
             Math.Abs((int)rx) < 8192 && Math.Abs((int)ry) < 8192 &&
-            SDL_GetGamepadAxis(gamepad, profile.PrimaryTriggerAxis) < 16384 &&
-            SDL_GetGamepadAxis(gamepad, profile.SecondaryTriggerAxis) < 16384) return;
+            Axis(profile.PrimaryTriggerAxis) < 16384 &&
+            Axis(profile.SecondaryTriggerAxis) < 16384) return;
         firstInputLogged = true;
         platform.Original.Logger.Notification("[VulkanStory] First SDL controller input: {0}; buttons=0x{1}; move={2},{3}; look={4},{5}; focused={6}",
             gamepadName, buttons.ToString("X"), lx, ly, rx, ry, platform.IsFocused);
@@ -672,6 +709,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         gamepad = 0;
         gamepadId = chosen;
         supportedButtons = 0;
+        trackedButtonsValid = false;
         firstInputLogged = false;
         nextStatusUpdate = 0;
         if (chosen == 0) { gamepadName = "none"; Status = "no SDL gamepad connected"; PublishControllerHints(); return; }
@@ -718,13 +756,24 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         PublishControllerHints();
     }
 
+    /// <summary>Publishes prompts for the open pad's current context, or clears them once after the pad goes away.</summary>
+    /// <remarks>Published contexts stay null while no prompts are published, so keyboard/mouse sessions never recompose GUI for hints.</remarks>
     private void PublishControllerHints()
     {
+        if (gamepad == 0)
+        {
+            bool hadHints = publishedGuiContext != null;
+            publishedGuiContext = publishedModifierContext = null;
+            if (!hadHints) return;
+            ControllerHints.Publish(null);
+            ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
+            return;
+        }
         bool gui = !platform.IsFocused || !platform.MouseGrabbed;
         bool modifier = !gui && modifierActive;
         publishedGuiContext = gui;
         publishedModifierContext = modifier;
-        ControllerHints.Publish(gamepad == 0 ? null : ControllerGlyphs.Build(profile, ButtonName, gui, modifier));
+        ControllerHints.Publish(ControllerGlyphs.Build(profile, ButtonName, gui, modifier));
         ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
     }
 
@@ -747,7 +796,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
             : (analogWalking ? 0.02f : profile.MovePressThreshold));
 
     private bool Button(int button) => button is >= 0 and < 32 &&
-        (inputContext.Buttons(sampleValid ? sampledButtons : ReadButtonMask()) & ~layerBlockedButtons &
+        (inputContext.Buttons(PressedButtonMask()) & ~layerBlockedButtons &
          ~(profile.ModifierEnabled && modifierActive ? 1u << profile.ModifierButton : 0u) & (1u << button)) != 0;
 
     private bool ActionDown(string action, int button, ControllerGestureMode fallback = ControllerGestureMode.Hold)
@@ -764,7 +813,22 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         return ActionDown(action, button, fallback) && !previous;
     }
     private bool Pressed(int button) => Button(button) && (previousButtons & (1u << button)) == 0;
-    private uint PressedButtonMask() => sampleValid ? sampledButtons : ReadButtonMask();
+    private uint PressedButtonMask() => sampleValid ? sampledButtons : CurrentButtons();
+    /// <summary>Event-tracked buttons of the open pad, resynchronized by one native read when tracking is not valid.</summary>
+    private uint CurrentButtons()
+    {
+        if (gamepad == 0) return 0;
+        if (trackedButtonsValid) return trackedButtons;
+        trackedButtons = ReadButtonMask();
+        // With gamepad events disabled no transitions arrive: keep reading natively.
+        trackedButtonsValid = GamepadEventsEnabled();
+        return trackedButtons;
+    }
+    private static bool GamepadEventsEnabled()
+    {
+        try { return SDL_GamepadEventsEnabled(); }
+        catch (EntryPointNotFoundException) { return false; }
+    }
     private uint ReadButtonMask()
     {
         if (gamepad == 0) return 0;
@@ -776,6 +840,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
 
     private void ReadSupportedButtons()
     {
+        trackedButtonsValid = false;
         supportedButtons = 0;
         for (int button = 0; button < 32; button++)
             if (SDL_GamepadHasButton(gamepad, button)) supportedButtons |= 1u << button;
@@ -1029,13 +1094,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         ClientMain? game = settingsGame;
         settingsDialog = null;
         settingsGame = null;
-        if (dialog == null) return;
-        try { dialog.TryClose(); }
-        finally
-        {
-            try { game?.UnregisterDialog(dialog); }
-            finally { dialog.Dispose(); }
-        }
+        RetireDialog(dialog, game);
     }
 
     private void CloseRadial()
@@ -1046,9 +1105,19 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         radialGame = null;
         radialButtonWasDown = false;
         inputContext.Reset();
+        RetireDialog(dialog, game);
+    }
+
+    /// <summary>Closes, unregisters, and disposes a detached owned dialog; each step runs even if an earlier one throws.</summary>
+    private static void RetireDialog(GuiDialog? dialog, ClientMain? game)
+    {
         if (dialog == null) return;
         try { dialog.TryClose(); }
-        finally { try { game?.UnregisterDialog(dialog); } finally { dialog.Dispose(); } }
+        finally
+        {
+            try { game?.UnregisterDialog(dialog); }
+            finally { dialog.Dispose(); }
+        }
     }
 
     /// <summary>Replaces any old wheel with a new game-owned wheel using the active profile's eight actions.</summary>
@@ -1212,6 +1281,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     /// <summary>Retries due profile writes while controller processing is disabled.</summary>
     internal void PollSuspended()
     {
+        // Button events are not forwarded while disabled; resync once input resumes.
+        trackedButtonsValid = false;
         LogRoutingState("disabled in VulkanStory settings");
         FlushProfile(false);
         FlushPendingProfiles(false);
@@ -1219,6 +1290,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     /// <summary>Closes the radial wheel, cancels requested device switching, and releases synthetic input until physical release.</summary>
     internal void OnFocusLost()
     {
+        // Focus changes can make SDL ignore or drop transitions; resync on the next read.
+        trackedButtonsValid = false;
         CloseRadial();
         requestedGamepadId = 0;
         ReleaseAll();
@@ -1267,7 +1340,9 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
     private void Disable(string reason)
     {
         unavailable = true;
+        trackedButtonsValid = false;
         ReleaseAll();
+        publishedGuiContext = publishedModifierContext = null;
         ControllerHints.Publish(null);
         ScreenManager.GuiComposers?.MarkAllDialogsForRecompose();
         platform.Original.Logger.Warning("[VulkanStory] SDL3 gamepad input unavailable: {0}", reason);
@@ -1279,6 +1354,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         CloseRadial();
         CloseSettings();
         CloseKeyboard();
+        publishedGuiContext = publishedModifierContext = null;
         ControllerHints.Publish(null);
         BindDamageAttributes(null);
         FlushProfile(true);
@@ -1290,6 +1366,7 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         gamepad = 0;
         gamepadId = 0;
         requestedGamepadId = 0;
+        trackedButtonsValid = false;
         if (initialized) SDL_QuitSubSystem(GamepadSubsystem);
         initialized = false;
         nextGamepadScan = 0;
@@ -1306,6 +1383,8 @@ internal sealed unsafe class SdlGamepadInput : IDisposable
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     private static extern void SDL_UpdateGamepads();
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_GamepadEventsEnabled();
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     private static extern nint SDL_GetGamepads(out int count);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]

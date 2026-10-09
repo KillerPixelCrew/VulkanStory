@@ -489,10 +489,16 @@ public sealed unsafe partial class VulkanDevice
     // Uniform state is game-neutral; draw binding consumes its retained dictionaries.
     private readonly ClientUniformBufferManager _clientUniformBuffers = new();
     /// <summary>Looks up a named client block's descriptor binding in the linked program.</summary>
-    internal int? ClientUniformBlockBinding(int programId, string blockName) =>
-        _programs.TryGetValue(programId, out var program)
-            ? program.Interface.UniformBlocks.Where(block => block.BlockName == blockName)
-                .Select(block => (int?)block.Binding).FirstOrDefault() : null;
+    internal int? ClientUniformBlockBinding(int programId, string blockName)
+    {
+        // Per entity per pass while motion is on (UBO.Update("Animation")): a plain loop, no LINQ closure.
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program)) return null;
+        foreach (BlockBinding block in program.Interface.UniformBlocks)
+        {
+            if (block.BlockName == blockName) return block.Binding;
+        }
+        return null;
+    }
 
     /// <summary>Creates and binds a CPU-shadowed named client uniform buffer.</summary>
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size) =>

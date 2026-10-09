@@ -30,23 +30,17 @@ internal sealed partial class GameGraphicsAdapter
         uint slots = count >= 32 ? uint.MaxValue : (1u << count) - 1u;
         var blend = new AttachmentBlend[Math.Max(count, 1)];
         for (int index = 0; index < blend.Length; index++) blend[index] = AttachmentBlend.Default;
-        NativePipeline? pipeline = NativeMeshPipelineFor(nativeSky, program, CurrentTargetId, slots, layout,
+        NativePipeline? pipeline = NativeMeshPipelineFor(nativeSky, program, formats, layout,
             new NativePipelineDescription
             {
                 Blend = blend, DepthTest = false, DepthWrite = false,
                 Cull = CullModeFlags.None, Topology = PrimitiveTopology.TriangleList,
             });
         if (pipeline == null) { RenderMesh(mesh); return; }
-        Rect2D viewport = Stated.Viewport;
         try
         {
-            if (renderer.BeginNativePass(new NativePassDescription
-            {
-                Name = "Sky/" + CurrentTargetId, FramebufferId = CurrentTargetId, ColorSlots = slots,
-                Reads = [sky, glow], Flags = PassFlags.AllowSplit,
-                ViewportX = viewport.Offset.X, ViewportY = viewport.Offset.Y,
-                ViewportWidth = (int)viewport.Extent.Width, ViewportHeight = (int)viewport.Extent.Height,
-            }))
+            if (renderer.BeginNativePass(StatedViewportPass("Sky/" + CurrentTargetId, CurrentTargetId, slots,
+                    [sky, glow], PassFlags.AllowSplit)))
             {
                 if (modelView is { Length: >= 16 }) renderer.WriteNative(pipeline, nativeSky.Uniforms[0], modelView.AsSpan(0, 16));
                 if (renderer.DrawNativeMesh(pipeline, handle,

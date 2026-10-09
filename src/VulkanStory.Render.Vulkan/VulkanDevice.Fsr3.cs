@@ -30,8 +30,18 @@ public sealed unsafe partial class VulkanDevice
                 void main() {
                     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
                     if (any(greaterThanEqual(pixel, imageSize(reactive)))) return;
-                    float value = texelFetch(motion, pixel, 0).b;
-                    value = isnan(value) || isinf(value) ? 0.9 : clamp(value, 0.0, 0.9);
+                    // Neighbourhood minimum: a sky pixel next to geometry is not reactive, so
+                    // silhouettes against cloud/fog keep history across jitter phases.
+                    // Each tap is sanitised before min(): min() with a NaN operand is undefined.
+                    ivec2 last = imageSize(reactive) - ivec2(1);
+                    float value = 0.9;
+                    for (int y = -1; y <= 1; y++)
+                        for (int x = -1; x <= 1; x++)
+                        {
+                            float tap = texelFetch(motion, clamp(pixel + ivec2(x, y), ivec2(0), last), 0).b;
+                            value = min(value, isnan(tap) || isinf(tap) ? 0.9 : tap);
+                        }
+                    value = clamp(value, 0.0, 0.9);
                     imageStore(reactive, pixel, vec4(value));
                 }
                 """, "fsr3-reactive", [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Storage)]);

@@ -27,6 +27,8 @@ internal sealed class GameGuiBindings
 
     /// <summary>Current screen, or null before the game's screen manager exists.</summary>
     internal GuiScreen? CurrentScreen => ClientProgram.screenManager is { } manager ? currentScreen(manager) : null;
+    /// <summary>Current screen of a specific screen manager, such as the one registered as a platform key handler.</summary>
+    internal GuiScreen? CurrentScreenOf(ScreenManager manager) => currentScreen(manager);
     /// <summary>Client instance associated with a running-game screen.</summary>
     internal ClientMain? RunningGame(GuiScreenRunningGame screen) => runningGame(screen);
     /// <summary>The game's live loaded-dialog list; callers do not own this collection.</summary>

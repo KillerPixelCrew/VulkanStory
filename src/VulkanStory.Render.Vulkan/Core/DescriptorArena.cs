@@ -26,11 +26,17 @@ internal sealed unsafe class DescriptorArena : IDisposable
 
     private readonly VulkanContext _context;
     private readonly List<DescriptorPool> _pools = new();
-    private readonly Dictionary<DescriptorSetContents, DescriptorSet> _sets = new();
+    private readonly Dictionary<DescriptorSetContents, DescriptorSet> _sets = new(DescriptorSetContentsComparer.Instance);
+    /// <summary>Span-keyed view of <see cref="_sets" />: a hit allocates no owned key.</summary>
+    private readonly Dictionary<DescriptorSetContents, DescriptorSet>.AlternateLookup<DescriptorSetKey> _setsByKey;
     private int _poolIndex;
     private bool _disposed;
 
-    public DescriptorArena(VulkanContext context) => _context = context;
+    public DescriptorArena(VulkanContext context)
+    {
+        _context = context;
+        _setsByKey = _sets.GetAlternateLookup<DescriptorSetKey>();
+    }
 
     /// <summary>Distinct sets handed out since the last reset.</summary>
     public int SetsThisFrame => _sets.Count;
@@ -71,6 +77,27 @@ internal sealed unsafe class DescriptorArena : IDisposable
             return existing;
         }
 
+        return Insert(contents, layout);
+    }
+
+    /// <summary>
+    /// <see cref="Get(DescriptorSetContents, DescriptorSetLayout)" /> for borrowed
+    /// contents: a hit allocates nothing, a miss copies the key once to insert it.
+    /// </summary>
+    public DescriptorSet Get(DescriptorSetKey key, DescriptorSetLayout layout)
+    {
+        if (_setsByKey.TryGetValue(key, out DescriptorSet existing))
+        {
+            Hits++;
+            return existing;
+        }
+
+        return Insert(key.ToContents(), layout);
+    }
+
+    /// <summary>Allocates and writes a set for a missed key and keeps it for the rest of the frame.</summary>
+    private DescriptorSet Insert(DescriptorSetContents contents, DescriptorSetLayout layout)
+    {
         DescriptorSet set = Allocate(layout);
         DescriptorCache.Write(_context, set, contents);
         _sets[contents] = set;
@@ -149,6 +176,9 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
     public const uint SetsPerPool = 64;
     public const uint ImagesPerSet = 8;
 
+    /// <summary>Descriptor writes <see cref="Get" /> keeps on the stack.</summary>
+    private const int MaxStackWrites = 16;
+
     private readonly VulkanContext _context;
     private readonly List<DescriptorPool> _pools = new();
     private int _poolIndex;
@@ -175,8 +205,15 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
         Allocations++;
         if (writes.Length == 0) return set;
 
-        var images = new DescriptorImageInfo[writes.Length];
-        var descriptorWrites = new WriteDescriptorSet[writes.Length];
+        // The scratch stays on the stack for every pass the device records (the caller keeps up
+        // to 16 writes there too); only a larger set falls back to the heap.
+        bool onStack = writes.Length <= MaxStackWrites;
+        Span<DescriptorImageInfo> images = onStack
+            ? stackalloc DescriptorImageInfo[writes.Length]
+            : new DescriptorImageInfo[writes.Length];
+        Span<WriteDescriptorSet> descriptorWrites = onStack
+            ? stackalloc WriteDescriptorSet[writes.Length]
+            : new WriteDescriptorSet[writes.Length];
         fixed (DescriptorImageInfo* imagesPtr = images)
         fixed (WriteDescriptorSet* writesPtr = descriptorWrites)
         {

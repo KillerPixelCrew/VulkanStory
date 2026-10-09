@@ -161,8 +161,9 @@ internal static class PlatformStartupRoutingPatches
         Cores(__instance) = Environment.ProcessorCount;
         return false;
     }
-    private static bool Vsync(ClientPlatformWindows __instance, bool __0)
-    { if (!TrySession(__instance, out var session)) return true; session.Device.SetVSync(__0); return false; }
+    // The session applies ClientSettings.VsyncMode before every frame and is the
+    // only swap-interval owner; the original call is consumed without a second write.
+    private static bool Vsync(ClientPlatformWindows __instance) => !TrySession(__instance, out _);
     private static bool Resize(ClientPlatformWindows __instance)
     { if (!TrySession(__instance, out var session)) return true; session.Input.RefreshWindowLayout(); return false; }
     private static bool Mouse(ClientPlatformWindows __instance) => !TrySession(__instance, out _);

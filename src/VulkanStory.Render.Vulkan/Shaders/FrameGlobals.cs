@@ -131,7 +131,7 @@ internal static class FrameGlobals
                 throw new InvalidOperationException("frame global '" + entry.Name + "' has unknown type " + entry.TypeName);
             }
 
-            offset = Align(offset, type.Alignment);
+            offset = ProgramInterfaceLayout.Align(offset, type.Alignment);
             var member = new UniformMember
             {
                 Name = entry.Name,
@@ -193,9 +193,6 @@ internal static class FrameGlobals
         }
         return buffer;
     }
-
-    private static int Align(int value, int alignment) =>
-        alignment <= 1 ? value : (value + alignment - 1) / alignment * alignment;
 
     // ------------------------------------------------------------ native include
 

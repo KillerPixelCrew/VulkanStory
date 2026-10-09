@@ -49,7 +49,16 @@ internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
         SetIndex = setIndex;
         Samplers = samplers;
         Buffers = buffers;
+        _hash = ComputeHash(programId, setIndex, samplers, buffers);
+    }
 
+    /// <summary>
+    /// The content hash of a set. <see cref="DescriptorSetKey" /> hashes through this
+    /// same method, so a span view and an owned key with equal contents hash equal.
+    /// </summary>
+    internal static int ComputeHash(int programId, int setIndex,
+        ReadOnlySpan<SamplerBindingValue> samplers, ReadOnlySpan<BufferBindingValue> buffers)
+    {
         var hash = new HashCode();
         hash.Add(programId);
         hash.Add(setIndex);
@@ -69,32 +78,108 @@ internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
             hash.Add(buffer.Range);
             hash.Add(buffer.Resource);
         }
-        _hash = hash.ToHashCode();
+        return hash.ToHashCode();
     }
 
-    /// <inheritdoc/>
-    public bool Equals(DescriptorSetContents? other)
+    /// <summary>
+    /// Content equality of a set described by its parts and an owned key. Both
+    /// <see cref="Equals(DescriptorSetContents)" /> and <see cref="DescriptorSetKey" />
+    /// compare through this method, so the two can never disagree.
+    /// </summary>
+    internal static bool ContentEquals(int hash, int programId, int setIndex,
+        ReadOnlySpan<SamplerBindingValue> samplers, ReadOnlySpan<BufferBindingValue> buffers,
+        DescriptorSetContents? other)
     {
-        if (other is null || other._hash != _hash) return false;
-        if (ProgramId != other.ProgramId || SetIndex != other.SetIndex) return false;
-        if (Samplers.Length != other.Samplers.Length) return false;
-        if (Buffers.Length != other.Buffers.Length) return false;
+        if (other is null || other._hash != hash) return false;
+        if (programId != other.ProgramId || setIndex != other.SetIndex) return false;
+        if (samplers.Length != other.Samplers.Length) return false;
+        if (buffers.Length != other.Buffers.Length) return false;
 
-        for (int i = 0; i < Samplers.Length; i++)
+        for (int i = 0; i < samplers.Length; i++)
         {
-            if (!Samplers[i].Equals(other.Samplers[i])) return false;
+            if (!samplers[i].Equals(other.Samplers[i])) return false;
         }
-        for (int i = 0; i < Buffers.Length; i++)
+        for (int i = 0; i < buffers.Length; i++)
         {
-            if (!Buffers[i].Equals(other.Buffers[i])) return false;
+            if (!buffers[i].Equals(other.Buffers[i])) return false;
         }
         return true;
     }
 
     /// <inheritdoc/>
+    public bool Equals(DescriptorSetContents? other) =>
+        ContentEquals(_hash, ProgramId, SetIndex, Samplers, Buffers, other);
+
+    /// <inheritdoc/>
     public override bool Equals(object? obj) => Equals(obj as DescriptorSetContents);
     /// <inheritdoc/>
     public override int GetHashCode() => _hash;
+}
+
+/// <summary>
+/// A borrowed view of descriptor-set contents, for looking a set up without
+/// allocating an owned <see cref="DescriptorSetContents" />. The spans usually
+/// point at per-device scratch arrays, so a key is valid only until the caller
+/// writes them again; <see cref="ToContents" /> copies it into an owned key,
+/// which a cache does only when it inserts on a miss.
+/// </summary>
+internal readonly ref struct DescriptorSetKey
+{
+    /// <summary>Program identity, as <see cref="DescriptorSetContents.ProgramId" />.</summary>
+    public int ProgramId { get; }
+    /// <summary>Descriptor-set index, as <see cref="DescriptorSetContents.SetIndex" />.</summary>
+    public int SetIndex { get; }
+    /// <summary>Sampler binding values, borrowed.</summary>
+    public ReadOnlySpan<SamplerBindingValue> Samplers { get; }
+    /// <summary>Buffer binding values, borrowed.</summary>
+    public ReadOnlySpan<BufferBindingValue> Buffers { get; }
+    /// <summary>The hash an owned key with the same contents carries.</summary>
+    public int Hash { get; }
+
+    public DescriptorSetKey(int programId, int setIndex,
+        ReadOnlySpan<SamplerBindingValue> samplers, ReadOnlySpan<BufferBindingValue> buffers)
+    {
+        ProgramId = programId;
+        SetIndex = setIndex;
+        Samplers = samplers;
+        Buffers = buffers;
+        Hash = DescriptorSetContents.ComputeHash(programId, setIndex, samplers, buffers);
+    }
+
+    /// <summary>Whether <paramref name="other" /> holds exactly these contents.</summary>
+    public bool Matches(DescriptorSetContents? other) =>
+        DescriptorSetContents.ContentEquals(Hash, ProgramId, SetIndex, Samplers, Buffers, other);
+
+    /// <summary>Copies the borrowed contents into an owned key.</summary>
+    public DescriptorSetContents ToContents() =>
+        new(ProgramId, SetIndex, Samplers.ToArray(), Buffers.ToArray());
+}
+
+/// <summary>
+/// The equality of <see cref="DescriptorSetContents" /> keys, plus the alternate
+/// lookup by <see cref="DescriptorSetKey" /> that lets a cache hit skip the owned
+/// key's allocation. Owned-key comparison is exactly what the default comparer did
+/// (<see cref="DescriptorSetContents.Equals(DescriptorSetContents)" />).
+/// </summary>
+internal sealed class DescriptorSetContentsComparer :
+    IEqualityComparer<DescriptorSetContents>, IAlternateEqualityComparer<DescriptorSetKey, DescriptorSetContents>
+{
+    public static readonly DescriptorSetContentsComparer Instance = new();
+
+    private DescriptorSetContentsComparer()
+    {
+    }
+
+    /// <inheritdoc/>
+    public bool Equals(DescriptorSetContents? x, DescriptorSetContents? y) => x is null ? y is null : x.Equals(y);
+    /// <inheritdoc/>
+    public int GetHashCode(DescriptorSetContents obj) => obj.GetHashCode();
+    /// <inheritdoc/>
+    public bool Equals(DescriptorSetKey alternate, DescriptorSetContents other) => alternate.Matches(other);
+    /// <inheritdoc/>
+    public int GetHashCode(DescriptorSetKey alternate) => alternate.Hash;
+    /// <inheritdoc/>
+    public DescriptorSetContents Create(DescriptorSetKey alternate) => alternate.ToContents();
 }
 
 /// <summary>
@@ -122,6 +207,9 @@ internal sealed unsafe class DescriptorCache : IDisposable
 {
     private const uint SetsPerPool = 512;
 
+    /// <summary>Descriptor writes <see cref="Write" /> keeps on the stack; set 0 needs 17, set 2 its storage bindings.</summary>
+    private const int MaxStackWrites = 32;
+
     /// <summary>A pool and how many sets it can still hand out.</summary>
     private sealed class PoolSlot
     {
@@ -133,7 +221,9 @@ internal sealed unsafe class DescriptorCache : IDisposable
     private readonly record struct CachedSet(DescriptorSet Set, PoolSlot Pool);
 
     private readonly VulkanContext _context;
-    private readonly Dictionary<DescriptorSetContents, CachedSet> _sets = new();
+    private readonly Dictionary<DescriptorSetContents, CachedSet> _sets = new(DescriptorSetContentsComparer.Instance);
+    /// <summary>Span-keyed view of <see cref="_sets" />: a hit allocates no owned key.</summary>
+    private readonly Dictionary<DescriptorSetContents, CachedSet>.AlternateLookup<DescriptorSetKey> _setsByKey;
     private readonly List<PoolSlot> _pools = new();
     private PoolSlot? _current;
 
@@ -151,7 +241,11 @@ internal sealed unsafe class DescriptorCache : IDisposable
     /// <summary>Number of recorded cache misses.</summary>
     public long Misses { get; private set; }
 
-    public DescriptorCache(VulkanContext context) => _context = context;
+    public DescriptorCache(VulkanContext context)
+    {
+        _context = context;
+        _setsByKey = _sets.GetAlternateLookup<DescriptorSetKey>();
+    }
 
     /// <summary>Returns a cached descriptor set or allocates/writes one for the supplied content key and layout.</summary>
     public DescriptorSet Get(DescriptorSetContents contents, DescriptorSetLayout layout)
@@ -163,6 +257,28 @@ internal sealed unsafe class DescriptorCache : IDisposable
         }
 
         Misses++;
+        return Insert(contents, layout);
+    }
+
+    /// <summary>
+    /// <see cref="Get(DescriptorSetContents, DescriptorSetLayout)" /> for borrowed
+    /// contents: a hit allocates nothing, a miss copies the key once to insert it.
+    /// </summary>
+    public DescriptorSet Get(DescriptorSetKey key, DescriptorSetLayout layout)
+    {
+        if (_setsByKey.TryGetValue(key, out CachedSet existing))
+        {
+            Hits++;
+            return existing.Set;
+        }
+
+        Misses++;
+        return Insert(key.ToContents(), layout);
+    }
+
+    /// <summary>Allocates and writes a set for a missed key, then caches and indexes it.</summary>
+    private DescriptorSet Insert(DescriptorSetContents contents, DescriptorSetLayout layout)
+    {
         CachedSet cached = Allocate(layout);
         Write(_context, cached.Set, contents);
         _sets[contents] = cached;
@@ -383,10 +499,22 @@ internal sealed unsafe class DescriptorCache : IDisposable
         int writeCount = contents.Samplers.Length + contents.Buffers.Length;
         if (writeCount == 0) return;
 
-        var writes = new WriteDescriptorSet[writeCount];
-        var imageInfos = new DescriptorImageInfo[contents.Samplers.Length];
-        var bufferInfos = new DescriptorBufferInfo[contents.Buffers.Length];
+        // Every arena miss writes a set (an entity's Animation block takes a new ring offset per
+        // draw), so the scratch lives on the stack. The shared layout bounds it (set 0: the frame
+        // textures and one buffer; set 2: StorageSetBindingCount buffers); only a larger set the
+        // convention does not produce falls back to the heap.
+        bool onStack = writeCount <= MaxStackWrites;
+        Span<WriteDescriptorSet> writes = onStack
+            ? stackalloc WriteDescriptorSet[writeCount]
+            : new WriteDescriptorSet[writeCount];
+        Span<DescriptorImageInfo> imageInfos = onStack
+            ? stackalloc DescriptorImageInfo[contents.Samplers.Length]
+            : new DescriptorImageInfo[contents.Samplers.Length];
+        Span<DescriptorBufferInfo> bufferInfos = onStack
+            ? stackalloc DescriptorBufferInfo[contents.Buffers.Length]
+            : new DescriptorBufferInfo[contents.Buffers.Length];
 
+        // Pinning stack memory is free; the heap fallback needs it.
         fixed (DescriptorImageInfo* imagePtr = imageInfos)
         fixed (DescriptorBufferInfo* bufferPtr = bufferInfos)
         {
