@@ -114,15 +114,13 @@ your own installation.
 | `sdk/` | Vendor SDKs as pinned submodules; `streamline-release-2.14.1/` is fetched, not tracked |
 | `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
 | `tests/` | Unit and integration tests |
-| `docs/` | Roadmap, architecture, installation, harness and development-evidence documents |
+| `docs/` | Roadmap, architecture, installation and harness documents |
 
 ## Documentation
 
 - [Roadmap](docs/ROADMAP.md): current status, known defects and remaining work
 - [Architecture](docs/architecture.md): components, ownership, rendering contracts, mod compatibility
 - [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, install/update/removal, Linux
-- [Porting plan](docs/porting-plan.md): how the original implementation was migrated
-- [Development evidence](docs/development-evidence.md): what has been built, run and verified, and on which hardware
 
 ## Background
 

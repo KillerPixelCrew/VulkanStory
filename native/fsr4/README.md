@@ -1,23 +1,12 @@
 # FSR 4 bridge
 
-Source migrated from `native/optimum-fsr4` at baseline revision
-`386e0d05386d0b228b439d09aeca851428f7bbf3` of the Optimum repository
-(StratumServer/Optimum). Own `OptimumFsr4` identifiers/exports become
-`VulkanStoryFsr4`; SDK calls, frame layout, adapter selection, image sharing,
-queue waits/signals and destruction are retained. Preserve the repository's
-inherited provenance and notices.
+`VulkanStoryFsr4.dll`: runs the FidelityFX DX12 upscaler for the Vulkan renderer through shared images and fences.
+Migrated from Optimum's `native/optimum-fsr4` (revision `386e0d0`); its provenance and notices apply.
 
-The explicit-SDK build recipe is retained. From a Windows developer shell with
-`g++` and Vulkan SDK headers available:
+Build (Windows, `g++`, `VULKAN_SDK` set); the SDK root defaults to the `sdk/fidelityfx` submodule when built through `scripts/build-provider-bridges.ps1`:
 
 ```powershell
-./native/fsr4/build.ps1 -SdkRoot <FidelityFX-SDK-root> -Output <absolute-output-directory>/VulkanStoryFsr4.dll
+./native/fsr4/build.ps1 -SdkRoot sdk/fidelityfx -Output <dir>/VulkanStoryFsr4.dll
 ```
 
-The supplied SDK root must contain `Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h`.
-`VULKAN_SDK` supplies Vulkan headers. This recipe neither downloads SDKs nor
-copies vendor binaries. Ship the separately authorized signed
-`amd_fidelityfx_upscaler_dx12.dll` beside `VulkanStoryFsr4.dll` in the payload's
-native RID directory. Players do not run this script.
-
-Consult the [Roadmap](../../docs/ROADMAP.md) for current source and validation status. AMD initialization, shared-resource/fence execution, real-scene quality, switching and shutdown remain acceptance gates.
+At runtime it loads `amd_fidelityfx_upscaler_dx12.dll` from the same directory.

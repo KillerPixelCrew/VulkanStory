@@ -1,117 +1,101 @@
 # Headless renderer harness
 
-Ported and compiled on 2026-10-01; bounded captures and staged-mod lifecycle are recorded in validation-headless-modpath-2026-10-01-01.md. Full feature/visual acceptance remains open. This replaces interactive
-renderer checks as the default development path. It does not deploy anything to
-or close the user's game installation.
+`scripts/dev/headless-capture.ps1` runs the official client with the VulkanStory
+runtime from a staged package. It uses an isolated data directory and a snapshot of
+an existing world, captures frames and attachments, and verifies the result.
+Rendering uses a real SDL window, Vulkan swapchain and provider presentation. The
+user's installation, settings and any running game are not touched.
 
-## What it preserves
+Requirements: Windows x64, the official 1.22.7 installation (default
+`%APPDATA%\Vintagestory`), `dotnet.exe` (.NET 10) on `PATH`, Python with `sqlite3`,
+and a staged package from `scripts/stage-runtime.ps1`
+([building a package](bootstrap-and-installation.md#building-a-package)).
 
-- A real SDL/Vulkan surface and swapchain in a permanently hidden window, including
-  real provider presentation. This is not the surface-free backend preflight.
-- Explicit frame lists or count/stride/first cadence, fixed simulation timestep,
-  local/server command scripts, PPM frames, PPM/PGM/PFM attachment and AO outputs.
-- Render-thread completion/timeout requests, with normal device drain and game save.
-- Existing SSIM comparison script (numpy required for comparison only).
-
-The frame planner, command parser and image writers are migrated from
-`optimum-render-device.cs`; session tick/commands/capture are migrated from
-ClientPlatformWindows's existing harness at baseline
-386e0d05386d0b228b439d09aeca851428f7bbf3. No modified API/game assemblies, Optimum
-launcher, copied game binaries or installed-setting edits are required.
-
-## Run
-
-First build Bootstrap and Game/backend/SDL and stage a complete runtime package
-using the existing scripts. Do this in a validation turn. Do not deploy that stage
-into the official installation for a harness run.
+## Running
 
 ```powershell
-./scripts/dev/headless-capture.ps1 `
-  -PackageDirectory 'D:\Coding\VulkanStory-Rewrite\artifacts\headless-stage' `
-  -OutputDirectory 'D:\Coding\VulkanStory-Rewrite\artifacts\headless-run-001' `
-  -World 'foggy village story' -Upscaler dlss -FrameGeneration dlss `
-  -First 180 -Count 3 -Stride 30 -ParityDump
+./scripts/dev/headless-capture.ps1 -PackageDirectory artifacts\headless-stage `
+  -OutputDirectory artifacts\headless-run-001 -Upscaler dlss -First 180 -Count 3 -Stride 30 -ParityDump
 ```
 
-Supply an existing staged package and a fresh output directory. `-Frames '180,240'`
-selects explicit frames. `-Commands <file> -CommandFrame 30` runs the retained
-camera/weather/chat script. `-FixedDt 0` leaves simulation on wall time. Attachment
-capture can be scheduled later than the last frame with `-ParityFrame`; shutdown
-waits for both artifacts. `-AoOutputs` adds working AO/edges/depth/output images.
-Default lifetime is bounded by `-TimeoutSeconds 300`, with a render-thread timeout
-and a final launcher timeout acting only on its own child handle.
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `-OutputDirectory` | required | Run directory; it must not exist yet |
+| `-World` | `foggy village story` | Save name under `<SourceDataDirectory>\Saves` |
+| `-First` / `-Count` / `-Stride` | 180 / 3 / 30 | Capture schedule in world frames; `-Frames '180,240'` gives an explicit list instead |
+| `-FixedDt` | 0.0166667 | Simulation step in seconds; `0` uses wall time |
+| `-Upscaler` | `off` | `dlss`, `fsr3`, `fsr4`, `xess` |
+| `-FrameGeneration` | `off` | `dlss`, `fsr3`, `xess` |
+| `-Commands`, `-CommandFrame` | —, 30 | Command script run once at that frame |
+| `-Scenario` | — | Scenario JSON (see below) |
+| `-ParityDump`, `-ParityFrame` | off, `-First` | Dump every framebuffer attachment at one frame |
+| `-AoOutputs` | off | Also dump AO working/edges/depth/output |
+| `-AsyncPipelines` | off | Asynchronous pipeline creation; the default compiles synchronously so captures are deterministic |
+| `-CompanionMode` | `present` | `absent` leaves out the input companion |
+| `-Visible`, `-KeepOpen` | off | Show a focused window; `-KeepOpen` keeps the client running after capture |
+| `-MainMenuOptions` | off | Open the Options dialog from the main menu without loading a world (`-OptionsPage`, `-MainOptionsAction open\|save\|cancel`) |
+| `-TimeoutSeconds` | 300 | After this, the launcher kills its own child process |
+| `-PreflightOnly` | off | Validate inputs and print JSON without starting a run |
 
-Requires Windows x64, the matching official .NET 10 game and Python with standard
-sqlite3 support. The launcher uses `dotnet exec` on the existing official client
-with its original runtimeconfig/deps, and a process-local startup hook from the
-staged package. Bootstrap permits that path only for explicit headless mode and
-the expected client entry assembly, then still verifies official game hashes.
-Bootstrap errors fail closed instead of falling back to a visible client.
+**Command scripts:** lines starting with `.` go to the client command dispatcher
+(for example `.vulkanstory set Upscaler xess`). Other lines are sent as chat, so
+server `/` commands work too. Lines starting with `#` are comments.
 
-## Isolation and avoiding interruptions
+**Scenarios** (`scripts/dev/scenarios/schema-v1.json`): up to 128 actions, each with
+an `id`, a `tick` and a `kind`. The kinds are `settings` (apply renderer settings),
+`capture` (a named frame, optionally with attachments), `checkpoint`, and `assert`
+(check a runtime field such as `hidden`, `focused`, `worldReady`,
+`effectiveUpscaler` or `realPresents`). `native-baseline.v1.json` is the reference
+example.
 
-The launcher takes a SQLite backup of the user's existing world, including committed
-WAL content, into `<run>/data/Saves`. It reads the source database without writing
-to it, so the user can keep their original world open. No raw live database-file
-copy and no development superflat. Simulated/world changes stay in the snapshot.
-The snapshot reads the last committed database state, not unsaved in-memory edits.
+## Isolation
 
-Client settings are copied to the isolated data directory; sound/music, focus
-pause and VSync are disabled there. Controller/touch input is disabled in the
-harness settings. Output/config/cache/log files use the run directory. SDL guards
-prevent show/raise/fullscreen/restore/minimize, mouse capture/warp, cursor selection
-and IME activation. The harness cannot open its crash-reporter GUI. Its child runs
-BelowNormal and frames are capped to roughly 30 per second by wall-time throttling.
-GPU/memory use is real and shared; lower CPU priority is not GPU isolation.
+- **World:** `snapshot-world.py` copies the save with SQLite's backup API, opening
+  the source read-only. The copy includes committed WAL content but not unsaved
+  in-memory changes. The world can stay open in the game. Use the foggy village
+  story save for world loading and representative rendering.
+- **Settings:** a copy of `clientsettings.json` with all six audio levels at 0
+  (recorded in `audio-mute.json`), VSync, fullscreen and pause-on-focus-loss off,
+  and only `vulkanstory`/`vulkanstoryinput` removed from `disabledMods`. Renderer
+  settings go to the isolated `ModConfig/vulkanstory.json`. Controller and touch
+  input are off.
+- **Mods:** the staged `Mods/vulkanstory` and `Mods/vulkanstoryinput` are copied
+  into `<run>/data/Mods` and added with `--addModPath`. The game's installed copies
+  are removed from discovery. Other installed mods load normally.
+- **Process:** `dotnet exec` runs the official `Vintagestory.dll` with its own
+  runtimeconfig and deps files, `--dataPath <run>/data`, and `DOTNET_STARTUP_HOOKS`
+  set to the staged bootstrap. The installed `hostfxr.dll` proxy is not used. The
+  child runs at BelowNormal priority but shares the GPU with everything else.
+- **No fallback:** with `VULKANSTORY_HEADLESS=1`, a bootstrap failure, a disabled
+  renderer or a window failure ends the run with an error. The client never falls
+  back to a visible OpenGL window or the crash-reporter GUI.
 
-The headless-only collector excludes the standard installed Mods/vulkanstory folder before assembly discovery. The runner always copies the staged ModSystem into isolated Mods; mod development no longer requires replacing or matching the installed DLL. Other mods follow normal discovery. Isolated module loading is verified. The installed native apphost shim is bypassed; proxy/MFG-enabler coexistence remains
-its own live acceptance gate. The harness currently selects Vulkan; an unmodified
-OpenGL reference capture is not claimed by this port.
+## Window modes
 
-## Evidence and remaining limits
+- **Hidden (default):** the window stays hidden. Show, raise, fullscreen,
+  minimize/restore, mouse capture and warp, cursor changes and IME are suppressed.
+  Frames are throttled to about 30 fps.
+- **`-Visible`:** the window is shown and focused, with no throttling. DLSS frame
+  generation presents generated frames only to a visible, focused window, so run
+  `-FrameGeneration dlss` checks in this mode.
 
-Frames use the original bottom-up Netpbm row convention for comparison. Attachment
-names use official framebuffer enum names or SlotN for extra targets; migrated AO
-outputs use slots 40–43. `frames/headless-result.json` reports artifact completion,
-not visual correctness. Nonzero child exit, missing result, failed counts or timeout
-fail the launcher. Periodic provider/status records go to `<run>/status`, with
-successful SR, prepared FG and SDK-reported presents kept distinct.
+## Outputs
 
-No new tests were written. Builds, bounded hidden captures, snapshots, scripted
-settings, attachment outputs and provider execution are recorded in the validation
-documents. Concurrent user-session performance and full visual parity remain open.
-Use later scheduled PNGs to inspect world rendering after chunk streaming.
+| Path | Contents |
+| --- | --- |
+| `frames/frame-NNNNNN.ppm`, `.png` | Scheduled frames. PPM is bottom-up (GL row order), PNG is top-down |
+| `frames/headless-result.json` | Completion record; scenario runs add `scenario-result.json` and `scenario-events.jsonl` |
+| `attachments/` | `<slot>-<name>-<color<i>\|depth>-<format>.{ppm,pgm,pfm}`. Names come from `EnumFrameBuffer`, `SlotN` for extra targets, slots 40–43 for AO |
+| `status/runtime-<pid>.jsonl` | Provider counters: SR frames, prepared FG frames, SDK-reported presents |
+| `bootstrap.jsonl`, `stdout.log`, `stderr.log` | Bootstrap events and child output |
+| `data/` | Isolated data path |
 
-## First runtime checkpoint
+`verify-headless-result.ps1` runs after the child exits. It checks the exit code,
+timeout, frame counts, that the staged mod copy was the one loaded, world readiness
+and the window state. If any check fails, the launcher fails. Passing means the
+artifacts are complete, not that the images are correct, so inspect the PNGs. Later
+frames show the world after chunk streaming has finished.
 
-The first completed run (2026-10-01) achieved a clean build, isolated snapshot, three frames and attachment/AO files, automatic shutdown. World source pixels are visible. SDK constants/release errors and remaining command/concurrency/visual gates stay open. No installed deployment occurred.
-
-## Normal asynchronous pipeline mode
-
-Pass -AsyncPipelines to keep ordinary scene pipeline creation asynchronous even during captures. Required final/luma/UI draws still wait for their own pipelines. The default retains deterministic synchronous capture behavior. Bounded asynchronous runs have completed successfully.
-
-## Scheduled PNG sidecars
-
-Each scheduled frame also writes a top-down PNG from the same BGRA readback. Original PPM files and SSIM conventions remain unchanged. Inspect those later PNGs for world completeness; the one-off status screenshot may precede completed chunk streaming.
-
-## Isolated module discovery checkpoint
-
-The launcher explicitly adds run/data/Mods. The latest checkpoint confirms the loaded DLL is the isolated staged copy and the ordinary world-ready callback arrives. Completion requires both. No installed module is replaced.
-
-## Scripted settings checkpoint
-
-A scripted run dispatched sequential
-`.vulkanstory set` commands at world frame 90, switching FSR3 SR/FG to XeSS balanced
-SR/FG. All changes persisted and executed; three later frame captures completed.
-One Streamline options warning during the transition remains unresolved.
-
-## Disablement and startup-failure isolation
-
-The runner enables only vulkanstory/vulkanstoryinput in its copied disabledMods
-list; all other mod choices and the original user settings remain unchanged.
-This keeps a renderer check usable when the user has disabled the normal mod.
-An unexpected disabled renderer during a headless launch now fails instead of
-returning to original visible OpenGL window creation. Window preparation failures
-also propagate in headless mode instead of entering the normal visible fallback.
-These source corrections are unbuilt/unrun. The preceding successful capture
-does not exercise a disabled or failed-startup branch.
+`python scripts/dev/ssim.py <dir-a> <dir-b> [--threshold 0.98] [--allowlist f.md]`
+compares two attachment dumps by SSIM and mean absolute difference (requires
+numpy).

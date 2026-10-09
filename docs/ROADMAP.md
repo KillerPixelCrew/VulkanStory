@@ -1,41 +1,28 @@
-# VulkanStory Roadmap
+# Roadmap
 
-Updated 2026-10-09. Current status and remaining work.
+Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.0-dev) (Windows x64, Vintage Story 1.22.7).
 
-Current release: [`v0.1.0-dev`](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.0-dev)
-(win-x64), built from branch `rewrite`. Vendor SDKs are pinned submodules under
-`sdk/`; the Streamline release runtimes are fetched by `scripts/fetch-streamline-release.ps1`.
+## Done
 
-## Features
-
-| Area | Status |
-| --- | --- |
-| Vulkan renderer, SDL3 window/input, official startup and graphics routing | Done |
-| Native TAA with sharpening and mip bias; render scale 25–100 % | Done |
-| Ambient occlusion: vanilla SSAO and GTAO with presets | Done |
-| Upscaling: DLSS, FSR 3.1, FSR 4, XeSS, with automatic fallback | Done |
-| Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG | Done |
-| Low latency: Reflex / PC Latency, Anti-Lag, XeLL | Done |
-| Original Options menu integration (main menu and in world) | Done |
-| Controllers: remapping, radial menu, glyphs, analog movement and server companion; touch | Done |
-| Screenshots, timelapse and AVI capture | Done |
-| Render-pass extension points for other mods | Done |
-| Windows install/update/removal through the native `hostfxr.dll` proxy | Done |
-| First world load holds the loading image until the frame is complete (REN-06) | Done |
-| OpenGL compatibility for other mods: loader-bound discovery and refusal | Done |
+- Vulkan renderer, SDL3 window and input
+- TAA, render scale, SSAO / GTAO
+- Upscaling: DLSS, FSR 3.1, FSR 4, XeSS
+- Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG
+- Low latency: Reflex / PC Latency, Anti-Lag, XeLL
+- Options menu integration
+- Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
+- Screenshot, timelapse and AVI capture
+- Render-pass extension points for other mods
+- Windows install, update and removal
+- Loading screen stays up until the first world frame is complete
 
 ## Known defects
 
-| ID | Defect |
-| --- | --- |
-| REN-07 | Geometry edges against the sky jitter with TAA and FSR upscaling (foliage against terrain is stable). Reading the TAA/FSR3 reactive value from the nearest-depth tap did not fix it. Next candidates: sky, cloud and fog layers not sharing the scene jitter, and depth/dilation at sky pixels. |
-| REN-08 | The first use of a new pipeline mid-game (new entity, particle or mod shader variant) skips that draw while it compiles, which costs one unresolved jittered frame and a TAA/SR history reset. |
+- **REN-07:** Geometry edges against the sky jitter with TAA and FSR.
+- **REN-08:** A pipeline first used mid-game (new entity, particle or mod shader) skips its draw while compiling, causing one jittered frame and a TAA/SR history reset.
 
-## Deferred work
+## Deferred
 
-| ID | Work | Deferred because |
-| --- | --- | --- |
-| GL-02 | Shared-resource/state adapters for other mods' OpenGL usage | Waits for a target mod to be selected |
-| GL-03 | Concrete mod compatibility profiles | No target mods yet (user, 2026-10-08) |
-| TEST-01 | Write tests, including a decision on the unused `*ForTests` hooks | Tests are deferred until integration is finished |
-| LINUX-01 | Linux release package | Linux is not part of the current release |
+- **GL-02 / GL-03:** OpenGL compatibility adapters and profiles for other mods, once a target mod is chosen.
+- **TEST-01:** Tests.
+- **LINUX-01:** Linux release.

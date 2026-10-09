@@ -1,7 +1,5 @@
 VulkanStory for Vintage Story 1.22.7 — Windows x64
 
-Development package. Full release acceptance is still in progress.
-
 INSTALL
 Close the game. Extract the client ZIP into the existing folder containing
 Vintagestory.exe, preserving the folder layout. Start with your normal shortcut.
