@@ -15,3 +15,7 @@ Directory.Build.local.props
 *.decompiled.*
 **/decompiled/
 *.il
+
+# Vendor SDK release binaries (fetched by scripts/fetch-streamline-release.ps1).
+# SDK sources are pinned submodules under sdk/.
+sdk/streamline-release-*/
