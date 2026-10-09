@@ -4,11 +4,12 @@ Updated 2026-10-09. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md) and the dated implementation and
 validation records under [records/](records/).
 
-Last installed development package: `artifacts/validation/ren-fixes-20261009-230744`
-(Release managed build, all five provider bridges built from the `sdk/` submodules,
-win-x64 stage/package/deploy passed, installed hashes verified). It contains the
-code-quality changes plus the REN-06 composition gate and the REN-07 sky-edge jitter
-fix; their runtime behaviour checks (CQ-01, REN-06, REN-07) are outstanding.
+Current release: [`v0.1.0-dev`](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.0-dev)
+(pre-release, win-x64), built from `artifacts/validation/ren-fixes-20261009-230744`
+and installed in the developer's game with verified hashes. It contains the 2026-10-09
+code-quality changes, the REN-06 composition gate and the REN-07 reactive change.
+User test: sky-edge jitter is still present (REN-07 open); FSR 4 runs on the user's
+NVIDIA GPU. The remaining runtime checks (CQ-01, REN-06) are outstanding.
 
 Commit hashes quoted in older records predate the 2026-10-09 history rewrite (which
 removed the vendored Streamline SDK and local agent files) and no longer resolve.
@@ -23,17 +24,17 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
    resolved the observed -12 stop. The existing XeSS→FSR3→XeSS and latency
    Off→On→Boost profiles passed all actions/captures on RTX 4070. Ordinary
    Options close/resize/resume passed on DLSS: both measured resume windows
-   produced 40 real/80 SDK presents. `6a3fab6` removes the stale full-extent override;
-   validate using a freshly built bridge with no sanitize warning. Wider quality/
-   pacing and eligible Intel behavior remain open.
+   produced 40 real/80 SDK presents. The stale full-extent override is removed and
+   the rebuilt Streamline bridge ships in `v0.1.0-dev`; confirm no sanitize warning
+   at runtime. Wider quality/pacing and eligible Intel behavior remain open.
 2. **SDK-02: moving-scene quality and pacing acceptance.** Focused DLSS-G gain is
    now verified on RTX 4070. The SDK suppressed the old hidden run because its window
    was unfocused. The 8 FPS regression was full-buffer cloning on small mapped mesh
    updates; ordered range uploads now preserve buffer identity and placement.
    Wider camera/object/transparency, loading/leave-rejoin and cadence checks remain.
 3. **HW-01/HW-02: obtain AMD execution evidence.** Current recorded hardware is
-   RTX 4070 Laptop GPU and Intel UHD 770; no AMD adapter. Unsupported fallback is
-   verified, actual AMD SR/FG is not. Intel FSR3 SR/FG executes; XeSS-FG requires
+   RTX 4070 Laptop GPU and Intel UHD 770; no AMD adapter. FSR 4 runs on the user's
+   NVIDIA GPU (user report 2026-10-09); AMD SR/FG execution is unverified. Intel FSR3 SR/FG executes; XeSS-FG requires
    eligible hardware rather than UHD 770.
 4. **UI-01: finish ordinary Options use.** Both hosts render all five pages;
    Save/Cancel, persistence and 6x slider callbacks have scoped diagnostic evidence.
@@ -79,23 +80,23 @@ Options menus from both the main menu and a loaded world. The goal is **not comp
 | XeSS SR | NVIDIA and Intel evaluations | Wider scene/quality acceptance |
 | XeSS FG | XeLL/history corrections validated; XeSS→FSR3→XeSS and Off→On→Boost scenarios passed | Wider transitions, moving-scene/visible quality/pacing and eligible Intel acceptance |
 | FSR3 SR/FG | NVIDIA SDK path; Intel single-queue direct interpolation, HUD composition and extra submissions | Moving-camera/disocclusion/scanout/pacing |
-| FSR4 | Bridge/runtime implemented; unsupported-NVIDIA fallback | Supported AMD execution |
+| FSR4 | Bridge/runtime implemented; runs on the user's NVIDIA GPU (user report 2026-10-09) | AMD execution; moving-scene quality |
 | Options | Main/world callback lifecycle passed; custom panels fit; inherited sidebar fixed-layout limit confirmed/no missing recompose | Scrolling, broader physical interaction/error/leave-rejoin; native sidebar limit is recorded separately |
 | Latency/controllers/touch | World/GUI release guards, radial sticks, separate menu bindings and semantic inventory actions implemented; inventory packet path checked | Physical input, gesture/layer/radial extensions and latency/touch acceptance |
 
 ## Source and delivery
 
-The installed implementation is `bc85817`, checkout `80158f3`. Both Game builds,
-both platform stage/packages and main/focused DLSS world profiles passed;
-all 400 installed hashes match. Linux ZIP exists; Linux runtime/install/providers remain unverified.
-The prior focused DLSS world/gain scenario passed at `9a14715`. Liquid motion is ready and
-Game XML warnings are resolved; the existing CS8600 warning remains. Used mesh
-writes stage only changed ranges, while rare raw pointer access synchronizes
-queued updates. Foreground scenarios require focus and skip the diagnostic throttle.
-Exact payloads and proof limits are in [development-evidence.md](development-evidence.md).
+Source: branch `rewrite` of KillerPixelCrew/VulkanStory (default branch). Vendor SDKs are
+pinned submodules under `sdk/`; the Streamline release runtimes are fetched by
+`scripts/fetch-streamline-release.ps1`.
 
-The staged and installed packages are identified above. The October-1 ZIP and
-prepared visible launchers retain their older recorded payloads.
+Release `v0.1.0-dev` (tag on `rewrite`) ships `VulkanStory-win-x64.zip` and
+`VulkanStory-Input-Companion.zip`. Its Release build reports 6 compiler warnings
+(CS1573 at `SdlWindowHost.cs:434` and `VulkanDevice.cs:177`, CS8600 at
+`GameRenderSession.Scenarios.cs:525`). No Linux package is published; the Linux
+stage/ZIP path last passed before the history rewrite and Linux runtime/install/providers
+remain unverified. Exact payloads and proof limits of earlier builds are in
+[development-evidence.md](development-evidence.md).
 
 ## Review findings
 
@@ -119,9 +120,9 @@ from these checks. Broader feature, platform and hardware work remains below.
 
 The [code-quality review record](records/code-quality-review-2026-10-09.md) holds every
 finding (I, E, R, S, A, C IDs) with its per-row implementation outcome. All rows
-except S13 (not attempted: tests deferred) and the partial rows below are
-implemented in the working tree, which is **unbuilt and unvalidated**. Every
-row below is implemented-unvalidated unless marked open.
+except S13 (not attempted: tests deferred) are implemented, built, deployed and
+released in `v0.1.0-dev`. Every row below is implemented and **runtime-unvalidated**
+unless marked open.
 
 | Finding | Kind | Status | Validation or remaining work |
 | --- | --- | --- | --- |
@@ -137,9 +138,9 @@ row below is implemented-unvalidated unless marked open.
 | C26 event-tracked gamepad buttons | Efficiency | Implemented, unvalidated | Button mask maintained from forwarded `GAMEPAD_BUTTON_DOWN/UP` events with full resync on open/remap/focus/2 s rescan; no stuck or missed buttons, pressed edges unchanged |
 | E1, A3 follow-ups | Efficiency / simplification | Implemented, unvalidated | Descriptor cache hits allocate nothing (span alternate lookup); single-source XeSS latency selection with unchanged call order |
 | C10 precise sleep | Known defect (15.6 ms sleep granularity) | Implemented, unvalidated; behaviour change | maxFps 60 cadence and FSR3 direct-FG pacing with `PreciseSleep` (high-resolution timer + spin) |
-| I4, C15, C17, C18 native bridges | Known defects (stale params, timing race, re-init, TOCTOU) | Implemented, unvalidated | Rebuild and ship `native/streamline` and `native/xess-fg` with the managed assembly (renamed `VulkanStorySlInvalidateFrameTags`); no sanitize warning; Streamline re-init; verified interposer load |
+| I4, C15, C17, C18 native bridges | Known defects (stale params, timing race, re-init, TOCTOU) | Implemented and built (ships in `v0.1.0-dev`), runtime-unvalidated | No sanitize warning; Streamline re-init; verified interposer load |
 | I5, C16, C21, C22, C23, E11, I9 | Known defects / correctness risks | Implemented, unvalidated | Streamline OUT_OF_DATE during waits rebuilds the swapchain; teardown after a failed wait; depth blit formats; latency follows effective FG; default vertex binding persists across vendor passes; vanilla SSAO guard |
-| S13 test hooks; `porting/renderer-tests` | Deferred test work | **Open**, deferred by test policy | Decide on `*ForTests` hooks; fixture must map GL stencil ops locally (`StencilOpFrom` removed) and fix the stale `DlssUpscaler` constructor at migration |
+| S13 test hooks | Deferred test work | **Open**, deferred by test policy | Decide on the `*ForTests` hooks when tests are written; the uncompiled `porting/renderer-tests` fixtures were removed in the 2026-10-09 cleanup |
 
 ## Remaining feature and verification work
 
@@ -151,7 +152,7 @@ findings to their broader feature and acceptance areas.
 | ID | Remaining completion boundary |
 | --- | --- |
 | CQ-01 | Validate the 2026-10-09 code-quality implementation: Game builds, rebuilt Streamline/XeSS-FG bridges, package, harness on the foggy village snapshot, and the behaviour changes in the code-quality table (including the C9 renderer stall throttle, C26 event-tracked controller buttons, C14 pixel units and the E1 descriptor lookup). Progress 2026-10-09 (`artifacts/validation/code-quality-20261009-212939`): Release managed build, shaders and all five Windows bridges built (6 compiler warnings: CS1573 at `SdlWindowHost.cs:434` and `VulkanDevice.cs:177`, CS8600 at `GameRenderSession.Scenarios.cs:525`); win-x64 staged, packaged and deployed to the user game (366 payload files verified, owned `loader.ini` preserved). Harness run and runtime behaviour checks still open |
-| CQ-02 | Open code-quality remainders: S13 `*ForTests` hooks and `porting/renderer-tests` fixture fixes (`StencilOpFrom`, `DlssUpscaler` constructor), deferred to test migration |
+| CQ-02 | Open code-quality remainder: S13 `*ForTests` hooks, deferred until tests are written |
 | PORT-01 | Controller world ownership/damage cleanup acceptance |
 | REN-01 | Historical DLSS sky pattern: current nonreproduction is not a fix |
 | REN-02 | Moving camera/object/animation/transparency motion parity |
@@ -176,13 +177,12 @@ findings to their broader feature and acceptance areas.
 | DEL-02 | Install/update/remove/recovery |
 | DEL-03 | Actual MFG version.dll coexistence and supported limits |
 | DEL-04 | Coherent current candidate, dependencies, licenses and release gates |
-| HW-01 | Supported AMD FSR4 execution |
+| HW-01 | AMD execution of FSR 3/FSR 4 upscaling and frame generation |
 | HW-02 | Vendor FG and handheld visible/pacing/power coverage |
 | LINUX-01 | Managed cross-builds, RID/notice corrections, staging and ZIP passed; actual Linux runtime/install/providers/URI proof open |
 | GL-01 | Loader-bound discovery/refusal compiles on both targets and normal startup registration passes; actual third-party refusal unexercised |
 | GL-02 | Concrete shared-resource/state adapters deferred by user until a target mod is selected |
 | GL-03 | Concrete mod profiles deferred by user: "none right now" on 2026-10-08 |
 
-Older plans, detailed session reports and pre-cleanup source are recoverable from
-a local, unpublished cleanup backup. Raw validation artifacts
-remain intact. Historical claims do not supersede this Roadmap.
+Dated implementation and validation records are in [records/](records/); historical
+claims there do not supersede this Roadmap.
