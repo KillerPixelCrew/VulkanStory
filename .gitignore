@@ -6,3 +6,12 @@ Directory.Build.local.props
 .idea/
 *.user
 
+
+# Local agent planning/baselines. Contains decompiled game sources; never publish.
+.codex/
+
+# Decompiled or disassembled game code, wherever it is placed.
+*.decompiled.cs
+*.decompiled.*
+**/decompiled/
+*.il
