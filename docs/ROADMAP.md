@@ -18,7 +18,7 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Known defects
 
-- **REN-07:** Geometry edges against the sky jitter with TAA and FSR.
+- **REN-07:** Geometry edges against the sky jitter with TAA and FSR. Cause found: the native TAA resolve (`shaders/native/taa-resolve.glsl`) read the sky's reactive value at sky-edge pixels and dropped history there. Fixed in source, not yet built.
 - **REN-08:** A pipeline first used mid-game (new entity, particle or mod shader) skips its draw while compiling, causing one jittered frame and a TAA/SR history reset.
 
 ## Planned
