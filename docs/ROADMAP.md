@@ -4,10 +4,11 @@ Updated 2026-10-09. Authoritative current status; detailed results are in
 [development-evidence.md](development-evidence.md) and the dated implementation and
 validation records under [records/](records/).
 
-Last installed development package: the 2026-10-09 code-quality build (Release managed
-build, all five provider bridges, win-x64 stage/package/deploy passed). Its runtime
-behaviour checks (CQ-01) are outstanding. The REN-06 composition gate and the REN-07
-sky-edge jitter fix are implemented but not yet built.
+Last installed development package: `artifacts/validation/ren-fixes-20261009-230744`
+(Release managed build, all five provider bridges built from the `sdk/` submodules,
+win-x64 stage/package/deploy passed, installed hashes verified). It contains the
+code-quality changes plus the REN-06 composition gate and the REN-07 sky-edge jitter
+fix; their runtime behaviour checks (CQ-01, REN-06, REN-07) are outstanding.
 
 Commit hashes quoted in older records predate the 2026-10-09 history rewrite (which
 removed the vendored Streamline SDK and local agent files) and no longer resolve.
@@ -157,8 +158,8 @@ findings to their broader feature and acceptance areas.
 | REN-03 | History reset, resize, option changes and shader reload |
 | REN-04 | Post-processing/material parity |
 | REN-05 | Graph/resource ownership and bounded fallback |
-| REN-06 | First world load showed the renderer assembling itself (missing draws, raw jitter, then TAA/SR/FG). Implemented 2026-10-09, **unbuilt and unvalidated**: a composition gate holds the last loading image until no draw waits on a pipeline, motion is valid, TAA/SR composed a full jitter cycle and FG is ready to enable (15 s timeout logs the unmet condition); temporal/FSR-blit pipelines are requested when targets are built; a cold FSR-blit pipeline no longer disables FSR for the session. Validate on the foggy village snapshot with `VULKANSTORY_HEADLESS_COMPOSITION_HOLD=1` (the harness bypasses the gate otherwise) and visibly per provider. Mid-game first-use pipeline drops (new entity/mod variants) are a separate defect |
-| REN-07 | Geometry edges against sky/fog/clouds jittered under native TAA and FSR3 (user report 2026-10-09; foliage against terrain stable). Cause: the sky reactive value (cloud/fog coverage) was read at the sky-side edge pixel while motion came from the nearest-depth tap, so edge pixels dropped history on sky jitter phases. Implemented 2026-10-09, **unbuilt and unvalidated**: `taa-resolve.fsh` reads reactive from `closestPixel`; the FSR3 reactive mask takes the 3x3 minimum. FSR4 passes no reactive mask; an unavailable FSR4 falls back to native TAA. Needs a visible check on the foggy village save with TAA, FSR3 and FSR4 |
+| REN-06 | First world load showed the renderer assembling itself (missing draws, raw jitter, then TAA/SR/FG). Implemented 2026-10-09, built and deployed 2026-10-09, **runtime unvalidated**: a composition gate holds the last loading image until no draw waits on a pipeline, motion is valid, TAA/SR composed a full jitter cycle and FG is ready to enable (15 s timeout logs the unmet condition); temporal/FSR-blit pipelines are requested when targets are built; a cold FSR-blit pipeline no longer disables FSR for the session. Validate on the foggy village snapshot with `VULKANSTORY_HEADLESS_COMPOSITION_HOLD=1` (the harness bypasses the gate otherwise) and visibly per provider. Mid-game first-use pipeline drops (new entity/mod variants) are a separate defect |
+| REN-07 | Geometry edges against sky/fog/clouds jittered under native TAA and FSR3 (user report 2026-10-09; foliage against terrain stable). Cause: the sky reactive value (cloud/fog coverage) was read at the sky-side edge pixel while motion came from the nearest-depth tap, so edge pixels dropped history on sky jitter phases. Implemented 2026-10-09, built and deployed 2026-10-09, **runtime unvalidated**: `taa-resolve.fsh` reads reactive from `closestPixel`; the FSR3 reactive mask takes the 3x3 minimum. FSR4 passes no reactive mask; an unavailable FSR4 falls back to native TAA. Needs a visible check on the foggy village save with TAA, FSR3 and FSR4 |
 | SDK-01 | SR settings, unsupported behavior and live switching |
 | SDK-02 | Broader FG HUD/occlusion quality, moving-scene and pacing coverage; RTX 4070 DLSS-G functional output gain passed |
 | SDK-03 | Verify DLSS-G framebuffer teardown after SDK VRAM warning 39; the checked drain/free correction is implemented |
