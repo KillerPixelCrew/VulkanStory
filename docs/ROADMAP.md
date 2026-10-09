@@ -6,7 +6,7 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 - Vulkan renderer, SDL3 window and input
 - TAA, render scale, SSAO / GTAO
-- Upscaling: DLSS, FSR 3.1, FSR 4, XeSS
+- Upscaling: DLSS, FSR 3.1, FSR 4 (INT8 path on NVIDIA and Intel), XeSS
 - Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG
 - Low latency: Reflex / PC Latency, Anti-Lag, XeLL
 - Options menu integration

@@ -12,6 +12,10 @@ Shaderc and its glslang/SPIRV dependencies use the revisions selected by the
 Silk.NET 2.23.0 build submodule and Shaderc DEPS. The native package's repository
 commit metadata alone is not treated as a Shaderc source revision.
 
+MinHook 1.3.4 (`c3fcafd`, the `sdk/minhook` submodule) is statically linked into
+`VulkanStoryFsr4.dll`; its notice, which also covers the bundled HDE32/HDE64
+disassemblers, comes from that revision.
+
 Silk managed notices come from its NuGet-recorded source commit. Microsoft
 DependencyModel 9.0.9 and PlatformAbstractions 3.1.6 license/third-party notices
 are copied from the installed packages. Vendor SDK notices are selected separately

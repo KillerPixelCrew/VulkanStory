@@ -8,7 +8,7 @@ Directory containing the compiled VulkanStory provider bridge DLLs.
 .PARAMETER CoreNativeDirectory
 Directory supplying inventory-listed SDL/shader compiler core binaries.
 .PARAMETER CoreNoticesDirectory
-Nonempty recursive tree of SDL/shader compiler redistribution notices.
+Nonempty recursive tree of SDL/shader compiler and MinHook (statically linked into the FSR 4 bridge) redistribution notices, normally packaging/notices/native.
 .PARAMETER DlssSdkRoot
 DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt; defaults to the sdk/dlss submodule.
 .PARAMETER Fsr3SdkRoot

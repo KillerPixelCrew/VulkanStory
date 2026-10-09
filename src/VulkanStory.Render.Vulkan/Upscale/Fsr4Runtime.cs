@@ -116,7 +116,7 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
             instance.context = context;
             if (code != 0 || context == 0)
             {
-                reason = "FSR 4 DX12 context creation failed (" + code.ToString("X8") + ")";
+                reason = CreateFailureReason(code);
                 instance.Dispose();
                 return false;
             }
@@ -140,6 +140,16 @@ internal sealed unsafe class Fsr4Runtime : IDisposable, IDx12SharedRuntime
             return false;
         }
     }
+
+    /// <summary>Maps a native VulkanStoryFsr4Create result to a readable unavailability reason.</summary>
+    /// <remarks>-11: unsupported vendor; -9: no FSR 4 provider selected/effective; -12: NVIDIA/Intel INT8 compatibility refused.</remarks>
+    private static string CreateFailureReason(int code) => code switch
+    {
+        -11 => "FSR 4 is not supported on this GPU",
+        -9 => "FSR 4 is not supported on this GPU (the signed runtime offers no FSR 4 provider)",
+        -12 => "FSR 4 compatibility for this GPU could not be enabled (SDK fingerprint, Shader Model 6.6 or wave operations)",
+        _ => "FSR 4 DX12 context creation failed (" + code.ToString("X8") + ")",
+    };
 
     /// <inheritdoc/>
     public int CreateSharedImage(uint width, uint height, Format format, bool writable,

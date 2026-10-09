@@ -7,12 +7,15 @@
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <memory>
 #include <new>
 #include <string>
 #include "api/include/dx12/ffx_api_dx12.h"
 #include "upscalers/include/ffx_upscale.h"
+#include "fsr4_compat.h"
 
 /// @brief Releases a local COM reference and clears its pointer without waiting for GPU work.
 template<class T> static void Release(T*& object) {
@@ -36,7 +39,9 @@ static_assert(sizeof(VulkanStoryFsr4Frame) == 96 &&
 
 /// @brief Owns the signed-runtime module, matching DX12 adapter/device, SDK context, queue and allocator-completion tracking.
 /// @details Imported image/resource ownership stays with the caller. A checked release failure retains this owner and prevents later destructive cleanup.
+/// The NVIDIA/Intel INT8 compatibility lease must outlive the SDK context; it is released after context destruction.
 struct VulkanStoryFsr4 {
+    std::shared_ptr<Fsr4Compatibility> compatibility;
     HMODULE module{};
     IDXGIFactory4* factory{};
     IDXGIAdapter1* adapter{};
@@ -59,9 +64,14 @@ struct VulkanStoryFsr4 {
     bool releasePrepared{};
 };
 
+/// @brief Whether a PCI vendor is an FSR4 candidate: AMD natively, NVIDIA/Intel through the INT8 compatibility lease.
+static bool IsCandidateVendor(uint32_t vendor) {
+    return vendor == 0x1002 || vendor == 0x10de || vendor == 0x8086;
+}
+
 /// @brief Checks the Vulkan adapter vendor required by this FSR4 bridge.
-/// @details The AMD vendor check is preliminary; actual signed-provider selection is verified during Create.
-/// @return Zero for an AMD Vulkan adapter, otherwise a negative availability code.
+/// @details The vendor check is preliminary; NVIDIA/Intel compatibility and signed-provider selection are verified during Create.
+/// @return Zero for an AMD, NVIDIA or Intel Vulkan adapter, otherwise a negative availability code.
 extern "C" __declspec(dllexport) int VulkanStoryFsr4Probe(VkPhysicalDevice physical) {
     if (!physical) return -1;
     HMODULE loader = GetModuleHandleW(L"vulkan-1.dll");
@@ -70,7 +80,34 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Probe(VkPhysicalDevice physi
     if (!properties) return -2;
     VkPhysicalDeviceProperties info{};
     properties(physical, &info);
-    return info.vendorID == 0x1002 ? 0 : -3;
+    return IsCandidateVendor(info.vendorID) ? 0 : -3;
+}
+
+// Ported from ReScaleFrame runtime/backends/fsr/src/ffx_version.h (same author, GPL-3.0-only).
+/// @brief Picks the newest provider of one FidelityFX major version out of an ffxQuery GetVersions answer.
+/// @details IDs are opaque; the family comes from the SDK's paired "major.minor.patch" display name, never from bit masks.
+/// @return False when nothing matches.
+static bool SelectNewestVersion(const uint64_t* ids, const char* const* names, uint64_t count,
+    unsigned major, uint64_t& id) {
+    bool found = false;
+    unsigned bestMinor = 0, bestPatch = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        unsigned foundMajor = 0, minor = 0, patch = 0;
+        if (!names[i] || std::sscanf(names[i], "%u.%u.%u", &foundMajor, &minor, &patch) != 3 ||
+            foundMajor != major) continue;
+        if (!found || minor > bestMinor || (minor == bestMinor && patch > bestPatch)) {
+            found = true; id = ids[i]; bestMinor = minor; bestPatch = patch;
+        }
+    }
+    return found;
+}
+
+/// @brief Whether a provider display name identifies FSR4 ("4.x.y" in SDK 2.x, or an "FSR4"/"FSR 4" label).
+static bool IsFsr4Name(const char* name) {
+    if (!name) return false;
+    unsigned major = 0, minor = 0, patch = 0;
+    if (std::sscanf(name, "%u.%u.%u", &major, &minor, &patch) == 3) return major == 4;
+    return std::strstr(name, "FSR4") || std::strstr(name, "FSR 4");
 }
 
 /// @brief Locates the bridge directory used for its sibling signed FSR4 runtime.
@@ -140,6 +177,8 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4DestroyChecked(VulkanStoryFs
     if (!value) return 0;
     int prepared = VulkanStoryFsr4PrepareDestroy(value);
     if (prepared != 0) return prepared;
+    // The SDK context is destroyed; dropping the lease restores native capability answers.
+    value->compatibility.reset();
     Release(value->commands);
     for (auto*& allocator : value->allocators) Release(allocator);
     Release(value->completionFence);
@@ -160,7 +199,7 @@ extern "C" __declspec(dllexport) void VulkanStoryFsr4Destroy(VulkanStoryFsr4* va
 }
 
 /// @brief Creates the signed FSR4 DX12 context on the adapter matching the Vulkan device LUID.
-/// @details Verifies the returned provider version identifies FSR4. On initialization failure a failed checked cleanup can return a retained owner through output.
+/// @details NVIDIA/Intel first acquire the INT8 compatibility lease (-12 when refused). The newest 4.x provider is forced with ffxOverrideVersion and the effective provider must match it (-9 otherwise; -11 for an unsupported vendor). On initialization failure a failed checked cleanup can return a retained owner through output.
 /// @param physical Borrowed Vulkan physical device with a valid Windows LUID.
 /// @param renderWidth Maximum input width.
 /// @param renderHeight Maximum input height.
@@ -190,6 +229,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         if (!id.deviceLUIDValid) { error = -4; break; }
         uint64_t luid{};
         std::memcpy(&luid, id.deviceLUID, VK_LUID_SIZE);
+        uint32_t vendor{};
         HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&value->factory));
         if (FAILED(hr)) { error = static_cast<int>(hr); break; }
         for (UINT index = 0; ; ++index) {
@@ -202,11 +242,16 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
             if (FAILED(hr)) { Release(candidate); error = static_cast<int>(hr); break; }
             uint64_t candidateLuid{};
             std::memcpy(&candidateLuid, &description.AdapterLuid, sizeof(candidateLuid));
-            if (candidateLuid == luid) { value->adapter = candidate; break; }
+            if (candidateLuid == luid) {
+                value->adapter = candidate;
+                vendor = description.VendorId;
+                break;
+            }
             candidate->Release();
         }
         if (error != 0) break;
         if (!value->adapter) { error = -5; break; }
+        if (!IsCandidateVendor(vendor)) { error = -11; break; }
         hr = D3D12CreateDevice(value->adapter, D3D_FEATURE_LEVEL_12_0,
             IID_PPV_ARGS(&value->device));
         if (FAILED(hr)) { error = static_cast<int>(hr); break; }
@@ -226,6 +271,28 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         if (!value->create || !value->destroy || !value->dispatch || !value->query) {
             error = -8; break;
         }
+        // NVIDIA/Intel run the INT8 provider through the pinned-SDK capability lease. It must be
+        // active before version enumeration, which filters providers by device support. A refusal
+        // is terminal; there is no fallback to an older provider.
+        if (vendor == 0x10de || vendor == 0x8086) {
+            value->compatibility = VulkanStoryFsr4EnableInt8(value->module, value->adapter, value->device);
+            if (!value->compatibility) { error = -12; break; }
+        }
+        // Ported from ReScaleFrame fsr_sr.inl: force the newest 4.x provider by display name.
+        uint64_t count = 32;
+        uint64_t ids[32]{};
+        const char* names[32]{};
+        ffxQueryDescGetVersions versions{};
+        versions.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
+        versions.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+        versions.device = value->device;
+        versions.outputCount = &count;
+        versions.versionIds = ids;
+        versions.versionNames = names;
+        error = static_cast<int>(value->query(nullptr, &versions.header));
+        if (error) break;
+        uint64_t selected{};
+        if (count > 32 || !SelectNewestVersion(ids, names, count, 4, selected)) { error = -9; break; }
         ffxCreateContextDescUpscale upscale{};
         upscale.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
         upscale.flags = FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
@@ -237,8 +304,12 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         ffxCreateContextDescUpscaleVersion version{};
         version.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE_VERSION;
         version.version = FFX_UPSCALER_VERSION;
+        ffxOverrideVersion overrideVersion{};
+        overrideVersion.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
+        overrideVersion.versionId = selected;
         upscale.header.pNext = &backend.header;
         backend.header.pNext = &version.header;
+        version.header.pNext = &overrideVersion.header;
         error = static_cast<int>(value->create(&value->effect, &upscale.header, nullptr));
         if (error) break;
         ffxQueryGetProviderVersion provider{};
@@ -247,9 +318,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr4Create(
         if (error) break;
         // The signed loader can select a legacy FSR provider on older GPUs.
         // This option promises the ML upscaler, so reject that substitution.
-        if (!provider.versionName ||
-            (!std::strstr(provider.versionName, "FSR4") &&
-             !std::strstr(provider.versionName, "FSR 4"))) { error = -9; break; }
+        if (provider.versionId != selected || !IsFsr4Name(provider.versionName)) { error = -9; break; }
         hr = value->device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
             IID_PPV_ARGS(&value->completionFence));
         if (FAILED(hr)) { error = static_cast<int>(hr); break; }

@@ -2,7 +2,7 @@
 .SYNOPSIS
 Builds the five Windows x64 provider bridges into a fresh output directory.
 .DESCRIPTION
-Requires Windows x64 PowerShell 7, declared SDK headers, g++, and gcc or cc. Validates inputs before creating OutputDirectory, then invokes the retained NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
+Requires Windows x64 PowerShell 7, declared SDK headers, the sdk/minhook submodule (FSR 4), g++, and gcc (FSR 4 MinHook sources and NGX). Validates inputs before creating OutputDirectory, then invokes the retained NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
 .PARAMETER Fsr3SdkRoot
 FidelityFX SDK root containing ffx-api/include/ffx_api/ffx_api.h; defaults to the sdk/fidelityfx-vk submodule (v1.1.4).
 .PARAMETER Fsr4SdkRoot
@@ -42,9 +42,12 @@ $headers = [ordered]@{
 foreach ($header in $headers.Keys) {
     if (-not (Test-Path -LiteralPath $header -PathType Leaf)) { throw "Missing $($headers[$header]) header: $header" }
 }
+$minHookHeader = Join-Path $projectRoot 'sdk/minhook/include/MinHook.h'
+if (-not (Test-Path -LiteralPath $minHookHeader -PathType Leaf)) {
+    throw "Missing MinHook header for the FSR 4 bridge: $minHookHeader. Run 'git submodule update --init sdk/minhook'."
+}
 Get-Command g++.exe -ErrorAction Stop | Out-Null
-if (-not (Get-Command gcc.exe -ErrorAction SilentlyContinue) -and
-    -not (Get-Command cc.exe -ErrorAction SilentlyContinue)) { throw 'NGX requires gcc.exe or cc.exe.' }
+if (-not (Get-Command gcc.exe -ErrorAction SilentlyContinue)) { throw 'gcc.exe is required (FSR 4 MinHook sources and NGX).' }
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bridge output directory; stale binaries are not merged.' }
 New-Item -ItemType Directory -Path $output | Out-Null

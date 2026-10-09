@@ -30,6 +30,11 @@
     "sha256": "EA43B1DE38A6F90C488800D66DEC1ED671E68CDA530266BC96951FB5B6307613"
   },
   {
+    "file": "native/minhook/LICENSE.txt",
+    "source": "https://raw.githubusercontent.com/TsudaKageyu/minhook/c3fcafdc10146beb5919319d0683e44e3c30d537/LICENSE.txt",
+    "sha256": "D5C2224982B0B95A16B098A561335FA93F3EAF4D0AA964B7843EDB986DF78DC8"
+  },
+  {
     "file": "managed/Silk.NET-LICENSE.md",
     "source": "https://raw.githubusercontent.com/dotnet/Silk.NET/94605142f7b7bd6e69c9201e8e721d245c69eb7e/LICENSE.md",
     "sha256": "725919AE6DD430F6302BD4E84958AE5B99F4F231B164382F6197DF1413D4A9C1"
