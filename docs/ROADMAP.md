@@ -21,6 +21,15 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - **REN-07:** Geometry edges against the sky jitter with TAA and FSR.
 - **REN-08:** A pipeline first used mid-game (new entity, particle or mod shader) skips its draw while compiling, causing one jittered frame and a TAA/SR history reset.
 
+## Planned
+
+- **PACK-01: Shader packs** (an Iris/Oculus equivalent for Vintage Story).
+  1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
+  2. Loader: `shaderpacks/` folder, pack selection and per-pack options in the Options menu, hot reload; compiled at runtime with the shipped shaderc.
+  3. Per-program fallback to the built-in shaders on compile/link errors, with in-game error reporting.
+  4. Pipeline cache keyed by the active pack.
+  5. Pack-declared composite/deferred passes in the frame graph.
+
 ## Deferred
 
 - **GL-02 / GL-03:** OpenGL compatibility adapters and profiles for other mods, once a target mod is chosen.
