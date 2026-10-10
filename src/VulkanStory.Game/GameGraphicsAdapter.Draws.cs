@@ -45,6 +45,8 @@ internal sealed partial class GameGraphicsAdapter
     internal void RenderMesh(MeshRef mesh, int[] starts, int[] sizes, int groups, bool useSsbo)
     {
         RequireDevice();
+        // Pools draw even when culling left no ranges; GL's MultiDrawElements treats that as a no-op, not a refused scene draw.
+        if (groups <= 0) return;
         // SSBO storage/index selection is part of the retained mesh's native layout.
         if (TryDrawChunkPoolNative((VAO)mesh, starts, sizes, groups)) return;
         if (TryDrawDecalPoolNative(mesh, starts, sizes, groups)) return;

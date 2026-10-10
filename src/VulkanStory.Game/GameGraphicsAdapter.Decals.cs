@@ -31,7 +31,7 @@ internal sealed partial class GameGraphicsAdapter
     private bool TryDrawDecalPoolNative(MeshRef mesh, int[] starts, int[] sizes, int groups)
     {
         var renderer = RequireDevice();
-        if (!decalScopeActive || groups <= 0 || currentFramebuffer == null ||
+        if (!decalScopeActive || currentFramebuffer == null ||
             mesh is not VAO vao || vao.Disposed || vao.VaoId == 0 ||
             !ReferenceEquals(ShaderProgramBase.CurrentShaderProgram, ShaderPrograms.Decals)) return false;
         renderer.GpuMark("decals");

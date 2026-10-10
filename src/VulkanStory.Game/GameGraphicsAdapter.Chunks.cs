@@ -52,7 +52,6 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         if (!chunkScopeActive || vao.VaoId == 0 || vao.Disposed) return false;
-        if (groups <= 0) return chunkPassOpen;
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         if (program == null || program.ProgramId <= 0) return RefuseOpenChunkDraw();
         int handle = MeshHandle(vao), layout = renderer.NativeMeshLayoutId(handle);
