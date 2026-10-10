@@ -4,7 +4,7 @@
   "name": "VulkanStory Input Companion",
   "authors": ["N1GHT"],
   "description": "Optional server support for negotiated VulkanStory controller movement.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "side": "Server",
   "requiredOnClient": false,
   "requiredOnServer": false,

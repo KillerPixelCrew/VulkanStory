@@ -4,7 +4,7 @@ A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
 generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
 unmodified game.
 
-> **Status: development build** (`v0.1.0-dev`) for Windows x64. Known defects and
+> **Status: development build** (`v0.1.1-dev`) for Windows x64. Known defects and
 > remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
@@ -70,8 +70,10 @@ Prerequisites:
   `VintageStoryPath` at it. Game assemblies are only compiled against, never shipped.
 - CMake and Ninja (native bootstrap), the Vulkan SDK, and MinGW-w64 `g++`/`gcc`
   (provider bridges)
+- Visual Studio 2022 or 2026 with x64 C++ build tools (the corrected FidelityFX
+  Vulkan runtime)
 - Vendor SDKs are pinned git submodules under `sdk/` (DLSS, FidelityFX for FSR 3
-  and FSR 4, XeSS, Streamline 2.14.1). Clone with `--recurse-submodules`, or run
+  and FSR 4, XeSS, Streamline 2.14.1, VMA). Clone with `--recurse-submodules`, or run
   `git submodule update --init`.
 
 ```powershell

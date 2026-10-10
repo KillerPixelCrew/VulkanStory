@@ -1,6 +1,6 @@
 # Roadmap
 
-Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.0-dev) (Windows x64, Vintage Story 1.22.7).
+Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1-dev) (Windows x64, Vintage Story 1.22.7).
 
 ## Done
 
@@ -23,7 +23,6 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
 - **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
-- **REN-11:** XeSS Ultra Performance became severely pixelated after the temporal stability fix, unlike the other upscalers at that quality level.
 
 ## Planned
 
