@@ -61,7 +61,7 @@
   <!-- Keep one maintained fullscreen source and the existing manifest resource names. -->
   <Target Name="EmbedFullscreenAliases" BeforeTargets="AssignTargetPaths">
     <ItemGroup>
-      <_FullscreenShaderAlias Include="fsr-rcas.vsh;taa-debug.vsh;taa-resolve.vsh" />
+      <_FullscreenShaderAlias Include="fsr-rcas.vsh;taa-debug.vsh;taa-resolve.vsh;taa-cache.vsh" />
     </ItemGroup>
     <Copy SourceFiles="@(_FullscreenShaderAlias->'Shaders/fsr-easu.vsh')"
           DestinationFiles="@(_FullscreenShaderAlias->'$(IntermediateOutputPath)fullscreen/%(Identity)')"

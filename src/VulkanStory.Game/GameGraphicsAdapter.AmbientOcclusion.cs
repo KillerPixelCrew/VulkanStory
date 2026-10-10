@@ -436,6 +436,16 @@ internal sealed partial class GameGraphicsAdapter
         return output;
     }
 
+    /// <summary>Allocates active AO targets alongside the public targets, before geometry and the post stage.</summary>
+    private void PrepareAmbientOcclusionTargets(IReadOnlyList<FrameBufferRef> targets)
+    {
+        if (postSettings == null || ambientOcclusionFailure != null || !RequestedSceneModes().Gtao ||
+            targets.Count == 0 || targets[0] is not { Disposed: false, ColorTextureIds.Length: >= 4 } primary ||
+            primary.DepthTextureId <= 0) return;
+        ambientOcclusion ??= new GtaoRenderer(RequireDevice());
+        ambientOcclusion.PrepareTargets(primary.Width, primary.Height);
+    }
+
     /// <summary>The debug outputs of this frame in the base's index order (working term, edges, depth level 0, output).</summary>
     internal int AmbientOcclusionDebugTexture(int index)
     {
@@ -474,6 +484,13 @@ internal sealed partial class GameGraphicsAdapter
         ambientOcclusion?.ReleaseTargets();
         ambientOcclusionOutput = 0;
         ambientOcclusionSampledTexture = 0;
+        aoWorkspaceOwnedBytes = 0;
+        if (routingEnabled())
+        {
+            var renderer = RequireLifecycleDevice();
+            aoWorkspaceOwnedBytes = renderer.TextureAllocationBytes(ambientOcclusion?.HilbertTexture ?? 0);
+            PublishCachedTaaWorkspaceReserve(renderer);
+        }
     }
 
     internal void ReleaseAmbientOcclusion()
@@ -482,5 +499,7 @@ internal sealed partial class GameGraphicsAdapter
         ambientOcclusion = null;
         ambientOcclusionOutput = 0;
         ambientOcclusionSampledTexture = 0;
+        aoWorkspaceOwnedBytes = 0;
+        if (routingEnabled()) PublishCachedTaaWorkspaceReserve(RequireLifecycleDevice());
     }
 }

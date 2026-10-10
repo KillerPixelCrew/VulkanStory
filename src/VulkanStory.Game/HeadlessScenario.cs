@@ -12,6 +12,7 @@ internal enum HeadlessScenarioActionKind
 {
     Settings,
     Options,
+    Camera,
     Resize,
     Capture,
     Checkpoint,
@@ -34,7 +35,8 @@ internal sealed record HeadlessScenarioAction(
     string? Operation = null,
     string? Page = null,
     int Width = 0,
-    int Height = 0);
+    int Height = 0,
+    float YawDeltaDegrees = 0);
 
 /// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
@@ -230,6 +232,17 @@ internal sealed class HeadlessScenario
                         !properties["height"].TryGetInt32(out int height) || height is < 128 or > 8192)
                         throw Error("ResizeRange", "Resize dimensions must be integers in 128..8192.");
                     action = new(index, actionId, tick, HeadlessScenarioActionKind.Resize, Width: width, Height: height);
+                    break;
+                }
+                case "camera":
+                {
+                    RequireOnly(properties, ["id", "tick", "kind", "yawDeltaDegrees"], "ActionField");
+                    RequireAll(properties, ["yawDeltaDegrees"], "ActionField");
+                    if (context != "world" || properties["yawDeltaDegrees"].ValueKind != JsonValueKind.Number ||
+                        !properties["yawDeltaDegrees"].TryGetSingle(out float yaw) ||
+                        !float.IsFinite(yaw) || Math.Abs(yaw) > 180f)
+                        throw Error("CameraRange", "Camera yaw requires a world and finite degrees in -180..180.");
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Camera, YawDeltaDegrees: yaw);
                     break;
                 }
                 case "settings":

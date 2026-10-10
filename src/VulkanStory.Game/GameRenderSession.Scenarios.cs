@@ -39,6 +39,7 @@ internal sealed partial class GameRenderSession
             int readIndex = Graphics.NextTaaReadIndex;
             if (platform.FrameBuffers.Count > readIndex && platform.FrameBuffers[readIndex] is { } read)
                 DumpNativeTaaTarget(directory, readIndex, "TaaRead", read, false);
+            DumpNativeTaaWindowProbes(Path.Combine(directory, "window"), Graphics.TaaSampleReadTargets);
         }
     }
 
@@ -52,6 +53,29 @@ internal sealed partial class GameRenderSession
         }
         if (primary && target.DepthTextureId > 0 && Device.ReadTextureForParity(target.DepthTextureId) is { } depth)
             HeadlessParityDump.Write(directory, slot, name, "depth", depth);
+    }
+
+    // Cache probes retain the exact local footprint used by the failing scene
+    // pixels without exporting thirty full-size auxiliary images per capture.
+    private void DumpNativeTaaWindowProbes(string directory, FrameBufferRef[] targets)
+    {
+        foreach (FrameBufferRef target in targets)
+        for (int attachment = 0; attachment < target.ColorTextureIds.Length; attachment++)
+        {
+            foreach (var focus in new[] { (Name: "treeline", X: 2139, Y: 396), (Name: "pine", X: 1619, Y: 358) })
+            {
+                int width = Math.Min(64, target.Width), height = Math.Min(64, target.Height);
+                int x = Math.Clamp((int)((long)focus.X * target.Width / 2560) - width / 2, 0, target.Width - width);
+                int pngTop = Math.Clamp((int)((long)focus.Y * target.Height / 1528) - height / 2, 0, target.Height - height);
+                int y = target.Height - pngTop - height;
+                if (Device.ReadTextureForParity(target.ColorTextureIds[attachment], x, y, width, height) is not { } crop) continue;
+                string probeDirectory = Path.Combine(directory, focus.Name);
+                Directory.CreateDirectory(probeDirectory);
+                File.WriteAllText(Path.Combine(probeDirectory, "region.json"), JsonSerializer.Serialize(new
+                    { fullWidth = target.Width, fullHeight = target.Height, x, y, pngTop, width, height }));
+                HeadlessParityDump.Write(probeDirectory, target.FboId, "TaaSamples", "color" + attachment, crop);
+            }
+        }
     }
 
     private sealed record ScenarioFile(string Path, string Sha256, int? Width, int? Height);
@@ -111,7 +135,7 @@ internal sealed partial class GameRenderSession
 
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
                      action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Settings or
-                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Resize))
+                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize))
         {
             string phase = ScenarioActionPhase(action.Kind);
             scenarioFailurePhase = phase;
@@ -127,6 +151,16 @@ internal sealed partial class GameRenderSession
                     if (error != null) throw new InvalidOperationException(error);
                 }
                 else if (action.Kind == HeadlessScenarioActionKind.Options) ExecuteScenarioOptions(action);
+                else if (action.Kind == HeadlessScenarioActionKind.Camera)
+                {
+                    var client = Temporal.CurrentClient ?? throw new InvalidOperationException("Camera action requires a world client.");
+                    if (client.IsPaused) throw new InvalidOperationException("Camera action requires an unpaused world.");
+                    // Official PlayerCamera reads mouseYaw in the Before stage.
+                    // Move that real camera input before it builds this frame's matrices.
+                    client.mouseYaw = Vintagestory.API.MathTools.GameMath.Mod(
+                        client.mouseYaw + action.YawDeltaDegrees * MathF.PI / 180f, MathF.Tau);
+                    client.EntityPlayer.Pos.Yaw = client.mouseYaw;
+                }
                 // Drawable pixels, the unit of captures and platform.WindowSize; SDL events own resize and GUI recomposition.
                 else Window.SetPixelSize(action.Width, action.Height);
                 if (!scenarioExecutedActions.Add(action.Index))
@@ -175,7 +209,7 @@ internal sealed partial class GameRenderSession
     private static string ScenarioActionPhase(HeadlessScenarioActionKind kind) => kind switch
     {
         HeadlessScenarioActionKind.Settings => "settings",
-        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Resize => "beforeInput",
+        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize => "beforeInput",
         HeadlessScenarioActionKind.Capture => "preGenerateReadback",
         _ => "completedFrame"
     };
@@ -273,6 +307,7 @@ internal sealed partial class GameRenderSession
             int writeIndex = Graphics.ResolvedTaaWriteIndex;
             if (platform.FrameBuffers.Count > writeIndex && platform.FrameBuffers[writeIndex] is { } write)
                 DumpNativeTaaTarget(Path.Combine(captureDirectory, "taa-output"), writeIndex, "TaaWrite", write, false);
+            DumpNativeTaaWindowProbes(Path.Combine(captureDirectory, "taa-output", "window"), Graphics.TaaSampleWrittenTargets);
         }
 
         var files = Directory.EnumerateFiles(captureDirectory, "*", SearchOption.AllDirectories)
@@ -280,9 +315,10 @@ internal sealed partial class GameRenderSession
             .Select(path =>
             {
                 dimensions.TryGetValue(Path.GetFullPath(path), out var fileSize);
+                using var file = File.OpenRead(path);
                 return new ScenarioFile(
                     Path.GetRelativePath(ScenarioOutputDirectory, path).Replace('\\', '/'),
-                    Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
+                    Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant(),
                     fileSize.Width == 0 ? null : fileSize.Width,
                     fileSize.Height == 0 ? null : fileSize.Height);
             }).ToArray();
@@ -324,6 +360,7 @@ internal sealed partial class GameRenderSession
             upscaleEvaluated = currentWorldSample ? Graphics.UpscaledThisFrame : (bool?)null,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
             nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,
+            resourceMemory = Device.ResourceMemoryDiagnostics(),
             renderWidth = primary?.Width,
             renderHeight = primary?.Height,
             displayWidth = width,

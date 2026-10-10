@@ -328,7 +328,7 @@ function Test-ScenarioDocument($Root) {
     $index = 0
     foreach ($action in $actions.EnumerateArray()) {
         $properties = Get-ScenarioProperties $action 'ActionField'
-        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline','operation','page','width','height') @('id','tick','kind') 'ActionField'
+        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline','operation','page','width','height','yawDeltaDegrees') @('id','tick','kind') 'ActionField'
         $actionId = Get-ScenarioString $properties['id'] 'ActionId'
         if (-not $ids.Add($actionId)) { Throw-ScenarioError 'DuplicateId' "Action IDs must be unique: $actionId" }
         $tick = Get-ScenarioTick $properties['tick']
@@ -339,6 +339,13 @@ function Test-ScenarioDocument($Root) {
             'settings' {
                 Require-ScenarioProperties $properties @('id','tick','kind','values') @('values') 'ActionField'
                 Apply-ScenarioSettings $properties['values']
+            }
+            'camera' {
+                Require-ScenarioProperties $properties @('id','tick','kind','yawDeltaDegrees') @('yawDeltaDegrees') 'ActionField'
+                $yaw = Get-ScenarioSettingValue 'YawDeltaDegrees' 'float' $properties['yawDeltaDegrees']
+                if ($context -cne 'world' -or [Math]::Abs($yaw) -gt 180) {
+                    Throw-ScenarioError 'CameraRange' 'Camera yaw requires a world and finite degrees in -180..180.'
+                }
             }
             'resize' {
                 Require-ScenarioProperties $properties @('id','tick','kind','width','height') @('width','height') 'ActionField'

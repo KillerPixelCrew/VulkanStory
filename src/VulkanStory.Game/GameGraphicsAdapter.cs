@@ -145,6 +145,9 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         if (platform is null) return;
         // Session disables routing and drains resources before detaching this bridge.
         if (routingEnabled()) throw new InvalidOperationException("Disable graphics routing before detachment.");
+        // Session releases the sample targets before disposing its device; the
+        // repeated call also withdraws the adapter's temporal publication.
+        ReleaseTaaSampleBanks();
         DetachCaptureService();
         Adapters.Remove(platform);
         RemoveModPassHooks();

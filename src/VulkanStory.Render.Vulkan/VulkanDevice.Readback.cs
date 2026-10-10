@@ -251,6 +251,26 @@ public sealed unsafe partial class VulkanDevice
         return readback;
     }
 
+    /// <summary>Debug parity readback of a bounded level-zero region in the same retained row order as a whole texture.</summary>
+    public TextureCaptureData? ReadTextureForParity(int textureId, int x, int y, int width, int height)
+    {
+        if (!_frameActive) return null;
+        VulkanTexture? texture = _textures.Get(textureId);
+        if (texture == null || texture.Cube || texture.Layers > 1 ||
+            !TextureReadbackFormats.HasParityDecoder(texture.Format)) return null;
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
+            (long)x + width > texture.Width || (long)y + height > texture.Height)
+            throw new ArgumentOutOfRangeException(nameof(width), "Parity region exceeds its image.");
+        ulong bytes = checked((ulong)width * (ulong)height * (ulong)BytesPerPixel(texture.Format));
+        byte[] data = new byte[checked((int)bytes)];
+        ImageAspectFlags aspect = (texture.Aspect & ImageAspectFlags.DepthBit) != 0
+            ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+        fixed (byte* destination = data)
+            ReadBack(texture, x, y, (uint)width, (uint)height, aspect, bytes, (IntPtr)destination);
+        int format = texture.GlInternalFormat != 0 ? texture.GlInternalFormat : TextureDump.GlInternalFormatOf(texture.Format);
+        return TextureDump.ToParityReadback(texture.Format, format, width, height, data);
+    }
+
     /// <summary>
     /// Bytes per texel for the formats the dump path is expected to see.
     /// Shared with <see cref="TextureDump.Write" />'s decode switch so the

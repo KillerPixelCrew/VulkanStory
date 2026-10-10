@@ -35,6 +35,10 @@ internal sealed partial class GameGraphicsAdapter
 
     private void ResetFramebufferPublication()
     {
+        bool hadSamples = taaSampleBanks != null;
+        taaWorkspaceOwnedBytes = 0;
+        ReleaseTaaSampleBanks();
+        if (!hadSamples && routingEnabled()) PublishCachedTaaWorkspaceReserve(RequireLifecycleDevice());
         ClearModPassPlans();
         allocatedFramebuffers = null;
         TaaTargetsReady = TaaHistoryValid = SceneNoHudCaptured = false;
@@ -60,6 +64,7 @@ internal sealed partial class GameGraphicsAdapter
     }
     private void DisableTaa(string reason)
     {
+        ReleaseTaaSampleBanks();
         taaDisabled = true;
         TaaTargetsReady = false;
         TaaHistoryValid = false;
@@ -84,6 +89,7 @@ internal sealed partial class GameGraphicsAdapter
     private void FinishFramebuffers(List<FrameBufferRef> targets)
     {
         var host = RequireFramebufferHost();
+        PrepareTemporalImageTargets(targets);
         MeshData quad = QuadMeshUtil.GetCustomQuadModelData(-1f, -1f, 0f, 2f, 2f);
         quad.Normals = null; quad.Rgba = null; quad.Uv = null;
         MeshRef? previous = GameFramebufferBindings.ScreenQuad(platform!);
@@ -98,7 +104,7 @@ internal sealed partial class GameGraphicsAdapter
             new Vintagestory.Client.NoObf.ClientPlatformWindows.GLBuffer(),
         ];
         SetFramebuffer(GameFramebufferBindings.OffscreenEnabled(platform) ? targets[0] : null, keepViewport: true);
-        TaaHistoryValid = false;
+        InvalidateTaaSampleWindow();
         host.TargetsBuilt(targets, TaaTargetsReady);
         host.RequestTemporalReset();
         host.Notification("(Re-)loaded frame buffers on the VulkanStory device");
@@ -110,19 +116,33 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         var host = RequireFramebufferHost();
+        GameFramebufferSettings settings = host.Settings();
+        if (!float.IsFinite(settings.SsaaLevel) || settings.SsaaLevel <= 0 ||
+            !float.IsFinite(settings.RenderScale) || settings.RenderScale <= 0)
+            throw new InvalidOperationException("Invalid framebuffer render scale.");
+        var clientSize = host.PixelSize();
+        int displayWidth = clientSize.Width;
+        int displayHeight = clientSize.Height;
+        if (displayWidth < 0 || displayHeight < 0) throw new InvalidOperationException("Invalid SDL pixel size.");
+        float ssaaLevel = settings.SsaaLevel;
+        float sceneScale = ssaaLevel * settings.RenderScale;
+        int width = displayWidth == 0 ? 0 : Math.Max(1, (int)(displayWidth * sceneScale));
+        int height = displayHeight == 0 ? 0 : Math.Max(1, (int)(displayHeight * sceneScale));
+        int nativeWidth = displayWidth == 0 ? 0 : Math.Max(1, (int)(displayWidth * ssaaLevel));
+        int nativeHeight = displayHeight == 0 ? 0 : Math.Max(1, (int)(displayHeight * ssaaLevel));
+        UpdateTaaWorkspaceReserve(Math.Max(width, nativeWidth), Math.Max(height, nativeHeight), replacingTargets: true);
         // The official rebuild allocates the new set before disposing the old one.
         // Release and complete its GPU users first: repeated settings changes must
         // not retain several full-resolution/shadow sets while allocating another.
+        bool hadSampleBanks = taaSampleBanks != null;
+        ReleaseTaaSampleBanks();
         if (platform!.FrameBuffers is { Count: > 0 } previous &&
             previous.Any(target => target != null && !target.Disposed))
         {
             DisposeFramebuffers(previous);
             renderer.CompleteReleasedResources();
         }
-        GameFramebufferSettings settings = host.Settings();
-        if (!float.IsFinite(settings.SsaaLevel) || settings.SsaaLevel <= 0 ||
-            !float.IsFinite(settings.RenderScale) || settings.RenderScale <= 0)
-            throw new InvalidOperationException("Invalid framebuffer render scale.");
+        else if (hadSampleBanks) renderer.CompleteReleasedResources();
         GameFramebufferBindings.AdoptSettings(platform!, settings);
         ResetFramebufferPublication();
         bool setupSsao = settings.SsaoQuality > 0;
@@ -132,16 +152,7 @@ internal sealed partial class GameGraphicsAdapter
             list.Add(null!);
         }
         int shadowMapQuality = settings.ShadowMapQuality;
-        float ssaaLevel = settings.SsaaLevel;
-
-        var clientSize = host.PixelSize();
-        int displayWidth = clientSize.Width;
-        int displayHeight = clientSize.Height;
-        if (displayWidth < 0 || displayHeight < 0) throw new InvalidOperationException("Invalid SDL pixel size.");
         allocatedFramebuffers = list;
-        float sceneScale = ssaaLevel * settings.RenderScale;
-        int width = displayWidth == 0 ? 0 : Math.Max(1, (int)(displayWidth * sceneScale));
-        int height = displayHeight == 0 ? 0 : Math.Max(1, (int)(displayHeight * sceneScale));
         bool upscaling = TryPlanUpscale(displayWidth, displayHeight, out int plannedWidth, out int plannedHeight);
         if (upscaling)
         {
@@ -150,6 +161,7 @@ internal sealed partial class GameGraphicsAdapter
             host.Notification("VulkanStory upscale: world target " + width + "x" + height +
                 ", display target " + displayWidth + "x" + displayHeight + ".");
         }
+        UpdateTaaWorkspaceReserve(Math.Max(width, nativeWidth), Math.Max(height, nativeHeight), replacingTargets: true);
         if (width == 0 || height == 0)
         {
             return list;

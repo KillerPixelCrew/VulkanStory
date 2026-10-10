@@ -68,6 +68,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private readonly VmaHeapStats[] _heaps;
     private readonly VmaClassStats[] _classes = new VmaClassStats[PoolClassCount];
     private ulong _transientPeak;
+    private ulong imageWorkspaceReserveBytes;
     private long _reBarMisses;
     private long _systemMemoryFallbacks;
     private long _allocationFailures;
@@ -97,6 +98,19 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     public long ReBarMisses { get { lock (_gate) return _reBarMisses; } }
     public ulong ReBarUsed { get { lock (_gate) { RefreshStatisticsLocked(); return _classes[(int)MemoryPoolClass.ReBar].BlockBytes; } } }
     public ulong TransientHeapBytes { get { lock (_gate) { RefreshStatisticsLocked(); return _classes[(int)MemoryPoolClass.Transient].BlockBytes; } } }
+
+    /// <summary>Protects known image workspace not already owned from new local mesh-block growth.</summary>
+    /// <remarks>The game supplies required workspace minus owned feature allocations; existing images and external use are already in heap usage. Existing VMA block reuse remains allowed.</remarks>
+    internal void SetImageWorkspaceReserve(ulong bytes)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ulong combined = checked(BlockSizeOf(MemoryPoolClass.DeviceImages) + bytes);
+            imageWorkspaceReserveBytes = bytes;
+            PersistentMeshReserveBytes = combined;
+        }
+    }
 
     /// <summary>Retained reserve-sizing policy; VMA selects actual backing block sizes.</summary>
     public static ulong BlockSizeOf(MemoryPoolClass poolClass) => poolClass switch
@@ -288,7 +302,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         ulong used = HeapUsageLocked(heap);
         ulong available = used < budget ? budget - used : 0;
         bool local = (_memoryProperties.MemoryHeaps[(int)heap].Flags & MemoryHeapFlags.DeviceLocalBit) != 0;
-        ulong reserve = local && poolClass == MemoryPoolClass.DeviceBuffers ? MeshReserveLocked(heap) : 0;
+        ulong reserve = local && poolClass == MemoryPoolClass.DeviceBuffers ? MeshReserveLocked() : 0;
         return reserve <= available ? available - reserve : 0;
     }
 
@@ -297,13 +311,11 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private ulong ReBarCapLocked(uint typeIndex) => ReBarCapOverrideForTests ??
         Math.Min(ReBarCapCeiling, HeapBudgetLocked(_memoryProperties.MemoryTypes[(int)typeIndex].HeapIndex) / 4);
 
-    private ulong MeshReserveLocked(uint heap)
+    private ulong MeshReserveLocked()
     {
-        ulong external = _heaps[heap].Usage > _heaps[heap].BlockBytes ?
-            _heaps[heap].Usage - _heaps[heap].BlockBytes : 0;
-        ulong images = _heaps[heap].ImageBlockBytes;
-        ulong combined = images > ulong.MaxValue - external ? ulong.MaxValue : images + external;
-        PersistentMeshReserveBytes = Math.Max(BlockSizeOf(MemoryPoolClass.DeviceImages), combined);
+        // Heap usage already includes owned images and external allocations.
+        // Reserve only additional provider room and the known unallocated image workspace.
+        PersistentMeshReserveBytes = checked(BlockSizeOf(MemoryPoolClass.DeviceImages) + imageWorkspaceReserveBytes);
         return PersistentMeshReserveBytes;
     }
 
@@ -441,21 +453,12 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return false;
     }
 
-    internal bool HasPersistentMeshHeadroom(ulong bytes)
+    internal bool IsDeviceLocal(in MemoryAllocation allocation)
     {
-        const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
         lock (_gate)
         {
-            if (_disposed) return false;
-            RefreshStatisticsLocked();
-            for (uint i = 0; i < _memoryProperties.MemoryTypeCount; i++)
-            {
-                MemoryType type = _memoryProperties.MemoryTypes[(int)i];
-                if ((type.PropertyFlags & wanted) == wanted &&
-                    bytes <= GrowthHeadroomLocked(type.HeapIndex, MemoryPoolClass.DeviceBuffers)) return true;
-            }
-            return false;
+            return _allocations.TryGetValue(allocation.Allocation, out VmaAllocationInfo info) &&
+                (info.MemoryProperties & (uint)MemoryPropertyFlags.DeviceLocalBit) != 0;
         }
     }
 

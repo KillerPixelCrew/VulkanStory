@@ -3,19 +3,22 @@
 // Raw cached scene/glow samples live on the fixed output-centre grid.
 // Raster depth remains separate guide metadata. No accumulated output is cached.
 
-uniform sampler2D sample0;
-uniform sampler2D sample1;
-uniform sampler2D sample2;
-uniform sampler2D sample3;
-uniform sampler2D sample4;
-uniform sampler2D sample5;
-uniform sampler2D sample6;
-uniform sampler2D oldSample6;
+uniform sampler2D sceneTex;
+uniform sampler2D glowTex;
 uniform sampler2D depthTex;
 uniform sampler2D motionTex;
 uniform sampler2D historyDepth;
 uniform sampler2D historyCount;
-uniform sampler2D newCount;
+uniform sampler2D oldScene0;
+uniform sampler2D oldGlow0;
+uniform sampler2D oldScene1;
+uniform sampler2D oldGlow1;
+uniform sampler2D oldScene2;
+uniform sampler2D oldGlow2;
+uniform sampler2D checkScene0;
+uniform sampler2D checkScene1;
+uniform sampler2D checkScene2;
+uniform sampler2D checkScene3;
 
 uniform vec2 renderSize;
 uniform vec2 jitterPx;
@@ -29,9 +32,28 @@ uniform int stage;
 
 in vec2 texCoord;
 
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outGlow;
-layout(location = 2) out vec4 outDepth;
+layout(location = 0) out vec4 out0;
+layout(location = 1) out vec4 out1;
+layout(location = 2) out vec4 out2;
+layout(location = 3) out vec4 out3;
+layout(location = 4) out vec4 out4;
+layout(location = 5) out vec4 out5;
+layout(location = 6) out vec4 out6;
+layout(location = 7) out vec4 out7;
+
+// Reconstruct an unjittered output centre without relying on Primary's sampler.
+// Positive bilinear weights preserve unit mass and the fractional sample centre.
+vec4 sampleCurrent(sampler2D tex, vec2 outputCentre) {
+	vec2 source = outputCentre + jitterPx - 0.5;
+	ivec2 base = ivec2(floor(source));
+	vec2 f = fract(source);
+	ivec2 maximum = ivec2(renderSize) - ivec2(1);
+	vec4 c00 = texelFetch(tex, clamp(base, ivec2(0), maximum), 0);
+	vec4 c10 = texelFetch(tex, clamp(base + ivec2(1, 0), ivec2(0), maximum), 0);
+	vec4 c01 = texelFetch(tex, clamp(base + ivec2(0, 1), ivec2(0), maximum), 0);
+	vec4 c11 = texelFetch(tex, clamp(base + ivec2(1, 1), ivec2(0), maximum), 0);
+	return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
 
 bool finiteFloat(float value) { return !isnan(value) && !isinf(value); }
 bool finiteVector(vec4 value) { return !any(isnan(value)) && !any(isinf(value)); }
@@ -237,70 +259,53 @@ HistoryGuide buildGuide(sampler2D currentDepth, sampler2D currentMotion,
 	return guide;
 }
 
-bool windowMean(HistoryGuide guide, out vec4 current, out vec4 mean) {
-	// The first seven terms are already transported into this completed new bank.
-	current = texelFetch(sample0, guide.pixel, 0);
-	mean = current;
-	if (!finiteVector(current)) { current = vec4(0.0); mean = current; return false; }
-	int count = guide.nOld;
-	float published = texelFetch(newCount, guide.pixel, 0).r;
-	int expected = min(count + 1, 7);
-	// A cache-stage nonfinite reset must govern both color and glow resolve.
-	if (!finiteFloat(published) || published < float(expected) ||
-	    published > 7.0 || floor(published) != published) count = 0;
+bool sceneAgesFinite(int count, vec2 uv, out vec4 c0, out vec4 c1, out vec4 c2) {
+	c0 = c1 = c2 = vec4(0.0);
 	vec4 value;
-	if (count > 0) {
-		value = texelFetch(sample1, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
+	if (stage == 0) {
+		if (count > 0 && !sampleSceneHistory(oldScene0, historyCount, uv, 0, c0)) return false;
+		if (count > 1 && !sampleSceneHistory(oldScene1, historyCount, uv, 1, c1)) return false;
+		if (count > 2 && !sampleSceneHistory(oldScene2, historyCount, uv, 2, c2)) return false;
+		// HIGH validates all ages and publishes the count before either resolve.
+		return true;
+	} else {
+		if (count > 0 && !sampleSceneHistory(checkScene0, historyCount, uv, 0, value)) return false;
+		if (count > 1 && !sampleSceneHistory(checkScene1, historyCount, uv, 1, value)) return false;
+		if (count > 2 && !sampleSceneHistory(checkScene2, historyCount, uv, 2, value)) return false;
+		if (count > 3 && !sampleSceneHistory(oldScene0, historyCount, uv, 3, c0)) return false;
+		if (count > 4 && !sampleSceneHistory(oldScene1, historyCount, uv, 4, c1)) return false;
+		if (count > 5 && !sampleSceneHistory(oldScene2, historyCount, uv, 5, c2)) return false;
 	}
-	if (count > 1) {
-		value = texelFetch(sample2, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
-	}
-	if (count > 2) {
-		value = texelFetch(sample3, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
-	}
-	if (count > 3) {
-		value = texelFetch(sample4, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
-	}
-	if (count > 4) {
-		value = texelFetch(sample5, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
-	}
-	if (count > 5) {
-		value = texelFetch(sample6, guide.pixel, 0);
-		if (!finiteVector(value)) return false;
-		mean += value;
-	}
-	if (count == 7) {
-		bool valid = stage == 0
-			? sampleSceneHistory(oldSample6, historyCount, guide.historyUv, 6, value)
-			: sampleGlowHistory(oldSample6, historyCount, guide.historyUv, 6, value);
-		if (!valid) return false;
-		mean += value;
-	}
-	mean /= float(min(count + 1, 8));
-	return finiteVector(mean);
+	if (count > 6 && !sampleSceneHistory(checkScene3, historyCount, uv, 6, value)) return false;
+	return true;
 }
 
 void main() {
 	HistoryGuide guide = buildGuide(depthTex, motionTex, historyDepth, historyCount);
-	vec4 current, mean;
-	if (!windowMean(guide, current, mean)) mean = current;
-	// Reactivity controls displayed response; it never alters stored sample ages.
-	vec4 displayed = mix(mean, current, guide.reactive);
+	vec2 centre = vec2(guide.pixel) + 0.5;
+	vec4 currentScene = max(sampleCurrent(sceneTex, centre), vec4(0.0));
+	vec4 currentGlow = sampleCurrent(glowTex, centre);
+	int count = guide.nOld;
+	vec4 c0 = currentScene, c1 = currentScene, c2 = currentScene;
+	// LOW checks its transported ages; HIGH validates all ages and publishes
+	// their shared validity count. Keep local values without sampling them twice.
+	// RGBA8 glow is finite by format; unavailable ages are never sampled.
+	if (count > 0 && !sceneAgesFinite(count, guide.historyUv, c0, c1, c2)) count = 0;
+	int firstOld = stage == 0 ? 0 : 3;
+	if (count <= firstOld) c0 = currentScene;
+	if (count <= firstOld + 1) c1 = currentScene;
+	if (count <= firstOld + 2) c2 = currentScene;
+	vec4 g0 = currentGlow, g1 = currentGlow, g2 = currentGlow;
+	if (count > firstOld) sampleGlowHistory(oldGlow0, historyCount, guide.historyUv, firstOld, g0);
+	if (count > firstOld + 1) sampleGlowHistory(oldGlow1, historyCount, guide.historyUv, firstOld + 1, g1);
+	if (count > firstOld + 2) sampleGlowHistory(oldGlow2, historyCount, guide.historyUv, firstOld + 2, g2);
+	// Store individual samples only. Initialize every unused age to current.
 	if (stage == 0) {
-		outColor = displayed;
-		outDepth = vec4(guide.linearDepth);
+		out0 = currentScene; out1 = currentGlow;
+		out2 = c0; out3 = g0; out4 = c1; out5 = g1; out6 = c2; out7 = g2;
 	} else {
-		// Preserve the existing sparse-depth exception's current-glow response.
-		outGlow = guide.sparseDepthMismatch ? current : displayed;
+		out0 = c0; out1 = g0; out2 = c1; out3 = g1; out4 = c2; out5 = g2;
+		out6 = vec4(float(min(count + 1, 7)), 0.0, 0.0, 1.0);
+		out7 = vec4(0.0);
 	}
 }

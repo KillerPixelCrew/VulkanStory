@@ -25,6 +25,8 @@ internal sealed class VulkanMesh : IDisposable
 {
     public VulkanBuffer?[] Buffers { get; } = new VulkanBuffer?[MeshManager.MaxBuffers];
     public VulkanBuffer? Indices { get; set; }
+    internal bool SharedIndices { get; set; }
+    internal ulong RequestedIndexBytes { get; set; }
 
     public int IndexCount { get; set; }
     public EnumDrawMode DrawMode { get; set; } = EnumDrawMode.Triangles;
@@ -42,7 +44,7 @@ internal sealed class VulkanMesh : IDisposable
     {
         foreach (VulkanBuffer? buffer in Buffers) buffer?.Dispose();
         Array.Clear(Buffers);
-        Indices?.Dispose();
+        if (!SharedIndices) Indices?.Dispose();
         Indices = null;
     }
 }
@@ -91,6 +93,8 @@ internal sealed unsafe class MeshManager : IDisposable
     private readonly Interner<VertexLayoutDescription> _layouts = new();
     private readonly List<VulkanMesh?> _meshes = new();
     private readonly Stack<int> _freeIds = new();
+    private VulkanBuffer? _sharedQuadIndices;
+    private VulkanBuffer? _pendingSharedIndexRetirement;
     private bool _disposed;
 
     /// <summary>
@@ -113,7 +117,8 @@ internal sealed unsafe class MeshManager : IDisposable
     /// <summary>
     /// Persistent (mapped, game-written) meshes in device-local host-visible memory.
     /// Only with a BAR heap of at least 1 GiB; <c>VULKANSTORY_VK_PERSISTENT_MESH_VRAM=0</c>
-    /// keeps them in system memory. Cleared after the first allocation that does not fit.
+    /// keeps them in system memory. VMA reuses existing local blocks before admitting
+    /// physical growth or falling back to compatible system memory.
     /// </summary>
     internal bool PersistentMeshesInVram { get; set; }
     internal long PersistentMeshHeadroomMisses { get; private set; }
@@ -230,9 +235,14 @@ internal sealed unsafe class MeshManager : IDisposable
 
         if (indicesSize > 0)
         {
-            mesh.Indices = CreateBuffer(indicesSize, BufferUsageFlags.IndexBufferBit, mesh.Persistent);
             mesh.IndexCount = indicesSize / sizeof(int);
-            if (ssbo) FillQuadIndices(mesh.Indices);
+            mesh.RequestedIndexBytes = (ulong)indicesSize;
+            if (ssbo)
+            {
+                mesh.Indices = SharedQuadIndices(indicesSize);
+                mesh.SharedIndices = true;
+            }
+            else mesh.Indices = CreateBuffer(indicesSize, BufferUsageFlags.IndexBufferBit, mesh.Persistent);
         }
 
         mesh.Layout = builder.Build();
@@ -348,16 +358,17 @@ internal sealed unsafe class MeshManager : IDisposable
         // crosses PCIe (docs/performance-profile-2026-09-26.md). The CPU only
         // writes these buffers, which write-combined VRAM handles well. When the
         // BAR heap is full the allocation falls back to system memory.
-        bool meshHeadroom = !persistent || !PersistentMeshesInVram ||
-            _context.Allocator.HasPersistentMeshHeadroom((ulong)byteSize);
-        if (!meshHeadroom) PersistentMeshHeadroomMisses++;
-        if (persistent && PersistentMeshesInVram && meshHeadroom)
+        if (persistent && PersistentMeshesInVram)
         {
             try
             {
-                return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
+                // The allocator tries existing VMA space first; its physical-growth
+                // callback owns budget admission, so a precheck must not reject reuse.
+                var buffer = new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
                     MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit |
                     MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
+                if (!_context.Allocator.IsDeviceLocal(buffer.Allocation)) PersistentMeshHeadroomMisses++;
+                return buffer;
             }
             catch (InvalidOperationException)
             {
@@ -426,19 +437,79 @@ internal sealed unsafe class MeshManager : IDisposable
     {
         get
         {
-            ulong bytes = 0;
+            ulong bytes = (_sharedQuadIndices?.Size ?? 0) + PendingQuadIndexRetirementBytes;
             foreach (VulkanMesh? mesh in _meshes)
             {
                 if (mesh == null) continue;
-                bytes += mesh.Indices?.Size ?? 0;
+                if (!mesh.SharedIndices) bytes += mesh.Indices?.Size ?? 0;
                 foreach (VulkanBuffer? buffer in mesh.Buffers) bytes += buffer?.Size ?? 0;
             }
             return bytes;
         }
     }
 
+    internal ulong SharedQuadIndexBytes => _sharedQuadIndices?.Size ?? 0;
+    internal ulong PendingQuadIndexRetirementBytes => _pendingSharedIndexRetirement?.Size ?? 0;
+    internal int SharedQuadIndexMeshCount => _meshes.Count(mesh => mesh?.SharedIndices == true);
+    internal ulong AvoidedQuadIndexBytes
+    {
+        get
+        {
+            ulong requested = 0;
+            foreach (VulkanMesh? mesh in _meshes)
+                if (mesh?.SharedIndices == true) requested += mesh.RequestedIndexBytes;
+            ulong shared = SharedQuadIndexBytes;
+            return requested > shared ? requested - shared : 0;
+        }
+    }
+
+    /// <summary>SSBO meshes borrow one immutable quad pattern sized to the largest request.</summary>
+    private VulkanBuffer SharedQuadIndices(int byteSize)
+    {
+        CompletePendingSharedIndexRetirement();
+        if (_sharedQuadIndices is { } current && current.Size >= (ulong)byteSize) return current;
+        if (_uploads != null && _frames == null)
+            throw new InvalidOperationException("Shared staged indices require a frame retirement owner.");
+
+        VulkanBuffer replacement = CreateBuffer(byteSize, BufferUsageFlags.IndexBufferBit, persistent: false);
+        try
+        {
+            FillQuadIndices(replacement);
+        }
+        catch (Exception fillError)
+        {
+            // A fill can already have recorded transfer users of the replacement.
+            _pendingSharedIndexRetirement = replacement;
+            try { CompletePendingSharedIndexRetirement(); }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException("Shared quad-index fill and retirement both failed.", fillError, cleanupError);
+            }
+            throw;
+        }
+
+        _pendingSharedIndexRetirement = _sharedQuadIndices;
+        _sharedQuadIndices = replacement;
+        foreach (VulkanMesh? mesh in _meshes)
+            if (mesh?.SharedIndices == true) mesh.Indices = replacement;
+        // Publication commits the complete owner before any retirement callback
+        // can fail; cleanup of a failed fill must never discard that live owner.
+        CompletePendingSharedIndexRetirement();
+        return replacement;
+    }
+
+    /// <summary>Keeps ownership until invalidation and retirement enqueue both succeed.</summary>
+    private void CompletePendingSharedIndexRetirement()
+    {
+        if (_pendingSharedIndexRetirement is not { } pending) return;
+        BufferRetired?.Invoke(pending.Id);
+        if (_frames != null) _frames.DeferDeletion(pending);
+        else pending.Dispose();
+        _pendingSharedIndexRetirement = null;
+    }
+
     /// <summary>
-    /// Fills an SSBO mesh's index buffer with the fixed quad pattern.
+    /// Fills the manager's shared SSBO index buffer with the fixed quad pattern.
     ///
     /// GL keeps one shared static index buffer for every SSBO mesh, written once
     /// with this pattern: each four consecutive vertices are a quad, drawn as the
@@ -466,7 +537,8 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private static void FillQuadPattern(int* destination, int count)
     {
-        for (int i = 0; i + 5 < count; i += 6)
+        int i = 0;
+        for (; i + 5 < count; i += 6)
         {
             int quad = i / 6 * 4;
             destination[i] = quad;
@@ -476,9 +548,12 @@ internal sealed unsafe class MeshManager : IDisposable
             destination[i + 4] = quad + 2;
             destination[i + 5] = quad + 3;
         }
+        // The official pattern also supplies a prefix when capacity ends mid-quad.
+        for (; i < count; i++)
+            destination[i] = i / 6 * 4 + ((i % 6) switch { 1 => 1, 2 or 4 => 2, 5 => 3, _ => 0 });
     }
 
-    /// <summary>Returns the requested live mesh buffer, or null when the mesh/slot has no buffer.</summary>
+    /// <summary>Returns a borrowed live buffer; shared SSBO indices may be inspected but never mutated.</summary>
     public VulkanBuffer? BufferOf(int meshId, int slot)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -486,13 +561,14 @@ internal sealed unsafe class MeshManager : IDisposable
         return slot < 0 ? mesh.Indices : mesh.Buffers[slot];
     }
 
-    /// <summary>Returns a borrowed mapped mesh-buffer pointer, or zero when no mapped buffer exists.</summary>
+    /// <summary>Returns a borrowed writable mapped pointer, or zero for unmapped or shared immutable storage.</summary>
     public IntPtr MappedPointer(int meshId, int slot)
     {
         VulkanMesh? mesh = Get(meshId);
         if (mesh == null) return IntPtr.Zero;
 
         if (slot >= MaxBuffers) return IntPtr.Zero;
+        if (slot < 0 && mesh.SharedIndices) return IntPtr.Zero;
         VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
         if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
         return WritableBuffer(mesh, slot, buffer).Mapped;
@@ -512,6 +588,8 @@ internal sealed unsafe class MeshManager : IDisposable
         if (source == IntPtr.Zero || byteCount <= 0) return;
 
         VulkanMesh? mesh = Get(meshId);
+        if (slot < 0 && mesh?.SharedIndices == true)
+            throw new InvalidOperationException("Shared SSBO quad indices are immutable.");
         VulkanBuffer? buffer = mesh == null ? null : slot < 0 ? mesh.Indices : mesh.Buffers[slot];
 
         string? problem =
@@ -552,6 +630,8 @@ internal sealed unsafe class MeshManager : IDisposable
     /// <remarks>A returned raw pointer is borrowed for writes before the next draw/update. Clients must request it again after GPU use.</remarks>
     private VulkanBuffer WritableBuffer(VulkanMesh mesh, int slot, VulkanBuffer buffer)
     {
+        if (slot < 0 && mesh.SharedIndices)
+            throw new InvalidOperationException("Shared SSBO quad indices cannot be renamed for a mesh write.");
         if (buffer.FrameUse == 0) return buffer;
         if (_frames == null) throw new InvalidOperationException("Mapped GPU storage requires a frame retirement owner before reuse.");
         var replacement = new VulkanBuffer(_context, buffer.Size, buffer.Usage,
@@ -694,5 +774,10 @@ internal sealed unsafe class MeshManager : IDisposable
 
         foreach (VulkanMesh? mesh in _meshes) mesh?.Dispose();
         _meshes.Clear();
+        _sharedQuadIndices?.Dispose();
+        _sharedQuadIndices = null;
+        // Device teardown has already drained recorded frame/transfer users.
+        _pendingSharedIndexRetirement?.Dispose();
+        _pendingSharedIndexRetirement = null;
     }
 }

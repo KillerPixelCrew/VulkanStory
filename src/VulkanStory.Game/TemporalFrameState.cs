@@ -249,6 +249,9 @@ namespace VulkanStory.Game
         /// <inheritdoc />
         public Vec2f JitterSequencePx { get; } = new Vec2f();
 
+        /// <summary>Selected raster-sequence phase count for the latest advance, retained after the jitter window closes.</summary>
+        internal int JitterPhaseCount { get; private set; }
+
         /// <summary>
         /// Opens and closes the jitter window. Setting it also updates
         /// <see cref="JitterPx" />, so the contract always reports the offset that
@@ -321,12 +324,12 @@ namespace VulkanStory.Game
 
         internal void AdvanceForFrame(ulong frameId, float deltaTimeMs, int width, int height,
             float renderScale, float near, float far, float fov, DefaultShaderUniforms uniforms,
-            bool openJitterWindow, bool applyJitterMagnitude)
+            bool openJitterWindow, bool applyJitterMagnitude, int? jitterPhaseCountOverride = null)
         {
             if (frameId == 0 || frameId <= renderFrameId)
                 throw new InvalidOperationException("Temporal history must advance once for a new rendered frame.");
             JitterMagnitudeEnabled = applyJitterMagnitude;
-            Advance(deltaTimeMs, width, height, renderScale, near, far, fov, uniforms);
+            AdvanceCore(deltaTimeMs, width, height, renderScale, near, far, fov, uniforms, jitterPhaseCountOverride);
             JitterActive = openJitterWindow;
             renderFrameId = frameId;
         }
@@ -395,6 +398,20 @@ namespace VulkanStory.Game
             float fov,
             DefaultShaderUniforms uniforms)
         {
+            AdvanceCore(deltaTimeMs, renderWidth, renderHeight, renderScale, zNear, zFar, fov, uniforms, null);
+        }
+
+        private void AdvanceCore(float deltaTimeMs, int renderWidth, int renderHeight,
+            float renderScale, float zNear, float zFar, float fov, DefaultShaderUniforms uniforms,
+            int? jitterPhaseCountOverride)
+        {
+            if (jitterPhaseCountOverride.HasValue && jitterPhaseCountOverride.Value <= 0)
+                throw new ArgumentOutOfRangeException(nameof(jitterPhaseCountOverride));
+            int phaseCount = jitterPhaseCountOverride ??
+                Math.Max(1, TemporalMath.JitterPhaseCount(renderScale > 0f ? 1f / renderScale : 1f));
+            if (JitterPhaseCount != 0 && JitterPhaseCount != phaseCount)
+                RequestReset(EnumTemporalResetReason.Toggle);
+
             // --- rotate current -> previous -------------------------------------
             // The jitter the previous frame really rendered with. JitterPx is
             // zeroed when the jitter window closes, so it cannot be used here.
@@ -457,7 +474,7 @@ namespace VulkanStory.Game
             Reset = reason != EnumTemporalResetReason.None;
 
             // --- jitter ----------------------------------------------------------
-            int phaseCount = Math.Max(1, TemporalMath.JitterPhaseCount(renderScale > 0f ? 1f / renderScale : 1f));
+            JitterPhaseCount = phaseCount;
             int phase = (int)(FrameIndex % phaseCount);
             double jx = TemporalMath.Halton(phase + 1, 2) - 0.5;
             double jy = TemporalMath.Halton(phase + 1, 3) - 0.5;

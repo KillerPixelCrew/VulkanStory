@@ -13,6 +13,29 @@ namespace VulkanStory.Render.Vulkan;
 /// <summary>Texture, sampler, framebuffer and mesh resource operations exposed to the game integration.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    /// <summary>Protects known unallocated image workspace from new nonmovable device-local mesh blocks.</summary>
+    internal void SetImageWorkspaceReserve(ulong bytes) => _context.Allocator.SetImageWorkspaceReserve(bytes);
+
+    /// <summary>Physical memory requirement for the same single-layer color-image creation contract used by targets.</summary>
+    internal ulong EstimateColorImageAllocationBytes(int width, int height, Format format)
+    {
+        _frames.RequireResourceLifetime();
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        return _textures.EstimateColorAllocationBytes((uint)width, (uint)height, format);
+    }
+
+    /// <summary>Physical requirement for the format, mip clamp and usage chosen by storage texture creation.</summary>
+    internal ulong EstimateStorageImageAllocationBytes(int width, int height, Format format, int mipLevels = 1)
+    {
+        _frames.RequireResourceLifetime();
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        return _textures.EstimateStorageAllocationBytes((uint)width, (uint)height, format,
+            (uint)Math.Max(1, mipLevels));
+    }
+
+    /// <summary>Actual VMA allocation bytes owned by a live texture, excluding block padding and borrowed images.</summary>
+    internal ulong TextureAllocationBytes(int textureId) => _textures.Get(textureId)?.Allocation.Size ?? 0;
+
     /// <summary>Finishes recorded resource users and releases completed retirements before allocating replacement targets.</summary>
     public void CompleteReleasedResources()
     {

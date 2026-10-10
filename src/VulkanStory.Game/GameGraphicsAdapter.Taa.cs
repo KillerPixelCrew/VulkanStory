@@ -8,24 +8,34 @@ using VulkanStory.Render.Vulkan.Graph;
 
 namespace VulkanStory.Game;
 
-// Retained ClientPlatformWindows resolve/sharpen decisions and native draw seams.
-// Baseline 386e0d05386d0b228b439d09aeca851428f7bbf3; TAA GLSL is copied unchanged.
+// Native TAA stores individual samples and transports its finite window each frame.
 internal sealed partial class GameGraphicsAdapter
 {
-    private readonly NativeFullscreenPass nativeTaaResolve = new("taa-resolve",
+    private static readonly string[] TaaWindowUniformNames =
         ["renderSize", "jitterPx", "prevJitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix", "cameraDelta",
-            "resetHistory", "blendAlpha", "varianceGamma"],
-        ["sceneTex", "glowTex", "motionTex", "depthTex", "historyColor", "historyGlow", "historyDepth"]);
+            "resetHistory", "stage"];
+    private readonly NativeFullscreenPass nativeTaaCache = new("taa-cache", TaaWindowUniformNames,
+        ["sceneTex", "glowTex", "depthTex", "motionTex", "historyDepth", "historyCount",
+            "oldScene0", "oldGlow0", "oldScene1", "oldGlow1", "oldScene2", "oldGlow2",
+            "checkScene0", "checkScene1", "checkScene2", "checkScene3"]);
+    private readonly NativeFullscreenPass nativeTaaResolve = new("taa-resolve",
+        TaaWindowUniformNames,
+        ["sample0", "sample1", "sample2", "sample3", "sample4", "sample5", "sample6", "oldSample6",
+            "depthTex", "motionTex", "historyDepth", "historyCount", "newCount"]);
     private readonly NativeFullscreenPass nativeTaaSharpen = new("taa-sharpen",
         ["inputTexelSize", "sharpness"], ["inputScene"]);
-    private int taaResolveProgram, taaSharpenProgram, taaParity;
-    private bool taaResolveFailed, taaSharpenFailed;
+    private int taaCacheProgram, taaResolveProgram, taaSharpenProgram, taaParity;
+    private bool taaCacheFailed, taaResolveFailed, taaSharpenFailed;
     internal string TaaReadiness { get; private set; } = "not resolved";
     private int taaResolvedColor, taaResolvedGlow;
     private readonly Dictionary<(int Program, string Name), int> ownedUniforms = new();
     internal object? TaaResolveCapture { get; private set; }
     internal int NextTaaReadIndex => (taaParity & 1) == 0 ? TaaHistoryIndexB : TaaHistoryIndexA;
     internal int ResolvedTaaWriteIndex => (taaParity & 1) == 0 ? TaaHistoryIndexB : TaaHistoryIndexA;
+    internal FrameBufferRef[] TaaSampleReadTargets => taaSampleBanks is { } banks
+        ? [banks[(taaParity ^ 1) & 1].Low, banks[(taaParity ^ 1) & 1].High] : [];
+    // Like the public history index, this expression addresses the written bank after publication flips parity.
+    internal FrameBufferRef[] TaaSampleWrittenTargets => TaaSampleReadTargets;
 
     private int OwnedUniform(int program, string name)
     {
@@ -96,11 +106,18 @@ internal sealed partial class GameGraphicsAdapter
         if (primary?.ColorTextureIds is not { Length: >= 2 } || motion < 0 || primary.ColorTextureIds.Length <= motion ||
             primary.DepthTextureId <= 0 || write?.ColorTextureIds is not { Length: >= 3 } || read?.ColorTextureIds is not { Length: >= 3 })
         { TaaReadiness = "TAA colour, depth, motion or history target unavailable"; TaaHistoryValid = false; return false; }
+        if (!EnsureTaaSampleBanks(write.Width, write.Height)) return false;
+        int cacheProgram = OwnedProgram("taa-cache", ref taaCacheProgram, ref taaCacheFailed);
         int program = OwnedProgram("taa-resolve", ref taaResolveProgram, ref taaResolveFailed);
-        if (program <= 0) { TaaReadiness = "TAA resolve shader unavailable"; TaaHistoryValid = false; return false; }
+        if (cacheProgram <= 0 || program <= 0)
+        { TaaReadiness = "TAA sample transport or resolve shader unavailable"; InvalidateTaaSampleWindow(); return false; }
+        TaaSampleBank newBank = taaSampleBanks![taaParity & 1];
+        TaaSampleBank oldBank = taaSampleBanks![(taaParity ^ 1) & 1];
         TemporalFrameState frame = temporal.State;
         (float[]? inverse, float[] previous) = JitteredReprojection(frame, write.Width, write.Height);
-        bool reset = frame.Reset || !TaaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || inverse == null;
+        bool matchingWindow = frame.JitterPhaseCount == 8;
+        bool reset = frame.Reset || !TaaHistoryValid || !matchingWindow ||
+            !frame.WasViewCaptured(EnumTemporalView.World) || inverse == null;
         inverse ??= Mat4f.Identity(new float[16]);
         if (Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_TAA_INPUTS") == "1")
             TaaResolveCapture = new
@@ -114,57 +131,110 @@ internal sealed partial class GameGraphicsAdapter
                 currentProjection = (float[])frame.GetProjection(EnumTemporalView.World).Clone(),
                 previousProjection = (float[])frame.GetPrevProjection(EnumTemporalView.World).Clone(),
                 cameraDelta = new[] { frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z },
-                resetHistory = reset, blendAlpha = .1f, varianceGamma = 1.25f,
+                resetHistory = reset, windowSize = 8, jitterPhaseCount = frame.JitterPhaseCount,
                 readFbo = read.FboId, writeFbo = write.FboId,
-                readTextures = (int[])read.ColorTextureIds.Clone(), writeTextures = (int[])write.ColorTextureIds.Clone()
+                readTextures = (int[])read.ColorTextureIds.Clone(), writeTextures = (int[])write.ColorTextureIds.Clone(),
+                oldSamples = new { lowFbo = oldBank.Low.FboId, highFbo = oldBank.High.FboId,
+                    scene = (int[])oldBank.SceneSamples.Clone(), glow = (int[])oldBank.GlowSamples.Clone(), count = oldBank.CountTexture },
+                newSamples = new { lowFbo = newBank.Low.FboId, highFbo = newBank.High.FboId,
+                    scene = (int[])newBank.SceneSamples.Clone(), glow = (int[])newBank.GlowSamples.Clone(), count = newBank.CountTexture }
             };
-        bool drawn = DrawTaaResolve(program, primary, write, read, frame, inverse, previous, reset);
-        if (!drawn) { TaaReadiness = "TAA resolve draw declined"; TaaHistoryValid = false; return false; }
+        bool drawn = DrawTaaSampleWindow(cacheProgram, program, primary, write, read,
+            newBank, oldBank, frame, inverse, previous, reset);
+        if (!drawn) { TaaReadiness = "TAA sample transport or resolve draw declined"; InvalidateTaaSampleWindow(); return false; }
         taaResolvedColor = write.ColorTextureIds[0]; taaResolvedGlow = write.ColorTextureIds[1];
-        TaaHistoryValid = true; taaParity ^= 1; TaaResolvedThisFrame = true;
+        TaaHistoryValid = matchingWindow; taaParity ^= 1; TaaResolvedThisFrame = true;
         TaaReadiness = "ready";
         return true;
     }
-    private bool DrawTaaResolve(int program, FrameBufferRef primary, FrameBufferRef write, FrameBufferRef read,
+    private bool DrawTaaSampleWindow(int cacheProgram, int resolveProgram,
+        FrameBufferRef primary, FrameBufferRef write, FrameBufferRef read,
+        TaaSampleBank newBank, TaaSampleBank oldBank,
         TemporalFrameState frame, float[] inverse, float[] previous, bool reset)
     {
+        int[] lowInputs = CacheInputs(0);
+        int[] highInputs = CacheInputs(1);
+        int[] colorInputs = ResolveInputs(newBank.SceneSamples, oldBank.SceneSamples);
+        int[] glowInputs = ResolveInputs(newBank.GlowSamples, oldBank.GlowSamples);
+        try
+        {
+            return DrawTaaWindowStage(nativeTaaCache, cacheProgram, newBank.Low, 255u, lowInputs,
+                       frame, inverse, previous, reset, 0) &&
+                   DrawTaaWindowStage(nativeTaaCache, cacheProgram, newBank.High, 127u, highInputs,
+                       frame, inverse, previous, reset, 1) &&
+                   DrawTaaWindowStage(nativeTaaResolve, resolveProgram, write, 5u, colorInputs,
+                       frame, inverse, previous, reset, 0) &&
+                   DrawTaaWindowStage(nativeTaaResolve, resolveProgram, write, 2u, glowInputs,
+                       frame, inverse, previous, reset, 1);
+        }
+        catch
+        {
+            InvalidateTaaSampleWindow();
+            throw;
+        }
+
+        int[] CacheInputs(int stage)
+        {
+            int start = stage == 0 ? 0 : 3;
+            int[] checks = stage == 0 ? [3, 4, 5, 6] : [0, 1, 2, 6];
+            return [primary.ColorTextureIds[0], primary.ColorTextureIds[1], primary.DepthTextureId,
+                primary.ColorTextureIds[FrameState.MotionAttachment], read.ColorTextureIds[2], oldBank.CountTexture,
+                oldBank.SceneSamples[start], oldBank.GlowSamples[start],
+                oldBank.SceneSamples[start + 1], oldBank.GlowSamples[start + 1],
+                oldBank.SceneSamples[start + 2], oldBank.GlowSamples[start + 2],
+                oldBank.SceneSamples[checks[0]], oldBank.SceneSamples[checks[1]],
+                oldBank.SceneSamples[checks[2]], oldBank.SceneSamples[checks[3]]];
+        }
+
+        int[] ResolveInputs(int[] current, int[] old) =>
+            [current[0], current[1], current[2], current[3], current[4], current[5], current[6], old[6],
+                primary.DepthTextureId, primary.ColorTextureIds[FrameState.MotionAttachment],
+                read.ColorTextureIds[2], oldBank.CountTexture, newBank.CountTexture];
+    }
+
+    private bool DrawTaaWindowStage(NativeFullscreenPass pass, int program, FrameBufferRef target,
+        uint slots, int[] inputs, TemporalFrameState frame, float[] inverse, float[] previous, bool reset, int stage)
+    {
         var renderer = RequireDevice();
-        int[] inputs = [primary.ColorTextureIds[0], primary.ColorTextureIds[1], primary.ColorTextureIds[FrameState.MotionAttachment],
-            primary.DepthTextureId, read.ColorTextureIds[0], read.ColorTextureIds[1], read.ColorTextureIds[2]];
-        const uint slots = 7u;
-        NativePipeline? pipeline = NativePostPipeline(nativeTaaResolve, program, write.FboId, slots,
+        using VulkanDevice.GpuSection gpuSection = renderer.BeginGpuSection(
+            pass.PassName == "taa-cache" ? (stage == 0 ? "taa_cache_low" : "taa_cache_high") :
+            (stage == 0 ? "taa_resolve_color" : "taa_resolve_glow"));
+        NativePipeline? pipeline = NativePostPipeline(pass, program, target.FboId, slots,
             NativeOpaqueBlend(slots), false, false, CompareOp.Less);
-        if (pipeline == null) return StatedTaaResolve(program, write, inputs, frame, inverse, previous, reset);
+        if (pipeline == null) return StatedTaaWindowStage(pass, program, target, slots, inputs,
+            frame, inverse, previous, reset, stage);
         bool drawn = false;
         try
         {
-            if (BeginNativeTargetPass("TaaResolve/" + write.FboId, write.FboId, slots, write.Width, write.Height, inputs))
+            if (BeginNativeTargetPass(pass.PassName + "/" + stage + "/" + target.FboId,
+                    target.FboId, slots, target.Width, target.Height, inputs))
             {
-                var u = nativeTaaResolve.Uniforms;
-                renderer.WriteNative(pipeline, u[0], write.Width, write.Height);
+                var u = pass.Uniforms;
+                renderer.WriteNative(pipeline, u[0], target.Width, target.Height);
                 renderer.WriteNative(pipeline, u[1], frame.JitterPx.X, frame.JitterPx.Y);
                 renderer.WriteNative(pipeline, u[2], frame.PrevJitterPx.X, frame.PrevJitterPx.Y);
                 WriteNativeMatrix(pipeline, u[3], inverse); WriteNativeMatrix(pipeline, u[4], previous);
                 WriteNativeMatrix(pipeline, u[5], frame.CameraMatrixOrigin);
                 renderer.WriteNative(pipeline, u[6], frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z);
                 renderer.WriteNative(pipeline, u[7], reset ? 1 : 0);
-                renderer.WriteNative(pipeline, u[8], .1f); renderer.WriteNative(pipeline, u[9], 1.25f);
-                NativeTexture[] textures = inputs.Select((texture, index) => new NativeTexture(nativeTaaResolve.Samplers[index], texture)).ToArray();
+                renderer.WriteNative(pipeline, u[8], stage);
+                NativeTexture[] textures = inputs.Select((texture, index) => new NativeTexture(pass.Samplers[index], texture)).ToArray();
                 drawn = renderer.DrawNativeFullscreen(pipeline, textures);
             }
         }
         finally { renderer.EndNativePass(); FinishTaaPass(); }
         return drawn;
     }
-    private bool StatedTaaResolve(int program, FrameBufferRef target, int[] inputs, TemporalFrameState frame,
-        float[] inverse, float[] previous, bool reset)
+    private bool StatedTaaWindowStage(NativeFullscreenPass pass, int program, FrameBufferRef target,
+        uint slots, int[] inputs, TemporalFrameState frame,
+        float[] inverse, float[] previous, bool reset, int stage)
     {
         var renderer = RequireDevice();
         ToggleBlend(false, EnumBlendMode.Standard); Stated.DepthTest = false;
         SetFramebuffer(target, keepViewport: false); StatedProgram = program;
         try
         {
-            BindOwnedInputs(program, nativeTaaResolve.SamplerNames, inputs);
+            BindOwnedInputs(program, pass.SamplerNames, inputs);
             renderer.SetUniform(program, OwnedUniform(program, "renderSize"), (float)target.Width, (float)target.Height);
             renderer.SetUniform(program, OwnedUniform(program, "jitterPx"), frame.JitterPx.X, frame.JitterPx.Y);
             renderer.SetUniform(program, OwnedUniform(program, "prevJitterPx"), frame.PrevJitterPx.X, frame.PrevJitterPx.Y);
@@ -173,9 +243,9 @@ internal sealed partial class GameGraphicsAdapter
             renderer.SetUniformMatrices(program, OwnedUniform(program, "viewMatrix"), 1, frame.CameraMatrixOrigin);
             renderer.SetUniform(program, OwnedUniform(program, "cameraDelta"), frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z);
             renderer.SetUniform(program, OwnedUniform(program, "resetHistory"), reset ? 1 : 0);
-            renderer.SetUniform(program, OwnedUniform(program, "blendAlpha"), .1f);
-            renderer.SetUniform(program, OwnedUniform(program, "varianceGamma"), 1.25f);
-            return DrawOwnedFullscreen("TaaResolve/" + target.FboId, 7u);
+            renderer.SetUniform(program, OwnedUniform(program, "stage"), stage);
+            return DrawOwnedFullscreen(pass.PassName + "/" + stage + "/" + target.FboId,
+                slots, requirePipeline: true, reads: inputs);
         }
         finally { StatedProgram = 0; FinishTaaPass(); }
     }
@@ -188,10 +258,11 @@ internal sealed partial class GameGraphicsAdapter
             Stated.BindTexture(index, textures[index]); Stated.BindSampler(index, 0);
         }
     }
-    private bool DrawOwnedFullscreen(string name, uint slots, bool requirePipeline = false)
+    private bool DrawOwnedFullscreen(string name, uint slots, bool requirePipeline = false, int[]? reads = null)
     {
         PassDeclaration? outer = StatedPass;
-        StatedPass = new PassDeclaration { Name = name, FramebufferId = CurrentTargetId, ColorSlots = slots, Flags = PassFlags.None };
+        StatedPass = new PassDeclaration { Name = name, FramebufferId = CurrentTargetId, ColorSlots = slots,
+            Reads = reads ?? [], Flags = PassFlags.None };
         try { return RecordStatedDraw(null, 1, null, null, 0, requirePipeline); }
         finally { StatedPass = outer; }
     }
@@ -256,11 +327,13 @@ internal sealed partial class GameGraphicsAdapter
     internal void ReloadTemporalPrograms()
     {
         var renderer = RequireDevice();
+        if (taaCacheProgram > 0) renderer.DeleteProgram(taaCacheProgram);
         if (taaResolveProgram > 0) renderer.DeleteProgram(taaResolveProgram);
         if (taaSharpenProgram > 0) renderer.DeleteProgram(taaSharpenProgram);
-        taaResolveProgram = taaSharpenProgram = 0; taaResolveFailed = taaSharpenFailed = false;
-        nativeTaaResolve.Pipeline = nativeTaaSharpen.Pipeline = null;
+        taaCacheProgram = taaResolveProgram = taaSharpenProgram = 0;
+        taaCacheFailed = taaResolveFailed = taaSharpenFailed = false;
+        nativeTaaCache.Pipeline = nativeTaaResolve.Pipeline = nativeTaaSharpen.Pipeline = null;
         ownedUniforms.Clear(); taaParity = 0; taaResolvedColor = taaResolvedGlow = 0;
-        TaaResolvedThisFrame = TaaHistoryValid = false;
+        InvalidateTaaSampleWindow();
     }
 }

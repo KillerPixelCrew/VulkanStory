@@ -69,6 +69,32 @@ internal sealed class GtaoRenderer : IDisposable
     /// <summary>Renderer ID of the Hilbert sampling-noise texture, or zero before allocation.</summary>
     public int HilbertTexture => _hilbert;
 
+    /// <summary>Physical cost of the six size-dependent storage targets and the persistent Hilbert lookup.</summary>
+    internal static ulong EstimateWorkspaceAllocationBytes(VulkanDevice device, int width, int height)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (width < MinimumExtent || height < MinimumExtent) return 0;
+        ulong depth = device.EstimateStorageImageAllocationBytes(width, height, Format.R32Sfloat, DepthLevels);
+        ulong term = device.EstimateStorageImageAllocationBytes(width, height, Format.R8Unorm);
+        ulong hilbert = device.EstimateColorImageAllocationBytes(HilbertLut.Width, HilbertLut.Width, Format.R32Sfloat);
+        return checked(depth + 5 * term + hilbert);
+    }
+
+    /// <summary>Actual live allocation credit owned by this GTAO instance; source depth and normals are borrowed.</summary>
+    internal ulong WorkspaceAllocationBytes => checked(
+        _device.TextureAllocationBytes(_workingDepth) + _device.TextureAllocationBytes(_workingTerm) +
+        _device.TextureAllocationBytes(_edges) + _device.TextureAllocationBytes(_scratchA) +
+        _device.TextureAllocationBytes(_scratchB) + _device.TextureAllocationBytes(_output) +
+        _device.TextureAllocationBytes(_hilbert));
+
+    /// <summary>Prepares owned targets before scene geometry without recording AO compute passes or compiling programs.</summary>
+    internal bool PrepareTargets(int width, int height)
+    {
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        return width >= MinimumExtent && height >= MinimumExtent && EnsureTargets((uint)width, (uint)height);
+    }
+
     /// <summary>
     /// Records the three passes into the open frame and returns <see cref="OutputTexture" />,
     /// or 0 with <see cref="LastError" /> set when nothing could be recorded.

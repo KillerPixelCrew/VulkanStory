@@ -28,6 +28,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
     private string? motionDrawFailure;
     private float previousFov;
     private int? dimension;
+    private bool? nativeTaaJitterPolicy;
     internal bool InScene => inScene;
     internal string MotionReadiness { get; private set; } = "no scene sampled";
     internal string? SceneSampleFailure => !inScene ? "outside scene" :
@@ -76,10 +77,16 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
             State.RequestReset(EnumTemporalResetReason.Dimension);
         dimension = currentDimension;
         float scale = settings.ActiveRenderScale > 0 ? settings.ActiveRenderScale : settings.Settings.RenderScale;
+        // Native TAA averages one input-grid jitter cycle; spatial scaling does
+        // not make that cycle a provider temporal-upscaling sequence.
+        bool nativeTaa = settings.EffectiveTaa && !settings.UpscalerReplacesTaa;
+        if (nativeTaaJitterPolicy.HasValue && nativeTaaJitterPolicy.Value != nativeTaa)
+            State.RequestReset(EnumTemporalResetReason.Toggle);
+        nativeTaaJitterPolicy = nativeTaa;
         State.AdvanceForFrame(device.LatencyFrameId, dt * 1000f, primary?.Width ?? client.Width,
             primary?.Height ?? client.Height, scale, client.MainCamera.ZNear, client.MainCamera.ZFar,
             client.MainCamera.Fov, client.shUniforms, temporal || settings.Settings.TaaJitterDev,
-            jitter || settings.Settings.TaaJitterDev);
+            jitter || settings.Settings.TaaJitterDev, jitterPhaseCountOverride: nativeTaa ? 8 : null);
     }
     /// <summary>Records unjittered world camera, camera position and projection for the current scene.</summary>
     /// <param name="projection">Original 16-element column-major world projection.</param>
@@ -110,6 +117,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         MotionReadiness = "world detached";
         previousFov = 0;
         dimension = null;
+        nativeTaaJitterPolicy = null;
         State.JitterActive = false;
         State.RequestReset(EnumTemporalResetReason.WorldLoad);
     }

@@ -439,6 +439,29 @@ internal sealed unsafe class TextureManager : IDisposable
         return CreateImage(width, height, format, mipLevels, layers, cube, usage, aspect, poolClass);
     }
 
+    /// <summary>Queries the physical memory requirement of an unbound ordinary color target, without allocating backing memory.</summary>
+    internal ulong EstimateColorAllocationBytes(uint width, uint height, Format format)
+    {
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo, ImageType = ImageType.Type2D, Format = format,
+            Extent = new Extent3D(Math.Max(1, width), Math.Max(1, height), 1),
+            MipLevels = 1, ArrayLayers = 1, Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal, SharingMode = SharingMode.Exclusive,
+            Usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit |
+                ImageUsageFlags.TransferSrcBit | ImageUsageFlags.ColorAttachmentBit,
+            InitialLayout = ImageLayout.Undefined,
+        };
+        Result result = _context.Api.CreateImage(_context.Device, &imageInfo, null, out Image image);
+        if (result != Result.Success) throw new InvalidOperationException("Image workspace query failed: " + result);
+        try
+        {
+            _context.Api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
+            return requirements.Size;
+        }
+        finally { _context.Api.DestroyImage(_context.Device, image, null); }
+    }
+
     /// <summary>
     /// Creates a texture a compute pass writes as a storage image (and later passes
     /// sample): <paramref name="requested" /> when the device can store to and sample
@@ -469,6 +492,35 @@ internal sealed unsafe class TextureManager : IDisposable
         }
 
         return CreateImage(width, height, format, mipLevels, 1, false, usage, ImageAspectFlags.ColorBit, poolClass);
+    }
+
+    /// <summary>Queries the same chosen format, mip chain and usages as a storage target without allocating backing memory.</summary>
+    internal ulong EstimateStorageAllocationBytes(uint width, uint height, Format requested, uint mipLevels = 1)
+    {
+        width = Math.Max(1, width);
+        height = Math.Max(1, height);
+        mipLevels = Math.Clamp(mipLevels, 1, MipLevelsFor(width, height));
+        Format format = StorageFormats.Choose(requested, _context.OptimalFormatFeatures);
+        ImageUsageFlags usage = ImageUsageFlags.StorageBit | ImageUsageFlags.SampledBit |
+                                ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit;
+        if (StorageFormats.SupportsColorAttachment(_context.OptimalFormatFeatures(format)))
+            usage |= ImageUsageFlags.ColorAttachmentBit;
+
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo, ImageType = ImageType.Type2D, Format = format,
+            Extent = new Extent3D(width, height, 1), MipLevels = mipLevels, ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit, Tiling = ImageTiling.Optimal,
+            SharingMode = SharingMode.Exclusive, Usage = usage, InitialLayout = ImageLayout.Undefined,
+        };
+        Result result = _context.Api.CreateImage(_context.Device, &imageInfo, null, out Image image);
+        if (result != Result.Success) throw new InvalidOperationException("Storage image workspace query failed: " + result);
+        try
+        {
+            _context.Api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
+            return requirements.Size;
+        }
+        finally { _context.Api.DestroyImage(_context.Device, image, null); }
     }
 
     private int CreateImage(uint width, uint height, Format format, uint mipLevels, uint layers, bool cube,

@@ -407,6 +407,7 @@ internal sealed partial class GameRenderSession : IDisposable
             device?.ReleaseStreamlineFrameGenerationResources();
             graphics?.ReleaseAmbientOcclusion();
             graphics?.ReleaseOit();
+            graphics?.ReleaseTaaSampleTargets();
             graphics?.ReleasePreviousAnimations();
             graphics?.ReleaseLiquidMotionProgram();
             upscalers?.Dispose(); upscalers = null;

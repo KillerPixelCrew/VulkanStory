@@ -35,6 +35,7 @@ internal sealed partial class GameRenderSession
         Temporal.DetachClient(client);
         composition!.Disarm(client);
         frameGeneration!.Reset();
+        Graphics.ReleaseTaaSampleTargets();
         Graphics.TaaHistoryValid = false;
         Graphics.SceneNoHudCaptured = false;
         ClearPresentation();

@@ -52,7 +52,7 @@ public static unsafe class VulkanMeshPreflight
                     !packed.BindingOrder.SequenceEqual(new[] { MeshManager.BufferRgba }))
                     return "SSBO face-record sizing or vertex bindings changed";
                 var indices = new int[6];
-                Marshal.Copy(meshes.MappedPointer(ssbo, -1), indices, 0, indices.Length);
+                Marshal.Copy(meshes.BufferOf(ssbo, -1)!.Mapped, indices, 0, indices.Length);
                 if (!indices.SequenceEqual(new[] { 0, 1, 2, 0, 2, 3 })) return "SSBO quad index pattern changed";
                 meshes.Delete(triangle);
                 meshes.Delete(ssbo);

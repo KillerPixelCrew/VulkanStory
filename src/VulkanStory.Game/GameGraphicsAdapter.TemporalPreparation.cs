@@ -26,8 +26,10 @@ internal sealed partial class GameGraphicsAdapter
         try
         {
             RequireDevice();
-            if (postSettings is not { } settings || targets == null || !TerrainShadersReady ||
+            if (postSettings is not { } settings || targets == null ||
                 !GameFramebufferBindings.OffscreenEnabled(platform!)) return;
+            PrepareTemporalImageTargets(targets);
+            if (!TerrainShadersReady) return;
             int motion = FrameState.MotionAttachment;
             if (settings.EffectiveTemporalPipeline && motion is >= 0 and < 32)
             {
@@ -52,9 +54,20 @@ internal sealed partial class GameGraphicsAdapter
         if (NativePostTarget(targets, TaaHistoryIndexA) is { ColorTextureIds.Length: >= 3 } history)
         {
             int resolve = OwnedProgram("taa-resolve", ref taaResolveProgram, ref taaResolveFailed);
-            const uint slots = 7u;
             if (resolve > 0)
-                NativePostPipeline(nativeTaaResolve, resolve, history.FboId, slots, NativeOpaqueBlend(slots), false, false, CompareOp.Less);
+            {
+                NativePostPipeline(nativeTaaResolve, resolve, history.FboId, 5u, NativeOpaqueBlend(5u), false, false, CompareOp.Less);
+                NativePostPipeline(nativeTaaResolve, resolve, history.FboId, 2u, NativeOpaqueBlend(2u), false, false, CompareOp.Less);
+            }
+            if (taaSampleBanks is { } banks)
+            {
+                int cache = OwnedProgram("taa-cache", ref taaCacheProgram, ref taaCacheFailed);
+                if (cache > 0)
+                {
+                    NativePostPipeline(nativeTaaCache, cache, banks[0].Low.FboId, 255u, NativeOpaqueBlend(255u), false, false, CompareOp.Less);
+                    NativePostPipeline(nativeTaaCache, cache, banks[0].High.FboId, 127u, NativeOpaqueBlend(127u), false, false, CompareOp.Less);
+                }
+            }
         }
         if (sharpen && NativePostTarget(targets, TaaSharpenIndex) is { } sharpenTarget)
         {

@@ -1083,6 +1083,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     /// <summary>Selected device's maximum 2D image dimension, or zero before initialization.</summary>
     public int MaxTextureSize => (int)(_context?.Capabilities.MaxImageDimension2D ?? 0);
+    /// <summary>Selected device's maximum simultaneous color attachments, or zero before initialization.</summary>
+    internal int MaxColorAttachments => (int)(_context?.Capabilities.MaxColorAttachments ?? 0);
     /// <summary>Whether the selected Vulkan device supports the wideLines feature.</summary>
     public bool SupportsThickLines => _context?.Capabilities.WideLines ?? false;
     /// <summary>Storage-buffer support exposed by the renderer's required device contract.</summary>
@@ -1258,6 +1260,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         var timeline = _frames.Timeline;
         return $"textures={_textures.Count} texture_bytes={_textures.LiveImageBytes} " +
             $"mesh_bytes={_meshes.LiveBufferBytes} mesh_headroom_spills={_meshes.PersistentMeshHeadroomMisses} mesh_vram_reserve={_context.Allocator.PersistentMeshReserveBytes} pending_deletions={_frames.PendingDeletionCount} " +
+            $"shared_quad_indices={_meshes.SharedQuadIndexBytes} shared_quad_meshes={_meshes.SharedQuadIndexMeshCount} avoided_quad_indices={_meshes.AvoidedQuadIndexBytes} pending_quad_indices={_meshes.PendingQuadIndexRetirementBytes} " +
             $"frame_recorded={timeline.FrameRecorded} frame_submitted={timeline.FrameSignalled} frame_completed={timeline.FrameCompleted} " +
             $"transfer_recorded={timeline.TransferRecorded} transfer_submitted={timeline.TransferSignalled} transfer_completed={timeline.TransferCompleted}; " +
             _context.Allocator.DiagnosticMemoryLine();
