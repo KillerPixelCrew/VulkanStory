@@ -8,7 +8,8 @@
 //
 // Conventions (see docs/vulkan.md): motion = previousPixel - currentUnjitteredPixel
 // in render pixels; a raster pixel centre sits at unjittered position
-// centre - jitterPx; history is stored at unjittered pixel centres; the
+// centre - jitterPx; colour/glow history is stored at unjittered pixel centres;
+// depth history keeps the raster grid of the frame that wrote it. The
 // motion attachment's alpha is the writer's WINDOW depth in [0,1] (the same
 // space as the depth attachment), not NDC depth.
 
@@ -18,10 +19,11 @@ uniform sampler2D motionTex;     // rg mv px, b reactive, a writerDepth [0,1] (0
 uniform sampler2D depthTex;      // Primary depth, [0,1], 0 = near
 uniform sampler2D historyColor;  // previous resolve colour
 uniform sampler2D historyGlow;   // previous resolve glow
-uniform sampler2D historyDepth;  // previous resolve linear depth
+uniform sampler2D historyDepth;  // previous raster-grid linear depth
 
 uniform vec2 renderSize;
 uniform vec2 jitterPx;           // this frame's raster displacement
+uniform vec2 prevJitterPx;       // previous frame's applied raster displacement
 uniform mat4 invViewProjJittered;// raster NDC -> camera-relative world (this frame)
 uniform mat4 prevViewProj;       // camera-relative world (previous camera) -> previous unjittered clip
 uniform mat4 viewMatrix;         // camera-relative world -> view (for linear depth)
@@ -46,11 +48,26 @@ vec3 yCoCgToRgb(vec3 c) {
 	return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
 }
 
+// Reconstruct the fixed output centre from the jittered raster grid. Explicit
+// texelFetch makes the 2x2 bilinear weights independent of Primary's sampler.
+// The positive weights sum to one and reproduce the fractional sample position
+// away from the clamped image border.
+vec4 sampleCurrent(sampler2D tex, vec2 outputPixelCentre) {
+	vec2 source = outputPixelCentre + jitterPx;
+	ivec2 base = ivec2(floor(source - 0.5));
+	vec2 f = fract(source - 0.5);
+	ivec2 maximum = ivec2(renderSize) - ivec2(1);
+	vec4 c00 = texelFetch(tex, clamp(base, ivec2(0), maximum), 0);
+	vec4 c10 = texelFetch(tex, clamp(base + ivec2(1, 0), ivec2(0), maximum), 0);
+	vec4 c01 = texelFetch(tex, clamp(base + ivec2(0, 1), ivec2(0), maximum), 0);
+	vec4 c11 = texelFetch(tex, clamp(base + ivec2(1, 1), ivec2(0), maximum), 0);
+	return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+
 // Intersects the history colour with the neighbourhood box (clip, not clamp).
 // `keep` reports how much of the history survived the clip: 1 when it was
-// already inside the box, 1/maxUnit when it had to be pulled in. The alpha
-// channel has no neighbourhood box of its own, so it is rectified toward the
-// current alpha by this same factor instead of drifting unchecked.
+// already inside the box, 1/maxUnit when it had to be pulled in. Colour and
+// alpha use this rectified endpoint only through the final feedback confidence.
 vec3 clipToBox(vec3 boxMin, vec3 boxMax, vec3 history, out float keep) {
 	vec3 centre = 0.5 * (boxMax + boxMin);
 	vec3 extent = 0.5 * (boxMax - boxMin) + 1e-5;
@@ -98,18 +115,16 @@ void main(void)
 	vec2 pixelCentre = vec2(pixel) + 0.5;
 
 	// ---- current frame: 3x3 neighbourhood, un-jittered reconstruction and statistics
-	vec4 centreSample = texelFetch(sceneTex, pixel, 0);
+	vec4 centreSample = sampleCurrent(sceneTex, pixelCentre);
 	float centreDepth = texelFetch(depthTex, pixel, 0).r;
 	float centreLuma = rgbToYCoCg(centreSample.rgb).x;
 	// Nearest window depth in the 3x3 (0 = near): its motion and its linear depth
 	// drive the reprojection and the disocclusion test, so a sub-pixel leaf in front
 	// of a far background keeps one consistent answer across jitter phases.
-	float closestDepth = 2.0;
+	float closestDepth = centreDepth;
 	float farthestDepth = 0.0;
 	float neighbourhoodDepth[9];
 	ivec2 closestPixel = pixel;
-	vec4 filtered = vec4(0.0);
-	float filteredWeight = 0.0;
 	vec3 m1 = vec3(0.0), m2 = vec3(0.0);
 	vec3 boxMin = vec3(1e9), boxMax = vec3(-1e9);
 	float fineContrast = 0.0;
@@ -118,7 +133,7 @@ void main(void)
 	for (int x = -1; x <= 1; x++)
 	{
 		ivec2 p = clamp(pixel + ivec2(x, y), ivec2(0), ivec2(renderSize) - ivec2(1));
-		vec4 c = texelFetch(sceneTex, p, 0);
+		vec4 c = sampleCurrent(sceneTex, vec2(p) + 0.5);
 		float tapDepth = texelFetch(depthTex, p, 0).r;
 		neighbourhoodDepth[(y + 1) * 3 + x + 1] = tapDepth;
 		if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }
@@ -132,17 +147,8 @@ void main(void)
 			fineContrast += abs(ycc.x - centreLuma);
 			fineTaps++;
 		}
-		// Reconstruct at this pixel's unjittered centre. The tap's raster
-		// centre (pixel + (x,y) + 0.5) sits at unjittered position
-		// pixelCentre + (x,y) - jitterPx, so its offset from the
-		// reconstruction point is (x, y) - jitterPx. Blackman-Harris, radius ~1.
-		vec2 d = vec2(x, y) - jitterPx;
-		float r = length(d);
-		float w = r < 1.0 ? (0.35875 + 0.48829 * cos(3.14159265 * r) + 0.14128 * cos(2.0 * 3.14159265 * r) + 0.01168 * cos(3.0 * 3.14159265 * r)) : 0.0;
-		filtered += c * w; filteredWeight += w;
 	}
-	vec4 current = filteredWeight > 1e-4 ? filtered / filteredWeight : centreSample;
-	current = max(current, vec4(0.0));
+	vec4 current = max(centreSample, vec4(0.0));
 	vec3 mu = m1 / 9.0;
 	vec3 sigma = sqrt(max(m2 / 9.0 - mu * mu, vec3(0.0)));
 	// Fine per-texel detail needs a slightly wider variance box to survive
@@ -167,7 +173,7 @@ void main(void)
 	vec3 closestWorld = closestH.xyz / max(abs(closestH.w), 1e-6) * sign(closestH.w);
 	float closestLinearDepth = -(viewMatrix * vec4(closestWorld, 1.0)).z;
 
-	vec4 glow = texelFetch(glowTex, pixel, 0);
+	vec4 glow = sampleCurrent(glowTex, pixelCentre);
 
 	// ---- motion: written vector when its depth matches, else camera reprojection
 	// Reactive comes from the same nearest-depth tap as the motion vector. A sky-side
@@ -214,6 +220,9 @@ void main(void)
 	// converged history at a different sub-pixel offset every frame - exactly
 	// the wobble jitter is supposed to remove.
 	vec2 historyUv = (pixelCentre + mv) * invSize;
+	// Depth metadata belongs to the selected current raster guide, and its
+	// previous-frame raster coordinate adds that frame's applied jitter.
+	vec2 depthUv = (currentUnjittered + mv + prevJitterPx) * invSize;
 
 	// ---- history sample and rejection
 	float alpha = blendAlpha;
@@ -223,7 +232,7 @@ void main(void)
 
 	vec4 history = sampleCatmullRom(historyColor, historyUv);
 	vec4 historyGlowSample = texture(historyGlow, historyUv);
-	float historyLinear = texture(historyDepth, historyUv).r;
+	float historyLinear = texture(historyDepth, depthUv).r;
 	// A history slot that was never written (freshly allocated after a
 	// framebuffer rebuild) or that caught a division blow-up holds NaN/Inf,
 	// and NaN survives any weighted blend, poisoning the pixel forever. Treat
@@ -245,14 +254,14 @@ void main(void)
 	// it just blends in whatever surface used to be in front.
 	// ==== 2026-09-11: distant foliage jitter was THIS test ====================
 	// Root cause: a single-sample depth test (this pixel's linear depth against
-	// the one history depth under historyUv) rejected history on ~3.7% of distant
+	// the one history depth under depthUv) rejected history on ~3.7% of distant
 	// leaf pixels per frame, on BOTH backends (parity dumps). A sub-pixel leaf
 	// covers the leaf in one jitter phase and the far background in the next, so
 	// the two depths disagree by tens of blocks and the pixel reset to the raw
 	// aliased sample - the shimmer the user saw on distant trees.
 	// Fix: the nearest current depth in the 3x3 (closestLinearDepth, the tap the
 	// motion vector also comes from) against the nearest finite history depth in
-	// the 3x3 around historyUv, tolerance 0.5 + 0.08 * closestLinearDepth. A leaf
+	// the 3x3 around depthUv, tolerance 0.5 + 0.08 * closestLinearDepth. A leaf
 	// that moves one pixel between phases stays inside both windows and keeps its
 	// history. Measured: leaf-far rejection ~3.7% -> ~1.1% per frame; the user
 	// confirmed on Vulkan that the distant-foliage flicker is gone.
@@ -271,7 +280,7 @@ void main(void)
 	for (int hy = -1; hy <= 1; hy++)
 	for (int hx = -1; hx <= 1; hx++)
 	{
-		float h = texture(historyDepth, historyUv + vec2(hx, hy) * invSize).r;
+		float h = texture(historyDepth, depthUv + vec2(hx, hy) * invSize).r;
 		if (!isnan(h) && !isinf(h)) historyNearest = min(historyNearest, h);
 	}
 	float depthTolerance = 0.5 + 0.08 * closestLinearDepth;
@@ -290,47 +299,31 @@ void main(void)
 
 	// ---- rectify and blend in YCoCg with luminance weighting
 	float clipKeep = 1.0;
-	vec3 histYcc = clipToBox(clipMin, clipMax, rgbToYCoCg(history.rgb), clipKeep);
+	vec3 rawHistoryYcc = rgbToYCoCg(history.rgb);
+	vec3 rectifiedHistoryYcc = clipToBox(clipMin, clipMax, rawHistoryYcc, clipKeep);
 	vec3 curYcc = rgbToYCoCg(current.rgb);
-	// ==== 2026-09-11: distant foliage jitter, second half =====================
-	// Root cause: with a fixed current weight (blendAlpha for every pixel that
-	// survived rejection), a sub-pixel leaf that enters and leaves the 3x3 moves
-	// the neighbourhood clip box every frame, and the clip drags the history
-	// with it at full blendAlpha - the history itself oscillates.
-	// Fix: current weight mix(1.2, 0.3, w * w) * blendAlpha with
-	// w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2)) on the
-	// rectified YCoCg luminance, only for pixels not rejected above (reset,
-	// off-screen, NaN history, disocclusion keep alpha = 1); reactive is applied
-	// after it. Together with the 3x3 nearest-depth test above this took distant
-	// leaf rejection from ~3.7% to ~1.1% per frame and removed the flicker in game.
-	// DO NOT REVERT to a fixed blend weight. Pinned by
-	// TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference and
-	// Optimum.Tests TaaAntiFlickerCoverageTests.
-	// ==========================================================================
-	// Anti-flicker feedback (Playdead INSIDE TAA, 2016): a sub-pixel feature that
-	// appears in some jitter phases and not in others moves the neighbourhood box
-	// every frame, and a fixed current weight lets the clip drag the history back
-	// and forth - the shimmer on distant foliage. Weight the current sample by how
-	// different it is from the rectified history in luminance: near-identical
-	// pixels keep more history (0.3 x blendAlpha), real changes take more of the
-	// current frame (1.2 x blendAlpha). Rejected pixels keep their full reset.
+	// Compare against raw history: clipping must not conceal the actual current
+	// innovation. Keep the retained luminance-feedback curve and full rejection.
 	if (!rejected)
 	{
 		float lumCur = max(curYcc.x, 0.0);
-		float lumHist = max(histYcc.x, 0.0);
+		float lumHist = max(rawHistoryYcc.x, 0.0);
 		float unbiasedDiff = abs(lumCur - lumHist) / max(lumCur, max(lumHist, 0.2));
 		float unbiasedWeight = 1.0 - unbiasedDiff;
 		alpha = mix(blendAlpha * 1.2, blendAlpha * 0.3, unbiasedWeight * unbiasedWeight);
 	}
 	alpha = max(alpha, reactive);
+	// Rectification is current-frame information too. Gate its displacement by
+	// the same final confidence instead of clipping history before weighting it.
+	vec3 histYcc = mix(rawHistoryYcc, rectifiedHistoryYcc, alpha);
 	float wCur = alpha / (1.0 + curYcc.x);
 	float wHist = (1.0 - alpha) / (1.0 + histYcc.x);
 	vec3 resolvedYcc = (curYcc * wCur + histYcc * wHist) / max(wCur + wHist, 1e-5);
 	vec3 resolved = max(yCoCgToRgb(resolvedYcc), vec3(0.0));
-	// Rectify the history alpha by the same factor the colour clip applied,
-	// then blend it with the same weight, so scene alpha cannot drift away
-	// from the colour it belongs to.
-	float histAlpha = mix(current.a, history.a, clipKeep);
+	// The alpha endpoint follows the colour clip, and its displacement is gated
+	// by the same confidence before the retained current/history blend.
+	float rectifiedAlpha = mix(current.a, history.a, clipKeep);
+	float histAlpha = mix(history.a, rectifiedAlpha, alpha);
 	float resolvedAlpha = mix(histAlpha, current.a, alpha);
 
 	// Glow blends with the same alpha as colour: a separate 0.2 floor made the
@@ -340,5 +333,6 @@ void main(void)
 
 	outColor = vec4(resolved, resolvedAlpha);
 	outGlow = resolvedGlow;
+	// Retain the centre raster sample's depth, addressed through depthUv next frame.
 	outDepth = vec4(linearDepth);
 }

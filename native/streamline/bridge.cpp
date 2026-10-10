@@ -167,11 +167,11 @@ sl::Resource resource(const TaggedImage& image) {
     return value;
 }
 
-/// @brief Copies a caller-owned column-major matrix into Streamline row-major storage.
+/// @brief Converts caller column-vector matrices to Streamline's row-vector convention.
 void rowMajor(sl::float4x4& target, const float* columnMajor) {
     for (int row = 0; row < 4; ++row)
         for (int col = 0; col < 4; ++col)
-            (&target[row].x)[col] = columnMajor[col * 4 + row];
+            (&target[row].x)[col] = columnMajor[row * 4 + col];
 }
 
 // Called by Streamline's present thread. Keep it lock-free and let the render

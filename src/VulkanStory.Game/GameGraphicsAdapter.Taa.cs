@@ -13,7 +13,7 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeFullscreenPass nativeTaaResolve = new("taa-resolve",
-        ["renderSize", "jitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix", "cameraDelta",
+        ["renderSize", "jitterPx", "prevJitterPx", "invViewProjJittered", "prevViewProj", "viewMatrix", "cameraDelta",
             "resetHistory", "blendAlpha", "varianceGamma"],
         ["sceneTex", "glowTex", "motionTex", "depthTex", "historyColor", "historyGlow", "historyDepth"]);
     private readonly NativeFullscreenPass nativeTaaSharpen = new("taa-sharpen",
@@ -23,6 +23,9 @@ internal sealed partial class GameGraphicsAdapter
     internal string TaaReadiness { get; private set; } = "not resolved";
     private int taaResolvedColor, taaResolvedGlow;
     private readonly Dictionary<(int Program, string Name), int> ownedUniforms = new();
+    internal object? TaaResolveCapture { get; private set; }
+    internal int NextTaaReadIndex => (taaParity & 1) == 0 ? TaaHistoryIndexB : TaaHistoryIndexA;
+    internal int ResolvedTaaWriteIndex => (taaParity & 1) == 0 ? TaaHistoryIndexB : TaaHistoryIndexA;
 
     private int OwnedUniform(int program, string name)
     {
@@ -75,6 +78,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         RequireDevice();
         TaaResolvedThisFrame = false;
+        TaaResolveCapture = null;
         var settings = postSettings ?? throw new InvalidOperationException("Post settings are not attached.");
         var snapshot = temporal.Snapshot();
         string? refusal = !settings.EffectiveTaa ? settings.TaaDisabled ? "TAA disabled for this session" : "TAA not selected" :
@@ -98,6 +102,22 @@ internal sealed partial class GameGraphicsAdapter
         (float[]? inverse, float[] previous) = JitteredReprojection(frame, write.Width, write.Height);
         bool reset = frame.Reset || !TaaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || inverse == null;
         inverse ??= Mat4f.Identity(new float[16]);
+        if (Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_TAA_INPUTS") == "1")
+            TaaResolveCapture = new
+            {
+                frameId = frame.RenderedFrameId, width = write.Width, height = write.Height,
+                currentJitter = new[] { frame.JitterPx.X, frame.JitterPx.Y },
+                previousJitter = new[] { frame.PrevJitterPx.X, frame.PrevJitterPx.Y },
+                inverseViewProjectionJittered = inverse,
+                previousViewProjection = previous,
+                viewMatrix = (float[])frame.CameraMatrixOrigin.Clone(),
+                currentProjection = (float[])frame.GetProjection(EnumTemporalView.World).Clone(),
+                previousProjection = (float[])frame.GetPrevProjection(EnumTemporalView.World).Clone(),
+                cameraDelta = new[] { frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z },
+                resetHistory = reset, blendAlpha = .1f, varianceGamma = 1.25f,
+                readFbo = read.FboId, writeFbo = write.FboId,
+                readTextures = (int[])read.ColorTextureIds.Clone(), writeTextures = (int[])write.ColorTextureIds.Clone()
+            };
         bool drawn = DrawTaaResolve(program, primary, write, read, frame, inverse, previous, reset);
         if (!drawn) { TaaReadiness = "TAA resolve draw declined"; TaaHistoryValid = false; return false; }
         taaResolvedColor = write.ColorTextureIds[0]; taaResolvedGlow = write.ColorTextureIds[1];
@@ -123,11 +143,12 @@ internal sealed partial class GameGraphicsAdapter
                 var u = nativeTaaResolve.Uniforms;
                 renderer.WriteNative(pipeline, u[0], write.Width, write.Height);
                 renderer.WriteNative(pipeline, u[1], frame.JitterPx.X, frame.JitterPx.Y);
-                WriteNativeMatrix(pipeline, u[2], inverse); WriteNativeMatrix(pipeline, u[3], previous);
-                WriteNativeMatrix(pipeline, u[4], frame.CameraMatrixOrigin);
-                renderer.WriteNative(pipeline, u[5], frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z);
-                renderer.WriteNative(pipeline, u[6], reset ? 1 : 0);
-                renderer.WriteNative(pipeline, u[7], .1f); renderer.WriteNative(pipeline, u[8], 1.25f);
+                renderer.WriteNative(pipeline, u[2], frame.PrevJitterPx.X, frame.PrevJitterPx.Y);
+                WriteNativeMatrix(pipeline, u[3], inverse); WriteNativeMatrix(pipeline, u[4], previous);
+                WriteNativeMatrix(pipeline, u[5], frame.CameraMatrixOrigin);
+                renderer.WriteNative(pipeline, u[6], frame.CameraPosDelta.X, frame.CameraPosDelta.Y, frame.CameraPosDelta.Z);
+                renderer.WriteNative(pipeline, u[7], reset ? 1 : 0);
+                renderer.WriteNative(pipeline, u[8], .1f); renderer.WriteNative(pipeline, u[9], 1.25f);
                 NativeTexture[] textures = inputs.Select((texture, index) => new NativeTexture(nativeTaaResolve.Samplers[index], texture)).ToArray();
                 drawn = renderer.DrawNativeFullscreen(pipeline, textures);
             }
@@ -146,6 +167,7 @@ internal sealed partial class GameGraphicsAdapter
             BindOwnedInputs(program, nativeTaaResolve.SamplerNames, inputs);
             renderer.SetUniform(program, OwnedUniform(program, "renderSize"), (float)target.Width, (float)target.Height);
             renderer.SetUniform(program, OwnedUniform(program, "jitterPx"), frame.JitterPx.X, frame.JitterPx.Y);
+            renderer.SetUniform(program, OwnedUniform(program, "prevJitterPx"), frame.PrevJitterPx.X, frame.PrevJitterPx.Y);
             renderer.SetUniformMatrices(program, OwnedUniform(program, "invViewProjJittered"), 1, inverse);
             renderer.SetUniformMatrices(program, OwnedUniform(program, "prevViewProj"), 1, previous);
             renderer.SetUniformMatrices(program, OwnedUniform(program, "viewMatrix"), 1, frame.CameraMatrixOrigin);

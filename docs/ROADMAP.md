@@ -19,7 +19,7 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Known defects
 
-- **REN-07:** Temporal instability at treelines against the sky. The reported recording uses FSR 3 UltraPerformance with DLSS-G; cloud/AO raster coordinates and cloud depth sampling have correctness defects.
+- **REN-07:** Native TAA jitters and shimmers at treelines against the sky with upscalers and frame generation off. The user rejected the previous candidate as worse. Current sample reconstruction, depth-history coordinates and history clipping have been corrected; the reported visual defect remains open.
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
 - **REN-09:** Allocation crash and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.

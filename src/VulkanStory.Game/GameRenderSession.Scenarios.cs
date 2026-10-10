@@ -21,6 +21,38 @@ internal sealed partial class GameRenderSession
     private string ScenarioSessionId => scenarioSessionId ??= Guid.NewGuid().ToString("N");
     private string ScenarioOutputDirectory => HeadlessHarnessOptions.FrameDirectory
         ?? throw new InvalidOperationException("Scenario output directory is not configured.");
+    private static readonly bool NativeTaaInputCapture =
+        Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_TAA_INPUTS") == "1";
+
+    // Capture at the actual consumer seam. Final composition overwrites Primary
+    // later, so its ordinary post-frame dump cannot represent the TAA input.
+    private void CaptureNativeTaaInputs()
+    {
+        if (!NativeTaaInputCapture || !HeadlessHarnessOptions.Enabled ||
+            !services.RendererSettings.EffectiveTaa || scenarioTick == null ||
+            HeadlessHarnessOptions.Scenario is not { } scenario || PrimaryTarget is not { } primary) return;
+        foreach (var action in scenario.Actions.Where(a => a.Tick == scenarioTick && a.Kind == HeadlessScenarioActionKind.Capture))
+        {
+            string directory = Path.Combine(ScenarioOutputDirectory, "scenario-captures", action.Name!, "taa-input");
+            Directory.CreateDirectory(directory);
+            DumpNativeTaaTarget(directory, 0, "Primary", primary, true);
+            int readIndex = Graphics.NextTaaReadIndex;
+            if (platform.FrameBuffers.Count > readIndex && platform.FrameBuffers[readIndex] is { } read)
+                DumpNativeTaaTarget(directory, readIndex, "TaaRead", read, false);
+        }
+    }
+
+    private void DumpNativeTaaTarget(string directory, int slot, string name, FrameBufferRef target, bool primary)
+    {
+        for (int i = 0; i < target.ColorTextureIds.Length; i++)
+        {
+            if (primary && i > 1 && i != Graphics.FrameState.MotionAttachment) continue;
+            if (Device.ReadTextureForParity(target.ColorTextureIds[i]) is { } data)
+                HeadlessParityDump.Write(directory, slot, name, "color" + i, data);
+        }
+        if (primary && target.DepthTextureId > 0 && Device.ReadTextureForParity(target.DepthTextureId) is { } depth)
+            HeadlessParityDump.Write(directory, slot, name, "depth", depth);
+    }
 
     private sealed record ScenarioFile(string Path, string Sha256, int? Width, int? Height);
     private sealed record ScenarioObservedField(object? Value, string Scope, ulong? SourceFrameId,
@@ -235,6 +267,13 @@ internal sealed partial class GameRenderSession
         if (action.Attachments)
             DumpHeadlessAttachments(captureDirectory, dimensions, temporal, captureFrameId,
                 currentWorldSample, size.Width, size.Height);
+        if (NativeTaaInputCapture && Graphics.TaaResolvedThisFrame)
+        {
+            WriteScenarioFrameInputs(captureDirectory, captureFrameId, temporal, currentWorldSample, size.Width, size.Height);
+            int writeIndex = Graphics.ResolvedTaaWriteIndex;
+            if (platform.FrameBuffers.Count > writeIndex && platform.FrameBuffers[writeIndex] is { } write)
+                DumpNativeTaaTarget(Path.Combine(captureDirectory, "taa-output"), writeIndex, "TaaWrite", write, false);
+        }
 
         var files = Directory.EnumerateFiles(captureDirectory, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.Ordinal)
@@ -284,6 +323,7 @@ internal sealed partial class GameRenderSession
             upscaler = currentWorldSample ? services.RendererSettings.EffectiveUpscaler : null,
             upscaleEvaluated = currentWorldSample ? Graphics.UpscaledThisFrame : (bool?)null,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
+            nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,
             renderWidth = primary?.Width,
             renderHeight = primary?.Height,
             displayWidth = width,

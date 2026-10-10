@@ -296,7 +296,11 @@ internal sealed partial class GameRenderSession : IDisposable
         if (!GameFramebufferBindings.OffscreenEnabled(platform)) return;
         // AO completes before this seam. Reconstruction precedes bloom,
         // god rays and luma; UI never enters either reconstruction input.
-        if (!RenderUpscaler()) Graphics.RenderTaaResolve(Temporal);
+        if (!RenderUpscaler())
+        {
+            CaptureNativeTaaInputs();
+            Graphics.RenderTaaResolve(Temporal);
+        }
         ObserveReconstruction();
         Graphics.RenderPostTail(Graphics.PostSceneTexture(), Graphics.PostGlowTexture());
     }
