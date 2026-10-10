@@ -147,7 +147,10 @@ internal sealed partial class GameGraphicsAdapter
     /// <c>SunPosition3D</c> in the final composition: two different fields behind one uniform
     /// name, as on the OpenGL body.
     /// </summary>
-    internal void RenderGodRaysPost(int scene, int glow)
+    /// <param name="scene">Scene colour on the same sampling grid as the glow input.</param>
+    /// <param name="glow">Matching scene glow input.</param>
+    /// <param name="requirePipeline">Wait for first-use pipelines and fail when required pre-SR lighting cannot draw.</param>
+    internal void RenderGodRaysPost(int scene, int glow, bool requirePipeline = false)
     {
         if (!GameFrameBindings.RenderGodRays(platform!)) return;
 
@@ -156,7 +159,9 @@ internal sealed partial class GameGraphicsAdapter
         FrameBufferRef? target = NativePostTarget(buffers, GodRaysIndex);
         if (!NativeProgramUsable(godrays) || target == null)
         {
-            LegacyGodRays(scene, glow);
+            if (requirePipeline)
+                throw new InvalidOperationException("Required scene god-ray shader or target is unavailable.");
+            LegacyGodRays(scene, glow, requirePipeline);
             return;
         }
 
@@ -164,33 +169,40 @@ internal sealed partial class GameGraphicsAdapter
             NativeStandardBlend(), depthTest: false, depthWrite: false, CompareOp.Less);
         if (pipeline == null)
         {
-            LegacyGodRays(scene, glow);
+            LegacyGodRays(scene, glow, requirePipeline);
             return;
         }
 
         FrameBufferRef postTarget = buffers[FindBrightIndex];
-
-        if (BeginNativePostPass("Post/" + GodRaysIndex, target.FboId, new[] { scene, glow }, transient: false))
+        FrameBufferRef inputTarget = requirePipeline ? buffers[PrimaryIndex] : postTarget;
+        bool drawn = false;
+        try
         {
-            // The input texel size is the full-resolution one, describing the texture the pass
-            // samples and not the half-resolution target it writes.
-            RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[0],
-                1f / postTarget.Width, 1f / postTarget.Height);
-            RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[1], GodRaysSampleLimit);
-            WriteNativeVec3(pipeline, nativeGodRays.Uniforms[2], PostUniforms.SunPositionScreen);
-            WriteNativeVec3(pipeline, nativeGodRays.Uniforms[3], PostUniforms.LightPosition3D);
-            WriteNativeVec3(pipeline, nativeGodRays.Uniforms[4], PostUniforms.PlayerViewVector);
-            RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[5], PostUniforms.Dusk);
-            RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[6], (float)platform!.EllapsedMs / 1000f);
-            RequireDevice().DrawNativeFullscreen(pipeline, new[]
+            if (BeginNativePostPass("Post/" + GodRaysIndex, target.FboId, new[] { scene, glow }, transient: false))
             {
-                new NativeTexture(nativeGodRays.Samplers[0], scene),
-                new NativeTexture(nativeGodRays.Samplers[1], glow),
-            });
+                // Describe the sampled scene grid, rather than the half-resolution output.
+                RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[0],
+                    1f / inputTarget.Width, 1f / inputTarget.Height);
+                RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[1], GodRaysSampleLimit);
+                WriteNativeVec3(pipeline, nativeGodRays.Uniforms[2], PostUniforms.SunPositionScreen);
+                WriteNativeVec3(pipeline, nativeGodRays.Uniforms[3], PostUniforms.LightPosition3D);
+                WriteNativeVec3(pipeline, nativeGodRays.Uniforms[4], PostUniforms.PlayerViewVector);
+                RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[5], PostUniforms.Dusk);
+                RequireDevice().WriteNative(pipeline, nativeGodRays.Uniforms[6], (float)platform!.EllapsedMs / 1000f);
+                drawn = RequireDevice().DrawNativeFullscreen(pipeline, new[]
+                {
+                    new NativeTexture(nativeGodRays.Samplers[0], scene),
+                    new NativeTexture(nativeGodRays.Samplers[1], glow),
+                }, requirePipeline);
+            }
         }
-        RequireDevice().EndNativePass();
-
-        Viewport(postTarget.Width, postTarget.Height);
+        finally
+        {
+            RequireDevice().EndNativePass();
+            Viewport(postTarget.Width, postTarget.Height);
+        }
+        if (requirePipeline && !drawn)
+            throw new InvalidOperationException("Required scene god-ray pass did not draw: " + RequireDevice().NativeDrawRefusal);
     }
 
     // -------------------------------------------------------- pass 8: FXAA luma or blit

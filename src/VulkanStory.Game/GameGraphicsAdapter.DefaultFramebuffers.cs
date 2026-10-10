@@ -37,6 +37,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         bool hadSamples = taaSampleBanks != null;
         taaWorkspaceOwnedBytes = 0;
+        commonWorkspaceOwnedBytes = 0;
         ReleaseTaaSampleBanks();
         if (!hadSamples && routingEnabled()) PublishCachedTaaWorkspaceReserve(RequireLifecycleDevice());
         ClearModPassPlans();
@@ -44,6 +45,7 @@ internal sealed partial class GameGraphicsAdapter
         TaaTargetsReady = TaaHistoryValid = SceneNoHudCaptured = false;
         sceneNoHudIndex = uiTargetIndex = -1;
         UpscaledThisFrame = UpscaledCompositeReady = false;
+        GodRaysInScene = false;
         AllocatedUpscalerPlan = null;
         FrameState = FrameState with { MotionAttachment = -1, MotionWriteActive = false };
     }

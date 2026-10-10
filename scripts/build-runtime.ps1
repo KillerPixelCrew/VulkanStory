@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-Builds production managed projects, the VMA bridge, native bootstrap, and shaders.
+Builds production managed projects, VMA, the corrected FidelityFX runtime, native bootstrap, and shaders.
 .DESCRIPTION
-Runs dotnet builds for Bootstrap, Game, Mod, and Input.Companion and builds the required VMA allocator bridge into artifacts/native-vma/<Configuration>/<rid>. Windows additionally builds the CMake activation proxy; Linux uses the original run.sh startup-hook integration and has no native activation proxy. Unless SkipShaders is set, it builds/runs the shader CLI into artifacts/runtime-shaders/<Configuration>: the loose shaders-vk directory and the shipped single-file shaders-vk.pak that stage-runtime.ps1 -ShaderPack takes. Native provider bridges are built separately. Any checked external failure terminates the script; no tests, staging, deployment, or game launch are performed.
+Runs dotnet builds for Bootstrap, Game, Mod, and Input.Companion and builds the required VMA allocator bridge into artifacts/native-vma/<Configuration>/<rid>. Windows additionally builds the corrected pinned FidelityFX Vulkan runtime and CMake activation proxy; Linux uses the original run.sh startup-hook integration and has no native activation proxy. The FidelityFX build requires MSVC x64 tools and reuses only a matching corrected build receipt. Unless SkipShaders is set, it builds/runs the shader CLI into artifacts/runtime-shaders/<Configuration>: the loose shaders-vk directory and the shipped single-file shaders-vk.pak that stage-runtime.ps1 -ShaderPack takes. Native provider bridges are built separately. Any checked external failure terminates the script; no tests, staging, deployment, or game launch are performed.
 .PARAMETER Configuration
 Debug or Release configuration used for managed, shader-tool, and native bootstrap outputs.
 .PARAMETER VintageStoryPath
@@ -35,6 +35,7 @@ if ($RuntimeIdentifier -eq 'linux-x64') {
 } else {
     & (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $vmaBuild 'VulkanStoryVma.dll') `
         -VulkanSdkRoot $VulkanSdkRoot -Configuration $Configuration
+    & (Join-Path $projectRoot 'native/fsr3/build-sdk.ps1') -VulkanSdkRoot $VulkanSdkRoot
 }
 # Bootstrap uses reflection to load Game; build it explicitly, without a test project.
 foreach ($project in @('VulkanStory.Bootstrap', 'VulkanStory.Game', 'VulkanStory.Mod', 'VulkanStory.Input.Companion')) {
@@ -64,4 +65,4 @@ if ($Generator -like 'Visual Studio*') { $arguments += @('-A', 'x64') }
 if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap configuration failed.' }
 & cmake --build $nativeBuild --config $Configuration
 if ($LASTEXITCODE -ne 0) { throw 'Native bootstrap build failed.' }
-Write-Host "Built production managed projects, VMA bridge at $vmaBuild, and bootstrap; full shaders compile unless SkipShaders is selected. Use build-provider-bridges.ps1 for native provider builds. No tests, staging, installation or game launch ran."
+Write-Host "Built production managed projects, VMA bridge at $vmaBuild, corrected FidelityFX Vulkan runtime, and bootstrap; full shaders compile unless SkipShaders is selected. Use build-provider-bridges.ps1 for native provider bridges. No tests, staging, installation or game launch ran."

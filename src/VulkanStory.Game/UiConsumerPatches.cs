@@ -112,6 +112,7 @@ internal static class UiConsumerPatches
     {
         if (!TryScreen(out var graphics)) return;
         graphics.ReloadUiProgram(); graphics.ReloadTemporalPrograms();
+        graphics.ReloadSceneGodRaysProgram();
         graphics.ReloadAmbientOcclusionProgram();
         graphics.ReloadBlitPrograms();
         graphics.ReloadSkyMotionProgram();

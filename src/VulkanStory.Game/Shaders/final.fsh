@@ -8,6 +8,7 @@ uniform sampler2D godrayParts;
 uniform sampler2D ssaoScene;
 uniform int optimumSsaoInScene;
 uniform int optimumAoDebug;
+uniform int godRaysInScene;
 
 uniform float gammaLevel;
 uniform float brightnessLevel;
@@ -116,8 +117,10 @@ void main(void)
 	#endif
 
 	#if GODRAYS > 0
-		vec4 grc = texture(godrayParts, texCoord);
-		color.rgb += grc.rgb;
+		if (godRaysInScene == 0) {
+			vec4 grc = texture(godrayParts, texCoord);
+			color.rgb += grc.rgb;
+		}
 		color.rgb = min(color.rgb, vec3(1));
 		color.a=1;
 	#endif

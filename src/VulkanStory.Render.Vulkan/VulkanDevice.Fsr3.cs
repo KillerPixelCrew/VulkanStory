@@ -30,17 +30,10 @@ public sealed unsafe partial class VulkanDevice
                 void main() {
                     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
                     if (any(greaterThanEqual(pixel, imageSize(reactive)))) return;
-                    // Neighbourhood minimum: a sky pixel next to geometry is not reactive, so
-                    // silhouettes against cloud/fog keep history across jitter phases.
-                    // Each tap is sanitised before min(): min() with a NaN operand is undefined.
-                    ivec2 last = imageSize(reactive) - ivec2(1);
-                    float value = 0.9;
-                    for (int y = -1; y <= 1; y++)
-                        for (int x = -1; x <= 1; x++)
-                        {
-                            float tap = texelFetch(motion, clamp(pixel + ivec2(x, y), ivec2(0), last), 0).b;
-                            value = min(value, isnan(tap) || isinf(tap) ? 0.9 : tap);
-                        }
+                    // Preserve coverage at the colour sample's pixel. The SDK
+                    // dilates reactive coverage; eroding it here removes thin edges.
+                    float value = texelFetch(motion, pixel, 0).b;
+                    if (isnan(value) || isinf(value)) value = 0.9;
                     value = clamp(value, 0.0, 0.9);
                     imageStore(reactive, pixel, vec4(value));
                 }
@@ -89,6 +82,7 @@ public sealed unsafe partial class VulkanDevice
             FovRadians = frame.Temporal.FovRadians,
             Reset = firstFrame || frame.Temporal.Reset ? 1u : 0u,
         };
+        _lastUpscalerInputTextures = (LatencyFrameId, motionRg, _fsr3ReactiveTexture);
         int result = api.Evaluate(context, &args);
         _dynamicState.Invalidate();
         return result;

@@ -122,20 +122,30 @@ internal sealed partial class GameGraphicsAdapter
         Viewport((int)(scale * display.Width), (int)(scale * display.Height));
         ToggleBlend(true, EnumBlendMode.Standard);
     }
-    private void LegacyGodRays(int scene, int glow)
+    private void LegacyGodRays(int scene, int glow, bool requirePipeline = false)
     {
         if (!GameFrameBindings.RenderGodRays(platform!)) return;
         var display = RequireFramebufferHost().PixelSize();
         float scale = GameFramebufferBindings.SsaaLevel(platform!);
-        LoadFramebuffer(EnumFrameBuffer.GodRays);
         ShaderProgramGodrays rays = ShaderPrograms.Godrays;
-        rays.Use(); rays.Uniform("invFrameSizeIn", 1f / (display.Width * scale), 1f / (display.Height * scale));
-        if (rays.HasUniform("maxGodRaySamples")) rays.Uniform("maxGodRaySamples", GodRaysSampleLimit);
-        rays.SunPosScreenIn = PostUniforms.SunPositionScreen; rays.SunPos3dIn = PostUniforms.LightPosition3D;
-        rays.PlayerViewVector = PostUniforms.PlayerViewVector; rays.Dusk = PostUniforms.Dusk;
-        rays.IGlobalTimeIn = (float)platform!.EllapsedMs / 1000f;
-        rays.InputTexture2D = scene; rays.GlowParts2D = glow;
-        DrawPostTriangle(); rays.Stop();
+        if (requirePipeline && (!NativeProgramUsable(rays) ||
+            NativePostTarget(platform!.FrameBuffers, GodRaysIndex) == null))
+            throw new InvalidOperationException("Required scene god-ray inputs are unavailable.");
+        LoadFramebuffer(EnumFrameBuffer.GodRays);
+        rays.Use();
+        try
+        {
+            var input = requirePipeline ? FramebufferAt(EnumFrameBuffer.Primary) : null;
+            rays.Uniform("invFrameSizeIn", requirePipeline ? 1f / input!.Width : 1f / (display.Width * scale),
+                requirePipeline ? 1f / input!.Height : 1f / (display.Height * scale));
+            if (rays.HasUniform("maxGodRaySamples")) rays.Uniform("maxGodRaySamples", GodRaysSampleLimit);
+            rays.SunPosScreenIn = PostUniforms.SunPositionScreen; rays.SunPos3dIn = PostUniforms.LightPosition3D;
+            rays.PlayerViewVector = PostUniforms.PlayerViewVector; rays.Dusk = PostUniforms.Dusk;
+            rays.IGlobalTimeIn = (float)platform!.EllapsedMs / 1000f;
+            rays.InputTexture2D = scene; rays.GlowParts2D = glow;
+            DrawPostTriangle(requirePipeline);
+        }
+        finally { rays.Stop(); }
         Viewport((int)(scale * display.Width), (int)(scale * display.Height));
     }
     private void LegacyPostLuma(int scene)
@@ -166,7 +176,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         RequireDevice();
         RenderBloomPost(scene, glow);
-        RenderGodRaysPost(scene, glow);
+        if (!GodRaysInScene) RenderGodRaysPost(scene, glow);
         RenderLumaPost(scene);
         FinishPostStages();
     }

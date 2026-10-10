@@ -33,6 +33,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         if (width <= 0 || height <= 0) return;
         VulkanDevice renderer = RequireLifecycleDevice();
+        UpdateCommonFrameWorkspaceReserve(renderer, width, height, replacingTargets);
         bool dimensionsChanged = width != taaWorkspaceWidth || height != taaWorkspaceHeight;
         bool possibleAo = (postSettings?.Settings.AmbientOcclusion is "auto" or "gtao") &&
             RequireFramebufferHost().Settings().SsaoQuality > 0 &&
@@ -101,7 +102,8 @@ internal sealed partial class GameGraphicsAdapter
     private void PublishCachedTaaWorkspaceReserve(VulkanDevice renderer) =>
         renderer.SetImageWorkspaceReserve(checked(
             (taaWorkspaceExpectedBytes > taaWorkspaceOwnedBytes ? taaWorkspaceExpectedBytes - taaWorkspaceOwnedBytes : 0) +
-            (aoWorkspaceExpectedBytes > aoWorkspaceOwnedBytes ? aoWorkspaceExpectedBytes - aoWorkspaceOwnedBytes : 0)));
+            (aoWorkspaceExpectedBytes > aoWorkspaceOwnedBytes ? aoWorkspaceExpectedBytes - aoWorkspaceOwnedBytes : 0) +
+            CommonFrameWorkspaceReserveBytes));
 
     /// <summary>Prepares the complete temporal image workspace before scene geometry is admitted.</summary>
     internal void PrepareTemporalImageTargets(IReadOnlyList<FrameBufferRef> targets)

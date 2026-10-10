@@ -35,6 +35,6 @@ internal static class TextureReadbackFormats
     /// <summary>Whether the retained parity decoder can interpret this raw format.</summary>
     internal static bool HasParityDecoder(Format format) => format is
         Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb or Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb or
-        Format.R8Unorm or Format.R16G16B16A16Sfloat or Format.R16G16B16A16Unorm or Format.R32G32B32A32Sfloat or
+        Format.R8Unorm or Format.R16G16Sfloat or Format.R16G16B16A16Sfloat or Format.R16G16B16A16Unorm or Format.R32G32B32A32Sfloat or
         Format.R16Sfloat or Format.R32Sfloat or Format.D32Sfloat or Format.D16Unorm;
 }

@@ -44,6 +44,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
 
     int optimumSsaoInScene;
     int optimumAoDebug;
+    int godRaysInScene;
 
     float gammaLevel;
     float brightnessLevel;
@@ -188,8 +189,10 @@ void main(void)
 	}
 
 	if (OPTIMUM_GODRAYS > 0) {
-		vec4 grc = texture(optimumTextures2D[godrayParts], texCoord);
-		color.rgb += grc.rgb;
+		if (godRaysInScene == 0) {
+			vec4 grc = texture(optimumTextures2D[godrayParts], texCoord);
+			color.rgb += grc.rgb;
+		}
 		color.rgb = min(color.rgb, vec3(1));
 		color.a=1;
 	}

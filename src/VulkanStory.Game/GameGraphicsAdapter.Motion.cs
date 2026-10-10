@@ -17,6 +17,16 @@ internal sealed partial class GameGraphicsAdapter
     private bool skyMotionFailed, skyMotionOutputReported;
     // Retain exact producer inputs only for the opt-in attachment capture.
     internal object? SkyMotionCapture { get; private set; }
+    private bool captureSrMotionInputs;
+    internal bool CaptureSrMotionInputs
+    {
+        get => captureSrMotionInputs;
+        set
+        {
+            captureSrMotionInputs = value;
+            if (!value && !HeadlessParityDump.Enabled) SkyMotionCapture = null;
+        }
+    }
     // Native manifest GBUFFER is derived from SSAOLEVEL, not TAAMOTIONLOCATION.
     // Keep owned motion programs on the same 2/4 attachment layout as scene writers.
     private static string MotionProgramPrefix(int motion) =>
@@ -83,8 +93,8 @@ internal sealed partial class GameGraphicsAdapter
     internal bool RenderSkyMotion(GameTemporalOwner temporal, bool transparentRendered = true)
     {
         var renderer = RequireDevice();
-        if (HeadlessParityDump.Enabled)
-            SkyMotionCapture = new { frameId = temporal.State.RenderedFrameId, submitted = false };
+        bool captureInputs = HeadlessParityDump.Enabled || CaptureSrMotionInputs;
+        SkyMotionCapture = captureInputs ? new { frameId = temporal.State.RenderedFrameId, submitted = false } : null;
         int motion = FrameState.MotionAttachment;
         if (!AoSettings.EffectiveTemporalPipeline || motion is < 0 or >= 32 || !temporal.HasCurrentSceneSample) return false;
         var primary = NativePostTarget(platform!.FrameBuffers, PrimaryIndex);
@@ -128,7 +138,7 @@ internal sealed partial class GameGraphicsAdapter
             renderer.EndNativePass(); Stated.DepthCompare = CompareOp.Less; Stated.DepthWrite = true;
             ToggleBlend(true, EnumBlendMode.Standard); Stated.CullEnabled = true;
         }
-        if (HeadlessParityDump.Enabled)
+        if (captureInputs)
             SkyMotionCapture = new
             {
                 frameId = frame.RenderedFrameId, submitted = drawn,

@@ -276,6 +276,7 @@ public sealed unsafe partial class VulkanDevice
                 " mv=" + motionTexture + " out=" + outputTexture);
         }
 
+        _lastUpscalerInputTextures = (LatencyFrameId, motionTexture, 0);
         NgxResult result = feature.Evaluate(
             commandBuffer,
             NgxResourceVk.Texture(color, readWrite: false),

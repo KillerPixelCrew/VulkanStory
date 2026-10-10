@@ -191,6 +191,8 @@ internal sealed partial class GameRenderSession : IDisposable
             Graphics.FrameState = Graphics.FrameState with { Ssao = settings.Ssao, MotionWriteActive = false };
             Graphics.UpscaledThisFrame = Graphics.UpscaledCompositeReady = Graphics.SceneNoHudCaptured = false;
             Graphics.TaaResolvedThisFrame = false;
+            Graphics.GodRaysInScene = false;
+            Graphics.CaptureSrMotionInputs = SrInputCaptureScheduled;
             Graphics.Stated.UiImageFramebuffer = 0;
             Device.RedirectDefaultFramebuffer(0);
             gpuCycleStarted = true;
@@ -222,7 +224,11 @@ internal sealed partial class GameRenderSession : IDisposable
             RecordHeadlessRenderFailure(error);
             throw;
         }
-        finally { rendering = false; }
+        finally
+        {
+            if (graphics != null) graphics.CaptureSrMotionInputs = false;
+            rendering = false;
+        }
     }
     private void PrepareFramePacing()
     {
@@ -296,7 +302,9 @@ internal sealed partial class GameRenderSession : IDisposable
         if (!GameFramebufferBindings.OffscreenEnabled(platform)) return;
         // AO completes before this seam. Reconstruction precedes bloom,
         // god rays and luma; UI never enters either reconstruction input.
-        if (!RenderUpscaler())
+        Graphics.RenderSceneGodRays();
+        if (RenderUpscaler()) CaptureSrInputs();
+        else
         {
             CaptureNativeTaaInputs();
             Graphics.RenderTaaResolve(Temporal);
@@ -410,6 +418,7 @@ internal sealed partial class GameRenderSession : IDisposable
             graphics?.ReleaseTaaSampleTargets();
             graphics?.ReleasePreviousAnimations();
             graphics?.ReleaseLiquidMotionProgram();
+            graphics?.ReloadSceneGodRaysProgram();
             upscalers?.Dispose(); upscalers = null;
             // Device disposal waits owned GPU work/presentation while SDL lives.
             device?.Dispose(); device = null;

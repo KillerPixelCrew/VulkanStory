@@ -290,6 +290,7 @@ internal static class TextureDump
     {
         Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb or Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb => 0x8058,
         Format.R8Unorm => 0x8229,
+        Format.R16G16Sfloat => 0x822F,
         Format.R16G16B16A16Sfloat => 0x881A,
         Format.R16G16B16A16Unorm => 0x805B,
         Format.R32G32B32A32Sfloat => 0x8814,
@@ -350,6 +351,19 @@ internal static class TextureDump
                     bytes[i * 4 + 3] = 255;
                 }
                 readback.Bytes = bytes;
+                return readback;
+            }
+            case Format.R16G16Sfloat:
+            {
+                var source = MemoryMarshal.Cast<byte, Half>(data);
+                var floats = new float[texels * 4];
+                for (int i = 0; i < texels; i++)
+                {
+                    floats[i * 4] = (float)source[i * 2];
+                    floats[i * 4 + 1] = (float)source[i * 2 + 1];
+                    floats[i * 4 + 3] = 1f;
+                }
+                readback.Floats = floats;
                 return readback;
             }
             case Format.R16G16B16A16Sfloat:

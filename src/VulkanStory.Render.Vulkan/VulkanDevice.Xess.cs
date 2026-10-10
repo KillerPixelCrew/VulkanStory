@@ -38,6 +38,7 @@ public sealed unsafe partial class VulkanDevice
             JitterX = frame.Temporal.JitterX, JitterY = frame.Temporal.JitterY,
             ExposureScale = 1f, Reset = firstFrame || frame.Temporal.Reset ? 1u : 0u,
         };
+        _lastUpscalerInputTextures = (LatencyFrameId, motionRg, 0);
         int result = api.Execute(context, commands.Handle, &args);
         _dynamicState.Invalidate();
         return result;

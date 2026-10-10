@@ -440,16 +440,21 @@ internal sealed unsafe class TextureManager : IDisposable
     }
 
     /// <summary>Queries the physical memory requirement of an unbound ordinary color target, without allocating backing memory.</summary>
-    internal ulong EstimateColorAllocationBytes(uint width, uint height, Format format)
+    internal ulong EstimateColorAllocationBytes(uint width, uint height, Format format) =>
+        EstimateTextureAllocationBytes(width, height, format);
+
+    /// <summary>Queries the ordinary texture creation contract, including depth usage and array layers.</summary>
+    internal ulong EstimateTextureAllocationBytes(uint width, uint height, Format format, uint layers = 1)
     {
         var imageInfo = new ImageCreateInfo
         {
             SType = StructureType.ImageCreateInfo, ImageType = ImageType.Type2D, Format = format,
             Extent = new Extent3D(Math.Max(1, width), Math.Max(1, height), 1),
-            MipLevels = 1, ArrayLayers = 1, Samples = SampleCountFlags.Count1Bit,
+            MipLevels = 1, ArrayLayers = layers, Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal, SharingMode = SharingMode.Exclusive,
             Usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit |
-                ImageUsageFlags.TransferSrcBit | ImageUsageFlags.ColorAttachmentBit,
+                ImageUsageFlags.TransferSrcBit | (IsDepthFormat(format)
+                    ? ImageUsageFlags.DepthStencilAttachmentBit : ImageUsageFlags.ColorAttachmentBit),
             InitialLayout = ImageLayout.Undefined,
         };
         Result result = _context.Api.CreateImage(_context.Device, &imageInfo, null, out Image image);

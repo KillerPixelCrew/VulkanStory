@@ -15,7 +15,7 @@ internal sealed partial class GameGraphicsAdapter
     private readonly NativeFullscreenPass nativeFinal = new("final",
         ["ambientBloomLevel", "optimumSsaoInScene", "optimumAoDebug", "invFrameSizeIn", "gammaLevel", "extraGamma",
             "contrastLevel", "brightnessLevel", "sepiaLevel", "windWaveCounter", "glitchEffectStrength",
-            "sunPosScreenIn", "sunPos3dIn", "playerViewVector", "damageVignetting", "damageVignettingSide", "frostVignetting"],
+            "sunPosScreenIn", "sunPos3dIn", "playerViewVector", "damageVignetting", "damageVignettingSide", "frostVignetting", "godRaysInScene"],
         ["primaryScene", "glowParts", "bloomParts", "godrayParts", "ssaoScene"]);
     /// <summary>Composes scene post outputs into the presentation target and records whether the upscaled composite is ready.</summary>
     internal void RenderFinalComposition()
@@ -114,5 +114,6 @@ internal sealed partial class GameGraphicsAdapter
         if (GameFrameBindings.RenderGodRays(platform!))
         { Vector(11, PostUniforms.SunPositionScreen); Vector(12, PostUniforms.SunPosition3D); Vector(13, PostUniforms.PlayerViewVector); }
         Scalar(14, PostUniforms.DamageVignetting); Scalar(15, PostUniforms.DamageVignettingSide); Scalar(16, PostUniforms.FrostVignetting);
+        Integer(17, GodRaysInScene ? 1 : 0);
     }
 }

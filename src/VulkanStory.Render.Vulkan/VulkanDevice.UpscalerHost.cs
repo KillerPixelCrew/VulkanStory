@@ -7,6 +7,11 @@ namespace VulkanStory.Render.Vulkan;
 /// <summary>Explicit provider-device interface forwarding to the renderer owner.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    private (ulong FrameId, int Motion, int Reactive) _lastUpscalerInputTextures;
+
+    /// <summary>Texture inputs recorded for the most recent native SR dispatch attempt.</summary>
+    internal (ulong FrameId, int Motion, int Reactive) LastUpscalerInputTextures => _lastUpscalerInputTextures;
+
     /// <inheritdoc/>
     int IUpscalerDevice.CreateUpscaleTexture(int width, int height, Format format, bool storage,
         IntPtr pixels, int bytesPerPixel) => CreateUpscaleTexture(width, height, format, storage, pixels, bytesPerPixel);

@@ -22,6 +22,9 @@ limited to four jobs and each shader compiler to one worker by default. Only
 staged build scheduling is adjusted; shader flags/permutations remain unchanged.
 It does not edit the
 vendor submodule or launch the game. A failed build produces no runtime receipt.
+The ordinary Windows `scripts/build-runtime.ps1` invokes this build. A cached
+runtime is reused only when its pinned source, correction, build recipe and binary
+hashes match the receipt.
 
 The default output is `artifacts/native-fsr3-sdk/Release/win-x64/runtime`.
 `scripts/prepare-native-bundle.ps1` requires that corrected runtime by default.

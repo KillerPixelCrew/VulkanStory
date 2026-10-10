@@ -76,6 +76,7 @@ public sealed unsafe partial class VulkanDevice
             ReadyValue = prepared.ReadyForDx12,
             DoneValue = prepared.DoneByDx12,
         };
+        _lastUpscalerInputTextures = (LatencyFrameId, motionRg, 0);
         int result = runtime.Evaluate(native);
         if (result != 0) return result;
         shared.MarkDispatched(prepared);

@@ -77,6 +77,7 @@ internal sealed partial class GameGraphicsAdapter
         renderer.AttachTexture(handle, FramebufferAttachment.ColorAttachment0, oitReveal, 0);
         for (int layer = 0; layer < 3; layer++)
             renderer.AttachTexture(handle, (FramebufferAttachment)(36067 + layer), oitAccumulation, layer);
+        RefreshCommonFrameWorkspaceOwnership();
     }
     internal void BindOit()
     {
@@ -91,6 +92,7 @@ internal sealed partial class GameGraphicsAdapter
         if (oitReveal > 0) device?.DeleteTexture(oitReveal);
         oitAccumulation = oitReveal = 0; oitTransparent = null;
         oitApi = null;
+        RefreshCommonFrameWorkspaceOwnership();
     }
     internal void ReleaseOitFor(ICoreClientAPI api) { RequireDevice(); if (ReferenceEquals(api, oitApi)) ReleaseOit(); }
     /// <summary>Merges weighted transparency into the current scene through native or retained composition.</summary>

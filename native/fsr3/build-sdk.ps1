@@ -23,13 +23,30 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (-not $output.StartsWith($artifactsRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The SDK build output must be a fresh directory inside this repository artifacts/.'
 }
-if (Test-Path -LiteralPath $output) { throw 'Choose a fresh SDK build output directory.' }
 $fixPath = Join-Path $PSScriptRoot 'sdk-fixes/luma-history-format.json'
 $fix = Get-Content -LiteralPath $fixPath -Raw | ConvertFrom-Json
 $commit = (& git -C $sdkRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -ne $fix.sdkCommit) { throw 'The FSR3 correction requires the pinned FidelityFX SDK commit.' }
 $dirty = & git -C $sdkRoot status --porcelain --untracked-files=no
 if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'FidelityFX SDK tracked sources must be unchanged before staging.' }
+$recipeHash = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
+$fixHash = (Get-FileHash -LiteralPath $fixPath -Algorithm SHA256).Hash
+if (Test-Path -LiteralPath $output) {
+    $cachedReceiptPath = Join-Path $output 'runtime/fsr3-sdk-build.json'
+    $cachedBinaryPath = Join-Path $output 'runtime/amd_fidelityfx_vk.dll'
+    if ((Test-Path -LiteralPath $cachedReceiptPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $cachedBinaryPath -PathType Leaf)) {
+        $cached = Get-Content -LiteralPath $cachedReceiptPath -Raw | ConvertFrom-Json
+        if ($cached.schema -eq 1 -and $cached.sdkCommit -eq $commit -and
+            $cached.configuration -eq $Configuration -and $cached.patchSha256 -eq $fixHash -and
+            $cached.buildRecipeSha256 -eq $recipeHash -and
+            $cached.runtimeSha256 -eq (Get-FileHash -LiteralPath $cachedBinaryPath -Algorithm SHA256).Hash) {
+            Write-Host "Using verified corrected FidelityFX runtime: $cachedBinaryPath"
+            return
+        }
+    }
+    throw 'Existing SDK output has no matching corrected build receipt. Choose a fresh SDK build output directory.'
+}
 $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { throw 'Visual Studio Installer vswhere.exe is required.' }
@@ -105,7 +122,7 @@ Copy-Item -LiteralPath $built -Destination $destination
 $receipt = [ordered]@{
     schema=1; fix=$fix.id; upstream=$fix.upstream; sdkCommit=$commit; configuration=$Configuration
     callback=$fix.file; sourceBeforeSha256=$beforeHash; sourceAfterSha256=$afterHash
-    patchSha256=(Get-FileHash -LiteralPath $fixPath -Algorithm SHA256).Hash
+    patchSha256=$fixHash; buildRecipeSha256=$recipeHash
     runtimeSha256=(Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     cmake=$cmake; compiler=$compiler; generator=$generator; vulkanSdk=$vulkanRoot
     parallel=$Parallel; shaderThreads=$ShaderThreads

@@ -23,6 +23,12 @@ internal sealed partial class GameRenderSession
         ?? throw new InvalidOperationException("Scenario output directory is not configured.");
     private static readonly bool NativeTaaInputCapture =
         Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_TAA_INPUTS") == "1";
+    private static readonly bool SrInputCapture =
+        Environment.GetEnvironmentVariable("VULKANSTORY_SR_INPUTS") == "1";
+    private bool SrInputCaptureScheduled => SrInputCapture && HeadlessHarnessOptions.Enabled &&
+        !scenarioTerminal && !headlessDone && scenarioTick.HasValue &&
+        HeadlessHarnessOptions.Scenario is { } scenario && scenario.Actions.Any(action =>
+            action.Tick == scenarioTick && action.Kind == HeadlessScenarioActionKind.Capture);
 
     // Capture at the actual consumer seam. Final composition overwrites Primary
     // later, so its ordinary post-frame dump cannot represent the TAA input.
@@ -40,6 +46,51 @@ internal sealed partial class GameRenderSession
             if (platform.FrameBuffers.Count > readIndex && platform.FrameBuffers[readIndex] is { } read)
                 DumpNativeTaaTarget(directory, readIndex, "TaaRead", read, false);
             DumpNativeTaaWindowProbes(Path.Combine(directory, "window"), Graphics.TaaSampleReadTargets);
+        }
+    }
+
+    // SR owns a separate consumer seam. Capture after its dispatch has completed
+    // recording, while Primary still holds the scene and before the post tail.
+    private void CaptureSrInputs()
+    {
+        if (!SrInputCaptureScheduled || !Graphics.UpscaledThisFrame || PrimaryTarget is not { } primary ||
+            platform.FrameBuffers.Count <= GameGraphicsAdapter.UpscaledSceneIndex ||
+            platform.FrameBuffers[GameGraphicsAdapter.UpscaledSceneIndex] is not { } output) return;
+        GameTemporalFrame temporal = Temporal.Snapshot();
+        ulong frameId = Device.LatencyFrameId;
+        bool currentWorldSample = temporal.WorldCaptured && temporal.FrameId == frameId;
+        var sdkInputs = Device.LastUpscalerInputTextures;
+        bool currentSdkInputs = currentWorldSample && sdkInputs.FrameId == frameId;
+        foreach (var action in HeadlessHarnessOptions.Scenario!.Actions.Where(a =>
+                     a.Tick == scenarioTick && a.Kind == HeadlessScenarioActionKind.Capture))
+        {
+            string captureDirectory = Path.Combine(ScenarioOutputDirectory, "scenario-captures", action.Name!);
+            string inputDirectory = Path.Combine(captureDirectory, "sr-input");
+            string outputDirectory = Path.Combine(captureDirectory, "sr-output");
+            Directory.CreateDirectory(inputDirectory);
+            Directory.CreateDirectory(outputDirectory);
+            DumpNativeTaaTarget(inputDirectory, 0, "Primary", primary, true);
+            if (Graphics.GodRaysInScene && platform.FrameBuffers[(int)EnumFrameBuffer.GodRays] is { } rays)
+                DumpNativeTaaTarget(inputDirectory, (int)EnumFrameBuffer.GodRays, "SceneGodRays", rays, false);
+            if (platform.FrameBuffers[(int)EnumFrameBuffer.Transparent] is { } transparent)
+            {
+                // OIT replaces attachment zero with a private reveal texture.
+                // Slots one and two remain the exact revealage/glow SR consumed.
+                for (int slot = 1; slot < Math.Min(3, transparent.ColorTextureIds.Length); slot++)
+                    if (Device.ReadTextureForParity(transparent.ColorTextureIds[slot]) is { } data)
+                        HeadlessParityDump.Write(inputDirectory, (int)EnumFrameBuffer.Transparent,
+                            "Transparent", "color" + slot, data);
+            }
+            if (currentSdkInputs)
+            {
+                if (sdkInputs.Motion > 0 && Device.ReadTextureForParity(sdkInputs.Motion) is { } motion)
+                    HeadlessParityDump.Write(inputDirectory, 60, "SdkMotion", "color0", motion);
+                if (sdkInputs.Reactive > 0 && Device.ReadTextureForParity(sdkInputs.Reactive) is { } reactive)
+                    HeadlessParityDump.Write(inputDirectory, 61, "SdkReactive", "color0", reactive);
+            }
+            DumpNativeTaaTarget(outputDirectory, GameGraphicsAdapter.UpscaledSceneIndex, "SdkOutput", output, false);
+            WriteScenarioFrameInputs(inputDirectory, frameId, temporal, currentWorldSample,
+                output.Width, output.Height, "postUpscalerPrePostTail");
         }
     }
 
@@ -334,13 +385,33 @@ internal sealed partial class GameRenderSession
     }
 
     private void WriteScenarioFrameInputs(string directory, ulong captureFrameId,
-        in GameTemporalFrame raw, bool currentWorldSample, int width, int height)
+        in GameTemporalFrame raw, bool currentWorldSample, int width, int height,
+        string phase = "preGenerateReadback")
     {
         object? temporalFrameId = currentWorldSample ? raw.FrameId : null;
         FrameBufferRef? primary = PrimaryTarget;
+        var sdkInputs = Device.LastUpscalerInputTextures;
+        object? srInputs = SrInputCapture && currentWorldSample && Graphics.UpscaledThisFrame &&
+            sdkInputs.FrameId == raw.FrameId ? new
+            {
+                frameId = sdkInputs.FrameId,
+                provider = services.RendererSettings.EffectiveUpscaler,
+                quality = services.RendererSettings.Quality,
+                renderWidth = primary?.Width,
+                renderHeight = primary?.Height,
+                displayWidth = width,
+                displayHeight = height,
+                jitterX = raw.Provider.JitterX,
+                jitterY = raw.Provider.JitterY,
+                colorTexture = primary?.ColorTextureIds.ElementAtOrDefault(0),
+                depthTexture = primary?.DepthTextureId,
+                sourceMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
+                motionTexture = sdkInputs.Motion,
+                reactiveTexture = sdkInputs.Reactive,
+            } : null;
         File.WriteAllText(Path.Combine(directory, "frame-inputs.json"), JsonSerializer.Serialize(new
         {
-            phase = "preGenerateReadback",
+            phase,
             sessionId = ScenarioSessionId,
             captureFrameId,
             frameId = captureFrameId,
@@ -357,7 +428,10 @@ internal sealed partial class GameRenderSession
             gameDitherSeed = currentWorldSample ? (object?)platform.ShaderUniforms.DitherSeed : null,
             gameFrameWidth = currentWorldSample ? (object?)platform.ShaderUniforms.FrameWidth : null,
             upscaler = currentWorldSample ? services.RendererSettings.EffectiveUpscaler : null,
+            upscalerQuality = currentWorldSample ? services.RendererSettings.Quality : null,
             upscaleEvaluated = currentWorldSample ? Graphics.UpscaledThisFrame : (bool?)null,
+            godRaysInScene = currentWorldSample ? Graphics.GodRaysInScene : (bool?)null,
+            srInputs,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
             nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,
             resourceMemory = Device.ResourceMemoryDiagnostics(),
@@ -522,6 +596,9 @@ internal sealed partial class GameRenderSession
         Current("temporalFrameId", currentWorldSample ? raw.FrameId : null);
         Current("requestedUpscaler", settings.Upscaler);
         Current("effectiveUpscaler", services.RendererSettings.EffectiveUpscaler);
+        Current("upscaleEvaluatedThisFrame", Graphics.UpscaledThisFrame);
+        Current("taaResolvedThisFrame", Graphics.TaaResolvedThisFrame);
+        Current("godRaysInScene", Graphics.GodRaysInScene);
         Current("requestedFrameGeneration", settings.FrameGeneration);
         Current("effectiveFrameGeneration", frameGeneration.EffectiveProvider);
         Current("inputsPreparedThisFrame", frameGeneration.PreparedThisFrame);

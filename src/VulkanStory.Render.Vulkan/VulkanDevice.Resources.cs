@@ -24,6 +24,14 @@ public sealed unsafe partial class VulkanDevice
         return _textures.EstimateColorAllocationBytes((uint)width, (uint)height, format);
     }
 
+    /// <summary>Physical requirement for an ordinary color/depth target with the declared array layers.</summary>
+    internal ulong EstimateTextureImageAllocationBytes(int width, int height, Format format, int layers = 1)
+    {
+        _frames.RequireResourceLifetime();
+        if (width <= 0 || height <= 0 || layers <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        return _textures.EstimateTextureAllocationBytes((uint)width, (uint)height, format, (uint)layers);
+    }
+
     /// <summary>Physical requirement for the format, mip clamp and usage chosen by storage texture creation.</summary>
     internal ulong EstimateStorageImageAllocationBytes(int width, int height, Format format, int mipLevels = 1)
     {
