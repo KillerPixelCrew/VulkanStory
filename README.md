@@ -30,8 +30,9 @@ unmodified game.
 - **Windows 10/11 x64** with a Vulkan 1.3 capable GPU and driver.
   Linux is not part of the current release.
 - Some vendor features need matching hardware: DLSS and DLSS-G need an NVIDIA RTX GPU,
-  and XeSS-FG needs a supported Intel Arc GPU. The FSR and XeSS upscalers run on GPUs
-  from all vendors; any upscaler the GPU doesn't support falls back automatically.
+  and XeSS-FG needs a supported DX12 GPU and driver (including non-Intel GPUs with
+  Shader Model 6.4). The FSR and XeSS upscalers run across vendors; unsupported
+  upscalers fall back automatically.
 
 ## Installation (players)
 
