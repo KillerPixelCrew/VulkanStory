@@ -14,7 +14,9 @@ Compiled VMA bridge directory; defaults to BridgesDirectory. Alternatively suppl
 .PARAMETER DlssSdkRoot
 DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt; defaults to the sdk/dlss submodule.
 .PARAMETER Fsr3SdkRoot
-FidelityFX SDK root supplying PrebuiltSignedDLL runtimes and license files; defaults to the sdk/fidelityfx-vk submodule.
+Pinned FidelityFX SDK root supplying the reviewed source identity and license files; defaults to the sdk/fidelityfx-vk submodule.
+.PARAMETER Fsr3RuntimeDirectory
+Corrected Vulkan runtime directory from native/fsr3/build-sdk.ps1. Defaults to artifacts/native-fsr3-sdk/Release/win-x64/runtime and requires its matching build receipt. The known faulty prebuilt SDK runtime is never bundled.
 .PARAMETER Fsr4SdkRoot
 FidelityFX DX12 SDK root supplying Kits/FidelityFX/signedbin runtimes and notices; defaults to the sdk/fidelityfx submodule.
 .PARAMETER XessSdkRoot
@@ -34,6 +36,7 @@ param(
     [string]$VmaDirectory,
     [string]$DlssSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/dlss'),
     [string]$Fsr3SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx-vk'),
+    [string]$Fsr3RuntimeDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native-fsr3-sdk/Release/win-x64/runtime'),
     [string]$Fsr4SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx'),
     [string]$XessSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/xess'),
     [string]$StreamlineSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/streamline-release-2.14.1'),
@@ -46,6 +49,20 @@ if (-not $VmaDirectory) { $VmaDirectory = $BridgesDirectory }
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bundle output directory.' }
 $inventory = Get-Content -LiteralPath (Join-Path $projectRoot 'packaging/native-win-x64.json') -Raw | ConvertFrom-Json
+if (-not $Fsr3RuntimeDirectory) { throw 'A corrected FSR3 runtime directory is required; build native/fsr3/build-sdk.ps1 first.' }
+$fsr3RuntimeRoot = (Resolve-Path -LiteralPath $Fsr3RuntimeDirectory).Path
+$receiptPath = Join-Path $fsr3RuntimeRoot 'fsr3-sdk-build.json'
+if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'The corrected FSR3 runtime build receipt is missing.' }
+$receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+$fixPath = Join-Path $projectRoot 'native/fsr3/sdk-fixes/luma-history-format.json'
+$fix = Get-Content -LiteralPath $fixPath -Raw | ConvertFrom-Json
+$sdkCommit = (& git -C $Fsr3SdkRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $receipt.schema -ne 1 -or $receipt.fix -ne $fix.id -or
+    $receipt.sdkCommit -ne $fix.sdkCommit -or $sdkCommit -ne $fix.sdkCommit -or
+    $receipt.patchSha256 -ne (Get-FileHash -LiteralPath $fixPath -Algorithm SHA256).Hash -or
+    $receipt.runtimeSha256 -ne (Get-FileHash -LiteralPath (Join-Path $fsr3RuntimeRoot 'amd_fidelityfx_vk.dll') -Algorithm SHA256).Hash) {
+    throw 'The corrected FSR3 runtime identity or hash does not match the reviewed SDK correction.'
+}
 if (-not $StreamlineRuntimeDirectory) { $StreamlineRuntimeDirectory = Join-Path $StreamlineSdkRoot 'bin/x64' }
 $streamlineVersion = Get-Content -LiteralPath (Join-Path $StreamlineSdkRoot 'include/sl_version.h') -Raw
 foreach ($part in @(@{ name='MAJOR'; value=2 }, @{ name='MINOR'; value=14 }, @{ name='PATCH'; value=1 })) {
@@ -75,7 +92,7 @@ foreach ($component in $inventory.components.PSObject.Properties) {
         elseif ($name.StartsWith('VulkanStory')) { Join-Path $BridgesDirectory $name }
         elseif ($component.Name -eq 'core') { Join-Path $CoreNativeDirectory $name }
         elseif ($component.Name -eq 'dlss') { Join-Path $DlssSdkRoot "lib/Windows_x86_64/rel/$name" }
-        elseif ($component.Name -eq 'fsr3') { Join-Path $Fsr3SdkRoot "PrebuiltSignedDLL/$name" }
+        elseif ($component.Name -eq 'fsr3') { Join-Path $fsr3RuntimeRoot $name }
         elseif ($component.Name -eq 'fsr4') { Join-Path $Fsr4SdkRoot "Kits/FidelityFX/signedbin/$name" }
         elseif ($component.Name -in @('xess','xess-fg')) { Join-Path $XessSdkRoot "bin/$name" }
         else { Join-Path $StreamlineRuntimeDirectory $name }
@@ -93,6 +110,7 @@ Add-Input 'licenses/dlss/LICENSE.txt' (Join-Path $DlssSdkRoot 'LICENSE.txt')
 Add-Input 'licenses/vma/LICENSE.txt' (Join-Path $projectRoot 'sdk/vma/LICENSE.txt')
 Add-Input 'licenses/fsr3/LICENSE.txt' (Join-Path $Fsr3SdkRoot 'LICENSE.txt')
 Add-Input 'licenses/fsr3/sdk-LICENSE.txt' (Join-Path $Fsr3SdkRoot 'sdk/LICENSE.txt')
+Add-Input 'licenses/fsr3/sdk-build.json' $receiptPath
 Add-Input 'licenses/fsr4/license.md' (Join-Path $Fsr4SdkRoot 'Kits/FidelityFX/docs/license.md')
 Add-Input 'licenses/fsr4/3rdpartynotice.md' (Join-Path $Fsr4SdkRoot '3rdpartynotice.md')
 Add-Input 'licenses/xess/LICENSE.txt' (Join-Path $XessSdkRoot 'LICENSE.txt')
