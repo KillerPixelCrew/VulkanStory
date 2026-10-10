@@ -122,7 +122,11 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
 
     /// <summary>Retires the owned backend texture through active graphics routing.</summary>
     /// <param name="id">Adapter texture identifier to delete.</param>
-    internal void DeleteTexture(int id) => RequireDevice().DeleteTexture(id);
+    internal void DeleteTexture(int id)
+    {
+        RequireDevice().DeleteTexture(id);
+        terrainTextureBias.Remove(id);
+    }
 
     private void CheckGraphicsError(string message)
     {

@@ -2,8 +2,7 @@
 #if defined(OPTIMUM_VERTEX)
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_GOOGLE_include_directive : require
-// Native port of celestialobject.vsh (docs/vulkan.md). Axis: GBUFFER (fragPosition and
-// gnormal, which GLSL 330 declares under SSAOLEVEL and never writes).
+// Native port of celestialobject.vsh (docs/vulkan.md).
 #include "bindings.glsl"
 #include "frame.glsl"
 #include "specialization.glsl"
@@ -69,11 +68,6 @@ layout(location = 0) out vec3 vertexPosition;
 layout(location = 1) out vec4 rgbaFog;
 layout(location = 2) out vec2 uv;
 layout(location = 3) out vec4 color;
-#if GBUFFER == 1
-layout(location = 4) out vec4 fragPosition;
-layout(location = 5) out vec4 gnormal;
-#endif
-
 #include "vertexflagbits.glsl"
 #include "shadowcoords.glsl"
 #include "fogandlight.vert.glsl"
@@ -108,8 +102,6 @@ layout(location = 0) in vec3 vertexPosition;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outGlow;
 #if GBUFFER == 1
-layout(location = 4) in vec4 fragPosition;
-layout(location = 5) in vec4 gnormal;
 layout(location = 2) out vec4 outGNormal;
 layout(location = 3) out vec4 outGPosition;
 #endif
@@ -168,8 +160,9 @@ void main () {
 	outColor.rgb = applyUnderwaterEffects(outColor.rgb, murkiness);
 
 #if GBUFFER == 1
-	outGPosition = vec4(fragPosition.xyz, fogAmount + glowLevel);
-	outGNormal = vec4(gnormal.xyz, 0);
+	// Celestial bodies belong to the sky, which has no AO surface position or normal.
+	outGPosition = vec4(0);
+	outGNormal = vec4(0);
 #endif
 
 }

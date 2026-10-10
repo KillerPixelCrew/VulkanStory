@@ -591,9 +591,22 @@ namespace VulkanStory.Game
         public float[] ApplyJitterCopy(double[] matrix)
         {
             for (int i = 0; i < 16; i++) jitteredScratch[i] = (float)matrix[i];
-            jitteredScratch[8] -= (float)(2.0 * JitterPx.X / RenderWidth);
-            jitteredScratch[9] -= (float)(2.0 * JitterPx.Y / RenderHeight);
+            ApplyRasterJitter(jitteredScratch, RenderWidth, RenderHeight);
             return jitteredScratch;
+        }
+
+        /// <summary>Copies the captured projection onto the same raster grid used by scene draws.</summary>
+        internal float[] CopyRasterProjection(EnumTemporalView view, int width, int height)
+        {
+            var matrix = (float[])projection[(int)view].Clone();
+            ApplyRasterJitter(matrix, width, height);
+            return matrix;
+        }
+
+        private void ApplyRasterJitter(float[] matrix, int width, int height)
+        {
+            matrix[8] -= (float)(2.0 * JitterPx.X / width);
+            matrix[9] -= (float)(2.0 * JitterPx.Y / height);
         }
 
         /// <summary>

@@ -110,6 +110,15 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         var host = RequireFramebufferHost();
+        // The official rebuild allocates the new set before disposing the old one.
+        // Release and complete its GPU users first: repeated settings changes must
+        // not retain several full-resolution/shadow sets while allocating another.
+        if (platform!.FrameBuffers is { Count: > 0 } previous &&
+            previous.Any(target => target != null && !target.Disposed))
+        {
+            DisposeFramebuffers(previous);
+            renderer.CompleteReleasedResources();
+        }
         GameFramebufferSettings settings = host.Settings();
         if (!float.IsFinite(settings.SsaaLevel) || settings.SsaaLevel <= 0 ||
             !float.IsFinite(settings.RenderScale) || settings.RenderScale <= 0)

@@ -205,7 +205,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         public required PrimitiveTopology Topology { get; init; }
     }
 
-    /// <summary>The pipeline for <paramref name="key" />, compiled on this thread if it has to be.</summary>
+    /// <summary>The pipeline for <paramref name="key" />, joining its prewarm or compiling on this thread on a miss.</summary>
     public Pipeline Get(PipelineKey key, PipelineRequest request)
     {
         if (_pipelines.TryGetValue(key, out Pipeline existing))
@@ -216,7 +216,23 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
         Misses++;
         PipelineKeyLogEntry entry = PipelineKeyLogEntry.From(SettingsHash, request);
-        if (!TryAdoptPrewarmed((request.Program.ProgramId, entry.ContentId), out Pipeline pipeline))
+        var id = (request.Program.ProgramId, entry.ContentId);
+        if (_pendingJobs.TryGetValue(id, out CompileJob? pending))
+        {
+            // A real draw must not disappear while its prewarm is compiling: that also
+            // withdraws the entire frame's temporal reconstruction. Join the existing
+            // job rather than compiling a second copy of the same pipeline.
+            pending.DemandKeys.Add(key);
+            _pendingByKey[key] = pending;
+            Promote(pending);
+            lock (_queueLock)
+            {
+                while (pending.Queued || _inFlight.Contains(pending)) Monitor.Wait(_queueLock);
+            }
+            PublishCompleted();
+            if (_pipelines.TryGetValue(key, out existing)) return existing;
+        }
+        if (!TryAdoptPrewarmed(id, out Pipeline pipeline))
         {
             pipeline = CreateBlocking(request);
         }
@@ -243,11 +259,18 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
 
     private bool _preparing;
 
-    /// <summary>Returns a cached graphics pipeline or schedules/executes compilation according to cache policy.</summary>
-    /// <remarks>Pending keys are not queued again. Background results become visible at <see cref="PublishCompleted"/>. With asynchronous compilation disabled, creation is synchronous.</remarks>
-    /// <returns>Whether a usable pipeline is available now; false permits the caller to skip the draw while compilation is pending.</returns>
+    /// <summary>Returns a required draw pipeline, or schedules background work when called by <see cref="Prepare"/>.</summary>
+    /// <remarks>Preparation may remain pending; a real draw joins that compile before recording.</remarks>
+    /// <returns>True for a required draw; false only when preparation is still pending.</returns>
     public bool TryGet(PipelineKey key, PipelineRequest request, out Pipeline pipeline)
     {
+        // Only preparation is allowed to leave work pending. Recording a scene draw
+        // requires its pipeline so geometry, motion and the resolve stay in one frame.
+        if (!_preparing)
+        {
+            pipeline = Get(key, request);
+            return true;
+        }
         if (_pipelines.TryGetValue(key, out pipeline))
         {
             Hits++;

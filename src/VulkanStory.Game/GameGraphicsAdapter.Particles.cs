@@ -48,7 +48,7 @@ internal sealed partial class GameGraphicsAdapter
             for (int index = 0; index < blend.Length; index++)
             {
                 blend[index] = AttachmentBlend.Default; blend[index].Enabled = true;
-                if (FrameState.MotionWriteActive && index == motion)
+                if ((FrameState.Ssao && index is 2 or 3) || (FrameState.MotionWriteActive && index == motion))
                 {
                     blend[index].SrcColor = blend[index].SrcAlpha = BlendFactor.One;
                     blend[index].DstColor = blend[index].DstAlpha = BlendFactor.Zero;

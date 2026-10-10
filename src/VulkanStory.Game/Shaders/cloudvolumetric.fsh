@@ -94,6 +94,8 @@ float halfsmooth(float x, float t){
 
 vec4 traverse(vec3 o, vec3 d, float far, float T){
 
+    // Integer fetches have no sampler wrap/clamp. Both tile images bound the traversal.
+    ivec2 tileSize = min(textureSize(cloudMap, 0), textureSize(cloudCol, 0));
     ivec2 p = ivec2(floor(o.xz));
     ivec2 istep = ivec2(sign(d.xz));
     vec2 tdelta, tmax;
@@ -105,6 +107,8 @@ vec4 traverse(vec3 o, vec3 d, float far, float T){
     vec4 k = vec4(0.0);
 
     for(int i = 0; i < 200; i++){
+
+        if(!(t < far) || any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, tileSize))) break;
 
         vec4 map = texelFetch(cloudMap, p, 0);
 
@@ -147,7 +151,7 @@ vec4 traverse(vec3 o, vec3 d, float far, float T){
             tmax.y += tdelta.y;
         }
 
-        if(t > far) break;
+        if(t >= far) break;
 
     }
 
@@ -162,7 +166,11 @@ void main(){
     vec3 origin = unproject(iMvpMatrix * vec4(ndc, -1.0, 1.0));
     vec3 direction = normalize(unproject(iMvpMatrix * vec4(ndc, 1.0, 1.0)) - origin);
     vec3 world = unproject(iMvpMatrix * vec4(ndc, texelFetch(depthTex, ivec2(gl_FragCoord), 0).r * 2.0 - 1.0, 1.0));
-    vec3 liquid = unproject(iMvpMatrix * vec4(ndc, texelFetch(liquidDepth, ivec2(gl_FragCoord / 4.0), 0).r * 2.0 - 1.0, 1.0));
+    // Liquid depth dimensions are floored independently; map the full raster grid to its actual grid.
+    vec2 rasterUv = gl_FragCoord.xy / vec2(textureSize(depthTex, 0));
+    ivec2 liquidSize = textureSize(liquidDepth, 0);
+    ivec2 liquidPixel = clamp(ivec2(rasterUv * vec2(liquidSize)), ivec2(0), liquidSize - ivec2(1));
+    vec3 liquid = unproject(iMvpMatrix * vec4(ndc, texelFetch(liquidDepth, liquidPixel, 0).r * 2.0 - 1.0, 1.0));
 
     float far = min(
         distance(origin, world),
@@ -195,6 +203,7 @@ void main(){
     far = min(far, plane.y);
     far = min(far, cloudMapWidth * cloudTileSize / 2.0 - near);
     far /= cloudTileSize;
+    if(!(far > 0.0)) discard;
 
     outGlow = OITaccumulation0 = OITaccumulation1 = OITaccumulation2 = vec4(0.0);
     OITreveal = outReveal = vec4(1.0);

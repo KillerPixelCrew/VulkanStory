@@ -88,7 +88,7 @@ internal sealed unsafe class PassRecorder
             if (clear.Depth)
             {
                 var value = new ClearDepthStencilValue(clear.R, 0);
-                var range = new ImageSubresourceRange(target.Aspect, 0, 1, 0, 1);
+                var range = new ImageSubresourceRange(target.Aspect, 0, 1, clear.Layer, 1);
                 _context.Api.CmdClearDepthStencilImage(commandBuffer, target.Image, ImageLayout.TransferDstOptimal,
                     &value, 1, &range);
             }
@@ -230,7 +230,7 @@ internal sealed unsafe class PassRecorder
         if (depth != null)
         {
             _textures.Require(_barriers, commandBuffer, depth, _uses[use].Usage);
-            if (!depthReadOnly && _graph.TakeForLoad(depth, 0, depth: true, out PendingClear clear))
+            if (!depthReadOnly && _graph.TakeForLoad(depth, framebuffer.DepthLayer, depth: true, out PendingClear clear))
             {
                 depthAttachment.LoadOp = AttachmentLoadOp.Clear;
                 depthAttachment.ClearValue = new ClearValue(depthStencil: new ClearDepthStencilValue(clear.R, 0));

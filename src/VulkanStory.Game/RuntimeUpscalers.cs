@@ -13,6 +13,7 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
     private VulkanDevice? device;
     private UpscalerPlan allocated, lastEvaluated;
     private bool depthRefusalLogged;
+    internal string EvaluationReadiness { get; private set; } = "not evaluated";
     private Exception? lifetimeFailure;
     private void RequireLifetime()
     {
@@ -134,13 +135,22 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         graphics.UpscaledThisFrame = false;
         var selected = Selected;
         int motion = graphics.FrameState.MotionAttachment;
-        if (selected?.Active != true || buffers.Count <= GameGraphicsAdapter.UpscaledSceneIndex || motion < 0) return false;
+        if (selected?.Active != true)
+        { EvaluationReadiness = Unavailable(state.Settings.Upscaler) ?? "upscaler not selected"; return false; }
+        if (buffers.Count <= GameGraphicsAdapter.UpscaledSceneIndex || motion < 0)
+        { EvaluationReadiness = "upscaler output or motion target unavailable"; return false; }
         var primary = buffers[0]; var output = buffers[GameGraphicsAdapter.UpscaledSceneIndex];
-        if (primary?.ColorTextureIds is not { } colors || output?.ColorTextureIds is not { Length: > 0 } || colors.Length <= motion) return false;
+        if (primary?.ColorTextureIds is not { } colors || output?.ColorTextureIds is not { Length: > 0 } || colors.Length <= motion)
+        { EvaluationReadiness = "upscaler colour, motion or output target unavailable"; return false; }
         var frame = new UpscalerFrame(colors[0], primary.DepthTextureId, colors[motion], output.ColorTextureIds[0], temporal);
         string? error;
-        try { if (!selected.Evaluate(allocated, frame, out error)) { Disable(error ?? "provider evaluation failed"); return false; } }
-        catch (Exception failure) { Disable(selected.Id + " evaluation threw: " + failure.Message); return false; }
+        try
+        {
+            if (!selected.Evaluate(allocated, frame, out error))
+            { EvaluationReadiness = error ?? "provider evaluation failed"; Disable(EvaluationReadiness); return false; }
+        }
+        catch (Exception failure)
+        { EvaluationReadiness = selected.Id + " evaluation threw: " + failure.Message; Disable(EvaluationReadiness); return false; }
         if (lastEvaluated != allocated)
         {
             lastEvaluated = allocated;
@@ -153,7 +163,7 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
             device.ClearDepthImageToFar(output.DepthTextureId);
             if (!depthRefusalLogged) { depthRefusalLogged = true; log("VulkanStory: depth blit unsupported; late overlays have no scene occlusion."); }
         }
-        graphics.UpscaledThisFrame = true; return true;
+        graphics.UpscaledThisFrame = true; EvaluationReadiness = "ready"; return true;
     }
     /// <summary>Shuts down owned SR providers with checked release and clears the active plan.</summary>
     /// <remarks>The borrowed device is not disposed here; release failure retains the remaining provider owners.</remarks>

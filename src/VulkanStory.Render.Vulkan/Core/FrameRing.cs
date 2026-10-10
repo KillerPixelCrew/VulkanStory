@@ -691,6 +691,16 @@ internal sealed class FrameRing : IDisposable
     /// <summary>Resources awaiting frame/transfer completion before disposal.</summary>
     public int PendingDeletionCount => _retired.PendingCount;
 
+    /// <summary>Completes accepted work and frees its retired resources before replacement allocation.</summary>
+    /// <remarks>The caller first submits any commands still recording. Unsubmitted retirement values stay queued.</remarks>
+    internal void CollectCompletedRetirements()
+    {
+        RequireResourceLifetime();
+        _timeline.WaitForFrame(_timeline.FrameSignalled, WaitSite.DeviceWaitIdle);
+        _timeline.WaitForTransfer(_timeline.TransferSignalled, WaitSite.DeviceWaitIdle);
+        _retired.Collect();
+    }
+
     /// <summary>Rejects cleanup after the retirement queue retained a terminal release failure.</summary>
     internal void RequireResourceLifetime() => _retired.RequireLifetime();
 

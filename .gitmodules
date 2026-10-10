@@ -17,3 +17,6 @@
 [submodule "sdk/minhook"]
 	path = sdk/minhook
 	url = https://github.com/TsudaKageyu/minhook.git
+[submodule "sdk/vma"]
+	path = sdk/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

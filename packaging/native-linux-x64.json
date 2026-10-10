@@ -2,7 +2,7 @@
   "schema": 1,
   "rid": "linux-x64",
   "components": {
-    "core": ["libSDL3.so", "libshaderc_shared.so"]
+    "core": ["libSDL3.so", "libshaderc_shared.so", "libVulkanStoryVma.so"]
   },
   "optionalComponents": {
     "dlss": ["libVulkanStoryNgx.so"]
@@ -10,13 +10,14 @@
   "inputs": {
     "libSDL3.so": "NuGet:ppy.sdl3-cs/2026.722.0/runtimes/linux-x64/native/libSDL3.so",
     "libshaderc_shared.so": "NuGet:silk.net.shaderc.native/2.23.0/runtimes/linux-x64/native/libshaderc_shared.so",
+    "libVulkanStoryVma.so": "Fresh native/vma/build.sh output from this checkout and pinned sdk/vma; required renderer allocator",
     "libVulkanStoryNgx.so": "Fresh native/ngx/build.sh output from this checkout; no compiled Linux shim is yet verified"
   },
   "sha256": {
     "libSDL3.so": "C740B9E4DA05D2DC45940D597CC2FB104514723D26DA830F1C2003409B8D26E4",
     "libshaderc_shared.so": "9F2D5C6F53C191E59376251C614043019C6A7E325809703CAD186DA9B9DCE6D3"
   },
-  "requiredNotices": ["core/SDL-LICENSE.txt", "core/shaderc/AUTHORS", "core/shaderc/LICENSE", "core/glslang/LICENSE.txt", "core/SPIRV-Tools/LICENSE", "core/SPIRV-Headers/LICENSE"],
+  "requiredNotices": ["core/SDL-LICENSE.txt", "core/shaderc/AUTHORS", "core/shaderc/LICENSE", "core/glslang/LICENSE.txt", "core/SPIRV-Tools/LICENSE", "core/SPIRV-Headers/LICENSE", "vma/LICENSE.txt"],
   "systemDependencies": ["Vulkan ICD and loader", "SDL3 Linux platform dependencies", "Optional DLSS: NVIDIA driver libnvidia-ngx.so.1 and its supported feature runtime"],
   "providerAcceptance": "unverified; Windows-only Streamline, XeSS-FG/XeLL and FSR4 DX12 bridges are excluded"
 }

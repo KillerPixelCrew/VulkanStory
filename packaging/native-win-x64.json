@@ -2,12 +2,13 @@
   "schema": 1,
   "rid": "win-x64",
   "components": {
-    "core": ["SDL3.dll", "shaderc_shared.dll"],
+    "core": ["SDL3.dll", "shaderc_shared.dll", "VulkanStoryVma.dll"],
     "dlss": ["VulkanStoryNgx.dll", "nvngx_dlss.dll"],
     "fsr3": ["VulkanStoryFsr3.dll", "amd_fidelityfx_vk.dll"],
     "fsr4": ["VulkanStoryFsr4.dll", "amd_fidelityfx_upscaler_dx12.dll"],
     "xess": ["libxess.dll"],
     "xess-fg": ["VulkanStoryXessFg.dll", "libxess_fg.dll", "libxell.dll"],
     "streamline": ["VulkanStoryStreamline.dll", "sl.interposer.dll", "sl.common.dll", "sl.reflex.dll", "sl.pcl.dll", "sl.dlss_g.dll", "nvngx_dlssg.dll", "NvLowLatencyVk.dll"]
-  }
+  },
+  "requiredNotices": ["vma/LICENSE.txt"]
 }

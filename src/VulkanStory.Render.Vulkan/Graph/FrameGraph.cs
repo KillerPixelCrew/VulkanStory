@@ -271,9 +271,9 @@ internal sealed class FrameGraph
         Replace(new PendingClear(texture, layer, false, r, g, b, a));
     }
 
-    public void PromoteDepthClear(VulkanTexture texture, float depth)
+    public void PromoteDepthClear(VulkanTexture texture, float depth, uint layer = 0)
     {
-        Replace(new PendingClear(texture, 0, true, depth, 0, 0, 0));
+        Replace(new PendingClear(texture, layer, true, depth, 0, 0, 0));
     }
 
     private void Replace(PendingClear clear)
@@ -307,7 +307,7 @@ internal sealed class FrameGraph
         {
             PendingClear candidate = _pending[i];
             if (!ReferenceEquals(candidate.Texture, texture) || candidate.Depth != depth) continue;
-            if (!depth && candidate.Layer != layer) continue;
+            if (candidate.Layer != layer) continue;
             _pending.RemoveAt(i);
             clear = candidate;
             PromotedClears++;

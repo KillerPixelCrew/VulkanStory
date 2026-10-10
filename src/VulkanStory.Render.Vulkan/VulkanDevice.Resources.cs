@@ -13,6 +13,15 @@ namespace VulkanStory.Render.Vulkan;
 /// <summary>Texture, sampler, framebuffer and mesh resource operations exposed to the game integration.</summary>
 public sealed unsafe partial class VulkanDevice
 {
+    /// <summary>Finishes recorded resource users and releases completed retirements before allocating replacement targets.</summary>
+    public void CompleteReleasedResources()
+    {
+        _frames.RequireResourceLifetime();
+        EndNativePass();
+        if (_frameActive) SubmitPartial();
+        else _uploads.SubmitStandalone();
+        _frames.CollectCompletedRetirements();
+    }
     // -------------------------------------------------------------------- textures
 
     /// <summary>Creates a renderer-owned 2D texture from the neutral client formats and optional initial pixels.</summary>

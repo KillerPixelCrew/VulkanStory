@@ -17,6 +17,18 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
+        // The original cloud renderer builds iMvpMatrix from PerspectiveProjectionMat,
+        // which intentionally stays unjittered for culling. Its fullscreen ray and
+        // depth reconstruction must instead use the projection that rasterized Primary.
+        // Set the original program before native selection so the retained path agrees.
+        if (program is { PassName: "cloudvolumetric" } && aoTemporal is { InScene: true } temporal &&
+            temporal.State.JitterActive && temporal.State.IsViewCaptured(EnumTemporalView.World) &&
+            platform!.FrameBuffers is { Count: > 0 } targets &&
+            targets[0] is { Width: > 0, Height: > 0 } primary)
+        {
+            (float[]? inverse, _) = JitteredReprojection(temporal.State, primary.Width, primary.Height);
+            if (inverse != null) program.UniformMatrix("iMvpMatrix", inverse);
+        }
         if (currentFramebuffer == null || !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[1]) ||
             Stated.DepthTest || program == null || program.PassName != "cloudvolumetric" ||
             !ReferenceEquals(program, ShaderRegistry.getProgramByName("cloudvolumetric")) ||

@@ -208,6 +208,8 @@ public sealed unsafe partial class VulkanDevice
             _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
                 ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
 
+            ReadbackManager.RecordHostReadBarrier(_context, commandBuffer, readback, 0, copied);
+
             if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
         }
         finally
@@ -236,6 +238,7 @@ public sealed unsafe partial class VulkanDevice
         if (!_frameActive) return null;
         VulkanTexture? texture = _textures.Get(textureId);
         if (texture == null || texture.Cube || texture.Layers > 1) return null;
+        if (!TextureReadbackFormats.HasParityDecoder(texture.Format)) return null;
 
         byte[] data = ReadBackLevel0(texture);
         int glInternalFormat = texture.GlInternalFormat != 0

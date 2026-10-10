@@ -59,6 +59,7 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     private readonly XessSharedFence _fence;
     private readonly ImageSet[] _images;
     private ulong _nextFenceValue = 1;
+    private ulong _previousDx12Done;
     private int _nextImageSet;
     private bool _disposed;
     private Exception? _releaseFailure;
@@ -429,7 +430,11 @@ internal sealed unsafe class XessFgPresenter : IDisposable
     {
         ulong ready = _nextFenceValue++;
         ulong done = _nextFenceValue++;
-        PreparedFrame frame = new(_nextImageSet, set.LastDx12Done, ready, done);
+        // Ready and done share one imported payload. Every ready signal must
+        // follow the preceding DX12 done signal, even when the optional whole
+        // frame GPU pacing gate is off; per-image-set reuse alone is insufficient.
+        PreparedFrame frame = new(_nextImageSet, Math.Max(set.LastDx12Done, _previousDx12Done), ready, done);
+        _previousDx12Done = done;
         _nextImageSet = (_nextImageSet + 1) % _images.Length;
         return frame;
     }

@@ -48,6 +48,7 @@ Other source trees:
 | Path | Contents |
 | --- | --- |
 | `native/bootstrap` | Windows `hostfxr.dll` proxy (CMake) |
+| `native/vma`, `sdk/vma` | Required allocation bridge and unmodified Vulkan Memory Allocator 3.4.0 submodule |
 | `native/ngx`, `fsr3`, `fsr4`, `xess-fg`, `streamline` | C/C++ provider bridges loaded by the renderer |
 | `shaders/native` | Maintained GLSL corpus for native (non-translated) pipelines |
 | `tools/VulkanStory.Shaders.Compiler` | Compiles `shaders/native` to SPIR-V plus `shaders.manifest.json`, packed into `shaders-vk.pak` |
@@ -146,6 +147,15 @@ Shaders:
   tree at device start instead.
 - `ShaderOverridePolicy` tracks shader assets changed by mods or resource packs and
   only uses a retained source where the original asset is unchanged.
+- Staged sources use weak stage identities, so shader reloads release obsolete
+  source text while live stages remain reusable across links.
+
+`VulkanAllocator` delegates suballocation, memory blocks and mapping to VMA through
+the private native bridge. Purpose/type pools retain the renderer's image, buffer,
+staging and ReBAR policies; physical heap budget checks govern new memory blocks,
+including provider headroom. Resource destruction still follows submitted GPU
+timeline values. Framebuffer replacement releases the previous set and completes
+its submitted retirements before allocating another set.
 
 Frame data is passed explicitly rather than read from global settings:
 `TemporalProviderFrame` carries jitter (render pixels), reset, frame time, camera

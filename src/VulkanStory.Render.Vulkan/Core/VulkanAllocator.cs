@@ -3,280 +3,33 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Silk.NET.Vulkan;
-
 using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
-/// <summary>
-/// What a piece of memory is for. Each class pools separately with its own block
-/// size, so a long-lived static mesh never shares a block with per-frame data and
-/// the cap on ReBAR can be enforced by class rather than guessed from flags.
-/// </summary>
+/// <summary>Resource purpose used for VMA pools and placement policy.</summary>
 internal enum MemoryPoolClass
 {
-    /// <summary>Sampled textures and attachments: optimally tiled images, 128 MiB blocks.</summary>
     DeviceImages = 0,
-
-    /// <summary>Long-lived buffers (static meshes device-local, dynamic meshes host-visible): 64 MiB blocks.</summary>
     DeviceBuffers = 1,
-
-    /// <summary>Host-side transfer memory (staging, readback arenas, a ReBAR miss's fall-through): 32 MiB blocks.</summary>
     Staging = 2,
-
-    /// <summary>
-    /// Device-local and host-visible memory for per-frame dynamic data only
-    /// (uniform ring, indirect ring): 16 MiB blocks, capped at
-    /// min(192 MiB, budget x 0.25). A miss falls through to <see cref="Staging" />.
-    /// </summary>
     ReBar = 3,
-
-    /// <summary>Frame-graph transient attachments (reserved for Phase 2): 64 MiB blocks.</summary>
     Transient = 4,
-
-    /// <summary>
-    /// One allocation per resource: the driver asked for it
-    /// (VkMemoryDedicatedRequirements) or the resource is at least a quarter of
-    /// its class's block size.
-    /// </summary>
     Dedicated = 5,
 }
 
-/// <summary>A region of a memory block handed to one resource.</summary>
+/// <summary>One VMA allocation, released only after all GPU users complete.</summary>
 internal readonly struct MemoryAllocation
 {
-    /// <summary>Vulkan device-memory allocation backing this block or suballocation.</summary>
     public DeviceMemory Memory { get; init; }
-    /// <summary>Byte offset within the backing device-memory allocation.</summary>
     public ulong Offset { get; init; }
-    /// <summary>Byte length of the memory block or suballocation.</summary>
     public ulong Size { get; init; }
-
-    /// <summary>Host pointer to this region, or zero when the memory is not mapped.</summary>
     public IntPtr Mapped { get; init; }
-
-    internal MemoryBlock? Block { get; init; }
-
-    /// <summary>Whether this suballocation retains an owning memory block.</summary>
-    public bool IsValid => Block != null;
+    internal ulong Allocation { get; init; }
+    public bool IsValid => Allocation != 0;
 }
 
-/// <summary>
-/// One vkAllocateMemory, divided up among many resources.
-///
-/// Free space is tracked as ranges in address order, so neighbouring frees merge
-/// back into one range and the block does not fragment into confetti as chunk
-/// meshes come and go.
-/// </summary>
-internal sealed unsafe class MemoryBlock : IDisposable
-{
-    /// <summary>Byte range available for aligned suballocation within one memory block.</summary>
-    private readonly struct FreeRange
-    {
-        public FreeRange(ulong offset, ulong size)
-        {
-            Offset = offset;
-            Size = size;
-        }
-
-        /// <summary>Byte offset within the backing device-memory allocation.</summary>
-        public ulong Offset { get; }
-        /// <summary>Byte length of the memory block or suballocation.</summary>
-        public ulong Size { get; }
-        /// <summary>Byte length of the memory block or suballocation.</summary>
-        public ulong End => Offset + Size;
-    }
-
-    private readonly VulkanContext _context;
-    private readonly List<FreeRange> _free = new();
-    private bool _disposed;
-
-    /// <summary>Vulkan device-memory allocation backing this block or suballocation.</summary>
-    public DeviceMemory Memory { get; }
-    /// <summary>Byte length of the memory block or suballocation.</summary>
-    public ulong Size { get; }
-    public uint TypeIndex { get; }
-
-    /// <summary>The heap the block's memory type draws from.</summary>
-    public uint HeapIndex { get; }
-
-    /// <summary>
-    /// The pool class the block belongs to. A dedicated block keeps the class of
-    /// the resource it backs, so a dedicated ReBAR resource still counts against
-    /// the ReBAR cap.
-    /// </summary>
-    public MemoryPoolClass Class { get; }
-
-    /// <summary>
-    /// Whether this block holds linear resources (buffers) or optimally tiled
-    /// ones (images). They are never mixed, which is what makes
-    /// bufferImageGranularity irrelevant here: the spec only requires padding
-    /// between the two kinds, and there is never a boundary between them.
-    /// </summary>
-    public bool Linear { get; }
-
-    /// <summary>Set when the block backs exactly one resource.</summary>
-    public bool Dedicated { get; }
-
-    /// <summary>Base host pointer when the memory type is host visible.</summary>
-    public IntPtr Mapped { get; private set; }
-
-    /// <summary>Total bytes currently assigned to live suballocations in this block.</summary>
-    public ulong Used { get; private set; }
-
-    /// <summary>Total bytes currently assigned to live suballocations in this block.</summary>
-    public bool IsEmpty => Used == 0;
-
-    /// <summary>
-    /// The allocator frame at which a pooled block last became empty, or -1 while
-    /// it holds anything. Empty blocks are freed after
-    /// <see cref="VulkanAllocator.EmptyBlockFrames" /> frames.
-    /// </summary>
-    internal long EmptySinceFrame = -1;
-
-    public MemoryBlock(
-        VulkanContext context, ulong size, uint typeIndex, bool linear, bool dedicated, bool hostVisible)
-        : this(context, size, typeIndex, 0, MemoryPoolClass.DeviceBuffers, linear, dedicated, hostVisible,
-            default, default)
-    {
-    }
-
-    public MemoryBlock(
-        VulkanContext context, ulong size, uint typeIndex, uint heapIndex, MemoryPoolClass poolClass,
-        bool linear, bool dedicated, bool hostVisible, Buffer dedicatedBuffer, Image dedicatedImage)
-    {
-        _context = context;
-        Size = size;
-        TypeIndex = typeIndex;
-        HeapIndex = heapIndex;
-        Class = poolClass;
-        Linear = linear;
-        Dedicated = dedicated;
-
-        // A dedicated block names its resource, which lets the driver place it
-        // (and is mandatory when the resource reported requiresDedicatedAllocation).
-        var dedicatedInfo = new MemoryDedicatedAllocateInfo
-        {
-            SType = StructureType.MemoryDedicatedAllocateInfo,
-            Buffer = dedicatedBuffer,
-            Image = dedicatedImage,
-        };
-        bool namesResource = dedicated && (dedicatedBuffer.Handle != 0 || dedicatedImage.Handle != 0);
-
-        var allocateInfo = new MemoryAllocateInfo
-        {
-            SType = StructureType.MemoryAllocateInfo,
-            PNext = namesResource ? &dedicatedInfo : null,
-            AllocationSize = size,
-            MemoryTypeIndex = typeIndex,
-        };
-
-        Memory = VulkanMemory.Allocate(context, allocateInfo,
-            $"a {size} byte {(dedicated ? "dedicated" : "pooled")} {poolClass} memory block");
-
-        if (hostVisible)
-        {
-            void* mapped;
-            // Mapped once for the block's whole life. Mapping is not free and a
-            // resource may be written from any thread, so per-resource mapping
-            // would be both slower and harder to synchronise.
-            Result result = context.Api.MapMemory(context.Device, Memory, 0, size, 0, &mapped);
-            if (result != Result.Success)
-            {
-                context.Api.FreeMemory(context.Device, Memory, null);
-                VulkanResult.Check(result, "mapping a host-visible memory block");
-            }
-            Mapped = (IntPtr)mapped;
-        }
-
-        _free.Add(new FreeRange(0, size));
-    }
-
-    /// <summary>Reserves an aligned byte range from this memory block.</summary>
-    /// <returns>Whether a fitting free range was found; offset is zero on failure.</returns>
-    public bool TryAllocate(ulong size, ulong alignment, out ulong offset)
-    {
-        offset = 0;
-        if (size == 0 || _disposed) return false;
-
-        for (int i = 0; i < _free.Count; i++)
-        {
-            FreeRange range = _free[i];
-
-            ulong aligned = alignment <= 1
-                ? range.Offset
-                : (range.Offset + alignment - 1) / alignment * alignment;
-
-            ulong padding = aligned - range.Offset;
-            if (range.Size < padding || range.Size - padding < size) continue;
-
-            ulong tail = range.Size - padding - size;
-
-            // The alignment padding stays free rather than being lost, so a
-            // later smaller or less strictly aligned resource can use it.
-            _free.RemoveAt(i);
-            if (tail > 0) _free.Insert(i, new FreeRange(aligned + size, tail));
-            if (padding > 0) _free.Insert(i, new FreeRange(range.Offset, padding));
-
-            Used += size;
-            offset = aligned;
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>Returns the specified allocation range to its owner and coalesces adjacent free ranges.</summary>
-    /// <remarks>Call only after all GPU users of that range have completed.</remarks>
-    public void Free(ulong offset, ulong size)
-    {
-        if (_disposed || size == 0) return;
-
-        Used -= Math.Min(Used, size);
-
-        int index = 0;
-        while (index < _free.Count && _free[index].Offset < offset) index++;
-
-        ulong start = offset;
-        ulong end = offset + size;
-
-        // Merge with the range before, if they touch.
-        if (index > 0 && _free[index - 1].End == start)
-        {
-            start = _free[index - 1].Offset;
-            _free.RemoveAt(index - 1);
-            index--;
-        }
-
-        // And with the range after.
-        if (index < _free.Count && _free[index].Offset == end)
-        {
-            end = _free[index].End;
-            _free.RemoveAt(index);
-        }
-
-        _free.Insert(index, new FreeRange(start, end - start));
-    }
-
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        if (Mapped != IntPtr.Zero)
-        {
-            _context.Api.UnmapMemory(_context.Device, Memory);
-            Mapped = IntPtr.Zero;
-        }
-
-        _context.Api.FreeMemory(_context.Device, Memory, null);
-        VulkanMemory.NoteFree();
-        _free.Clear();
-    }
-}
-
-/// <summary>The allocator's state at one moment, for the <c>stats.memory</c> line and tests.</summary>
+/// <summary>Actual VMA memory-block totals and physical-device heap budgets.</summary>
 internal readonly record struct MemorySnapshot(
     int Blocks,
     int DedicatedBlocks,
@@ -292,150 +45,60 @@ internal readonly record struct MemorySnapshot(
     ulong[] HeapDriverUsage);
 
 /// <summary>
-/// Hands resources memory out of a few large blocks instead of giving each its
-/// own allocation.
-///
-/// A device allocation is not a cheap object. The driver tracks every one of
-/// them and builds a residency list over the whole set on each submit, so cost
-/// grows with the count rather than with the bytes. Backing every buffer and
-/// image individually put a loaded world at eighteen thousand live allocations,
-/// where frames took 200 ms; the same world's memory in a few dozen blocks is
-/// the difference between four frames a second and fifty. The allocation limit
-/// the spec exposes - commonly 4096 - is the same problem stated as a hard cap,
-/// and NVIDIA not enforcing one is why this degraded instead of failing.
-///
-/// Phase 1B step 5: memory is pooled per <see cref="MemoryPoolClass" /> and
-/// memory type. Buffers and images are kept in separate blocks so
-/// bufferImageGranularity never applies; anything the driver wants dedicated, or
-/// large enough to waste a quarter of its class's block, gets its own. Heap
-/// budgets come from VK_EXT_memory_budget when the device has it (heap x 0.7
-/// otherwise). Empty blocks are freed after <see cref="EmptyBlockFrames" />
-/// frames, or at once when a heap is over its budget.
+/// VMA owns Vulkan memory, mapping, suballocation, granularity, dedicated memory
+/// and empty-block reclamation. This adapter retains the renderer's placement
+/// policy and its existing GPU-safe resource retirement interface.
 /// </summary>
 internal sealed unsafe class VulkanAllocator : IDisposable
 {
     public const int PoolClassCount = 6;
-
     private const ulong MiB = 1024UL * 1024;
-
-    /// <summary>Frames a pooled block stays empty before it is freed.</summary>
     public const int EmptyBlockFrames = 120;
-
-    /// <summary>The ReBAR cap's ceiling; the cap is min(this, budget x 0.25).</summary>
     public const ulong ReBarCapCeiling = 192 * MiB;
-
-    /// <summary>Budget as a share of heap size when VK_EXT_memory_budget is absent.</summary>
     public const double FallbackBudgetShare = 0.7;
-
-    /// <summary>ReBAR misses reported through <see cref="Log" />; the counter keeps counting past it.</summary>
     private const int LoggedMissLimit = 32;
-
-    /// <summary>
-    /// Set by VULKANSTORY_VULKAN_DEDICATED_MEMORY=1 to give every resource its own
-    /// vkAllocateMemory, which is what this backend did before pooling existed.
-    ///
-    /// It is ruinously slow - that is the whole reason pooling is here - but it
-    /// removes every question of one resource landing on another's bytes, so a
-    /// rendering fault that survives it is not a suballocation fault. Keeping
-    /// the old behaviour reachable is what makes that a one-run experiment
-    /// rather than a bisect.
-    /// </summary>
     private static readonly bool AlwaysDedicated =
         Environment.GetEnvironmentVariable("VULKANSTORY_VULKAN_DEDICATED_MEMORY") == "1";
-
-    /// <summary>VULKANSTORY_VULKAN_NO_REBAR=1 forces every ReBAR request down the fall-through path.</summary>
     private static readonly bool ReBarDisabled =
         Environment.GetEnvironmentVariable("VULKANSTORY_VULKAN_NO_REBAR") == "1";
-
-    private readonly VulkanContext _context;
     private readonly object _gate = new();
-    private readonly Dictionary<(MemoryPoolClass Class, uint TypeIndex, bool Linear), List<MemoryBlock>> _pools = new();
-    private readonly List<MemoryBlock> _dedicated = new();
+    private readonly VmaRuntime _vma;
     private readonly PhysicalDeviceMemoryProperties _memoryProperties;
-    private readonly ulong[] _heapUsed;
-    private readonly ulong[] _heapImageBytes;
-    private readonly ulong[] _heapBudget;
-    private readonly ulong[] _heapDriverUsage;
-    private readonly ulong[] _heapOwnedAtBudgetRefresh;
-    private readonly ulong[] _classBytes = new ulong[PoolClassCount];
-    private ulong _reBarUsed;
-    // Block bytes of the Transient class, dedicated ones included, and their peak since the last take.
-    private ulong _transientBytes;
+    private readonly Dictionary<ulong, VmaAllocationInfo> _allocations = new();
+    private readonly VmaHeapStats[] _heaps;
+    private readonly VmaClassStats[] _classes = new VmaClassStats[PoolClassCount];
     private ulong _transientPeak;
     private long _reBarMisses;
+    private long _systemMemoryFallbacks;
+    private long _allocationFailures;
     private long _emptyBlocksFreed;
-    private long _frame;
-    private long _budgetRefreshFrame = -1;
-    private int _emptyBlocks;
+    private uint _frame;
+    private int _knownBlocks;
+    private ulong _knownPooledBlocks;
     private bool _disposed;
 
     public VulkanAllocator(VulkanContext context)
     {
-        _context = context;
         context.Api.GetPhysicalDeviceMemoryProperties(context.PhysicalDevice, out _memoryProperties);
-        _heapUsed = new ulong[_memoryProperties.MemoryHeapCount];
-        _heapImageBytes = new ulong[_memoryProperties.MemoryHeapCount];
-        _heapBudget = new ulong[_memoryProperties.MemoryHeapCount];
-        _heapDriverUsage = new ulong[_memoryProperties.MemoryHeapCount];
-        _heapOwnedAtBudgetRefresh = new ulong[_memoryProperties.MemoryHeapCount];
+        _heaps = new VmaHeapStats[_memoryProperties.MemoryHeapCount];
         BudgetExtension = context.MemoryBudgetAvailable;
-        RefreshBudgetLocked();
+        _vma = new VmaRuntime(context);
+        try { RefreshStatisticsLocked(); }
+        catch { _vma.Dispose(); throw; }
     }
 
-    /// <summary>
-    /// Receives a line for each logged event (ReBAR misses). The device points it
-    /// at the validation mirror; never at GetError, since a miss is not an error.
-    /// </summary>
     public Action<string>? Log { get; set; }
-    /// <summary>Optional renderer-owned detailed trace sink.</summary>
     public Action<string>? Trace { get; set; }
-
-    /// <summary>Whether heap budgets come from VK_EXT_memory_budget.</summary>
     public bool BudgetExtension { get; }
-
-    /// <summary>Replaces the ReBAR cap. Tests only.</summary>
     internal ulong? ReBarCapOverrideForTests { get; set; }
-
-    /// <summary>Replaces every heap's budget. Tests only.</summary>
     internal ulong? HeapBudgetOverrideForTests { get; set; }
+    internal ulong PersistentMeshReserveBytes { get; private set; }
+    public int BlockCount { get { lock (_gate) { RefreshStatisticsLocked(); return _knownBlocks; } } }
+    public long ReBarMisses { get { lock (_gate) return _reBarMisses; } }
+    public ulong ReBarUsed { get { lock (_gate) { RefreshStatisticsLocked(); return _classes[(int)MemoryPoolClass.ReBar].BlockBytes; } } }
+    public ulong TransientHeapBytes { get { lock (_gate) { RefreshStatisticsLocked(); return _classes[(int)MemoryPoolClass.Transient].BlockBytes; } } }
 
-    /// <summary>Blocks currently held, which is the real vkAllocateMemory count.</summary>
-    public int BlockCount
-    {
-        get
-        {
-            lock (_gate)
-            {
-                return BlockCountLocked();
-            }
-        }
-    }
-
-    private int BlockCountLocked()
-    {
-        int count = _dedicated.Count;
-        foreach (List<MemoryBlock> blocks in _pools.Values) count += blocks.Count;
-        return count;
-    }
-
-    public long ReBarMisses
-    {
-        get
-        {
-            lock (_gate) return _reBarMisses;
-        }
-    }
-
-    /// <summary>Block bytes of the given class on ReBAR memory types, dedicated ones included.</summary>
-    public ulong ReBarUsed
-    {
-        get
-        {
-            lock (_gate) return _reBarUsed;
-        }
-    }
-
-    /// <summary>Returns the retained allocation-block size policy for the selected pool class.</summary>
+    /// <summary>Retained reserve-sizing policy; VMA selects actual backing block sizes.</summary>
     public static ulong BlockSizeOf(MemoryPoolClass poolClass) => poolClass switch
     {
         MemoryPoolClass.DeviceImages => 128 * MiB,
@@ -446,11 +109,6 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         _ => 64 * MiB,
     };
 
-    /// <summary>
-    /// The class a request lands in when the caller does not say: images are
-    /// DeviceImages; a buffer asking for device-local and host-visible memory is
-    /// ReBar; every other buffer is DeviceBuffers.
-    /// </summary>
     public static MemoryPoolClass InferClass(MemoryPropertyFlags properties, bool linear)
     {
         if (!linear) return MemoryPoolClass.DeviceImages;
@@ -458,17 +116,11 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return (properties & reBar) == reBar ? MemoryPoolClass.ReBar : MemoryPoolClass.DeviceBuffers;
     }
 
-    /// <summary>Allocates aligned Vulkan memory satisfying resource requirements and requested properties.</summary>
-    /// <remarks>Ownership is represented by the returned allocation; release it through this allocator after GPU completion.</remarks>
     public MemoryAllocation Allocate(
         MemoryRequirements requirements, MemoryPropertyFlags properties, bool linear, string what) =>
         Allocate(requirements, properties, linear, what, InferClass(properties, linear), false, default, default);
 
-    /// <summary>
-    /// Allocates for one resource. <paramref name="requiresDedicated" /> is the
-    /// resource's VkMemoryDedicatedRequirements (required or preferred), and the
-    /// buffer or image handle, when given, is named in a dedicated allocation.
-    /// </summary>
+    /// <summary>Allocates VMA memory for the existing resource, retaining its required memory flags.</summary>
     public MemoryAllocation Allocate(
         MemoryRequirements requirements, MemoryPropertyFlags properties, bool linear, string what,
         MemoryPoolClass poolClass, bool requiresDedicated, Buffer buffer, Image image)
@@ -478,507 +130,338 @@ internal sealed unsafe class VulkanAllocator : IDisposable
             requiresDedicated = true;
             poolClass = InferClass(properties, linear);
         }
-
+        if ((uint)poolClass >= PoolClassCount) throw new ArgumentOutOfRangeException(nameof(poolClass));
+        if (requirements.Size == 0) throw new ArgumentOutOfRangeException(nameof(requirements));
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-
             if (poolClass == MemoryPoolClass.ReBar)
-            {
                 return AllocateReBarLocked(requirements, properties, linear, what, requiresDedicated, buffer, image);
-            }
 
-            uint typeIndex = FindMemoryType(requirements.MemoryTypeBits, properties, Avoided(properties));
-            try
+            Result result = TryAllocateTypesLocked(requirements, properties, Avoided(properties), poolClass,
+                linear, requiresDedicated, buffer, image, out MemoryAllocation allocation);
+            if (result == Result.Success) return allocation;
+            if (result == Result.ErrorOutOfDeviceMemory &&
+                (properties & MemoryPropertyFlags.DeviceLocalBit) != 0 &&
+                ((poolClass == MemoryPoolClass.DeviceImages && !linear && properties == MemoryPropertyFlags.DeviceLocalBit) ||
+                 (poolClass == MemoryPoolClass.DeviceBuffers && linear)))
             {
-                return AllocateLocked(requirements, typeIndex, poolClass, linear, what, requiresDedicated, buffer, image);
+                // Preserve coherent mapped writes for meshes while leaving VRAM
+                // available to images and provider reconstruction/FG contexts.
+                MemoryPropertyFlags systemProperties = (properties & ~MemoryPropertyFlags.DeviceLocalBit) |
+                    MemoryPropertyFlags.HostVisibleBit;
+                if (linear) systemProperties |= MemoryPropertyFlags.HostCoherentBit;
+                Result fallback = TryAllocateTypesLocked(requirements, systemProperties,
+                    MemoryPropertyFlags.DeviceLocalBit, poolClass, linear, requiresDedicated, buffer, image,
+                    out allocation, allowAvoided: false);
+                if (fallback == Result.Success)
+                {
+                    if (++_systemMemoryFallbacks <= LoggedMissLimit)
+                        Log?.Invoke($"Vulkan VRAM headroom exhausted; allocated {what} on compatible system memory");
+                    return allocation;
+                }
+                if (fallback != Result.ErrorFeatureNotPresent) result = fallback;
             }
-            catch (VulkanMemoryAllocationException error) when (
-                error.Result == Result.ErrorOutOfDeviceMemory && poolClass == MemoryPoolClass.DeviceImages &&
-                !linear && properties == MemoryPropertyFlags.DeviceLocalBit)
-            {
-                // Ordinary images need a compatible memory type, not necessarily
-                // the GPU-only heap. Keep inventory/UI allocation alive under VRAM
-                // pressure without rebinding or discarding any existing resource.
-                if (!TryFindMemoryType(requirements.MemoryTypeBits, MemoryPropertyFlags.HostVisibleBit,
-                    MemoryPropertyFlags.DeviceLocalBit, out uint systemType)) throw;
-                MemoryAllocation allocation = AllocateLocked(requirements, systemType, poolClass,
-                    linear, what, requiresDedicated, buffer, image);
-                Log?.Invoke($"Vulkan image VRAM allocation failed; allocated {what} on compatible system-memory type {systemType} instead of {typeIndex}");
-                return allocation;
-            }
+            throw AllocationFailureLocked(result, requirements.Size, what);
         }
     }
 
-    /// <summary>
-    /// ReBAR holds only per-frame dynamic data and is capped. A request that finds
-    /// no ReBAR type, or would take the class past its cap, is counted, logged and
-    /// served from host-visible staging memory instead.
-    /// </summary>
-    private MemoryAllocation AllocateReBarLocked(
-        MemoryRequirements requirements, MemoryPropertyFlags properties, bool linear, string what,
-        bool requiresDedicated, Buffer buffer, Image image)
+    private MemoryAllocation AllocateReBarLocked(MemoryRequirements requirements, MemoryPropertyFlags properties,
+        bool linear, string what, bool requiresDedicated, Buffer buffer, Image image)
     {
         MemoryPropertyFlags wanted = properties | MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit;
-        string? miss = null;
-
-        if (ReBarDisabled)
-        {
-            miss = "VULKANSTORY_VULKAN_NO_REBAR=1";
-        }
-        else if (!TryFindMemoryType(requirements.MemoryTypeBits, wanted, 0, out uint typeIndex))
-        {
-            miss = "no device-local host-visible memory type";
-        }
-        else
-        {
-            bool dedicated = AlwaysDedicated || requiresDedicated
-                || requirements.Size >= BlockSizeOf(MemoryPoolClass.ReBar) / 4;
-            var key = (MemoryPoolClass.ReBar, typeIndex, linear);
-
-            if (!dedicated && _pools.TryGetValue(key, out List<MemoryBlock>? pool))
-            {
-                foreach (MemoryBlock candidate in pool)
-                {
-                    if (candidate.TryAllocate(requirements.Size, requirements.Alignment, out ulong offset))
-                    {
-                        NoteFilled(candidate);
-                        return Describe(candidate, offset, requirements.Size);
-                    }
-                }
-            }
-
-            ulong growth = dedicated ? requirements.Size : BlockSizeOf(MemoryPoolClass.ReBar);
-            ulong cap = ReBarCapLocked(typeIndex);
-            if (_reBarUsed + growth > cap)
-            {
-                miss = "cap " + cap + " bytes reached (" + _reBarUsed + " used, " + growth + " more needed)";
-            }
-            else
-            {
-                return AllocateLocked(requirements, typeIndex, MemoryPoolClass.ReBar, linear, what,
-                    requiresDedicated, buffer, image);
-            }
-        }
+        MemoryAllocation preferred = default;
+        Result result = ReBarDisabled ? Result.ErrorFeatureNotPresent :
+            TryAllocateTypesLocked(requirements, wanted, 0, MemoryPoolClass.ReBar, linear, requiresDedicated,
+                buffer, image, out preferred);
+        // A disabled ReBAR request does not evaluate the native allocation call.
+        if (!ReBarDisabled && result == Result.Success)
+            return preferred;
+        if (result is not (Result.ErrorOutOfDeviceMemory or Result.ErrorFeatureNotPresent))
+            throw AllocationFailureLocked(result, requirements.Size, what);
 
         _reBarMisses++;
         VulkanStats.NoteRebarFallback();
         if (_reBarMisses <= LoggedMissLimit)
         {
-            string line = "[VulkanStory] ReBAR miss for " + what + ": " + miss +
-                "; falling through to host-visible staging memory (miss " + _reBarMisses + ")";
+            string reason = ReBarDisabled ? "VULKANSTORY_VULKAN_NO_REBAR=1" :
+                result == Result.ErrorFeatureNotPresent ? "no compatible device-local host-visible memory" :
+                "the ReBAR cap or heap budget has no physical allocation headroom";
+            string line = $"[VulkanStory] ReBAR miss for {what}: {reason}; falling through to host-visible staging memory (miss {_reBarMisses})";
             Log?.Invoke(line);
             Trace?.Invoke(line);
         }
-
-        MemoryPropertyFlags host = (properties & ~MemoryPropertyFlags.DeviceLocalBit)
-            | MemoryPropertyFlags.HostVisibleBit;
-        uint hostType = FindMemoryType(requirements.MemoryTypeBits, host, MemoryPropertyFlags.DeviceLocalBit);
-        return AllocateLocked(requirements, hostType, MemoryPoolClass.Staging, linear, what, requiresDedicated,
-            buffer, image);
+        MemoryPropertyFlags host = (properties & ~MemoryPropertyFlags.DeviceLocalBit) | MemoryPropertyFlags.HostVisibleBit;
+        result = TryAllocateTypesLocked(requirements, host, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.Staging,
+            linear, requiresDedicated, buffer, image, out MemoryAllocation allocation);
+        if (result != Result.Success) throw AllocationFailureLocked(result, requirements.Size, what);
+        return allocation;
     }
 
-    private MemoryAllocation AllocateLocked(
-        MemoryRequirements requirements, uint typeIndex, MemoryPoolClass poolClass, bool linear, string what,
-        bool requiresDedicated, Buffer buffer, Image image)
+    private Result TryAllocateTypesLocked(MemoryRequirements requirements, MemoryPropertyFlags properties,
+        MemoryPropertyFlags avoid, MemoryPoolClass poolClass, bool linear, bool dedicated,
+        Buffer buffer, Image image, out MemoryAllocation allocation, bool allowAvoided = true)
     {
-        MemoryType type = _memoryProperties.MemoryTypes[(int)typeIndex];
-        bool hostVisible = (type.PropertyFlags & MemoryPropertyFlags.HostVisibleBit) != 0;
-        ulong blockSize = BlockSizeOf(poolClass);
-
-        if (AlwaysDedicated || requiresDedicated || requirements.Size >= blockSize / 4)
+        allocation = default;
+        Result last = Result.ErrorFeatureNotPresent;
+        // Prefer types without the avoided properties, then accept a compatible
+        // unified-memory type when there is no discrete alternative.
+        int passes = avoid != 0 && allowAvoided ? 2 : 1;
+        for (int pass = 0; pass < passes; pass++)
         {
-            PrepareBlockAllocationLocked(type.HeapIndex, requirements.Size);
-            var block = new MemoryBlock(
-                _context, requirements.Size, typeIndex, type.HeapIndex, poolClass, linear, dedicated: true,
-                hostVisible, buffer, image);
-            _dedicated.Add(block);
-            NoteBlockCreated(block);
-
-            if (!block.TryAllocate(requirements.Size, requirements.Alignment, out ulong dedicatedOffset))
+            for (uint typeIndex = 0; typeIndex < _memoryProperties.MemoryTypeCount; typeIndex++)
             {
-                throw new InvalidOperationException("a dedicated block could not satisfy " + what);
+                if ((requirements.MemoryTypeBits & (1u << (int)typeIndex)) == 0) continue;
+                MemoryType type = _memoryProperties.MemoryTypes[(int)typeIndex];
+                if ((type.PropertyFlags & properties) != properties) continue;
+                bool avoided = (type.PropertyFlags & avoid) != 0;
+                if (avoid != 0 && (pass == 0 ? avoided : !avoided)) continue;
+                var request = new VmaAllocateInfo
+                {
+                    Size = requirements.Size,
+                    Alignment = requirements.Alignment,
+                    Buffer = buffer.Handle,
+                    Image = image.Handle,
+                    MemoryTypeBits = 1u << (int)typeIndex,
+                    RequiredFlags = (uint)properties,
+                    PoolClass = (uint)poolClass,
+                    Flags = ((type.PropertyFlags & MemoryPropertyFlags.HostVisibleBit) != 0 ? 1u | 16u : 0u) |
+                        (AlwaysDedicated || dedicated ? 2u : 0u) |
+                        (!linear && buffer.Handle == 0 && image.Handle == 0 ? 4u : 0u),
+                    GrowthLimitBytes = 0,
+                };
+                // Reuse an existing VMA block before considering physical growth;
+                // this remains valid even while external provider use is high.
+                last = AllocateNativeLocked(request, out VmaAllocationInfo info);
+                if (last == Result.ErrorOutOfDeviceMemory)
+                {
+                    // Provider contexts can consume VRAM several times within
+                    // one renderer frame. VMA refreshes driver budget data when
+                    // setting the frame index, including the current index.
+                    _vma.SetFrameIndex(_frame);
+                    RefreshStatisticsLocked();
+                    request.GrowthLimitBytes = GrowthHeadroomLocked(type.HeapIndex, poolClass);
+                    if (poolClass == MemoryPoolClass.ReBar)
+                    {
+                        ulong cap = ReBarCapLocked(typeIndex);
+                        ulong used = _classes[(int)MemoryPoolClass.ReBar].BlockBytes;
+                        request.GrowthLimitBytes = Math.Min(request.GrowthLimitBytes, used < cap ? cap - used : 0);
+                    }
+                    if (request.GrowthLimitBytes != 0)
+                        last = AllocateNativeLocked(request, out info);
+                }
+                if (last == Result.Success)
+                {
+                    try { _allocations.Add(info.Allocation, info); }
+                    catch { _vma.Free(info.Allocation); RefreshStatisticsLocked(); throw; }
+                    allocation = new MemoryAllocation
+                    {
+                        Memory = new DeviceMemory(info.Memory),
+                        Offset = info.Offset,
+                        Size = info.Size,
+                        Mapped = (IntPtr)info.Mapped,
+                        Allocation = info.Allocation,
+                    };
+                    return Result.Success;
+                }
+                if (last != Result.ErrorOutOfDeviceMemory) return last;
             }
-            return Describe(block, dedicatedOffset, requirements.Size);
         }
-
-        var key = (poolClass, typeIndex, linear);
-        if (!_pools.TryGetValue(key, out List<MemoryBlock>? pool))
-        {
-            pool = new List<MemoryBlock>();
-            _pools[key] = pool;
-        }
-
-        foreach (MemoryBlock candidate in pool)
-        {
-            if (candidate.TryAllocate(requirements.Size, requirements.Alignment, out ulong offset))
-            {
-                NoteFilled(candidate);
-                return Describe(candidate, offset, requirements.Size);
-            }
-        }
-
-        PrepareBlockAllocationLocked(type.HeapIndex, blockSize);
-        var fresh = new MemoryBlock(
-            _context, blockSize, typeIndex, type.HeapIndex, poolClass, linear, dedicated: false, hostVisible,
-            default, default);
-        pool.Add(fresh);
-        NoteBlockCreated(fresh);
-
-        if (!fresh.TryAllocate(requirements.Size, requirements.Alignment, out ulong freshOffset))
-        {
-            throw new InvalidOperationException("a fresh block could not satisfy " + what);
-        }
-        return Describe(fresh, freshOffset, requirements.Size);
+        return last;
     }
 
-    private void NoteBlockCreated(MemoryBlock block)
+    private Result AllocateNativeLocked(in VmaAllocateInfo request, out VmaAllocationInfo allocation)
     {
-        _heapUsed[block.HeapIndex] += block.Size;
-        if (block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient) _heapImageBytes[block.HeapIndex] += block.Size;
-        _classBytes[(int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class)] += block.Size;
-        if (block.Class == MemoryPoolClass.ReBar) _reBarUsed += block.Size;
-        if (block.Class == MemoryPoolClass.Transient)
+        Result result = _vma.Allocate(request, out allocation);
+        try { RefreshStatisticsLocked(); }
+        catch
         {
-            _transientBytes += block.Size;
-            if (_transientBytes > _transientPeak) _transientPeak = _transientBytes;
+            if (result == Result.Success) _vma.Free(allocation.Allocation);
+            throw;
         }
+        return result;
     }
 
-    /// <summary>Block bytes of the Transient pool class, dedicated blocks included.</summary>
-    public ulong TransientHeapBytes
+    private ulong GrowthHeadroomLocked(uint heap, MemoryPoolClass poolClass)
     {
-        get
-        {
-            lock (_gate) return _transientBytes;
-        }
+        ulong budget = HeapBudgetLocked(heap);
+        ulong used = HeapUsageLocked(heap);
+        ulong available = used < budget ? budget - used : 0;
+        bool local = (_memoryProperties.MemoryHeaps[(int)heap].Flags & MemoryHeapFlags.DeviceLocalBit) != 0;
+        ulong reserve = local && poolClass == MemoryPoolClass.DeviceBuffers ? MeshReserveLocked(heap) : 0;
+        return reserve <= available ? available - reserve : 0;
     }
 
-    /// <summary>
-    /// The Transient class's peak block bytes since the previous call (the stats
-    /// sample's <c>heap_peak_mib</c>); the next peak starts from the current use.
-    /// </summary>
-    public ulong TakeTransientHeapPeak()
+    private ulong HeapBudgetLocked(uint heap) => HeapBudgetOverrideForTests ?? _heaps[heap].Budget;
+    private ulong HeapUsageLocked(uint heap) => Math.Max(_heaps[heap].Usage, _heaps[heap].BlockBytes);
+    private ulong ReBarCapLocked(uint typeIndex) => ReBarCapOverrideForTests ??
+        Math.Min(ReBarCapCeiling, HeapBudgetLocked(_memoryProperties.MemoryTypes[(int)typeIndex].HeapIndex) / 4);
+
+    private ulong MeshReserveLocked(uint heap)
     {
-        lock (_gate)
-        {
-            ulong peak = Math.Max(_transientPeak, _transientBytes);
-            _transientPeak = _transientBytes;
-            return peak;
-        }
+        ulong external = _heaps[heap].Usage > _heaps[heap].BlockBytes ?
+            _heaps[heap].Usage - _heaps[heap].BlockBytes : 0;
+        ulong images = _heaps[heap].ImageBlockBytes;
+        ulong combined = images > ulong.MaxValue - external ? ulong.MaxValue : images + external;
+        PersistentMeshReserveBytes = Math.Max(BlockSizeOf(MemoryPoolClass.DeviceImages), combined);
+        return PersistentMeshReserveBytes;
     }
 
-    private void NoteBlockReleased(MemoryBlock block)
-    {
-        _heapUsed[block.HeapIndex] -= Math.Min(_heapUsed[block.HeapIndex], block.Size);
-        if (block.Class is MemoryPoolClass.DeviceImages or MemoryPoolClass.Transient)
-            _heapImageBytes[block.HeapIndex] -= Math.Min(_heapImageBytes[block.HeapIndex], block.Size);
-        int index = (int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class);
-        _classBytes[index] -= Math.Min(_classBytes[index], block.Size);
-        if (block.Class == MemoryPoolClass.ReBar) _reBarUsed -= Math.Min(_reBarUsed, block.Size);
-        if (block.Class == MemoryPoolClass.Transient) _transientBytes -= Math.Min(_transientBytes, block.Size);
-    }
-
-    private void NoteFilled(MemoryBlock block)
-    {
-        if (block.EmptySinceFrame < 0) return;
-        block.EmptySinceFrame = -1;
-        _emptyBlocks--;
-    }
-
-    private static MemoryAllocation Describe(MemoryBlock block, ulong offset, ulong size) =>
-        new()
-        {
-            Memory = block.Memory,
-            Offset = offset,
-            Size = size,
-            Mapped = block.Mapped == IntPtr.Zero ? IntPtr.Zero : block.Mapped + (int)offset,
-            Block = block,
-        };
-
-    /// <summary>Returns the specified allocation range to its owner and coalesces adjacent free ranges.</summary>
-    /// <remarks>Call only after all GPU users of that range have completed.</remarks>
+    /// <remarks>Call only after all GPU users of the allocation have completed.</remarks>
     public void Free(in MemoryAllocation allocation)
     {
-        MemoryBlock? block = allocation.Block;
-        if (block == null) return;
-
+        if (!allocation.IsValid) return;
         lock (_gate)
         {
-            if (_disposed) return;
-
-            block.Free(allocation.Offset, allocation.Size);
-
-            if (block.Dedicated)
-            {
-                _dedicated.Remove(block);
-                NoteBlockReleased(block);
-                block.Dispose();
-                return;
-            }
-
-            // An emptied block is kept for EmptyBlockFrames frames, so a pool that
-            // is repeatedly drained and refilled - which chunk streaming does - is
-            // not paying for an allocation each time.
-            if (!block.IsEmpty || block.EmptySinceFrame >= 0) return;
-            block.EmptySinceFrame = _frame;
-            _emptyBlocks++;
+            if (_disposed || !_allocations.Remove(allocation.Allocation)) return;
+            _vma.Free(allocation.Allocation);
+            RefreshStatisticsLocked();
         }
     }
 
-    /// <summary>
-    /// One frame boundary (the frame ring calls it at BeginFrame): refreshes the
-    /// heap budgets now and then, and frees pooled blocks that stayed empty for
-    /// <see cref="EmptyBlockFrames" /> frames, or every empty block at once while a
-    /// heap is over its budget.
-    /// </summary>
     public void AdvanceFrame()
     {
         lock (_gate)
         {
             if (_disposed) return;
-            _frame++;
-
-            if (_frame % 60 == 0) RefreshBudgetLocked();
-            if (_emptyBlocks == 0) return;
-
-            bool pressure = false;
-            for (int heap = 0; heap < _heapUsed.Length; heap++)
-            {
-                if (HeapUsageLocked(heap) >= HeapBudgetLocked(heap)) pressure = true;
-            }
-
-            foreach (List<MemoryBlock> pool in _pools.Values)
-            {
-                for (int i = pool.Count - 1; i >= 0; i--)
-                {
-                    MemoryBlock block = pool[i];
-                    if (block.EmptySinceFrame < 0 || !block.IsEmpty) continue;
-                    if (!pressure && _frame - block.EmptySinceFrame < EmptyBlockFrames) continue;
-
-                    pool.RemoveAt(i);
-                    _emptyBlocks--;
-                    _emptyBlocksFreed++;
-                    NoteBlockReleased(block);
-                    block.Dispose();
-                }
-            }
+            _vma.SetFrameIndex(++_frame);
+            if (_frame % 60 == 0) RefreshStatisticsLocked();
         }
     }
 
-    private ulong HeapBudgetLocked(int heap) => HeapBudgetOverrideForTests ?? _heapBudget[heap];
-
-    private ulong HeapUsageLocked(int heap)
+    private void RefreshStatisticsLocked()
     {
-        ulong added = _heapUsed[heap] > _heapOwnedAtBudgetRefresh[heap]
-            ? _heapUsed[heap] - _heapOwnedAtBudgetRefresh[heap] : 0;
-        ulong driver = _heapDriverUsage[heap];
-        return Math.Max(_heapUsed[heap], added > ulong.MaxValue - driver ? ulong.MaxValue : driver + added);
-    }
-
-    private void PrepareBlockAllocationLocked(uint heap, ulong requestedBytes)
-    {
-        // Provider allocations also consume this heap. Query at most once per
-        // frame before creating physical blocks, rather than ignoring their use
-        // until the sixty-frame budget refresh.
-        if (BudgetExtension && _budgetRefreshFrame != _frame) RefreshBudgetLocked();
-        ulong budget = HeapBudgetLocked((int)heap);
-        ulong used = HeapUsageLocked((int)heap);
-        if (_emptyBlocks == 0 || (used < budget && requestedBytes <= budget - used)) return;
-        foreach (List<MemoryBlock> pool in _pools.Values)
+        if (_disposed) return;
+        _vma.GetStatistics(_heaps, _classes);
+        int blocks = 0;
+        foreach (VmaHeapStats heap in _heaps) blocks = checked(blocks + (int)heap.BlockCount);
+        // Keep the shared allocation-failure counter tied to physical VMA blocks,
+        // including dedicated allocations made elsewhere through VulkanMemory.
+        for (int i = _knownBlocks; i < blocks; i++)
         {
-            for (int i = pool.Count - 1; i >= 0; i--)
-            {
-                MemoryBlock block = pool[i];
-                if (block.HeapIndex != heap || !block.IsEmpty || block.EmptySinceFrame < 0) continue;
-                pool.RemoveAt(i);
-                _emptyBlocks--;
-                _emptyBlocksFreed++;
-                NoteBlockReleased(block);
-                block.Dispose();
-            }
+            VulkanMemory.NoteAllocation();
+            VulkanStats.NoteAllocation();
         }
+        for (int i = blocks; i < _knownBlocks; i++) VulkanMemory.NoteFree();
+        _knownBlocks = blocks;
+        ulong pooledBlocks = 0;
+        foreach (VmaClassStats purpose in _classes)
+            pooledBlocks += purpose.BlockCount - Math.Min(purpose.BlockCount, purpose.DedicatedCount);
+        if (pooledBlocks < _knownPooledBlocks) _emptyBlocksFreed += checked((long)(_knownPooledBlocks - pooledBlocks));
+        _knownPooledBlocks = pooledBlocks;
+        _transientPeak = Math.Max(_transientPeak, _classes[(int)MemoryPoolClass.Transient].BlockBytes);
     }
 
-    private ulong ReBarCapLocked(uint typeIndex)
+    public ulong TakeTransientHeapPeak()
     {
-        if (ReBarCapOverrideForTests is { } forced) return forced;
-        uint heap = _memoryProperties.MemoryTypes[(int)typeIndex].HeapIndex;
-        return Math.Min(ReBarCapCeiling, HeapBudgetLocked((int)heap) / 4);
-    }
-
-    private void RefreshBudgetLocked()
-    {
-        _budgetRefreshFrame = _frame;
-        int heaps = (int)_memoryProperties.MemoryHeapCount;
-        if (BudgetExtension)
+        lock (_gate)
         {
-            var budget = new PhysicalDeviceMemoryBudgetPropertiesEXT
-            {
-                SType = StructureType.PhysicalDeviceMemoryBudgetPropertiesExt,
-            };
-            var properties = new PhysicalDeviceMemoryProperties2
-            {
-                SType = StructureType.PhysicalDeviceMemoryProperties2,
-                PNext = &budget,
-            };
-            _context.Api.GetPhysicalDeviceMemoryProperties2(_context.PhysicalDevice, &properties);
-            for (int i = 0; i < heaps; i++)
-            {
-                ulong reported = budget.HeapBudget[i];
-                _heapBudget[i] = reported > 0
-                    ? reported
-                    : (ulong)(_memoryProperties.MemoryHeaps[i].Size * FallbackBudgetShare);
-                _heapDriverUsage[i] = budget.HeapUsage[i];
-                _heapOwnedAtBudgetRefresh[i] = _heapUsed[i];
-            }
-            return;
-        }
-
-        for (int i = 0; i < heaps; i++)
-        {
-            _heapBudget[i] = (ulong)(_memoryProperties.MemoryHeaps[i].Size * FallbackBudgetShare);
+            RefreshStatisticsLocked();
+            ulong peak = _transientPeak;
+            _transientPeak = _classes[(int)MemoryPoolClass.Transient].BlockBytes;
+            return peak;
         }
     }
 
-    /// <summary>Captures current allocator pool, dedicated-allocation and heap-budget diagnostic totals under its lock.</summary>
     public MemorySnapshot Snapshot()
     {
         lock (_gate)
         {
-            var heapBudget = new ulong[_heapBudget.Length];
-            var heapFlags = new uint[_heapBudget.Length];
-            for (int i = 0; i < heapBudget.Length; i++) heapBudget[i] = HeapBudgetLocked(i);
-            for (int i = 0; i < heapFlags.Length; i++)
-                heapFlags[i] = (uint)_memoryProperties.MemoryHeaps[i].Flags;
-
-            ulong cap = 0;
-            if (TryFindMemoryType(uint.MaxValue,
-                    MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit, 0, out uint reBarType))
+            RefreshStatisticsLocked();
+            var used = new ulong[_heaps.Length];
+            var budgets = new ulong[_heaps.Length];
+            var flags = new uint[_heaps.Length];
+            var driverUsage = new ulong[_heaps.Length];
+            for (int i = 0; i < _heaps.Length; i++)
             {
-                cap = ReBarCapLocked(reBarType);
+                used[i] = _heaps[i].BlockBytes;
+                budgets[i] = HeapBudgetLocked((uint)i);
+                flags[i] = _heaps[i].HeapFlags;
+                driverUsage[i] = _heaps[i].Usage;
             }
-
-            return new MemorySnapshot(
-                BlockCountLocked(), _dedicated.Count, _reBarUsed, cap, _reBarMisses, _emptyBlocksFreed,
-                BudgetExtension, (ulong[])_classBytes.Clone(), (ulong[])_heapUsed.Clone(), heapBudget,
-                heapFlags, (ulong[])_heapDriverUsage.Clone());
+            var classBytes = new ulong[PoolClassCount];
+            ulong dedicated = 0;
+            for (int i = 0; i < PoolClassCount; i++)
+            {
+                if (i != (int)MemoryPoolClass.Dedicated)
+                    classBytes[i] = _classes[i].BlockBytes - Math.Min(_classes[i].BlockBytes, _classes[i].DedicatedBytes);
+                else
+                    classBytes[i] += _classes[i].BlockBytes - Math.Min(_classes[i].BlockBytes, _classes[i].DedicatedBytes);
+                classBytes[(int)MemoryPoolClass.Dedicated] += _classes[i].DedicatedBytes;
+                dedicated += _classes[i].DedicatedCount;
+            }
+            ulong cap = 0;
+            if (TryFindMemoryType(uint.MaxValue, MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit,
+                0, out uint reBarType)) cap = ReBarCapLocked(reBarType);
+            return new MemorySnapshot(_knownBlocks, checked((int)dedicated),
+                _classes[(int)MemoryPoolClass.ReBar].BlockBytes, cap, _reBarMisses, _emptyBlocksFreed,
+                BudgetExtension, classBytes, used, budgets, flags, driverUsage);
         }
     }
 
-    internal string DiagnosticMemoryLine()
+    internal string DiagnosticMemoryLine() => FormatMemoryLine(Snapshot());
+
+    private VulkanMemoryAllocationException AllocationFailureLocked(Result result, ulong size, string what)
     {
-        lock (_gate)
-        {
-            RefreshBudgetLocked();
-            return FormatMemoryLine(Snapshot());
-        }
+        string line = $"VMA allocation failed for {what} with {result} ({size} bytes requested); {FormatMemoryLine(Snapshot())}";
+        if (++_allocationFailures <= LoggedMissLimit) { Log?.Invoke(line); Trace?.Invoke(line); }
+        return new VulkanMemoryAllocationException(result, line);
     }
 
-    /// <summary>
-    /// Flags a request should avoid when it can: device-local-only memory keeps off
-    /// host-visible types (so ReBAR is left for per-frame data), and host memory
-    /// keeps off device-local types (so it does not eat the BAR either).
-    /// </summary>
     private static MemoryPropertyFlags Avoided(MemoryPropertyFlags properties)
     {
-        bool deviceLocal = (properties & MemoryPropertyFlags.DeviceLocalBit) != 0;
-        bool hostVisible = (properties & MemoryPropertyFlags.HostVisibleBit) != 0;
-        if (deviceLocal && !hostVisible) return MemoryPropertyFlags.HostVisibleBit;
-        if (hostVisible && !deviceLocal) return MemoryPropertyFlags.DeviceLocalBit;
-        return 0;
+        bool local = (properties & MemoryPropertyFlags.DeviceLocalBit) != 0;
+        bool visible = (properties & MemoryPropertyFlags.HostVisibleBit) != 0;
+        return local && !visible ? MemoryPropertyFlags.HostVisibleBit :
+            visible && !local ? MemoryPropertyFlags.DeviceLocalBit : 0;
     }
 
-    private bool TryFindMemoryType(uint typeBits, MemoryPropertyFlags properties, MemoryPropertyFlags avoid,
-        out uint typeIndex)
+    private bool TryFindMemoryType(uint bits, MemoryPropertyFlags properties, MemoryPropertyFlags avoid, out uint index)
     {
         for (uint i = 0; i < _memoryProperties.MemoryTypeCount; i++)
         {
-            if ((typeBits & (1u << (int)i)) == 0) continue;
-
             MemoryPropertyFlags flags = _memoryProperties.MemoryTypes[(int)i].PropertyFlags;
-            if ((flags & properties) == properties && (flags & avoid) == 0)
-            {
-                typeIndex = i;
-                return true;
-            }
+            if ((bits & (1u << (int)i)) != 0 && (flags & properties) == properties && (flags & avoid) == 0)
+            { index = i; return true; }
         }
-
-        typeIndex = 0;
+        index = 0;
         return false;
     }
 
-    /// <summary>
-    /// The first type with every requested property, preferring one without the
-    /// avoided flags; on a unified-memory device nothing can be avoided and the
-    /// first match is taken.
-    /// </summary>
-    private uint FindMemoryType(uint typeBits, MemoryPropertyFlags properties, MemoryPropertyFlags avoid)
-    {
-        if (avoid != 0 && TryFindMemoryType(typeBits, properties, avoid, out uint preferred)) return preferred;
-        if (TryFindMemoryType(typeBits, properties, 0, out uint any)) return any;
-        throw new InvalidOperationException($"no memory type with {properties}");
-    }
-
-    /// <summary>
-    /// Whether a device-local, host-visible, host-coherent type sits on a heap of at
-    /// least <paramref name="minimumHeapBytes" />: resizable BAR (or unified memory)
-    /// rather than the 256 MiB window, so long-lived mapped buffers can live in VRAM
-    /// without starving the per-frame ReBAR class.
-    /// </summary>
     public bool HasLargeHostVisibleDeviceMemory(ulong minimumHeapBytes)
     {
         const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
-        lock (_gate)
+        for (int i = 0; i < _memoryProperties.MemoryTypeCount; i++)
         {
-            for (int i = 0; i < _memoryProperties.MemoryTypeCount; i++)
-            {
-                MemoryType type = _memoryProperties.MemoryTypes[i];
-                if ((type.PropertyFlags & wanted) == wanted &&
-                    _memoryProperties.MemoryHeaps[(int)type.HeapIndex].Size >= minimumHeapBytes)
-                    return true;
-            }
-            return false;
+            MemoryType type = _memoryProperties.MemoryTypes[i];
+            if ((type.PropertyFlags & wanted) == wanted &&
+                _memoryProperties.MemoryHeaps[(int)type.HeapIndex].Size >= minimumHeapBytes) return true;
         }
+        return false;
     }
 
-    /// <summary>Checks BAR-backed mesh headroom while preserving the current image/provider reserve policy.</summary>
     internal bool HasPersistentMeshHeadroom(ulong bytes)
     {
         const MemoryPropertyFlags wanted = MemoryPropertyFlags.DeviceLocalBit |
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
         lock (_gate)
         {
-            if (!TryFindMemoryType(uint.MaxValue, wanted, 0, out uint typeIndex)) return false;
-            if (BudgetExtension && _budgetRefreshFrame != _frame) RefreshBudgetLocked();
-            uint heap = _memoryProperties.MemoryTypes[(int)typeIndex].HeapIndex;
-            ulong budget = HeapBudgetLocked((int)heap);
-            ulong used = HeapUsageLocked((int)heap);
-            // Leave room for image/provider working-set transitions. A single
-            // image-pool block was insufficient: DLSS-G reported VRAM pressure
-            // while mesh pools kept consuming the rest of the heap's budget.
-            ulong imageBytes = _heapImageBytes[heap];
-            ulong externalBytes = _heapDriverUsage[heap] > _heapOwnedAtBudgetRefresh[heap]
-                ? _heapDriverUsage[heap] - _heapOwnedAtBudgetRefresh[heap] : 0;
-            ulong reserve = Math.Max(BlockSizeOf(MemoryPoolClass.DeviceImages), imageBytes + externalBytes);
-            PersistentMeshReserveBytes = reserve;
-            ulong meshBlock = Math.Max(bytes, BlockSizeOf(MemoryPoolClass.DeviceBuffers));
-            return used < budget && reserve < budget - used && meshBlock <= budget - used - reserve;
+            if (_disposed) return false;
+            RefreshStatisticsLocked();
+            for (uint i = 0; i < _memoryProperties.MemoryTypeCount; i++)
+            {
+                MemoryType type = _memoryProperties.MemoryTypes[(int)i];
+                if ((type.PropertyFlags & wanted) == wanted &&
+                    bytes <= GrowthHeadroomLocked(type.HeapIndex, MemoryPoolClass.DeviceBuffers)) return true;
+            }
+            return false;
         }
     }
 
-    /// <summary>Most recently calculated reserve used when deciding BAR-backed persistent mesh placement.</summary>
-    internal ulong PersistentMeshReserveBytes { get; private set; }
-
-    /// <summary>The property flags of a memory type. Tests and diagnostics.</summary>
     public MemoryPropertyFlags FlagsOf(uint typeIndex) => _memoryProperties.MemoryTypes[(int)typeIndex].PropertyFlags;
-
-    /// <summary>Whether any type the mask allows has the properties and none of the avoided flags.</summary>
-    public bool HasMemoryType(uint typeBits, MemoryPropertyFlags properties, MemoryPropertyFlags avoid)
-    {
-        lock (_gate) return TryFindMemoryType(typeBits, properties, avoid, out _);
-    }
+    public bool HasMemoryType(uint typeBits, MemoryPropertyFlags properties, MemoryPropertyFlags avoid) =>
+        TryFindMemoryType(typeBits, properties, avoid, out _);
 
     /// <summary>A buffer's requirements plus whether the driver requires or prefers a dedicated allocation.</summary>
     public static MemoryRequirements BufferRequirements(VulkanContext context, Buffer buffer, out bool dedicated)
@@ -1074,22 +557,19 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         return line.ToString();
     }
 
-    /// <inheritdoc/>
     public void Dispose()
     {
         lock (_gate)
         {
             if (_disposed) return;
+            foreach (ulong allocation in _allocations.Keys) _vma.Free(allocation);
+            _allocations.Clear();
+            _vma.Dispose();
+            for (int i = 0; i < _knownBlocks; i++) VulkanMemory.NoteFree();
+            _knownBlocks = 0;
+            Array.Clear(_heaps);
+            Array.Clear(_classes);
             _disposed = true;
-
-            foreach (List<MemoryBlock> pool in _pools.Values)
-            {
-                foreach (MemoryBlock block in pool) block.Dispose();
-            }
-            _pools.Clear();
-
-            foreach (MemoryBlock block in _dedicated) block.Dispose();
-            _dedicated.Clear();
         }
     }
 }

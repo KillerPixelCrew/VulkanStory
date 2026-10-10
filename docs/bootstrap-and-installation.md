@@ -102,7 +102,8 @@ and, if enabled, appends `VulkanStory/managed/VulkanStory.Bootstrap.dll` to
 is the same as on Windows. Launch paths that start the `Vintagestory` binary
 directly without `run.sh` are not activated.
 
-The Linux native set is `libSDL3.so` and `libshaderc_shared.so`, plus an optional
+The Linux native set is `libSDL3.so`, `libshaderc_shared.so` and the required
+`libVulkanStoryVma.so`, plus an optional
 `libVulkanStoryNgx.so` for DLSS (`packaging/native-linux-x64.json`). The
 Streamline, FSR 4 and XeSS-FG bridges are Windows-only and are not included.
 
@@ -132,7 +133,7 @@ directory; on Linux the installer copies it there:
       VulkanStory.{Bootstrap,Contracts,Game,Input,Platform.Sdl,Render.Vulkan}.dll
       SDL3-CS.dll, Silk.NET.*.dll, Microsoft.*.dll
       profiles/vs-1.22.7-<rid>.json
-    native/<rid>/                  # SDL3, shaderc, provider bridges, vendor runtimes
+    native/<rid>/                  # SDL3, shaderc, VMA, provider bridges, vendor runtimes
     shaders-vk.pak                 # Native SPIR-V and shaders.manifest.json in one file
     assets/gamecontrollerdb.txt
     tools/                         # deploy/remove (Windows) or install/remove (Linux)
@@ -152,7 +153,7 @@ Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 
 | Component | Files |
 | --- | --- |
-| Core | `SDL3.dll`, `shaderc_shared.dll` |
+| Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll` |
 | DLSS | `VulkanStoryNgx.dll`, `nvngx_dlss.dll` |
 | FSR 3 | `VulkanStoryFsr3.dll`, `amd_fidelityfx_vk.dll` |
 | FSR 4 | `VulkanStoryFsr4.dll`, `amd_fidelityfx_upscaler_dx12.dll` |
@@ -165,14 +166,15 @@ Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 Every script takes fresh output directories, documents its parameters
 (`Get-Help scripts/<name>.ps1 -Full`) and never launches the game. Vendor SDKs are
 pinned submodules under `sdk/` (`dlss`, `fidelityfx-vk`, `fidelityfx`, `xess`,
-`streamline`) and are the scripts' default SDK roots.
+`streamline`, `vma`) and are the scripts' default SDK roots. The VMA bridge is
+mandatory and its MIT notice ships in `licenses/native/vma/LICENSE.txt`.
 
 | Step | Script | Result |
 | --- | --- | --- |
 | 1 | `fetch-streamline-release.ps1` | Hash-checked Streamline 2.14.1 release ZIP extracted to the git-ignored `sdk/streamline-release-2.14.1`. The production `bin/x64` runtimes come only from this ZIP |
-| 2 | `build-runtime.ps1` | Managed projects, the Windows proxy (CMake) and the shader corpus in `artifacts/runtime-shaders/<Configuration>` (`shaders-vk/` and the shipped `shaders-vk.pak`). `-RuntimeIdentifier linux-x64` builds for Linux |
-| 3 | `build-provider-bridges.ps1` | The five Windows bridges (needs `g++`/`gcc` and `VULKAN_SDK`) |
-| 4 | `prepare-native-bundle.ps1` | Bridges, core binaries, vendor runtimes and notices from `native-win-x64.json`. Streamline runtimes must match the release hashes |
+| 2 | `build-runtime.ps1` | Managed projects, required VMA bridge in `artifacts/native-vma/<Configuration>/<rid>`, Windows proxy (CMake), and shader corpus/pack in `artifacts/runtime-shaders/<Configuration>`. Requires `g++` and Vulkan headers. `-RuntimeIdentifier linux-x64` builds on Linux |
+| 3 | `build-provider-bridges.ps1` | Five Windows provider bridges plus the required VMA bridge (needs `g++`/`gcc` and `VULKAN_SDK`) |
+| 4 | `prepare-native-bundle.ps1` | Bridges, core binaries, vendor runtimes and notices from `native-win-x64.json`. `-VmaDirectory` accepts the runtime build's allocator bridge. Streamline runtimes must match the release hashes |
 | 5 | `stage-runtime.ps1` | The layout above plus `optional-server/`. Checks the `-ShaderPack` index, blob hashes and manifest coverage, and writes the SHA256 inventory `package.json` |
 | 6 | `package-runtime.ps1` | Verifies the staged hashes and writes `VulkanStory-<rid>.zip`, `VulkanStory-Input-Companion.zip` and `archives.json` |
 

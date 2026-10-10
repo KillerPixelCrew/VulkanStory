@@ -26,6 +26,7 @@ internal sealed class VulkanFramebuffer
 
     public AttachmentSlot[] Color = new AttachmentSlot[RenderLimits.MaxColorAttachments];
     public int DepthTextureId;
+    public uint DepthLayer;
 
     /// <summary>Cached interned id of the attachment formats, or -1 when stale.</summary>
     public int FormatsId = -1;
@@ -156,7 +157,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         if (attachmentIndex < 0)
         {
+            if (framebuffer.DepthTextureId == textureId && framebuffer.DepthLayer == layer) return;
             framebuffer.DepthTextureId = textureId;
+            framebuffer.DepthLayer = layer;
         }
         else if (attachmentIndex < RenderLimits.MaxColorAttachments)
         {
@@ -464,7 +467,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 depthAttachment = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
-                    ImageView = depth.View,
+                    ImageView = depth.ViewOfLayer(framebuffer.DepthLayer),
                     ImageLayout = depthLayout,
                     LoadOp = AttachmentLoadOp.Load,
                     StoreOp = AttachmentStoreOp.Store,
@@ -688,7 +691,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 // No pass open (or the scope is about to change): LOAD_OP_CLEAR on the next scope.
                 EndRendering(commandBuffer);
                 SetDepthReadOnly(false);
-                _graph.PromoteDepthClear(texture, depth);
+                _graph.PromoteDepthClear(texture, depth, _bound.DepthLayer);
                 return;
             }
             _graph.NoteInPassClear();

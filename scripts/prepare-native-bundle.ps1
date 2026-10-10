@@ -9,6 +9,8 @@ Directory containing the compiled VulkanStory provider bridge DLLs.
 Directory supplying inventory-listed SDL/shader compiler core binaries.
 .PARAMETER CoreNoticesDirectory
 Nonempty recursive tree of SDL/shader compiler and MinHook (statically linked into the FSR 4 bridge) redistribution notices, normally packaging/notices/native.
+.PARAMETER VmaDirectory
+Compiled VMA bridge directory; defaults to BridgesDirectory. Alternatively supply artifacts/native-vma/<Configuration>/win-x64 from build-runtime.ps1.
 .PARAMETER DlssSdkRoot
 DLSS SDK root supplying lib/Windows_x86_64/rel runtimes and LICENSE.txt; defaults to the sdk/dlss submodule.
 .PARAMETER Fsr3SdkRoot
@@ -29,6 +31,7 @@ param(
     [Parameter(Mandatory)][string]$BridgesDirectory,
     [Parameter(Mandatory)][string]$CoreNativeDirectory,
     [Parameter(Mandatory)][string]$CoreNoticesDirectory,
+    [string]$VmaDirectory,
     [string]$DlssSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/dlss'),
     [string]$Fsr3SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx-vk'),
     [string]$Fsr4SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx'),
@@ -39,6 +42,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
+if (-not $VmaDirectory) { $VmaDirectory = $BridgesDirectory }
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bundle output directory.' }
 $inventory = Get-Content -LiteralPath (Join-Path $projectRoot 'packaging/native-win-x64.json') -Raw | ConvertFrom-Json
@@ -67,7 +71,8 @@ function Add-Input([string]$relative, [string]$source) {
 }
 foreach ($component in $inventory.components.PSObject.Properties) {
     foreach ($name in $component.Value) {
-        $source = if ($name.StartsWith('VulkanStory')) { Join-Path $BridgesDirectory $name }
+        $source = if ($name -eq 'VulkanStoryVma.dll') { Join-Path $VmaDirectory $name }
+        elseif ($name.StartsWith('VulkanStory')) { Join-Path $BridgesDirectory $name }
         elseif ($component.Name -eq 'core') { Join-Path $CoreNativeDirectory $name }
         elseif ($component.Name -eq 'dlss') { Join-Path $DlssSdkRoot "lib/Windows_x86_64/rel/$name" }
         elseif ($component.Name -eq 'fsr3') { Join-Path $Fsr3SdkRoot "PrebuiltSignedDLL/$name" }
@@ -85,6 +90,7 @@ foreach ($component in $inventory.components.PSObject.Properties) {
     }
 }
 Add-Input 'licenses/dlss/LICENSE.txt' (Join-Path $DlssSdkRoot 'LICENSE.txt')
+Add-Input 'licenses/vma/LICENSE.txt' (Join-Path $projectRoot 'sdk/vma/LICENSE.txt')
 Add-Input 'licenses/fsr3/LICENSE.txt' (Join-Path $Fsr3SdkRoot 'LICENSE.txt')
 Add-Input 'licenses/fsr3/sdk-LICENSE.txt' (Join-Path $Fsr3SdkRoot 'sdk/LICENSE.txt')
 Add-Input 'licenses/fsr4/license.md' (Join-Path $Fsr4SdkRoot 'Kits/FidelityFX/docs/license.md')

@@ -71,6 +71,15 @@ internal sealed partial class GameGraphicsAdapter
         AmbientOcclusionTexture = 0;
         if (!GameFrameBindings.RenderSsao(platform!) || projectMatrix == null) return;
 
+        // The original post input is kept unjittered for game camera/culling code.
+        // AO reads rasterized depth/normals/positions and must project/reconstruct
+        // samples on the same grid as the world, sky and cloud draws.
+        if (aoTemporal is { } temporal && temporal.State.RenderedFrameId == RequireDevice().LatencyFrameId &&
+            temporal.State.JitterActive &&
+            temporal.State.IsViewCaptured(EnumTemporalView.World))
+            projectMatrix = temporal.State.CopyRasterProjection(EnumTemporalView.World,
+                temporal.State.RenderWidth, temporal.State.RenderHeight);
+
         AmbientOcclusionTexture = RenderGtao(projectMatrix);
         if (AmbientOcclusionTexture != 0)
         {

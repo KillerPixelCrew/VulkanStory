@@ -52,6 +52,8 @@ internal sealed partial class GameRenderSession : IDisposable
     private VulkanStory.Contracts.RendererLatencySelection? appliedLatency;
     private GameFrameSettings? pendingFrameSettings;
     private ulong inputFrameId;
+    private string? reconstructionDecline;
+    private string? upscalerFrameRefusal;
     internal bool Stopping => stopping;
     internal bool Matches(ClientPlatformWindows candidate) => ReferenceEquals(platform, candidate);
     internal SdlWindowHost Window => window ?? throw new ObjectDisposedException(nameof(GameRenderSession));
@@ -277,9 +279,14 @@ internal sealed partial class GameRenderSession : IDisposable
         // Called by the migrated post chain before bloom/final/UI, never from
         // BeforePresent where the final scene has already been composed.
         GameTemporalFrame temporal = Temporal.Snapshot();
-        if (temporal.FrameId != Device.LatencyFrameId || !temporal.HasCamera || !temporal.MotionValid)
+        upscalerFrameRefusal = temporal.FrameId != Device.LatencyFrameId ? "temporal frame identity mismatch" :
+            !temporal.HasCamera ? "world camera not captured" :
+            !temporal.MotionValid ? Temporal.MotionReadiness : null;
+        if (upscalerFrameRefusal != null)
         { Graphics.UpscaledThisFrame = false; return false; }
-        return upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
+        bool evaluated = upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
+        if (!evaluated) upscalerFrameRefusal = upscalers.EvaluationReadiness;
+        return evaluated;
     }
     /// <summary>Runs SR or native TAA followed by the retained display-resolution post tail.</summary>
     /// <remarks>AO precedes this seam and UI is excluded from reconstruction inputs.</remarks>
@@ -290,7 +297,27 @@ internal sealed partial class GameRenderSession : IDisposable
         // AO completes before this seam. Reconstruction precedes bloom,
         // god rays and luma; UI never enters either reconstruction input.
         if (!RenderUpscaler()) Graphics.RenderTaaResolve(Temporal);
+        ObserveReconstruction();
         Graphics.RenderPostTail(Graphics.PostSceneTexture(), Graphics.PostGlowTexture());
+    }
+    private void ObserveReconstruction()
+    {
+        RendererSettings requested = services.RendererSettings.Settings;
+        if (requested.Upscaler == "off" && !requested.Taa)
+        { reconstructionDecline = null; return; }
+        if (Graphics.UpscaledThisFrame || Graphics.TaaResolvedThisFrame)
+        {
+            if (reconstructionDecline != null)
+                platform.Logger.Notification("VulkanStory: temporal reconstruction resumed with {0} at frame {1}.",
+                    Graphics.UpscaledThisFrame ? services.RendererSettings.EffectiveUpscaler : "TAA", Device.LatencyFrameId);
+            reconstructionDecline = null;
+            return;
+        }
+        if (reconstructionDecline != null) return;
+        reconstructionDecline = services.RendererSettings.UpscalerReplacesTaa
+            ? upscalerFrameRefusal ?? "upscaler declined" : Graphics.TaaReadiness;
+        platform.Logger.Warning("VulkanStory: temporal reconstruction dropped at frame {0}: {1}; motion: {2}.",
+            Device.LatencyFrameId, reconstructionDecline, Temporal.MotionReadiness);
     }
     /// <summary>Executes AO followed by temporal reconstruction and display-resolution post stages.</summary>
     /// <param name="projection">Original scene projection used by the AO path; ignored when offscreen rendering is disabled.</param>

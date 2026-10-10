@@ -150,7 +150,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     internal long FrameUse;
 
     /// <summary>
-    /// Single-layer views, created on demand and keyed by layer.
+    /// Single-mip, single-layer attachment views, created on demand and keyed by layer.
     ///
     /// <see cref="View" /> covers the whole image, which is what a sampler wants.
     /// A colour attachment pointed at one layer of an array needs a view of that
@@ -164,7 +164,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
 
     public ImageView ViewOfLayer(uint layer)
     {
-        if (layer == 0 && Layers <= 1) return View;
+        if (Volume) throw new NotSupportedException("Volume textures have no 2D attachment view.");
+        if (layer >= Layers) throw new ArgumentOutOfRangeException(nameof(layer));
+        if (layer == 0 && Layers == 1 && MipLevels == 1 && !Cube) return View;
         if (_layerViews.TryGetValue(layer, out ImageView existing)) return existing;
 
         var createInfo = new ImageViewCreateInfo
@@ -173,7 +175,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
             Image = Image,
             ViewType = ImageViewType.Type2D,
             Format = Format,
-            SubresourceRange = new ImageSubresourceRange(Aspect, 0, MipLevels, layer, 1),
+            SubresourceRange = new ImageSubresourceRange(Aspect, 0, 1, layer, 1),
         };
 
         VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),

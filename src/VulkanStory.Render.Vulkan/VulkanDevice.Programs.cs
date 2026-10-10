@@ -30,22 +30,22 @@ public sealed unsafe partial class VulkanDevice
         string stageName = shader.Type.ToString();
         if (shader.Code.Length + (shader.PrefixCode?.Length ?? 0) > MaxShaderSourceBytes)
         {
-            AddDiagnostic($"{stageName}: shader source exceeds {MaxShaderSourceBytes} bytes and was rejected");
+            AddDiagnostic(VulkanContext.ErrorPrefix + $"{stageName}: shader source exceeds {MaxShaderSourceBytes} bytes and was rejected");
             return false;
         }
         if (shader.Code.IndexOf('\0') >= 0 || (shader.PrefixCode?.IndexOf('\0') ?? -1) >= 0)
         {
-            AddDiagnostic($"{stageName}: shader source contains a NUL byte and was rejected");
+            AddDiagnostic(VulkanContext.ErrorPrefix + $"{stageName}: shader source contains a NUL byte and was rejected");
             return false;
         }
 
-        _stagedStages[shader] = new StagedStage
+        _stagedStages.AddOrUpdate(shader, new StagedStage
         {
             Stage = (ShaderStageKind)shader.Type,
             Code = shader.Code,
             PrefixCode = shader.PrefixCode ?? "",
             Filename = shader.Type.ToString(),
-        };
+        });
         return true;
     }
 
@@ -60,7 +60,7 @@ public sealed unsafe partial class VulkanDevice
 
         if (stages.Count == 0)
         {
-            AddDiagnostic($"shader program '{program.PassName}' has no stages");
+            AddDiagnostic(VulkanContext.ErrorPrefix + $"shader program '{program.PassName}' has no stages");
             return 0;
         }
 
@@ -126,7 +126,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 foreach (string error in translated.Errors)
                 {
-                    AddDiagnostic($"{program.PassName}: {error}");
+                    AddDiagnostic(VulkanContext.ErrorPrefix + $"{program.PassName}: {error}");
                 }
                 return 0;
             }

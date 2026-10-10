@@ -19,8 +19,10 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Known defects
 
-- **REN-07:** Geometry edges against the sky jitter with TAA. The native TAA resolve read the sky's reactive value at sky-edge pixels; fixed and deployed, edge flicker down ~4–5× in the foggy-village capture. Awaiting the user's in-game check.
-- **REN-08:** A pipeline first used mid-game (new entity, particle or mod shader) skips its draw while compiling, causing one jittered frame and a TAA/SR history reset.
+- **REN-07:** Temporal instability at treelines against the sky. The reported recording uses FSR 3 UltraPerformance with DLSS-G; cloud/AO raster coordinates and cloud depth sampling have correctness defects.
+- **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
+- **REN-09:** Allocation crash and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported.
+- **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
 

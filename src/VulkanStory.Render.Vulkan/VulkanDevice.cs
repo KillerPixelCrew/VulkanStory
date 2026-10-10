@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Shaders;
 using Silk.NET.Vulkan;
@@ -427,7 +428,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
-    private readonly Dictionary<VulkanStory.Contracts.ShaderStageDefinition, StagedStage> _stagedStages = new();
+    // Staging follows live shader definitions instead of retaining superseded reload sources.
+    private readonly ConditionalWeakTable<ShaderStageDefinition, StagedStage> _stagedStages = new();
 
     /// <summary>
     /// Error-severity diagnostics since the last GetError, under their own lock:

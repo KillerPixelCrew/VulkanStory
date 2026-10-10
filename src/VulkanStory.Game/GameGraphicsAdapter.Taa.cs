@@ -20,6 +20,7 @@ internal sealed partial class GameGraphicsAdapter
         ["inputTexelSize", "sharpness"], ["inputScene"]);
     private int taaResolveProgram, taaSharpenProgram, taaParity;
     private bool taaResolveFailed, taaSharpenFailed;
+    internal string TaaReadiness { get; private set; } = "not resolved";
     private int taaResolvedColor, taaResolvedGlow;
     private readonly Dictionary<(int Program, string Name), int> ownedUniforms = new();
 
@@ -60,12 +61,7 @@ internal sealed partial class GameGraphicsAdapter
     /// <returns>The inverse jittered view-projection (null when singular; each caller keeps its own fallback) and the previous view-projection.</returns>
     private static (float[]? Inverse, float[] Previous) JitteredReprojection(TemporalFrameState frame, int width, int height)
     {
-        float[] projection = frame.GetProjection(EnumTemporalView.World);
-        var jittered = new double[16];
-        for (int index = 0; index < 16; index++) jittered[index] = projection[index];
-        TemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, width, height);
-        var projectionJittered = new float[16];
-        for (int index = 0; index < 16; index++) projectionJittered[index] = (float)jittered[index];
+        float[] projectionJittered = frame.CopyRasterProjection(EnumTemporalView.World, width, height);
         float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
         float[]? inverse = Mat4f.Invert(new float[16], viewProj);
         float[] previous = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
@@ -81,9 +77,13 @@ internal sealed partial class GameGraphicsAdapter
         TaaResolvedThisFrame = false;
         var settings = postSettings ?? throw new InvalidOperationException("Post settings are not attached.");
         var snapshot = temporal.Snapshot();
-        if (!TaaTargetsReady || !settings.EffectiveTaa || !snapshot.MotionValid ||
-            snapshot.FrameId != device!.LatencyFrameId)
-        { TaaHistoryValid = false; return false; }
+        string? refusal = !settings.EffectiveTaa ? settings.TaaDisabled ? "TAA disabled for this session" : "TAA not selected" :
+            !TaaTargetsReady ? "TAA targets unavailable" :
+            snapshot.FrameId != device!.LatencyFrameId ? "temporal frame identity mismatch" :
+            !snapshot.WorldCaptured ? "world camera not captured" :
+            !snapshot.MotionValid ? temporal.MotionReadiness : null;
+        if (refusal != null)
+        { TaaReadiness = refusal; TaaHistoryValid = false; return false; }
         var buffers = platform!.FrameBuffers;
         FrameBufferRef? primary = NativePostTarget(buffers, PrimaryIndex);
         FrameBufferRef? write = NativePostTarget(buffers, (taaParity & 1) == 0 ? TaaHistoryIndexA : TaaHistoryIndexB);
@@ -91,17 +91,18 @@ internal sealed partial class GameGraphicsAdapter
         int motion = FrameState.MotionAttachment;
         if (primary?.ColorTextureIds is not { Length: >= 2 } || motion < 0 || primary.ColorTextureIds.Length <= motion ||
             primary.DepthTextureId <= 0 || write?.ColorTextureIds is not { Length: >= 3 } || read?.ColorTextureIds is not { Length: >= 3 })
-        { TaaHistoryValid = false; return false; }
+        { TaaReadiness = "TAA colour, depth, motion or history target unavailable"; TaaHistoryValid = false; return false; }
         int program = OwnedProgram("taa-resolve", ref taaResolveProgram, ref taaResolveFailed);
-        if (program <= 0) { TaaHistoryValid = false; return false; }
+        if (program <= 0) { TaaReadiness = "TAA resolve shader unavailable"; TaaHistoryValid = false; return false; }
         TemporalFrameState frame = temporal.State;
         (float[]? inverse, float[] previous) = JitteredReprojection(frame, write.Width, write.Height);
         bool reset = frame.Reset || !TaaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || inverse == null;
         inverse ??= Mat4f.Identity(new float[16]);
         bool drawn = DrawTaaResolve(program, primary, write, read, frame, inverse, previous, reset);
-        if (!drawn) { TaaHistoryValid = false; return false; }
+        if (!drawn) { TaaReadiness = "TAA resolve draw declined"; TaaHistoryValid = false; return false; }
         taaResolvedColor = write.ColorTextureIds[0]; taaResolvedGlow = write.ColorTextureIds[1];
         TaaHistoryValid = true; taaParity ^= 1; TaaResolvedThisFrame = true;
+        TaaReadiness = "ready";
         return true;
     }
     private bool DrawTaaResolve(int program, FrameBufferRef primary, FrameBufferRef write, FrameBufferRef read,

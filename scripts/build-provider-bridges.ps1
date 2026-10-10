@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-Builds the five Windows x64 provider bridges into a fresh output directory.
+Builds five Windows x64 provider bridges and the required VMA allocator bridge.
 .DESCRIPTION
-Requires Windows x64 PowerShell 7, declared SDK headers, the sdk/minhook submodule (FSR 4), g++, and gcc (FSR 4 MinHook sources and NGX). Validates inputs before creating OutputDirectory, then invokes the retained NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
+Requires Windows x64 PowerShell 7, declared SDK headers, the sdk/minhook and sdk/vma submodules, g++, and gcc (FSR 4 MinHook sources and NGX). Validates inputs before creating OutputDirectory, then invokes VMA, NGX, FSR3, FSR4, XeSS-FG, and Streamline build entries. Vendor redistributable runtimes/notices are separate inputs; a partially populated output may remain if a later build fails.
 .PARAMETER Fsr3SdkRoot
 FidelityFX SDK root containing ffx-api/include/ffx_api/ffx_api.h; defaults to the sdk/fidelityfx-vk submodule (v1.1.4).
 .PARAMETER Fsr4SdkRoot
@@ -12,7 +12,7 @@ XeSS SDK root containing inc/xess_fg/xefg_swapchain_d3d12.h; defaults to the sdk
 .PARAMETER StreamlineSdkRoot
 Streamline SDK root containing include/sl.h; defaults to the sdk/streamline submodule (v2.14.1).
 .PARAMETER OutputDirectory
-Fresh destination for the five compiled bridge DLLs; an existing directory is rejected.
+Fresh destination for the six compiled bridge DLLs; an existing directory is rejected.
 .PARAMETER VulkanSdkRoot
 Vulkan SDK root containing Include/vulkan/vulkan.h; defaults to VULKAN_SDK.
 #>
@@ -38,6 +38,7 @@ $headers = [ordered]@{
     (Join-Path $Fsr4SdkRoot 'Kits/FidelityFX/api/include/dx12/ffx_api_dx12.h') = 'FidelityFX DX12'
     (Join-Path $XessSdkRoot 'inc/xess_fg/xefg_swapchain_d3d12.h') = 'XeSS FG'
     (Join-Path $StreamlineSdkRoot 'include/sl.h') = 'Streamline'
+    (Join-Path $projectRoot 'sdk/vma/include/vk_mem_alloc.h') = 'VMA'
 }
 foreach ($header in $headers.Keys) {
     if (-not (Test-Path -LiteralPath $header -PathType Leaf)) { throw "Missing $($headers[$header]) header: $header" }
@@ -51,6 +52,7 @@ if (-not (Get-Command gcc.exe -ErrorAction SilentlyContinue)) { throw 'gcc.exe i
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bridge output directory; stale binaries are not merged.' }
 New-Item -ItemType Directory -Path $output | Out-Null
+& (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $output 'VulkanStoryVma.dll') -VulkanSdkRoot $vulkanRoot
 & (Join-Path $projectRoot 'native/ngx/build.ps1') -OutputDirectory $output
 $builds = @(
     @{ Directory='fsr3'; Sdk=$Fsr3SdkRoot; Binary='VulkanStoryFsr3.dll' },

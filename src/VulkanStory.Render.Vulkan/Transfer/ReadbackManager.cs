@@ -86,9 +86,38 @@ internal sealed unsafe class ReadbackManager : IDisposable
         _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
             ImageLayout.TransferSrcOptimal, arena.Handle, 1, &region);
 
+        RecordHostReadBarrier(_context, commandBuffer, arena, offset, copied);
+
         if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
 
         return new ReadbackTicket(arena, offset, Math.Min(bytes, copied), slot.FrameValue);
+    }
+
+    /// <summary>Makes copied bytes visible to host reads before their completion signal.</summary>
+    internal static void RecordHostReadBarrier(VulkanContext context, CommandBuffer commandBuffer,
+        VulkanBuffer buffer, ulong offset, ulong size)
+    {
+        if (size == 0) return;
+        var barrier = new BufferMemoryBarrier2
+        {
+            SType = StructureType.BufferMemoryBarrier2,
+            SrcStageMask = PipelineStageFlags2.CopyBit,
+            SrcAccessMask = AccessFlags2.TransferWriteBit,
+            DstStageMask = PipelineStageFlags2.HostBit,
+            DstAccessMask = AccessFlags2.HostReadBit,
+            SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            Buffer = buffer.Handle,
+            Offset = offset,
+            Size = size,
+        };
+        var dependency = new DependencyInfo
+        {
+            SType = StructureType.DependencyInfo,
+            BufferMemoryBarrierCount = 1,
+            PBufferMemoryBarriers = &barrier,
+        };
+        context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
     }
 
     /// <summary>

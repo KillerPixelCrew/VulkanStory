@@ -204,6 +204,8 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// forces the heap x 0.7 fallback.
     /// </summary>
     public bool MemoryBudgetAvailable { get; private set; }
+    /// <summary>Whether the device was created with bufferDeviceAddress enabled.</summary>
+    public bool BufferDeviceAddressEnabled { get; private set; }
     /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
 
@@ -1278,6 +1280,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             DynamicState3Api = state3;
         }
         MemoryBudgetAvailable = wantMemoryBudget;
+        BufferDeviceAddressEnabled = vulkan12.BufferDeviceAddress;
         EnabledDeviceExtensions = deviceExtensions.ToArray();
         Capabilities.PresentIdEnabled = enablePresentId;
         Capabilities.PresentFencesEnabled = enablePresentFences;

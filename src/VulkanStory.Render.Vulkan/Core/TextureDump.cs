@@ -276,9 +276,8 @@ internal static class TextureDump
     /// Bytes per texel for the formats the dump path is expected to see. One
     /// table serves both the size check and the decode switch, so a format can
     /// never be sized one way and read another; R16Sfloat sized as 4 bytes made
-    /// every row of an R16f readback start on the wrong texel. Anything
-    /// unrecognised falls back to 4 (8-bit RGBA), the blanket assumption the
-    /// default decode branch makes.
+    /// every row of an R16f readback start on the wrong texel. Unsupported raw
+    /// formats are rejected before the GPU copy rather than assigned a guessed stride.
     /// </summary>
     public static int BytesPerTexel(Format format) => TextureReadbackFormats.BytesPerTexel(format);
 

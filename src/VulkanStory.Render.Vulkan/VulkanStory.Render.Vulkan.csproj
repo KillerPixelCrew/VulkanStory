@@ -45,6 +45,7 @@
     <Compile Include="Core/VulkanCapabilities.cs" />
     <Compile Include="Core/VulkanContext.cs" />
     <Compile Include="Core/VulkanAllocator.cs" />
+    <Compile Include="Core/VmaRuntime.cs" />
     <Compile Include="Core/VulkanResources.cs" />
     <Compile Include="Core/FrameRing.cs" />
     <Compile Include="Core/TextureManager.cs" />

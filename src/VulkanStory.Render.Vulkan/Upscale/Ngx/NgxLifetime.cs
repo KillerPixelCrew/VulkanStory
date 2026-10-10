@@ -174,6 +174,7 @@ internal sealed class NgxLifetimeOwner
     {
         lock (_gate)
         {
+            if (_shutdownFailed) return NgxLifetimeOutcome.ShutdownFailed;
             if (_shutDown) return NgxLifetimeOutcome.AlreadyShutDown;
             if (!_initialized)
             {
