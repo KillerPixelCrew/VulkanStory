@@ -31,6 +31,7 @@
     <Compile Include="VulkanDevice.Shadows.cs" />
     <Compile Include="VulkanDevice.UpscalerHost.cs" />
     <Compile Include="VulkanDevice.Xess.cs" />
+    <Compile Include="VulkanDevice.XessOrientation.cs" />
     <Compile Include="VulkanDevice.XessFg.cs" />
     <Compile Include="AmbientOcclusion/GtaoRenderer.cs" />
     <Compile Include="AmbientOcclusion/GtaoSettings.cs" />

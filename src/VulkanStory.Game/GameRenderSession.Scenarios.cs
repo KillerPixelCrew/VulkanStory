@@ -60,6 +60,7 @@ internal sealed partial class GameRenderSession
         ulong frameId = Device.LatencyFrameId;
         bool currentWorldSample = temporal.WorldCaptured && temporal.FrameId == frameId;
         var sdkInputs = Device.LastUpscalerInputTextures;
+        var xessInputs = Device.LastXessInputTextures;
         bool currentSdkInputs = currentWorldSample && sdkInputs.FrameId == frameId;
         foreach (var action in HeadlessHarnessOptions.Scenario!.Actions.Where(a =>
                      a.Tick == scenarioTick && a.Kind == HeadlessScenarioActionKind.Capture))
@@ -86,6 +87,15 @@ internal sealed partial class GameRenderSession
             }
             if (currentSdkInputs)
             {
+                if (xessInputs.FrameId == frameId)
+                {
+                    if (Device.ReadTextureForParity(xessInputs.Color) is { } sdkColor)
+                        HeadlessParityDump.Write(inputDirectory, 64, "SdkColor", "color0", sdkColor);
+                    if (Device.ReadTextureForParity(xessInputs.Depth) is { } sdkDepth)
+                        HeadlessParityDump.Write(inputDirectory, 65, "SdkDepth", "color0", sdkDepth);
+                    if (Device.ReadTextureForParity(xessInputs.Output) is { } sdkOutput)
+                        HeadlessParityDump.Write(outputDirectory, 66, "SdkUprightOutput", "color0", sdkOutput);
+                }
                 if (sdkInputs.Motion > 0 && Device.ReadTextureForParity(sdkInputs.Motion) is { } motion)
                     HeadlessParityDump.Write(inputDirectory, 60, "SdkMotion", "color0", motion);
                 if (sdkInputs.Reactive > 0 && Device.ReadTextureForParity(sdkInputs.Reactive) is { } reactive)
@@ -397,6 +407,9 @@ internal sealed partial class GameRenderSession
         object? temporalFrameId = currentWorldSample ? raw.FrameId : null;
         FrameBufferRef? primary = PrimaryTarget;
         var sdkInputs = Device.LastUpscalerInputTextures;
+        var xessInputs = Device.LastXessInputTextures;
+        bool currentXessInputs = currentWorldSample && services.RendererSettings.EffectiveUpscaler == "xess" &&
+            xessInputs.FrameId == raw.FrameId;
         object? srInputs = SrInputCapture && currentWorldSample && Graphics.UpscaledThisFrame &&
             sdkInputs.FrameId == raw.FrameId ? new
             {
@@ -409,8 +422,9 @@ internal sealed partial class GameRenderSession
                 displayHeight = height,
                 jitterX = raw.Provider.JitterX,
                 jitterY = raw.Provider.JitterY,
-                colorTexture = primary?.ColorTextureIds.ElementAtOrDefault(0),
-                depthTexture = primary?.DepthTextureId,
+                inputOrientation = currentXessInputs ? "upright" : "renderer",
+                colorTexture = currentXessInputs ? xessInputs.Color : primary?.ColorTextureIds.ElementAtOrDefault(0),
+                depthTexture = currentXessInputs ? xessInputs.Depth : primary?.DepthTextureId,
                 sourceMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
                 motionTexture = sdkInputs.Motion,
                 reactiveTexture = sdkInputs.Reactive,

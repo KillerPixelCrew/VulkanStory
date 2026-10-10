@@ -35,7 +35,8 @@ internal interface IUpscalerDevice
     int EvaluateFsr3(Fsr3Native api, nint context, int motion, in UpscalerFrame frame, bool firstFrame);
     /// <summary>Converts renderer motion and records XeSS SR for the current frame.</summary>
     /// <returns>The XeSS result code; nonnegative values include successful SDK warnings.</returns>
-    int EvaluateXess(XessNative api, nint context, int motion, in UpscalerFrame frame, bool firstFrame);
+    int EvaluateXess(XessNative api, nint context, int color, int depth, int motion, int output,
+        in UpscalerFrame frame, bool firstFrame);
     /// <summary>Creates the Vulkan/DX12 image sets and fence required by the FSR 4 plan.</summary>
     /// <param name="runtime">DX12 runtime that must outlive the returned shared resources.</param>
     /// <param name="plan">Input and output extents for the shared images.</param>

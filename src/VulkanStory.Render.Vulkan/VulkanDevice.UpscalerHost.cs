@@ -33,8 +33,8 @@ public sealed unsafe partial class VulkanDevice
     int IUpscalerDevice.EvaluateFsr3(Fsr3Native api, nint context, int motion, in UpscalerFrame frame,
         bool firstFrame) => EvaluateFsr3(api, context, motion, frame, firstFrame);
     /// <inheritdoc/>
-    int IUpscalerDevice.EvaluateXess(XessNative api, nint context, int motion, in UpscalerFrame frame,
-        bool firstFrame) => EvaluateXess(api, context, motion, frame, firstFrame);
+    int IUpscalerDevice.EvaluateXess(XessNative api, nint context, int color, int depth, int motion, int output,
+        in UpscalerFrame frame, bool firstFrame) => EvaluateXess(api, context, color, depth, motion, output, frame, firstFrame);
     /// <inheritdoc/>
     bool IUpscalerDevice.TryCreateFsr4SharedFrames(Fsr4Runtime runtime, in UpscalerPlan plan,
         out Fsr4SharedFrames? shared, out string reason) =>

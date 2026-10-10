@@ -19,7 +19,7 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
     private nint instance, physical, logical;
     private XessContext? context;
     private UpscalerPlan initializedPlan;
-    private int motion;
+    private int color, depth, motion, output;
     private bool ready, firstFrame;
     /// <inheritdoc/>
     public string Id => "xess";
@@ -220,11 +220,14 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
             var init = new XessInit { Output = new(plan.DisplayWidth, plan.DisplayHeight),
                 Quality = QualityOf(plan.Quality), Flags = InitFlags };
             if (!Check(api!.Init(context!.Handle, &init), "xessVKInit")) { error = Unavailable; return false; }
-            motion = device!.CreateUpscaleTexture(plan.RenderWidth, plan.RenderHeight, Format.R16G16Sfloat, false);
+            color = device!.CreateUpscaleTexture(plan.RenderWidth, plan.RenderHeight, Format.R16G16B16A16Sfloat, true);
+            depth = device.CreateUpscaleTexture(plan.RenderWidth, plan.RenderHeight, Format.R32Sfloat, true);
+            motion = device.CreateUpscaleTexture(plan.RenderWidth, plan.RenderHeight, Format.R16G16Sfloat, true);
+            output = device.CreateUpscaleTexture(plan.DisplayWidth, plan.DisplayHeight, Format.R16G16B16A16Sfloat, true);
             initializedPlan = plan;
             firstFrame = true;
         }
-        int result = device!.EvaluateXess(api!, context!.Handle, motion, frame, firstFrame);
+        int result = device!.EvaluateXess(api!, context!.Handle, color, depth, motion, output, frame, firstFrame);
         firstFrame = false;
         if (Check(result, "xessVKExecute")) return true;
         error = Unavailable;
@@ -234,7 +237,9 @@ internal sealed unsafe class XessBackend : IUpscalerBackend, IDeviceRequirementC
     public void RetireFeature()
     {
         if (context != null) { device!.RetireUpscalerResource(context); context = null; }
-        if (motion != 0) { device!.DeleteTexture(motion); motion = 0; }
+        foreach (int texture in new[] { color, depth, motion, output })
+            if (texture != 0) device!.DeleteTexture(texture);
+        color = depth = motion = output = 0;
         initializedPlan = default;
     }
     /// <inheritdoc/>

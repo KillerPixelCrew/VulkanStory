@@ -25,16 +25,26 @@ public sealed unsafe partial class VulkanDevice
     internal void RetireUpscalerResource(IDisposable resource) => _frames.DeferDeletion(resource);
 
     /// <summary>Converts renderer motion and records a XeSS SR execution with the current temporal constants.</summary>
-    internal int EvaluateXess(XessNative api, nint context, int motionRg, in UpscalerFrame frame, bool firstFrame)
+    internal int EvaluateXess(XessNative api, nint context, int colorId, int depthId, int motionRg, int outputId,
+        in UpscalerFrame frame, bool firstFrame)
     {
         using GpuSection gpuSection = BeginGpuSection("upscale_xess");
         XessConstantsCapture = null;
+        LastXessInputTextures = default;
         if (!_frameActive) return -3;
-        VulkanTexture? color = _textures.Get(frame.Color), depth = _textures.Get(frame.Depth),
+        VulkanTexture? sourceColor = _textures.Get(frame.Color), sourceDepth = _textures.Get(frame.Depth),
             sourceMotion = _textures.Get(frame.Motion), motion = _textures.Get(motionRg),
-            output = _textures.Get(frame.Output);
-        if (color == null || depth == null || sourceMotion == null || motion == null || output == null) return -4;
-        if (!PrepareUpscalerMotion(sourceMotion, motion, color.Width, color.Height, Commands)) return -4;
+            color = _textures.Get(colorId), depth = _textures.Get(depthId), output = _textures.Get(outputId),
+            rendererOutput = _textures.Get(frame.Output);
+        if (sourceColor == null || sourceDepth == null || sourceMotion == null || motion == null ||
+            color == null || depth == null || output == null || rendererOutput == null) return -4;
+        if (color.Width != sourceColor.Width || color.Height != sourceColor.Height ||
+            depth.Width != color.Width || depth.Height != color.Height ||
+            motion.Width != color.Width || motion.Height != color.Height ||
+            sourceDepth.Width != color.Width || sourceDepth.Height != color.Height ||
+            sourceMotion.Width != color.Width || sourceMotion.Height != color.Height ||
+            output.Width != rendererOutput.Width || output.Height != rendererOutput.Height) return -4;
+        if (!PrepareXessUprightInputs(frame, colorId, depthId, motionRg)) return -4;
 
         CommandBuffer commands = Commands;
         _textures.Require(_barriers, commands, color, ResourceUsage.SampleExternal);
@@ -46,8 +56,8 @@ public sealed unsafe partial class VulkanDevice
         {
             Color = XessImage.From(color), Depth = XessImage.From(depth), Velocity = XessImage.From(motion),
             Output = XessImage.From(output), Width = color.Width, Height = color.Height,
-            // Positive-height Vulkan rasterization moves image rows by +Jy.
-            // XeSS expresses camera jitter with Y up, as in Intel's Vulkan sample.
+            // All XeSS resources are upright. Submit their measured pixel
+            // displacement; flipping rows reverses both jitter and motion Y.
             JitterX = frame.Temporal.JitterX,
             JitterY = -frame.Temporal.JitterY,
             ExposureScale = 1f, Reset = firstFrame || frame.Temporal.Reset ? 1u : 0u,
@@ -65,6 +75,7 @@ public sealed unsafe partial class VulkanDevice
                 frameId = LatencyFrameId,
                 submittedJitterX = args.JitterX, submittedJitterY = args.JitterY,
                 rasterJitterX = frame.Temporal.JitterX, rasterJitterY = frame.Temporal.JitterY,
+                sdkRasterJitterY = -frame.Temporal.JitterY,
                 jitterScaleQueryResult = jitterScaleResult,
                 jitterScaleX = CapturedScale(jitterScaleResult, jitterScaleX),
                 jitterScaleY = CapturedScale(jitterScaleResult, jitterScaleY),
@@ -73,8 +84,11 @@ public sealed unsafe partial class VulkanDevice
                 velocityScaleY = CapturedScale(velocityScaleResult, velocityScaleY),
                 resetHistory = args.Reset != 0, firstFrame,
                 exposureScale = args.ExposureScale, initFlags = XessBackend.InitFlags,
-                colorTexture = frame.Color, depthTexture = frame.Depth,
-                sourceMotionTexture = frame.Motion, motionTexture = motionRg, outputTexture = frame.Output,
+                inputOrientation = "upright",
+                sourceColorTexture = frame.Color, sourceDepthTexture = frame.Depth,
+                colorTexture = colorId, depthTexture = depthId,
+                sourceMotionTexture = frame.Motion, motionTexture = motionRg,
+                sdkOutputTexture = outputId, outputTexture = frame.Output,
                 renderWidth = args.Width, renderHeight = args.Height,
                 sourceMotionWidth = sourceMotion.Width, sourceMotionHeight = sourceMotion.Height,
                 depthWidth = depth.Width, depthHeight = depth.Height,
@@ -83,8 +97,10 @@ public sealed unsafe partial class VulkanDevice
             };
         }
         _lastUpscalerInputTextures = (LatencyFrameId, motionRg, 0);
+        LastXessInputTextures = (LatencyFrameId, colorId, depthId, motionRg, outputId);
         int result = api.Execute(context, commands.Handle, &args);
         _dynamicState.Invalidate();
+        if (result >= 0 && !RestoreXessRendererOrientation(outputId, frame.Output)) return -5;
         return result;
     }
 
