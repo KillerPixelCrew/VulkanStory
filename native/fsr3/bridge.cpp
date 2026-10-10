@@ -20,17 +20,18 @@ struct VulkanStoryFsr3Image {
     VkFormat format;
 };
 /// @brief Fixed-layout SR dispatch record shared with the managed FSR3 ABI.
-/// @details The 160-byte record contains five 24-byte image records; jitter begins at byte 128. Color/output use RGBA16F, depth D32F, motion RG16F and reactive coverage R8_UNORM. The host keeps all resources live through GPU completion.
+/// @details The 184-byte record contains six 24-byte image records; jitter begins at byte 152. Color/output use RGBA16F, depth D32F, motion RG16F and independent material reactive/composition masks R8_UNORM. The host keeps all resources live through GPU completion.
 struct VulkanStoryFsr3Frame {
     VkCommandBuffer commands;
-    /// @brief Borrowed SR scene color, depth, motion, output and render-resolution reactive-coverage resources.
-    VulkanStoryFsr3Image color, depth, motion, output, reactive;
+    /// @brief Borrowed SR scene color, depth, motion, output and separate render-resolution material/composition resources.
+    VulkanStoryFsr3Image color, depth, motion, output, reactive, composition;
     float jitterX, jitterY, deltaMs, nearPlane, farPlane, fovRadians;
     uint32_t reset;
 };
 static_assert(sizeof(VulkanStoryFsr3Image) == 24);
-static_assert(sizeof(VulkanStoryFsr3Frame) == 160);
-static_assert(offsetof(VulkanStoryFsr3Frame, jitterX) == 128);
+static_assert(sizeof(VulkanStoryFsr3Frame) == 184);
+static_assert(offsetof(VulkanStoryFsr3Frame, jitterX) == 152);
+static_assert(offsetof(VulkanStoryFsr3Frame, composition) == 128);
 /// @brief Owns one FidelityFX reconstruction effect and its creation descriptors.
 /// @details Device handles and the process-retained SDK function table are borrowed. The host retires referencing Vulkan work before destruction.
 struct VulkanStoryFsr3Context {
@@ -213,19 +214,20 @@ static FfxApiResource Resource(VulkanStoryFsr3Image image, bool output = false) 
     return resource;
 }
 
-/// @brief Records reconstruction using the current command buffer, matching temporal constants and an R8 reactive mask.
+/// @brief Records reconstruction using matching temporal constants and independent R8 reactive/composition masks.
 /// @details Inputs must already have SDK-compatible compute-read usage and output storage-write usage. The call records GPU work without submitting or waiting; all borrowed images remain live through host timeline completion.
 /// @param context Borrowed live SR owner.
-/// @param frame Borrowed 160-byte frame record with render-resolution reactive coverage and matching input/output extents.
+/// @param frame Borrowed 184-byte frame record with render-resolution material/composition masks and matching input/output extents.
 /// @return SDK dispatch result; -1 for absent context/frame/dispatch, -2 for incompatible required image formats.
-extern "C" __declspec(dllexport) int VulkanStoryFsr3Evaluate(
+extern "C" __declspec(dllexport) int VulkanStoryFsr3EvaluateWithComposition(
     VulkanStoryFsr3Context* context, const VulkanStoryFsr3Frame* frame) {
     if (!context || !frame || !dispatch) return -1;
     if (frame->color.format != VK_FORMAT_R16G16B16A16_SFLOAT ||
         frame->depth.format != VK_FORMAT_D32_SFLOAT ||
         frame->motion.format != VK_FORMAT_R16G16_SFLOAT ||
         frame->output.format != VK_FORMAT_R16G16B16A16_SFLOAT ||
-        frame->reactive.format != VK_FORMAT_R8_UNORM) return -2;
+        frame->reactive.format != VK_FORMAT_R8_UNORM ||
+        frame->composition.format != VK_FORMAT_R8_UNORM) return -2;
     ffxDispatchDescUpscale desc{};
     desc.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
     desc.commandList = frame->commands;
@@ -233,6 +235,7 @@ extern "C" __declspec(dllexport) int VulkanStoryFsr3Evaluate(
     desc.depth = Resource(frame->depth);
     desc.motionVectors = Resource(frame->motion);
     desc.reactive = Resource(frame->reactive);
+    desc.transparencyAndComposition = Resource(frame->composition);
     desc.output = Resource(frame->output, true);
     desc.jitterOffset = {frame->jitterX, frame->jitterY};
     desc.motionVectorScale = {1.0f, 1.0f};

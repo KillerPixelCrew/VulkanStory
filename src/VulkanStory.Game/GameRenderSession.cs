@@ -192,11 +192,14 @@ internal sealed partial class GameRenderSession : IDisposable
             Graphics.UpscaledThisFrame = Graphics.UpscaledCompositeReady = Graphics.SceneNoHudCaptured = false;
             Graphics.TaaResolvedThisFrame = false;
             Graphics.GodRaysInScene = false;
+            Graphics.ResetFsr3InputPublication();
             Graphics.CaptureSrMotionInputs = SrInputCaptureScheduled;
+            Device.CaptureUpscalerConstants = SrInputCaptureScheduled;
             Graphics.Stated.UiImageFramebuffer = 0;
             Device.RedirectDefaultFramebuffer(0);
             gpuCycleStarted = true;
             Device.BeginFrame();
+            Graphics.DrainFinalizedMeshes();
             // Background pipeline results publish at BeginFrame; skips counted after it are this frame's.
             long pipelineSkipsAtStart = Device.PipelineDrawsSkipped;
             GameFrameBindings.Dispatch(platform, delta);
@@ -227,6 +230,8 @@ internal sealed partial class GameRenderSession : IDisposable
         finally
         {
             if (graphics != null) graphics.CaptureSrMotionInputs = false;
+            graphics?.ClearFsr3InputCapture();
+            if (device != null) device.CaptureUpscalerConstants = false;
             rendering = false;
         }
     }

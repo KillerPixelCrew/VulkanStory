@@ -70,6 +70,9 @@ internal sealed partial class GameRenderSession
             Directory.CreateDirectory(inputDirectory);
             Directory.CreateDirectory(outputDirectory);
             DumpNativeTaaTarget(inputDirectory, 0, "Primary", primary, true);
+            if (Graphics.UsesFsr3Inputs && Graphics.Fsr3MaterialMotionCaptureFrameId == frameId &&
+                Graphics.Fsr3MaterialMotionCapture is { } materialMotion)
+                HeadlessParityDump.Write(inputDirectory, 63, "MaterialMotion", "color0", materialMotion);
             if (Graphics.GodRaysInScene && platform.FrameBuffers[(int)EnumFrameBuffer.GodRays] is { } rays)
                 DumpNativeTaaTarget(inputDirectory, (int)EnumFrameBuffer.GodRays, "SceneGodRays", rays, false);
             if (platform.FrameBuffers[(int)EnumFrameBuffer.Transparent] is { } transparent)
@@ -87,6 +90,9 @@ internal sealed partial class GameRenderSession
                     HeadlessParityDump.Write(inputDirectory, 60, "SdkMotion", "color0", motion);
                 if (sdkInputs.Reactive > 0 && Device.ReadTextureForParity(sdkInputs.Reactive) is { } reactive)
                     HeadlessParityDump.Write(inputDirectory, 61, "SdkReactive", "color0", reactive);
+                if (services.RendererSettings.EffectiveUpscaler == "fsr3" &&
+                    Device.Fsr3CompositionTexture > 0 && Device.ReadTextureForParity(Device.Fsr3CompositionTexture) is { } composition)
+                    HeadlessParityDump.Write(inputDirectory, 62, "SdkComposition", "color0", composition);
             }
             DumpNativeTaaTarget(outputDirectory, GameGraphicsAdapter.UpscaledSceneIndex, "SdkOutput", output, false);
             WriteScenarioFrameInputs(inputDirectory, frameId, temporal, currentWorldSample,
@@ -431,6 +437,9 @@ internal sealed partial class GameRenderSession
             upscalerQuality = currentWorldSample ? services.RendererSettings.Quality : null,
             upscaleEvaluated = currentWorldSample ? Graphics.UpscaledThisFrame : (bool?)null,
             godRaysInScene = currentWorldSample ? Graphics.GodRaysInScene : (bool?)null,
+            fsr3MaterialCaptureFrameId = currentWorldSample && Graphics.UsesFsr3Inputs ? (ulong?)Device.Fsr3MaterialReactiveFrameId : null,
+            fsr3HasComposition = currentWorldSample && Graphics.UsesFsr3Inputs ? (bool?)Graphics.Fsr3HasComposition : null,
+            xessConstants = currentWorldSample ? Device.XessConstantsCapture : null,
             srInputs,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
             nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,

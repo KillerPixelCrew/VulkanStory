@@ -46,6 +46,7 @@ internal sealed partial class GameGraphicsAdapter
         sceneNoHudIndex = uiTargetIndex = -1;
         UpscaledThisFrame = UpscaledCompositeReady = false;
         GodRaysInScene = false;
+        ResetFsr3InputPublication();
         AllocatedUpscalerPlan = null;
         FrameState = FrameState with { MotionAttachment = -1, MotionWriteActive = false };
     }

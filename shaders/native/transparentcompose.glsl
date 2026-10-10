@@ -22,7 +22,7 @@
 
 // Program interface of transparentcompose (docs/vulkan.md). A fullscreen pass: one
 // draw per Use(), so the push block holds only the sampler slots, in transparentcompose.fsh's declaration
-// order, and there is no program record.
+// order. The record separates composition coverage from material response for FSR3.
 //
 // OITaccumulation is the fifth slot, the unit collectUniformNames assigns to the name `Array` it misreads
 // from `uniform sampler2DArray OITaccumulation` (docs/vulkan.md, "Family post").
@@ -33,6 +33,11 @@ layout(push_constant, scalar) uniform OptimumDraw
     OPTIMUM_SAMPLER_SLOT(sampler2D, inGlow);
     OPTIMUM_SAMPLER_SLOT(sampler2D, OITreveal);
     OPTIMUM_SAMPLER_SLOT(sampler2DArray, OITaccumulation);
+};
+
+layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
+{
+    int taaCompositionReactive;
 };
 
 #if defined(OPTIMUM_VERTEX)
@@ -104,7 +109,7 @@ void main(){
     // very alpha this pass is composited with. It is the reactive value: at 1
     // the pixel is entirely transparent content with no motion vector of its
     // own, at 0 the pixel is untouched by it.
-    outMotion = optimumWriteReactiveOnly(clamp(anet, 0.0, 1.0));
+    outMotion = optimumWriteReactiveOnly(taaCompositionReactive != 0 ? clamp(anet, 0.0, 1.0) : 0.0);
 #endif
 
 }

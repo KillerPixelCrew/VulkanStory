@@ -29,6 +29,10 @@ internal sealed unsafe class XessNative
     public readonly delegate* unmanaged[Cdecl]<nint, int> Destroy;
     /// <summary>Native XeSS optimal/minimum/maximum input-resolution query.</summary>
     public readonly delegate* unmanaged[Cdecl]<nint, XessSize*, int, XessSize*, XessSize*, XessSize*, int> Resolution;
+    /// <summary>Read-only pinned SDK jitter-scale query; coordinates are returned through float pointers.</summary>
+    public readonly delegate* unmanaged[Cdecl]<nint, float*, float*, int> JitterScale;
+    /// <summary>Read-only pinned SDK velocity-scale query; coordinates are returned through float pointers.</summary>
+    public readonly delegate* unmanaged[Cdecl]<nint, float*, float*, int> VelocityScale;
 
     private XessNative(nint module)
     {
@@ -41,6 +45,8 @@ internal sealed unsafe class XessNative
         Execute = (delegate* unmanaged[Cdecl]<nint, nint, XessExecute*, int>)Export("xessVKExecute");
         Destroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("xessDestroyContext");
         Resolution = (delegate* unmanaged[Cdecl]<nint, XessSize*, int, XessSize*, XessSize*, XessSize*, int>)Export("xessGetOptimalInputResolution");
+        JitterScale = (delegate* unmanaged[Cdecl]<nint, float*, float*, int>)Export("xessGetJitterScale");
+        VelocityScale = (delegate* unmanaged[Cdecl]<nint, float*, float*, int>)Export("xessGetVelocityScale");
     }
     private nint Export(string name) => NativeLibrary.GetExport(module, name);
     /// <summary>Returns process-cached XeSS exports or loads the pinned Windows x64 runtime from an absolute path.</summary>

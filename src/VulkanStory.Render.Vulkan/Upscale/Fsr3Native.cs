@@ -66,7 +66,7 @@ internal sealed unsafe class Fsr3Native
         Open = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr3Open");
         Plan = (delegate* unmanaged[Cdecl]<uint, uint, uint, uint*, uint*, int>)Export("VulkanStoryFsr3Plan");
         Create = (delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, uint, nint*, int>)Export("VulkanStoryFsr3Create");
-        Evaluate = (delegate* unmanaged[Cdecl]<nint, Fsr3Frame*, int>)Export("VulkanStoryFsr3Evaluate");
+        Evaluate = (delegate* unmanaged[Cdecl]<nint, Fsr3Frame*, int>)Export("VulkanStoryFsr3EvaluateWithComposition");
         Destroy = (delegate* unmanaged[Cdecl]<nint, int>)Export("VulkanStoryFsr3Destroy");
         CreateFrameGeneration = (delegate* unmanaged[Cdecl]<nint, nint, uint, uint, uint, nint*, int>)Export("VulkanStoryFsr3FgCreate");
         EvaluateFrameGeneration = (delegate* unmanaged[Cdecl]<nint, Fsr3FgFrame*, int>)Export("VulkanStoryFsr3FgEvaluate");
@@ -133,14 +133,16 @@ internal partial struct Fsr3Image
     public uint Width, Height, Format;
 }
 
-/// <summary>Sequential C-ABI inputs and temporal constants for one FidelityFX reconstruction dispatch.</summary>
+/// <summary>184-byte C-ABI reconstruction inputs; six 24-byte image records precede jitter at byte 152.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8)]
 internal struct Fsr3Frame
 {
     public nint Commands;
     public Fsr3Image Color, Depth, Motion, Output;
-    /// <summary>Extracted reactive mask, normalized and clamped to AMD's recommended maximum.</summary>
+    /// <summary>Pre-composition material reactive mask, normalized and clamped to AMD's recommended maximum.</summary>
     public Fsr3Image Reactive;
+    /// <summary>Independent current-frame transparency and animated composition coverage.</summary>
+    public Fsr3Image Composition;
     public float JitterX, JitterY, DeltaMs, NearPlane, FarPlane, FovRadians;
     public uint Reset;
 }

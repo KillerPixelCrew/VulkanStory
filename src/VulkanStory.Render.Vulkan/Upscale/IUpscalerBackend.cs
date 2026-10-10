@@ -9,8 +9,11 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <param name="Motion">Renderer motion texture; the backend converts it when its SDK requires another format.</param>
 /// <param name="Output">Display-resolution destination texture.</param>
 /// <param name="Temporal">Jitter, camera, timing and history-reset data for this frame.</param>
+/// <param name="Composition">Borrowed current-frame transparency revealage texture, when present.</param>
+/// <param name="HasComposition">Whether this frame rendered transparency into the revealage texture.</param>
 internal readonly record struct UpscalerFrame(
-    int Color, int Depth, int Motion, int Output, TemporalProviderFrame Temporal);
+    int Color, int Depth, int Motion, int Output, TemporalProviderFrame Temporal,
+    int Composition = 0, bool HasComposition = false);
 
 /// <summary>
 /// One selectable reconstruction provider. All installed providers prepare before Vulkan device

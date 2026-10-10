@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
+using System.Threading;
 using OpenTK.Graphics.OpenGL;
 using Vintagestory.API.Client;
 using Vintagestory.Client.NoObf;
@@ -8,8 +10,39 @@ namespace VulkanStory.Game;
 
 internal sealed partial class GameGraphicsAdapter
 {
-    private sealed record MeshOwner(GameGraphicsAdapter Adapter, int Handle);
+    private sealed class MeshOwner(GameGraphicsAdapter adapter, int handle)
+    {
+        internal GameGraphicsAdapter Adapter { get; } = adapter;
+        internal int Handle { get; } = handle;
+        private int released;
+        internal bool ClaimRelease() => Interlocked.Exchange(ref released, 1) == 0;
+
+        ~MeshOwner()
+        {
+            if (!ClaimRelease()) return;
+            // The original VAO finalizer only logs. Its weak sidecar can enqueue
+            // the stable renderer handle, but must never touch Vulkan or its table.
+            try { Adapter.QueueFinalizedMesh(Handle); }
+            catch { /* During process teardown/OOM the device still owns the mesh. */ }
+        }
+    }
     private static readonly ConditionalWeakTable<VAO, MeshOwner> Meshes = new();
+    private readonly ConcurrentQueue<int> finalizedMeshHandles = new();
+
+    private void QueueFinalizedMesh(int handle)
+    {
+        // A detached adapter must not reacquire a disposed device. A shutdown
+        // race may enqueue a handle after teardown; no consumer then runs and
+        // MeshManager.Dispose has already released all remaining GPU meshes.
+        if (Volatile.Read(ref device) != null) finalizedMeshHandles.Enqueue(handle);
+    }
+
+    /// <summary>Retires abandoned game mesh handles on the frame thread through the existing GPU timeline.</summary>
+    internal void DrainFinalizedMeshes()
+    {
+        var renderer = RequireDevice();
+        while (finalizedMeshHandles.TryDequeue(out int handle)) renderer.DeleteMesh(handle);
+    }
 
     private static PrimitiveType DrawMode(EnumDrawMode mode) => mode switch
     {
@@ -46,7 +79,14 @@ internal sealed partial class GameGraphicsAdapter
     internal static GameGraphicsAdapter MeshAdapter(VAO mesh) => Meshes.TryGetValue(mesh, out var owner)
         ? owner.Adapter : throw new InvalidOperationException("Active mesh routing has no renderer owner.");
     internal void RequireOwnedMesh(VAO mesh) { RequireDevice(); MeshHandle(mesh); }
-    internal void ReleaseMesh(VAO mesh) => RequireDevice().DeleteMesh(MeshHandle(mesh));
+    internal void ReleaseMesh(VAO mesh)
+    {
+        var renderer = RequireDevice();
+        if (!Meshes.TryGetValue(mesh, out var owner) || !ReferenceEquals(owner.Adapter, this))
+            throw new InvalidOperationException("Active mesh routing has no renderer owner.");
+        if (owner.ClaimRelease()) renderer.DeleteMesh(owner.Handle);
+        GC.SuppressFinalize(owner);
+    }
     internal void DeleteMesh(MeshRef? mesh)
     {
         RequireDevice();

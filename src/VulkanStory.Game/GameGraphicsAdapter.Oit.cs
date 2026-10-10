@@ -15,7 +15,7 @@ internal sealed partial class GameGraphicsAdapter
     private FrameBufferRef? oitTransparent;
     private bool oitDisabled;
     private ICoreClientAPI? oitApi;
-    private readonly NativeFullscreenPass nativeOitMerge = new("transparentcompose", [],
+    private readonly NativeFullscreenPass nativeOitMerge = new("transparentcompose", ["taaCompositionReactive"],
         ["accumulation", "revealage", "inGlow", "OITreveal", "OITaccumulation"]);
     /// <summary>Allocates or selects weighted-transparency targets for the current original client API and scene size.</summary>
     /// <param name="api">Original client API used to bind and draw the transparency path.</param>
@@ -129,6 +129,7 @@ internal sealed partial class GameGraphicsAdapter
                 if (renderer.BeginNativePass(StatedViewportPass("MergeTransparent/0", primary.FboId, slots,
                         inputs.Where(value => value > 0).ToArray(), PassFlags.None)))
                 {
+                    renderer.WriteNative(pipeline, nativeOitMerge.Uniforms[0], UsesFsr3Inputs ? 0 : 1);
                     var textures = new NativeTexture[inputs.Length];
                     for (int index = 0; index < inputs.Length; index++) textures[index] = new NativeTexture(nativeOitMerge.Samplers[index], inputs[index]);
                     renderer.DrawNativeFullscreen(pipeline, textures);
@@ -139,7 +140,12 @@ internal sealed partial class GameGraphicsAdapter
         }
         StatedProgram = compose.ProgramId; Stated.SetDrawBuffers(primary.FboId, slots);
         if (writable) Stated.SetSlotBlend(motion, 32774, 1, 1, 1, 1);
-        try { BindOwnedInputs(compose.ProgramId, nativeOitMerge.SamplerNames, inputs); DrawOwnedFullscreen("MergeTransparent/0", slots); }
+        try
+        {
+            BindOwnedInputs(compose.ProgramId, nativeOitMerge.SamplerNames, inputs);
+            renderer.SetUniform(compose.ProgramId, OwnedUniform(compose.ProgramId, "taaCompositionReactive"), UsesFsr3Inputs ? 0 : 1);
+            DrawOwnedFullscreen("MergeTransparent/0", slots);
+        }
         finally
         {
             StatedProgram = 0; Stated.SetDrawBuffers(primary.FboId, GameFrameBindings.RenderSsao(platform!) ? 15u : 3u);

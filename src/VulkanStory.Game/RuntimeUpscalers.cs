@@ -142,7 +142,11 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         var primary = buffers[0]; var output = buffers[GameGraphicsAdapter.UpscaledSceneIndex];
         if (primary?.ColorTextureIds is not { } colors || output?.ColorTextureIds is not { Length: > 0 } || colors.Length <= motion)
         { EvaluationReadiness = "upscaler colour, motion or output target unavailable"; return false; }
-        var frame = new UpscalerFrame(colors[0], primary.DepthTextureId, colors[motion], output.ColorTextureIds[0], temporal);
+        int composition = graphics.UsesFsr3Inputs && graphics.Fsr3HasComposition &&
+            buffers.Count > 1 && buffers[1]?.ColorTextureIds is { Length: > 1 } transparency
+            ? transparency[1] : 0;
+        var frame = new UpscalerFrame(colors[0], primary.DepthTextureId, colors[motion], output.ColorTextureIds[0], temporal,
+            composition, graphics.Fsr3HasComposition);
         string? error;
         try
         {

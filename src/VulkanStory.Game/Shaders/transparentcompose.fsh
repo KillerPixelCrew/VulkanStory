@@ -19,7 +19,9 @@
 // motion of the geometry behind it. That is done with blending rather than a
 // colour mask: ClientPlatformWindows.MergeTransparentRenderPass puts the motion
 // attachment on FUNC_ADD with (ONE, ONE), and the fragment writes zero into rg
-// and a, so those channels add zero and only b accumulates. Where nothing
+// and a, so those channels add zero and only b accumulates. FSR3 keeps B as
+// material response and transports OIT coverage in its separate composition mask.
+// Where nothing
 // transparent covers the pixel anet is 0 and the attachment is bit-for-bit
 // unchanged.
 
@@ -30,6 +32,7 @@ uniform sampler2D inGlow;
 
 uniform sampler2D OITreveal;
 uniform sampler2DArray OITaccumulation;
+uniform int taaCompositionReactive = 1;
 
 in vec2 v_texcoord;
 
@@ -75,7 +78,8 @@ void main(){
     // very alpha this pass is composited with. It is the reactive value: at 1
     // the pixel is entirely transparent content with no motion vector of its
     // own, at 0 the pixel is untouched by it.
-    outMotion = vec4(0.0, 0.0, clamp(anet, 0.0, 1.0), 0.0);
+    // FSR3 transports this coverage in its independent composition mask.
+    outMotion = vec4(0.0, 0.0, taaCompositionReactive != 0 ? clamp(anet, 0.0, 1.0) : 0.0, 0.0);
 #endif
 
 }

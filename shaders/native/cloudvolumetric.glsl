@@ -272,9 +272,9 @@ void main(){
     float s = FrameWidth / 240.0 / 11.0;
     float n = NoiseFromPixelPosition(ivec2(gl_FragCoord.xy), frame + 256, FrameWidth).r * s;
 
-    k = exp(log(k + 1.0) + n) - 1.0;
-
-    if(k.a <= 0.0) discard;
+    // Display dither affects colour only. Opacity and OIT bin revealage must
+    // retain the same analytic traversal; noise must not toggle thin clouds.
+    k.rgb = exp(log(k.rgb + 1.0) + n) - 1.0;
 
 #if USEOIT == 1
     for(int i = 0; i < OIT_BINS; i++)

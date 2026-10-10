@@ -19,9 +19,9 @@ Current release: [v0.1.0-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Known defects
 
-- **REN-07:** Temporal upscalers still jitter at geometry against bare sky. DLSS is least affected and FSR 3 worst; FSR 3 also jitters and draws white outlines on clouds. The user confirms native TAA is completely fixed.
+- **REN-07:** FSR 3.1 still jitters at geometry against clouds; XeSS still jitters against bare sky, including with a stationary camera. The user confirms native TAA, DLSS and FSR 4 are completely fixed, and FSR 3.1's bare-sky boundary is fixed.
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
-- **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace now covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth, and terrain pools share immutable quad indices. The reported lag and RAM growth remain open.
+- **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned

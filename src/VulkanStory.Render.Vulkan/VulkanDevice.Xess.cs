@@ -9,6 +9,18 @@ namespace VulkanStory.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     private bool? upscalerMotionBlitSupported;
+    private bool captureUpscalerConstants;
+    internal bool CaptureUpscalerConstants
+    {
+        get => captureUpscalerConstants;
+        set
+        {
+            captureUpscalerConstants = value;
+            if (!value) XessConstantsCapture = null;
+        }
+    }
+    /// <summary>Requested-frame XeSS constants and context-scale queries, withdrawn when capture closes.</summary>
+    internal object? XessConstantsCapture { get; private set; }
     /// <summary>Transfers native-provider disposal to the renderer's frame retirement queue.</summary>
     internal void RetireUpscalerResource(IDisposable resource) => _frames.DeferDeletion(resource);
 
@@ -16,6 +28,7 @@ public sealed unsafe partial class VulkanDevice
     internal int EvaluateXess(XessNative api, nint context, int motionRg, in UpscalerFrame frame, bool firstFrame)
     {
         using GpuSection gpuSection = BeginGpuSection("upscale_xess");
+        XessConstantsCapture = null;
         if (!_frameActive) return -3;
         VulkanTexture? color = _textures.Get(frame.Color), depth = _textures.Get(frame.Depth),
             sourceMotion = _textures.Get(frame.Motion), motion = _textures.Get(motionRg),
@@ -33,11 +46,42 @@ public sealed unsafe partial class VulkanDevice
         {
             Color = XessImage.From(color), Depth = XessImage.From(depth), Velocity = XessImage.From(motion),
             Output = XessImage.From(output), Width = color.Width, Height = color.Height,
-            // Positive-height offscreen viewport: use raster displacement directly.
-            // XessTests measures registration against all four sign combinations.
-            JitterX = frame.Temporal.JitterX, JitterY = frame.Temporal.JitterY,
+            // Positive-height Vulkan rasterization moves image rows by +Jy.
+            // XeSS expresses camera jitter with Y up, as in Intel's Vulkan sample.
+            JitterX = frame.Temporal.JitterX,
+            JitterY = -frame.Temporal.JitterY,
             ExposureScale = 1f, Reset = firstFrame || frame.Temporal.Reset ? 1u : 0u,
         };
+        if (captureUpscalerConstants)
+        {
+            float jitterScaleX = float.NaN, jitterScaleY = float.NaN;
+            float velocityScaleX = float.NaN, velocityScaleY = float.NaN;
+            int jitterScaleResult = api.JitterScale(context, &jitterScaleX, &jitterScaleY);
+            int velocityScaleResult = api.VelocityScale(context, &velocityScaleX, &velocityScaleY);
+            static float? CapturedScale(int result, float value) =>
+                result >= 0 && float.IsFinite(value) ? value : null;
+            XessConstantsCapture = new
+            {
+                frameId = LatencyFrameId,
+                submittedJitterX = args.JitterX, submittedJitterY = args.JitterY,
+                rasterJitterX = frame.Temporal.JitterX, rasterJitterY = frame.Temporal.JitterY,
+                jitterScaleQueryResult = jitterScaleResult,
+                jitterScaleX = CapturedScale(jitterScaleResult, jitterScaleX),
+                jitterScaleY = CapturedScale(jitterScaleResult, jitterScaleY),
+                velocityScaleQueryResult = velocityScaleResult,
+                velocityScaleX = CapturedScale(velocityScaleResult, velocityScaleX),
+                velocityScaleY = CapturedScale(velocityScaleResult, velocityScaleY),
+                resetHistory = args.Reset != 0, firstFrame,
+                exposureScale = args.ExposureScale, initFlags = XessBackend.InitFlags,
+                colorTexture = frame.Color, depthTexture = frame.Depth,
+                sourceMotionTexture = frame.Motion, motionTexture = motionRg, outputTexture = frame.Output,
+                renderWidth = args.Width, renderHeight = args.Height,
+                sourceMotionWidth = sourceMotion.Width, sourceMotionHeight = sourceMotion.Height,
+                depthWidth = depth.Width, depthHeight = depth.Height,
+                motionWidth = motion.Width, motionHeight = motion.Height,
+                outputWidth = output.Width, outputHeight = output.Height,
+            };
+        }
         _lastUpscalerInputTextures = (LatencyFrameId, motionRg, 0);
         int result = api.Execute(context, commands.Handle, &args);
         _dynamicState.Invalidate();

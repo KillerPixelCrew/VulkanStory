@@ -9,8 +9,31 @@ namespace VulkanStory.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     private int _fsr3ReactiveProgram, _fsr3ReactiveTexture;
+    private int _fsr3CompositionProgram, _fsr3CompositionClearProgram, _fsr3CompositionTexture;
+    private int _fsr3MaterialReactiveSource;
+    private ulong _fsr3MaterialReactiveFrameId, _fsr3CompositionFrameId;
 
-    /// <summary>Extracts the scene motion attachment's reactive channel into an SDK-readable mask.</summary>
+    /// <summary>Frame owning material reactivity after scene writers and before the sky coverage pass.</summary>
+    internal ulong Fsr3MaterialReactiveFrameId => _fsr3MaterialReactiveFrameId;
+    /// <summary>Actual SDK composition mask ID after this frame's mask production, or zero before it.</summary>
+    internal int Fsr3CompositionTexture => _fsr3CompositionFrameId == LatencyFrameId ? _fsr3CompositionTexture : 0;
+
+    /// <summary>Captures material reactivity while B is separate from FSR's composition coverage.</summary>
+    /// <param name="sourceMotionId">Current frame's packed RGBA16F scene motion attachment.</param>
+    internal void CaptureFsr3MaterialReactive(int sourceMotionId)
+    {
+        _fsr3MaterialReactiveFrameId = 0;
+        _fsr3MaterialReactiveSource = 0;
+        _fsr3CompositionFrameId = 0;
+        if (!_frameActive || LatencyFrameId == 0 ||
+            _textures.Get(sourceMotionId) is not { Format: Format.R16G16B16A16Sfloat } source)
+            throw new InvalidOperationException("FSR3 material-reactive capture requires the current packed scene motion attachment.");
+        PrepareFsr3Reactive(sourceMotionId, source);
+        _fsr3MaterialReactiveSource = sourceMotionId;
+        _fsr3MaterialReactiveFrameId = LatencyFrameId;
+    }
+
+    /// <summary>Extracts the pre-composition motion attachment's material reactive channel into an SDK-readable mask.</summary>
     /// <remarks>The device owns one reusable mask; resize retires its old image on the existing frame timeline.</remarks>
     private VulkanTexture PrepareFsr3Reactive(int sourceId, VulkanTexture source)
     {
@@ -30,8 +53,8 @@ public sealed unsafe partial class VulkanDevice
                 void main() {
                     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
                     if (any(greaterThanEqual(pixel, imageSize(reactive)))) return;
-                    // Preserve coverage at the colour sample's pixel. The SDK
-                    // dilates reactive coverage; eroding it here removes thin edges.
+                    // Capture actual material reactivity before composition adds
+                    // coverage. The SDK performs its own reactive dilation.
                     float value = texelFetch(motion, pixel, 0).b;
                     if (isnan(value) || isinf(value)) value = 0.9;
                     value = clamp(value, 0.0, 0.9);
@@ -49,6 +72,72 @@ public sealed unsafe partial class VulkanDevice
         return mask;
     }
 
+    /// <summary>Produces independent composition coverage, explicitly clearing frames with no transparency.</summary>
+    private VulkanTexture PrepareFsr3Composition(in UpscalerFrame frame, VulkanTexture color)
+    {
+        _fsr3CompositionFrameId = 0;
+        if (_textures.Get(_fsr3CompositionTexture) is not { } mask || mask.Width != color.Width || mask.Height != color.Height)
+        {
+            if (_fsr3CompositionTexture != 0) DeleteTexture(_fsr3CompositionTexture);
+            _fsr3CompositionTexture = CreateUpscaleTexture((int)color.Width, (int)color.Height, Format.R8Unorm, true);
+            mask = _textures.Get(_fsr3CompositionTexture)!;
+        }
+        if (frame.HasComposition)
+        {
+            if (_textures.Get(frame.Composition) is not { Format: Format.R16Sfloat } reveal ||
+                reveal.Width != color.Width || reveal.Height != color.Height)
+                throw new InvalidOperationException("FSR3 composition requires matching current-frame R16F revealage.");
+            if (_fsr3CompositionProgram == 0)
+            {
+                _fsr3CompositionProgram = CreateComputeProgram("""
+                    #version 450
+                    layout(local_size_x=8, local_size_y=8) in;
+                    layout(set=0,binding=0) uniform sampler2D revealage;
+                    layout(set=0,binding=1,r8) writeonly uniform image2D composition;
+                    void main() {
+                        ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+                        if (any(greaterThanEqual(pixel, imageSize(composition)))) return;
+                        float coverage = 1.0 - texelFetch(revealage, pixel, 0).r;
+                        if (isnan(coverage) || isinf(coverage)) coverage = 1.0;
+                        imageStore(composition, pixel, vec4(clamp(coverage, 0.0, 1.0)));
+                    }
+                    """, "fsr3-composition", [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Storage)]);
+                if (_fsr3CompositionProgram == 0) throw new InvalidOperationException("FSR3 composition-mask shader did not compile.");
+            }
+            if (!RecordComputePass(new ComputePassDeclaration
+            {
+                Name = "FSR3 composition mask", ProgramId = _fsr3CompositionProgram,
+                Bindings = [new(0, frame.Composition, ComputeAccess.Sampled), new(1, _fsr3CompositionTexture, ComputeAccess.StorageWrite)],
+                Dispatches = [ComputeDispatch.Covering(1)],
+            })) throw new InvalidOperationException("FSR3 composition-mask extraction failed.");
+        }
+        else
+        {
+            if (_fsr3CompositionClearProgram == 0)
+            {
+                _fsr3CompositionClearProgram = CreateComputeProgram("""
+                    #version 450
+                    layout(local_size_x=8, local_size_y=8) in;
+                    layout(set=0,binding=0,r8) writeonly uniform image2D composition;
+                    void main() {
+                        ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+                        if (any(greaterThanEqual(pixel, imageSize(composition)))) return;
+                        imageStore(composition, pixel, vec4(0.0));
+                    }
+                    """, "fsr3-composition-clear", [new(0, ComputeSlotKind.Storage)]);
+                if (_fsr3CompositionClearProgram == 0) throw new InvalidOperationException("FSR3 composition-mask clear shader did not compile.");
+            }
+            if (!RecordComputePass(new ComputePassDeclaration
+            {
+                Name = "FSR3 composition mask clear", ProgramId = _fsr3CompositionClearProgram,
+                Bindings = [new(0, _fsr3CompositionTexture, ComputeAccess.StorageWrite)],
+                Dispatches = [ComputeDispatch.Covering(0)],
+            })) throw new InvalidOperationException("FSR3 composition-mask clear failed.");
+        }
+        _fsr3CompositionFrameId = LatencyFrameId;
+        return mask;
+    }
+
     /// <summary>Converts motion, transitions reconstruction inputs/output and records native FidelityFX SR dispatch.</summary>
     /// <returns>Zero on bridge success, or the local/native failure code.</returns>
     internal int EvaluateFsr3(Fsr3Native api, nint context, int motionRg,
@@ -60,14 +149,20 @@ public sealed unsafe partial class VulkanDevice
             sourceMotion = _textures.Get(frame.Motion), motion = _textures.Get(motionRg),
             output = _textures.Get(frame.Output);
         if (color == null || depth == null || sourceMotion == null || motion == null || output == null) return -4;
+        // A post-OIT B extraction would turn persistent cloud coverage into
+        // history rejection again. Require the material producer's exact frame.
+        if (_fsr3MaterialReactiveFrameId != LatencyFrameId || _fsr3MaterialReactiveSource != frame.Motion ||
+            _textures.Get(_fsr3ReactiveTexture) is not { Format: Format.R8Unorm } reactive ||
+            reactive.Width != color.Width || reactive.Height != color.Height) return -5;
         CommandBuffer commands = Commands;
         if (!PrepareUpscalerMotion(sourceMotion, motion, color.Width, color.Height, commands)) return -4;
-        VulkanTexture reactive = PrepareFsr3Reactive(frame.Motion, sourceMotion);
+        VulkanTexture composition = PrepareFsr3Composition(frame, color);
         commands = Commands;
         _textures.Require(_barriers, commands, color, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, depth, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, motion, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, reactive, ResourceUsage.SampleExternal);
+        _textures.Require(_barriers, commands, composition, ResourceUsage.SampleExternal);
         _textures.Require(_barriers, commands, output, ResourceUsage.StorageWriteExternal);
         _barriers.Flush(commands);
         var args = new Fsr3Frame
@@ -76,6 +171,7 @@ public sealed unsafe partial class VulkanDevice
             Color = Fsr3Image.From(color), Depth = Fsr3Image.From(depth),
             Motion = Fsr3Image.From(motion), Output = Fsr3Image.From(output),
             Reactive = Fsr3Image.From(reactive),
+            Composition = Fsr3Image.From(composition),
             JitterX = frame.Temporal.JitterX, JitterY = frame.Temporal.JitterY,
             DeltaMs = frame.Temporal.DeltaTimeMs,
             NearPlane = frame.Temporal.NearPlane, FarPlane = frame.Temporal.FarPlane,
