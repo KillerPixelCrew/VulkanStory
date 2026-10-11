@@ -141,12 +141,10 @@ your own installation.
 
 ## Background
 
-VulkanStory began as part of [Optimum](https://github.com/StratumServer/Optimum), a
-modified-client fork. This branch is a fresh implementation as an ordinary mod: it
-compiles against the official game assemblies, keeps its own state outside game
-objects, and integrates through Harmony instead of a modified client. Working
-renderer, shader, SDL and provider code was migrated as directly as possible, with
-its provenance preserved.
+The Vulkan code brought into this rewrite was written entirely by N1GHT. No code
+was directly migrated from Optimum. VulkanStory compiles against the official
+game assemblies, keeps its own state outside game objects, and integrates through
+Harmony instead of a modified client.
 
 ## AI-assisted development
 
@@ -155,9 +153,7 @@ debugging and documentation.
 
 ## License and attribution
 
-Code migrated from Optimum keeps its original license and attribution; a rename or
-move does not change a file's license. The Optimum license texts, notice and per-path
-license scope are in [`packaging/notices/source-provenance`](packaging/notices/source-provenance).
+The Vulkan code is N1GHT's own work. It is not third-party code from Optimum.
 Third-party notices for SDL, Shaderc, Silk.NET, PromptFont and the vendor SDK runtimes
 are under [`packaging/notices`](packaging/notices) and ship with every package under
 `VulkanStory/licenses`. Vendor SDKs are subject to their own license terms.
