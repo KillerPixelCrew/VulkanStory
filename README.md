@@ -4,7 +4,7 @@ A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
 generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
 unmodified game.
 
-> **Status: development build** (`v0.1.1-dev`) for Windows x64. Known defects and
+> **Current release: [v0.1.1](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1)** for Windows x64. Known defects and
 > remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
