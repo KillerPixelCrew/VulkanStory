@@ -67,7 +67,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (!inScene || client == null) throw new InvalidOperationException("Temporal advance is outside the world render loop.");
         var targets = platform.FrameBuffers;
         FrameBufferRef? primary = targets is { Count: > 0 } ? targets[0] : null;
-        bool temporal = settings.EffectiveTaa || settings.UpscalerReplacesTaa || settings.Settings.FrameGeneration != "off";
+        bool temporal = !settings.StereoRendering && (settings.EffectiveTaa || settings.UpscalerReplacesTaa || settings.Settings.FrameGeneration != "off");
         bool jitter = settings.EffectiveTaa || settings.UpscalerReplacesTaa;
         if (previousFov != 0 && previousFov != client.MainCamera.Fov)
             State.RequestReset(EnumTemporalResetReason.FovChange);
@@ -85,8 +85,8 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         nativeTaaJitterPolicy = nativeTaa;
         State.AdvanceForFrame(device.LatencyFrameId, dt * 1000f, primary?.Width ?? client.Width,
             primary?.Height ?? client.Height, scale, client.MainCamera.ZNear, client.MainCamera.ZFar,
-            client.MainCamera.Fov, client.shUniforms, temporal || settings.Settings.TaaJitterDev,
-            jitter || settings.Settings.TaaJitterDev, jitterPhaseCountOverride: nativeTaa ? 8 : null);
+            client.MainCamera.Fov, client.shUniforms, temporal || (!settings.StereoRendering && settings.Settings.TaaJitterDev),
+            jitter || (!settings.StereoRendering && settings.Settings.TaaJitterDev), jitterPhaseCountOverride: nativeTaa ? 8 : null);
     }
     /// <summary>Records unjittered world camera, camera position and projection for the current scene.</summary>
     /// <param name="projection">Original 16-element column-major world projection.</param>

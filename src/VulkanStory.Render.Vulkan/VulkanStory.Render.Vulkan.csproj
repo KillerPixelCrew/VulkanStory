@@ -12,12 +12,16 @@
     <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenXR" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenXR.Extensions.KHR" Version="2.23.0" />
     <InternalsVisibleTo Include="VulkanStory.Render.Vulkan.Tests" />
     <InternalsVisibleTo Include="VulkanStory.Game" />
   </ItemGroup>
   <!-- Retained backend and facade. Game types stay in the integration project. -->
   <ItemGroup>
     <Compile Include="VulkanDevice.cs" />
+    <Compile Include="VulkanDevice.OpenXr.cs" />
+    <Compile Include="Vr/OpenXrRuntime.cs" />
     <Compile Include="VulkanDevice.Binding.cs" />
     <Compile Include="VulkanDevice.Dlss.cs" />
     <Compile Include="VulkanDevice.FrameGeneration.cs" />

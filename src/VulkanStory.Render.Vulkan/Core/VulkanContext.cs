@@ -57,6 +57,7 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Initialized before Vulkan calls; owned by the created context.</summary>
     public StreamlineRuntime? Streamline;
+    public Vr.OpenXrRuntime? OpenXr;
 
     /// <summary>Reserve the four distinct queues required by the FidelityFX Vulkan FG proxy.</summary>
     public bool PrepareFrameGenerationQueues;
@@ -490,8 +491,11 @@ internal sealed unsafe class VulkanContext : IDisposable
                 PpEnabledLayerNames = validation ? (byte**)layersPtr : null,
             };
 
-            Result result = Streamline != null
-                ? Streamline.CreateInstance(&createInfo, out Instance instance)
+            Instance instance;
+            Result result = options.OpenXr != null
+                ? options.OpenXr.CreateVulkanInstance(Api, &createInfo, out instance)
+                : Streamline != null
+                ? Streamline.CreateInstance(&createInfo, out instance)
                 : Api.CreateInstance(&createInfo, null, out instance);
             if (result != Result.Success)
             {
@@ -499,7 +503,7 @@ internal sealed unsafe class VulkanContext : IDisposable
                 return false;
             }
             Instance = instance;
-            if (Streamline != null) Api.CurrentInstance = instance;
+            if (Streamline != null || options.OpenXr != null) Api.CurrentInstance = instance;
         }
         finally
         {
@@ -743,6 +747,19 @@ internal sealed unsafe class VulkanContext : IDisposable
     private bool SelectPhysicalDevice(VulkanContextOptions options, out string? failureReason)
     {
         failureReason = null;
+
+        if (options.OpenXr != null)
+        {
+            PhysicalDevice selected = options.OpenXr.SelectPhysicalDevice(Instance);
+            if (!IsUsable(selected, out failureReason)) return false;
+            if (options.PreferredVendorId is { } vendor && Api.GetPhysicalDeviceProperties(selected).VendorID != vendor)
+            {
+                failureReason = "The OpenXR headset GPU does not match VULKANSTORY_VK_VENDOR.";
+                return false;
+            }
+            PhysicalDevice = selected;
+            return true;
+        }
 
         uint count = 0;
         if (Streamline != null) Streamline.EnumeratePhysicalDevices(Instance, ref count, null);
@@ -1239,8 +1256,11 @@ internal sealed unsafe class VulkanContext : IDisposable
                 PpEnabledExtensionNames = extensionsPtr == 0 ? null : (byte**)extensionsPtr,
             };
 
-            Result result = Streamline != null
-                ? Streamline.CreateDevice(Instance, PhysicalDevice, &createInfo, out Device device)
+            Device device;
+            Result result = options.OpenXr != null
+                ? options.OpenXr.CreateVulkanDevice(Api, PhysicalDevice, &createInfo, out device)
+                : Streamline != null
+                ? Streamline.CreateDevice(Instance, PhysicalDevice, &createInfo, out device)
                 : Api.CreateDevice(PhysicalDevice, &createInfo, null, out device);
             if (result != Result.Success)
             {
@@ -1248,7 +1268,7 @@ internal sealed unsafe class VulkanContext : IDisposable
                 return false;
             }
             Device = device;
-            if (Streamline != null) Api.CurrentDevice = device;
+            if (Streamline != null || options.OpenXr != null) Api.CurrentDevice = device;
         }
         finally
         {

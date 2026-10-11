@@ -48,7 +48,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     /// <summary>Set by every frame that skipped preparation; the next prepared frame resets provider history across the gap.</summary>
     private bool historyResetPending;
 
-    internal string RequestedProvider => settings.Settings.FrameGeneration;
+    internal string RequestedProvider => settings.StereoRendering ? "off" : settings.Settings.FrameGeneration;
     internal string EffectiveProvider => failed.ContainsKey(activeProvider) ? "off" : activeProvider;
     // Prepared describes current inputs, not actual SDK interpolation/presentation.
     /// <summary>Whether current frame inputs were prepared; this does not prove SDK interpolation or physical presentation.</summary>

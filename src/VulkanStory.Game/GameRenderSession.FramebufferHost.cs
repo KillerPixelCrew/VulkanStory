@@ -36,9 +36,9 @@ internal sealed partial class GameRenderSession
             SsaaLevel: ClientSettings.SSAA,
             RenderScale: state.Settings.RenderScale,
             TaaRequested: state.EffectiveTaa,
-            FrameGenerationRequested: state.Settings.FrameGeneration != "off",
+            FrameGenerationRequested: !state.StereoRendering && state.Settings.FrameGeneration != "off",
             HandheldShadowTier: state.Settings.HandheldShadowTier,
-            FrameGenerationProvider: state.Settings.FrameGeneration);
+            FrameGenerationProvider: state.StereoRendering ? "off" : state.Settings.FrameGeneration);
     }
     private void DisableFramebufferTaa(string reason)
     {

@@ -697,6 +697,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _presentationSurfaceSource = window;
         _presentationWindow = window?.NativeHandle ?? IntPtr.Zero;
         bool headless = window == null;
+        PrepareOpenXr(headless);
 
         var options = new VulkanContextOptions
         {
@@ -722,7 +723,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
                 : window!.RequiredInstanceExtensions(),
-            PrepareFrameGenerationQueues = !headless && OperatingSystem.IsWindows(),
+            PrepareFrameGenerationQueues = OpenXr == null && !headless && OperatingSystem.IsWindows(),
+            OpenXr = OpenXr,
         };
 
         var vendorLatencyRequirements = new VendorLatencyRequirements(headless);
@@ -743,7 +745,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // Streamline's signed 2.14.1 Vulkan proxy rejects extensions supplied
         // only by a validation layer. Keep sync-validation acceptance on the
         // native path; normal client runs use the proxy.
-        if (EnableStreamline && !headless && OperatingSystem.IsWindows() &&
+        if (OpenXr == null && EnableStreamline && !headless && OperatingSystem.IsWindows() &&
             !(options.EnableValidation && !string.IsNullOrWhiteSpace(options.ValidationFeatures)) &&
             Environment.GetEnvironmentVariable("VULKANSTORY_STREAMLINE")?.Trim() != "0")
         {
@@ -925,6 +927,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // harness, a test driving the post chain - reads it back. Only presenting it needs
         // a surface.
         CreateDefaultFramebuffer((uint)width, (uint)height);
+        OpenXr?.Attach(_context, width, height);
 
         if (!headless)
         {
@@ -1820,6 +1823,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before device teardown");
         }
+        OpenXr?.Dispose(); OpenXr = null;
 
         // Background compiles read program modules and layouts, and a background save
         // reads the driver cache: both end before anything they use is destroyed.

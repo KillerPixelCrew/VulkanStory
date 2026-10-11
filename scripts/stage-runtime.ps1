@@ -96,6 +96,7 @@ foreach ($project in @('Bootstrap','Contracts','Game','Input','Platform.Sdl','Re
 $backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/$managedSuffix"
 foreach ($name in @('SDL3-CS','Silk.NET.Core','Silk.NET.Shaderc','Silk.NET.Vulkan',
     'Silk.NET.Vulkan.Extensions.EXT','Silk.NET.Vulkan.Extensions.KHR',
+    'Silk.NET.OpenXR','Silk.NET.OpenXR.Extensions.KHR','Silk.NET.Maths',
     'Microsoft.DotNet.PlatformAbstractions','Microsoft.Extensions.DependencyModel')) {
     Add-Payload "VulkanStory/managed/$name.dll" (Join-Path $backend "$name.dll")
 }

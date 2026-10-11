@@ -9,6 +9,8 @@ internal sealed record RendererSettings
 {
     /// <summary>Whether early startup should create the Vulkan/SDL session; disabling takes effect at the next launch.</summary>
     public bool Enabled { get; init; } = true;
+    /// <summary>Creates an OpenXR stereo session on the next launch. The first VR path uses ordinary raster rendering.</summary>
+    public bool OpenXr { get; init; }
     /// <summary>Requested ordinary render fraction, normalized to 0.25 through 1; an active SR plan supplies its own scale.</summary>
     public float RenderScale { get; init; } = 1f;
     /// <summary>Requests native TAA when SR does not replace it and session readiness permits it.</summary>
@@ -241,13 +243,14 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     private readonly object gate = new();
     private float activeRenderScale, activeLodBias;
     internal bool TaaDisabled { get; private set; }
+    internal bool StereoRendering { get; set; }
     internal RendererSettingsState(RendererSettings settings) => this.settings = settings.Normalize();
     internal RendererSettings Settings => Volatile.Read(ref settings);
     internal void Apply(RendererSettings value) => Volatile.Write(ref settings, value.Normalize());
-    internal string EffectiveUpscaler { get { lock (gate) return disabled.Contains(Settings.Upscaler) ? "off" : Settings.Upscaler; } }
+    internal string EffectiveUpscaler { get { lock (gate) return StereoRendering || disabled.Contains(Settings.Upscaler) ? "off" : Settings.Upscaler; } }
     internal bool UpscalerReplacesTaa => EffectiveUpscaler != "off";
-    internal bool EffectiveTaa => Settings.Taa && !TaaDisabled && !UpscalerReplacesTaa;
-    internal bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa || Settings.FrameGeneration != "off";
+    internal bool EffectiveTaa => !StereoRendering && Settings.Taa && !TaaDisabled && !UpscalerReplacesTaa;
+    internal bool EffectiveTemporalPipeline => !StereoRendering && (EffectiveTaa || UpscalerReplacesTaa || Settings.FrameGeneration != "off");
     public bool DlssRequested => EffectiveUpscaler == "dlss";
     public string Quality => Settings.UpscalerQuality;
     public float LodBiasOffset => Settings.UpscalerLodBiasOffset;
@@ -284,6 +287,7 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     /// <remarks>A failed provider no longer forces low latency On; the user's requested latency mode applies.</remarks>
     internal RendererLatencySelection EffectiveLatencySelection(Func<string, string?>? unavailable)
     {
+        if (StereoRendering) return new("off", "off");
         RendererSettings current = Settings;
         string generation = current.FrameGeneration != "off" && unavailable?.Invoke(current.FrameGeneration) != null
             ? "off" : current.FrameGeneration;

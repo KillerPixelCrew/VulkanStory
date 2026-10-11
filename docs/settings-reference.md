@@ -27,7 +27,7 @@ values to supported ranges, depending on the entry point.
 
 | Change | Takes effect |
 | --- | --- |
-| `Enabled`, `NativeShaders`, `Streamline` | Next game launch |
+| `Enabled`, `NativeShaders`, `Streamline`, `OpenXr` | Next game launch |
 | `ParallelChunkReads` | Next world load |
 | Reconstruction provider/quality, render scale, TAA/AO | Live; may rebuild targets and reset history |
 | Generation provider | Live; resets previous presentation/provider state |
@@ -42,6 +42,19 @@ installed hooks and changes the path they choose, allowing a return to the
 ordinary behavior without repeatedly patching methods.
 
 ## Choices
+
+`OpenXr` enables the initial headset stereo path on the Device page. Connect the
+headset to the selected PC OpenXR runtime before restarting the game. VR renders
+two eye views with tracked head position/orientation and the runtime's eye FOVs.
+The desktop window mirrors the right eye; its pixel dimensions select each eye's
+output resolution. Keyboard, mouse and ordinary controllers remain the input
+devices. Menus and HUD are drawn in the eye images; tracked motion controllers
+and world-space UI are later work.
+
+TAA, temporal upscaling, frame generation and vendor latency pacing are inactive
+in this initial VR mode. Their saved desktop requests are retained. The OpenXR
+runtime owns headset frame pacing. Headset loss or missing tracking submits no
+scene layer; runtime session exit returns to desktop presentation.
 
 | Property | Values |
 | --- | --- |
@@ -108,6 +121,7 @@ choice and range definitions live in
 | Property | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | `Enabled` | bool | `true` | Whether early startup should create the Vulkan/SDL session; disabling takes effect at the next launch. |
+| `OpenXr` | bool | `false` | Enables the initial OpenXR headset stereo path on the next launch. |
 | `RenderScale` | float | `1f` | Requested ordinary render fraction, normalized to 0.25 through 1; an active SR plan supplies its own scale. |
 | `Taa` | bool | `false` | Requests native TAA when SR does not replace it and session readiness permits it. |
 | `TaaSharpness` | float | `.2f` | Native TAA sharpening strength, normalized to zero through one. |

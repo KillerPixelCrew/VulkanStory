@@ -20,3 +20,6 @@
 [submodule "sdk/vma"]
 	path = sdk/vma
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "sdk/openxr"]
+	path = sdk/openxr
+	url = https://github.com/KhronosGroup/OpenXR-SDK.git

@@ -34,6 +34,7 @@ param(
     [Parameter(Mandatory)][string]$CoreNativeDirectory,
     [Parameter(Mandatory)][string]$CoreNoticesDirectory,
     [string]$VmaDirectory,
+    [string]$OpenXrDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native-openxr/Release/win-x64'),
     [string]$DlssSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/dlss'),
     [string]$Fsr3SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx-vk'),
     [string]$Fsr3RuntimeDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native-fsr3-sdk/Release/win-x64/runtime'),
@@ -89,6 +90,7 @@ function Add-Input([string]$relative, [string]$source) {
 foreach ($component in $inventory.components.PSObject.Properties) {
     foreach ($name in $component.Value) {
         $source = if ($name -eq 'VulkanStoryVma.dll') { Join-Path $VmaDirectory $name }
+        elseif ($name -eq 'openxr_loader.dll') { Join-Path $OpenXrDirectory $name }
         elseif ($name.StartsWith('VulkanStory')) { Join-Path $BridgesDirectory $name }
         elseif ($component.Name -eq 'core') { Join-Path $CoreNativeDirectory $name }
         elseif ($component.Name -eq 'dlss') { Join-Path $DlssSdkRoot "lib/Windows_x86_64/rel/$name" }
@@ -108,6 +110,8 @@ foreach ($component in $inventory.components.PSObject.Properties) {
 }
 Add-Input 'licenses/dlss/LICENSE.txt' (Join-Path $DlssSdkRoot 'LICENSE.txt')
 Add-Input 'licenses/vma/LICENSE.txt' (Join-Path $projectRoot 'sdk/vma/LICENSE.txt')
+Add-Input 'licenses/openxr/LICENSE.txt' (Join-Path $OpenXrDirectory 'licenses/openxr/LICENSE.txt')
+Add-Input 'licenses/openxr/jsoncpp-LICENSE.txt' (Join-Path $OpenXrDirectory 'licenses/openxr/jsoncpp-LICENSE.txt')
 Add-Input 'licenses/fsr3/LICENSE.txt' (Join-Path $Fsr3SdkRoot 'LICENSE.txt')
 Add-Input 'licenses/fsr3/sdk-LICENSE.txt' (Join-Path $Fsr3SdkRoot 'sdk/LICENSE.txt')
 Add-Input 'licenses/fsr3/sdk-build.json' $receiptPath

@@ -104,6 +104,8 @@ internal sealed partial class GameRenderSession : IDisposable
             session.window.Sync();
             session.device = new VulkanDevice();
             session.ConfigureDevice();
+            session.device.OpenXrEnabled = services.RendererSettings.Settings.OpenXr && !HeadlessHarnessOptions.Enabled;
+            services.RendererSettings.StereoRendering = session.device.OpenXrEnabled;
             session.device.NativeShadersEnabled = services.RendererSettings.Settings.NativeShaders;
             session.device.EnableStreamline = services.RendererSettings.Settings.Streamline;
             session.device.LatencySelection = services.RendererSettings.LatencySelection;
@@ -190,7 +192,8 @@ internal sealed partial class GameRenderSession : IDisposable
             frameClock.Restart();
             PrepareHeadlessFrame(ref delta);
             // The session is the only swap-interval owner; SetVSync ignores an unchanged value.
-            Device.SetVSync(settings.Vsync);
+            Device.OpenXr?.PollEvents();
+            Device.SetVSync(Device.OpenXr?.Running == true ? false : settings.Vsync);
             ScreenManager.FrameProfiler.Begin(null);
             ScreenManager.FrameProfiler.Mark("sleep");
             GameFrameBindings.Adopt(platform, settings);
@@ -204,6 +207,8 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.CaptureUpscalerConstants = SrInputCaptureScheduled;
             Graphics.Stated.UiImageFramebuffer = 0;
             Device.RedirectDefaultFramebuffer(0);
+            var vrSize = Window.PixelSize;
+            Device.OpenXr?.BeginFrame(vrSize.Width, vrSize.Height);
             gpuCycleStarted = true;
             Device.BeginFrame();
             Graphics.DrainFinalizedMeshes();
@@ -219,9 +224,12 @@ internal sealed partial class GameRenderSession : IDisposable
             CaptureScenarioReadbacks();
             // Diagnostics above read the composed frame; a hold replaces only what is presented.
             bool hold = ApplyCompositionHold();
-            frameGeneration!.Generate(Graphics, platform.FrameBuffers, Temporal.Snapshot(), hold);
+            if (hold) Device.OpenXr?.SuppressFrame();
+            if (!services.RendererSettings.StereoRendering)
+                frameGeneration!.Generate(Graphics, platform.FrameBuffers, Temporal.Snapshot(), hold);
             ObserveCompositionReadiness(pipelineSkipsAtStart);
             Device.Present();
+            Device.OpenXr?.EndFrame();
             SampleFps();
             PublishPresentation();
             PublishDiagnosticFrame();
@@ -259,7 +267,8 @@ internal sealed partial class GameRenderSession : IDisposable
         }
         // Limiting occurs before collecting input, alongside vendor sleep.
         // The original applies frame sleep in every VSync mode except "VSync only".
-        if (settings.FrameSleep && !Device.VendorLatencyOwnsFrameCap && settings.MaxFps > 10 && settings.MaxFps < 241)
+        Device.OpenXr?.PollEvents();
+        if (Device.OpenXr?.Running != true && settings.FrameSleep && !Device.VendorLatencyOwnsFrameCap && settings.MaxFps > 10 && settings.MaxFps < 241)
         {
             // Fractional, high-resolution wait: Thread.Sleep(int) truncates and can
             // overshoot by a whole ~15.6 ms timer tick without 1 ms resolution.
@@ -269,7 +278,8 @@ internal sealed partial class GameRenderSession : IDisposable
         pendingFrameSettings = settings;
         inputFrameId = Device.BeginLatencyFrame();
         long sleepStarted = controllerPerformance?.Recording == true ? Stopwatch.GetTimestamp() : 0;
-        Device.SleepVendorLatency(inputFrameId, services.RendererSettings.Settings.FrameGeneration != "off");
+        if (!services.RendererSettings.StereoRendering)
+            Device.SleepVendorLatency(inputFrameId, services.RendererSettings.Settings.FrameGeneration != "off");
         if (sleepStarted != 0)
             controllerPerformance!.RecordVendorSleep(Stopwatch.GetTimestamp() - sleepStarted);
         // XeLL requires SimulationStart immediately after the final sleep.
@@ -382,6 +392,7 @@ internal sealed partial class GameRenderSession : IDisposable
             AmbientOcclusionDebugView = next.AmbientOcclusionDebugView,
             GodRaysSampleCap = next.GodRaysSampleCap,
             Enabled = next.Enabled,
+            OpenXr = next.OpenXr,
             NativeShaders = next.NativeShaders,
             Streamline = next.Streamline,
         }) == next)

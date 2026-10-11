@@ -17,7 +17,7 @@ in `Directory.Build.local.props`, using the example file as the template.
 | CMake/Ninja | Native Windows activation shim |
 | Vulkan SDK | Headers and native Vulkan imports |
 | MinGW-w64 GCC/G++ | Native provider and allocation bridges |
-| MSVC x64 build tools | Corrected FidelityFX Vulkan runtime |
+| MSVC x64 build tools | Corrected FidelityFX Vulkan runtime and OpenXR loader |
 | `sdk/` submodules | Pinned vendor source SDKs and VMA |
 | Streamline release download | Hash-pinned redistributable runtimes |
 
@@ -55,7 +55,8 @@ flowchart TD
 ```
 
 `build-runtime.ps1` builds production managed projects, the allocator bridge,
-Windows bootstrap and corrected FidelityFX runtime, and the shader tool/corpus.
+Windows bootstrap, corrected FidelityFX runtime, pinned Khronos OpenXR loader,
+and the shader tool/corpus.
 Provider bridges are built separately. Staging consumes existing outputs; it does
 not secretly build missing components. Packaging verifies staged hashes and writes
 archives without installing or launching the game.

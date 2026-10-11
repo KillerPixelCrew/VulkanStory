@@ -11,6 +11,7 @@ internal sealed partial class GameRenderSession
         RequireActive();
         if (!ReferenceEquals(client.Platform, platform)) throw new InvalidOperationException("World belongs to another platform.");
         ControllerMovement.Reset();
+        referenceReady = false;
         diagnosticWorldReady = true;
         diagnosticWorldFrames = 0;
         diagnosticCaptureAttempted = false;

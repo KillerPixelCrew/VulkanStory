@@ -17,7 +17,7 @@ internal sealed partial class GameRenderSession
     /// </summary>
     internal void CaptureOcclusionDepth()
     {
-        if (stopping || device == null || Temporal.CurrentClient is not ClientMain client || client.EntityPlayer?.CameraPos is not { } camera) return;
+        if (stopping || device == null || device.OpenXr != null || Temporal.CurrentClient is not ClientMain client || client.EntityPlayer?.CameraPos is not { } camera) return;
         if (platform.FrameBuffers is not { Count: > 0 } buffers || buffers[0] is not { Disposed: false, DepthTextureId: > 0 } primary) return;
         float[] view = (float[])client.api.Render.CameraMatrixOriginf.Clone();
         float[] projection = (float[])client.api.Render.CurrentProjectionMatrix.Clone();

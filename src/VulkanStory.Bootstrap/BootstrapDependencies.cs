@@ -33,6 +33,7 @@ internal sealed class BootstrapDependencies(string managedDirectory, string game
     {
         "SDL3-CS", "Silk.NET.Core", "Silk.NET.Shaderc", "Silk.NET.Vulkan",
         "Silk.NET.Vulkan.Extensions.EXT", "Silk.NET.Vulkan.Extensions.KHR",
+        "Silk.NET.OpenXR", "Silk.NET.OpenXR.Extensions.KHR", "Silk.NET.Maths",
         "Microsoft.DotNet.PlatformAbstractions", "Microsoft.Extensions.DependencyModel"
     };
 

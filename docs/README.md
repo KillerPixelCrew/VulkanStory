@@ -44,5 +44,6 @@ graphs. Frame generation, for example, adds presentation images without adding
 game simulation ticks. Performance results depend on the scene, settings and
 hardware; use a capture rather than treating a diagram as a benchmark.
 
-Ray/path tracing, OpenXR VR and user-selectable shader packs remain roadmap work.
+OpenXR's initial stereo/headset path is available in development through the Device settings page.
+VR controller input, world-space UI, body tracking, ray/path tracing and user-selectable shader packs remain roadmap work.
 They are not part of the renderer described here.

@@ -23,6 +23,7 @@ internal static class StartupProfileComposition
             QueriesCaptureConsumerPatches.CreateSubset(enabled),
             PlatformStartupRoutingPatches.CreateSubset(runtime),
             TemporalConsumerPatches.CreateGroup(runtime),
+            OpenXrConsumerPatches.CreateGroup(runtime),
             MotionUniformConsumerPatches.CreateGroup(runtime),
             UiConsumerPatches.CreateGroup(runtime),
             MenuSettingsConsumerPatches.CreateGroup(enabled),

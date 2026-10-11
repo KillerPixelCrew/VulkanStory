@@ -226,6 +226,8 @@ internal sealed class RendererSettingsPanel
                 break;
             case 3:
                 Switch("Enable VulkanStory (restart)", "Enabled");
+                Switch("OpenXR headset / stereo (restart)", "OpenXr");
+                Text("VR currently uses ordinary rendering. TAA, upscaling and frame generation remain desktop features.");
                 Switch("Controllers", "ControllerEnabled");
                 Switch("Touch input", "TouchEnabled");
                 Switch("Native shaders (restart)", "NativeShaders");

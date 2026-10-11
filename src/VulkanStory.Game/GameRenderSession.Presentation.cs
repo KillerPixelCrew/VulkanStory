@@ -65,6 +65,7 @@ internal sealed partial class GameRenderSession
                     "; VSync: " + (state.VsyncSupport == 1 ? "supported" : state.VsyncSupport == 0 ? "unsupported" : "unknown");
         }
         Volatile.Write(ref presentation, text);
+        if (Device.OpenXrEnabled) Volatile.Write(ref presentation, text + "\n" + Device.OpenXrStatus + "\nVR: raster stereo; temporal providers inactive.");
     }
     private void ClearPresentation()
     {
