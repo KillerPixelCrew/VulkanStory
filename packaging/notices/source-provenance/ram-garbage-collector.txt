@@ -1,0 +1,12 @@
+Early item merging and configurable particle budgets were inspired by
+telleznilsson/RAM-Garbage-Collector:
+https://github.com/telleznilsson/RAM-Garbage-Collector
+Reference revision: 3c9bc662dec3be3f2b65e92d53cb71532f334acd
+
+VulkanStory implements these ideas in Performance/EarlyItemMerge.cs and
+Performance/ParticleBudgets.cs using its own optional patch and live settings
+system. It uses the game's automatic slot merge operation instead of directly
+changing stack counts, and budgets the stock spawn loop instead of mutating
+particle providers. Forced garbage collection and adaptive chunk settings are
+not included. The reference project's Boost Software License 1.0 is retained
+in LICENSE-RAM-GARBAGE-COLLECTOR.txt.

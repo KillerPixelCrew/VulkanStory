@@ -13,6 +13,8 @@ internal static class PerformanceFeatures
         ShadowFarFoliage.Create(),
         EntityShadowCull.Create(),
         ParticleDistanceGate.Create(),
+        ParticleBudgets.Create(),
+        EarlyItemMerge.Create(),
         DroppedItemCull.Create(essentials),
         UploadQueueSortSkip.Create(),
         MeshPartPool.Create(),

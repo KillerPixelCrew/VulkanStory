@@ -130,6 +130,7 @@ internal static class PerformanceCounters
         ShapeParseHits, ShapeParseMisses,
         VisibilityBfsMismatches,
         CloudCoordinatesReused,
+        ItemMergeSearches, ItemStacksMerged, ItemUnitsMerged, ItemEntitiesMerged, ParticleSpawnsBudgeted,
         OcclusionTests, OcclusionCulled, OcclusionPublished, EntityOcclusionTests, EntityOcclusionCulled, VisibilityWalks, VisibilityChunksVisited, VisibleChunks, VisibilityMismatches, VisibilityRayChunks, CullMicroseconds, CullsTimed, WorldgenColumns, WorldgenLeaseConflicts,
         WorldgenWorkerFaults, ParallelChunkReads;
     private static readonly System.Reflection.FieldInfo[] Fields = typeof(PerformanceCounters)

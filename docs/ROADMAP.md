@@ -34,6 +34,10 @@ Current release: [v0.1.1](https://github.com/KillerPixelCrew/VulkanStory/release
   - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, indexed flood-fill traversal, and private coordinate reuse in the stock FluffyClouds updater. Optional algorithms have live controls.
   - Loading and streaming: background outfit metadata preparation, translation resolution caching with language/reload invalidation, bounded mesh-part capacity classes, independent static-shape templates for fruiting bushes, and pooled PCM accumulation with the original decoder and runtime unmute behavior.
 
+- **PERF-07: Drop and particle budgets** (ideas from RAM-Garbage-Collector, rebuilt as optional patches)
+  - Earlier merging of settled matching drops in singleplayer, with bounded work, player ownership checks and the game's automatic stack/collectible rules.
+  - Live particle density, per-spawn and per-pool limits for cubes, quads and mod providers. Defaults: 50% density, 256 per spawn and 8,192 per pool; effects marked to ignore user configuration are preserved. Both features have live switches on the Performance page. No forced GC.
+
 ## Known defects
 
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.

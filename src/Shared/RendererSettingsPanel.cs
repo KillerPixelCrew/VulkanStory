@@ -245,6 +245,12 @@ internal sealed class RendererSettingsPanel
                 Switch("Cull distant entity shadows", "EntityShadowCull");
                 Slider("Entity shadow distance (blocks)", "EntityShadowDistance");
                 Switch("Skip distant particle spawns", "ParticleDistanceGate");
+                Switch("Limit particle quantities", "ParticleBudgets");
+                Slider("Particle density (%)", "ParticleQuantityPercent");
+                Slider("Particles per spawn (0: unlimited)", "ParticleSpawnLimit");
+                Slider("Live particles per pool (0: unlimited)", "ParticlePoolLimit");
+                Switch("Merge settled drops sooner (singleplayer)", "EarlyItemMerge");
+                Text("Particle limits apply live to cubes and quads, including mod effects. Effects marked to ignore user settings are preserved. Lowering the live limit stops new spawns until the pool falls below it; existing particles finish normally. Drop merging preserves matching attributes, player ownership and the game's automatic stack rules.");
                 Switch("Cull distant dropped items", "DroppedItemCull");
                 Slider("Dropped item distance (blocks)", "DroppedItemDistance");
                 Switch("Skip unchanged chunk upload sorting", "UploadQueueSortSkip");

@@ -34,7 +34,8 @@ internal static class RendererSettingCommand
                 value = JsonValue.Create(toggle);
                 break;
             case JsonValueKind.Number:
-                if (property.Key is "TaaDebugView" or "FrameGenerationMultiplier" or "EntityShadowDistance" or "DroppedItemDistance")
+                if (property.Key is "TaaDebugView" or "FrameGenerationMultiplier" or "EntityShadowDistance" or "DroppedItemDistance"
+                    or "ParticleQuantityPercent" or "ParticleSpawnLimit" or "ParticlePoolLimit")
                 {
                     if (!int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number) ||
                         number < 0 || (property.Key != "TaaDebugView" &&

@@ -69,6 +69,16 @@ internal sealed record RendererSettings
     public bool MeshPartPool { get; init; } = true;
     /// <summary>Skips particle spawns whose emitter lies beyond the view distance.</summary>
     public bool ParticleDistanceGate { get; init; } = true;
+    /// <summary>Applies live density, burst and resident limits to configurable client particles.</summary>
+    public bool ParticleBudgets { get; init; } = true;
+    /// <summary>Percentage of the requested particle quantity, including fractional-count sampling.</summary>
+    public int ParticleQuantityPercent { get; init; } = 50;
+    /// <summary>Maximum particles per spawn call; zero disables this limit.</summary>
+    public int ParticleSpawnLimit { get; init; } = 256;
+    /// <summary>Maximum living configurable particles in each client pool; zero disables this limit.</summary>
+    public int ParticlePoolLimit { get; init; } = 8192;
+    /// <summary>Merges settled matching dropped stacks sooner in the integrated server.</summary>
+    public bool EarlyItemMerge { get; init; } = true;
     /// <summary>Skips drawing dropped items beyond <see cref="DroppedItemDistance" /> blocks.</summary>
     public bool DroppedItemCull { get; init; } = true;
     /// <summary>Horizontal dropped-item draw distance in blocks.</summary>
@@ -146,6 +156,11 @@ internal sealed record RendererSettings
         FallingBlockMeshFix = source.FallingBlockMeshFix,
         MeshPartPool = source.MeshPartPool,
         ParticleDistanceGate = source.ParticleDistanceGate,
+        ParticleBudgets = source.ParticleBudgets,
+        ParticleQuantityPercent = source.ParticleQuantityPercent,
+        ParticleSpawnLimit = source.ParticleSpawnLimit,
+        ParticlePoolLimit = source.ParticlePoolLimit,
+        EarlyItemMerge = source.EarlyItemMerge,
         DroppedItemCull = source.DroppedItemCull,
         DroppedItemDistance = source.DroppedItemDistance,
         OutfitShapeCache = source.OutfitShapeCache,
@@ -209,6 +224,9 @@ internal sealed record RendererSettings
             TaaDebugView = Math.Max(0, TaaDebugView),
             EntityShadowDistance = RendererChoices.Range(nameof(EntityShadowDistance)).Clamp(EntityShadowDistance),
             DroppedItemDistance = RendererChoices.Range(nameof(DroppedItemDistance)).Clamp(DroppedItemDistance),
+            ParticleQuantityPercent = RendererChoices.Range(nameof(ParticleQuantityPercent)).Clamp(ParticleQuantityPercent),
+            ParticleSpawnLimit = RendererChoices.Range(nameof(ParticleSpawnLimit)).Clamp(ParticleSpawnLimit),
+            ParticlePoolLimit = RendererChoices.Range(nameof(ParticlePoolLimit)).Clamp(ParticlePoolLimit),
             ChiselLodDistance = RendererChoices.Range(nameof(ChiselLodDistance)).Clamp(ChiselLodDistance),
             WorldgenWorkers = Choice(WorldgenWorkers, nameof(WorldgenWorkers), "auto"),
         };

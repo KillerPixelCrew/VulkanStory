@@ -33,6 +33,9 @@ internal static class RendererChoices
     private static readonly RendererRange EntityShadowDistance = new(16f, 256f, 80f, 8, 1);
     private static readonly RendererRange DroppedItemDistance = new(16f, 256f, 64f, 8, 1);
     private static readonly RendererRange ChiselLodDistance = new(16f, 256f, 48f, 8, 1);
+    private static readonly RendererRange ParticleQuantityPercent = new(0f, 100f, 50f, 5, 1);
+    private static readonly RendererRange ParticleSpawnLimit = new(0f, 4096f, 256f, 64, 1);
+    private static readonly RendererRange ParticlePoolLimit = new(0f, 65536f, 8192f, 1024, 1);
 
     /// <summary>Returns supported values and labels; XeSS adds its SDK-specific quality choices.</summary>
     /// <param name="key">Renderer setting name shared by commands and the settings panel.</param>
@@ -75,6 +78,9 @@ internal static class RendererChoices
         "EntityShadowDistance" => EntityShadowDistance,
         "DroppedItemDistance" => DroppedItemDistance,
         "ChiselLodDistance" => ChiselLodDistance,
+        "ParticleQuantityPercent" => ParticleQuantityPercent,
+        "ParticleSpawnLimit" => ParticleSpawnLimit,
+        "ParticlePoolLimit" => ParticlePoolLimit,
         _ => throw new ArgumentException("Unknown renderer range: " + key),
     };
 }
