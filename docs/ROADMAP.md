@@ -39,6 +39,10 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 
 ## Planned
 
+- **PERF-06: Profile-driven optimizations (in progress)**
+  - Recurring renderer costs: reusable occlusion hierarchy storage with a live switch, descriptor comparisons without handle boxing, and render/upload synchronization changes grounded in lock ownership.
+  - Loading and streaming: move outfit metadata discovery out of budgeted frame ticks, cache translation/search resolution with language and asset invalidation, improve bounded mesh-part reuse and immutable shape parsing, and reduce audio decode growth/copies while preserving runtime unmute.
+
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
   2. Loader: `shaderpacks/` folder, pack selection and per-pack options in the Options menu, hot reload; compiled at runtime with the shipped shaderc.

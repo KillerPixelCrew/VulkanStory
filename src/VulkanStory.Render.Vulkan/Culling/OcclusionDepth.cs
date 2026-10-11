@@ -33,6 +33,11 @@ internal sealed class OcclusionDepth : IDisposable
     private Format _programFormat;
     private int _width, _height;
     private OcclusionPyramid? _latest;
+    private OcclusionPyramid? _spare;
+    private readonly object _publicationGate = new();
+
+    /// <summary>Reuses size-matched CPU hierarchy storage. Applies to the next completed readback.</summary>
+    public bool ReuseStorage { get; set; } = true;
 
     public OcclusionDepth(VulkanDevice device, int framesInFlight)
     {
@@ -42,7 +47,7 @@ internal sealed class OcclusionDepth : IDisposable
         Test = new LatestView(this);
     }
 
-    /// <summary>The newest published pyramid; reads are lock-free and see one complete snapshot.</summary>
+    /// <summary>The newest published pyramid; queries retain a complete snapshot until they finish.</summary>
     public IOcclusionTest Test { get; }
 
     /// <summary>Why the last <see cref="Capture" /> recorded nothing, or null.</summary>
@@ -102,9 +107,16 @@ internal sealed class OcclusionDepth : IDisposable
     {
         if (_pending[slotIndex] is not { } pending || _readbacks[slotIndex] is not { } buffer) return;
         _pending[slotIndex] = null;
-        var texels = new float[pending.Width * pending.Height];
-        Marshal.Copy(buffer.Mapped, texels, 0, texels.Length);
-        System.Threading.Volatile.Write(ref _latest, OcclusionPyramid.Build(texels, pending.Width, pending.Height, pending.Camera, pending.Projection));
+        // Only LatestView exposes the published pyramid, and its queries hold the publication gate.
+        // The spare is unreachable by readers; build it outside the gate, then retire the old snapshot
+        // only after all queries using it have finished. Neither readers nor the GPU retain spare storage.
+        OcclusionPyramid next = OcclusionPyramid.FromReadback(buffer.Mapped, pending.Width, pending.Height,
+            pending.Camera, pending.Projection, ReuseStorage ? _spare : null);
+        lock (_publicationGate)
+        {
+            _spare = ReuseStorage ? _latest : null;
+            _latest = next;
+        }
         Published++;
     }
 
@@ -112,7 +124,7 @@ internal sealed class OcclusionDepth : IDisposable
     public void Reset()
     {
         Array.Clear(_pending);
-        System.Threading.Volatile.Write(ref _latest, null);
+        lock (_publicationGate) { _latest = null; _spare = null; }
     }
 
     private bool Fail(string reason)
@@ -172,9 +184,12 @@ internal sealed class OcclusionDepth : IDisposable
     /// <summary>Forwards to the newest published pyramid; undecided (visible) while none exists.</summary>
     private sealed class LatestView(OcclusionDepth owner) : IOcclusionTest
     {
-        public OcclusionCamera? Source => System.Threading.Volatile.Read(ref owner._latest)?.Camera;
-        public bool IsOccluded(double minX, double minY, double minZ, double maxX, double maxY, double maxZ) =>
-            System.Threading.Volatile.Read(ref owner._latest)?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true;
+        public OcclusionCamera? Source { get { lock (owner._publicationGate) return owner._latest?.Camera; } }
+        public bool IsOccluded(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
+        {
+            lock (owner._publicationGate)
+                return owner._latest?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true;
+        }
     }
 }
 
@@ -198,7 +213,7 @@ internal readonly record struct OcclusionProjection(float DepthUnpackMul, float 
 
 /// <summary>
 /// One published occlusion depth: a max-reduced pyramid of forward view distances over the captured view, with the camera
-/// that drew it. Immutable, so the main thread tests it while the next one is being built.
+/// that drew it. Immutable while published; OcclusionDepth recycles it only after all readers finish.
 /// </summary>
 internal sealed class OcclusionPyramid
 {
@@ -208,9 +223,9 @@ internal sealed class OcclusionPyramid
 
     private readonly float[][] _levels;
     private readonly int[] _widths, _heights;
-    private readonly float[] _view, _projection;
+    private float[] _view, _projection;
 
-    public OcclusionCamera Camera { get; }
+    public OcclusionCamera Camera { get; private set; }
 
     private OcclusionPyramid(float[][] levels, int[] widths, int[] heights, OcclusionCamera camera)
     {
@@ -221,16 +236,46 @@ internal sealed class OcclusionPyramid
     /// <summary>Linearises the base level and reduces it to 1x1, every level keeping the farthest distance of its children.</summary>
     public static OcclusionPyramid Build(float[] depth, int width, int height, OcclusionCamera camera, OcclusionProjection projection)
     {
+        OcclusionPyramid result = CreateStorage(width, height, camera);
+        depth.AsSpan().CopyTo(result._levels[0]);
+        result.Reduce(camera, projection);
+        return result;
+    }
+
+    internal static OcclusionPyramid FromReadback(IntPtr mapped, int width, int height, OcclusionCamera camera,
+        OcclusionProjection projection, OcclusionPyramid? reuse)
+    {
+        OcclusionPyramid result = reuse != null && reuse._widths[0] == width && reuse._heights[0] == height
+            ? reuse : CreateStorage(width, height, camera);
+        Marshal.Copy(mapped, result._levels[0], 0, width * height);
+        result.Reduce(camera, projection);
+        return result;
+    }
+
+    private static OcclusionPyramid CreateStorage(int width, int height, OcclusionCamera camera)
+    {
         var levels = new System.Collections.Generic.List<float[]>();
         var widths = new System.Collections.Generic.List<int>();
         var heights = new System.Collections.Generic.List<int>();
-        var level = new float[depth.Length];
-        for (int i = 0; i < depth.Length; i++) level[i] = projection.ViewDepth(depth[i]);
-        levels.Add(level); widths.Add(width); heights.Add(height);
+        levels.Add(new float[width * height]); widths.Add(width); heights.Add(height);
         while (width > 1 || height > 1)
         {
-            int nextWidth = (width + 1) / 2, nextHeight = (height + 1) / 2;
-            var next = new float[nextWidth * nextHeight];
+            width = (width + 1) / 2; height = (height + 1) / 2;
+            levels.Add(new float[width * height]); widths.Add(width); heights.Add(height);
+        }
+        return new OcclusionPyramid(levels.ToArray(), widths.ToArray(), heights.ToArray(), camera);
+    }
+
+    private void Reduce(OcclusionCamera camera, OcclusionProjection projection)
+    {
+        Camera = camera; _view = camera.View; _projection = camera.Projection;
+        float[] level = _levels[0];
+        for (int i = 0; i < level.Length; i++) level[i] = projection.ViewDepth(level[i]);
+        for (int index = 1; index < _levels.Length; index++)
+        {
+            int width = _widths[index - 1], height = _heights[index - 1];
+            int nextWidth = _widths[index], nextHeight = _heights[index];
+            float[] next = _levels[index];
             for (int y = 0; y < nextHeight; y++)
                 for (int x = 0; x < nextWidth; x++)
                 {
@@ -238,10 +283,8 @@ internal sealed class OcclusionPyramid
                     next[y * nextWidth + x] = MathF.Max(MathF.Max(level[sy * width + sx], level[sy * width + sx1]),
                         MathF.Max(level[sy1 * width + sx], level[sy1 * width + sx1]));
                 }
-            level = next; width = nextWidth; height = nextHeight;
-            levels.Add(level); widths.Add(width); heights.Add(height);
+            level = next;
         }
-        return new OcclusionPyramid(levels.ToArray(), widths.ToArray(), heights.ToArray(), camera);
     }
 
     /// <summary>

@@ -16,11 +16,22 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 internal readonly record struct SamplerBindingValue(
     uint Binding, ImageView View, Sampler Sampler, ulong Resource = 0,
-    ImageLayout Layout = ImageLayout.ShaderReadOnlyOptimal);
+    ImageLayout Layout = ImageLayout.ShaderReadOnlyOptimal)
+{
+    // Silk handle wrappers use ValueType equality. Compare their handles directly to avoid boxing per draw.
+    public bool Equals(SamplerBindingValue other) => Binding == other.Binding && View.Handle == other.View.Handle &&
+        Sampler.Handle == other.Sampler.Handle && Resource == other.Resource && Layout == other.Layout;
+    public override int GetHashCode() => HashCode.Combine(Binding, View.Handle, Sampler.Handle, Resource, Layout);
+}
 
 /// <summary>One buffer binding. <paramref name="Resource" /> as for samplers.</summary>
 internal readonly record struct BufferBindingValue(
-    uint Binding, Buffer Buffer, ulong Offset, ulong Range, ulong Resource = 0);
+    uint Binding, Buffer Buffer, ulong Offset, ulong Range, ulong Resource = 0)
+{
+    public bool Equals(BufferBindingValue other) => Binding == other.Binding && Buffer.Handle == other.Buffer.Handle &&
+        Offset == other.Offset && Range == other.Range && Resource == other.Resource;
+    public override int GetHashCode() => HashCode.Combine(Binding, Buffer.Handle, Offset, Range, Resource);
+}
 
 /// <summary>
 /// The contents of one descriptor set, used as a cache key.

@@ -183,6 +183,7 @@ internal sealed partial class GameRenderSession : IDisposable
         try
         {
             Performance.PerformanceTrace.Log.CaptureSettings(services.RendererSettings.Settings);
+            Device.OcclusionDepth.ReuseStorage = services.RendererSettings.Settings.OcclusionStorageReuse;
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
             pendingFrameSettings = null;
             float delta = (float)frameClock.Elapsed.TotalSeconds;

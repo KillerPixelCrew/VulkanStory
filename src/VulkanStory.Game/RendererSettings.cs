@@ -120,6 +120,8 @@ internal sealed record RendererSettings
     public int ChiselLodDistance { get; init; } = 48;
     /// <summary>Caches world-map pages on disk and renders resident pages with a Vulkan array texture.</summary>
     public bool WorldMapPageCache { get; init; } = true;
+    /// <summary>Reuses CPU occlusion depth and hierarchy storage without changing visibility tests.</summary>
+    public bool OcclusionStorageReuse { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -157,6 +159,7 @@ internal sealed record RendererSettings
         ChiselMeshLod = source.ChiselMeshLod,
         ChiselLodDistance = source.ChiselLodDistance,
         WorldMapPageCache = source.WorldMapPageCache,
+        OcclusionStorageReuse = source.OcclusionStorageReuse,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>

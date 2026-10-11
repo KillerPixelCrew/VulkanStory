@@ -269,6 +269,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Distant chisel mesh LOD", "ChiselMeshLod");
                 Slider("Chisel LOD distance (blocks)", "ChiselLodDistance");
                 Switch("World map page cache", "WorldMapPageCache");
+                Switch("Reuse occlusion hierarchy storage", "OcclusionStorageReuse");
                 string unavailable = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> performance
                     ? string.Join("\n", performance().Split('\n').Where(line => line.Contains(": unavailable (", StringComparison.Ordinal)).Select(line => line.Trim()))
                     : "";
