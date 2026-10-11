@@ -73,10 +73,10 @@ internal static class TranslationLookupCache
         AccessTools.FieldRefAccess<TranslationService, ILogger>("logger");
     private static readonly Action<TranslationService> EnsureLoaded = AccessTools.Method(typeof(TranslationService), "EnsureLoaded")!
         .CreateDelegate<Action<TranslationService>>();
-    private static readonly Func<TranslationService, string, object[], string> Format = AccessTools.Method(typeof(TranslationService), "Format")!
-        .CreateDelegate<Func<TranslationService, string, object[], string>>();
-    private static readonly Func<string, string, string> DomainKey = AccessTools.Method(typeof(TranslationService), "KeyWithDomain")!
-        .CreateDelegate<Func<string, string, string>>();
+    private static readonly System.Func<TranslationService, string, object[], string> Format = AccessTools.Method(typeof(TranslationService), "Format")!
+        .CreateDelegate<System.Func<TranslationService, string, object[], string>>();
+    private static readonly System.Func<string, string, string> DomainKey = AccessTools.Method(typeof(TranslationService), "KeyWithDomain")!
+        .CreateDelegate<System.Func<string, string, string>>();
 
     internal static PerformanceFeature Create() => new("translation-lookup-cache", s => s.TranslationLookupCache, () =>
     {

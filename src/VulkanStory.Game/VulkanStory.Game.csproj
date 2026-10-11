@@ -31,6 +31,10 @@
       <HintPath>$(VintageStoryPath)/VintagestoryLib.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(VintageStoryPath)/Lib/Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="SkiaSharp">
       <HintPath>$(VintageStoryPath)/Lib/SkiaSharp.dll</HintPath>
       <Private>false</Private>

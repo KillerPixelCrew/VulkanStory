@@ -127,6 +127,7 @@ internal static class PerformanceCounters
 {
     internal static long ShadowFoliagePoolsSkipped, EntityShadowsSkipped, QueueSortsSkipped, QueueSortsRun, FallingMeshUploadsSaved, FallingMeshesBuilt,
         MeshPartsReused, MeshPartsAllocated, ParticleSpawnsGated, DroppedItemsCulled, OutfitShapeHits, OutfitShapeMisses, OutfitTexturesPrewarmed,
+        ShapeParseHits, ShapeParseMisses,
         OcclusionTests, OcclusionCulled, OcclusionPublished, EntityOcclusionTests, EntityOcclusionCulled, VisibilityWalks, VisibilityChunksVisited, VisibleChunks, VisibilityMismatches, VisibilityRayChunks, CullMicroseconds, CullsTimed, WorldgenColumns, WorldgenLeaseConflicts,
         WorldgenWorkerFaults, ParallelChunkReads;
     private static readonly System.Reflection.FieldInfo[] Fields = typeof(PerformanceCounters)

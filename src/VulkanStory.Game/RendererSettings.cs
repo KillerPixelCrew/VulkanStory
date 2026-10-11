@@ -126,6 +126,10 @@ internal sealed record RendererSettings
     public bool TranslationLookupCache { get; init; } = true;
     /// <summary>Uses pooled PCM segments in the original Vorbis decoder.</summary>
     public bool AudioDecodeBufferReuse { get; init; } = true;
+    /// <summary>Caches private static-shape templates for fruiting-bush tessellation, with independent caller data.</summary>
+    public bool ShapeParseCache { get; init; } = true;
+    /// <summary>Prepares outfit shape metadata on owned background inputs; atlas insertion stays on the owner thread.</summary>
+    public bool OutfitMetadataPreparation { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -166,6 +170,8 @@ internal sealed record RendererSettings
         OcclusionStorageReuse = source.OcclusionStorageReuse,
         TranslationLookupCache = source.TranslationLookupCache,
         AudioDecodeBufferReuse = source.AudioDecodeBufferReuse,
+        ShapeParseCache = source.ShapeParseCache,
+        OutfitMetadataPreparation = source.OutfitMetadataPreparation,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>

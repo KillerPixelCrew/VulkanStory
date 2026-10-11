@@ -6,6 +6,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Datastructures;
+using Vintagestory.Common;
 
 namespace VulkanStory.Game.Performance;
 
@@ -240,8 +241,8 @@ internal static class OutfitShapeCache
 /// <summary>E3 prewarm: inserts every outfit texture of dressed-humanoid entity types into the entity atlas after a world loads,
 /// spread over game ticks within a small time budget, so a villager or trader first coming into view needs no atlas insert.</summary>
 /// <remarks>The atlas API inserts one texture at a time and each insert costs milliseconds, so an up-front batch stalls world entry.
-/// Discovery is lazy as well: configs and gear shapes load as the walk reaches them. Runs on the client main thread inside the
-/// game frame, like the original's own lazy inserts.</remarks>
+/// Metadata can be prepared from owned asset snapshots off-thread. Atlas mutation stays on the client main thread;
+/// one insertion is indivisible, so the budget limits additional work rather than promising a hard 1ms bound.</remarks>
 internal static class OutfitTexturePrewarm
 {
     private const double BudgetMilliseconds = 1;
@@ -249,13 +250,19 @@ internal static class OutfitTexturePrewarm
     private static IEnumerator<AssetLocation>? pending;
     private static long listener = -1;
     private static readonly System.Diagnostics.Stopwatch Spent = new();
+    private static readonly HashSet<string> processed = new(StringComparer.Ordinal);
+    private static Task<Preparation>? preparing;
+    private static CancellationTokenSource? cancellation;
+    private static bool offThread;
+    private sealed record Input(AssetLocation? Texture, Asset? Shape);
+    private sealed record Preparation(AssetLocation[] Textures, string[] Warnings);
 
     internal static void Start(ICoreClientAPI client)
     {
         Stop();
         if (PerformancePatchSet.Current?.OutfitShapeCache != true) return;
         api = client;
-        pending = Textures(client).GetEnumerator();
+        Configure(client);
         Spent.Reset();
         listener = client.Event.RegisterGameTickListener(Step, 0);
     }
@@ -264,16 +271,73 @@ internal static class OutfitTexturePrewarm
     {
         if (listener >= 0) api?.Event.UnregisterGameTickListener(listener);
         listener = -1; pending?.Dispose(); pending = null; api = null;
+        cancellation?.Cancel(); cancellation?.Dispose(); cancellation = null; preparing = null;
+        processed.Clear();
+    }
+
+    private static void Configure(ICoreClientAPI client)
+    {
+        pending?.Dispose(); pending = null;
+        cancellation?.Cancel(); cancellation?.Dispose(); cancellation = null; preparing = null;
+        offThread = PerformancePatchSet.Current?.OutfitMetadataPreparation == true;
+        if (!offThread) { pending = Textures(client).GetEnumerator(); return; }
+        // Registry/config access and snapshots belong to the owner thread. The worker never accesses the world,
+        // live asset dictionary, mutable outfit configs, texture atlas, or renderer.
+        Input[] inputs = Inputs(client).ToArray();
+        cancellation = new();
+        CancellationToken token = cancellation.Token;
+        preparing = Task.Run(() => Prepare(inputs, token), token);
+    }
+
+    private static Preparation Prepare(Input[] inputs, CancellationToken token)
+    {
+        var stamp = PerformanceTrace.Log.Begin();
+        try { return PrepareCore(inputs, token); }
+        finally { PerformanceTrace.Log.End("Outfit.MetadataPreparation", stamp); }
+    }
+
+    private static Preparation PrepareCore(Input[] inputs, CancellationToken token)
+    {
+        var textures = new List<AssetLocation>();
+        var warnings = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Input input in inputs)
+        {
+            token.ThrowIfCancellationRequested();
+            if (input.Texture is { } direct) Add(direct);
+            if (input.Shape is not { } shape) continue;
+            try
+            {
+                if (shape.Data == null) shape.Origin?.TryLoadAsset(shape);
+                token.ThrowIfCancellationRequested();
+                if (shape.ToObject<Shape>()?.Textures is { } gear)
+                    foreach (AssetLocation texture in gear.Values) Add(texture);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception error) { warnings.Add("Outfit metadata " + shape.Location + ": " + error.Message); }
+        }
+        return new(textures.ToArray(), warnings.ToArray());
+        void Add(AssetLocation texture) { if (seen.Add(texture.ToString())) textures.Add(texture.Clone()); }
     }
 
     private static void Step(float dt)
     {
-        if (api == null || pending == null) return;
+        if (api == null) return;
         if (PerformancePatchSet.Current?.OutfitShapeCache != true) { Stop(); return; }
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         Spent.Start();
         try
         {
+            if (offThread != (PerformancePatchSet.Current?.OutfitMetadataPreparation == true)) Configure(api);
+            if (preparing is { } task)
+            {
+                if (!task.IsCompleted) return;
+                Preparation result = task.GetAwaiter().GetResult();
+                preparing = null; cancellation?.Dispose(); cancellation = null;
+                foreach (string warning in result.Warnings) api.Logger.Warning("VulkanStory: {0}", warning);
+                pending = ((IEnumerable<AssetLocation>)result.Textures).GetEnumerator();
+            }
+            if (pending == null) return;
             // At least one texture per tick; more while the budget lasts.
             do
             {
@@ -284,11 +348,17 @@ internal static class OutfitTexturePrewarm
                     Stop();
                     return;
                 }
-                var texture = new CompositeTexture(pending.Current);
-                texture.Bake(api.Assets);
-                if (texture.Baked?.TextureFilenames is { Length: > 0 } files &&
-                    api.EntityTextureAtlas.GetOrInsertTexture(new AssetLocationAndSource(files[0], "VulkanStory outfit prewarm of", pending.Current), out _, out _))
-                    Interlocked.Increment(ref PerformanceCounters.OutfitTexturesPrewarmed);
+                if (!processed.Add(pending.Current.ToString())) continue;
+                var stamp = PerformanceTrace.Log.Begin();
+                try
+                {
+                    var texture = new CompositeTexture(pending.Current);
+                    texture.Bake(api.Assets);
+                    if (texture.Baked?.TextureFilenames is { Length: > 0 } files &&
+                        api.EntityTextureAtlas.GetOrInsertTexture(new AssetLocationAndSource(files[0], "VulkanStory outfit prewarm of", pending.Current), out _, out _))
+                        Interlocked.Increment(ref PerformanceCounters.OutfitTexturesPrewarmed);
+                }
+                finally { PerformanceTrace.Log.End("Outfit.AtlasInsertion", stamp); }
             }
             while (System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds < BudgetMilliseconds);
         }
@@ -298,6 +368,54 @@ internal static class OutfitTexturePrewarm
             Stop();
         }
         finally { Spent.Stop(); }
+    }
+
+    private static IEnumerable<Input> Inputs(ICoreClientAPI client)
+    {
+        Type? dressed = AccessTools.TypeByName("Vintagestory.GameContent.EntityDressedHumanoid");
+        if (dressed == null || client.ModLoader.GetModSystem("Vintagestory.GameContent.HumanoidOutfits") is not { } outfits) yield break;
+        MethodInfo? getConfig = AccessTools.Method(outfits.GetType(), "GetConfig", [typeof(string)]);
+        if (getConfig == null) yield break;
+        var configs = new HashSet<string>(StringComparer.Ordinal);
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        var classes = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (EntityProperties type in client.World.EntityTypes.ToArray())
+        {
+            if (type?.Class == null || type.Code == null) continue;
+            if (!classes.TryGetValue(type.Class, out bool isDressed))
+                classes[type.Class] = isDressed = dressed.IsInstanceOfType(client.ClassRegistry.CreateEntity(type.Class));
+            if (!isDressed) continue;
+            string config = AssetLocation.Create(type.Attributes?["outfitConfigFileName"].AsString("traderaccessories") ?? "traderaccessories",
+                type.Code.Domain).ToString();
+            if (!configs.Add(config)) continue;
+            if (getConfig.Invoke(outfits, [config]) is not { } properties ||
+                AccessTools.Field(properties.GetType(), "Variants")?.GetValue(properties) is not System.Collections.IDictionary variants) continue;
+            foreach (object? variant in variants.Values.Cast<object?>().ToArray())
+            {
+                if (variant is not CompositeShape shape) continue;
+                foreach (string field in new[] { "Textures", "OverrideTextures" })
+                    if (AccessTools.Field(variant.GetType(), field)?.GetValue(variant) is IDictionary<string, AssetLocation> textures)
+                        foreach (AssetLocation location in textures.Values) yield return new(location.Clone(), null);
+                if (shape.Base == null) continue;
+                AssetLocation path = shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+                if (!paths.Add(path.ToString()) || client.Assets.TryGet(path, false) is not { } asset) continue;
+                if (asset.GetType() != typeof(Asset))
+                {
+                    // A mod can override ToObject. Preserve that behavior on its owner rather than calling it off-thread.
+                    if (Shape.TryGet(client, path)?.Textures is { } customTextures)
+                        foreach (AssetLocation location in customTextures.Values) yield return new(location.Clone(), null);
+                    continue;
+                }
+                Type? originType = asset.Origin?.GetType();
+                // These stock origins only read immutable path metadata and write the supplied asset's Data.
+                // Unknown origins are loaded on the owner thread before taking the snapshot.
+                bool safeOrigin = originType == typeof(GameOrigin) || originType == typeof(PathOrigin) || originType == typeof(FolderOrigin);
+                if (asset.Data == null && !safeOrigin) asset = client.Assets.Get(path);
+                var owned = new Asset(asset.Data == null ? null : (byte[])asset.Data.Clone(), asset.Location.Clone(), asset.Origin);
+                if (asset is Asset original) owned.FilePath = original.FilePath;
+                yield return new(null, owned);
+            }
+        }
     }
 
     /// <summary>Walks dressed-humanoid entity types, their outfit configs and gear shapes, yielding each distinct texture once.</summary>

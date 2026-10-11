@@ -37,5 +37,6 @@ internal static class PerformanceFeatures
         PerformanceTrace.Create(),
         TranslationLookupCache.Create(),
         AudioDecodeBuffers.Create(),
+        ShapeParseCache.Create(survival),
     ];
 }
