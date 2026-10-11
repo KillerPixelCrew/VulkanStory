@@ -12,6 +12,35 @@ internal sealed partial class GameRenderSession
     private long diagnosticNextSample, diagnosticWorldFrames, diagnosticUpscaleFrames, diagnosticPreparedFrames;
     private string? diagnosticCapture;
     private ulong diagnosticCaptureFrame;
+    private readonly List<double> diagnosticFrameWork = new();
+
+    /// <summary>Collects the game frame dispatch duration (CPU work, excluding pacing and presentation waits) for the next sample.</summary>
+    private void RecordFrameWork(long ticks)
+    {
+        if (DiagnosticsEnabled()) diagnosticFrameWork.Add(ticks * 1000.0 / Stopwatch.Frequency);
+    }
+
+    /// <summary>Performance counters, with the renderer-owned occlusion pyramid count folded in.</summary>
+    private Dictionary<string, long> SnapshotPerformance()
+    {
+        if (device != null) Interlocked.Exchange(ref Performance.PerformanceCounters.OcclusionPublished, device.OcclusionDepth.Published);
+        return Performance.PerformanceCounters.Snapshot();
+    }
+
+    /// <summary>Per-sample frame work percentiles in milliseconds; clears the collected window.</summary>
+    private object? TakeFrameWorkStats()
+    {
+        if (diagnosticFrameWork.Count == 0) return null;
+        diagnosticFrameWork.Sort();
+        double Percentile(double fraction) => diagnosticFrameWork[Math.Min(diagnosticFrameWork.Count - 1, (int)(fraction * diagnosticFrameWork.Count))];
+        var stats = new
+        {
+            frames = diagnosticFrameWork.Count, p50 = Percentile(.5), p95 = Percentile(.95), p99 = Percentile(.99),
+            max = diagnosticFrameWork[^1],
+        };
+        diagnosticFrameWork.Clear();
+        return stats;
+    }
 
     private bool DiagnosticsEnabled()
     {
@@ -98,6 +127,7 @@ internal sealed partial class GameRenderSession
                 hostGeneratedPresents = Interlocked.Read(ref hostGeneratedPresents),
                 sdkPresentReports = Interlocked.Read(ref sdkReports),
                 fps = FpsText, presentation = Presentation,
+                frameWorkMs = TakeFrameWorkStats(), performance = SnapshotPerformance(),
                 composedFramebufferCapture = diagnosticCapture, captureFrameId = diagnosticCaptureFrame
             });
             File.AppendAllText(Path.Combine(diagnosticDirectory!, "runtime-" + Environment.ProcessId + ".jsonl"), json + Environment.NewLine);

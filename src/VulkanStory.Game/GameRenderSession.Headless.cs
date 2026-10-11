@@ -15,6 +15,7 @@ internal sealed partial class GameRenderSession
     private long headlessWorldFrame = -1;
     private int headlessWritten;
     private bool headlessCommandsDone, headlessDone;
+    private List<HeadlessTimedCommand>? headlessTimedCommands;
     private bool headlessLegacyReady;
     private string? headlessCompletionReason;
     private bool headlessParityDone;
@@ -38,12 +39,16 @@ internal sealed partial class GameRenderSession
         { delta = HeadlessHarnessOptions.FixedDeltaTime; game.DeltaTimeLimiter = delta; }
         headlessWorldFrame++;
         if (headlessCommandsDone || headlessWorldFrame < HeadlessHarnessOptions.CommandFrame) return;
-        headlessCommandsDone = true;
-        foreach (string line in HeadlessHarnessOptions.ReadCommands())
+        // "@<frame> <line>" runs a line at that world frame; other lines run at the command frame.
+        headlessTimedCommands ??= HeadlessHarnessOptions.ReadCommands().Select(HeadlessTimedCommand.Parse).ToList();
+        foreach (var command in headlessTimedCommands.Where(command => command.Frame <= headlessWorldFrame).ToList())
         {
+            headlessTimedCommands.Remove(command);
+            string line = command.Line;
             try
             {
-                if (line.StartsWith(Vintagestory.Common.ChatCommandApi.ClientCommandPrefix, StringComparison.Ordinal))
+                if (line.StartsWith('!')) HeadlessServerDirective.Run(line, game.api);
+                else if (line.StartsWith(Vintagestory.Common.ChatCommandApi.ClientCommandPrefix, StringComparison.Ordinal))
                 {
                     string rest = line[1..]; int space = rest.IndexOf(' ');
                     // The public property exposes the same official dispatcher.
@@ -55,6 +60,7 @@ internal sealed partial class GameRenderSession
             }
             catch (Exception error) { platform.Logger.Error("VulkanStory headless command failed: {0}: {1}", line, error.Message); }
         }
+        headlessCommandsDone = headlessTimedCommands.Count == 0;
     }
 
     /// <summary>Reads and writes configured headless frame output only after the harness readiness/warmup boundaries are satisfied.</summary>

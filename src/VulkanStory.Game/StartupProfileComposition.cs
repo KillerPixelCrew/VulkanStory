@@ -12,7 +12,7 @@ internal static class StartupProfileComposition
         Assembly essentials, Assembly survival)
     {
         Func<bool> enabled = () => runtime.Routing.RoutingEnabled;
-        return Create(runtime, services, ComposeGraphics(
+        return Create(runtime, services, Performance.PerformanceFeatures.Create1227(essentials, survival), ComposeGraphics(
         [
             TextureConsumerPatches.CreateSubset(enabled),
             ShaderConsumerPatches.CreateSubset(enabled),
@@ -40,6 +40,9 @@ internal static class StartupProfileComposition
     internal static GameStartupPlan Create(ProcessRuntime runtime, GameSessionServices services, StartupPatchGroup completeGraphics)
         => Create(runtime, () => services, completeGraphics);
     internal static GameStartupPlan Create(ProcessRuntime runtime, Func<GameSessionServices> services, StartupPatchGroup completeGraphics)
+        => Create(runtime, services, [], completeGraphics);
+    internal static GameStartupPlan Create(ProcessRuntime runtime, Func<GameSessionServices> services,
+        Performance.PerformanceFeature[] performance, StartupPatchGroup completeGraphics)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(completeGraphics);
@@ -53,7 +56,7 @@ internal static class StartupProfileComposition
             completeGraphics,
             FrameLoopRoutingPatches.CreateGroup(runtime),
             StartupWindowRoutingPatches.CreateShutdownGroup(runtime),
-        ], services);
+        ], services, performance);
     }
     internal static StartupPatchGroup ComposeGraphics(IEnumerable<StartupPatchGroup> completeCoverage)
     {

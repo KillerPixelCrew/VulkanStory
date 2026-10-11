@@ -21,6 +21,9 @@ unmodified game.
 - **SDL3 window and input**: high-DPI aware windowing, raw mouse, touch, and full
   gamepad support with remapping, a radial menu, on-screen glyphs and analog movement
   (with an optional server-side input companion).
+- **Performance**: optional smoothness patches (culling, chunk streaming, entities,
+  singleplayer worldgen) and occlusion culling of terrain and entities hidden behind
+  terrain, each switchable on the Performance options page.
 - **Extension points** for other mods to add renderer passes. A separate
   compatibility module for translating supported OpenGL usage by other mods is planned.
 

@@ -59,11 +59,30 @@ internal static class ChunkConsumerPatches
             attempted = false;
         });
     }
+    private static readonly FieldInfo PassPools = AccessTools.Field(typeof(ChunkRenderer), nameof(ChunkRenderer.poolsByRenderPass))!;
+    /// <summary>Index of the single RenderShadow pool call that draws the BlendNoCull (foliage) pass, or -1 when the anchor is absent.</summary>
+    /// <remarks>The pass index is the constant loaded right after the nearest preceding <c>poolsByRenderPass</c> load.</remarks>
+    internal static int FoliageShadowSite(IReadOnlyList<CodeInstruction> body)
+    {
+        int found = -1;
+        for (int index = 0; index < body.Count; index++)
+        {
+            if (!body[index].Calls(Pool)) continue;
+            int load = index - 1;
+            while (load >= 0 && !body[load].LoadsField(PassPools)) load--;
+            if (load < 0 || load + 1 >= index || !body[load + 1].LoadsConstant((int)EnumChunkRenderPass.BlendNoCull)) continue;
+            if (found >= 0) return -1;
+            found = index;
+        }
+        return found;
+    }
     private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, MethodBase __originalMethod)
     {
         var body = instructions.ToList(); Check(__originalMethod, body);
-        foreach (var instruction in body)
+        int foliage = __originalMethod.Name == "RenderShadow" ? FoliageShadowSite(body) : -1;
+        for (int index = 0; index < body.Count; index++)
         {
+            var instruction = body[index];
             if (instruction.Calls(Pool))
             {
                 var label = new CodeInstruction(OpCodes.Ldstr, "chunk-" + __originalMethod.Name);
@@ -71,7 +90,8 @@ internal static class ChunkConsumerPatches
                 label.blocks.AddRange(instruction.blocks.Where(block => block.blockType != ExceptionBlockType.EndExceptionBlock));
                 instruction.blocks.RemoveAll(block => block.blockType != ExceptionBlockType.EndExceptionBlock);
                 yield return label;
-                instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(ChunkConsumerPatches), nameof(RenderPool));
+                instruction.opcode = OpCodes.Call;
+                instruction.operand = AccessTools.Method(typeof(ChunkConsumerPatches), index == foliage ? nameof(RenderShadowFoliagePool) : nameof(RenderPool));
             }
             else if (instruction.Calls(Sampler))
             { instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(ChunkConsumerPatches), nameof(ClearSampler)); }
@@ -96,6 +116,18 @@ internal static class ChunkConsumerPatches
             finally { graphics.EndChunkPool(); }
         }
         finally { if (motion) graphics.EndMotionWrite(); }
+    }
+    /// <summary>Set by the performance feature once it validated; until then the foliage site renders like every other pool.</summary>
+    internal static volatile bool FoliageSkipArmed;
+    private static void RenderShadowFoliagePool(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, string name)
+    {
+        if (FoliageSkipArmed && mode == EnumFrustumCullMode.CullInstantShadowPassFar &&
+            Performance.PerformancePatchSet.Current?.ShadowFarFoliage == true)
+        {
+            Interlocked.Increment(ref Performance.PerformanceCounters.ShadowFoliagePoolsSkipped);
+            return;
+        }
+        RenderPool(pool, position, uniform, mode, name);
     }
     private static void ClearSampler(int unit, int sampler)
     { if (Adapter() is { } graphics) graphics.BindSampler(unit, sampler); else GL.BindSampler(unit, sampler); }

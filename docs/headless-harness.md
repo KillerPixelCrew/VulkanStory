@@ -34,12 +34,23 @@ and a staged package from `scripts/stage-runtime.ps1`
 | `-CompanionMode` | `present` | `absent` leaves out the input companion |
 | `-Visible`, `-KeepOpen` | off | Show a focused window; `-KeepOpen` keeps the client running after capture |
 | `-MainMenuOptions` | off | Open the Options dialog from the main menu without loading a world (`-OptionsPage`, `-MainOptionsAction open\|save\|cancel`) |
+| `-SettingsOverrides` | — | JSON file of renderer settings merged into the isolated `vulkanstory.json` before launch, for settings read at world load (for example `WorldgenWorkers`). Renderer, upscaler, frame-generation and input switches stay under their own parameters |
+| `-MaxWorldgenThreads` | 0 | Above 0, copies the source `servermagicnumbers.json` with the game's own `MaxWorldgenThreads` set, as the vanilla multi-threaded worldgen reference |
 | `-TimeoutSeconds` | 300 | After this, the launcher kills its own child process |
 | `-PreflightOnly` | off | Validate inputs and print JSON without starting a run |
 
 **Command scripts:** lines starting with `.` go to the client command dispatcher
 (for example `.vulkanstory set Upscaler xess`). Other lines are sent as chat, so
-server `/` commands work too. Lines starting with `#` are comments.
+server `/` commands work too. Lines starting with `#` are comments. A line written
+as `@<frame> <command>` runs at that world frame instead of `-CommandFrame`. Harness
+directives reach paths no stock command does. Through the integrated server,
+`!sand <dx> <dy> <dz>` places sand at that offset from the player and wakes it so it
+falls, and `!drop <dx> <dz> <count>` spawns dropped flint on the surface at that offset.
+`!occluder <distance>` builds a granite wall across the camera's view at that
+distance, with four traders behind it and two in front of it (an entity occlusion
+scene). On the client, `!fallingsource` makes every later falling block act as a mod block
+that supplies its own falling mesh (`IFallingBlockMeshSource`), which no stock block
+does.
 
 **Scenarios** (`scripts/dev/scenarios/schema-v1.json`): up to 128 actions, each with
 an `id`, a `tick` and a `kind`. The kinds are `settings` (apply renderer settings),
@@ -86,7 +97,7 @@ example.
 | `frames/frame-NNNNNN.ppm`, `.png` | Scheduled frames. PPM is bottom-up (GL row order), PNG is top-down |
 | `frames/headless-result.json` | Completion record; scenario runs add `scenario-result.json` and `scenario-events.jsonl` |
 | `attachments/` | `<slot>-<name>-<color<i>\|depth>-<format>.{ppm,pgm,pfm}`. Names come from `EnumFrameBuffer`, `SlotN` for extra targets, slots 40–43 for AO |
-| `status/runtime-<pid>.jsonl` | Provider counters: SR frames, prepared FG frames, SDK-reported presents |
+| `status/runtime-<pid>.jsonl` | Provider counters (SR frames, prepared FG frames, SDK-reported presents), game frame work-time percentiles (`frameWorkMs`) and performance-port counters (`performance`) |
 | `bootstrap.jsonl`, `stdout.log`, `stderr.log` | Bootstrap events and child output |
 | `data/` | Isolated data path |
 

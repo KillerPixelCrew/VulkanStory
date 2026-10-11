@@ -1224,6 +1224,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // host buffer before the pools reset, and its readback arena is free again.
         _queryRing.BeginSlot(slot.Index, slot.CommandBuffer);
         _gpuTimestamps?.BeginSlot(slot.Index, slot.CommandBuffer);
+        // The occlusion depth this slot captured is complete; publish it before the arena is reused.
+        _occlusionDepth?.Collect(slot.Index);
         _readbacks.BeginSlot(slot.Index);
 
         // Sets naming resources deleted since last frame leave the cache now and
@@ -1826,6 +1828,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
+        // Its texture and program go with the texture manager and the compute cache below.
+        _occlusionDepth?.DisposeIdle();
+        _occlusionDepth = null;
         _compute?.Dispose();
         // The shared pipeline layout before the table's set layout it names; the
         // table's placeholders are textures and go with the texture manager.

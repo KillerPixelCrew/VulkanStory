@@ -26,6 +26,47 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Creates a logical renderer occlusion-query ID.</summary>
     public int CreateOcclusionQuery() => _queryRing.Create();
 
+    // ---------------------------------------------------------- occlusion depth (PERF-03)
+
+    private Culling.OcclusionDepth? _occlusionDepth;
+
+    /// <summary>The terrain occlusion depth pyramid owner, created on first use.</summary>
+    internal Culling.OcclusionDepth OcclusionDepth => _occlusionDepth ??= new Culling.OcclusionDepth(this, _frames.FramesInFlight);
+
+    /// <summary>A persistently mapped host buffer a caller owns for its own readbacks (the shared arena can be replaced mid-frame).</summary>
+    internal VulkanBuffer CreateReadbackBuffer(ulong size) => new(_context, size, BufferUsageFlags.TransferDstBit,
+        MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
+
+    /// <summary>Index of the frame slot being recorded.</summary>
+    internal int CurrentFrameSlot => _frames.Current.Index;
+
+    /// <summary>Retires a buffer once no submitted frame can still write it.</summary>
+    internal void DeferBufferDeletion(VulkanBuffer buffer) => _frames.DeferDeletion(buffer);
+
+    /// <summary>
+    /// Records a copy of level 0 of a colour texture into <paramref name="destination" /> at offset 0 (closing any open rendering
+    /// scope) and returns the slot whose next frame start finds the bytes complete.
+    /// </summary>
+    internal int CopyTextureToReadbackBuffer(int textureId, uint width, uint height, VulkanBuffer destination)
+    {
+        VulkanTexture texture = _textures.Get(textureId) ?? throw new InvalidOperationException("readback texture missing");
+        CommandBuffer commandBuffer = Commands;
+        _targets.EndRendering(commandBuffer);
+        ImageLayout restore = texture.Layout;
+        _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
+        var region = new BufferImageCopy
+        {
+            BufferOffset = 0,
+            ImageSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+            ImageExtent = new Extent3D(width, height, 1),
+        };
+        _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image, ImageLayout.TransferSrcOptimal, destination.Handle, 1, &region);
+        ulong copied = (ulong)width * height * (ulong)TextureReadbackFormats.BytesPerTexel(texture.Format);
+        ReadbackManager.RecordHostReadBarrier(_context, commandBuffer, destination, 0, copied);
+        if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
+        return _frames.Current.Index;
+    }
+
     /// <summary>Starts a known logical occlusion query in the current frame/rendering scope.</summary>
     public void BeginOcclusionQuery(int queryId)
     {

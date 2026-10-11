@@ -20,6 +20,7 @@ internal sealed partial class GameRenderSession
         Temporal.PublishMotionCoverage(false);
         // Usually already armed by the client's first scene; a no-op for the armed client.
         if (composition!.Arm(client)) Graphics.PrepareTemporalPipelines(platform.FrameBuffers, worldLoaded: true);
+        if (client.Api is Vintagestory.API.Client.ICoreClientAPI api) Performance.PerformancePatchSet.NotifyWorldReady(api);
     }
     /// <summary>Releases matching world controller/temporal state and output readiness while the process window/device survive.</summary>
     /// <param name="client">Departing original client identity.</param>
@@ -39,6 +40,7 @@ internal sealed partial class GameRenderSession
         Graphics.TaaHistoryValid = false;
         Graphics.SceneNoHudCaptured = false;
         ClearPresentation();
+        Performance.PerformancePatchSet.NotifyWorldLeft();
     }
     /// <summary>Arms the composition gate for a new world client and applies its hold to this frame's default image.</summary>
     /// <returns>True while the gate holds, so frame generation stays paused before enabling.</returns>

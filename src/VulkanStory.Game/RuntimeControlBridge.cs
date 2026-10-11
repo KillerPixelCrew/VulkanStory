@@ -19,7 +19,7 @@ internal static class RuntimeControlBridge
         AppContext.SetData("VulkanStory.Runtime.ShowFpsCounter", (Func<bool>)(() => runtime.IsActive && runtime.Session.ShowFpsCounter));
         AppContext.SetData("VulkanStory.Runtime.Presentation", (Func<string>)(() =>
             (runtime.IsActive ? runtime.Session.Presentation : "Renderer inactive: " + runtime.Status) +
-            "\n" + ModCompatibilityConsumerPatches.Status));
+            "\n" + ModCompatibilityConsumerPatches.Status + "\n" + Performance.PerformancePatchSet.Status));
         AppContext.SetData("VulkanStory.Runtime.ApplySettings", (Func<string, string?>)runtime.SaveSettings);
         AppContext.SetData("VulkanStory.Runtime.PreviewSettings", (Func<string, string?>)runtime.PreviewSettings);
         AppContext.SetData("VulkanStory.Runtime.ReloadSettings", (Func<string?>)runtime.ReloadSettings);

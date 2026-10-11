@@ -53,6 +53,59 @@ internal sealed record RendererSettings
     public bool ControllerEnabled { get; init; } = true;
     /// <summary>Enables session touch-to-mouse handling.</summary>
     public bool TouchEnabled { get; init; } = true;
+    /// <summary>Skips foliage (BlendNoCull terrain) in the far shadow cascade.</summary>
+    public bool ShadowFarFoliage { get; init; } = true;
+    /// <summary>Skips entity shadows beyond <see cref="EntityShadowDistance" /> blocks.</summary>
+    public bool EntityShadowCull { get; init; } = true;
+    /// <summary>Horizontal entity shadow distance in blocks.</summary>
+    public int EntityShadowDistance { get; init; } = 80;
+    /// <summary>Skips re-sorting the chunk upload queue while nothing that orders it changed.</summary>
+    public bool UploadQueueSortSkip { get; init; } = true;
+    /// <summary>Replaces the per-entity LINQ collision-box animation check with an allocation-free loop.</summary>
+    public bool AnimationLinqFree { get; init; } = true;
+    /// <summary>Fixes the falling-block mesh buffer reuse and duplicate upload.</summary>
+    public bool FallingBlockMeshFix { get; init; } = true;
+    /// <summary>Recycles the custom attribute parts of tessellated chunk meshes.</summary>
+    public bool MeshPartPool { get; init; } = true;
+    /// <summary>Skips particle spawns whose emitter lies beyond the view distance.</summary>
+    public bool ParticleDistanceGate { get; init; } = true;
+    /// <summary>Skips drawing dropped items beyond <see cref="DroppedItemDistance" /> blocks.</summary>
+    public bool DroppedItemCull { get; init; } = true;
+    /// <summary>Horizontal dropped-item draw distance in blocks.</summary>
+    public int DroppedItemDistance { get; init; } = 64;
+    /// <summary>Caches assembled villager/trader outfit shapes and texture sets, and pre-inserts outfit textures gradually after world load.</summary>
+    public bool OutfitShapeCache { get; init; } = true;
+    /// <summary>Walks the occlusion culler's own rays from a precomputed shared tree instead of recomputing each ray.</summary>
+    public bool ChunkVisibilityWalk { get; init; } = true;
+    /// <summary>Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws.</summary>
+    public bool TerrainOcclusionCull { get; init; } = true;
+    /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
+    public bool EntityOcclusionCull { get; init; } = true;
+    /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
+    public bool ParallelChunkReads { get; init; } = true;
+    /// <summary>Singleplayer worldgen worker policy: off, auto, 1, 2 or 3; applies at the next world load.</summary>
+    public string WorldgenWorkers { get; init; } = "auto";
+
+    /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
+    internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
+    {
+        ShadowFarFoliage = source.ShadowFarFoliage,
+        EntityShadowCull = source.EntityShadowCull,
+        EntityShadowDistance = source.EntityShadowDistance,
+        UploadQueueSortSkip = source.UploadQueueSortSkip,
+        AnimationLinqFree = source.AnimationLinqFree,
+        FallingBlockMeshFix = source.FallingBlockMeshFix,
+        MeshPartPool = source.MeshPartPool,
+        ParticleDistanceGate = source.ParticleDistanceGate,
+        DroppedItemCull = source.DroppedItemCull,
+        DroppedItemDistance = source.DroppedItemDistance,
+        OutfitShapeCache = source.OutfitShapeCache,
+        ChunkVisibilityWalk = source.ChunkVisibilityWalk,
+        TerrainOcclusionCull = source.TerrainOcclusionCull,
+        EntityOcclusionCull = source.EntityOcclusionCull,
+        ParallelChunkReads = source.ParallelChunkReads,
+        WorldgenWorkers = source.WorldgenWorkers,
+    };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>
     /// <returns>A normalized copy; device/provider availability is evaluated separately.</returns>
@@ -81,6 +134,9 @@ internal sealed record RendererSettings
             AmbientOcclusion = Choice(AmbientOcclusion, nameof(AmbientOcclusion), "auto"),
             AmbientOcclusionPreset = Choice(AmbientOcclusionPreset, nameof(AmbientOcclusionPreset), "medium"),
             TaaDebugView = Math.Max(0, TaaDebugView),
+            EntityShadowDistance = RendererChoices.Range(nameof(EntityShadowDistance)).Clamp(EntityShadowDistance),
+            DroppedItemDistance = RendererChoices.Range(nameof(DroppedItemDistance)).Clamp(DroppedItemDistance),
+            WorldgenWorkers = Choice(WorldgenWorkers, nameof(WorldgenWorkers), "auto"),
         };
     }
 }

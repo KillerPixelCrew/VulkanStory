@@ -10,6 +10,9 @@ Directory.Build.local.props
 # Local agent planning/baselines. Contains decompiled game sources; never publish.
 .codex/
 
+# Local reference checkouts of other projects.
+_ref/
+
 # Decompiled or disassembled game code, wherever it is placed.
 *.decompiled.cs
 *.decompiled.*

@@ -20,7 +20,7 @@ internal sealed class RendererSettingsPanel
     private readonly Func<string?> controllerOpened;
     private bool controllerPending;
     private int page;
-    internal static readonly string[] PageNames = ["Image", "Generation", "Effects", "Device", "Status"];
+    internal static readonly string[] PageNames = ["Image", "Generation", "Effects", "Device", "Performance", "Status"];
     /// <summary>Display name of the currently selected settings page.</summary>
     internal string CurrentPageName => PageNames[page];
     private bool refresh;
@@ -57,7 +57,7 @@ internal sealed class RendererSettingsPanel
         {
             nextStatusRefresh = Environment.TickCount64 + 1000;
             if (page == 0) refreshImageStatus?.Invoke();
-            if (page == 4) return true;
+            if (PageNames[page] == "Status") return true;
         }
         return value;
     }
@@ -234,6 +234,29 @@ internal sealed class RendererSettingsPanel
                 composer.AddSmallButton("Save and open controller settings", () => Editable() ? SaveAndOpenController() : true,
                     ElementBounds.Fixed(0, y, width, 30));
                 y += 42;
+                break;
+            case 4:
+                Switch("Chunk visibility walk", "ChunkVisibilityWalk");
+                Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
+                Switch("Entity occlusion culling", "EntityOcclusionCull");
+                Switch("Skip foliage in far shadows", "ShadowFarFoliage");
+                Switch("Cull distant entity shadows", "EntityShadowCull");
+                Slider("Entity shadow distance (blocks)", "EntityShadowDistance");
+                Switch("Skip distant particle spawns", "ParticleDistanceGate");
+                Switch("Cull distant dropped items", "DroppedItemCull");
+                Slider("Dropped item distance (blocks)", "DroppedItemDistance");
+                Switch("Skip unchanged chunk upload sorting", "UploadQueueSortSkip");
+                Switch("Reuse chunk mesh buffers", "MeshPartPool");
+                Switch("Parallel chunk reads (next world)", "ParallelChunkReads");
+                DefinedChoice("Worldgen workers (next world)", "WorldgenWorkers");
+                Switch("Allocation-free animation checks", "AnimationLinqFree");
+                Switch("Falling block mesh fix", "FallingBlockMeshFix");
+                Switch("Villager outfit cache", "OutfitShapeCache");
+                string unavailable = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> performance
+                    ? string.Join("\n", performance().Split('\n').Where(line => line.Contains(": unavailable (", StringComparison.Ordinal)).Select(line => line.Trim()))
+                    : "";
+                if (unavailable.Length != 0) Text("Unavailable in this game version:\n" + unavailable);
+                Text("These ports trade small visual differences or none at all for smoother frames. Options marked next world apply when a world is loaded; the others apply immediately. Worldgen and chunk reads affect singleplayer only.");
                 break;
             default:
                 string status = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> read

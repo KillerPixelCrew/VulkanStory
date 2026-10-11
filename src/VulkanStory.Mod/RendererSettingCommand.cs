@@ -34,10 +34,10 @@ internal static class RendererSettingCommand
                 value = JsonValue.Create(toggle);
                 break;
             case JsonValueKind.Number:
-                if (property.Key is "TaaDebugView" or "FrameGenerationMultiplier")
+                if (property.Key is "TaaDebugView" or "FrameGenerationMultiplier" or "EntityShadowDistance" or "DroppedItemDistance")
                 {
                     if (!int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out int number) ||
-                        number < 0 || (property.Key == "FrameGenerationMultiplier" &&
+                        number < 0 || (property.Key != "TaaDebugView" &&
                             RendererChoices.Range(property.Key).Clamp(number) != number))
                         throw new ArgumentException("Invalid integer value for " + property.Key + ".");
                     value = JsonValue.Create(number);

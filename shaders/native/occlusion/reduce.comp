@@ -1,0 +1,34 @@
+#version 450
+// Occlusion depth (PERF-03): reduces Primary's D32 depth to the farthest value of each
+// block x block tile, the conservative base level of the CPU occlusion pyramid.
+//
+// Depth is the device's [0, 1] value, larger is farther (GL clip z remapped, no reversed
+// Z); rows stay in the device's bottom-up order. A tile that contains sky (1.0) or any
+// far texel therefore keeps its far value, so it can never hide anything behind it.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(binding = 0) uniform sampler2D sourceDepth;
+layout(binding = 1, OCCLUSION_FORMAT) uniform writeonly image2D farthestDepth;
+
+layout(push_constant) uniform Reduce
+{
+    ivec2 sourceSize;
+    int block;
+} reduce;
+
+void main()
+{
+    ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(farthestDepth);
+    if (tile.x >= size.x || tile.y >= size.y) return;
+    ivec2 first = tile * reduce.block;
+    ivec2 last = min(first + reduce.block, reduce.sourceSize);
+    float farthest = 0.0;
+    for (int y = first.y; y < last.y; y++)
+        for (int x = first.x; x < last.x; x++)
+            farthest = max(farthest, texelFetch(sourceDepth, ivec2(x, y), 0).r);
+    // An empty tile (source smaller than the grid) never occludes.
+    if (last.x <= first.x || last.y <= first.y) farthest = 1.0;
+    imageStore(farthestDepth, tile, vec4(farthest));
+}

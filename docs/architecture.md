@@ -9,7 +9,10 @@ packaging are described in [bootstrap and installation](bootstrap-and-installati
 Design rules:
 
 - No launcher, copied game directory, modified or cached game assemblies, or
-  injected members. Additional state lives in VulkanStory objects.
+  injected members. Additional state lives in VulkanStory objects: static
+  helpers, side tables keyed by game instance (`ConditionalWeakTable`), our own
+  per-worker instances, or VulkanStory-owned subclasses swapped in where the game
+  creates the instance.
 - Game assemblies are referenced at compile time with `Private=false` and are never
   shipped.
 - Game internals and Harmony stay in `VulkanStory.Game`. Renderer, SDL and provider
@@ -34,7 +37,7 @@ flowchart TD
 | Project | Responsibility | References |
 | --- | --- | --- |
 | `VulkanStory.Bootstrap` | Startup-hook entry: process/profile checks, dependency resolver, loads the game integration | Framework only |
-| `VulkanStory.Contracts` | Game-independent renderer contracts: mesh/texture/shader definitions, temporal frame data, upscaler plans, latency selection | None |
+| `VulkanStory.Contracts` | Game-independent renderer contracts: mesh/texture/shader definitions, temporal frame data, upscaler plans, latency selection, occlusion test | None |
 | `VulkanStory.Platform.Sdl` | SDL3 window, Vulkan surface support, event pump, window coordinates | `ppy.SDL3-CS` |
 | `VulkanStory.Render.Vulkan` | Vulkan device, resources, frame graph, pipelines and shader translation, upscalers, frame generation, presentation, latency | Contracts, Platform.Sdl, Silk.NET Vulkan/Shaderc |
 | `VulkanStory.Game` | Process runtime, startup routing, Harmony patches, graphics/platform adapters, temporal state, controller input, mod pass API | All of the above, official game assemblies, game-shipped Harmony and Mono.Cecil |
@@ -82,8 +85,9 @@ Lifetimes:
   `AppContext` delegates. Nothing runs from `DLL_PROCESS_DETACH`.
 
 Settings that affect device or window creation, such as the renderer switch,
-native shaders and Streamline, apply at the next launch. Other settings apply live
-through the runtime's control queue.
+native shaders and Streamline, apply at the next launch. The singleplayer server
+performance settings (worldgen workers, parallel chunk reads) apply when the next
+world loads. Other settings apply live through the runtime's control queue.
 
 ## Startup routing
 
@@ -125,6 +129,36 @@ Patches use the game's own `Lib/0Harmony.dll`
 ([patching guide](https://wiki.vintagestory.at/Modding:Monkey_patching)). They
 target concrete methods or the call sites that touch native or GL state. Accessors
 are bound once, so draw paths do no reflection or patch discovery.
+
+## Performance patches
+
+Game-side smoothness ports (`VulkanStory.Game/Performance`) are not part of the
+startup transaction, because every group there is mandatory. `PerformancePatchSet`
+installs them after the renderer commits, before any world loads, and removes them
+at shutdown. Each `PerformanceFeature` has its own Harmony owner
+(`vulkanstory.performance.<name>`), validates its signatures and IL anchors, and
+installs on its own. A refused feature is logged, listed as unavailable in
+`.vulkanstory status` and on the Performance settings page, and leaves the others
+running.
+
+Patched calls read their switch from the current settings snapshot on every call,
+so switching one off falls back to the original code path without unpatching. A
+port that needs a hook inside a startup group (the far-cascade foliage skip in
+`ChunkConsumerPatches`) is armed by its feature instead. Server-side ports apply
+only to the integrated singleplayer server in this process; dedicated servers are
+untouched. With `VULKANSTORY_RUNTIME_DIAGNOSTICS`, the per-second jsonl also carries
+game frame work-time percentiles and the per-feature counters.
+
+Occlusion culling splits across the boundary. Right after the game's opaque terrain
+pass, the session asks `VulkanDevice.OcclusionDepth` to reduce the primary depth to
+8×8-pixel max-depth tiles (`shaders/native/occlusion/reduce.comp`) and copy them
+into a readback buffer owned by that frame slot. When the slot comes round again,
+the tiles become a CPU max-depth pyramid together with the view, projection and
+camera position they were captured with. The renderer exposes it only as the
+game-independent `IOcclusionTest` (`VulkanStory.Contracts`). `TerrainOcclusionCull`
+adds the box test after the game's main-camera visibility check for each chunk part;
+`EntityOcclusionCull` sends hidden entities down the game's own outside-the-frustum
+branch.
 
 ## Rendering
 

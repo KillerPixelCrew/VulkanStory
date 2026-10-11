@@ -35,6 +35,7 @@
     <Compile Include="VulkanDevice.XessFg.cs" />
     <Compile Include="AmbientOcclusion/GtaoRenderer.cs" />
     <Compile Include="AmbientOcclusion/GtaoSettings.cs" />
+    <Compile Include="Culling/OcclusionDepth.cs" />
     <Compile Include="Core/GpuCheckpoints.cs" />
     <Compile Include="Core/DescriptorCache.cs" />
     <Compile Include="Core/DescriptorArena.cs" />
@@ -152,6 +153,9 @@
   <ItemGroup>
     <EmbeddedResource Include="../../shaders/native/gtao/*.comp;../../shaders/native/gtao/*.glsl">
       <LogicalName>shaders-vk/gtao/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../shaders/native/occlusion/*.comp">
+      <LogicalName>shaders-vk/occlusion/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 </Project>

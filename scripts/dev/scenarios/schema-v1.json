@@ -160,6 +160,59 @@
                 "TouchEnabled": {
                   "type": "boolean",
                   "const": false
+                },
+                "ShadowFarFoliage": {
+                  "type": "boolean"
+                },
+                "EntityShadowCull": {
+                  "type": "boolean"
+                },
+                "EntityShadowDistance": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 256
+                },
+                "UploadQueueSortSkip": {
+                  "type": "boolean"
+                },
+                "AnimationLinqFree": {
+                  "type": "boolean"
+                },
+                "FallingBlockMeshFix": {
+                  "type": "boolean"
+                },
+                "MeshPartPool": {
+                  "type": "boolean"
+                },
+                "ParticleDistanceGate": {
+                  "type": "boolean"
+                },
+                "DroppedItemCull": {
+                  "type": "boolean"
+                },
+                "DroppedItemDistance": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 256
+                },
+                "OutfitShapeCache": {
+                  "type": "boolean"
+                },
+                "ChunkVisibilityWalk": {
+                  "type": "boolean"
+                },
+                "TerrainOcclusionCull": {
+                  "type": "boolean"
+                },
+                "EntityOcclusionCull": {
+                  "type": "boolean"
+                },
+                "ParallelChunkReads": {
+                  "type": "boolean"
+                },
+                "WorldgenWorkers": {
+                  "type": "string",
+                  "pattern": "^\\s*(?:[aA][uU][tT][oO]|[oO][fF][fF]|1|2|3)\\s*$"
                 }
               },
               "allOf": [

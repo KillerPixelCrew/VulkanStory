@@ -1,0 +1,25 @@
+using System.Reflection;
+
+namespace VulkanStory.Game.Performance;
+
+/// <summary>The 1.22.7 performance ports. Binding happens in each feature's validation, so a missing member refuses only that feature.</summary>
+internal static class PerformanceFeatures
+{
+    internal static PerformanceFeature[] Create1227(Assembly essentials, Assembly survival) =>
+    [
+        ChunkVisibilityWalk.Create(),
+        TerrainOcclusionCull.Create(),
+        EntityOcclusionCull.Create(),
+        ShadowFarFoliage.Create(),
+        EntityShadowCull.Create(),
+        ParticleDistanceGate.Create(),
+        DroppedItemCull.Create(essentials),
+        UploadQueueSortSkip.Create(),
+        MeshPartPool.Create(),
+        ParallelChunkReads.Create(),
+        WorldgenPipeline.Create(),
+        AnimationLinqFree.Create(),
+        FallingBlockMeshFix.Create(essentials),
+        OutfitShapeCache.Create(survival),
+    ];
+}

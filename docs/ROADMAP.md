@@ -17,6 +17,15 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - Windows install, update and removal
 - Loading screen stays up until the first world frame is complete
 - Shaders ship as one container, `shaders-vk.pak`
+- **PERF-01: Smoothness ports** (ideas from Optimum, rebuilt as optional Harmony patches; each has a switch on the Performance settings page, all on by default)
+  - Culling: skip foliage in the far shadow cascade, entity shadow distance cull, the occlusion culler's rays precomputed into one shared ray tree, particle and dropped-item distance gates
+  - Chunk streaming: skip unchanged upload-queue sorting, tessellator mesh-part pool, parallel raw chunk reads in singleplayer
+  - Entities: allocation-free animation checks, falling-block mesh fix, villager/trader outfit shape cache with outfit textures pre-inserted gradually after world load
+  - Worldgen (singleplayer): the game's own per-pass worldgen workers, made safe with column footprint leases, a shared Vegetation/sunlight lock, per-generator locks and atomic entity ids, with a fallback to the chunk thread alone when other mods touch worldgen or a worker fails
+- **PERF-03: GPU occlusion culling** (two switches on the Performance settings page, on by default)
+  - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws, tested against a max-depth pyramid of the opaque terrain from a recent frame
+  - Test boxes grow by the camera's movement since that depth was captured; boxes outside the captured view or crossing its near plane are always drawn; players are never culled
+  - Shadow passes keep their own culling
 
 ## Known defects
 
@@ -45,5 +54,6 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 ## Deferred
 
 - **GL-02 / GL-03:** OpenGL compatibility adapters and profiles for other mods, once a target mod is chosen.
+- **PERF-02:** Parallel Terrain worldgen pass, SIMD frustum test, pathfinding node pooling, outfit animator cache, if PERF-01 measurements call for them.
 - **TEST-01:** Tests.
 - **LINUX-01:** Linux release.

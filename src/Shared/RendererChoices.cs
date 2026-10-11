@@ -23,12 +23,15 @@ internal static class RendererChoices
     private static readonly (string Value, string Label)[] Latency = [("off", "Off"), ("on", "On"), ("boost", "Boost")];
     private static readonly (string Value, string Label)[] Occlusion = [("auto", "Auto"), ("vanilla", "SSAO"), ("gtao", "GTAO")];
     private static readonly (string Value, string Label)[] OcclusionQuality = [("low", "Low"), ("medium", "Medium"), ("high", "High"), ("ultra", "Ultra")];
+    private static readonly (string Value, string Label)[] WorldgenWorkers = [("auto", "Auto"), ("off", "Off"), ("1", "1 worker"), ("2", "2 workers"), ("3", "3 workers")];
 
     private static readonly RendererRange RenderScale = new(.25f, 1f, 1f, 5, 100);
     private static readonly RendererRange TaaSharpness = new(0f, 1f, .2f, 5, 100);
     private static readonly RendererRange TaaMipBias = new(-2f, 0f, -.5f, 1, 10);
     private static readonly RendererRange UpscalerLodBiasOffset = new(0f, 1f, 1f, 5, 100);
     private static readonly RendererRange FrameGenerationMultiplier = new(2f, 6f, 2f, 1, 1);
+    private static readonly RendererRange EntityShadowDistance = new(16f, 256f, 80f, 8, 1);
+    private static readonly RendererRange DroppedItemDistance = new(16f, 256f, 64f, 8, 1);
 
     /// <summary>Returns supported values and labels; XeSS adds its SDK-specific quality choices.</summary>
     /// <param name="key">Renderer setting name shared by commands and the settings panel.</param>
@@ -43,6 +46,7 @@ internal static class RendererChoices
         "LowLatencyMode" => Latency,
         "AmbientOcclusion" => Occlusion,
         "AmbientOcclusionPreset" => OcclusionQuality,
+        "WorldgenWorkers" => WorldgenWorkers,
         _ => throw new ArgumentException("Unknown renderer choice: " + key),
     };
 
@@ -67,6 +71,8 @@ internal static class RendererChoices
         "TaaMipBias" => TaaMipBias,
         "UpscalerLodBiasOffset" => UpscalerLodBiasOffset,
         "FrameGenerationMultiplier" => FrameGenerationMultiplier,
+        "EntityShadowDistance" => EntityShadowDistance,
+        "DroppedItemDistance" => DroppedItemDistance,
         _ => throw new ArgumentException("Unknown renderer range: " + key),
     };
 }

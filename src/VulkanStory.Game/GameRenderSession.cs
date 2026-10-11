@@ -145,6 +145,8 @@ internal sealed partial class GameRenderSession : IDisposable
                 throw new InvalidOperationException("Shader override policy was not prepared."));
             session.graphics.ConfigureFramebufferHost(session.CreateFramebufferHost());
             session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
+            Performance.TerrainOcclusionCull.Attach(session.device.OcclusionDepth.Test, session.OcclusionCameraPosition,
+                session.CaptureOcclusionDepth, () => session.device?.OcclusionDepth.Reset());
             platform.WindowSize.Width = pixels.Width;
             platform.WindowSize.Height = pixels.Height;
             return session;
@@ -202,7 +204,9 @@ internal sealed partial class GameRenderSession : IDisposable
             Graphics.DrainFinalizedMeshes();
             // Background pipeline results publish at BeginFrame; skips counted after it are this frame's.
             long pipelineSkipsAtStart = Device.PipelineDrawsSkipped;
+            long dispatchStarted = Stopwatch.GetTimestamp();
             GameFrameBindings.Dispatch(platform, delta);
+            RecordFrameWork(Stopwatch.GetTimestamp() - dispatchStarted);
             Graphics.ComposeUiTarget(); // Flush any still-open owned UI scope before provider presentation.
             CompleteOptionsDiagnostic();
             CaptureDiagnosticWorldFrame();
@@ -357,10 +361,10 @@ internal sealed partial class GameRenderSession : IDisposable
         // settings directly. Sharpening strength, debug views and the god-ray
         // sample cap are read per frame as shader constants or pass selection.
         // Enabled, NativeShaders and Streamline are consumed only at startup and
-        // are marked restart in the panel. These saves do not invalidate scene
-        // resources or temporal history. Any other changed property keeps the
-        // full reset path.
-        if ((previous with
+        // are marked restart in the panel. Performance switches are read on each
+        // patched call. These saves do not invalidate scene resources or temporal
+        // history. Any other changed property keeps the full reset path.
+        if ((previous.WithPerformanceFrom(next) with
         {
             LowLatencyMode = next.LowLatencyMode,
             ShowFpsCounter = next.ShowFpsCounter,
@@ -442,6 +446,7 @@ internal sealed partial class GameRenderSession : IDisposable
     private void ReleaseSessionResources()
     {
         RequireOwner();
+        Performance.TerrainOcclusionCull.Attach(null, null, null, null);
         var failures = new List<Exception>();
         try { StopAndDrain(); } catch (Exception error) { failures.Add(error); }
         // A failed GPU drain retains SDL. Other cleanup failures must not prevent

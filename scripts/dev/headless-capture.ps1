@@ -94,7 +94,9 @@ param(
     [switch]$KeepOpen,
     [switch]$MainMenuOptions,
     [ValidateSet('open','save','cancel')][string]$MainOptionsAction = 'open',
-    [ValidateSet('Image','Generation','Effects','Device','Status')][string]$OptionsPage = 'Image',
+    [ValidateSet('Image','Generation','Effects','Device','Performance','Status')][string]$OptionsPage = 'Image',
+    [string]$SettingsOverrides,
+    [ValidateRange(0,6)][int]$MaxWorldgenThreads = 0,
     [string]$Python = 'python'
 )
 $ErrorActionPreference = 'Stop'
@@ -368,8 +370,8 @@ function Test-ScenarioDocument($Root) {
                 }
                 if ($properties.ContainsKey('page')) {
                     $page = Get-ScenarioString $properties['page'] 'OptionsPage'
-                    if ($operation -cne 'open' -or $page -cnotin @('Image','Generation','Effects','Device','Status')) {
-                        Throw-ScenarioError 'OptionsPage' 'Page is allowed only for open and must be Image, Generation, Effects, Device or Status.'
+                    if ($operation -cne 'open' -or $page -cnotin @('Image','Generation','Effects','Device','Performance','Status')) {
+                        Throw-ScenarioError 'OptionsPage' 'Page is allowed only for open and must be Image, Generation, Effects, Device, Performance or Status.'
                     }
                 }
             }
@@ -450,12 +452,12 @@ function Test-ScenarioDocument($Root) {
 }
 
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled')) {
+foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
     $script:settingTypes.Add($name, 'bool')
 }
 foreach ($name in @('RenderScale','TaaSharpness','TaaMipBias','UpscalerLodBiasOffset')) { $script:settingTypes.Add($name, 'float') }
-foreach ($name in @('TaaDebugView','FrameGenerationMultiplier')) { $script:settingTypes.Add($name, 'int') }
-foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMode','AmbientOcclusion','AmbientOcclusionPreset')) {
+foreach ($name in @('TaaDebugView','FrameGenerationMultiplier','EntityShadowDistance','DroppedItemDistance')) { $script:settingTypes.Add($name, 'int') }
+foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMode','AmbientOcclusion','AmbientOcclusionPreset','WorldgenWorkers')) {
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
@@ -570,6 +572,14 @@ foreach ($file in @('clientsettings.json')) {
     $source = Join-Path $sourceRoot $file
     if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $dataRoot }
 }
+# The game's own multi-threaded worldgen (vanilla reference for worldgen parity checks).
+if ($MaxWorldgenThreads -gt 0) {
+    $magicSource = Join-Path $sourceRoot 'servermagicnumbers.json'
+    if (-not (Test-Path -LiteralPath $magicSource)) { throw 'MaxWorldgenThreads needs the source servermagicnumbers.json; no client launched.' }
+    $magic = Get-Content -LiteralPath $magicSource -Raw | ConvertFrom-Json -AsHashtable
+    $magic['MaxWorldgenThreads'] = $MaxWorldgenThreads
+    $magic | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $dataRoot 'servermagicnumbers.json')
+}
 $clientPath = Join-Path $dataRoot 'clientsettings.json'
 $silentAudioKeys = @('masterSoundLevel','soundLevel','entitySoundLevel','ambientSoundLevel','weatherSoundLevel','musicLevel')
 if (-not (Test-Path -LiteralPath $clientPath)) {
@@ -622,8 +632,18 @@ Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstory') -Destination 
 if ($CompanionMode -eq 'present') {
     Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstoryinput') -Destination (Join-Path $dataRoot 'Mods') -Recurse
 }
-@{ Enabled=$true; Upscaler=$Upscaler; UpscalerQuality='quality'; FrameGeneration=$FrameGeneration; ShowFpsCounter=$true; Streamline=$true; ControllerEnabled=$false; TouchEnabled=$false } |
-    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'ModConfig/vulkanstory.json')
+$rendererSettings = @{ Enabled=$true; Upscaler=$Upscaler; UpscalerQuality='quality'; FrameGeneration=$FrameGeneration; ShowFpsCounter=$true; Streamline=$true; ControllerEnabled=$false; TouchEnabled=$false }
+# Settings read before the world loads (for example WorldgenWorkers) cannot come from a command script.
+if ($SettingsOverrides) {
+    $overrides = Get-Content -LiteralPath $SettingsOverrides -Raw | ConvertFrom-Json -AsHashtable
+    foreach ($key in $overrides.Keys) {
+        if (-not $script:settingTypes.ContainsKey($key) -or $key -in @('Enabled','ControllerEnabled','TouchEnabled','Upscaler','FrameGeneration')) {
+            throw "SettingsOverrides cannot set '$key'; no client launched."
+        }
+        $rendererSettings[$key] = $overrides[$key]
+    }
+}
+$rendererSettings | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'ModConfig/vulkanstory.json')
 $info = [Diagnostics.ProcessStartInfo]::new($dotnet)
 $info.UseShellExecute = $false; $info.CreateNoWindow = $true
 $info.WorkingDirectory = $gameRoot

@@ -5,7 +5,9 @@ namespace VulkanStory.Game;
 // The profile supplies all mandatory startup groups, including complete GL
 // coverage. Existing graphics subsets do not become a complete profile here.
 /// <summary>Complete startup patch coverage and a deferred settings/data-path factory; the factory runs at the first window request.</summary>
-internal sealed record GameStartupPlan(StartupPatchGroup[] Groups, Func<GameSessionServices> CreateServices);
+/// <remarks>Performance features are optional and install separately after commit; they never make the startup transaction fail.</remarks>
+internal sealed record GameStartupPlan(StartupPatchGroup[] Groups, Func<GameSessionServices> CreateServices,
+    VulkanStory.Game.Performance.PerformanceFeature[]? Performance = null);
 
 /// <summary>Shared early/ordinary-mod entry into the one process runtime.</summary>
 public static class RuntimeBootstrap
@@ -97,10 +99,23 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
             Routing.Commit(() => session = GameRenderSession.Create(platform, Routing,
                 selectedServices ?? throw new InvalidOperationException("Window services were not selected."), title, width, height));
             HasCommitted = true;
+            InstallPerformance(platform);
             Publish("active");
             Notify("runtime.active", "SDL window and retained Vulkan device committed in the original game process.");
         }
         catch { Publish("failed"); throw; }
+    }
+    /// <summary>Installs the optional performance features once the renderer owns the window, before any world loads.</summary>
+    /// <remarks>Each feature refuses independently; a failure here is logged and never changes graphics ownership.</remarks>
+    private void InstallPerformance(ClientPlatformWindows owner)
+    {
+        if (plan?.Performance is not { Length: > 0 } features || selectedServices == null) return;
+        try
+        {
+            Performance.PerformancePatchSet.Install(features, selectedServices.RendererSettings, owner.Logger);
+            Notify("runtime.performance", Performance.PerformancePatchSet.Status);
+        }
+        catch (Exception error) { owner.Logger.Warning("VulkanStory: performance patches unavailable: {0}", error.Message); }
     }
     /// <summary>Records the original platform instance before the first SDL window is created.</summary>
     /// <param name="value">Original platform retained for the process session.</param>
@@ -120,7 +135,9 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
             Routing.Commit(() => session = GameRenderSession.Create(platform, Routing,
                 selectedServices ?? throw new InvalidOperationException("Window services were not selected."),
                 settings.Title, settings.ClientSize.X, settings.ClientSize.Y, (int)settings.WindowState, (int)settings.WindowBorder));
-            HasCommitted = true; Publish("active");
+            HasCommitted = true;
+            InstallPerformance(platform);
+            Publish("active");
             Notify("runtime.active", "First window owned by SDL; original game platform retained.");
         }
         catch { Publish("failed"); throw; }
@@ -172,6 +189,9 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
         // A drain failure retains the live window/patch owners for diagnosis.
         session?.Dispose();
         session = null;
+        // Optional patches never block routing removal.
+        try { Performance.PerformancePatchSet.Remove(); }
+        catch (Exception error) { Notify("runtime.performance.remove-failed", error.Message); }
         routing?.Dispose();
         ClearPendingControls();
         RuntimeControlBridge.Remove();

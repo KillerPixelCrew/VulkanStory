@@ -410,7 +410,7 @@ internal sealed class HeadlessScenario
             "requestedFrameGeneration" or "effectiveFrameGeneration" => ChoiceValues(nameof(RendererSettings.FrameGeneration)),
             "phase" => ["completedFrame"],
             "optionsHost" => ["none", "main", "world"],
-            "optionsPage" => ["Image", "Generation", "Effects", "Device", "Status", "Graphics", "Home"],
+            "optionsPage" => [.. RendererSettingsPanel.PageNames, "Graphics", "Home"],
             _ => null
         };
         if (choices != null && !choices.Contains(expected, StringComparer.Ordinal))
