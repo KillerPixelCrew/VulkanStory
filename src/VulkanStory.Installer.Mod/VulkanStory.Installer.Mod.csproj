@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI" HintPath="$(VintageStoryPath)/VintagestoryAPI.dll" Private="false" />
+    <None Update="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

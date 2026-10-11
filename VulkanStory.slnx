@@ -6,6 +6,7 @@
     <Project Path="src/VulkanStory.Input/VulkanStory.Input.csproj" />
     <Project Path="src/VulkanStory.Input.Companion/VulkanStory.Input.Companion.csproj" />
     <Project Path="src/VulkanStory.Mod/VulkanStory.Mod.csproj" />
+    <Project Path="src/VulkanStory.Installer.Mod/VulkanStory.Installer.Mod.csproj" />
     <Project Path="src/VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <Project Path="src/VulkanStory.Render.Vulkan/VulkanStory.Render.Vulkan.csproj" />
   </Folder>

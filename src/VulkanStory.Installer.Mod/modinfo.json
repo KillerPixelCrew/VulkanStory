@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "vulkanstoryinstaller",
+  "name": "Vulkan Story Installer",
+  "authors": ["N1GHT"],
+  "description": "Downloads and installs Vulkan Story after entering a world. Restart the game to activate it.",
+  "version": "0.1.1",
+  "side": "Client",
+  "requiredOnClient": false,
+  "requiredOnServer": false,
+  "dependencies": { "game": "1.22.7" }
+}
