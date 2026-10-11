@@ -30,6 +30,9 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
   - Inventory render-info reuse, wind sample caching without slowing smoothing, dynamic-light scans and nearest selection, animated-block LOD without freezing distant machines, entity retessellation budgeting, BFS visibility, pathfinding node pooling with independent returned paths, entity light batching and SIMD frustum tests with full coefficient refresh and original precision.
   - Outfit animator caching with separate mutable poses per entity, parallel Terrain columns with independent workspaces and a reusable worldgen worker pool, dedicated chisel LOD pools with live distance control, bounded Vulkan world-map pages with a compressed disk cache, and physics collection reuse with reader leases and activation capacity batching without delaying simulation.
 - **PERF-05: Performance inspection harness**: bounded EventPipe captures from `.vulkanstory profile start [seconds]`, stop/status; per-thread call stacks, sampled allocations, frame/system timings, searchable offline flame graphs and Speedscope export. GPU execution time is not measured.
+- **PERF-06: Profile-driven optimizations**
+  - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, indexed flood-fill traversal, and private coordinate reuse in the stock FluffyClouds updater. Optional algorithms have live controls.
+  - Loading and streaming: background outfit metadata preparation, translation resolution caching with language/reload invalidation, bounded mesh-part capacity classes, independent static-shape templates for fruiting bushes, and pooled PCM accumulation with the original decoder and runtime unmute behavior.
 
 ## Known defects
 
@@ -38,10 +41,6 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
-
-- **PERF-06: Profile-driven optimizations (in progress)**
-  - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, indexed flood-fill traversal, and private coordinate reuse in the stock FluffyClouds updater. Optional algorithms have live controls.
-  - Loading and streaming: move outfit metadata discovery out of budgeted frame ticks, cache translation/search resolution with language and asset invalidation, improve bounded mesh-part reuse and immutable shape parsing, and reduce audio decode growth/copies while preserving runtime unmute.
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
