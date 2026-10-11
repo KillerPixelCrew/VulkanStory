@@ -275,6 +275,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Reuse audio decode buffers", "AudioDecodeBufferReuse");
                 Switch("Cache fruiting-bush shape parsing", "ShapeParseCache");
                 Switch("Prepare outfit metadata off-thread", "OutfitMetadataPreparation");
+                Switch("Reuse cloud tile coordinates", "CloudCoordinateReuse");
                 string unavailable = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> performance
                     ? string.Join("\n", performance().Split('\n').Where(line => line.Contains(": unavailable (", StringComparison.Ordinal)).Select(line => line.Trim()))
                     : "";

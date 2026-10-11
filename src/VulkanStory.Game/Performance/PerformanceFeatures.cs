@@ -38,5 +38,6 @@ internal static class PerformanceFeatures
         TranslationLookupCache.Create(),
         AudioDecodeBuffers.Create(),
         ShapeParseCache.Create(survival),
+        CloudCoordinateReuse.Create(essentials),
     ];
 }

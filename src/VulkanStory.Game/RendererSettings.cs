@@ -132,6 +132,8 @@ internal sealed record RendererSettings
     public bool OutfitMetadataPreparation { get; init; } = true;
     /// <summary>Uses loaded-chunk indices and precomputed neighbor edges for flood-fill visibility.</summary>
     public bool IndexedChunkVisibility { get; init; } = true;
+    /// <summary>Reuses private tile-position scratch vectors in the stock cloud updater.</summary>
+    public bool CloudCoordinateReuse { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -175,6 +177,7 @@ internal sealed record RendererSettings
         ShapeParseCache = source.ShapeParseCache,
         OutfitMetadataPreparation = source.OutfitMetadataPreparation,
         IndexedChunkVisibility = source.IndexedChunkVisibility,
+        CloudCoordinateReuse = source.CloudCoordinateReuse,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>

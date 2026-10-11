@@ -40,7 +40,7 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 ## Planned
 
 - **PERF-06: Profile-driven optimizations (in progress)**
-  - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, and indexed flood-fill traversal with a live switch.
+  - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, indexed flood-fill traversal, and private coordinate reuse in the stock FluffyClouds updater. Optional algorithms have live controls.
   - Loading and streaming: move outfit metadata discovery out of budgeted frame ticks, cache translation/search resolution with language and asset invalidation, improve bounded mesh-part reuse and immutable shape parsing, and reduce audio decode growth/copies while preserving runtime unmute.
 
 - **PACK-01: Shader packs**
