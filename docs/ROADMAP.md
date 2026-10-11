@@ -26,6 +26,10 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
   - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws, tested against a max-depth pyramid of the opaque terrain from a recent frame
   - Test boxes grow by the camera's movement since that depth was captured; boxes outside the captured view or crossing its near plane are always drawn; players are never culled
   - Shadow passes keep their own culling
+- **PERF-04: Additional Optimum ports** (runtime controls on the Performance settings page)
+  - Inventory render-info reuse, wind sample caching without slowing smoothing, dynamic-light scans and nearest selection, animated-block LOD without freezing distant machines, entity retessellation budgeting, BFS visibility, pathfinding node pooling with independent returned paths, entity light batching and SIMD frustum tests with full coefficient refresh and original precision.
+  - Outfit animator caching with separate mutable poses per entity, parallel Terrain columns with independent workspaces and a reusable worldgen worker pool, dedicated chisel LOD pools with live distance control, bounded Vulkan world-map pages with a compressed disk cache, and physics collection reuse with reader leases and activation capacity batching without delaying simulation.
+- **PERF-05: Performance inspection harness**: bounded EventPipe captures from `.vulkanstory profile start [seconds]`, stop/status; per-thread call stacks, sampled allocations, frame/system timings, searchable offline flame graphs and Speedscope export. GPU execution time is not measured.
 
 ## Known defects
 
@@ -34,11 +38,6 @@ Current release: [v0.1.1-dev](https://github.com/KillerPixelCrew/VulkanStory/rel
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
-
-- **PERF-04: Additional Optimum ports (in progress)**
-  - Runtime controls for inventory render-info reuse, wind sample caching without slowing smoothing, dynamic-light scans and nearest selection, animated-block LOD without freezing distant machines, entity retessellation budgeting, BFS visibility, pathfinding node pooling with independent returned paths, entity light batching and SIMD frustum tests with full coefficient refresh and original precision.
-  - Outfit animator caching with separate mutable poses per entity, parallel Terrain columns with independent workspaces and a reusable worldgen worker pool, dedicated chisel LOD pools with live distance control, bounded Vulkan world-map pages with a compressed disk cache, and physics collection reuse with reader leases and activation capacity batching without delaying simulation.
-- **PERF-05: Performance inspection harness (in progress)**: bounded EventPipe captures from `.vulkanstory profile start [seconds]`, stop/status; per-thread call stacks, sampled allocations, frame/system timings, searchable offline flame graphs and Speedscope export.
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.

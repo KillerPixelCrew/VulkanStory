@@ -14,7 +14,9 @@ internal static class GuiItemRenderInfoReuse
     private sealed class Scope
     {
         internal readonly ItemRenderInfo Scratch = new();
+        internal readonly Vintagestory.API.MathTools.Size2i TextureSize;
         internal bool Used;
+        internal Scope() => TextureSize = Scratch.TextureSize;
     }
     [ThreadStatic] private static List<Scope>? scopes;
     [ThreadStatic] private static int depth;
@@ -95,12 +97,14 @@ internal static class GuiItemRenderInfoReuse
         info.Transform = null;
         info.CullFaces = false;
         info.TextureId = 0;
+        info.TextureSize = scope.TextureSize;
         info.TextureSize.Width = 0;
         info.TextureSize.Height = 0;
         info.AlphaTest = 0;
         info.HalfTransparent = false;
         info.NormalShaded = false;
         info.ApplyColor = false;
+        info.OverlayTexture = null;
         info.OverlayOpacity = 0;
         info.DamageEffect = 0;
         info.InSlot = null;
