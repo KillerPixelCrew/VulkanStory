@@ -238,6 +238,7 @@ internal sealed class RendererSettingsPanel
             case 4:
                 Switch("Chunk visibility walk", "ChunkVisibilityWalk");
                 Switch("Flood-fill chunk visibility", "BfsChunkVisibility");
+                Switch("Indexed flood-fill visibility", "IndexedChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");

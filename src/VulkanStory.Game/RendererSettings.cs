@@ -130,6 +130,8 @@ internal sealed record RendererSettings
     public bool ShapeParseCache { get; init; } = true;
     /// <summary>Prepares outfit shape metadata on owned background inputs; atlas insertion stays on the owner thread.</summary>
     public bool OutfitMetadataPreparation { get; init; } = true;
+    /// <summary>Uses loaded-chunk indices and precomputed neighbor edges for flood-fill visibility.</summary>
+    public bool IndexedChunkVisibility { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -172,6 +174,7 @@ internal sealed record RendererSettings
         AudioDecodeBufferReuse = source.AudioDecodeBufferReuse,
         ShapeParseCache = source.ShapeParseCache,
         OutfitMetadataPreparation = source.OutfitMetadataPreparation,
+        IndexedChunkVisibility = source.IndexedChunkVisibility,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>
