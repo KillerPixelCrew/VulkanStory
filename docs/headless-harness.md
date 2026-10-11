@@ -26,7 +26,7 @@ and a staged package from `scripts/stage-runtime.ps1`
 | `-FixedDt` | 0.0166667 | Simulation step in seconds; `0` uses wall time |
 | `-Upscaler` | `off` | `dlss`, `fsr3`, `fsr4`, `xess` |
 | `-FrameGeneration` | `off` | `dlss`, `fsr3`, `xess` |
-| `-Commands`, `-CommandFrame` | —, 30 | Command script run once at that frame |
+| `-Commands`, `-CommandFrame` | —, 30 | Unscheduled lines run at that frame; `@<frame>` lines run at their declared world frame |
 | `-Scenario` | — | Scenario JSON (see below) |
 | `-ParityDump`, `-ParityFrame` | off, `-First` | Dump every framebuffer attachment at one frame |
 | `-AoOutputs` | off | Also dump AO working/edges/depth/output |
@@ -54,10 +54,17 @@ does.
 
 **Scenarios** (`scripts/dev/scenarios/schema-v1.json`): up to 128 actions, each with
 an `id`, a `tick` and a `kind`. The kinds are `settings` (apply renderer settings),
+`options` (dialog operations), `camera` (world yaw), `resize` (drawable dimensions),
 `capture` (a named frame, optionally with attachments), `checkpoint`, and `assert`
 (check a runtime field such as `hidden`, `focused`, `worldReady`,
 `effectiveUpscaler` or `realPresents`). `native-baseline.v1.json` is the reference
 example.
+
+Options actions use `operation` (`open`, `toggle-taa`, `save`, `cancel`, `back`,
+`resume`, `close`) and optionally `page` when opening. Camera actions use
+`yawDeltaDegrees` in -180..180; resize actions use `width`/`height` in 128..8192.
+The launcher validates inputs before starting a child. Controller/touch enable
+flags require the deferred child-owned input profile and are refused when it is absent.
 
 ## Isolation
 
@@ -110,3 +117,27 @@ frames show the world after chunk streaming has finished.
 `python scripts/dev/ssim.py <dir-a> <dir-b> [--threshold 0.98] [--allowlist f.md]`
 compares two attachment dumps by SSIM and mean absolute difference (requires
 numpy).
+
+## Performance captures
+
+Command scripts can use the packaged collector without adding a separate game launcher:
+
+```text
+@60 .vulkanstory profile start 10
+@180 .vulkanstory set CloudCoordinateReuse false
+@300 .vulkanstory set CloudCoordinateReuse true
+@800 .vulkanstory profile status
+```
+
+Keep the session alive beyond the requested capture duration (for example, capture
+world frame 900). Reports go to `%LOCALAPPDATA%\VulkanStory\Performance`, not the
+isolated run directory. The collector writes `capture.nettrace`, `report.json`,
+`report.html`, `capture.speedscope.json`, process metrics and target identity.
+
+Hidden frames deliberately wait up to a 33ms cadence. Screenshots, injected chat
+commands and settings changes can also create frame-time spikes. Warm asset loading
+and chunk streaming before comparing steady-state performance, use equivalent
+camera/workload conditions, and distinguish those harness costs from game work.
+Nested timing spans overlap; allocation ticks are estimates. Monitor events report
+elapsed waits, while external/native stack samples are not CPU milliseconds.
+No GPU execution timing is collected.

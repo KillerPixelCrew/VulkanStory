@@ -6,6 +6,11 @@ A ZIP placed only in `Mods` cannot do that. Player-facing steps are in the packa
 [client README](../packaging/README-client.txt) and
 [Linux README](../packaging/README-linux-client.txt).
 
+The [v0.1.1 general release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1)
+ships the Windows x64 client and optional dedicated-server input companion, plus
+`SHA256SUMS.txt` and `archives.json`. Linux activation below describes the source
+tooling; no Linux client archive is published in this release.
+
 ## Windows activation
 
 `Vintagestory.exe` is a framework-dependent .NET apphost. Before using the
@@ -136,7 +141,8 @@ directory; on Linux the installer copies it there:
     native/<rid>/                  # SDL3, shaderc, VMA, provider bridges, vendor runtimes
     shaders-vk.pak                 # Native SPIR-V and shaders.manifest.json in one file
     assets/gamecontrollerdb.txt
-    tools/                         # deploy/remove (Windows) or install/remove (Linux)
+    tools/                         # deployment/removal helpers
+      performance/                 # external .NET performance collector, report template and notices
     licenses/
   Mods/
     vulkanstory/                   # VulkanStory.Mod.dll, modinfo.json
@@ -148,6 +154,9 @@ Both copies come from the same build, so they have the same assembly identity.
 Native and vendor DLLs are kept out of `Mods`, so the game's mod scanner never sees
 them. A separate `VulkanStory-Input-Companion.zip` contains only
 `vulkanstoryinput/`, for a dedicated server's `Mods` directory.
+The performance collector and its private Microsoft diagnostics dependencies live
+under `tools/performance`, outside the game's mod-scanner directories. In-game
+`.vulkanstory profile start [seconds]`, `stop` and `status` use this packaged tool.
 
 Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 

@@ -70,6 +70,8 @@ per-thread flame graphs, method search, time-range filtering, sampled allocation
 types, frame intervals, render/system duration percentiles, process CPU/memory
 samples and GC events. `capture.speedscope.json` supports
 other flame-graph viewers; `capture.nettrace` retains the original events.
+Monitor-contention events include waiting threads, lock identities, owner thread
+IDs when available, and elapsed waits. Stack samples alone do not identify a lock's owner.
 
 For an independently selected game/server process, run
 `dotnet VulkanStory.PerformanceHarness.dll capture <pid> <seconds> <fresh-output-directory>`.
@@ -80,6 +82,9 @@ Timing hooks are dormant until an EventPipe session enables the
 managed/external stack samples and GC allocation ticks. External samples include
 waiting/native execution, sampled allocations are estimates, measured spans may
 overlap, and these captures do not measure GPU execution time.
+Capture duration is 1–300 seconds. Report processing happens in the collector,
+outside the game process. Hidden harness captures also include a 33ms frame throttle,
+screenshots and scripted-command work; those intervals are not an unthrottled FPS benchmark.
 
 ## Runtime ownership
 
@@ -163,13 +168,32 @@ installs on its own. A refused feature is logged, listed as unavailable in
 `.vulkanstory status` and on the Performance settings page, and leaves the others
 running.
 
-Patched calls read their switch from the current settings snapshot on every call,
-so switching one off falls back to the original code path without unpatching. A
+Patched calls read their switch from the current settings snapshot, so disabling
+one restores its unoptimized behavior without unpatching. Some keep bookkeeping
+or retained meshes to make live transitions safe. A
 port that needs a hook inside a startup group (the far-cascade foliage skip in
 `ChunkConsumerPatches`) is armed by its feature instead. Server-side ports apply
 only to the integrated singleplayer server in this process; dedicated servers are
 untouched. With `VULKANSTORY_RUNTIME_DIAGNOSTICS`, the per-second jsonl also carries
 game frame work-time percentiles and the per-feature counters.
+
+The Performance page includes inventory render-info reuse, weather/light caches,
+animated-block and chisel LOD, entity mesh budgets, pathfinding nodes, entity lighting,
+SIMD frustum tests, outfit shape/animator caches, parallel Terrain generation,
+physics collections, and world-map pages. Mutable poses and returned paths are
+kept independent; budgets retain overdue work instead of starving it.
+
+Profile-driven changes include direct descriptor-handle comparisons, exact-capacity
+mesh-part pools bounded by count and bytes, reload-aware raw translation resolution,
+independent fruiting-bush shape templates, and pooled PCM accumulation inside the
+original Vorbis decoder. Outfit metadata is prepared from owned snapshots off-thread;
+texture-atlas insertion remains on the owner thread. FluffyClouds is part of the
+official `VSEssentials.dll`; its coordinate scratch is private to each renderer/update.
+
+Visibility culling copies membership under the chunk-map lock, then resets, walks
+and counts the snapshot outside that lock. Indexed BFS precomputes loaded-chunk
+neighbors and stores face arrivals in arrays. Runtime diagnostics compare its
+visible set with the coordinate BFS using the same snapshot and traversability data.
 
 Occlusion culling splits across the boundary. Right after the game's opaque terrain
 pass, the session asks `VulkanDevice.OcclusionDepth` to reduce the primary depth to
@@ -181,6 +205,9 @@ game-independent `IOcclusionTest` (`VulkanStory.Contracts`). `TerrainOcclusionCu
 adds the box test after the game's main-camera visibility check for each chunk part;
 `EntityOcclusionCull` sends hidden entities down the game's own outside-the-frustum
 branch.
+CPU hierarchy reuse alternates published and spare storage. Publication and query
+access are guarded so storage cannot be overwritten while a reader uses it; size
+changes and world resets rebuild or discard storage. Visibility math stays unchanged.
 
 ## Rendering
 
@@ -288,3 +315,4 @@ from OpenGL to Vulkan automatically. A specific direct-GL mod needs its own adap
 | `<game cache>/vulkanstory-vulkan` | Shader binaries and pipeline cache |
 | `%LOCALAPPDATA%/VulkanStory/Logs/bootstrap-*.jsonl` | Native and managed bootstrap events |
 | `<data>/Logs/client-main.log` | Runtime and provider messages |
+| `%LOCALAPPDATA%/VulkanStory/Performance/<capture>/` | Trace, offline report, Speedscope data and process metrics |

@@ -22,8 +22,11 @@ unmodified game.
   gamepad support with remapping, a radial menu, on-screen glyphs and analog movement
   (with an optional server-side input companion).
 - **Performance**: optional smoothness patches (culling, chunk streaming, entities,
-  singleplayer worldgen) and occlusion culling of terrain and entities hidden behind
-  terrain, each switchable on the Performance options page.
+  singleplayer worldgen, inventory, lighting, physics, chisel LOD and world-map caching),
+  plus terrain/entity occlusion, indexed visibility traversal and stock cloud updates.
+  Optional algorithms are switchable on the Performance options page.
+- **Performance inspection**: in-game captures with offline flame graphs, allocation
+  samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
 - **Extension points** for other mods to add renderer passes. A separate
   compatibility module for translating supported OpenGL usage by other mods is planned.
 
@@ -43,7 +46,8 @@ VulkanStory starts **before** the game creates its window, so it is installed be
 the game executable, not only into `Mods`.
 
 1. Close the game.
-2. Extract the client ZIP into the folder that contains `Vintagestory.exe`, keeping
+2. Download **VulkanStory-win-x64.zip** from the [v0.1.1 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1).
+   Extract it into the folder that contains `Vintagestory.exe`, keeping
    the folder layout. This adds `hostfxr.dll`, `VulkanStory/`, `Mods/vulkanstory` and
    `Mods/vulkanstoryinput`. The game's own files are not modified.
 3. Start the game with your normal shortcut.
@@ -60,6 +64,12 @@ the [client README](packaging/README-client.txt) (Windows) and the
 
 In game, renderer options live in the regular **Options** menu. Chat commands:
 `.vulkanstory settings`, `.vulkanstory status`, `.vulkanstory controller`.
+
+To inspect performance, run `.vulkanstory profile start 30` in a loaded world.
+Use `.vulkanstory profile stop` to finish early and `.vulkanstory profile status`
+to find the result. Open `report.html` under `%LOCALAPPDATA%\VulkanStory\Performance`.
+Captures last 1–300 seconds. Allocation samples are estimates; native/wait samples
+are not CPU time, and GPU execution time is not measured.
 
 When reporting a problem, include `%LOCALAPPDATA%\VulkanStory\Logs\bootstrap-*.jsonl`
 and the game's `Logs/client-main.log`.
@@ -97,8 +107,8 @@ pwsh scripts/stage-runtime.ps1 -NativeDirectory ... -ShaderPack artifacts/runtim
 pwsh scripts/package-runtime.ps1 -StagingDirectory <stage> -OutputDirectory <fresh-dir>
 ```
 
-Every script documents its parameters (`Get-Help scripts/<name>.ps1 -Full`). None of
-them launch the game. Renderer checks normally run in the isolated
+Every script documents its parameters (`Get-Help scripts/<name>.ps1 -Full`). The
+build and package scripts above never launch the game. Renderer checks normally run in the isolated
 [headless harness](docs/headless-harness.md) against a world snapshot rather than in
 your own installation.
 
@@ -115,7 +125,7 @@ your own installation.
 | `src/VulkanStory.Input`, `src/VulkanStory.Input.Companion` | Analog movement protocol and the optional server companion |
 | `native/` | Native bootstrap and provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline) |
 | `shaders/native` | Native GLSL shader corpus |
-| `tools/` | Shader compiler, game-profile and preflight tools |
+| `tools/` | Shader compiler, game-profile/preflight tools and the performance collector |
 | `scripts/` | Build, stage, package, deploy and removal scripts |
 | `sdk/` | Vendor SDKs as pinned submodules; `streamline-release-2.14.1/` is fetched, not tracked |
 | `packaging/`, `profiles/` | Package inventories, notices and supported game profiles |
@@ -127,6 +137,7 @@ your own installation.
 - [Roadmap](docs/ROADMAP.md): current status, known defects and remaining work
 - [Architecture](docs/architecture.md): components, ownership, rendering contracts, mod compatibility
 - [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, install/update/removal, Linux
+- [Headless harness](docs/headless-harness.md): isolated captures, scheduled commands, scenarios and profiling limits
 
 ## Background
 
