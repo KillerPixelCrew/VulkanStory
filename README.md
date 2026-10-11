@@ -148,6 +148,13 @@ objects, and integrates through Harmony instead of a modified client. Working
 renderer, shader, SDL and provider code was migrated as directly as possible, with
 its provenance preserved.
 
+## AI-assisted development
+
+AI tools are used in the development of VulkanStory, including writing code,
+debugging and documentation. This does not guarantee correctness. The project is
+still in beta, and bugs, crashes and compatibility issues should be expected.
+Responsibility for the project and its releases stays with the maintainer.
+
 ## License and attribution
 
 Code migrated from Optimum keeps its original license and attribution; a rename or
