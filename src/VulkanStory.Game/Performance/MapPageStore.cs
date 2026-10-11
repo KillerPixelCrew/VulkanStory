@@ -106,6 +106,7 @@ internal sealed class MapPageStore : IDisposable
         lock (files)
             foreach (string profile in new[] { "normal", "accurate" })
                 try { File.Delete(PathFor(key, Path.Combine(family, profile))); }
+                catch (DirectoryNotFoundException) { } // A palette cache that has never been written has nothing to invalidate.
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException) { DiskFailure(error); }
         signal.Writer.TryWrite(true);
     }

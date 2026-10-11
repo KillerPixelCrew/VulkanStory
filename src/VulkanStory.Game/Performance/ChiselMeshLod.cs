@@ -44,6 +44,8 @@ internal static class ChiselMeshLod
     private static MethodInfo? majority;
     private static MethodInfo Populate() => AccessTools.Method(typeof(ChunkTesselator), "populateTesselatedChunkPart")!;
     private static MethodInfo Store() => AccessTools.Method(typeof(TesselatedChunkPart), "AddModelAndStoreLocation")!;
+    private static readonly MethodInfo InitializePools = AccessTools.Method(typeof(ChunkTesselator), "InitialiseRenderPassPools",
+        [typeof(MeshData[]), typeof(EnumChunkRenderPass), typeof(int)])!;
 
     internal static PerformanceFeature Create(Assembly survival)
     {
@@ -56,6 +58,7 @@ internal static class ChiselMeshLod
             if (target == null || majority == null || PatchProcessor.GetOriginalInstructions(target).Count(i => i.Calls(Add) || i.Calls(AddColor)) != 2)
                 throw new InvalidOperationException("Chisel tessellation anchors changed.");
             _ = Populate(); _ = Store();
+            if (InitializePools == null) throw new MissingMethodException("ChunkTesselator.InitialiseRenderPassPools");
         }, harmony =>
         {
             harmony.Patch(target!, transpiler: new HarmonyMethod(typeof(ChiselMeshLod), nameof(MicroTranspiler)));
@@ -125,12 +128,12 @@ internal static class ChiselMeshLod
             state.Discard(); state.CenterGeneration = Center(__instance);
         }
         MeshData[][][] source = Current(__instance);
-        if (!state.Grids.TryGetValue(source, out var extra)) state.Grids.Add(source, extra = EmptyGrid(source));
+        if (!state.Grids.TryGetValue(source, out var extra)) state.Grids.Add(source, extra = EmptyGrid(__instance, source));
         __state = source; Current(__instance) = extra;
     }
     private static void RestorePool(ChunkTesselator __instance, MeshData[][][]? __state)
     { if (__state != null) Current(__instance) = __state; }
-    private static MeshData[][][] EmptyGrid(MeshData[][][] source)
+    private static MeshData[][][] EmptyGrid(ChunkTesselator tesselator, MeshData[][][] source)
     {
         var grid = new MeshData[source.Length][][];
         for (int level = 0; level < source.Length; level++)
@@ -140,7 +143,10 @@ internal static class ChiselMeshLod
             {
                 if (source[level][pass] == null) continue;
                 grid[level][pass] = new MeshData[source[level][pass].Length];
-                for (int atlas = 0; atlas < grid[level][pass].Length; atlas++) grid[level][pass][atlas] = source[level][pass][atlas].EmptyClone();
+                // EmptyClone sizes vertex buffers from the used count, which is zero in a fresh pool.
+                // Stock tessellation doubles capacity on growth; zero capacity can never grow.
+                // Use the stock initializer to retain positive capacity and each render pass's custom data.
+                InitializePools.Invoke(tesselator, [grid[level][pass], (EnumChunkRenderPass)pass, 1024]);
             }
         }
         return grid;
