@@ -67,13 +67,17 @@ internal static class ChunkVisibilityWalk
     private static long cullStarted, replayTicks;
     private static int cullRegen;
     private static Vec3i cullCenter = new();
+    private static bool lastBfs, lastWalk;
+    private static readonly Dictionary<(int X, int Y, int Z), byte> BfsArrivals = new();
+    private static readonly Queue<(int X, int Y, int Z, int Face)> BfsQueue = new();
+    private static readonly Dictionary<long, ClientChunk> BfsChunks = new();
 
     private static System.Reflection.MethodInfo Target() => AccessTools.Method(typeof(ChunkCuller), nameof(ChunkCuller.CullInvisibleChunks), Type.EmptyTypes) ??
         throw new MissingMethodException(typeof(ChunkCuller).FullName, "CullInvisibleChunks");
 
     private static bool Diagnostics => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("VULKANSTORY_RUNTIME_DIAGNOSTICS"));
 
-    internal static PerformanceFeature Create() => new("chunk-visibility-walk", settings => settings.ChunkVisibilityWalk, () =>
+    internal static PerformanceFeature Create() => new("chunk-visibility-walk", settings => settings.ChunkVisibilityWalk || settings.BfsChunkVisibility, () =>
     {
         _ = Target();
         setVisible = (AccessTools.Method(typeof(ClientChunk), "SetVisible", [typeof(bool)]) ??
@@ -115,7 +119,16 @@ internal static class ChunkVisibilityWalk
     {
         cullStarted = System.Diagnostics.Stopwatch.GetTimestamp(); replayTicks = 0;
         cullRegen = RegenCount(__instance); cullCenter = Center(__instance).Clone();
-        if (PerformancePatchSet.Current?.ChunkVisibilityWalk != true) return true;
+        var settings = PerformancePatchSet.Current;
+        bool bfs = settings?.BfsChunkVisibility == true, walk = settings?.ChunkVisibilityWalk == true;
+        bool modeChanged = bfs != lastBfs || walk != lastWalk;
+        lastBfs = bfs; lastWalk = walk;
+        if (!bfs && !walk)
+        {
+            // Force the original to rebuild on a runtime switch even if the camera did not move.
+            if (modeChanged) RegenCount(__instance) = int.MinValue / 2;
+            return true;
+        }
         ClientMain game = Game(__instance);
         ClientWorldMap map = game.WorldMap;
         Dictionary<long, ClientChunk> chunks = Chunks(map);
@@ -126,7 +139,7 @@ internal static class ChunkVisibilityWalk
         NowOff(__instance) = false;
         Vec3d camera = game.player.Entity.CameraPos;
         Vec3i center = Center(__instance);
-        if (center.Equals((int)camera.X / 32, (int)camera.Y / 32, (int)camera.Z / 32) &&
+        if (!modeChanged && center.Equals((int)camera.X / 32, (int)camera.Y / 32, (int)camera.Z / 32) &&
             Math.Abs(game.chunkPositionsForRegenTrav.Count - RegenCount(__instance)) < 10) return false;
         RegenCount(__instance) = game.chunkPositionsForRegenTrav.Count;
         center.Set((int)(camera.X / 32.0), (int)(camera.Y / 32.0), (int)(camera.Z / 32.0));
@@ -141,10 +154,10 @@ internal static class ChunkVisibilityWalk
                             setVisible!(near, true);
         }
         // The shell array is replaced when the view distance changes; rebuild the tree for it.
-        if (!ReferenceEquals(tree?.Shell, shell)) tree = Build(shell);
+        if (!bfs && !ReferenceEquals(tree?.Shell, shell)) tree = Build(shell);
         bool diagnostics = Diagnostics;
-        int visited = WalkTree(tree!, map, chunks, center, above, diagnostics ? Walked : null);
-        if (diagnostics)
+        int visited = bfs ? WalkBfs(map, chunks, center, above, shell) : WalkTree(tree!, map, chunks, center, above, diagnostics ? Walked : null);
+        if (diagnostics && !bfs)
         {
             long replayStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             Compare(map, chunks, center, above, shell);
@@ -154,6 +167,71 @@ internal static class ChunkVisibilityWalk
         Interlocked.Increment(ref PerformanceCounters.VisibilityWalks);
         Interlocked.Add(ref PerformanceCounters.VisibilityChunksVisited, visited);
         return false;
+    }
+
+    /// <summary>Face-state flood: each newly reached incoming face is expanded, including arrivals discovered later.
+    /// Unlike the donor's direction mask, paths may turn back; connected passages cannot disappear because of visit order.
+    /// Frustum rejection is left to the draw culler so it cannot cut a path to a visible chunk.</summary>
+    private static int WalkBfs(ClientWorldMap map, Dictionary<long, ClientChunk> chunks, Vec3i center, bool above, Vec3i[] shell)
+    {
+        BfsArrivals.Clear(); BfsQueue.Clear(); BfsChunks.Clear();
+        lock (ChunksLock(map)) foreach (var pair in chunks) BfsChunks.Add(pair.Key, pair.Value);
+        int radiusX = 2, radiusY = 2, radiusZ = 2;
+        foreach (var offset in shell)
+        {
+            radiusX = Math.Max(radiusX, Math.Abs(offset.X) + 2);
+            radiusY = Math.Max(radiusY, Math.Abs(offset.Y) + 2);
+            radiusZ = Math.Max(radiusZ, Math.Abs(offset.Z) + 2);
+        }
+        // Unknown/unloaded space must not hide terrain beyond it. Seed exposed faces instead of flooding millions
+        // of virtual empty coordinates. Work is bounded by the loaded chunks and at most six arrivals per chunk.
+        foreach (long key in BfsChunks.Keys)
+        {
+            int x = (int)(key % map.index3dMulX);
+            long yz = key / map.index3dMulX;
+            int z = (int)(yz % map.index3dMulZ), y = (int)(yz / map.index3dMulZ);
+            if (!InRange(x, y, z)) continue;
+            int distance = Math.Abs(x - center.X) + Math.Abs(y - center.Y) + Math.Abs(z - center.Z);
+            if (distance <= 1) Enqueue(x, y, z, -1);
+            else
+                for (int face = 0; face < 6; face++)
+                {
+                    var n = BlockFacing.ALLFACES[face].Normali;
+                    int nx = x + n.X, ny = y + n.Y, nz = z + n.Z;
+                    if (InRange(nx, ny, nz) && !BfsChunks.ContainsKey(Key(map, nx, ny, nz))) Enqueue(x, y, z, face);
+                }
+        }
+        int visited = 0;
+        while (BfsQueue.TryDequeue(out var current))
+        {
+            long key = Key(map, current.X, current.Y, current.Z);
+            BfsChunks.TryGetValue(key, out var chunk);
+            int distance = Math.Abs(current.X - center.X) + Math.Abs(current.Y - center.Y) + Math.Abs(current.Z - center.Z);
+            if (chunk == null) continue;
+            setVisible!(chunk, true); visited++;
+            for (int exit = 0; exit < 6; exit++)
+            {
+                var face = BlockFacing.ALLFACES[exit];
+                if (chunk != null && distance > 1 && current.Face >= 0 &&
+                    !chunk.IsTraversable(BlockFacing.ALLFACES[current.Face], face)) continue;
+                var normal = face.Normali;
+                int x = current.X + normal.X, y = current.Y + normal.Y, z = current.Z + normal.Z;
+                if (InRange(x, y, z) && BfsChunks.ContainsKey(Key(map, x, y, z))) Enqueue(x, y, z, face.Opposite.Index);
+            }
+        }
+        BfsChunks.Clear(); // Do not retain unloaded chunks between walks.
+        return visited;
+        bool InRange(int x, int y, int z) => Math.Abs(x - center.X) <= radiusX && Math.Abs(y - center.Y) <= radiusY &&
+            Math.Abs(z - center.Z) <= radiusZ && (validChunk!(map, x, y, z) || above && y > 0);
+        void Enqueue(int x, int y, int z, int incoming)
+        {
+            var position = (x, y, z);
+            byte bit = incoming < 0 ? (byte)63 : (byte)(1 << incoming);
+            BfsArrivals.TryGetValue(position, out byte arrivals);
+            if ((arrivals & bit) == bit) return;
+            BfsArrivals[position] = (byte)(arrivals | bit);
+            BfsQueue.Enqueue((x, y, z, incoming));
+        }
     }
 
     /// <summary>Records every ray's steps exactly as the original walks them, relative to the camera chunk, and merges them into a tree.</summary>

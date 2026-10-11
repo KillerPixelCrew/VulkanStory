@@ -17,6 +17,7 @@
     <Project Path="tests/VulkanStory.Render.Vulkan.Tests/VulkanStory.Render.Vulkan.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/VulkanStory.PerformanceHarness/VulkanStory.PerformanceHarness.csproj" />
     <Project Path="tools/VulkanStory.GameProfile/VulkanStory.GameProfile.csproj" />
     <Project Path="tools/VulkanStory.Preflight/VulkanStory.Preflight.csproj" />
     <Project Path="tools/VulkanStory.Shaders.Compiler/VulkanStory.Shaders.Compiler.csproj" />

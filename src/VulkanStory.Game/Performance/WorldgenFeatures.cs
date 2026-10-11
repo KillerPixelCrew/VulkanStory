@@ -55,9 +55,11 @@ internal static class WorldgenPipeline
     private static readonly object LightPasses = new();
     [ThreadStatic] private static List<long>? held;
     [ThreadStatic] private static int depth;
+    [ThreadStatic] private static int expectedStart, expectedEnd;
     private static ChunkServerThread? chunkThread;
     private static ServerMain? server;
     private static volatile bool managed, serial;
+    private static int poolCapacity, originalWorkerCount;
     private static System.Func<object, object>? supplyOfThread;
     private static MethodInfo? pauseWorkers, resumeWorkers;
 
@@ -83,8 +85,13 @@ internal static class WorldgenPipeline
     }, harmony =>
     {
         harmony.Patch(Constructor(), postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(Configure)));
+        harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "OnBeginGameReady", typeof(SaveGame)),
+            postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(ApplyPolicy)));
+        harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "GetUpdateInterval"),
+            postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(PositiveInterval)));
         harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "GenerateChunkColumns_OnSeparateThread", typeof(int), typeof(int)),
-            prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(WorkerStep)));
+            prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(WorkerStep)),
+            finalizer: new HarmonyMethod(typeof(WorldgenPipeline), nameof(EndWorkerStep)));
         harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "PopulateChunk", typeof(ChunkColumnLoadRequest)),
             prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(BeginPopulate)),
             finalizer: new HarmonyMethod(typeof(WorldgenPipeline), nameof(EndPopulate)));
@@ -97,7 +104,10 @@ internal static class WorldgenPipeline
             transpiler: new HarmonyMethod(typeof(WorldgenPipeline), nameof(EntityIdTranspiler)));
     });
 
-    private static bool Active => managed && !serial && chunkThread is { additionalWorldGenThreadsCount: > 0 };
+    // Footprint protection remains installed while the reusable worker pool exists, including live off/on transitions.
+    private static bool Active => managed && chunkThread != null;
+    internal static bool ParallelActive => Active && !serial && chunkThread!.additionalWorldGenThreadsCount > 0;
+    internal static int WorkerCount => poolCapacity;
 
     /// <summary>The in-process server whose chunk thread was last constructed (headless harness directives only).</summary>
     internal static ServerMain? IntegratedServer => server;
@@ -112,24 +122,42 @@ internal static class WorldgenPipeline
     private static void Configure(ChunkServerThread __instance, ServerMain server)
     {
         chunkThread = __instance; WorldgenPipeline.server = server; serial = false;
-        string policy = PerformancePatchSet.Current?.WorldgenWorkers ?? "off";
-        managed = policy != "off" && !server.ReducedServerThreads;
-        // Auto never lowers a worker count the player configured through the game's own MaxWorldgenThreads.
-        if (managed) __instance.additionalWorldGenThreadsCount = policy == "auto"
-            ? Math.Max(__instance.additionalWorldGenThreadsCount, Workers(policy)) : Workers(policy);
+        managed = !server.ReducedServerThreads;
+        originalWorkerCount = __instance.additionalWorldGenThreadsCount;
+        poolCapacity = Math.Max(3, originalWorkerCount);
+        // Start the game's own reusable workers once. Per-call admission applies the current live policy.
+        // Even an initially disabled option can then be enabled without reconstructing or restarting the world.
+        if (managed) __instance.additionalWorldGenThreadsCount = poolCapacity;
     }
-
-    private static bool WorkerStep(ref int __result)
+    private static void ApplyPolicy()
     {
-        if (!managed || !serial) return true;
+        if (!managed || chunkThread == null || serial) return;
+        RendererSettings? settings = PerformancePatchSet.Current;
+        string policy = settings?.WorldgenWorkers ?? "off";
+        int requested = policy == "off" ? 0 : policy == "auto" ? Math.Max(originalWorkerCount, Workers(policy)) : Workers(policy);
+        // Terrain alone owns pass 1; the chunk thread continues all later passes. Idle pool workers can assist Terrain.
+        if (settings?.ParallelTerrainGeneration == true) requested = Math.Max(1, requested);
+        chunkThread.additionalWorldGenThreadsCount = Math.Min(poolCapacity, requested);
+    }
+    private static void PositiveInterval(ref int __result) => __result = Math.Max(1, __result);
+
+    private static bool WorkerStep(int stageStart, int stageEnd, ref int __result, out (int Start, int End) __state)
+    {
+        __state = (expectedStart, expectedEnd);
+        expectedStart = stageStart; expectedEnd = stageEnd;
+        ApplyPolicy();
+        if (!managed) return true;
+        if (!serial && stageStart <= chunkThread!.additionalWorldGenThreadsCount) return true;
         __result = 0;
         return false;
     }
+    private static void EndWorkerStep((int Start, int End) __state)
+    { expectedStart = __state.Start; expectedEnd = __state.End; }
 
     /// <summary>Runs once the world type's handlers are known and before spawn chunks load; repeated by <c>/wgen regen</c>.</summary>
     private static void Prepare(object __result)
     {
-        if (!managed || chunkThread is not { additionalWorldGenThreadsCount: > 0 } thread || __result is not IWorldGenHandler handlers) return;
+        if (!managed || chunkThread is not { } thread || __result is not IWorldGenHandler handlers) return;
         string? reason = Unsafe(handlers);
         if (reason != null)
         {
@@ -201,9 +229,9 @@ internal static class WorldgenPipeline
         ServerMain.Logger.Warning("VulkanStory: {0}; the chunk thread generates alone.", reason);
     }
 
-    private static void BeginPopulate(ChunkColumnLoadRequest chunkRequest)
+    private static bool BeginPopulate(ChunkColumnLoadRequest chunkRequest)
     {
-        if (!Active || depth++ > 0) return;
+        if (!Active || depth++ > 0) return true;
         int x = ChunkX(chunkRequest), z = ChunkZ(chunkRequest);
         var keys = held ??= new List<long>(9);
         while (true)
@@ -217,11 +245,12 @@ internal static class WorldgenPipeline
                     if (Leased.TryAdd(key, Environment.CurrentManagedThreadId)) keys.Add(key);
                     else acquired = false;
                 }
-            if (acquired) return;
+            if (acquired)
+                return expectedEnd == 0 || chunkRequest.CurrentIncompletePass_AsInt >= expectedStart && chunkRequest.CurrentIncompletePass_AsInt < expectedEnd;
             foreach (long key in keys) Leased.TryRemove(key, out _);
             keys.Clear();
             Interlocked.Increment(ref PerformanceCounters.WorldgenLeaseConflicts);
-            if (server == null || Stopped(server) || serial) return;
+            if (server == null || Stopped(server) || serial) return false;
             Thread.Sleep(1);
         }
     }
@@ -298,6 +327,7 @@ internal static class WorldgenPipeline
         internal ChunkColumnGenerationDelegate Original => original;
         internal void Invoke(IChunkColumnGenerateRequest request)
         {
+            if (!lightPass && ParallelTerrainGeneration.TryInvoke(original, request, gate)) return;
             if (lightPass) lock (LightPasses) lock (gate) original(request);
             else lock (gate) original(request);
         }

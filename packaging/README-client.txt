@@ -48,3 +48,14 @@ Keep %LOCALAPPDATA%\VulkanStory\Logs\bootstrap-*.jsonl and your game data
 Logs/client-main.log when
 reporting startup/rendering problems. Package hashes are in VulkanStory/package.json.
 License/attribution notices, including PromptFont, are under VulkanStory/licenses.
+
+PERFORMANCE CAPTURES
+In a loaded world, use .vulkanstory profile start 30 to capture 30 seconds.
+Use .vulkanstory profile stop to finish early and .vulkanstory profile status
+to check completion. Captures are saved under
+%LOCALAPPDATA%\VulkanStory\Performance. Open report.html for searchable,
+per-thread flame graphs, frame intervals, render/tick work, CPU/memory and
+allocation samples. capture.nettrace preserves raw events;
+capture.speedscope.json can be opened in a Speedscope viewer.
+The collector runs separately from the game. Native/wait samples are not
+CPU time, allocation ticks are estimates, and GPU execution time is not measured.

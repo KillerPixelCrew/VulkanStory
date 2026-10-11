@@ -83,8 +83,43 @@ internal sealed record RendererSettings
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
     public bool ParallelChunkReads { get; init; } = true;
-    /// <summary>Singleplayer worldgen worker policy: off, auto, 1, 2 or 3; applies at the next world load.</summary>
+    /// <summary>Live singleplayer worldgen worker policy: off, auto, 1, 2 or 3.</summary>
     public string WorldgenWorkers { get; init; } = "auto";
+
+    /// <summary>Reuses render-info scratch objects only inside synchronous GUI item rendering.</summary>
+    public bool GuiItemRenderInfoReuse { get; init; } = true;
+    /// <summary>Caches wind samples for at most 50 ms while smoothing continues every frame.</summary>
+    public bool WeatherWindSampleCache { get; init; } = true;
+    /// <summary>Uses a face-connectivity flood instead of the ray tree for chunk visibility.</summary>
+    public bool BfsChunkVisibility { get; init; } = true;
+    /// <summary>Staggers distant animated-block evaluation while retaining accumulated animation time.</summary>
+    public bool AnimatedBlockLod { get; init; } = true;
+    /// <summary>Bounds dynamic-light membership scans to 100 ms with movement and population invalidation.</summary>
+    public bool DynamicLightScanCache { get; init; } = true;
+    /// <summary>Selects the nearest dynamic lights without allocating a LINQ sort.</summary>
+    public bool NearestLightSelection { get; init; } = true;
+    /// <summary>Spreads existing entity shape rebuilds across frames with an eight-frame maximum deferral.</summary>
+    public bool EntityRetessellationBudget { get; init; } = true;
+    /// <summary>Reuses temporary pathfinding nodes while keeping returned paths independent of later searches.</summary>
+    public bool PathfindingNodePool { get; init; } = true;
+    /// <summary>Batches visible entity light reads by chunk under the game's original chunk lock.</summary>
+    public bool EntityLightBatch { get; init; } = true;
+    /// <summary>Evaluates frustum planes in SIMD vectors with the game's original precision and LOD thresholds.</summary>
+    public bool SimdFrustumTests { get; init; } = true;
+    /// <summary>Caches outfit pose layouts with separate mutable pose graphs for each entity.</summary>
+    public bool OutfitAnimatorCache { get; init; } = true;
+    /// <summary>Allows idle worldgen workers to generate Terrain columns with independent generator workspaces.</summary>
+    public bool ParallelTerrainGeneration { get; init; } = true;
+    /// <summary>Reuses physics client lists only when queued readers have released them.</summary>
+    public bool PhysicsCollectionReuse { get; init; } = true;
+    /// <summary>Reserves activation-list capacity in one batch; all entities still activate in the original tick.</summary>
+    public bool PhysicsActivationBatch { get; init; } = true;
+    /// <summary>Uses a majority-material proxy for distant chisel geometry while retaining full geometry for live toggles.</summary>
+    public bool ChiselMeshLod { get; init; } = true;
+    /// <summary>Distance in blocks at which chisel chunk parts switch to the proxy.</summary>
+    public int ChiselLodDistance { get; init; } = 48;
+    /// <summary>Caches world-map pages on disk and renders resident pages with a Vulkan array texture.</summary>
+    public bool WorldMapPageCache { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -105,6 +140,23 @@ internal sealed record RendererSettings
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,
+        GuiItemRenderInfoReuse = source.GuiItemRenderInfoReuse,
+        WeatherWindSampleCache = source.WeatherWindSampleCache,
+        BfsChunkVisibility = source.BfsChunkVisibility,
+        AnimatedBlockLod = source.AnimatedBlockLod,
+        DynamicLightScanCache = source.DynamicLightScanCache,
+        NearestLightSelection = source.NearestLightSelection,
+        EntityRetessellationBudget = source.EntityRetessellationBudget,
+        PathfindingNodePool = source.PathfindingNodePool,
+        EntityLightBatch = source.EntityLightBatch,
+        SimdFrustumTests = source.SimdFrustumTests,
+        OutfitAnimatorCache = source.OutfitAnimatorCache,
+        ParallelTerrainGeneration = source.ParallelTerrainGeneration,
+        PhysicsCollectionReuse = source.PhysicsCollectionReuse,
+        PhysicsActivationBatch = source.PhysicsActivationBatch,
+        ChiselMeshLod = source.ChiselMeshLod,
+        ChiselLodDistance = source.ChiselLodDistance,
+        WorldMapPageCache = source.WorldMapPageCache,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>
@@ -136,6 +188,7 @@ internal sealed record RendererSettings
             TaaDebugView = Math.Max(0, TaaDebugView),
             EntityShadowDistance = RendererChoices.Range(nameof(EntityShadowDistance)).Clamp(EntityShadowDistance),
             DroppedItemDistance = RendererChoices.Range(nameof(DroppedItemDistance)).Clamp(DroppedItemDistance),
+            ChiselLodDistance = RendererChoices.Range(nameof(ChiselLodDistance)).Clamp(ChiselLodDistance),
             WorldgenWorkers = Choice(WorldgenWorkers, nameof(WorldgenWorkers), "auto"),
         };
     }

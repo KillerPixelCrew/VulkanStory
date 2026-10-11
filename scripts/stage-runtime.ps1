@@ -80,6 +80,7 @@ if ($RuntimeIdentifier -eq 'win-x64') {
 Add-Payload 'VulkanStory/loader.ini' (Join-Path $projectRoot 'packaging/loader.ini')
 $readme = if ($RuntimeIdentifier -eq 'linux-x64') { 'packaging/README-linux-client.txt' } else { 'packaging/README-client.txt' }
 Add-Payload 'VulkanStory/README.txt' (Join-Path $projectRoot $readme)
+Add-Tree 'VulkanStory/tools/performance' (Join-Path $projectRoot "tools/VulkanStory.PerformanceHarness/bin/$Configuration/net10.0")
 if ($RuntimeIdentifier -eq 'win-x64') {
     Add-Payload 'VulkanStory/tools/deploy-runtime.ps1' (Join-Path $projectRoot 'scripts/deploy-runtime.ps1')
     Add-Payload 'VulkanStory/tools/remove-runtime.ps1' (Join-Path $projectRoot 'scripts/remove-runtime.ps1')

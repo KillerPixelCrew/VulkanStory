@@ -23,6 +23,10 @@
       <HintPath>$(VintageStoryPath)/VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="VSEssentials">
+      <HintPath>$(VintageStoryPath)/Mods/VSEssentials.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="VintagestoryLib">
       <HintPath>$(VintageStoryPath)/VintagestoryLib.dll</HintPath>
       <Private>false</Private>
@@ -57,6 +61,7 @@
     </Reference>
     <InternalsVisibleTo Include="VulkanStory.Bootstrap.Tests" />
     <InternalsVisibleTo Include="VulkanStory.Game.Tests" />
+    <InternalsVisibleTo Include="VulkanStory.GameProfile" />
   </ItemGroup>
   <!-- Keep one maintained fullscreen source and the existing manifest resource names. -->
   <Target Name="EmbedFullscreenAliases" BeforeTargets="AssignTargetPaths">

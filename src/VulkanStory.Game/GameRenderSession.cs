@@ -176,9 +176,13 @@ internal sealed partial class GameRenderSession : IDisposable
         RequireActive();
         if (rendering) throw new InvalidOperationException("Recursive game frame.");
         rendering = true;
+        Performance.AnimatedBlockLod.BeginFrame();
+        Performance.EntityRetessellationBudget.BeginFrame();
+        var performanceStamp = Performance.PerformanceTrace.Log.Begin();
         bool gpuCycleStarted = false;
         try
         {
+            Performance.PerformanceTrace.Log.CaptureSettings(services.RendererSettings.Settings);
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
             pendingFrameSettings = null;
             float delta = (float)frameClock.Elapsed.TotalSeconds;
@@ -237,6 +241,7 @@ internal sealed partial class GameRenderSession : IDisposable
             graphics?.ClearFsr3InputCapture();
             if (device != null) device.CaptureUpscalerConstants = false;
             rendering = false;
+            Performance.PerformanceTrace.Log.End("Frame", performanceStamp);
         }
     }
     private void PrepareFramePacing()

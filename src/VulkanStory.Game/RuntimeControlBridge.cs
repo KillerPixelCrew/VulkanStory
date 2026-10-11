@@ -15,6 +15,7 @@ internal static class RuntimeControlBridge
     internal static void Install(ProcessRuntime runtime)
     {
         AppContext.SetData("VulkanStory.Runtime.ReadSettings", (Func<string>)runtime.ReadSettings);
+        AppContext.SetData("VulkanStory.Runtime.PerformanceCapture", (Func<string, string>)Performance.PerformanceCaptureControl.Command);
         AppContext.SetData("VulkanStory.Runtime.FpsText", (Func<string>)(() => runtime.IsActive ? runtime.Session.FpsText : "Renderer inactive"));
         AppContext.SetData("VulkanStory.Runtime.ShowFpsCounter", (Func<bool>)(() => runtime.IsActive && runtime.Session.ShowFpsCounter));
         AppContext.SetData("VulkanStory.Runtime.Presentation", (Func<string>)(() =>
@@ -34,6 +35,8 @@ internal static class RuntimeControlBridge
     /// <summary>Clears all VulkanStory-owned AppContext control delegates during runtime shutdown.</summary>
     internal static void Remove()
     {
+        Performance.PerformanceCaptureControl.Stop();
+        AppContext.SetData("VulkanStory.Runtime.PerformanceCapture", null);
         foreach (string key in new[] { "ReadSettings", "FpsText", "ShowFpsCounter", "Presentation", "ApplySettings", "PreviewSettings", "ReloadSettings", "WorldReady", "WorldLeft", "ControllerSettings", "ControllerSettingsAfterSave", "DiagnosticOptions" })
             AppContext.SetData("VulkanStory.Runtime." + key, null);
     }

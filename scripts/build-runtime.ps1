@@ -45,6 +45,8 @@ foreach ($project in @('VulkanStory.Bootstrap', 'VulkanStory.Game', 'VulkanStory
     & dotnet @arguments
     if ($LASTEXITCODE -ne 0) { throw "Managed build failed: $project" }
 }
+& dotnet build (Join-Path $projectRoot 'tools/VulkanStory.PerformanceHarness/VulkanStory.PerformanceHarness.csproj') -c $Configuration
+if ($LASTEXITCODE -ne 0) { throw 'Performance harness build failed.' }
 if (-not $SkipShaders) {
     $shaderProject = Join-Path $projectRoot 'tools/VulkanStory.Shaders.Compiler/VulkanStory.Shaders.Compiler.csproj'
     & dotnet build $shaderProject -c $Configuration

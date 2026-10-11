@@ -24,8 +24,8 @@ public sealed class VulkanStoryModSystem : ModSystem
         api.Event.LeaveWorld += WorldLeft;
         var commandOwner = new WeakReference<VulkanStoryModSystem>(this);
         api.ChatCommands.GetOrCreate("vulkanstory")
-            .WithDescription("VulkanStory settings, controller panel, status and set <setting> <value>")
-            .WithArgs(api.ChatCommands.Parsers.OptionalWord("settings|controller|status|reload|set"),
+            .WithDescription("VulkanStory settings, controller panel, status, profile start [seconds], profile stop/status and set <setting> <value>")
+            .WithArgs(api.ChatCommands.Parsers.OptionalWord("settings|controller|status|reload|set|profile"),
                 api.ChatCommands.Parsers.OptionalWord("setting"), api.ChatCommands.Parsers.OptionalAll("value"))
             // The public API has no unregister operation. Keep the registry
             // handler independent of this owner's lifetime and allow reattachment.
@@ -75,6 +75,12 @@ public sealed class VulkanStoryModSystem : ModSystem
     {
         if (client == null) return TextCommandResult.Error("VulkanStory client mod is unavailable.");
         string action = (args[0] as string ?? "settings").ToLowerInvariant();
+        if (action == "profile")
+        {
+            if (AppContext.GetData("VulkanStory.Runtime.PerformanceCapture") is not System.Func<string, string> capture)
+                return TextCommandResult.Error("VulkanStory performance capture is unavailable.");
+            return TextCommandResult.Success(capture((args[1] as string ?? "status") + " " + (args[2] as string ?? "")));
+        }
         if (action == "diagnostic-options")
         {
             if (AppContext.GetData("VulkanStory.Runtime.DiagnosticOptions") is not System.Func<string, string?> inspect)

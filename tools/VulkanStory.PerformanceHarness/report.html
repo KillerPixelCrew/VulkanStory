@@ -1,0 +1,51 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VulkanStory performance capture</title>
+<style>
+body{margin:0;background:#111720;color:#e2e8f0;font:14px system-ui}main{max-width:1500px;margin:auto;padding:28px}h1{font-size:24px}label{margin-right:18px}input,select,button{background:#202d3e;color:inherit;border:1px solid #43546b;padding:7px;border-radius:4px}input[type=number]{width:90px}input[type=search]{width:240px}canvas{width:100%;background:#172230;margin-top:18px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid #2c3848}td:first-child{overflow-wrap:anywhere}p{color:#b6c2d3;line-height:1.5}.stats{display:flex;flex-wrap:wrap;gap:22px;padding:16px;background:#202d3e}#crumb{margin:12px 0}details{margin-top:18px}pre{white-space:pre-wrap;overflow-wrap:anywhere}.warn{color:#ffca81}
+</style><main><h1>VulkanStory performance capture</h1><p id="notes"></p><p id="quality" class="warn"></p>
+<label>Thread <select id="thread"><option value="all">All threads</option></select></label>
+<label>Samples <select id="kind"><option>Managed</option><option>External</option><option value="all">All</option></select></label>
+<label>From ms <input id="from" type="number" value="0" min="0"></label><label>To ms <input id="to" type="number" min="0"></label>
+<input id="search" type="search" placeholder="Search method or mod"><button id="reset">Reset flame graph</button>
+<div id="stats" class="stats"></div><div id="crumb"></div><canvas id="flame" height="500"></canvas>
+<h2>Process CPU and memory</h2><p id="process"></p><canvas id="memory" height="160"></canvas>
+<h2>Method hotspots</h2><p>Inclusive samples include child calls; self samples end in this method. Samples are counts, not milliseconds.</p>
+<table><thead><tr><th>Method</th><th>Inclusive samples</th><th>Self samples</th></tr></thead><tbody id="hotspots"></tbody></table>
+<h2>Measured frame / system spans</h2><p>Wall duration includes waits. Nested spans overlap and must not be summed.</p>
+<table><thead><tr><th>Scope</th><th>Calls</th><th>Mean ms</th><th>p95 ms</th><th>p99 ms</th><th>Max ms</th><th>Thread bytes</th></tr></thead><tbody id="spans"></tbody></table>
+<h2>Allocation samples</h2><table><thead><tr><th>Type</th><th>Estimated bytes</th><th>Ticks</th></tr></thead><tbody id="allocations"></tbody></table>
+<details><summary>Captured settings</summary><pre id="settings"></pre></details></main>
+<script>
+const data=/*REPORT_DATA*/null;
+const el=id=>document.getElementById(id);let boxes=[],focus=[];
+el('notes').textContent=data.Notes;
+el('quality').textContent=`Lost events: ${data.EventsLost}; unresolved sample stacks: ${data.MissingStacks}. ${data.Spans.length?'':'No VulkanStory timing events were captured.'}`;
+el('to').value=Math.ceil(data.DurationMs);
+for(const id of [...new Set([...data.Samples,...data.Spans].map(s=>s.Thread))].sort((a,b)=>a-b)){let o=document.createElement('option');o.value=id;o.textContent=id;el('thread').append(o)}
+function selected(s){return(el('thread').value==='all'||s.Thread===+el('thread').value)&&s.TimeMs>=+el('from').value&&s.TimeMs<=+el('to').value}
+function row(target,values){let tr=document.createElement('tr');for(let value of values){let td=document.createElement('td');td.textContent=value;tr.append(td)}target.append(tr)}
+function percentile(values,p){return values.length?values[Math.max(0,Math.ceil(values.length*p)-1)]:0}
+function draw(){
+let samples=data.Samples.filter(s=>selected(s)&&(el('kind').value==='all'||s.Kind===el('kind').value)),query=el('search').value.toLowerCase();
+if(query)samples=samples.filter(s=>s.Stack.some(f=>f.toLowerCase().includes(query)));
+let hits=new Map(),root={name:'All selected samples',count:0,children:new Map()};
+for(let sample of samples){root.count++;let node=root;for(let name of sample.Stack){if(!node.children.has(name))node.children.set(name,{name,count:0,children:new Map()});node=node.children.get(name);node.count++}for(let name of new Set(sample.Stack)){let h=hits.get(name)||[0,0];h[0]++;hits.set(name,h)}if(sample.Stack.length)hits.get(sample.Stack.at(-1))[1]++}
+el('hotspots').replaceChildren();for(let [name,counts]of [...hits].sort((a,b)=>b[1][0]-a[1][0]))row(el('hotspots'),[name,...counts]);
+let spans=data.Spans.filter(selected),groups=new Map();for(let span of spans){if(query&&!span.Name.toLowerCase().includes(query))continue;let g=groups.get(span.Name)||[];g.push(span);groups.set(span.Name,g)}
+let maxDuration=g=>g.reduce((m,s)=>Math.max(m,s.DurationMs),0);
+el('spans').replaceChildren();for(let[name,group]of [...groups].sort((a,b)=>maxDuration(b[1])-maxDuration(a[1]))){let times=group.map(s=>s.DurationMs).sort((a,b)=>a-b);row(el('spans'),[name,group.length,(times.reduce((a,b)=>a+b,0)/times.length).toFixed(3),percentile(times,.95).toFixed(3),percentile(times,.99).toFixed(3),times.at(-1).toFixed(3),group.reduce((a,s)=>a+s.AllocatedBytes,0).toLocaleString()])}
+let allocs=new Map();for(let a of data.Allocations.filter(selected)){if(query&&!a.Type.toLowerCase().includes(query))continue;let g=allocs.get(a.Type)||[0,0];g[0]+=a.Bytes;g[1]++;allocs.set(a.Type,g)}el('allocations').replaceChildren();for(let[name,g]of[...allocs].sort((a,b)=>b[1][0]-a[1][0]))row(el('allocations'),[name,g[0].toLocaleString(),g[1]]);
+let ends=spans.filter(s=>s.Name==='Frame').sort((a,b)=>a.TimeMs-b.TimeMs),work=ends.map(s=>s.DurationMs).sort((a,b)=>a-b),intervals=[];for(let i=1;i<ends.length;i++)if(ends[i].Thread===ends[i-1].Thread)intervals.push(ends[i].TimeMs-ends[i-1].TimeMs);intervals.sort((a,b)=>a-b);
+let mean=intervals.length?intervals.reduce((a,b)=>a+b,0)/intervals.length:0;
+el('stats').textContent=`${samples.length.toLocaleString()} samples · ${ends.length} frames · ${(mean?1000/mean:0).toFixed(1)} FPS · frame interval p95 ${percentile(intervals,.95).toFixed(2)} / p99 ${percentile(intervals,.99).toFixed(2)} ms · render work p99 ${percentile(work,.99).toFixed(2)} ms · ${(data.GarbageCollections||[]).filter(g=>g.Kind==='start'&&g.TimeMs>=+el('from').value&&g.TimeMs<=+el('to').value).length} GCs`;
+let metrics=(data.ProcessMetrics||[]).map(m=>({...m,TimeMs:new Date(m.TimeUtc)-new Date(data.TraceStartUtc)})).filter(m=>m.TimeMs>=+el('from').value&&m.TimeMs<=+el('to').value);
+el('process').textContent=metrics.length?`${data.Target?.Name||'Target'} (${data.Target?.Pid||''}) · mean CPU ${(metrics.reduce((a,m)=>a+m.CorePercent,0)/metrics.length).toFixed(1)}% of one core · peak working set ${(Math.max(...metrics.map(m=>m.WorkingSetBytes))/1048576).toFixed(1)} MiB · peak private memory ${(Math.max(...metrics.map(m=>m.PrivateBytes))/1048576).toFixed(1)} MiB. Memory graph: working set (blue), private memory (orange).`:'No process memory samples in this range.';
+let mc=el('memory'),mw=mc.clientWidth,mratio=devicePixelRatio||1;mc.width=mw*mratio;mc.height=160*mratio;let mctx=mc.getContext('2d');mctx.scale(mratio,mratio);if(metrics.length){let peak=metrics.reduce((p,m)=>Math.max(p,m.WorkingSetBytes,m.PrivateBytes),1);for(let[field,color]of[['WorkingSetBytes','#62a9ff'],['PrivateBytes','#ffae64']]){mctx.strokeStyle=color;mctx.beginPath();metrics.forEach((m,i)=>{let x=(m.TimeMs-(+el('from').value))/Math.max(1,+el('to').value-(+el('from').value))*mw,y=150-m[field]/peak*140;if(i)mctx.lineTo(x,y);else mctx.moveTo(x,y)});mctx.stroke()}}
+let node=root;for(let name of focus){if(!node.children.has(name)){focus=[];node=root;break}node=node.children.get(name)}el('crumb').textContent=focus.join(' → ')||'Click a frame to zoom; reset to return.';
+let canvas=el('flame'),ratio=devicePixelRatio||1,width=canvas.clientWidth;canvas.width=width*ratio;canvas.height=500*ratio;let c=canvas.getContext('2d');c.scale(ratio,ratio);c.font='12px system-ui';boxes=[];
+function rect(n,x,y,w,path){if(w<1||y>480)return;let hash=0;for(let ch of n.name)hash=(hash*31+ch.charCodeAt(0))|0;c.fillStyle=`hsl(${Math.abs(hash)%70+10} 65% 48%)`;c.fillRect(x,y,w-1,23);c.fillStyle='#10151c';if(w>35)c.fillText(n.name.slice(0,Math.floor(w/7)),x+3,y+16);boxes.push({x,y,w,name:n.name,path});let left=x;for(let child of [...n.children.values()].sort((a,b)=>b.count-a.count)){let cw=w*child.count/n.count;rect(child,left,y+25,cw,[...path,child.name]);left+=cw}}
+if(node.count)rect(node,0,0,width,focus);
+el('settings').textContent=data.Settings.map(s=>`${s.TimeMs.toFixed(0)} ms\n${s.Json}`).join('\n\n');
+}
+for(let id of['thread','kind','from','to','search'])el(id).addEventListener('input',draw);el('reset').onclick=()=>{focus=[];draw()};el('flame').onclick=e=>{let r=e.currentTarget.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,b=boxes.find(b=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<b.y+23);if(b){focus=b.path;draw()}};el('flame').onmousemove=e=>{let r=e.currentTarget.getBoundingClientRect(),b=boxes.find(b=>e.clientX-r.left>=b.x&&e.clientX-r.left<=b.x+b.w&&e.clientY-r.top>=b.y&&e.clientY-r.top<b.y+23);e.currentTarget.title=b?b.name:''};window.addEventListener('resize',draw);draw();
+</script></html>

@@ -237,6 +237,7 @@ internal sealed class RendererSettingsPanel
                 break;
             case 4:
                 Switch("Chunk visibility walk", "ChunkVisibilityWalk");
+                Switch("Flood-fill chunk visibility", "BfsChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");
@@ -248,15 +249,31 @@ internal sealed class RendererSettingsPanel
                 Switch("Skip unchanged chunk upload sorting", "UploadQueueSortSkip");
                 Switch("Reuse chunk mesh buffers", "MeshPartPool");
                 Switch("Parallel chunk reads (next world)", "ParallelChunkReads");
-                DefinedChoice("Worldgen workers (next world)", "WorldgenWorkers");
+                DefinedChoice("Worldgen workers", "WorldgenWorkers");
                 Switch("Allocation-free animation checks", "AnimationLinqFree");
                 Switch("Falling block mesh fix", "FallingBlockMeshFix");
                 Switch("Villager outfit cache", "OutfitShapeCache");
+                Switch("Reuse inventory render info", "GuiItemRenderInfoReuse");
+                Switch("Cache weather wind samples", "WeatherWindSampleCache");
+                Switch("Animated block distance LOD", "AnimatedBlockLod");
+                Switch("Cache dynamic light scans", "DynamicLightScanCache");
+                Switch("Allocation-free nearest lights", "NearestLightSelection");
+                Switch("Spread entity mesh rebuilds", "EntityRetessellationBudget");
+                Switch("Reuse pathfinding nodes", "PathfindingNodePool");
+                Switch("Batch entity lighting", "EntityLightBatch");
+                Switch("SIMD frustum tests", "SimdFrustumTests");
+                Switch("Cache outfit animator builds", "OutfitAnimatorCache");
+                Switch("Parallel Terrain columns", "ParallelTerrainGeneration");
+                Switch("Reuse physics client lists", "PhysicsCollectionReuse");
+                Switch("Batch physics activation capacity", "PhysicsActivationBatch");
+                Switch("Distant chisel mesh LOD", "ChiselMeshLod");
+                Slider("Chisel LOD distance (blocks)", "ChiselLodDistance");
+                Switch("World map page cache", "WorldMapPageCache");
                 string unavailable = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> performance
                     ? string.Join("\n", performance().Split('\n').Where(line => line.Contains(": unavailable (", StringComparison.Ordinal)).Select(line => line.Trim()))
                     : "";
                 if (unavailable.Length != 0) Text("Unavailable in this game version:\n" + unavailable);
-                Text("These ports trade small visual differences or none at all for smoother frames. Options marked next world apply when a world is loaded; the others apply immediately. Worldgen and chunk reads affect singleplayer only.");
+                Text("These ports trade small visual differences or none at all for smoother frames. Parallel chunk reads apply at the next world load; the other controls apply live. Worldgen and chunk reads affect singleplayer only. The map cache retains the normal renderer when a view exceeds its resident-page budget.");
                 break;
             default:
                 string status = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> read

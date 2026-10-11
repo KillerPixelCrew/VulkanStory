@@ -57,8 +57,29 @@ Other source trees:
 | `tools/VulkanStory.Shaders.Compiler` | Compiles `shaders/native` to SPIR-V plus `shaders.manifest.json`, packed into `shaders-vk.pak` |
 | `tools/VulkanStory.GameProfile` | Verifies an installation against the startup IL profile and writes an operand inventory |
 | `tools/VulkanStory.Preflight` | Standalone Vulkan/SDL device, surface and swapchain preflights |
+| `tools/VulkanStory.PerformanceHarness` | External EventPipe collector and offline per-thread flame graph, allocation and frame/system timing reports |
 | `profiles/` | Supported game profiles: file hashes per platform and the startup IL profile |
 | `sdk/` | Vendor SDKs as pinned git submodules |
+
+The performance harness is an external .NET process shipped under
+`VulkanStory/tools/performance`. `.vulkanstory profile start 30` records a
+30-second capture; `profile stop` ends it early and `profile status` reports its
+output directory and completion. Captures are saved under
+`%LOCALAPPDATA%/VulkanStory/Performance`. Open the capture's `report.html` for
+per-thread flame graphs, method search, time-range filtering, sampled allocation
+types, frame intervals, render/system duration percentiles, process CPU/memory
+samples and GC events. `capture.speedscope.json` supports
+other flame-graph viewers; `capture.nettrace` retains the original events.
+
+For an independently selected game/server process, run
+`dotnet VulkanStory.PerformanceHarness.dll capture <pid> <seconds> <fresh-output-directory>`.
+Rebuild a report from a retained trace with
+`dotnet VulkanStory.PerformanceHarness.dll report <capture.nettrace> <output-directory>`.
+Timing hooks are dormant until an EventPipe session enables the
+`VulkanStory-Performance` provider. The collector combines these events with CLR
+managed/external stack samples and GC allocation ticks. External samples include
+waiting/native execution, sampled allocations are estimates, measured spans may
+overlap, and these captures do not measure GPU execution time.
 
 ## Runtime ownership
 
@@ -85,9 +106,10 @@ Lifetimes:
   `AppContext` delegates. Nothing runs from `DLL_PROCESS_DETACH`.
 
 Settings that affect device or window creation, such as the renderer switch,
-native shaders and Streamline, apply at the next launch. The singleplayer server
-performance settings (worldgen workers, parallel chunk reads) apply when the next
-world loads. Other settings apply live through the runtime's control queue.
+native shaders and Streamline, apply at the next launch. Parallel chunk reads
+apply when the next world loads. Worldgen workers reuse a pool created at world
+startup; admission and Terrain assistance follow the current settings without
+restarting the world. Other settings apply live through the runtime's control queue.
 
 ## Startup routing
 

@@ -32,6 +32,7 @@ internal static class RendererChoices
     private static readonly RendererRange FrameGenerationMultiplier = new(2f, 6f, 2f, 1, 1);
     private static readonly RendererRange EntityShadowDistance = new(16f, 256f, 80f, 8, 1);
     private static readonly RendererRange DroppedItemDistance = new(16f, 256f, 64f, 8, 1);
+    private static readonly RendererRange ChiselLodDistance = new(16f, 256f, 48f, 8, 1);
 
     /// <summary>Returns supported values and labels; XeSS adds its SDK-specific quality choices.</summary>
     /// <param name="key">Renderer setting name shared by commands and the settings panel.</param>
@@ -73,6 +74,7 @@ internal static class RendererChoices
         "FrameGenerationMultiplier" => FrameGenerationMultiplier,
         "EntityShadowDistance" => EntityShadowDistance,
         "DroppedItemDistance" => DroppedItemDistance,
+        "ChiselLodDistance" => ChiselLodDistance,
         _ => throw new ArgumentException("Unknown renderer range: " + key),
     };
 }

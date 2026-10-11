@@ -8,9 +8,10 @@ using VulkanStory.Game;
 // IL profile, validates platform metadata, and writes a method-operand inventory.
 // This metadata check does not launch the game or establish startup/render acceptance.
 // Exit codes: 0 for a matching inventory, 1 for a captured failure, 2 for invalid arguments.
-if (args.Length != 6 || args[0] != "--game-directory" || args[2] != "--profile" || args[4] != "--output")
+bool inspectPerformance = args.Length == 7 && args[6] == "--performance-patches";
+if ((args.Length != 6 && !inspectPerformance) || args[0] != "--game-directory" || args[2] != "--profile" || args[4] != "--output")
 {
-    Console.Error.WriteLine("Usage: VulkanStory.GameProfile --game-directory <official game dir> --profile <profile.json> --output <inventory.json>");
+    Console.Error.WriteLine("Usage: VulkanStory.GameProfile --game-directory <official game dir> --profile <profile.json> --output <inventory.json> [--performance-patches]");
     return 2;
 }
 
@@ -38,7 +39,7 @@ try
 
     AssemblyLoadContext.Default.Resolving += (_, name) =>
     {
-        foreach (string directory in new[] { gameDirectory, Path.Combine(gameDirectory, "Lib") })
+        foreach (string directory in new[] { gameDirectory, Path.Combine(gameDirectory, "Lib"), Path.Combine(gameDirectory, "Mods") })
         {
             string path = Path.Combine(directory, name.Name + ".dll");
             if (File.Exists(path)) return AssemblyLoadContext.Default.LoadFromAssemblyPath(path);
@@ -52,6 +53,15 @@ try
     StartupIlProfile.VerifyProfile1227(methods);
     GamePlatformBindingProfile.Validate1227();
 
+    var performance = new List<object>();
+    int performanceFailures = 0;
+    if (inspectPerformance)
+    {
+        Assembly essentials = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(gameDirectory, "Mods", "VSEssentials.dll"));
+        Assembly survival = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(gameDirectory, "Mods", "VSSurvivalMod.dll"));
+        performance = PerformanceInstallationCheck.Run(essentials, survival, out performanceFailures);
+    }
+
     string? parent = Path.GetDirectoryName(outputPath);
     if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
     File.WriteAllText(outputPath, JsonSerializer.Serialize(new
@@ -59,6 +69,7 @@ try
         profileId,
         gameAssemblySha256 = profile.RootElement.GetProperty("files").GetProperty("VintagestoryLib.dll").GetString(),
         methods,
+        performance,
     }, new JsonSerializerOptions { WriteIndented = true }));
 
     foreach (StartupMethodInventory method in methods)
@@ -71,7 +82,7 @@ try
     }
     Console.WriteLine("Matched pinned startup IL anchors and saved inventory: " + outputPath);
     Console.WriteLine("Matched original platform input/frame/close binding metadata.");
-    return 0;
+    return performanceFailures == 0 ? 0 : 1;
 }
 catch (Exception error)
 {

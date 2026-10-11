@@ -15,6 +15,19 @@ does not grant permission to redistribute Anego-owned material.
 
 ## Third-party material
 
+The optional game-side performance ports in `VulkanStory.Game/Performance`
+adapt optimization ideas and patch logic from `_ref/Optimum/patches` and
+`_ref/Optimum/sources`, including inventory rendering, weather lookup caching,
+block animation LOD, entity retessellation, dynamic-light selection, chunk
+visibility and pathfinding node pooling. The historical license and applicable
+upstream notices above remain attached to this material. The official game
+assemblies are compile-time references and are not redistributed.
+
+Outfit animator layouts, Terrain worker workspaces, physics collection reuse,
+chisel LOD routing and world-map page rendering/cache behavior also follow the
+Optimum patch/source overlays, with Vulkan-owned rendering and side-table state
+in the rewrite. The original material's license scope remains applicable.
+
 Third-party files keep their own notices and license terms. In particular,
 `sources/shaders/cloudvolumetric.fsh` contains its own MIT notice for the
 Inigo Quilez material it uses.

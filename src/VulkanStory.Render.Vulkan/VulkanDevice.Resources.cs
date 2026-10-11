@@ -176,6 +176,13 @@ public sealed unsafe partial class VulkanDevice
         _textures.Create((uint)width, (uint)height,
             GlEnums.TextureFormatFrom(internalFormat), layers: (uint)layers);
 
+    /// <summary>Uploads borrowed RGBA pixels into one layer of an owned array texture.</summary>
+    public void UploadTexture2DArrayLayer(int textureId, int layer, int width, int height, IntPtr pixels)
+    {
+        FlushPendingClears(textureId);
+        _textures.Upload(textureId, 0, 0, 0, (uint)width, (uint)height, pixels, 4, (uint)layer);
+    }
+
     /// <summary>Uploads borrowed client pixels into a texture mip rectangle using the client pixel format.</summary>
     public void UploadTexture2D(
         int textureId, int level, int x, int y, int width, int height,
