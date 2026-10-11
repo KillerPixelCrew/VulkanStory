@@ -223,6 +223,75 @@ Disabling in the mod manager takes effect at the next launch's first window
 request: routing is removed and the game uses OpenGL. `Enabled=0` skips the
 managed bootstrap entirely.
 
+## Installer mod
+
+The separate `vulkanstoryinstaller` mod is an ordinary client code mod. Its ZIP
+contains `modinfo.json` and `VulkanStory.Installer.Mod.dll` at the archive root.
+It is placed in a Mods directory, unlike the full runtime ZIP which extracts
+into the game directory. The mod does not load renderer libraries or initialize
+the shim in the already-running process.
+
+`InstallerModSystem` subscribes to `LevelFinalize`. Once the first world finishes
+loading, it opens the installation dialog if that mod instance has not prompted
+and `VulkanStory/package.json` is absent. `.vulkanstoryinstall` opens the dialog
+manually. World leave disposes it and cancels outstanding work.
+
+```mermaid
+flowchart TD
+    World[World load completes] --> Present{Runtime package present?}
+    Present -->|Yes| Skip[Suppress automatic prompt]
+    Present -->|No| Dialog[Install or Later]
+    Dialog -->|Install| Release[Query GitHub latest release]
+    Release --> Asset[Select VulkanStory-win-x64.zip]
+    Asset --> Download[Stream into temporary directory]
+    Download --> Hash[Check exact size and SHA256]
+    Hash --> Paths[Validate all archive destinations]
+    Paths --> Extract[Create runtime files without overwrites]
+    Extract --> Shim[Write hostfxr shim last]
+    Shim --> Restart[Tell player to close and restart]
+    Download -->|Failure| Error[Report error]
+    Hash -->|Failure| Error
+    Paths -->|Failure| Error
+    Extract -->|Failure| Rollback[Remove newly created files]
+    Rollback --> Error
+```
+
+`RuntimeDownload` uses GitHub's `/repos/KillerPixelCrew/VulkanStory/releases/latest`
+endpoint. It chooses the exact Windows client asset name, uses the published asset
+size, and requires the asset's `sha256:` digest. There is no installed-version
+comparison, downgrade selection or separate updater in this mod. GitHub latest
+release behavior determines the selected release.
+
+The Windows x64 check happens before download. Requests have a 30-minute timeout.
+Download progress reports transferred/total MiB. The verified ZIP is opened and
+all file destinations are checked before copying. Only `hostfxr.dll`,
+`VulkanStory/`, `Mods/vulkanstory/`, and `Mods/vulkanstoryinput/` are accepted.
+Parent/dot components, drive-qualified paths, duplicate destinations, paths outside
+the game root, and linked destination ancestors within the checked tree are
+rejected. Existing files or directories at a file destination are refused.
+
+Extraction uses `FileMode.CreateNew`, and records created files for cleanup on
+failure. Runtime files precede the activation shim so incomplete extraction does
+not install a shim pointing at missing dependencies. Temporary download cleanup
+is attempted regardless of outcome. Empty created directories can remain after
+failure. Cancellation is checked between extraction entries; copying one entry
+does not stop midway through that synchronous copy.
+
+On success, the mod tells the player to close and restart the game. The existing
+process remains on its current renderer. The next normal launch uses the shim
+and bootstrap sequence documented above. Removing the installer ZIP afterwards
+does not remove the installed runtime.
+
+This installer differs from `deploy-runtime.ps1`: it does not validate each
+official game file against the package profile before extraction, produce an
+`install.json` receipt, preserve/replace existing payload, or perform an update.
+The normal early bootstrap still verifies the game profile at the next launch.
+Fresh ZIP installs use `package.json` for removal inventory when no ownership
+receipt exists. Close the game before using the update/removal scripts.
+
+Player steps are in [player guide](player-guide.md); separate installer packaging
+is in [development](development.md#build-the-small-installer-mod).
+
 ## References
 
 - [.NET startup hooks](https://github.com/dotnet/runtime/blob/main/docs/design/features/host-startup-hook.md)

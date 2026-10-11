@@ -42,6 +42,12 @@ unmodified game.
 
 ## Installation (players)
 
+The small **Vulkan Story Installer** mod can download and install the runtime for
+you. Put its ZIP in `Mods`, enter a world, choose **Install**, then close and
+restart the game when it finishes. The installer is for fresh installations and
+does not overwrite existing files. See the [player guide](docs/player-guide.md)
+for the full procedure and troubleshooting.
+
 VulkanStory starts **before** the game creates its window, so it is installed beside
 the game executable, not only into `Mods`.
 
@@ -134,6 +140,14 @@ your own installation.
 
 ## Documentation
 
+- [Documentation index](docs/README.md): player and developer guides
+- [Player guide](docs/player-guide.md): installer mod, manual installation, settings, commands and troubleshooting
+- [Settings reference](docs/settings-reference.md): all renderer properties, defaults, ranges and live/restart behavior
+- [Rendering](docs/rendering.md): frame flow, shaders, GPU lifetime, TAA, GTAO, reconstruction and frame generation
+- [Window and controllers](docs/window-and-input.md): SDL input, profiles, gestures, GUI navigation and analog protocol
+- [Performance](docs/performance.md): optimization behavior and interpreting captures
+- [Mod integration](docs/mod-integration.md): render-pass API, attachments, motion writers and compatibility
+- [Development](docs/development.md): builds, packages, source map and diagnostics
 - [Roadmap](docs/ROADMAP.md): current status, known defects and remaining work
 - [Architecture](docs/architecture.md): components, ownership, rendering contracts, mod compatibility
 - [Bootstrap and installation](docs/bootstrap-and-installation.md): native activation, install/update/removal, Linux

@@ -6,6 +6,11 @@ from the normal shortcut, against the unmodified official game assemblies (profi
 `vs-1.22.7`). Feature status is tracked in the [roadmap](ROADMAP.md); activation and
 packaging are described in [bootstrap and installation](bootstrap-and-installation.md).
 
+Start with the [documentation index](README.md) for the player guide and detailed
+subsystem references. [Rendering](rendering.md), [window and controllers](window-and-input.md),
+[performance](performance.md), and [mod integration](mod-integration.md) describe
+the contracts behind the overview below.
+
 Design rules:
 
 - No launcher, copied game directory, modified or cached game assemblies, or
@@ -18,7 +23,7 @@ Design rules:
 - Game internals and Harmony stay in `VulkanStory.Game`. Renderer, SDL and provider
   code is game-independent.
 - No graphics initialization while the OS loader lock is held.
-- Migrated files keep their provenance and license notices.
+- Third-party dependencies retain their own notices and license terms.
 
 ## Components
 
@@ -42,6 +47,7 @@ flowchart TD
 | `VulkanStory.Render.Vulkan` | Vulkan device, resources, frame graph, pipelines and shader translation, upscalers, frame generation, presentation, latency | Contracts, Platform.Sdl, Silk.NET Vulkan/Shaderc |
 | `VulkanStory.Game` | Process runtime, startup routing, Harmony patches, graphics/platform adapters, temporal state, controller input, mod pass API | All of the above, official game assemblies, game-shipped Harmony and Mono.Cecil |
 | `VulkanStory.Mod` | Ordinary client `ModSystem`: settings dialog, `.vulkanstory` command, FPS HUD, world lifecycle callbacks | `VintagestoryAPI` only |
+| `VulkanStory.Installer.Mod` | Separate client mod: first-world prompt, release download and fresh runtime extraction | `VintagestoryAPI` and framework libraries |
 | `VulkanStory.Input` | Analog movement protocol shared by client and server | `VintagestoryAPI` |
 | `VulkanStory.Input.Companion` | Optional server mod for negotiated analog movement | Input, `VintagestoryAPI`, Harmony |
 | `src/Shared` | Settings choices and settings panel compiled into more than one project | — |
@@ -117,6 +123,23 @@ startup; admission and Terrain assistance follow the current settings without
 restarting the world. Other settings apply live through the runtime's control queue.
 
 ## Startup routing
+
+```mermaid
+stateDiagram-v2
+    [*] --> Prepared: Profile and patch targets verified
+    Prepared --> Vanilla: Disabled or pre-commit failure
+    Prepared --> Active: First window request commits SDL and Vulkan
+    Active --> Menu: No world attached
+    Menu --> World: WorldReady queued
+    World --> Menu: WorldLeft queued
+    Menu --> Stopping: Application shutdown
+    World --> Stopping: Application shutdown
+    Stopping --> Released: GPU drained, providers and device released
+    Released --> [*]
+```
+
+The diagram describes lifecycle transitions. Provider availability is separate
+from process activation; a missing optional provider need not bypass the renderer.
 
 The startup hook runs before `Main`. `RuntimeBootstrap.Install` binds the 1.22.7
 profile (`VersionProfile1227`), including the original `VSEssentials` and
