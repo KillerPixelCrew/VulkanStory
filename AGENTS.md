@@ -1,5 +1,6 @@
 # Workflow
 
+- `D:/Coding/VulkanStory-Rewrite` is the development target. Work, commit and push on `rewrite` by default, always. Do not create or push a feature branch unless the human explicitly requests one. The legacy `D:/Coding/VulkanStory` checkout is reference material.
 - A turn is either implementation or validation. In an implementation turn, edit code only: no builds, tests, packages or game runs.
 - A validation turn runs one planned batch (build, package, checks) once and reports the result. If it fails, diagnose from the logs and fix it in a later implementation turn; don't rerun.
 - Routine renderer checks use the headless harness with an isolated copy of the **foggy village story** save, never development superflat. The harness must be silent (all six audio levels zeroed). DLSS-FG checks run visible and focused; everything else stays hidden.
