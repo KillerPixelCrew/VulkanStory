@@ -270,6 +270,8 @@ internal sealed class RendererSettingsPanel
                 Slider("Chisel LOD distance (blocks)", "ChiselLodDistance");
                 Switch("World map page cache", "WorldMapPageCache");
                 Switch("Reuse occlusion hierarchy storage", "OcclusionStorageReuse");
+                Switch("Cache translation lookups", "TranslationLookupCache");
+                Switch("Reuse audio decode buffers", "AudioDecodeBufferReuse");
                 string unavailable = AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> performance
                     ? string.Join("\n", performance().Split('\n').Where(line => line.Contains(": unavailable (", StringComparison.Ordinal)).Select(line => line.Trim()))
                     : "";

@@ -20,6 +20,7 @@ internal static class Report
         var allocations = new List<Allocation>();
         var settings = new List<object>();
         var gc = new List<object>();
+        var contention = new List<object>();
         int missingStacks = 0;
         foreach (var data in log.Events)
         {
@@ -37,6 +38,9 @@ internal static class Report
                     collection.Depth, Reason = collection.Reason.ToString(), Type = collection.Type.ToString() });
             else if (data is GCEndTraceData ended)
                 gc.Add(new { TimeMs = ended.TimeStampRelativeMSec, ended.ThreadID, Kind = "end", ended.Count, ended.Depth });
+            else if (data.ProviderName == "Microsoft-Windows-DotNETRuntime" && data.EventName.StartsWith("Contention/", StringComparison.Ordinal))
+                contention.Add(new { TimeMs = data.TimeStampRelativeMSec, Thread = data.ThreadID, data.EventName,
+                    Payload = data.PayloadNames.ToDictionary(name => name, name => data.PayloadByName(name)), Stack = Stack(data.CallStack()) });
             else if (data.ProviderName == "VulkanStory-Performance")
             {
                 if ((int)data.ID == 1)
@@ -55,6 +59,7 @@ internal static class Report
             DurationMs = log.SessionDuration.TotalMilliseconds, EventsLost = log.EventsLost, MissingStacks = missingStacks,
             Notes = "Managed samples identify managed execution hotspots. External samples include native execution and waiting; they are not CPU time. Allocation ticks are sampled byte estimates, not exact object counts. Span bytes count only allocations on the measured thread; nested spans overlap. GPU execution time is not measured.",
             Samples = samples, Spans = spans, Allocations = allocations, Settings = settings, GarbageCollections = gc,
+            Contention = contention,
             Target = ReadJson("target.json"), ProcessMetrics = ReadJson("process-metrics.json"), TraceStartUtc = log.SessionStartTime.ToUniversalTime(),
         };
         string json = JsonSerializer.Serialize(report);

@@ -122,6 +122,10 @@ internal sealed record RendererSettings
     public bool WorldMapPageCache { get; init; } = true;
     /// <summary>Reuses CPU occlusion depth and hierarchy storage without changing visibility tests.</summary>
     public bool OcclusionStorageReuse { get; init; } = true;
+    /// <summary>Caches raw translation resolution with language reload invalidation; formatting remains live.</summary>
+    public bool TranslationLookupCache { get; init; } = true;
+    /// <summary>Uses pooled PCM segments in the original Vorbis decoder.</summary>
+    public bool AudioDecodeBufferReuse { get; init; } = true;
 
     /// <summary>Returns this snapshot with every performance switch copied from <paramref name="source" />; all of them apply live.</summary>
     internal RendererSettings WithPerformanceFrom(RendererSettings source) => this with
@@ -160,6 +164,8 @@ internal sealed record RendererSettings
         ChiselLodDistance = source.ChiselLodDistance,
         WorldMapPageCache = source.WorldMapPageCache,
         OcclusionStorageReuse = source.OcclusionStorageReuse,
+        TranslationLookupCache = source.TranslationLookupCache,
+        AudioDecodeBufferReuse = source.AudioDecodeBufferReuse,
     };
 
     /// <summary>Returns a supported, finite settings snapshot with provider-specific choice normalization.</summary>

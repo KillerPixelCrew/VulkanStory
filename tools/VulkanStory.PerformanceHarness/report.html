@@ -13,6 +13,8 @@ body{margin:0;background:#111720;color:#e2e8f0;font:14px system-ui}main{max-widt
 <table><thead><tr><th>Method</th><th>Inclusive samples</th><th>Self samples</th></tr></thead><tbody id="hotspots"></tbody></table>
 <h2>Measured frame / system spans</h2><p>Wall duration includes waits. Nested spans overlap and must not be summed.</p>
 <table><thead><tr><th>Scope</th><th>Calls</th><th>Mean ms</th><th>p95 ms</th><th>p99 ms</th><th>Max ms</th><th>Thread bytes</th></tr></thead><tbody id="spans"></tbody></table>
+<h2>Monitor contention</h2><p>CLR contention events identify waiting threads, lock owners where available, and elapsed waits. Wait duration is not CPU time. Raw lock identifiers are process-local.</p>
+<table><thead><tr><th>Time ms</th><th>Thread</th><th>Event</th><th>Runtime payload</th><th>Stack</th></tr></thead><tbody id="contention"></tbody></table>
 <h2>Allocation samples</h2><table><thead><tr><th>Type</th><th>Estimated bytes</th><th>Ticks</th></tr></thead><tbody id="allocations"></tbody></table>
 <details><summary>Captured settings</summary><pre id="settings"></pre></details></main>
 <script>
@@ -35,6 +37,7 @@ let spans=data.Spans.filter(selected),groups=new Map();for(let span of spans){if
 let maxDuration=g=>g.reduce((m,s)=>Math.max(m,s.DurationMs),0);
 el('spans').replaceChildren();for(let[name,group]of [...groups].sort((a,b)=>maxDuration(b[1])-maxDuration(a[1]))){let times=group.map(s=>s.DurationMs).sort((a,b)=>a-b);row(el('spans'),[name,group.length,(times.reduce((a,b)=>a+b,0)/times.length).toFixed(3),percentile(times,.95).toFixed(3),percentile(times,.99).toFixed(3),times.at(-1).toFixed(3),group.reduce((a,s)=>a+s.AllocatedBytes,0).toLocaleString()])}
 let allocs=new Map();for(let a of data.Allocations.filter(selected)){if(query&&!a.Type.toLowerCase().includes(query))continue;let g=allocs.get(a.Type)||[0,0];g[0]+=a.Bytes;g[1]++;allocs.set(a.Type,g)}el('allocations').replaceChildren();for(let[name,g]of[...allocs].sort((a,b)=>b[1][0]-a[1][0]))row(el('allocations'),[name,g[0].toLocaleString(),g[1]]);
+el('contention').replaceChildren();for(let wait of(data.Contention||[]).filter(selected)){if(query&&!wait.Stack.some(name=>name.toLowerCase().includes(query)))continue;row(el('contention'),[wait.TimeMs.toFixed(3),wait.Thread,wait.EventName,JSON.stringify(wait.Payload),wait.Stack.join(' → ')])}
 let ends=spans.filter(s=>s.Name==='Frame').sort((a,b)=>a.TimeMs-b.TimeMs),work=ends.map(s=>s.DurationMs).sort((a,b)=>a-b),intervals=[];for(let i=1;i<ends.length;i++)if(ends[i].Thread===ends[i-1].Thread)intervals.push(ends[i].TimeMs-ends[i-1].TimeMs);intervals.sort((a,b)=>a-b);
 let mean=intervals.length?intervals.reduce((a,b)=>a+b,0)/intervals.length:0;
 el('stats').textContent=`${samples.length.toLocaleString()} samples · ${ends.length} frames · ${(mean?1000/mean:0).toFixed(1)} FPS · frame interval p95 ${percentile(intervals,.95).toFixed(2)} / p99 ${percentile(intervals,.99).toFixed(2)} ms · render work p99 ${percentile(work,.99).toFixed(2)} ms · ${(data.GarbageCollections||[]).filter(g=>g.Kind==='start'&&g.TimeMs>=+el('from').value&&g.TimeMs<=+el('to').value).length} GCs`;

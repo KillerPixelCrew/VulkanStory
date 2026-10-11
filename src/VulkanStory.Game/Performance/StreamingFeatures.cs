@@ -98,44 +98,62 @@ internal static class UploadQueueSortSkip
 internal static class MeshPartPool
 {
     private const int MaxFreePerType = 128;
+    private const long MaxBytesPerType = 16 * 1024 * 1024;
 
-    /// <summary>One part type's free list (tessellation thread) and return queue (main thread).</summary>
+    /// <summary>Exact capacity classes, bounded across all returned parts. Only ownership transfers hold the lock.</summary>
     private sealed class Pool<TPart, T>(Action<TPart> resetConversion) where TPart : CustomMeshDataPart<T>, new()
     {
-        private readonly ConcurrentQueue<TPart> returned = new();
-        private readonly List<TPart> free = new();
-        private volatile bool clearRequested;
+        private readonly object gate = new();
+        private readonly Dictionary<int, Stack<TPart>> free = new();
+        private int retained;
+        private long retainedBytes;
+        private static readonly AccessTools.FieldRef<CustomMeshDataPart<T>, bool> CustomAllocation =
+            AccessTools.FieldRefAccess<CustomMeshDataPart<T>, bool>("customAllocationSize");
+        private static readonly AccessTools.FieldRef<CustomMeshDataPart<T>, int> Allocation =
+            AccessTools.FieldRefAccess<CustomMeshDataPart<T>, int>("allocationSize");
+        private static long Bytes(TPart part) => (long)(part.Values?.Length ?? 0) * Unsafe.SizeOf<T>() +
+            (long)((part.InterleaveSizes?.Length ?? 0) + (part.InterleaveOffsets?.Length ?? 0)) * sizeof(int);
 
-        internal void Return(TPart? part) { if (part != null) returned.Enqueue(part); }
+        internal void Return(TPart? part)
+        {
+            if (part?.Values == null) return;
+            long bytes = Bytes(part);
+            lock (gate)
+            {
+                if (retained >= MaxFreePerType || bytes > MaxBytesPerType - retainedBytes) return;
+                if (!free.TryGetValue(part.Values.Length, out var bucket)) free.Add(part.Values.Length, bucket = new());
+                bucket.Push(part); retained++; retainedBytes += bytes;
+            }
+        }
 
-        /// <summary>Drops pooled parts; the free list itself is cleared by its owning tessellation thread on its next clone.</summary>
-        internal void Drain() { while (returned.TryDequeue(out _)) { } clearRequested = true; }
+        /// <summary>Drops all free storage; in-flight meshes retain exclusive ownership until upload/disposal.</summary>
+        internal void Drain() { lock (gate) { free.Clear(); retained = 0; retainedBytes = 0; } }
 
         /// <summary>Copies <paramref name="source" /> like the original part clone, reusing a returned part when one fits.</summary>
         /// <returns>Null when the source does not qualify; the caller then uses the original clone.</returns>
         internal TPart? Clone(TPart source)
         {
-            // Only automatic allocation sizes are reproduced exactly by a reused part.
-            if (source.Values == null || source.AllocationSize != source.Count) return null;
-            if (clearRequested) { clearRequested = false; free.Clear(); }
-            while (returned.TryDequeue(out var back)) if (free.Count < MaxFreePerType) free.Add(back);
-            int best = -1;
-            for (int index = 0; index < free.Count; index++)
+            if (source.Values == null) return null;
+            TPart? part = null;
+            lock (gate)
             {
-                int length = free[index].Values?.Length ?? 0;
-                if (length >= source.Count && (best < 0 || length < free[best].Values!.Length)) best = index;
+                if (free.TryGetValue(source.Values.Length, out var bucket) && bucket.TryPop(out part))
+                {
+                    retained--; retainedBytes -= Bytes(part);
+                    if (bucket.Count == 0) free.Remove(source.Values.Length);
+                }
             }
-            TPart part;
-            if (best >= 0)
+            if (part != null)
             {
-                part = free[best]; free[best] = free[^1]; free.RemoveAt(free.Count - 1);
                 Interlocked.Increment(ref PerformanceCounters.MeshPartsReused);
             }
             else { part = new TPart(); Interlocked.Increment(ref PerformanceCounters.MeshPartsAllocated); }
-            part.AutoAllocationSize();
+            // Preserve fixed allocation policy as well as automatic policy, just like SetFrom.
+            CustomAllocation(part) = CustomAllocation(source);
+            Allocation(part) = Allocation(source);
             part.Count = source.Count;
-            if (part.Values == null || part.Values.Length < source.Count) part.Values = new T[source.Values.Length];
-            Array.Copy(source.Values, part.Values, source.Count);
+            if (part.Values == null) part.Values = new T[source.Values.Length];
+            Array.Copy(source.Values, part.Values, source.Values.Length);
             part.InterleaveSizes = CopyInto(source.InterleaveSizes, part.InterleaveSizes);
             part.InterleaveOffsets = CopyInto(source.InterleaveOffsets, part.InterleaveOffsets);
             part.InterleaveStride = source.InterleaveStride;
@@ -161,6 +179,8 @@ internal static class MeshPartPool
     private static readonly Pool<CustomMeshDataPartInt, int> Ints = new(part => part.Conversion = IntDefault);
     private static readonly Pool<CustomMeshDataPartShort, short> Shorts = new(part => part.Conversion = ShortDefault);
     private static readonly Pool<CustomMeshDataPartFloat, float> Floats = new(_ => { });
+    private sealed record Owned(CustomMeshDataPartInt? Ints, CustomMeshDataPartShort? Shorts, CustomMeshDataPartFloat? Floats);
+    private static readonly ConditionalWeakTable<MeshData, Owned> owned = new();
     private static readonly MethodInfo CloneRecycled = AccessTools.Method(typeof(MeshData), nameof(MeshData.CloneUsingRecycler), Type.EmptyTypes)!;
     private static MethodInfo Populate() => AccessTools.Method(typeof(ChunkTesselator), "populateTesselatedChunkPart") ??
         throw new MissingMethodException(typeof(ChunkTesselator).FullName, "populateTesselatedChunkPart");
@@ -177,6 +197,8 @@ internal static class MeshPartPool
     {
         harmony.Patch(Populate(), transpiler: new HarmonyMethod(typeof(MeshPartPool), nameof(Transpiler)));
         harmony.Patch(Store(), postfix: new HarmonyMethod(typeof(MeshPartPool), nameof(Reclaim)));
+        harmony.Patch(AccessTools.Method(typeof(MeshData), nameof(MeshData.Dispose), Type.EmptyTypes),
+            prefix: new HarmonyMethod(typeof(MeshPartPool), nameof(ReclaimDisposed)));
     }, WorldLeft: () => { Ints.Drain(); Shorts.Drain(); Floats.Drain(); });
 
     private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
@@ -201,13 +223,16 @@ internal static class MeshPartPool
         if (ints != null) copy.CustomInts = Ints.Clone(ints) ?? ints.Clone();
         if (shorts != null) copy.CustomShorts = Shorts.Clone(shorts) ?? shorts.Clone();
         if (floats != null) copy.CustomFloats = Floats.Clone(floats) ?? floats.Clone();
+        owned.Add(copy, new(copy.CustomInts, copy.CustomShorts, copy.CustomFloats));
         return copy;
     }
 
     // Main thread, after AddModel copied the mesh and before TesselatedChunkPart.Dispose drops the parts.
     private static void Reclaim(MeshData modeldata)
     {
-        if (PerformancePatchSet.Current?.MeshPartPool != true || modeldata == null) return;
-        Ints.Return(modeldata.CustomInts); Shorts.Return(modeldata.CustomShorts); Floats.Return(modeldata.CustomFloats);
+        if (modeldata == null || !owned.TryGetValue(modeldata, out var parts) || !owned.Remove(modeldata)) return;
+        Ints.Return(parts.Ints); Shorts.Return(parts.Shorts); Floats.Return(parts.Floats);
     }
+    // Covers discarded chunks and upload failures, without returning arbitrary mod-owned mesh parts or returning twice.
+    private static void ReclaimDisposed(MeshData __instance) => Reclaim(__instance);
 }

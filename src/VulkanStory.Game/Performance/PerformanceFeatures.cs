@@ -35,5 +35,7 @@ internal static class PerformanceFeatures
         ChiselMeshLod.Create(survival),
         WorldMapPageCache.Create(),
         PerformanceTrace.Create(),
+        TranslationLookupCache.Create(),
+        AudioDecodeBuffers.Create(),
     ];
 }

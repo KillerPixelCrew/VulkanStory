@@ -31,7 +31,8 @@ internal static class Program
             {
                 new EventPipeProvider(SampleProfilerTraceEventParser.ProviderName, EventLevel.Informational),
                 new EventPipeProvider(ClrTraceEventParser.ProviderName, EventLevel.Verbose,
-                    (long)(ClrTraceEventParser.Keywords.GC | ClrTraceEventParser.Keywords.Jit | ClrTraceEventParser.Keywords.Loader)),
+                    (long)(ClrTraceEventParser.Keywords.GC | ClrTraceEventParser.Keywords.Jit | ClrTraceEventParser.Keywords.Loader |
+                        ClrTraceEventParser.Keywords.Contention)),
                 new EventPipeProvider("VulkanStory-Performance", EventLevel.Informational),
             };
             var client = new DiagnosticsClient(pid);
