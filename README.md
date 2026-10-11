@@ -151,9 +151,7 @@ its provenance preserved.
 ## AI-assisted development
 
 AI tools are used in the development of VulkanStory, including writing code,
-debugging and documentation. This does not guarantee correctness. The project is
-still in beta, and bugs, crashes and compatibility issues should be expected.
-Responsibility for the project and its releases stays with the maintainer.
+debugging and documentation.
 
 ## License and attribution
 
