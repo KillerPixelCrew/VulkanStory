@@ -110,6 +110,10 @@ foreach ($component in $inventory.components.PSObject.Properties) {
 }
 Add-Input 'licenses/dlss/LICENSE.txt' (Join-Path $DlssSdkRoot 'LICENSE.txt')
 Add-Input 'licenses/vma/LICENSE.txt' (Join-Path $projectRoot 'sdk/vma/LICENSE.txt')
+Add-Input 'licenses/nrd/LICENSE.txt' (Join-Path $projectRoot 'sdk/nrd/LICENSE.txt')
+foreach ($notice in Get-ChildItem -LiteralPath (Join-Path $BridgesDirectory 'licenses/nrd') -File | Where-Object Name -ne 'LICENSE.txt') {
+    Add-Input "licenses/nrd/$($notice.Name)" $notice.FullName
+}
 Add-Input 'licenses/openxr/LICENSE.txt' (Join-Path $OpenXrDirectory 'licenses/openxr/LICENSE.txt')
 Add-Input 'licenses/openxr/jsoncpp-LICENSE.txt' (Join-Path $OpenXrDirectory 'licenses/openxr/jsoncpp-LICENSE.txt')
 Add-Input 'licenses/fsr3/LICENSE.txt' (Join-Path $Fsr3SdkRoot 'LICENSE.txt')

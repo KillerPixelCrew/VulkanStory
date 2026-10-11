@@ -22,6 +22,7 @@ internal sealed partial class GameRenderSession
     }
     private void NotifyDeviceCreated()
     {
+        Device.SetRaySceneCollection(services.RendererSettings.Settings.PathTracing && !services.RendererSettings.StereoRendering);
         platform.Logger.Notification("VulkanStory device: {0}; {1}; Vulkan {2}",
             Device.VendorString, Device.RendererString, Device.VersionString);
     }

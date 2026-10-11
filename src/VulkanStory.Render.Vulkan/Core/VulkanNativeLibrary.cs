@@ -18,6 +18,14 @@ internal static class VulkanNativeLibrary
 
     private static nint Resolve(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
     {
+        if (libraryName == "VulkanStoryNrd")
+        {
+            string name = OperatingSystem.IsWindows() ? "VulkanStoryNrd.dll" : "libVulkanStoryNrd.so";
+            string path = Path.Combine(NativeRuntimePaths.DirectoryContaining(name), name);
+            if (File.Exists(path)) return NativeRuntimePaths.LoadLibrary(path);
+            if (NativeRuntimePaths.IsDeployedPayload) throw new DllNotFoundException("NRD bridge is missing: " + path);
+            return 0;
+        }
         if (OperatingSystem.IsWindows() && string.Equals(libraryName, "libxell.dll", StringComparison.OrdinalIgnoreCase))
         {
             string xell = Path.Combine(NativeRuntimePaths.DirectoryContaining("libxell.dll"), "libxell.dll");

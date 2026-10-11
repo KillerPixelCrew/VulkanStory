@@ -200,7 +200,7 @@ internal sealed class RendererSettingsPanel
                 const string imageStatusKey = "vulkanstory-image-status";
                 string ImageStatus() => AppContext.GetData("VulkanStory.Runtime.Presentation") is Func<string> read
                     ? string.Join("\n", read().Split('\n').Where(line =>
-                        line.StartsWith("Upscaler", StringComparison.Ordinal) || line.StartsWith("Render resolution:", StringComparison.Ordinal))) +
+                        line.StartsWith("Upscaler", StringComparison.Ordinal) || line.StartsWith("Path tracing", StringComparison.Ordinal) || line.StartsWith("Render resolution:", StringComparison.Ordinal))) +
                         "\n" + (AppContext.GetData("VulkanStory.Runtime.FpsText") is Func<string> fps ? fps() : "FPS unavailable")
                     : "Renderer runtime is unavailable.";
                 Label(ImageStatus(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y, width, 125), imageStatusKey);
@@ -217,6 +217,11 @@ internal sealed class RendererSettingsPanel
                 Text("With frame generation selected, low latency remains enabled. Boost depends on the provider.");
                 break;
             case 2:
+                Switch("Path tracing", "PathTracing");
+                Slider("Samples per pixel", "PathTracingSamples");
+                Slider("Path bounces", "PathTracingBounces");
+                DefinedChoice("Ray reconstruction", "RayReconstruction");
+                Text("Path tracing is under development. Animated scene coverage and AMD reconstruction are incomplete. NRD filters opaque lighting; transparent surfaces retain noisy transport. DLSS RR reconstructs at render resolution. Check the Image page for runtime status.");
                 DefinedChoice("Ambient occlusion", "AmbientOcclusion");
                 DefinedChoice("AO quality", "AmbientOcclusionPreset");
                 Switch("Show ambient occlusion", "AmbientOcclusionDebugView");

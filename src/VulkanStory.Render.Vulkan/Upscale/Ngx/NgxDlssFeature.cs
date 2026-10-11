@@ -202,7 +202,8 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
     /// life (the evaluate parameters are read at evaluate time, from this block).
     /// </summary>
     public static NgxResult Create(
-        IntPtr device, CommandBuffer commandBuffer, NgxDlssSettings settings, out NgxDlssFeature? feature)
+        IntPtr device, CommandBuffer commandBuffer, NgxDlssSettings settings, out NgxDlssFeature? feature,
+        NgxFeature kind = NgxFeature.SuperSampling)
     {
         feature = null;
         if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailShimMissing;
@@ -228,10 +229,16 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
         block.SetInt(NgxParameterNames.PerfQualityValue, (int)settings.Quality);
         block.SetInt(NgxParameterNames.DlssFeatureCreateFlags, (int)settings.Flags);
         block.SetInt(NgxParameterNames.DlssEnableOutputSubrects, 0);
+        if (kind == NgxFeature.RayReconstruction)
+        {
+            block.SetInt("DLSS.Denoise.Mode", 1);
+            block.SetUInt("DLSS.Roughness.Mode", 1);
+            block.SetUInt("DLSS.Use.HW.Depth", 1);
+        }
 
         IntPtr handle = IntPtr.Zero;
         NgxResult created = NgxShim.IsAvailable
-            ? NgxShim.CreateFeature1(device, (IntPtr)commandBuffer.Handle, NgxFeature.SuperSampling,
+            ? NgxShim.CreateFeature1(device, (IntPtr)commandBuffer.Handle, kind,
                 parameters, out handle)
             : NgxResult.FailShimMissing;
 
@@ -340,6 +347,63 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
     /// completed: NGX's own docs are explicit that releasing a feature whose
     /// evaluate is still executing is undefined.
     /// </summary>
+    internal NgxResult EvaluateRayReconstruction(CommandBuffer commands, Span<NgxResourceVk> resources,
+        in RayTracingFrame frame, bool reset)
+    {
+        lock (_gate)
+        {
+            if (_disposed || _handle == IntPtr.Zero) return NgxResult.FailFeatureNotFound;
+            if (resources.Length != 8) return NgxResult.FailMissingInput;
+            var parameters = new NgxParameters(_parameters);
+            // All structures and matrices stay pinned through EvaluateFeature.
+            fixed (NgxResourceVk* images = resources)
+            fixed (float* view = frame.View.Span)
+            {
+                float* projection = stackalloc float[16];
+                frame.Projection.Span.CopyTo(new Span<float>(projection, 16));
+                for (int column = 0; column < 4; column++)
+                {
+                    int offset = column * 4;
+                    projection[offset + 2] = 0.5f * (projection[offset + 2] + projection[offset + 3]);
+                }
+                parameters.SetVoidPointer(NgxParameterNames.Color, (nint)(images + 0));
+                parameters.SetVoidPointer(NgxParameterNames.Output, (nint)(images + 1));
+                parameters.SetVoidPointer(NgxParameterNames.Depth, (nint)(images + 2));
+                parameters.SetVoidPointer(NgxParameterNames.MotionVectors, (nint)(images + 3));
+                parameters.SetVoidPointer("GBuffer.Normals", (nint)(images + 4));
+                parameters.SetVoidPointer("GBuffer.Roughness", 0); // packed in normals.w
+                parameters.SetVoidPointer("DLSS.Input.DiffuseAlbedo", (nint)(images + 5));
+                parameters.SetVoidPointer("DLSS.Input.SpecularAlbedo", (nint)(images + 6));
+                parameters.SetVoidPointer("DLSSD.SpecularHitDistance", (nint)(images + 7));
+                parameters.SetVoidPointer("WorldToViewMatrix", (nint)view);
+                parameters.SetVoidPointer("ViewToClipMatrix", (nint)projection);
+                parameters.SetFloat(NgxParameterNames.JitterOffsetX, frame.Jitter.X);
+                parameters.SetFloat(NgxParameterNames.JitterOffsetY, frame.Jitter.Y);
+                parameters.SetFloat(NgxParameterNames.MvScaleX, 1);
+                parameters.SetFloat(NgxParameterNames.MvScaleY, 1);
+                parameters.SetInt(NgxParameterNames.Reset, reset ? 1 : 0);
+                parameters.SetFloat(NgxParameterNames.FrameTimeDeltaInMsec, frame.Milliseconds);
+                parameters.SetFloat(NgxParameterNames.DlssPreExposure, 1);
+                parameters.SetFloat(NgxParameterNames.DlssExposureScale, 1);
+                parameters.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsWidth, Settings.RenderWidth);
+                parameters.SetUInt(NgxParameterNames.DlssRenderSubrectDimensionsHeight, Settings.RenderHeight);
+                parameters.SetVoidPointer(NgxParameterNames.ExposureTexture, 0);
+                parameters.SetVoidPointer("DLSSD.DiffuseHitDistance", 0);
+                parameters.SetVoidPointer("GBuffer.SpecularMvec", 0);
+                foreach (string resource in new[] {"Color", "Depth", "MV", "DiffuseAlbedo", "SpecularAlbedo", "Normals", "Roughness"})
+                {
+                    parameters.SetUInt("DLSS.Input." + resource + ".Subrect.Base.X", 0);
+                    parameters.SetUInt("DLSS.Input." + resource + ".Subrect.Base.Y", 0);
+                }
+                parameters.SetUInt(NgxParameterNames.DlssOutputSubrectBaseX, 0);
+                parameters.SetUInt(NgxParameterNames.DlssOutputSubrectBaseY, 0);
+                parameters.SetUInt("DLSSD.SpecularHitDistance.Subrect.Base.X", 0);
+                parameters.SetUInt("DLSSD.SpecularHitDistance.Subrect.Base.Y", 0);
+                return NgxShim.EvaluateFeature((nint)commands.Handle, _handle, _parameters, IntPtr.Zero);
+            }
+        }
+    }
+
     public void Dispose()
     {
         lock (_gate)

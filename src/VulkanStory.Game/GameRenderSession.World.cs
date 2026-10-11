@@ -28,6 +28,7 @@ internal sealed partial class GameRenderSession
     internal void NoteWorldLeft(ClientMain client)
     {
         RequireActive();
+        Graphics.RemoveRayWorld(client.Api.World);
         // The original disposal prefix may already have detached this world.
         // Still retire its outputs, but never invalidate a newer attached world.
         if (Temporal.CurrentClient != null && !ReferenceEquals(Temporal.CurrentClient, client)) return;

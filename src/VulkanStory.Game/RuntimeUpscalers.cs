@@ -44,6 +44,7 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         device = target;
         DlssUpscaler? dlss = DlssUpscaler.TryPrepare(state, Path.Combine(dataPath, "ModConfig", "vulkanstory-ngx"), log, prepareForSwitching: true);
         if (dlss != null) providers.Add("dlss", new DlssBackend(dlss));
+        if (dlss?.RayReconstructionSession is { } ngxSession) target.AttachRayNgxSession(ngxSession);
         providers.Add("xess", new XessBackend(log));
         providers.Add("fsr3", new Fsr3Backend(log));
         providers.Add("fsr4", new Fsr4Backend(log));

@@ -1,0 +1,42 @@
+#version 460
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+layout(local_size_x=64) in;
+struct Vertex {
+    vec3 position; uint flags;
+    vec2 uv; uint color; uint material;
+    vec2 secondaryUv; uint auxiliary; uint packedNormal;
+    vec3 previousPosition; uint jointIndex;
+};
+struct Joint { mat4 current; mat4 previous; mat4 normal; };
+layout(buffer_reference, scalar, buffer_reference_align=4) readonly buffer InputVertices { Vertex vertices[]; };
+layout(buffer_reference, scalar, buffer_reference_align=4) buffer OutputVertices { Vertex vertices[]; };
+layout(buffer_reference, scalar, buffer_reference_align=4) readonly buffer Joints { Joint joints[]; };
+layout(push_constant, scalar) uniform Skin {
+    uint64_t inputAddress; uint64_t outputAddress; uint64_t jointAddress;
+    uint vertexCount; uint jointCount; uint reset; uint padding;
+    vec4 previousOriginDelta;
+} skin;
+vec3 decodeNormal(Vertex v) {
+    if (v.packedNormal != 0u)
+        return vec3(int(v.packedNormal << 22) >> 22, int(v.packedNormal << 12) >> 22, int(v.packedNormal << 2) >> 22) / 511.0;
+    vec3 n = vec3((v.flags >> 14) & 7u, (v.flags >> 18) & 7u, (v.flags >> 22) & 7u);
+    return n * (vec3(1) - 2.0 * vec3((v.flags >> 13) & 1u, (v.flags >> 17) & 1u, (v.flags >> 21) & 1u));
+}
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= skin.vertexCount) return;
+    Vertex vertex = InputVertices(skin.inputAddress).vertices[index];
+    Joint joint = Joints(skin.jointAddress).joints[vertex.jointIndex];
+    vec3 current = (joint.current * vec4(vertex.position, 1)).xyz;
+    vertex.previousPosition = skin.reset != 0u ? current :
+        (joint.previous * vec4(vertex.position, 1)).xyz + skin.previousOriginDelta.xyz;
+    vec3 normal = (joint.normal * vec4(decodeNormal(vertex), 0)).xyz;
+    normal = dot(normal, normal) > 1e-10 ? normalize(normal) : vec3(0);
+    ivec3 encoded = ivec3(round(normal * 511.0)) & 1023;
+    vertex.packedNormal = uint(encoded.x | (encoded.y << 10) | (encoded.z << 20));
+    if (vertex.packedNormal == 0u) vertex.flags &= ~0x01ffe000u; // use the posed triangle's face normal
+    vertex.position = current;
+    OutputVertices(skin.outputAddress).vertices[index] = vertex;
+}

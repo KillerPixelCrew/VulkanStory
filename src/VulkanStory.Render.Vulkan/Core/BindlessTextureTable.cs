@@ -264,7 +264,8 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
                 Binding = BindlessKinds.BindingOf((TextureKind)i),
                 DescriptorType = DescriptorType.CombinedImageSampler,
                 DescriptorCount = capacities[i],
-                StageFlags = SharedPipelineLayout.Stages,
+                StageFlags = SharedPipelineLayout.Stages | (context.Capabilities.RayTracingPipelineEnabled
+                    ? RayTracing.RayTracingPipeline.Stages : ShaderStageFlags.None),
             };
             flags[i] = DescriptorBindingFlags.PartiallyBoundBit | DescriptorBindingFlags.UpdateAfterBindBit;
         }

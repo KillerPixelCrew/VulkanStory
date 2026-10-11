@@ -1,0 +1,8 @@
+hitAttributeEXT vec2 barycentric;
+void main() {
+    Geometry mesh; Vertex a, b, c;
+    triangle(uint(gl_InstanceCustomIndexEXT), uint(gl_PrimitiveID), mesh, a, b, c);
+    vec3 weights = vec3(1.0 - barycentric.x - barycentric.y, barycentric);
+    vec4 colour = textureColour(mesh, a, b, c, weights, gl_HitTEXT);
+    if (colour.a < 0.01) ignoreIntersectionEXT;
+}

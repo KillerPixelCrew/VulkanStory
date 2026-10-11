@@ -167,6 +167,20 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     /// </summary>
     public PhysicalDeviceVulkan12Features* Vulkan12 { get; set; }
 
+    /// <summary>Borrowed core feature request; contributors must query before setting optional bits.</summary>
+    public PhysicalDeviceFeatures* CoreFeatures { get; set; }
+
+    public bool RequestShaderInt64()
+    {
+        if (CoreFeatures == null) return false;
+        if (CoreFeatures->ShaderInt64) return true;
+        PhysicalDeviceFeatures supported = default;
+        Api.GetPhysicalDeviceFeatures(PhysicalDevice, &supported);
+        if (!supported.ShaderInt64) return false;
+        CoreFeatures->ShaderInt64 = true;
+        return true;
+    }
+
     /// <summary>
     /// Turns on <c>bufferDeviceAddress</c> when the physical device supports it,
     /// and answers whether the device will have it.

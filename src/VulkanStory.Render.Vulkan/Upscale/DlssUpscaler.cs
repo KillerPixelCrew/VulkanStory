@@ -121,6 +121,7 @@ internal sealed class DlssUpscaler : IDisposable
 
     /// <summary>The live feature, for tests that want to see it change across a resize.</summary>
     internal NgxDlssFeature? Feature => _feature;
+    internal NgxSession? RayReconstructionSession => _session;
 
     // ------------------------------------------------------------ bring-up
 
@@ -174,7 +175,7 @@ internal sealed class DlssUpscaler : IDisposable
 
         host._session = new NgxSession("1.0.0", dataPath, paths);
         host.Requirements = new NgxDeviceRequirements(
-            host._session, new[] { NgxFeature.SuperSampling, NgxFeature.FrameGeneration },
+            host._session, new[] { NgxFeature.SuperSampling, NgxFeature.FrameGeneration, NgxFeature.RayReconstruction },
             line => host._log("[VulkanStory] NGX: " + line));
         host.Unavailable = "the device has not been brought up yet";
         return host;

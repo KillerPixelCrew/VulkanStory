@@ -304,6 +304,10 @@ public enum ResourceUsage
     SampleVertex,
     /// <summary>Sampled by a geometry shader.</summary>
     SampleGeometry,
+    /// <summary>Sampled by a KHR ray-tracing shader.</summary>
+    SampleRayTracing,
+    /// <summary>Written by a KHR ray-tracing shader without reading prior contents.</summary>
+    StorageWriteRayTracing,
     /// <summary>Read as a storage image.</summary>
     StorageRead,
     /// <summary>Sampled by a compute shader.</summary>
@@ -385,6 +389,10 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
         ResourceUsage.StorageReadWrite => new(ImageLayout.General,
             PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit),
+        ResourceUsage.SampleRayTracing => new(ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags2.RayTracingShaderBitKhr, AccessFlags2.ShaderReadBit),
+        ResourceUsage.StorageWriteRayTracing => new(ImageLayout.General,
+            PipelineStageFlags2.RayTracingShaderBitKhr, AccessFlags2.ShaderStorageWriteBit),
         ResourceUsage.SampleExternal => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.FragmentShaderBit,
             AccessFlags2.ShaderReadBit),
@@ -415,6 +423,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled =>
                 (DepthTests, AccessFlags2.DepthStencilAttachmentWriteBit),
             ResourceUsage.TransferDst => (PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
+            ResourceUsage.StorageWriteRayTracing => (PipelineStageFlags2.RayTracingShaderBitKhr, AccessFlags2.ShaderStorageWriteBit),
             // A dispatch's storage write: the next barrier must make it available.
             ResourceUsage.StorageWrite or ResourceUsage.StorageReadWrite =>
                 (PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageWriteBit),
@@ -490,6 +499,13 @@ internal static class BufferUsageState
         {
             stage |= PipelineStageFlags2.DrawIndirectBit;
             access |= AccessFlags2.IndirectCommandReadBit;
+        }
+        if ((usage & BufferUsageFlags.AccelerationStructureBuildInputReadOnlyBitKhr) != 0)
+        {
+            stage |= PipelineStageFlags2.AccelerationStructureBuildBitKhr;
+            access |= AccessFlags2.ShaderReadBit;
+            if ((usage & BufferUsageFlags.StorageBufferBit) != 0)
+                stage |= PipelineStageFlags2.RayTracingShaderBitKhr;
         }
         if ((usage & BufferUsageFlags.TransferSrcBit) != 0)
         {

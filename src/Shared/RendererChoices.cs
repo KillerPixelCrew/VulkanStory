@@ -16,6 +16,7 @@ internal readonly record struct RendererRange(float Min, float Max, float Fallba
 /// <summary>One source of supported renderer-setting values, numeric ranges and their GUI labels.</summary>
 internal static class RendererChoices
 {
+    private static readonly (string Value, string Label)[] Reconstruction = [("off", "Noisy"), ("nrd", "NRD (Vulkan)"), ("dlss", "DLSS Ray Reconstruction")];
     private static readonly (string Value, string Label)[] Upscalers = [("off", "Off"), ("dlss", "DLSS"), ("xess", "XeSS"), ("fsr3", "FSR 3.1"), ("fsr4", "FSR 4")];
     private static readonly (string Value, string Label)[] Quality = [("dlaa", "Native AA"), ("quality", "Quality"), ("balanced", "Balanced"), ("performance", "Performance"), ("ultraperformance", "Ultra Performance")];
     private static readonly (string Value, string Label)[] XessQuality = [("dlaa", "Native AA"), ("ultraqualityplus", "Ultra Quality+"), ("ultraquality", "Ultra Quality"), ("quality", "Quality"), ("balanced", "Balanced"), ("performance", "Performance"), ("ultraperformance", "Ultra Performance")];
@@ -30,6 +31,8 @@ internal static class RendererChoices
     private static readonly RendererRange TaaMipBias = new(-2f, 0f, -.5f, 1, 10);
     private static readonly RendererRange UpscalerLodBiasOffset = new(0f, 1f, 1f, 5, 100);
     private static readonly RendererRange FrameGenerationMultiplier = new(2f, 6f, 2f, 1, 1);
+    private static readonly RendererRange PathTracingSamples = new(1f, 64f, 1f, 1, 1);
+    private static readonly RendererRange PathTracingBounces = new(1f, 16f, 4f, 1, 1);
     private static readonly RendererRange EntityShadowDistance = new(16f, 256f, 80f, 8, 1);
     private static readonly RendererRange DroppedItemDistance = new(16f, 256f, 64f, 8, 1);
     private static readonly RendererRange ChiselLodDistance = new(16f, 256f, 48f, 8, 1);
@@ -44,6 +47,7 @@ internal static class RendererChoices
     /// <exception cref="ArgumentException">The setting name has no defined choices.</exception>
     internal static IReadOnlyList<(string Value, string Label)> Get(string key, bool xess = false) => key switch
     {
+        "RayReconstruction" => Reconstruction,
         "Upscaler" => Upscalers,
         "UpscalerQuality" => xess ? XessQuality : Quality,
         "FrameGeneration" => Generation,
@@ -75,6 +79,8 @@ internal static class RendererChoices
         "TaaMipBias" => TaaMipBias,
         "UpscalerLodBiasOffset" => UpscalerLodBiasOffset,
         "FrameGenerationMultiplier" => FrameGenerationMultiplier,
+        "PathTracingSamples" => PathTracingSamples,
+        "PathTracingBounces" => PathTracingBounces,
         "EntityShadowDistance" => EntityShadowDistance,
         "DroppedItemDistance" => DroppedItemDistance,
         "ChiselLodDistance" => ChiselLodDistance,

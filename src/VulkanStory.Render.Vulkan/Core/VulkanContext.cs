@@ -102,6 +102,7 @@ internal sealed class VulkanCapabilities
     }
 
     public bool FillModeNonSolid;
+    internal bool RayTracingPipelineEnabled;
     public bool SamplerAnisotropy;
     public bool MultiDrawIndirect;
     /// <summary>Enabled whenever available; occlusion queries then count samples exactly, like GL_SAMPLES_PASSED.</summary>
@@ -260,6 +261,19 @@ internal sealed unsafe class VulkanContext : IDisposable
     private nint _cmdSetCheckpoint;
     private nint _getQueueCheckpointData;
     private ExtDeviceFault? _deviceFault;
+    private KhrAccelerationStructure? _accelerationStructures;
+
+    internal KhrAccelerationStructure AccelerationStructures
+    {
+        get
+        {
+            if (_accelerationStructures != null) return _accelerationStructures;
+            if (!EnabledDeviceExtensions.Contains("VK_KHR_acceleration_structure") ||
+                !Api.TryGetDeviceExtension(Instance, Device, out KhrAccelerationStructure loaded))
+                throw new NotSupportedException("The enabled acceleration-structure entry points are unavailable.");
+            return _accelerationStructures = loaded;
+        }
+    }
 
     /// <summary>The instance extensions actually named in VkInstanceCreateInfo.</summary>
     public string[] EnabledInstanceExtensions { get; private set; } = Array.Empty<string>();
@@ -1212,7 +1226,7 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         using var vendorRequirements = new DeviceRequirements(
             Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
-        { Vulkan12 = &vulkan12 };
+        { Vulkan12 = &vulkan12, CoreFeatures = &features2.Features };
         foreach (IDeviceRequirementContributor contributor in options.RequirementContributors)
             contributor.ContributeDeviceRequirements(vendorRequirements);
 
@@ -1510,6 +1524,8 @@ internal sealed unsafe class VulkanContext : IDisposable
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
             Allocator?.Dispose();
+            _accelerationStructures?.Dispose();
+            _accelerationStructures = null;
             Streamline?.Shutdown();
             Api.DestroyDevice(Device, null);
             // Further instance/global symbol lookups must not consult a device

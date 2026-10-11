@@ -204,6 +204,19 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
         return compiled;
     }
 
+    internal ShaderCompileResult CompileRayTracing(string code, string filename, EnumShaderType stage)
+    {
+        if (stage is not (EnumShaderType.RayGenerationShader or EnumShaderType.MissShader or
+            EnumShaderType.ClosestHitShader or EnumShaderType.AnyHitShader))
+            throw new ArgumentOutOfRangeException(nameof(stage));
+        string? key = BinaryCache == null ? null : ShaderBinaryCache.KeyFor(code, stage, Identity);
+        if (key != null && BinaryCache!.TryGet(key) is { } cached)
+            return new ShaderCompileResult { Success = true, Spirv = cached };
+        ShaderCompileResult compiled = CompileUncached(code, filename, stage);
+        if (key != null && compiled.Success) BinaryCache!.Put(key, compiled.Spirv);
+        return compiled;
+    }
+
     private ShaderCompileResult CompileUncached(string code, string filename, EnumShaderType stage, bool optimize = true)
     {
         CompileOptions* options = CreateOptions();
@@ -385,6 +398,10 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
         EnumShaderType.FragmentShader => ShaderKind.FragmentShader,
         EnumShaderType.GeometryShader => ShaderKind.GeometryShader,
         ComputeStageTag => ShaderKind.ComputeShader,
+        EnumShaderType.RayGenerationShader => ShaderKind.RaygenShader,
+        EnumShaderType.MissShader => ShaderKind.MissShader,
+        EnumShaderType.ClosestHitShader => ShaderKind.ClosesthitShader,
+        EnumShaderType.AnyHitShader => ShaderKind.AnyhitShader,
         _ => ShaderKind.VertexShader,
     };
 

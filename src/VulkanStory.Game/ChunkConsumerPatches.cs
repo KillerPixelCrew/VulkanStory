@@ -39,6 +39,7 @@ internal static class ChunkConsumerPatches
         return new StartupPatchGroup("graphics-scene-chunks", () =>
         {
             if (Pool == null || Sampler == null) throw new MissingMethodException("Original terrain pool/sampler overload is missing.");
+            RayTerrainCapture.Validate();
             foreach (var route in Profile)
             {
                 MethodInfo method = Target(route.Name);
@@ -49,12 +50,14 @@ internal static class ChunkConsumerPatches
         {
             if (runtime != null) throw new InvalidOperationException("Chunk routing already has an owner.");
             runtime = owner; attempted = true;
+            RayTerrainCapture.Install(harmony, owner);
             foreach (var route in Profile) harmony.Patch(Target(route.Name),
                 transpiler: new HarmonyMethod(typeof(ChunkConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
         }, () =>
         {
             if (!attempted) return;
             harmony.UnpatchAll(Owner);
+            RayTerrainCapture.Detach(owner);
             if (ReferenceEquals(runtime, owner)) runtime = null;
             attempted = false;
         });

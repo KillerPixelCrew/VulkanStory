@@ -201,6 +201,7 @@ internal sealed partial class GameRenderSession : IDisposable
             Graphics.FrameState = Graphics.FrameState with { Ssao = settings.Ssao, MotionWriteActive = false };
             Graphics.UpscaledThisFrame = Graphics.UpscaledCompositeReady = Graphics.SceneNoHudCaptured = false;
             Graphics.TaaResolvedThisFrame = false;
+            Graphics.RayTracedThisFrame = false;
             Graphics.GodRaysInScene = false;
             Graphics.ResetFsr3InputPublication();
             Graphics.CaptureSrMotionInputs = SrInputCaptureScheduled;
@@ -325,6 +326,11 @@ internal sealed partial class GameRenderSession : IDisposable
     {
         RequireActive();
         if (!GameFramebufferBindings.OffscreenEnabled(platform)) return;
+        if (Graphics.RayTracedThisFrame)
+        {
+            Graphics.RenderPostTail(Graphics.PostSceneTexture(), Graphics.PostGlowTexture());
+            return;
+        }
         // AO completes before this seam. Reconstruction precedes bloom,
         // god rays and luma; UI never enters either reconstruction input.
         Graphics.RenderSceneGodRays();
@@ -362,6 +368,18 @@ internal sealed partial class GameRenderSession : IDisposable
     {
         RequireActive();
         if (!GameFramebufferBindings.OffscreenEnabled(platform)) return;
+        if (Device.RaySceneCollectionEnabled && Temporal.CurrentClient is { } client &&
+            Temporal.Snapshot().HasCamera && client.EntityPlayer?.CameraPos is { } camera)
+        {
+            Graphics.CaptureRayEntities(client, Temporal.Snapshot());
+            if (Device.BuildRayScene(Graphics.RayWorldIdentity(client.Api.World), camera.X, camera.Y, camera.Z, client.EntityPlayer.Pos.Dimension))
+                Graphics.RenderPathTracing(client, Temporal.Snapshot(), services.RendererSettings.Settings);
+        }
+        if (Graphics.RayTracedThisFrame)
+        {
+            RenderTemporalPostTail();
+            return;
+        }
         Graphics.RenderAmbientOcclusionPost(projection!);
         RenderTemporalPostTail();
     }
@@ -373,6 +391,12 @@ internal sealed partial class GameRenderSession : IDisposable
         RequireActive();
         next = next.Normalize();
         RendererSettings previous = services.RendererSettings.Settings;
+        if (previous.PathTracing != next.PathTracing)
+        {
+            Device.SetRaySceneCollection(next.PathTracing && !services.RendererSettings.StereoRendering);
+            if (!Device.RaySceneCollectionEnabled) Graphics.ResetRayActors();
+            if (next.PathTracing) Temporal.CurrentClient?.RedrawAllBlocks();
+        }
         // Pacing/input options are consumed at pre-input; the FPS overlay reads
         // settings directly. Sharpening strength, debug views and the god-ray
         // sample cap are read per frame as shader constants or pass selection.
@@ -445,6 +469,7 @@ internal sealed partial class GameRenderSession : IDisposable
             graphics?.ReleasePreviousAnimations();
             graphics?.ReleaseLiquidMotionProgram();
             graphics?.ReloadSceneGodRaysProgram();
+            device?.RetireRayReconstruction();
             upscalers?.Dispose(); upscalers = null;
             // Device disposal waits owned GPU work/presentation while SDL lives.
             device?.Dispose(); device = null;

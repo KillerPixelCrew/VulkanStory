@@ -30,6 +30,7 @@ internal sealed partial class GameRenderSession
         FrameBufferRef? primary = PrimaryTarget;
         var display = Window.PixelSize;
         string text = "Last rendered frame\n" +
+            "Path tracing requested: " + settings.PathTracing + "; " + Device.RayTracingReadiness + "; " + Graphics.RayEntityReadiness + "\n" +
             "Upscaler requested: " + settings.Upscaler + " / " + settings.UpscalerQuality + "; evaluated: " + sr + "\n" +
             "Render resolution: " + (Graphics.AllocatedUpscalerPlan is { } plan
                 ? plan.RenderWidth + "x" + plan.RenderHeight + " -> " + plan.DisplayWidth + "x" + plan.DisplayHeight

@@ -5,6 +5,9 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="RayTracing/Shaders/*" LogicalName="VulkanStory.RayTracing.%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
     <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
@@ -21,6 +24,9 @@
   <ItemGroup>
     <Compile Include="VulkanDevice.cs" />
     <Compile Include="VulkanDevice.OpenXr.cs" />
+    <Compile Include="VulkanDevice.RayTracing.cs" />
+    <Compile Include="VulkanDevice.RayReconstruction.cs" />
+    <Compile Include="VulkanDevice.DlssRayReconstruction.cs" />
     <Compile Include="Vr/OpenXrRuntime.cs" />
     <Compile Include="VulkanDevice.Binding.cs" />
     <Compile Include="VulkanDevice.Dlss.cs" />
@@ -40,6 +46,14 @@
     <Compile Include="AmbientOcclusion/GtaoRenderer.cs" />
     <Compile Include="AmbientOcclusion/GtaoSettings.cs" />
     <Compile Include="Culling/OcclusionDepth.cs" />
+    <Compile Include="RayTracing/RayTracingRequirements.cs" />
+    <Compile Include="RayTracing/NrdApi.cs" />
+    <Compile Include="RayTracing/NrdDenoiser.cs" />
+    <Compile Include="RayTracing/RaySkinningPipeline.cs" />
+    <Compile Include="RayTracing/RayAccelerationStructure.cs" />
+    <Compile Include="RayTracing/RayTracingScene.cs" />
+    <Compile Include="RayTracing/RayTracingPipeline.cs" />
+    <Compile Include="RayTracing/RayTracingRenderer.cs" />
     <Compile Include="Core/GpuCheckpoints.cs" />
     <Compile Include="Core/DescriptorCache.cs" />
     <Compile Include="Core/DescriptorArena.cs" />

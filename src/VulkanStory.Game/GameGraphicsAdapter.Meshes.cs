@@ -57,8 +57,12 @@ internal sealed partial class GameGraphicsAdapter
         Meshes.Add(mesh, new MeshOwner(this, handle));
         return mesh;
     }
-    internal MeshRef UploadMesh(MeshData data) =>
-        MeshReference(RequireDevice().CreateMesh(GameMeshLayout.Capture(data), true), data.IndicesCount, data.mode, false);
+    internal MeshRef UploadMesh(MeshData data)
+    {
+        MeshRef mesh = MeshReference(RequireDevice().CreateMesh(GameMeshLayout.Capture(data), true), data.IndicesCount, data.mode, false);
+        if (RayEntityMeshCapture.Capturing) RayEntityMeshCapture.Remember(mesh, data);
+        return mesh;
+    }
     internal MeshRef AllocateEmptyMesh(int xyz, int normals, int uv, int rgba, int flags, int indices,
         CustomMeshDataPartFloat? floats, CustomMeshDataPartShort? shorts, CustomMeshDataPartByte? bytes,
         CustomMeshDataPartInt? ints, EnumDrawMode mode, bool staticDraw) =>
@@ -69,6 +73,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         ParticleMotionHistory.Uploaded(mesh, data);
         RequireDevice().UpdateMesh(MeshHandle((VAO)mesh), GameMeshLayout.Capture(data));
+        RayEntityMeshCapture.Update(mesh, data);
     }
     private int MeshHandle(VAO mesh)
     {

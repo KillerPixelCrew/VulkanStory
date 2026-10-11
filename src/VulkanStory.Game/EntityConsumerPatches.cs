@@ -33,15 +33,18 @@ internal static class EntityConsumerPatches
             if (Multi == null || Multi.ReturnType != typeof(void) || Multi.GetMethodBody() == null)
                 throw new MissingMethodException("Original multi-texture mesh method changed.");
             Check(PatchProcessor.GetOriginalInstructions(Multi));
+            RayEntityMeshCapture.Validate();
         }, () =>
         {
             if (runtime != null) throw new InvalidOperationException("Entity routing already has an owner.");
             runtime = owner; attempted = true;
+            RayEntityMeshCapture.Install(harmony, owner);
             harmony.Patch(Multi, transpiler: new HarmonyMethod(typeof(EntityConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
         }, () =>
         {
             if (!attempted) return;
             harmony.UnpatchAll(Owner);
+            RayEntityMeshCapture.Detach(owner);
             if (ReferenceEquals(runtime, owner)) runtime = null;
             attempted = false;
         });

@@ -176,7 +176,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         RequireDevice();
         RenderBloomPost(scene, glow);
-        if (!GodRaysInScene) RenderGodRaysPost(scene, glow);
+        if (!RayTracedThisFrame && !GodRaysInScene) RenderGodRaysPost(scene, glow);
         RenderLumaPost(scene);
         FinishPostStages();
     }

@@ -728,6 +728,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         };
 
         var vendorLatencyRequirements = new VendorLatencyRequirements(headless);
+        var rayTracingRequirements = new RayTracing.RayTracingRequirements();
+        options.RequirementContributors.Add(rayTracingRequirements);
         string? vendorSetting = Environment.GetEnvironmentVariable("VULKANSTORY_VK_VENDOR")?.Trim();
         if (!string.IsNullOrEmpty(vendorSetting))
         {
@@ -800,6 +802,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
         _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineReflexReady
             ? null : VendorLatency.TryCreate(_context, vendorLatencyRequirements.Kind);
+        SupportsRayTracing = rayTracingRequirements.Available;
+        supportsNrdImages = rayTracingRequirements.NrdImagesAvailable;
+        _context.Capabilities.RayTracingPipelineEnabled = SupportsRayTracing;
+        SupportsRayQueries = rayTracingRequirements.RayQueriesAvailable;
+        RayTracingCapabilityReason = rayTracingRequirements.Reason;
         if (_vendorLatency != null) _vendorLatency.Failure = MirrorValidationMessage;
         // Any hard Vulkan failure now reaches the client's error channel and the
         // validation log instead of turning into a silent stall.
@@ -825,6 +832,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             " (needs " + DescriptorIndexingFloor.RequiredSampledImages + ")" +
             "; push constants " + _context.Capabilities.DescriptorIndexing.MaxPushConstantsSize + " B" +
             "; " + _context.Capabilities.LatencySummary +
+            "; ray tracing " + RayTracingCapabilityReason +
             "; vendor latency " + (_vendorLatency?.Kind.ToString() ?? "none"));
         // Seams S1-S5: the backend is installed before the frame ring and the first
         // swapchain exist, so nothing in the frame ever sees a different instance.
@@ -1069,6 +1077,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
     /// <summary>Selected GPU name, falling back to Vulkan before device initialization.</summary>
     public string RendererString => _context?.Capabilities.DeviceName ?? "Vulkan";
+
+    /// <summary>Device capability only; scene and reconstruction readiness are separate.</summary>
+    internal bool SupportsRayQueries { get; private set; }
+    internal string RayTracingCapabilityReason { get; private set; } = "device not created";
     /// <summary>Selected Vulkan driver name, or unknown before initialization.</summary>
     public string VendorString => _context?.Capabilities.DriverName ?? "unknown";
     /// <summary>Vulkan API/driver version description for the active context.</summary>
@@ -1835,6 +1847,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // Its texture and program go with the texture manager and the compute cache below.
         _occlusionDepth?.DisposeIdle();
         _occlusionDepth = null;
+        ReleaseRayReconstruction();
+        rayRenderer?.Dispose(); rayRenderer = null;
+        rayScene?.Dispose(); rayScene = null;
         _compute?.Dispose();
         // The shared pipeline layout before the table's set layout it names; the
         // table's placeholders are textures and go with the texture manager.

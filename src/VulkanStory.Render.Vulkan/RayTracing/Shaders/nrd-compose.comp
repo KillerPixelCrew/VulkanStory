@@ -1,0 +1,18 @@
+#version 450
+layout(local_size_x=8, local_size_y=8) in;
+layout(binding=0) uniform sampler2D diffuse;
+layout(binding=1) uniform sampler2D specular;
+layout(binding=2) uniform sampler2D stable;
+layout(binding=3) uniform sampler2D noisy;
+layout(binding=4) uniform sampler2D viewDepth;
+layout(binding=5, rgba32f) writeonly uniform image2D outputColour;
+layout(push_constant) uniform Settings { float range; } settings;
+void main() {
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, imageSize(outputColour)))) return;
+    vec3 result = texelFetch(noisy, pixel, 0).rgb;
+    if (texelFetch(viewDepth, pixel, 0).r < settings.range) {
+        result = texelFetch(stable, pixel, 0).rgb + texelFetch(diffuse, pixel, 0).rgb + texelFetch(specular, pixel, 0).rgb;
+    }
+    imageStore(outputColour, pixel, vec4(max(result, vec3(0)), 1));
+}

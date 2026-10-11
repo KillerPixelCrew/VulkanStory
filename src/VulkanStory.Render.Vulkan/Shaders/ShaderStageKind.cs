@@ -10,4 +10,8 @@ public enum ShaderStageKind
     FragmentShader = 0x8B30,
     GeometryShader = 0x8DD9,
     ComputeShader = 0x91B9,
+    RayGenerationShader = 0x9553,
+    AnyHitShader = 0x9555,
+    ClosestHitShader = 0x9557,
+    MissShader = 0x955A,
 }

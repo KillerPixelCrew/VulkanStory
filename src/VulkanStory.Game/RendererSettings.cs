@@ -11,6 +11,11 @@ internal sealed record RendererSettings
     public bool Enabled { get; init; } = true;
     /// <summary>Creates an OpenXR stereo session on the next launch. The first VR path uses ordinary raster rendering.</summary>
     public bool OpenXr { get; init; }
+    /// <summary>Requests the path-tracing scene; effective rendering readiness is evaluated separately.</summary>
+    public bool PathTracing { get; init; }
+    public int PathTracingSamples { get; init; } = 1;
+    public int PathTracingBounces { get; init; } = 4;
+    public string RayReconstruction { get; init; } = "nrd";
     /// <summary>Requested ordinary render fraction, normalized to 0.25 through 1; an active SR plan supplies its own scale.</summary>
     public float RenderScale { get; init; } = 1f;
     /// <summary>Requests native TAA when SR does not replace it and session readiness permits it.</summary>
@@ -213,6 +218,9 @@ internal sealed record RendererSettings
         string quality = Choice(UpscalerQuality, nameof(UpscalerQuality), "quality", xess: provider == "xess");
         return this with
         {
+            PathTracingSamples = Math.Clamp(PathTracingSamples, 1, 64),
+            PathTracingBounces = Math.Clamp(PathTracingBounces, 1, 16),
+            RayReconstruction = RendererChoices.Contains(nameof(RayReconstruction), RayReconstruction) ? RayReconstruction : "nrd",
             RenderScale = RendererChoices.Range(nameof(RenderScale)).Clamp(RenderScale),
             TaaSharpness = RendererChoices.Range(nameof(TaaSharpness)).Clamp(TaaSharpness),
             TaaMipBias = RendererChoices.Range(nameof(TaaMipBias)).Clamp(TaaMipBias),

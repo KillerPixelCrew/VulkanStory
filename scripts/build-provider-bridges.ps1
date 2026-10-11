@@ -54,6 +54,7 @@ if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bridge output direct
 New-Item -ItemType Directory -Path $output | Out-Null
 & (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $output 'VulkanStoryVma.dll') -VulkanSdkRoot $vulkanRoot
 & (Join-Path $projectRoot 'native/ngx/build.ps1') -OutputDirectory $output
+& (Join-Path $projectRoot 'native/nrd/build.ps1') -OutputDirectory $output
 $builds = @(
     @{ Directory='fsr3'; Sdk=$Fsr3SdkRoot; Binary='VulkanStoryFsr3.dll' },
     @{ Directory='fsr4'; Sdk=$Fsr4SdkRoot; Binary='VulkanStoryFsr4.dll' },

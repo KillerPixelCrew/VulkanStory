@@ -314,6 +314,7 @@ internal sealed partial class GameGraphicsAdapter
     internal int PostSceneTexture()
     {
         RequireDevice();
+        if (RayTracedThisFrame) return RaySceneColour;
         if (UpscaledThisFrame && NativePostTarget(platform!.FrameBuffers, UpscaledSceneIndex) is { } upscaled)
             return upscaled.ColorTextureIds[0];
         return TaaResolvedThisFrame ? taaResolvedColor : FramebufferAt(EnumFrameBuffer.Primary).ColorTextureIds[0];
@@ -321,6 +322,7 @@ internal sealed partial class GameGraphicsAdapter
     internal int PostGlowTexture()
     {
         RequireDevice();
+        if (RayTracedThisFrame) return RaySceneGlow;
         return TaaResolvedThisFrame ? taaResolvedGlow : FramebufferAt(EnumFrameBuffer.Primary).ColorTextureIds[1];
     }
     /// <summary>Invalidates retained native temporal program caches after shader reload.</summary>

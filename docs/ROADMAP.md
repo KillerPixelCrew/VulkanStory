@@ -2,49 +2,18 @@
 
 Current release: [v0.1.1](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1) (Windows x64, Vintage Story 1.22.7).
 
-## Done
-
-- Vulkan renderer, SDL3 window and input
-- TAA, render scale, SSAO / GTAO
-- Upscaling: DLSS, FSR 3.1, FSR 4 (INT8 path on NVIDIA and Intel), XeSS
-- Stable geometry boundaries against sky and clouds with TAA and upscaling
-- Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG
-- Low latency: Reflex / PC Latency, Anti-Lag, XeLL
-- Options menu integration
-- Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
-- Screenshot, timelapse and AVI capture
-- Render-pass extension points for other mods
-- Windows install, update and removal
-- Loading screen stays up until the first world frame is complete
-- Shaders ship as one container, `shaders-vk.pak`
-- **PERF-01: Smoothness ports** (ideas from Optimum, rebuilt as optional Harmony patches; each has a switch on the Performance settings page, all on by default)
-  - Culling: skip foliage in the far shadow cascade, entity shadow distance cull, the occlusion culler's rays precomputed into one shared ray tree, particle and dropped-item distance gates
-  - Chunk streaming: skip unchanged upload-queue sorting, tessellator mesh-part pool, parallel raw chunk reads in singleplayer
-  - Entities: allocation-free animation checks, falling-block mesh fix, villager/trader outfit shape cache with outfit textures pre-inserted gradually after world load
-  - Worldgen (singleplayer): the game's own per-pass worldgen workers, made safe with column footprint leases, a shared Vegetation/sunlight lock, per-generator locks and atomic entity ids, with a fallback to the chunk thread alone when other mods touch worldgen or a worker fails
-- **PERF-03: GPU occlusion culling** (two switches on the Performance settings page, on by default)
-  - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws, tested against a max-depth pyramid of the opaque terrain from a recent frame
-  - Test boxes grow by the camera's movement since that depth was captured; boxes outside the captured view or crossing its near plane are always drawn; players are never culled
-  - Shadow passes keep their own culling
-- **PERF-04: Additional Optimum ports** (runtime controls on the Performance settings page)
-  - Inventory render-info reuse, wind sample caching without slowing smoothing, dynamic-light scans and nearest selection, animated-block LOD without freezing distant machines, entity retessellation budgeting, BFS visibility, pathfinding node pooling with independent returned paths, entity light batching and SIMD frustum tests with full coefficient refresh and original precision.
-  - Outfit animator caching with separate mutable poses per entity, parallel Terrain columns with independent workspaces and a reusable worldgen worker pool, dedicated chisel LOD pools with live distance control, bounded Vulkan world-map pages with a compressed disk cache, and physics collection reuse with reader leases and activation capacity batching without delaying simulation.
-- **PERF-05: Performance inspection harness**: bounded EventPipe captures from `.vulkanstory profile start [seconds]`, stop/status; per-thread call stacks, sampled allocations, frame/system timings, searchable offline flame graphs and Speedscope export. GPU execution time is not measured.
-- **PERF-06: Profile-driven optimizations**
-  - Recurring costs: reusable occlusion hierarchy storage, descriptor comparisons without handle boxing, short chunk-map membership snapshots with visibility work outside the shared lock, indexed flood-fill traversal, and private coordinate reuse in the stock FluffyClouds updater. Optional algorithms have live controls.
-  - Loading and streaming: background outfit metadata preparation, translation resolution caching with language/reload invalidation, bounded mesh-part capacity classes, independent static-shape templates for fruiting bushes, and pooled PCM accumulation with the original decoder and runtime unmute behavior.
-
-- **PERF-07: Drop and particle budgets** (ideas from RAM-Garbage-Collector, rebuilt as optional patches)
-  - Earlier merging of settled matching drops in singleplayer, with bounded work, player ownership checks and the game's automatic stack/collectible rules.
-  - Live particle density, per-spawn and per-pool limits for cubes, quads and mod providers. Defaults: 50% density, 256 per spawn and 8,192 per pool; effects marked to ignore user configuration are preserved. Both features have live switches on the Performance page. No forced GC.
-
 ## Known defects
 
-- **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
-- **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
+
+- **RT-01: Full path tracing**
+  - In progress: retained terrain and shaped entity bodies with pose motion, frame-slot actor buffers and BLAS refits, traced frame outputs, Vulkan NRD opaque reconstruction, optional Vulkan DLSS RR at render resolution, depth/motion routing to frame generation and live controls. GPU skinning, held items, particles, procedural warping, full material/lighting coverage and AMD reconstruction are still planned.
+  1. Portable Vulkan KHR ray tracing with a persistent scene for streamed terrain, animated entities, particles and off-screen geometry.
+  2. Game materials and atlases, emissive and sky lighting, diffuse/specular bounces, alpha testing, glass and water.
+  3. Current/previous scene state and coherent depth, motion, albedo, normal/roughness and hit-distance guides; a reconstruction path that works across GPU vendors, with optional DLSS Ray Reconstruction and FSR Ray Regeneration.
+  4. Live raster/path-tracing and reconstruction controls, world transitions, resize handling and existing post-processing/UI integration.
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
