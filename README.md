@@ -141,10 +141,8 @@ your own installation.
 
 ## Background
 
-The Vulkan code brought into this rewrite was written entirely by N1GHT. No code
-was directly migrated from Optimum. VulkanStory compiles against the official
-game assemblies, keeps its own state outside game objects, and integrates through
-Harmony instead of a modified client.
+VulkanStory compiles against the official game assemblies, keeps its own state
+outside game objects, and integrates through Harmony instead of a modified client.
 
 ## AI-assisted development
 
@@ -153,7 +151,6 @@ debugging and documentation.
 
 ## License and attribution
 
-The Vulkan code is N1GHT's own work. It is not third-party code from Optimum.
 Third-party notices for SDL, Shaderc, Silk.NET, PromptFont and the vendor SDK runtimes
 are under [`packaging/notices`](packaging/notices) and ship with every package under
 `VulkanStory/licenses`. Vendor SDKs are subject to their own license terms.
