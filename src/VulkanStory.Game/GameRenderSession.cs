@@ -433,6 +433,7 @@ internal sealed partial class GameRenderSession : IDisposable
             // pending timeline retirements. Preserve the entire graph before
             // clearing GUI owners or beginning any dependent release.
             device?.RequireFrameRelease();
+            ClearScenarioWorldCycle();
             // GUI LoadedTextures must be released while routed texture deletion
             // can still reach this live Vulkan adapter. Rollback is too late.
             OptionsSettingsOwner.ClearAll();

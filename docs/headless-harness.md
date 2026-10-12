@@ -54,15 +54,24 @@ does.
 
 **Scenarios** (`scripts/dev/scenarios/schema-v1.json`): up to 128 actions, each with
 an `id`, a `tick` and a `kind`. The kinds are `settings` (apply renderer settings),
-`options` (dialog operations), `camera` (world yaw), `resize` (drawable dimensions),
-`capture` (a named frame, optionally with attachments), `checkpoint`, and `assert`
+`options` (dialog operations), `camera` (world yaw/mode), `resize` (drawable dimensions),
+`world-cycle` (leave/re-enter the save), `capture` (a named frame, optionally with
+attachments), `checkpoint`, and `assert`
 (check a runtime field such as `hidden`, `focused`, `worldReady`,
 `effectiveUpscaler` or `realPresents`). `native-baseline.v1.json` is the reference
 example.
 
 Options actions use `operation` (`open`, `toggle-taa`, `save`, `cancel`, `back`,
 `resume`, `close`) and optionally `page` when opening. Camera actions use
-`yawDeltaDegrees` in -180..180; resize actions use `width`/`height` in 128..8192.
+`yawDeltaDegrees` in -180..180 and optionally `mode` (`FirstPerson`, `ThirdPerson`,
+`Overhead`); resize actions use `width`/`height` in 128..8192.
+
+`world-cycle` accepts only `id`, `tick` and `kind`, requires world context, and
+must be the sole action at its tick. It exits through the official menu path,
+waits for server shutdown and detached world state, then reconnects the same
+isolated save in the existing process. Scheduled ticks/captures pause during the
+transition; the global timeout stays active. Completion requires a fresh client
+on the same platform before the remaining actions resume.
 The launcher validates inputs before starting a child. Controller/touch enable
 flags require the deferred child-owned input profile and are refused when it is absent.
 

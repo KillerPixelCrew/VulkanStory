@@ -327,6 +327,7 @@ function Test-ScenarioDocument($Root) {
     $captureNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $checkpointIndexes = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
     $previousTick = -1
+    $previousKind = $null
     $index = 0
     foreach ($action in $actions.EnumerateArray()) {
         $properties = Get-ScenarioProperties $action 'ActionField'
@@ -338,9 +339,12 @@ function Test-ScenarioDocument($Root) {
         if (-not $ids.Add($actionId)) { Throw-ScenarioError 'DuplicateId' "Action IDs must be unique: $actionId" }
         $tick = Get-ScenarioTick $properties['tick']
         if ($tick -lt $previousTick) { Throw-ScenarioError 'TickRange' 'Action ticks must be nondecreasing.' }
-        $previousTick = $tick
         $kind = Get-ScenarioString $properties['kind'] 'ActionKind'
         switch -CaseSensitive ($kind) {
+            'world-cycle' {
+                Require-ScenarioProperties $properties @('id','tick','kind') @() 'ActionField'
+                if ($context -cne 'world') { Throw-ScenarioError 'ScenarioContext' 'world-cycle requires a world scenario.' }
+            }
             'settings' {
                 Require-ScenarioProperties $properties @('id','tick','kind','values') @('values') 'ActionField'
                 Apply-ScenarioSettings $properties['values']
@@ -453,6 +457,11 @@ function Test-ScenarioDocument($Root) {
             }
             default { Throw-ScenarioError 'ActionKind' "Unknown scenario action kind: $kind" }
         }
+        if ($tick -eq $previousTick -and ($kind -ceq 'world-cycle' -or $previousKind -ceq 'world-cycle')) {
+            Throw-ScenarioError 'WorldCycleTick' 'world-cycle must be the only action at its declared tick.'
+        }
+        $previousTick = $tick
+        $previousKind = $kind
         $index++
     }
     return @{ Id = $scenarioId; ActionCount = $index; Context = $context }

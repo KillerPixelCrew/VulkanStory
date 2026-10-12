@@ -174,6 +174,20 @@ internal sealed partial class GameRenderSession
     {
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;
         if (scenario == null || scenarioTerminal || headlessDone) return;
+        if (ScenarioWorldCyclePending)
+        {
+            try { AdvanceScenarioWorldCycle(scenario); }
+            catch (Exception error)
+            {
+                try { WriteScenarioEvent(scenarioWorldCycle!.Action, "beforeInput", false, false, null,
+                    error.GetBaseException().Message); }
+                catch { }
+                FailHeadlessRun("World cycle failed: " + error.GetBaseException().Message, "beforeInput");
+            }
+            // A verified reload restores the declared tick for this completed frame.
+            // The next ordinary input boundary advances it exactly once.
+            return;
+        }
         if (scenarioTick == null)
         {
             try { if (!TryStartScenarioContext(scenario)) return; }
@@ -202,12 +216,18 @@ internal sealed partial class GameRenderSession
 
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
                      action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Settings or
-                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize))
+                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or
+                         HeadlessScenarioActionKind.Resize or HeadlessScenarioActionKind.WorldCycle))
         {
             string phase = ScenarioActionPhase(action.Kind);
             scenarioFailurePhase = phase;
             try
             {
+                if (action.Kind == HeadlessScenarioActionKind.WorldCycle)
+                {
+                    StartScenarioWorldCycle(action);
+                    return;
+                }
                 if (action.Kind == HeadlessScenarioActionKind.Settings)
                 {
                     JsonObject current = JsonNode.Parse(RuntimeBootstrap.Current.ReadSettings())?.AsObject()
@@ -265,7 +285,8 @@ internal sealed partial class GameRenderSession
         {
             declaredIndex = action.Index,
             actionId = action.Id,
-            actionKind = action.Kind.ToString().ToLowerInvariant(),
+            actionKind = action.Kind == HeadlessScenarioActionKind.WorldCycle
+                ? "world-cycle" : action.Kind.ToString().ToLowerInvariant(),
             declaredTick = action.Tick,
             scenarioTick,
             phase,
@@ -284,7 +305,8 @@ internal sealed partial class GameRenderSession
     private static string ScenarioActionPhase(HeadlessScenarioActionKind kind) => kind switch
     {
         HeadlessScenarioActionKind.Settings => "settings",
-        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize => "beforeInput",
+        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize or
+            HeadlessScenarioActionKind.WorldCycle => "beforeInput",
         HeadlessScenarioActionKind.Capture => "preGenerateReadback",
         _ => "completedFrame"
     };
@@ -802,6 +824,7 @@ internal sealed partial class GameRenderSession
 
     private void FailHeadlessRun(string reason, string failedPhase)
     {
+        ClearScenarioWorldCycle();
         try
         {
             if (scenarioFailure != null) return;
@@ -841,6 +864,7 @@ internal sealed partial class GameRenderSession
     private void FinalizeHeadlessRun(bool success, string reason, bool hidden, bool focused,
         bool stagedModLoaded, string modLocation, ulong? completedFrameId = null)
     {
+        ClearScenarioWorldCycle();
         try
         {
             if (HeadlessHarnessOptions.Scenario != null)

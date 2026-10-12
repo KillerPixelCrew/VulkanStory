@@ -14,6 +14,7 @@ internal enum HeadlessScenarioActionKind
     Options,
     Camera,
     Resize,
+    WorldCycle,
     Capture,
     Checkpoint,
     Assert
@@ -209,6 +210,14 @@ internal sealed class HeadlessScenario
             HeadlessScenarioAction action;
             switch (kindText)
             {
+                case "world-cycle":
+                {
+                    RequireOnly(properties, ["id", "tick", "kind"], "ActionField");
+                    if (context != "world")
+                        throw Error("ScenarioContext", "world-cycle requires a world scenario.");
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.WorldCycle);
+                    break;
+                }
                 case "options":
                 {
                     RequireOnly(properties, ["id", "tick", "kind", "operation", "page"], "ActionField");
@@ -326,6 +335,10 @@ internal sealed class HeadlessScenario
                 default:
                     throw Error("ActionKind", "Unknown scenario action kind: " + kindText);
             }
+            if (actions.Count > 0 && actions[^1].Tick == tick &&
+                (action.Kind == HeadlessScenarioActionKind.WorldCycle ||
+                 actions[^1].Kind == HeadlessScenarioActionKind.WorldCycle))
+                throw Error("WorldCycleTick", "world-cycle must be the only action at its declared tick.");
             actions.Add(action);
             index++;
         }
