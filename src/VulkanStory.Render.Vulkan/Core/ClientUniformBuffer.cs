@@ -98,6 +98,11 @@ internal sealed class ClientUniformBufferManager
     /// </summary>
     internal readonly Dictionary<string, int> BoundBlocks = new(StringComparer.Ordinal);
 
+    /// <summary>The live buffer supplying this named block at draw time, or zero when absent/deleted.</summary>
+    internal int BoundHandle(string blockName) =>
+        !string.IsNullOrEmpty(blockName) && BoundBlocks.TryGetValue(blockName, out int handle) &&
+        Buffers.ContainsKey(handle) ? handle : 0;
+
     private int _nextUniformBufferId = 1;
 
     /// <summary>Allocates a client buffer ID and at least four shadow bytes, immediately binding a nonempty block name.</summary>

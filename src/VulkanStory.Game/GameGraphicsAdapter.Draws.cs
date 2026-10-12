@@ -40,7 +40,9 @@ internal sealed partial class GameGraphicsAdapter
         if (vao.VaoId == 0 || vao.Disposed)
             throw new ArgumentException(vao.VaoId == 0 ? "Fatal: Trying to render an uninitialized mesh" : "Fatal: Trying to render a disposed mesh");
         RuntimeStats.drawCallsCount--; // Retained stated helper counts only draws it records.
-        RecordStatedDraw(vao, 1, null, null, 0);
+        bool motion = BeginAnimatedMotionWrite();
+        try { RecordStatedDraw(vao, 1, null, null, 0); }
+        finally { if (motion) EndMotionWrite(); }
     }
     internal void RenderMesh(MeshRef mesh, int[] starts, int[] sizes, int groups, bool useSsbo)
     {

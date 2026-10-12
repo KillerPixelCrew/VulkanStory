@@ -59,6 +59,9 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// <summary>Whether the program was linked from the native manifest.</summary>
     public bool IsNative { get; }
 
+    /// <summary>Animation/motion eligibility reflected once from this link's immutable interface and binaries.</summary>
+    internal AnimatedMotionContract AnimatedMotion { get; }
+
     /// <summary>Bumped by every write that changes the shadow.</summary>
     public uint UniformVersion { get; private set; } = 1;
 
@@ -96,6 +99,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         PushShadow = translated.Layout.CreatePushShadow();
         Specialization = translated.Specialization;
         IsNative = translated.IsNative;
+        AnimatedMotion = AnimatedMotionContract.Create(translated, this);
 
         try
         {

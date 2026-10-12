@@ -65,6 +65,7 @@
     <Compile Include="Core/MeshUploads.cs" />
     <Compile Include="Core/VulkanMeshPreflight.cs" />
     <Compile Include="Core/ShaderProgramResources.cs" />
+    <Compile Include="Core/AnimatedMotionContract.cs" />
     <Compile Include="Core/NativeRenderDeclarations.cs" />
     <Compile Include="Core/ClientUniformBuffer.cs" />
     <Compile Include="Core/PipelineCache.cs" />

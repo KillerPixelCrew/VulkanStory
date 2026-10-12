@@ -49,7 +49,7 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 ## Planned
 
 - **MOD-01: General mod compatibility**
-  1. Extend ordinary RenderAPI motion histories to custom moving geometry, including object/animation inputs for reconstruction and frame generation.
+  1. Finish shader-certified animated pose/model history, and extend ordinary RenderAPI motion histories to custom rigid/procedural geometry with stable object identities and actual previous deformation inputs.
   2. Retain resource/state contracts across mod rendering and world transitions.
   3. Exercise the complete supplied mod set across loading, provider changes and world transitions without patches keyed to mod IDs.
 

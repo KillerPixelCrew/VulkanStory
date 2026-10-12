@@ -20,6 +20,22 @@ static custom geometry camera motion without replacing its shading. Independentl
 moving custom geometry still needs object/animation history: camera reprojection
 does not supply that history or certify an absent object writer.
 
+The animated-history integration remains in development. Programs using the
+ordinary game pose/model producer will be able to use that history
+independently of their pass name. Eligibility requires linked motion output and
+compatible `Animation`/`AnimationPrev` column-major `mat4` arrays, plus the existing
+previous-camera/model uniforms. Pose uploads must cover whole matrices at offset
+zero and fit the declared capacity. Capture follows accepted model writes and a
+successful upload to the active program's pose buffer. Drawing checks both bound
+pose buffers, the current frame/view, and unchanged model/warp inputs. Shader
+reload, relink, world changes and later buffer writes invalidate readiness.
+
+Pose histories retain original array identity and separate programs/views. Reusing
+one pose for different transforms within a frame declines its writer; mesh or draw
+order is not substituted for object identity. This ABI check does not reconstruct
+arbitrary procedural deformation or prove a shader's motion equations. Such draws
+still require their real previous inputs through the motion-writer contract below.
+
 Direct OpenGL calls are different. OpenTK GL calls, native GL imports and GL
 proc-address loaders expect an OpenGL context and cannot operate on Vulkan
 resources. When Vulkan routing is active, `ModGlUsage` examines enabled client

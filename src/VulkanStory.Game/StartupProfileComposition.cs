@@ -25,7 +25,6 @@ internal static class StartupProfileComposition
             PlatformStartupRoutingPatches.CreateSubset(runtime),
             TemporalConsumerPatches.CreateGroup(runtime),
             OpenXrConsumerPatches.CreateGroup(runtime),
-            MotionUniformConsumerPatches.CreateGroup(runtime),
             UiConsumerPatches.CreateGroup(runtime),
             MenuSettingsConsumerPatches.CreateGroup(enabled),
             HotkeyRegistrationConsumerPatches.CreateGroup(enabled),
@@ -65,7 +64,7 @@ internal static class StartupProfileComposition
     {
         StartupPatchGroup[] groups = completeCoverage.ToArray();
         string[] required = ["graphics-harmony-ownership", "graphics-textures", "graphics-shaders", "graphics-shader-sources", "graphics-meshes", "graphics-states",
-            "graphics-framebuffers", "graphics-queries-capture", "graphics-platform-start", "graphics-platform-remaining", "graphics-temporal", "graphics-motion-uniforms", "graphics-ui", "graphics-menu-settings", "graphics-controller-hints", "graphics-controller-analog-direction", "graphics-controller-analog-client", "graphics-scene", "graphics-post", "graphics-mod-compatibility"];
+            "graphics-framebuffers", "graphics-queries-capture", "graphics-platform-start", "graphics-platform-remaining", "graphics-temporal", "graphics-ui", "graphics-menu-settings", "graphics-controller-hints", "graphics-controller-analog-direction", "graphics-controller-analog-client", "graphics-scene", "graphics-post", "graphics-mod-compatibility"];
         var attempted = new List<StartupPatchGroup>();
         return new StartupPatchGroup("graphics-api", () =>
         {

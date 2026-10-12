@@ -7,7 +7,7 @@ namespace VulkanStory.Game;
 // Session-owned frame/draw state replaces the injected API static holders.
 #nullable disable
     /// <summary>Session-owned animated draw history keyed weakly by bone-array identity; validates consecutive frames, joint counts and camera views.</summary>
-    internal sealed class EntityMotionHistory(TemporalFrameState temporal)
+    internal sealed class EntityMotionHistory(TemporalFrameState temporal, Func<int, (float Wind, float Water)> readWarp)
     {
         /// <summary>
         /// Whether the motion writers are compiled into the shaders at all. Set by
@@ -15,6 +15,7 @@ namespace VulkanStory.Game;
         /// per-uniform hooks below cost one static bool read when TAA is off.
         /// </summary>
         public bool Enabled;
+        internal long ValidAnimationUploads { get; private set; }
 
         private sealed class History
         {
@@ -38,26 +39,50 @@ namespace VulkanStory.Game;
             public long CapturedFrame = -1;
             /// <summary>The frame PrevBones et al. were captured in; -1 = never.</summary>
             public long PreviousFrame = -1;
+            public bool CurAmbiguous, PrevAmbiguous;
         }
 
-        private readonly ConditionalWeakTable<object, History> histories = new ConditionalWeakTable<object, History>();
-
-        private readonly float[] modelMatrixScratch = new float[16];
-        private float windWaveIntensityScratch = 1f;
-        private float waterWaveCounterScratch;
-
-        /// <summary>
-        /// The two per-draw warp uniforms as the draw in progress last set them.
-        /// Shared with <see cref="StandardMotionHistory" />: the standard shader's
-        /// users override the very same two names (a swimming dropped item sets
-        /// waterWaveCounter, an entity sets windWaveIntensity), and both writers
-        /// read them through the one recorder in ShaderProgramBase rather than
-        /// growing a second hook.
-        /// </summary>
-        internal float ScratchWindWaveIntensity => windWaveIntensityScratch;
-
-        /// <summary>See <see cref="ScratchWindWaveIntensity" />.</summary>
-        internal float ScratchWaterWaveCounter => waterWaveCounterScratch;
+        private readonly ConditionalWeakTable<object, Dictionary<(int Program, EnumTemporalView View), History>> histories = new();
+        private sealed class DrawInputs
+        {
+            internal readonly float[] Model = new float[16];
+            internal float UploadWind, UploadWater;
+            internal long ModelFrame = -1, Revision, UploadFrame = -1, UploadRevision;
+            internal EnumTemporalView ModelView, UploadView;
+            internal int UploadBuffer, UploadPreviousBuffer;
+        }
+        private readonly Dictionary<int, DrawInputs> inputs = new();
+        private DrawInputs Inputs(int program)
+        {
+            if (!inputs.TryGetValue(program, out var state)) inputs.Add(program, state = new DrawInputs());
+            return state;
+        }
+        internal (float Wind, float Water) CurrentWarp(int program) => readWarp(program);
+        internal bool HasCurrentModel(int program) => inputs.TryGetValue(program, out var state) &&
+            state.ModelFrame == temporal.FrameIndex && state.ModelView == temporal.ActiveView;
+        internal bool HasCurrentUpload(int program, int buffer, int previousBuffer) => HasCurrentModel(program) &&
+            inputs[program].UploadFrame == temporal.FrameIndex && inputs[program].UploadView == temporal.ActiveView &&
+            inputs[program].UploadRevision == inputs[program].Revision && inputs[program].UploadBuffer == buffer &&
+            inputs[program].UploadPreviousBuffer == previousBuffer &&
+            readWarp(program) == (inputs[program].UploadWind, inputs[program].UploadWater);
+        internal void InvalidateUpload(int program)
+        { if (inputs.TryGetValue(program, out var state)) state.UploadFrame = -1; }
+        internal void InvalidateModel(int program)
+        { if (inputs.TryGetValue(program, out var state)) { state.ModelFrame = -1; state.UploadFrame = -1; } }
+        internal void InvalidateBuffer(int buffer)
+        {
+            foreach (var state in inputs.Values)
+                if (state.UploadBuffer == buffer || state.UploadPreviousBuffer == buffer) state.UploadFrame = -1;
+        }
+        internal void ReleaseProgram(int program)
+        {
+            inputs.Remove(program);
+            foreach (var entry in histories)
+                foreach (var key in entry.Value.Keys.Where(key => key.Program == program).ToArray()) entry.Value.Remove(key);
+            if (sharedUniformProgram?.ProgramId == program) sharedUniformProgram = null;
+        }
+        internal void Clear()
+        { inputs.Clear(); histories.Clear(); sharedUniformProgram = null; sharedUniformFrame = -1; }
 
         private IShaderProgram sharedUniformProgram;
         private long sharedUniformFrame = -1;
@@ -68,28 +93,14 @@ namespace VulkanStory.Game;
         /// store it as next frame's previous one. Called from ShaderProgramBase for
         /// the uniform named "modelMatrix" only.
         /// </summary>
-        public void NoteModelMatrix(float[] matrix)
-        {
-            if (matrix == null || matrix.Length < 16) return;
-            Array.Copy(matrix, modelMatrixScratch, 16);
-        }
-        public void NoteModelMatrix(ReadOnlySpan<float> matrix)
+        public void NoteModelMatrix(int program, ReadOnlySpan<float> matrix)
         {
             if (matrix.Length < 16) return;
-            matrix[..16].CopyTo(modelMatrixScratch);
-        }
-
-        /// <summary>
-        /// Remembers a warp uniform that varies per draw rather than per frame.
-        /// EntityShapeRenderer overrides windWaveIntensity per entity and the echo
-        /// chamber pins both to zero, so the previous frame's values for these two
-        /// have to be stored per entity - the global PrevWarp would replay a warp the
-        /// entity never had.
-        /// </summary>
-        public void NoteWarpUniform(string uniformName, float value)
-        {
-            if (uniformName == "windWaveIntensity") windWaveIntensityScratch = value;
-            else if (uniformName == "waterWaveCounter") waterWaveCounterScratch = value;
+            DrawInputs state = Inputs(program);
+            if (!matrix[..16].SequenceEqual(state.Model)) state.Revision++;
+            matrix[..16].CopyTo(state.Model);
+            state.ModelFrame = temporal.FrameIndex;
+            state.ModelView = temporal.ActiveView;
         }
 
         /// <summary>
@@ -98,24 +109,32 @@ namespace VulkanStory.Game;
         /// and sets the writer's per-draw uniforms, then records this draw's state
         /// as next frame's previous one.
         /// </summary>
-        /// <param name="program">The program in use; must be an entityanimated motion writer.</param>
+        /// <param name="program">The program in use, with a certified animated motion interface.</param>
         /// <param name="uploadPrevious">Its "AnimationPrev" uniform block.</param>
         /// <param name="boneMatrices">The array being uploaded into "Animation".</param>
         /// <param name="byteCount">How many bytes of it the draw uses.</param>
-        public void OnAnimationUpload(IShaderProgram program, Action<float[], int> uploadPrevious, object boneMatrices, int byteCount)
+        public void OnAnimationUpload(IShaderProgram program, int bufferHandle, int previousBufferHandle,
+            Action<float[], int> uploadPrevious, object boneMatrices, int byteCount)
         {
             if (!Enabled || program == null || uploadPrevious == null) return;
             if (!program.HasUniform("taaHistoryValid")) return;
+            if (!HasCurrentModel(program.ProgramId)) return;
+            DrawInputs state = inputs[program.ProgramId];
+            var warp = readWarp(program.ProgramId);
+            if (!float.IsFinite(warp.Wind) || !float.IsFinite(warp.Water)) return;
 
             float[] bones = boneMatrices as float[];
-            if (bones == null || byteCount <= 0) return;
+            if (bones == null || byteCount <= 0 || byteCount % 64 != 0) return;
 
             int floats = byteCount / 4;
             if (floats <= 0 || floats > bones.Length) return;
 
             TemporalFrameState frame = temporal;
             EnumTemporalView view = frame.ActiveView;
-            History history = histories.GetValue(bones, _ => new History());
+            var poses = histories.GetValue(bones, _ => new());
+            var key = (program.ProgramId, view);
+            if (!poses.TryGetValue(key, out var history)) poses.Add(key, history = new History());
+            bool repeated = history.CapturedFrame == frame.FrameIndex;
 
             // One roll per frame, not per draw: an entity drawn twice in a frame
             // (opaque then after-OIT) must both times compare against the frame
@@ -132,14 +151,23 @@ namespace VulkanStory.Game;
                 history.PrevView = history.CurView;
                 history.PreviousFrame = history.CapturedFrame;
                 history.CapturedFrame = frame.FrameIndex;
+                history.PrevAmbiguous = history.CurAmbiguous;
+                history.CurAmbiguous = false;
             }
+
+            // One pose array cannot identify several independently transformed objects.
+            // Retain the pose, but decline its writer when a same-frame upload aliases transforms.
+            if (repeated && (history.CurFloatCount != floats ||
+                !state.Model.AsSpan().SequenceEqual(history.CurModelMatrix) ||
+                history.CurWindWaveIntensity != warp.Wind || history.CurWaterWaveCounter != warp.Water ||
+                !bones.AsSpan(0, floats).SequenceEqual(history.CurBones.AsSpan(0, floats)))) history.CurAmbiguous = true;
 
             if (history.CurBones.Length < floats) history.CurBones = new float[floats];
             Array.Copy(bones, history.CurBones, floats);
             history.CurFloatCount = floats;
-            Array.Copy(modelMatrixScratch, history.CurModelMatrix, 16);
-            history.CurWindWaveIntensity = windWaveIntensityScratch;
-            history.CurWaterWaveCounter = waterWaveCounterScratch;
+            Array.Copy(state.Model, history.CurModelMatrix, 16);
+            history.CurWindWaveIntensity = warp.Wind;
+            history.CurWaterWaveCounter = warp.Water;
             history.CurView = view;
 
             // Valid only if the very same entity was drawn last frame, under the same
@@ -147,6 +175,7 @@ namespace VulkanStory.Game;
             // with the same joint count, and the frame itself did not reset.
             bool valid =
                 !frame.Reset &&
+                !history.CurAmbiguous && !history.PrevAmbiguous &&
                 history.PreviousFrame == frame.FrameIndex - 1 &&
                 history.PrevFloatCount == floats &&
                 history.PrevView == view &&
@@ -188,6 +217,17 @@ namespace VulkanStory.Game;
             if (program.HasUniform("prevWaterWaveCounter"))
             {
                 program.Uniform("prevWaterWaveCounter", valid ? history.PrevWaterWaveCounter : history.CurWaterWaveCounter);
+            }
+            if (!history.CurAmbiguous)
+            {
+                if (valid) ValidAnimationUploads++;
+                state.UploadFrame = frame.FrameIndex;
+                state.UploadView = view;
+                state.UploadRevision = state.Revision;
+                state.UploadBuffer = bufferHandle;
+                state.UploadPreviousBuffer = previousBufferHandle;
+                state.UploadWind = warp.Wind;
+                state.UploadWater = warp.Water;
             }
         }
     }
@@ -236,6 +276,13 @@ namespace VulkanStory.Game;
             if (!drawState.Enabled || program == null || identity == null) return false;
             if (modelMatrix == null || modelMatrix.Length < 16) return false;
             if (!program.HasUniform("taaHistoryValid")) return false;
+            var warp = drawState.CurrentWarp(program.ProgramId);
+            if (!float.IsFinite(warp.Wind) || !float.IsFinite(warp.Water))
+            {
+                program.Uniform("taaHistoryValid", 0);
+                if (program.HasUniform("taaReactive")) program.Uniform("taaReactive", 1f);
+                return false;
+            }
 
             TemporalFrameState frame = temporal;
             EnumTemporalView view = frame.ActiveView;
@@ -256,8 +303,8 @@ namespace VulkanStory.Game;
 
             Array.Copy(modelMatrix, history.CurModelMatrix, 16);
             history.CurShape = shape;
-            history.CurWindWaveIntensity = drawState.ScratchWindWaveIntensity;
-            history.CurWaterWaveCounter = drawState.ScratchWaterWaveCounter;
+            history.CurWindWaveIntensity = warp.Wind;
+            history.CurWaterWaveCounter = warp.Water;
             history.CurView = view;
 
             bool valid =

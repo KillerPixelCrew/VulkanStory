@@ -343,7 +343,11 @@ function Test-ScenarioDocument($Root) {
                 Apply-ScenarioSettings $properties['values']
             }
             'camera' {
-                Require-ScenarioProperties $properties @('id','tick','kind','yawDeltaDegrees') @('yawDeltaDegrees') 'ActionField'
+                Require-ScenarioProperties $properties @('id','tick','kind','yawDeltaDegrees','mode') @('yawDeltaDegrees') 'ActionField'
+                if ($properties.ContainsKey('mode')) {
+                    $mode = Get-ScenarioString $properties['mode'] 'CameraMode'
+                    if ($mode -cnotin @('FirstPerson','ThirdPerson','Overhead')) { Throw-ScenarioError 'CameraMode' "Unknown camera mode: $mode" }
+                }
                 $yaw = Get-ScenarioSettingValue 'YawDeltaDegrees' 'float' $properties['yawDeltaDegrees']
                 if ($context -cne 'world' -or [Math]::Abs($yaw) -gt 180) {
                     Throw-ScenarioError 'CameraRange' 'Camera yaw requires a world and finite degrees in -180..180.'
@@ -431,7 +435,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -468,7 +472,7 @@ foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','w
 foreach ($name in @('temporalFrameId','renderWidth','renderHeight','configuredDlssGeneratedFrames','dlssStateQueryFrameId','dlssStateQueryResult','dlssMaximumGenerated','dlssDynamicMfgSupport','successfulUpscaleFrames','preparedFrames')) {
     $script:assertionKinds.Add($name, 'number?')
 }
-foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight')) {
+foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight','validAnimatedHistoryUploads','animatedMotionWindows')) {
     $script:assertionKinds.Add($name, 'number')
 }
 foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase','optionsHost')) {

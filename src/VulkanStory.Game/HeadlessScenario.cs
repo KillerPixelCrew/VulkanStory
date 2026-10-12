@@ -36,7 +36,8 @@ internal sealed record HeadlessScenarioAction(
     string? Page = null,
     int Width = 0,
     int Height = 0,
-    float YawDeltaDegrees = 0);
+    float YawDeltaDegrees = 0,
+    string? CameraMode = null);
 
 /// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
@@ -93,6 +94,8 @@ internal sealed class HeadlessScenario
             ["successfulUpscaleFrames"] = (JsonValueKind.Number, true),
             ["preparedFrames"] = (JsonValueKind.Number, true),
             ["mapPageRendererActive"] = (JsonValueKind.True, false),
+            ["validAnimatedHistoryUploads"] = (JsonValueKind.Number, false),
+            ["animatedMotionWindows"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -108,7 +111,8 @@ internal sealed class HeadlessScenario
         };
     private static readonly HashSet<string> MonotonicTotals = new(StringComparer.Ordinal)
     {
-        "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents"
+        "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
+        "validAnimatedHistoryUploads", "animatedMotionWindows"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)
@@ -240,13 +244,16 @@ internal sealed class HeadlessScenario
                 }
                 case "camera":
                 {
-                    RequireOnly(properties, ["id", "tick", "kind", "yawDeltaDegrees"], "ActionField");
+                    RequireOnly(properties, ["id", "tick", "kind", "yawDeltaDegrees", "mode"], "ActionField");
                     RequireAll(properties, ["yawDeltaDegrees"], "ActionField");
                     if (context != "world" || properties["yawDeltaDegrees"].ValueKind != JsonValueKind.Number ||
                         !properties["yawDeltaDegrees"].TryGetSingle(out float yaw) ||
                         !float.IsFinite(yaw) || Math.Abs(yaw) > 180f)
                         throw Error("CameraRange", "Camera yaw requires a world and finite degrees in -180..180.");
-                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Camera, YawDeltaDegrees: yaw);
+                    string? mode = properties.TryGetValue("mode", out var modeValue) ? RequiredString(modeValue, "CameraMode") : null;
+                    if (mode is not (null or "FirstPerson" or "ThirdPerson" or "Overhead"))
+                        throw Error("CameraMode", "Unknown camera mode: " + mode);
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Camera, YawDeltaDegrees: yaw, CameraMode: mode);
                     break;
                 }
                 case "settings":

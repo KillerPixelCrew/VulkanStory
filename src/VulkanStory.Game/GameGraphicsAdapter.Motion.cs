@@ -11,6 +11,7 @@ namespace VulkanStory.Game;
 // Retained primary motion window and far-depth sky/cloud reactive pass.
 internal sealed partial class GameGraphicsAdapter
 {
+    internal long AnimatedMotionWindows { get; private set; }
     private readonly NativeFullscreenPass nativeSkyMotion = new("taa-skymotion",
         ["taaRenderSize", "taaJitterPx", "taaInvViewProjJittered", "taaPrevViewProj", "taaCloudReactive"], ["transparentRevealTex"]);
     private int skyMotionProgram, skyMotionLocation = -1;
@@ -58,13 +59,21 @@ internal sealed partial class GameGraphicsAdapter
     /// <returns>True when the motion write mask was opened; false when the scene/target/program prerequisites decline.</returns>
     internal bool BeginAnimatedMotionWrite()
     {
-        RequireDevice();
+        var renderer = RequireDevice();
         if (aoTemporal?.EntityMotion.Enabled != true || !aoTemporal.State.JitterActive ||
-            ShaderProgramBase.CurrentShaderProgram is not { PassName: "entityanimated" } program ||
-            !program.HasUniform("taaHistoryValid")) return false;
+            ShaderProgramBase.CurrentShaderProgram is not { } program || StatedProgram != program.ProgramId ||
+            !renderer.TryGetAnimatedMotionContract(program.ProgramId, FrameState.MotionAttachment, out _) ||
+            !program.ubos.TryGetValue("Animation", out var animation) || animation is not UBO buffer || buffer.Disposed ||
+            !UniformBuffers.TryGetValue(buffer, out var owner) || !ReferenceEquals(owner.Adapter, this) ||
+            !previousAnimations.TryGetValue(program.ProgramId, out var previous) || previous.Buffer.Disposed ||
+            renderer.ClientUniformBufferBoundHandle("Animation") != owner.Handle ||
+            renderer.ClientUniformBufferBoundHandle("AnimationPrev") != UniformBufferHandle(previous.Buffer) ||
+            !aoTemporal.EntityMotion.HasCurrentUpload(program.ProgramId, owner.Handle, UniformBufferHandle(previous.Buffer))) return false;
         // Bone upload supplies per-entity model/joint history. Opening the mask
         // alone does not assert that those histories or the complete frame are valid.
-        return BeginMotionWrite(aoTemporal);
+        bool opened = BeginMotionWrite(aoTemporal);
+        if (opened) AnimatedMotionWindows++;
+        return opened;
     }
     internal bool BeginMotionWrite(GameTemporalOwner temporal, bool onlyMotion = false)
     {

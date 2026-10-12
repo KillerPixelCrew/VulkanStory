@@ -222,6 +222,14 @@ internal sealed partial class GameRenderSession
                 {
                     var client = Temporal.CurrentClient ?? throw new InvalidOperationException("Camera action requires a world client.");
                     if (client.IsPaused) throw new InvalidOperationException("Camera action requires an unpaused world.");
+                    if (action.CameraMode is { } modeName)
+                    {
+                        var mode = Enum.Parse<EnumCameraMode>(modeName);
+                        for (int attempt = 0; attempt < 2 && client.api.Render.CameraType != mode; attempt++)
+                            client.MainCamera.CycleMode();
+                        if (client.api.Render.CameraType != mode) throw new InvalidOperationException("Camera mode switch failed.");
+                        Temporal.State.RequestReset(EnumTemporalResetReason.Toggle);
+                    }
                     // Official PlayerCamera reads mouseYaw in the Before stage.
                     // Move that real camera input before it builds this frame's matrices.
                     client.mouseYaw = Vintagestory.API.MathTools.GameMath.Mod(
@@ -643,6 +651,8 @@ internal sealed partial class GameRenderSession
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
         Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
+        Aggregate("validAnimatedHistoryUploads", Temporal.EntityMotion.ValidAnimationUploads);
+        Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
         Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));

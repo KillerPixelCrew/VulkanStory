@@ -12,7 +12,16 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
     private EntityMotionHistory? entityMotion;
     private StandardMotionHistory? standardMotion;
     private InstanceMotionHistory? instanceMotion;
-    internal EntityMotionHistory EntityMotion => entityMotion ??= new EntityMotionHistory(State);
+    internal EntityMotionHistory EntityMotion => entityMotion ??= new EntityMotionHistory(State, ReadWarp);
+    private (float Wind, float Water) ReadWarp(int program)
+    {
+        float wind = 1f, water = 0f;
+        if (device.GetUniformLocation(program, "windWaveIntensity") >= 0 &&
+            !device.TryReadClientFloatUniform(program, "windWaveIntensity", out wind)) wind = float.NaN;
+        if (device.GetUniformLocation(program, "waterWaveCounter") >= 0 &&
+            !device.TryReadClientFloatUniform(program, "waterWaveCounter", out water)) water = float.NaN;
+        return (wind, water);
+    }
     internal StandardMotionHistory StandardMotion => standardMotion ??= new StandardMotionHistory(State, EntityMotion);
     internal InstanceMotionHistory InstanceMotion => instanceMotion ??= new InstanceMotionHistory(State, EntityMotion);
     internal void SetMotionShaderMode(bool enabled)
@@ -50,6 +59,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (!ReferenceEquals(value.Platform, platform)) throw new InvalidOperationException("Temporal client has another platform.");
         if (!ReferenceEquals(client, value))
         {
+            entityMotion?.Clear();
             client = value;
             State.RequestReset(EnumTemporalResetReason.WorldLoad);
         }

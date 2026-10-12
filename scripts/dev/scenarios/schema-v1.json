@@ -27,6 +27,9 @@
             "$ref": "#/$defs/settings"
           },
           {
+            "$ref": "#/$defs/camera"
+          },
+          {
             "$ref": "#/$defs/capture"
           },
           {
@@ -246,6 +249,20 @@
       ],
       "unevaluatedProperties": false
     },
+    "camera": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "properties": {
+            "kind": { "const": "camera" },
+            "yawDeltaDegrees": { "type": "number", "minimum": -180, "maximum": 180 },
+            "mode": { "enum": ["FirstPerson", "ThirdPerson", "Overhead"] }
+          },
+          "required": ["yawDeltaDegrees"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "capture": {
       "allOf": [
         {
@@ -335,6 +352,8 @@
                 "dlssDynamicMfgSupport",
                 "successfulUpscaleFrames",
                 "preparedFrames",
+                "validAnimatedHistoryUploads",
+                "animatedMotionWindows",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -453,6 +472,8 @@
                       "enum": [
                         "displayWidth",
                         "displayHeight",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -639,7 +660,9 @@
                         "scenarioTick",
                         "worldFrame",
                         "sampledAtFrameId",
-                        "completedFrameId"
+                        "completedFrameId",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows"
                       ]
                     },
                     "op": {
@@ -657,7 +680,9 @@
                         "successfulUpscaleFrames",
                         "preparedFrames",
                         "realPresents",
-                        "sdkReportedPresents"
+                        "sdkReportedPresents",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows"
                       ]
                     },
                     "op": {
