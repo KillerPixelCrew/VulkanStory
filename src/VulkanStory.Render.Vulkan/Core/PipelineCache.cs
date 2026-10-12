@@ -548,6 +548,10 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         }
     }
 
+    // Native driver compilers can use deep stacks. AMD recommends avoiding small-stack
+    // PSO threads; reserve 8 MiB instead of inheriting the Windows apphost's stack size.
+    private const int CompilerWorkerStackBytes = 8 * 1024 * 1024;
+
     private Thread[] StartWorkers()
     {
         // One or two: compiles hold the main cache's lock only for the short warm attempt
@@ -557,7 +561,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         var workers = new Thread[count];
         for (int i = 0; i < count; i++)
         {
-            workers[i] = new Thread(WorkerLoop)
+            workers[i] = new Thread(WorkerLoop, CompilerWorkerStackBytes)
             {
                 IsBackground = true,
                 Name = "optimum-pipeline-compile-" + i,
