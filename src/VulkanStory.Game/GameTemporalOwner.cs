@@ -22,7 +22,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
             !device.TryReadClientFloatUniform(program, "waterWaveCounter", out water)) water = float.NaN;
         return (wind, water);
     }
-    internal StandardMotionHistory StandardMotion => standardMotion ??= new StandardMotionHistory(State, EntityMotion);
+    internal StandardMotionHistory StandardMotion => standardMotion ??= new StandardMotionHistory(State, EntityMotion, reason => RejectMotionDraw(reason));
     internal InstanceMotionHistory InstanceMotion => instanceMotion ??= new InstanceMotionHistory(State, EntityMotion);
     internal void SetMotionShaderMode(bool enabled)
     {
@@ -60,6 +60,7 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         if (!ReferenceEquals(client, value))
         {
             entityMotion?.Clear();
+            standardMotion?.Clear();
             client = value;
             State.RequestReset(EnumTemporalResetReason.WorldLoad);
         }
@@ -123,6 +124,8 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
     {
         if (!ReferenceEquals(client, value)) return;
         client = null;
+        entityMotion?.Clear();
+        standardMotion?.Clear();
         inScene = motionValid = false;
         MotionReadiness = "world detached";
         previousFov = 0;

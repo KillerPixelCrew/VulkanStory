@@ -151,6 +151,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         ReleasePreviousAnimation(program);
         aoTemporal?.EntityMotion.ReleaseProgram(program);
+        aoTemporal?.StandardMotion.ReleaseProgram(program);
         motionInputLocations.Remove(program);
         RequireDevice().DeleteProgram(program);
         worldSamplerNames.Remove(program);

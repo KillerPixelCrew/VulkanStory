@@ -385,6 +385,9 @@
                 "preparedFrames",
                 "validAnimatedHistoryUploads",
                 "animatedMotionWindows",
+                "validRigidHistoryWrites",
+                "rigidEntityMotionWindows",
+                "validRigidEntityHistoryWrites",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -505,6 +508,9 @@
                         "displayHeight",
                         "validAnimatedHistoryUploads",
                         "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -693,7 +699,10 @@
                         "sampledAtFrameId",
                         "completedFrameId",
                         "validAnimatedHistoryUploads",
-                        "animatedMotionWindows"
+                        "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites"
                       ]
                     },
                     "op": {
@@ -713,7 +722,10 @@
                         "realPresents",
                         "sdkReportedPresents",
                         "validAnimatedHistoryUploads",
-                        "animatedMotionWindows"
+                        "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites"
                       ]
                     },
                     "op": {

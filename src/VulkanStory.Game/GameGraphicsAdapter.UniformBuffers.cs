@@ -136,6 +136,8 @@ internal sealed partial class GameGraphicsAdapter
         }
         if (failures.Count != 0) throw new AggregateException("Previous animation cleanup failed.", failures);
         aoTemporal?.EntityMotion.Clear();
+        aoTemporal?.StandardMotion.Clear();
+        rigidEntityScope = default;
         motionInputLocations.Clear();
     }
 }

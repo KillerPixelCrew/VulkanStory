@@ -675,6 +675,9 @@ internal sealed partial class GameRenderSession
         Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
         Aggregate("validAnimatedHistoryUploads", Temporal.EntityMotion.ValidAnimationUploads);
         Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
+        Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);
+        Aggregate("rigidEntityMotionWindows", Graphics.RigidEntityMotionWindows);
+        Aggregate("validRigidEntityHistoryWrites", Graphics.ValidRigidEntityHistoryWrites);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
         Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));

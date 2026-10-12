@@ -97,6 +97,9 @@ internal sealed class HeadlessScenario
             ["mapPageRendererActive"] = (JsonValueKind.True, false),
             ["validAnimatedHistoryUploads"] = (JsonValueKind.Number, false),
             ["animatedMotionWindows"] = (JsonValueKind.Number, false),
+            ["validRigidHistoryWrites"] = (JsonValueKind.Number, false),
+            ["rigidEntityMotionWindows"] = (JsonValueKind.Number, false),
+            ["validRigidEntityHistoryWrites"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -113,7 +116,8 @@ internal sealed class HeadlessScenario
     private static readonly HashSet<string> MonotonicTotals = new(StringComparer.Ordinal)
     {
         "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
-        "validAnimatedHistoryUploads", "animatedMotionWindows"
+        "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
+        "rigidEntityMotionWindows", "validRigidEntityHistoryWrites"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

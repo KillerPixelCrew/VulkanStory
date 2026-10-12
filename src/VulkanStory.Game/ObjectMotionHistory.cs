@@ -16,6 +16,7 @@ namespace VulkanStory.Game;
         /// </summary>
         public bool Enabled;
         internal long ValidAnimationUploads { get; private set; }
+        internal long ModelCaptureSerial { get; private set; }
 
         private sealed class History
         {
@@ -47,7 +48,7 @@ namespace VulkanStory.Game;
         {
             internal readonly float[] Model = new float[16];
             internal float UploadWind, UploadWater;
-            internal long ModelFrame = -1, Revision, UploadFrame = -1, UploadRevision;
+            internal long ModelFrame = -1, ModelSerial, Revision, UploadFrame = -1, UploadRevision;
             internal EnumTemporalView ModelView, UploadView;
             internal int UploadBuffer, UploadPreviousBuffer;
         }
@@ -60,6 +61,15 @@ namespace VulkanStory.Game;
         internal (float Wind, float Water) CurrentWarp(int program) => readWarp(program);
         internal bool HasCurrentModel(int program) => inputs.TryGetValue(program, out var state) &&
             state.ModelFrame == temporal.FrameIndex && state.ModelView == temporal.ActiveView;
+        // Borrowed capture for an immediate draw; the next accepted model write replaces its contents.
+        internal bool TryGetCurrentModel(int program, long capturedAfter, out float[] model)
+        {
+            model = null;
+            if (!inputs.TryGetValue(program, out var state) || state.ModelFrame != temporal.FrameIndex ||
+                state.ModelView != temporal.ActiveView || state.ModelSerial <= capturedAfter) return false;
+            model = state.Model;
+            return true;
+        }
         internal bool HasCurrentUpload(int program, int buffer, int previousBuffer) => HasCurrentModel(program) &&
             inputs[program].UploadFrame == temporal.FrameIndex && inputs[program].UploadView == temporal.ActiveView &&
             inputs[program].UploadRevision == inputs[program].Revision && inputs[program].UploadBuffer == buffer &&
@@ -99,6 +109,7 @@ namespace VulkanStory.Game;
             DrawInputs state = Inputs(program);
             if (!matrix[..16].SequenceEqual(state.Model)) state.Revision++;
             matrix[..16].CopyTo(state.Model);
+            state.ModelSerial = ++ModelCaptureSerial;
             state.ModelFrame = temporal.FrameIndex;
             state.ModelView = temporal.ActiveView;
         }
@@ -234,16 +245,23 @@ namespace VulkanStory.Game;
 
 
     /// <summary>Tracks rigid draw transforms by stable object identity and rejects previous data after shape, view or frame discontinuity.</summary>
-    internal sealed class StandardMotionHistory(TemporalFrameState temporal, EntityMotionHistory drawState)
+    internal sealed class StandardMotionHistory(TemporalFrameState temporal, EntityMotionHistory drawState,
+        Action<string> rejectAmbiguous)
     {
+        internal long ValidHistoryWrites { get; private set; }
+
+        private readonly record struct GeometryPart(MeshRef Mesh, long Revision);
+
         private sealed class History
         {
             public readonly float[] PrevModelMatrix = new float[16];
             public readonly float[] CurModelMatrix = new float[16];
 
-            /// <summary>The mesh drawn last frame; a different one means a different shape.</summary>
+            /// <summary>The mesh wrapper and exact part geometry drawn in each frame.</summary>
             public object PrevShape;
             public object CurShape;
+            public GeometryPart[] PrevGeometry = [];
+            public GeometryPart[] CurGeometry = [];
 
             public float PrevWindWaveIntensity = 1f;
             public float CurWindWaveIntensity = 1f;
@@ -255,13 +273,24 @@ namespace VulkanStory.Game;
 
             public long CapturedFrame = -1;
             public long PreviousFrame = -1;
+            public bool CurAmbiguous, PrevAmbiguous, FrameValidWritten;
         }
 
-        private readonly ConditionalWeakTable<object, History> histories = new ConditionalWeakTable<object, History>();
+        private readonly ConditionalWeakTable<object, Dictionary<(int Program, EnumTemporalView View), History>> histories = new();
 
         private IShaderProgram sharedUniformProgram;
         private long sharedUniformFrame = -1;
         private EnumTemporalView sharedUniformView;
+
+        internal void ReleaseProgram(int program)
+        {
+            foreach (var entry in histories)
+                foreach (var key in entry.Value.Keys.Where(key => key.Program == program).ToArray()) entry.Value.Remove(key);
+            if (sharedUniformProgram?.ProgramId == program) sharedUniformProgram = null;
+        }
+
+        internal void Clear()
+        { histories.Clear(); sharedUniformProgram = null; sharedUniformFrame = -1; }
 
         /// <summary>
         /// Feeds one standard-shader draw's previous transform to the writer.
@@ -274,19 +303,13 @@ namespace VulkanStory.Game;
         public bool Apply(IShaderProgram program, object identity, object shape, float[] modelMatrix)
         {
             if (!drawState.Enabled || program == null || identity == null) return false;
-            if (modelMatrix == null || modelMatrix.Length < 16) return false;
             if (!program.HasUniform("taaHistoryValid")) return false;
-            var warp = drawState.CurrentWarp(program.ProgramId);
-            if (!float.IsFinite(warp.Wind) || !float.IsFinite(warp.Water))
-            {
-                program.Uniform("taaHistoryValid", 0);
-                if (program.HasUniform("taaReactive")) program.Uniform("taaReactive", 1f);
-                return false;
-            }
-
             TemporalFrameState frame = temporal;
             EnumTemporalView view = frame.ActiveView;
-            History history = histories.GetValue(identity, _ => new History());
+            var programs = histories.GetValue(identity, _ => new());
+            var key = (program.ProgramId, view);
+            if (!programs.TryGetValue(key, out var history)) programs.Add(key, history = new History());
+            bool repeated = history.CapturedFrame == frame.FrameIndex;
 
             // One roll per frame, not per draw: something drawn twice in a frame must
             // both times compare against the frame before, not against its own first draw.
@@ -294,23 +317,80 @@ namespace VulkanStory.Game;
             {
                 Array.Copy(history.CurModelMatrix, history.PrevModelMatrix, 16);
                 history.PrevShape = history.CurShape;
+                var geometrySwap = history.PrevGeometry;
+                history.PrevGeometry = history.CurGeometry;
+                history.CurGeometry = geometrySwap;
                 history.PrevWindWaveIntensity = history.CurWindWaveIntensity;
                 history.PrevWaterWaveCounter = history.CurWaterWaveCounter;
                 history.PrevView = history.CurView;
                 history.PreviousFrame = history.CapturedFrame;
                 history.CapturedFrame = frame.FrameIndex;
+                history.PrevAmbiguous = history.CurAmbiguous;
+                history.CurAmbiguous = false;
+                history.FrameValidWritten = false;
+            }
+
+            bool modelValid = modelMatrix != null && modelMatrix.Length >= 16;
+            if (modelValid)
+                for (int i = 0; i < 16; i++)
+                    if (!float.IsFinite(modelMatrix[i])) { modelValid = false; break; }
+            MeshRef singleMesh = shape as MeshRef;
+            MeshRef[] meshParts = (shape as MultiTextureMeshRef)?.meshrefs;
+            int partCount = singleMesh != null ? 1 : meshParts?.Length ?? 0;
+            bool geometryValid = partCount > 0 && (shape is not MultiTextureMeshRef multi || !multi.Disposed);
+            bool geometryMatchesCurrent = ReferenceEquals(history.CurShape, shape) && history.CurGeometry.Length == partCount;
+            bool geometryMatchesPrevious = ReferenceEquals(history.PrevShape, shape) && history.PrevGeometry.Length == partCount;
+            if (geometryValid)
+                for (int i = 0; i < partCount; i++)
+                {
+                    MeshRef part = singleMesh ?? meshParts[i];
+                    long revision = part == null || part.Disposed ? -1 : GameGraphicsAdapter.MeshGeometryRevision(part);
+                    if (revision < 0) { geometryValid = false; break; }
+                    if (geometryMatchesCurrent && (!ReferenceEquals(history.CurGeometry[i].Mesh, part) ||
+                        history.CurGeometry[i].Revision != revision)) geometryMatchesCurrent = false;
+                    if (geometryMatchesPrevious && (!ReferenceEquals(history.PrevGeometry[i].Mesh, part) ||
+                        history.PrevGeometry[i].Revision != revision)) geometryMatchesPrevious = false;
+                }
+            var warp = drawState.CurrentWarp(program.ProgramId);
+            if (!modelValid || !geometryValid || !float.IsFinite(warp.Wind) || !float.IsFinite(warp.Water))
+            {
+                bool newlyAmbiguous = !history.CurAmbiguous;
+                history.CurAmbiguous = true;
+                if (newlyAmbiguous && history.FrameValidWritten)
+                    rejectAmbiguous?.Invoke("rigid object identity received invalid same-frame draw inputs");
+                program.Uniform("taaHistoryValid", 0);
+                if (program.HasUniform("taaReactive")) program.Uniform("taaReactive", 1f);
+                return false;
+            }
+
+            // A stable object identity cannot describe independently transformed parts.
+            // If an earlier valid draw already consumed this history, reject the frame's certification too.
+            if (repeated && !history.CurAmbiguous &&
+                (!modelMatrix.AsSpan(0, 16).SequenceEqual(history.CurModelMatrix) ||
+                !geometryMatchesCurrent ||
+                history.CurWindWaveIntensity != warp.Wind || history.CurWaterWaveCounter != warp.Water))
+            {
+                history.CurAmbiguous = true;
+                if (history.FrameValidWritten) rejectAmbiguous?.Invoke("rigid object identity aliases multiple same-frame draws");
             }
 
             Array.Copy(modelMatrix, history.CurModelMatrix, 16);
             history.CurShape = shape;
+            if (history.CurGeometry.Length != partCount) history.CurGeometry = new GeometryPart[partCount];
+            for (int i = 0; i < partCount; i++)
+            {
+                MeshRef part = singleMesh ?? meshParts[i];
+                history.CurGeometry[i] = new GeometryPart(part, GameGraphicsAdapter.MeshGeometryRevision(part));
+            }
             history.CurWindWaveIntensity = warp.Wind;
             history.CurWaterWaveCounter = warp.Water;
             history.CurView = view;
 
             bool valid =
                 !frame.Reset &&
+                !history.CurAmbiguous && !history.PrevAmbiguous &&
                 history.PreviousFrame == frame.FrameIndex - 1 &&
-                ReferenceEquals(history.PrevShape, shape) &&
+                geometryMatchesPrevious &&
                 history.PrevView == view &&
                 frame.WasViewCaptured(view);
 
@@ -349,6 +429,11 @@ namespace VulkanStory.Game;
                 program.Uniform("prevWaterWaveCounter", valid ? history.PrevWaterWaveCounter : history.CurWaterWaveCounter);
             }
 
+            if (valid)
+            {
+                history.FrameValidWritten = true;
+                ValidHistoryWrites++;
+            }
             return valid;
         }
     }

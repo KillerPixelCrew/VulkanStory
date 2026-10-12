@@ -319,6 +319,11 @@ public sealed unsafe partial class VulkanDevice
             program.AnimatedMotion.TryGet(motionAttachment, out maximumJointMatrices);
     }
 
+    /// <summary>Checks the linked rigid motion ABI at the active motion attachment.</summary>
+    internal bool HasRigidMotionContract(int programId, int motionAttachment) =>
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) &&
+        program.RigidMotion.Has(motionAttachment);
+
     /// <summary>Reads a declared scalar float from the actual shadow consumed by the next draw.</summary>
     internal bool TryReadClientFloatUniform(int programId, string name, out float value)
     {

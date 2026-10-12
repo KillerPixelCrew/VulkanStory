@@ -107,10 +107,11 @@ internal static class HeldItemMotionConsumerPatches
         var program = ShaderProgramBase.CurrentShaderProgram;
         object? point = pose == null ? null : attachmentPoint!(pose);
         bool opened = false;
+        var entityScope = session.Graphics.EnterRigidEntityMotionScope(null);
         try
         {
             if (!shadow && temporal.EntityMotion.Enabled && temporal.State.JitterActive && program != null &&
-                program.HasUniform("taaHistoryValid") && point != null && model!(renderer) is { } transform)
+                session.Graphics.HasRigidMotionContract(program) && point != null && model!(renderer) is { } transform)
             {
                 bool alreadyOpen = session.Graphics.FrameState.MotionWriteActive;
                 opened = session.Graphics.BeginMotionWrite(temporal);
@@ -122,6 +123,10 @@ internal static class HeldItemMotionConsumerPatches
             }
             render.RenderMultiTextureMesh(mesh, sampler, unit);
         }
-        finally { if (opened) session.Graphics.EndMotionWrite(); }
+        finally
+        {
+            if (opened) session.Graphics.EndMotionWrite();
+            session.Graphics.ExitRigidEntityMotionScope(entityScope);
+        }
     }
 }
