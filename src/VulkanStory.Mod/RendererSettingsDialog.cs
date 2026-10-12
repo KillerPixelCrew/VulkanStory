@@ -56,18 +56,16 @@ internal sealed class RendererSettingsDialog : GuiDialog
         bool Live() => IsOpened() && ReferenceEquals(SingleComposer, composer);
         panel.AddCompactPageNavigation(composer, contentWidth, Live);
         var clip = ElementBounds.Fixed(0, 42, contentWidth, visibleHeight);
-        var body = ElementBounds.Fixed(0, 0, contentWidth, 1).WithParent(clip);
+        var body = new SettingsScrollContent(capi, clip, contentWidth);
         composer.AddVerticalScrollbar(value =>
         {
             if (!ReferenceEquals(SingleComposer, composer)) return;
-            scrollOffset = value; body.fixedY = -value;
-            body.MarkDirtyRecursive(); body.CalcWorldBounds();
+            scrollOffset = value; body.ScrollTo(value);
         }, ElementBounds.Fixed(width - 20, 42, 20, visibleHeight), "vulkanstory-scroll")
-            .BeginClip(clip).BeginChildElements(body);
-        Action initialize = panel.AddContent(composer, contentWidth, out double contentHeight,
+            .AddInteractiveElement(body, "vulkanstory-content");
+        Action initialize = panel.AddContent(body.Content, contentWidth, out double contentHeight,
             canInteract: Live, includeFooter: false, includePages: false);
-        body.fixedHeight = contentHeight;
-        composer.EndChildElements().EndClip();
+        body.SetHeight(contentHeight);
         panel.AddFooter(composer, contentWidth, height - 30, Live);
         SingleComposer = composer.EndChildElements().Compose();
         initialize();

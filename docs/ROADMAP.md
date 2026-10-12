@@ -10,7 +10,7 @@ Current release: [v0.1.2](https://github.com/KillerPixelCrew/VulkanStory/release
 - Stable geometry boundaries against sky and clouds with TAA and upscaling
 - Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG
 - Low latency: Reflex / PC Latency, Anti-Lag, XeLL
-- Options menu integration
+- Options menu integration, with clipped scrolling that moves labels, controls and their backgrounds together
 - Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
 - Screenshot, timelapse and AVI capture
 - Render-pass extension points for other mods

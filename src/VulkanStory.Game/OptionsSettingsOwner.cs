@@ -235,20 +235,18 @@ internal sealed class OptionsSettingsOwner
             if (visibleHeight < 40)
                 throw new InvalidOperationException("Resize the window or lower GUI scale to show Options navigation and content.");
             var clip = ElementBounds.Fixed(0, contentTop, contentWidth, visibleHeight);
-            var body = ElementBounds.Fixed(0, 0, contentWidth, 1).WithParent(clip);
+            var body = new SettingsScrollContent(Api(owner), clip, contentWidth);
             replacement.AddVerticalScrollbar(value =>
             {
                 // SetHeights/restore run before publication and must still move
                 // this new body; a later callback from a replaced composer may not.
                 if (published && !LiveComposition()) return;
-                scrollOffset = value; body.fixedY = -value;
-                body.MarkDirtyRecursive(); body.CalcWorldBounds();
+                scrollOffset = value; body.ScrollTo(value);
             }, ElementBounds.Fixed(width - 20, contentTop, 20, visibleHeight), "vulkanstory-scroll")
-                .BeginClip(clip).BeginChildElements(body);
-            Action initialize = panel!.AddContent(replacement, contentWidth, out double contentHeight,
+                .AddInteractiveElement(body, "vulkanstory-content");
+            Action initialize = panel!.AddContent(body.Content, contentWidth, out double contentHeight,
                 canInteract: LiveComposition, includeFooter: false, includePages: false);
-            body.fixedHeight = contentHeight;
-            replacement.EndChildElements().EndClip();
+            body.SetHeight(contentHeight);
             panel.AddFooter(replacement, contentWidth, height - 30, LiveComposition);
             replacement.EndChildElements().Compose();
             initialize(); replacement.GetToggleButton("vulkanstory").SetValue(true);

@@ -2,6 +2,7 @@
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/RendererSettingsPanel.cs" Link="Settings/RendererSettingsPanel.cs" />
+    <Compile Include="../Shared/SettingsScrollContent.cs" Link="Settings/SettingsScrollContent.cs" />
     <Compile Include="../Shared/RendererChoices.cs" Link="Settings/RendererChoices.cs" />
     <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />

@@ -159,7 +159,8 @@ internal sealed partial class GameRenderSession
     private (bool Before, bool Expected) ClickOptionsTaaAction(GuiComposer shown, string action)
     {
         bool before = RuntimeBootstrap.Current.RequestedSettings.Taa;
-        ClickOptionsControl(shown, shown.GetSwitch("Taa").Bounds, "TAA switch");
+        var content = ((SettingsScrollContent)shown.GetElement("vulkanstory-content")).Content;
+        ClickOptionsControl(shown, content.GetSwitch("Taa").Bounds, "TAA switch");
         ClickOptionsFooter(shown, action);
         return (before, action == "save" ? !before : before);
     }
@@ -243,7 +244,8 @@ internal sealed partial class GameRenderSession
             throw new InvalidOperationException("Multiplier diagnostic lost its original Options page/world.");
         if (!pending.Clicked)
         {
-            var slider = shown.GetSlider("FrameGenerationMultiplier");
+            var content = ((SettingsScrollContent)shown.GetElement("vulkanstory-content")).Content;
+            var slider = content.GetSlider("FrameGenerationMultiplier");
             int y = (int)(slider.Bounds.renderY + slider.Bounds.OuterHeight / 2);
             int start = (int)(slider.Bounds.renderX + slider.Bounds.OuterWidth / 2);
             int end = (int)(slider.Bounds.renderX + slider.Bounds.OuterWidth - 2);
