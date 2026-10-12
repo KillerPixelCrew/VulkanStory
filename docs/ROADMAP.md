@@ -14,7 +14,7 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 - Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
 - Screenshot, timelapse and AVI capture
 - Render-pass extension points for other mods
-- Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history and rigid entity transforms with stable identities, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
+- Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history, rigid entity and inventory-slot transforms with stable identities, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
 - Windows install, update and removal
 - Loading screen stays up until the first world frame is complete
 - Shaders ship as one container, `shaders-vk.pak`

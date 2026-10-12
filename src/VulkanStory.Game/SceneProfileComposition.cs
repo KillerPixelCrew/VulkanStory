@@ -27,6 +27,7 @@ internal static class SceneProfileComposition
             HeldItemMotionConsumerPatches.CreateGroup(runtime, essentials),
             InstanceMotionConsumerPatches.CreateGroup(runtime, survival),
             RigidContentMotionConsumerPatches.CreateGroup(runtime, survival),
+            InventoryMotionConsumerPatches.CreateGroup(runtime, survival),
             DroppedFallingMotionConsumerPatches.CreateGroup(runtime, essentials),
             DirectAnimatedMotionConsumerPatches.CreateGroup(runtime, survival),
             SceneRawStateConsumerPatches.CreateGroup(runtime, survival),
@@ -40,6 +41,7 @@ internal static class SceneProfileComposition
             "graphics-scene-particles", "graphics-scene-decals", "graphics-scene-chunks",
             "graphics-scene-cloud-volumetric", "graphics-scene-cloud-map", "graphics-scene-entities",
             "graphics-motion-held-items", "graphics-motion-instances", "graphics-motion-rigid-content",
+            "graphics-motion-inventory",
             "graphics-motion-dropped-falling", "graphics-motion-direct-animated", "graphics-scene-raw-state",
         ];
         var attempted = new List<StartupPatchGroup>();

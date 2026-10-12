@@ -35,6 +35,16 @@ order is not substituted for object identity. This ABI check does not reconstruc
 arbitrary procedural deformation or prove a shader's motion equations. Such draws
 still require their real previous inputs through the motion-writer contract below.
 
+Rigid entity dispatch supplies the actual entity identity; drawing additionally
+requires a model upload inside that callback and a linked rigid motion interface.
+The core ground-storage producer supplies its actual inventory slot at each draw,
+so distinct slots can share cached geometry without sharing transform history.
+Replacing a stack resets that slot's history. Exact mesh members and geometry
+revisions, shader/view changes, and world transitions invalidate stale captures.
+An ordinary renderer callback can manage many objects, so its receiver alone does
+not establish their identities. Unassociated custom subobjects and deformation
+still need their real previous inputs through the explicit writer contract.
+
 Direct OpenGL calls are different. OpenTK GL calls, native GL imports and GL
 proc-address loaders expect an OpenGL context and cannot operate on Vulkan
 resources. When Vulkan routing is active, `ModGlUsage` examines enabled client

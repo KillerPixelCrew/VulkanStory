@@ -442,7 +442,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -484,7 +484,7 @@ foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','w
 foreach ($name in @('temporalFrameId','renderWidth','renderHeight','configuredDlssGeneratedFrames','dlssStateQueryFrameId','dlssStateQueryResult','dlssMaximumGenerated','dlssDynamicMfgSupport','successfulUpscaleFrames','preparedFrames')) {
     $script:assertionKinds.Add($name, 'number?')
 }
-foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites')) {
+foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws')) {
     $script:assertionKinds.Add($name, 'number')
 }
 foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase','optionsHost')) {

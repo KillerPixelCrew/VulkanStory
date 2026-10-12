@@ -388,6 +388,9 @@
                 "validRigidHistoryWrites",
                 "rigidEntityMotionWindows",
                 "validRigidEntityHistoryWrites",
+                "inventoryMotionWindows",
+                "validInventoryHistoryWrites",
+                "inventorySharedGeometryDraws",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -511,6 +514,9 @@
                         "validRigidHistoryWrites",
                         "rigidEntityMotionWindows",
                         "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -702,7 +708,10 @@
                         "animatedMotionWindows",
                         "validRigidHistoryWrites",
                         "rigidEntityMotionWindows",
-                        "validRigidEntityHistoryWrites"
+                        "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws"
                       ]
                     },
                     "op": {
@@ -725,7 +734,10 @@
                         "animatedMotionWindows",
                         "validRigidHistoryWrites",
                         "rigidEntityMotionWindows",
-                        "validRigidEntityHistoryWrites"
+                        "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws"
                       ]
                     },
                     "op": {

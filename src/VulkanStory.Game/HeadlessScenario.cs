@@ -100,6 +100,9 @@ internal sealed class HeadlessScenario
             ["validRigidHistoryWrites"] = (JsonValueKind.Number, false),
             ["rigidEntityMotionWindows"] = (JsonValueKind.Number, false),
             ["validRigidEntityHistoryWrites"] = (JsonValueKind.Number, false),
+            ["inventoryMotionWindows"] = (JsonValueKind.Number, false),
+            ["validInventoryHistoryWrites"] = (JsonValueKind.Number, false),
+            ["inventorySharedGeometryDraws"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -117,7 +120,8 @@ internal sealed class HeadlessScenario
     {
         "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
         "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
-        "rigidEntityMotionWindows", "validRigidEntityHistoryWrites"
+        "rigidEntityMotionWindows", "validRigidEntityHistoryWrites", "inventoryMotionWindows", "validInventoryHistoryWrites",
+        "inventorySharedGeometryDraws"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

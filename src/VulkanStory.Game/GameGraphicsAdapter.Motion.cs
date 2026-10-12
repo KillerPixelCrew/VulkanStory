@@ -12,6 +12,29 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     internal long AnimatedMotionWindows { get; private set; }
+    private int motionWriteSuspensions;
+    internal readonly record struct MotionWriteSuspension(int Target, uint Mask, bool Active, int Depth);
+    internal MotionWriteSuspension SuspendMotionWrites()
+    {
+        RequireDevice();
+        int target = CurrentTargetId;
+        uint mask = Stated.DrawBuffers(target);
+        var prior = new MotionWriteSuspension(target, mask, FrameState.MotionWriteActive, ++motionWriteSuspensions);
+        int motion = FrameState.MotionAttachment;
+        FrameState = FrameState with { MotionWriteActive = false };
+        if (motion is >= 0 and < 32) Stated.SetDrawBuffers(target, mask & ~(1u << motion));
+        return prior;
+    }
+    internal void RestoreMotionWrites(MotionWriteSuspension prior)
+    {
+        RequireDevice();
+        if (motionWriteSuspensions != prior.Depth) throw new InvalidOperationException("Motion write suspension order changed.");
+        motionWriteSuspensions--;
+        Stated.SetDrawBuffers(prior.Target, prior.Mask);
+        FrameState = FrameState with { MotionWriteActive = prior.Active };
+        if (prior.Active && FrameState.MotionAttachment is >= 0 and < 32)
+            Stated.SetSlotBlend(FrameState.MotionAttachment, 32774, 1, 0, 1, 0);
+    }
     private readonly NativeFullscreenPass nativeSkyMotion = new("taa-skymotion",
         ["taaRenderSize", "taaJitterPx", "taaInvViewProjJittered", "taaPrevViewProj", "taaCloudReactive"], ["transparentRevealTex"]);
     private int skyMotionProgram, skyMotionLocation = -1;
@@ -79,7 +102,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         RequireDevice();
         int motion = FrameState.MotionAttachment;
-        if (FrameState.MotionWriteActive || motion is < 0 or >= 32 || !AoSettings.EffectiveTemporalPipeline ||
+        if (motionWriteSuspensions > 0 || FrameState.MotionWriteActive || motion is < 0 or >= 32 || !AoSettings.EffectiveTemporalPipeline ||
             !temporal.State.JitterActive || currentFramebuffer == null ||
             !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[0]) || currentFramebuffer.ColorTextureIds.Length <= motion)
             return false;

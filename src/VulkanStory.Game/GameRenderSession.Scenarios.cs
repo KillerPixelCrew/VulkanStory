@@ -678,6 +678,9 @@ internal sealed partial class GameRenderSession
         Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);
         Aggregate("rigidEntityMotionWindows", Graphics.RigidEntityMotionWindows);
         Aggregate("validRigidEntityHistoryWrites", Graphics.ValidRigidEntityHistoryWrites);
+        Aggregate("inventoryMotionWindows", Graphics.InventoryMotionWindows);
+        Aggregate("validInventoryHistoryWrites", Graphics.ValidInventoryHistoryWrites);
+        Aggregate("inventorySharedGeometryDraws", Graphics.InventorySharedGeometryDraws);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
         Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));
