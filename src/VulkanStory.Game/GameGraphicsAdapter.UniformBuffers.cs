@@ -84,7 +84,7 @@ internal sealed partial class GameGraphicsAdapter
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         if (program == null || StatedProgram != program.ProgramId ||
             !program.ubos.TryGetValue("Animation", out var current) || !ReferenceEquals(current, buffer) ||
-            renderer.ClientUniformBlockBinding(program.ProgramId, "Animation") != owner.Binding ||
+            renderer.ClientUniformBufferBoundHandle("Animation") != owner.Handle ||
             !renderer.TryGetAnimatedMotionContract(program.ProgramId, FrameState.MotionAttachment, out int capacity) ||
             (capacity > 0 && size / 64 > capacity) || !aoTemporal.EntityMotion.HasCurrentModel(program.ProgramId)) return;
         int? binding = renderer.ClientUniformBlockBinding(program.ProgramId, "AnimationPrev");

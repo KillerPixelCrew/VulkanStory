@@ -20,8 +20,7 @@ static custom geometry camera motion without replacing its shading. Independentl
 moving custom geometry still needs object/animation history: camera reprojection
 does not supply that history or certify an absent object writer.
 
-The animated-history integration remains in development. Programs using the
-ordinary game pose/model producer will be able to use that history
+Programs using the ordinary game pose/model producer can use animated history
 independently of their pass name. Eligibility requires linked motion output and
 compatible `Animation`/`AnimationPrev` column-major `mat4` arrays, plus the existing
 previous-camera/model uniforms. Pose uploads must cover whole matrices at offset
