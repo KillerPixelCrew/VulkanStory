@@ -28,22 +28,22 @@ internal sealed partial class GameGraphicsAdapter
         int id = 0;
         try
         {
-            var source = new ShaderProgram { PassName = "chunkliquidmotion", AssetDomain = "game", LoadFromFile = false };
-            string vertexCode = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource("chunkliquidmotion", "vsh"));
-            string fragmentCode = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource("chunkliquidmotion", "fsh"));
+            var includes = new HashSet<string>(StringComparer.Ordinal);
+            string vertexCode = ExpandOwnedShaderIncludes(OwnedShaderSource("chunkliquidmotion", "vsh"), includes);
+            string fragmentCode = ExpandOwnedShaderIncludes(OwnedShaderSource("chunkliquidmotion", "fsh"), includes);
             string prefix = MotionProgramPrefix(motion);
             var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader, Code = vertexCode, PrefixCode = prefix };
             var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader, Code = fragmentCode, PrefixCode = prefix };
             if (!renderer.CompileShader(vertex) || !renderer.CompileShader(fragment))
                 throw new InvalidOperationException(renderer.GetError());
-            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, new HashSet<string>(source.includes)));
+            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, includes));
             if (id <= 0) throw new InvalidOperationException(renderer.GetError());
             if (!renderer.NativeProgramWritesOutput(id, motion))
                 throw new InvalidOperationException("Liquid motion shader does not write attachment " + motion + ".");
             // A normal game shader identity lets existing pool origins and dimension transforms
             // use the same routed uniform API as every other terrain draw.
             var program = new ShaderProgram { ProgramId = id, PassName = "chunkliquidmotion", LoadFromFile = false };
-            program.includes.UnionWith(source.includes);
+            program.includes.UnionWith(includes);
             foreach (Match uniform in Regex.Matches(vertexCode + "\n" + fragmentCode, @"\buniform\s+\w+\s+(\w+)"))
             {
                 string name = uniform.Groups[1].Value;

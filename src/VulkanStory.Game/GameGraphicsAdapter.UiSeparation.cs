@@ -24,7 +24,7 @@ internal sealed partial class GameGraphicsAdapter
         // This renderer also owns the early menu, before the mod AssetsLoaded
         // stage. Read the game's selected base-asset map, as ShaderRegistry does.
         // The same map contains selected mod overrides after their normal load.
-        IAsset? replacement = platform!.AssetManager?.TryGet_BaseAssets(new AssetLocation("shaders/" + pass + "." + stage));
+        IAsset? replacement = OwnedShaderAsset(new AssetLocation("shaders/" + pass + "." + stage));
         if (replacement != null) return replacement.ToText();
         return EmbeddedShaderSource(pass + "." + stage) ?? throw new InvalidOperationException("Owned shader is missing: " + pass);
     }
@@ -35,14 +35,13 @@ internal sealed partial class GameGraphicsAdapter
         if (program > 0 || failed) return program;
         try
         {
-            var source = new ShaderProgram { PassName = pass, AssetDomain = "game", LoadFromFile = false };
+            var includes = new HashSet<string>(StringComparer.Ordinal);
             var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader,
-                Code = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource(pass, "vsh")), PrefixCode = prefix };
+                Code = ExpandOwnedShaderIncludes(OwnedShaderSource(pass, "vsh"), includes), PrefixCode = prefix };
             var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader,
-                Code = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource(pass, "fsh")), PrefixCode = prefix };
+                Code = ExpandOwnedShaderIncludes(OwnedShaderSource(pass, "fsh"), includes), PrefixCode = prefix };
             if (renderer.CompileShader(vertex) && renderer.CompileShader(fragment))
-                program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null,
-                    new HashSet<string>(source.includes)));
+                program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null, includes));
         }
         catch (Exception error)
         {

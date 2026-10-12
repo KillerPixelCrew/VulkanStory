@@ -6,8 +6,10 @@ Mods using Vintage Story's ordinary `RenderAPI` reach the same graphics adapter
 as the game. Game-facing texture/mesh IDs belong to a shared registry, so a mesh
 uploaded through the API is not placed in a disconnected renderer.
 
-Selected mod shader includes are preserved through the game's include expansion
-and the GLSL rewriter. Changing an include prevents use of the stock native shader
+Selected mod shader includes are preserved through asset resolution and the GLSL
+rewriter. Owned passes resolve includes without initializing the game's shader
+registry; ordinary registered stages keep the game's loading lifecycle. Changing
+an include prevents use of the stock native shader
 bundle; it does not by itself disable scene motion. Retained geometry stages must
 still link with the required motion outputs before the renderer publishes them.
 
