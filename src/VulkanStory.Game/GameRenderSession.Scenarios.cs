@@ -673,6 +673,7 @@ internal sealed partial class GameRenderSession
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
         Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
+        Aggregate("managedDependencyResolutionVerified", ModCompatibilityConsumerPatches.ManagedDependencyResolutionVerified);
         Aggregate("validAnimatedHistoryUploads", Temporal.EntityMotion.ValidAnimationUploads);
         Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
         Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);

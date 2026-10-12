@@ -14,7 +14,7 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 - Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
 - Screenshot, timelapse and AVI capture
 - Render-pass extension points for other mods
-- Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history, rigid entity and inventory-slot transforms with stable identities, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
+- Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history, rigid entity and inventory-slot transforms with stable identities, managed dependency filenames, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
 - Windows install, update and removal
 - Loading screen stays up until the first world frame is complete
 - Shaders ship as one container, `shaders-vk.pak`
@@ -60,6 +60,9 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
   4. Pipeline cache keyed by the active pack.
   5. Pack-declared composite/deferred passes in the frame graph.
 
+- **GL-02 / GL-03: Managed OpenGL compatibility**
+  - Support direct OpenTK rendering and context/window ownership in core adapters. The missing ImGui dependency needed by the supplied GUI addon exposes this requirement, including buffer/texture/shader draws and secondary viewports.
+
 - **VR-01: OpenXR VR**
   - First stereo step: OpenXR session and eye swapchains on the renderer's Vulkan device; two tracked eye views, runtime FOVs, headset presentation and a right-eye desktop mirror. Enable OpenXR on the Device settings page and restart with the headset connected. Raster rendering only; desktop temporal-provider settings are retained.
   1. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
@@ -70,6 +73,5 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 
 ## Deferred
 
-- **GL-02 / GL-03:** OpenGL compatibility adapters and profiles for other mods, once a target mod is chosen.
 - **TEST-01:** Tests.
 - **LINUX-01:** Linux release.

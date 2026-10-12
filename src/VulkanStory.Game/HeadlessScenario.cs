@@ -95,6 +95,7 @@ internal sealed class HeadlessScenario
             ["successfulUpscaleFrames"] = (JsonValueKind.Number, true),
             ["preparedFrames"] = (JsonValueKind.Number, true),
             ["mapPageRendererActive"] = (JsonValueKind.True, false),
+            ["managedDependencyResolutionVerified"] = (JsonValueKind.True, false),
             ["validAnimatedHistoryUploads"] = (JsonValueKind.Number, false),
             ["animatedMotionWindows"] = (JsonValueKind.Number, false),
             ["validRigidHistoryWrites"] = (JsonValueKind.Number, false),

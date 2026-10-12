@@ -477,7 +477,7 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive')) {
+foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive','managedDependencyResolutionVerified')) {
     $script:assertionKinds.Add($name, 'bool')
 }
 foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','worldPaused')) { $script:assertionKinds.Add($name, 'bool?') }

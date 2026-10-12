@@ -21,6 +21,21 @@ internal static class ModCompatibilityConsumerPatches
     private static System.Func<ModLoader, List<ModContainer>, List<ModContainer>>? verify;
     private static ReadModInfo? readInfo;
     private static System.Action<GameMod, ModInfo>? setInfo;
+    internal static bool ManagedDependencyResolutionVerified { get; private set; }
+    internal static void VerifyManagedDependencyResolution()
+    {
+        if (runtime?.IsActive != true) throw new InvalidOperationException("Managed dependency check requires active routing.");
+        Assembly expected = typeof(ModSystem).Assembly;
+        MethodInfo handler = AccessTools.Method(typeof(ModAssemblyLoader), "AssemblyResolveHandler", [typeof(object), typeof(ResolveEventArgs)])!;
+        using var loader = new ModAssemblyLoader([], []);
+        var requesting = typeof(ModCompatibilityConsumerPatches).Assembly;
+        var fullIdentity = new ResolveEventArgs(expected.FullName!, requesting);
+        Assembly? found = (Assembly?)handler.Invoke(loader, [null, fullIdentity]);
+        var absent = new ResolveEventArgs("VulkanStory.UnavailableDependency." + Guid.NewGuid().ToString("N") + ", Version=1.0.0.0, Culture=neutral, PublicKeyToken=null", requesting);
+        Assembly? missing = (Assembly?)handler.Invoke(loader, [null, absent]);
+        ManagedDependencyResolutionVerified = ReferenceEquals(found, expected) && missing == null;
+        if (!ManagedDependencyResolutionVerified) throw new InvalidOperationException("Managed dependency filename resolution failed.");
+    }
 
     /// <summary>Invokes the official Cecil-based mod-attribute reader without loading a source-mod assembly.</summary>
     /// <param name="mod">Original mod container whose attribute semantics the game owns.</param>
@@ -48,7 +63,7 @@ internal static class ModCompatibilityConsumerPatches
     internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
     {
         var harmony = new Harmony(Owner);
-        MethodInfo? instantiate = null, compile = null, verifier = null, metadataReader = null, infoSetter = null;
+        MethodInfo? instantiate = null, compile = null, verifier = null, metadataReader = null, infoSetter = null, resolve = null;
         bool attempted = false;
         return new StartupPatchGroup("graphics-mod-compatibility", () =>
         {
@@ -60,13 +75,15 @@ internal static class ModCompatibilityConsumerPatches
             metadataReader = Method(typeof(ModContainer), "LoadModInfoFromAssemblyDefinition", typeof(ModInfo),
                 typeof(AssemblyDefinition), typeof(ModWorldConfiguration).MakeByRefType());
             infoSetter = Method(typeof(GameMod), "set_Info", typeof(void), typeof(ModInfo));
+            resolve = Method(typeof(ModAssemblyLoader), "AssemblyResolveHandler", typeof(Assembly), typeof(object), typeof(ResolveEventArgs));
+            CheckResolveFilename();
             if (AccessTools.Field(typeof(ModLoader), "side")?.FieldType != typeof(EnumAppSide))
                 throw new MissingFieldException("Official mod loader side changed.");
             CheckCompile(PatchProcessor.GetOriginalInstructions(compile));
             _ = RecheckBoundary(PatchProcessor.GetOriginalInstructions(instantiate));
         }, () =>
         {
-            if (runtime != null || instantiate == null || compile == null || verifier == null || metadataReader == null || infoSetter == null)
+            if (runtime != null || instantiate == null || compile == null || verifier == null || metadataReader == null || infoSetter == null || resolve == null)
                 throw new InvalidOperationException("Mod discovery is unvalidated or already owned.");
             verify = verifier.CreateDelegate<System.Func<ModLoader, List<ModContainer>, List<ModContainer>>>();
             readInfo = metadataReader.CreateDelegate<ReadModInfo>();
@@ -77,6 +94,8 @@ internal static class ModCompatibilityConsumerPatches
                 transpiler: new HarmonyMethod(typeof(ModCompatibilityConsumerPatches), nameof(InstantiateTranspiler)) { priority = Priority.First });
             harmony.Patch(compile,
                 transpiler: new HarmonyMethod(typeof(ModCompatibilityConsumerPatches), nameof(CompileTranspiler)) { priority = Priority.First });
+            harmony.Patch(resolve,
+                prefix: new HarmonyMethod(typeof(ModCompatibilityConsumerPatches), nameof(ResolveFilename)) { priority = Priority.First });
         }, () =>
         {
             if (!attempted) return;
@@ -84,10 +103,39 @@ internal static class ModCompatibilityConsumerPatches
             if (ReferenceEquals(runtime, owner))
             {
                 runtime = null; verify = null; readInfo = null; setInfo = null;
+                ManagedDependencyResolutionVerified = false;
                 lock (Gate) { Inspections.Clear(); Refused.Clear(); }
             }
             attempted = false;
         });
+    }
+
+    private static void CheckResolveFilename()
+    {
+        // The official profile builds candidate filenames in this captured lambda.
+        if (typeof(ModAssemblyLoader).Module.ResolveMethod(0x06003a8e) is not MethodInfo candidate ||
+            candidate.IsStatic || candidate.ReturnType != typeof(string) ||
+            candidate.DeclaringType?.FullName != "Vintagestory.Common.ModAssemblyLoader+<>c__DisplayClass7_0" ||
+            candidate.Name != "<AssemblyResolveHandler>b__0" ||
+            !candidate.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual([typeof(string)]))
+            throw new InvalidOperationException("Official managed dependency filename producer changed.");
+        var body = PatchProcessor.GetOriginalInstructions(candidate);
+        if (body.Count(instruction => instruction.Calls(AccessTools.PropertyGetter(typeof(ResolveEventArgs), nameof(ResolveEventArgs.Name)))) != 1 ||
+            body.Count(instruction => instruction.Calls(typeof(string).GetMethod(nameof(string.Concat), [typeof(string), typeof(string)])!)) != 1 ||
+            body.Count(instruction => instruction.Calls(typeof(Path).GetMethod(nameof(Path.Combine), [typeof(string), typeof(string)])!)) != 1 ||
+            body.Count(instruction => instruction.opcode == OpCodes.Ldstr && Equals(instruction.operand, ".dll")) != 1)
+            throw new InvalidOperationException("Official managed dependency filename anchors changed.");
+    }
+
+    private static void ResolveFilename(ref ResolveEventArgs __1)
+    {
+        if (runtime?.IsActive != true) return;
+        string? name;
+        try { name = new AssemblyName(__1.Name).Name; }
+        catch (Exception error) when (error is ArgumentException or FileLoadException) { return; }
+        if (!string.IsNullOrEmpty(name) && name != __1.Name)
+            __1 = new ResolveEventArgs(name, __1.RequestingAssembly);
+        // Keep the original candidate order, loading, binding and scoped disposal.
     }
 
     /// <summary>Resolves a single concrete instance method in the pinned official profile.</summary>

@@ -57,6 +57,11 @@ without an owner are scoped to that instance's ID. Explicit owner IDs keep their
 normal behavior. World/mod disposal therefore preserves other owners' live hooks,
 including the renderer's resource cleanup routes.
 
+The game's scoped managed-library loader derives dependency filenames from the
+assembly's simple name. Full identities containing version, culture and key data
+retain the original search order and CLR binding behavior. This repairs discovery
+of present dependencies; it cannot supply an absent library or adapt its rendering.
+
 ```mermaid
 flowchart TD
     Mod[Client mod] --> Scan[Graphics usage scan]

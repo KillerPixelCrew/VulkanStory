@@ -368,6 +368,7 @@
                 "taaResolvedThisFrame",
                 "godRaysInScene",
                 "mapPageRendererActive",
+                "managedDependencyResolutionVerified",
                 "requestedFrameGeneration",
                 "effectiveFrameGeneration",
                 "inputsPreparedThisFrame",
@@ -470,6 +471,7 @@
                         "taaResolvedThisFrame",
                         "godRaysInScene",
                         "mapPageRendererActive",
+                        "managedDependencyResolutionVerified",
                         "cpuRenderCycleSucceeded",
                         "presentCallReturned"
                       ]

@@ -37,6 +37,7 @@ internal static class HeadlessServerDirective
     {
         string[] parts = line[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 1 && parts[0] == "fallingsource") { HeadlessFallingMeshSource.Arm(client); return; }
+        if (parts.Length == 1 && parts[0] == "resolve-library") { ModCompatibilityConsumerPatches.VerifyManagedDependencyResolution(); return; }
         ServerMain server = Performance.WorldgenPipeline.IntegratedServer ??
             throw new InvalidOperationException("No integrated server is known to the harness.");
         int Arg(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
