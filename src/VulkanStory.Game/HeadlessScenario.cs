@@ -89,6 +89,7 @@ internal sealed class HeadlessScenario
             ["dlssDynamicMfgSupport"] = (JsonValueKind.Number, true),
             ["successfulUpscaleFrames"] = (JsonValueKind.Number, true),
             ["preparedFrames"] = (JsonValueKind.Number, true),
+            ["mapPageRendererActive"] = (JsonValueKind.True, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),

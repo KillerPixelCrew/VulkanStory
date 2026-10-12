@@ -14,6 +14,7 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 - Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
 - Screenshot, timelapse and AVI capture
 - Render-pass extension points for other mods
+- Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
 - Windows install, update and removal
 - Loading screen stays up until the first world frame is complete
 - Shaders ship as one container, `shaders-vk.pak`
@@ -48,9 +49,9 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 ## Planned
 
 - **MOD-01: General mod compatibility**
-  1. Preserve selected shader stages/includes and certify compiled motion outputs independently of asset origin; provide complete camera/object motion inputs to reconstruction and frame-generation providers.
-  2. Extend ordinary RenderAPI motion histories to custom moving geometry and retain resource/state contracts across mod rendering and world transitions.
-  3. Keep repeated input registration and optional entity discovery resilient, and exercise the complete supplied mod set without patches keyed to mod IDs.
+  1. Extend ordinary RenderAPI motion histories to custom moving geometry, including object/animation inputs for reconstruction and frame generation.
+  2. Retain resource/state contracts across mod rendering and world transitions.
+  3. Exercise the complete supplied mod set across loading, provider changes and world transitions without patches keyed to mod IDs.
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.

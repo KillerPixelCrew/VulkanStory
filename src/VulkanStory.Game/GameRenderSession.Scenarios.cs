@@ -642,6 +642,7 @@ internal sealed partial class GameRenderSession
         Current("dlssDynamicMfgSupport", queryDynamic);
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
+        Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
         Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));

@@ -61,6 +61,8 @@ internal static class WorldMapPageCache
     private static readonly object CreationGate = new();
     private static readonly ConditionalWeakTable<ChunkMapLayer, State> states = new();
     private static readonly ConditionalWeakTable<MapDB, State> databases = new();
+    internal static bool HasActiveRenderer => states.Any(entry => !entry.Value.Disposed &&
+        entry.Value.ArrayActive && entry.Value.Renderer != null);
     private static readonly System.Func<object, ICoreClientAPI> Api = ServerTypes.Getter<ICoreClientAPI>(typeof(ChunkMapLayer), "capi");
     private static readonly System.Func<object, bool> Accurate = ServerTypes.Getter<bool>(typeof(ChunkMapLayer), "colorAccurate");
     private static readonly System.Func<object, MapDB> Database = ServerTypes.Getter<MapDB>(typeof(ChunkMapLayer), "mapdb");
@@ -104,6 +106,18 @@ internal static class WorldMapPageCache
             MapDB? database = Database(layer);
             if (database != null) databases.GetValue(database, _ => state);
             return state;
+        }
+    }
+    /// <summary>Releases registered map shaders before the global registry replaces them; cached source pixels remain reusable.</summary>
+    internal static void ReloadShaders()
+    {
+        foreach (var entry in states)
+        {
+            State state = entry.Value;
+            if (state.Disposed) continue;
+            state.CloseRenderer();
+            state.TransitionToOriginal = false;
+            state.Refusal = null;
         }
     }
     private static void Opened(ChunkMapLayer __instance)
