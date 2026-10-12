@@ -27,6 +27,11 @@ mod metadata before executing the code. Unsupported direct graphics access is
 refused through the game's mod error path and reported in runtime status.
 Passing this scan does not guarantee that a mod's higher-level behavior works.
 
+While Vulkan owns the game API, legacy instance `Harmony.UnpatchAll()` calls
+without an owner are scoped to that instance's ID. Explicit owner IDs keep their
+normal behavior. World/mod disposal therefore preserves other owners' live hooks,
+including the renderer's resource cleanup routes.
+
 ```mermaid
 flowchart TD
     Mod[Client mod] --> Scan[Graphics usage scan]

@@ -14,6 +14,7 @@ internal static class StartupProfileComposition
         Func<bool> enabled = () => runtime.Routing.RoutingEnabled;
         return Create(runtime, services, Performance.PerformanceFeatures.Create1227(essentials, survival), ComposeGraphics(
         [
+            HarmonyOwnershipConsumerPatches.CreateGroup(enabled),
             TextureConsumerPatches.CreateSubset(enabled),
             ShaderConsumerPatches.CreateSubset(enabled),
             ShaderSourceConsumerPatches.CreateGroup(runtime),
@@ -63,7 +64,7 @@ internal static class StartupProfileComposition
     internal static StartupPatchGroup ComposeGraphics(IEnumerable<StartupPatchGroup> completeCoverage)
     {
         StartupPatchGroup[] groups = completeCoverage.ToArray();
-        string[] required = ["graphics-textures", "graphics-shaders", "graphics-shader-sources", "graphics-meshes", "graphics-states",
+        string[] required = ["graphics-harmony-ownership", "graphics-textures", "graphics-shaders", "graphics-shader-sources", "graphics-meshes", "graphics-states",
             "graphics-framebuffers", "graphics-queries-capture", "graphics-platform-start", "graphics-platform-remaining", "graphics-temporal", "graphics-motion-uniforms", "graphics-ui", "graphics-menu-settings", "graphics-controller-hints", "graphics-controller-analog-direction", "graphics-controller-analog-client", "graphics-scene", "graphics-post", "graphics-mod-compatibility"];
         var attempted = new List<StartupPatchGroup>();
         return new StartupPatchGroup("graphics-api", () =>
