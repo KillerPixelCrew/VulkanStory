@@ -95,11 +95,13 @@ internal sealed class CompositionReadiness(bool enabled, Action<string> notifica
         return true;
     }
 
-    /// <summary>Opens the gate without waiting when the armed world leaves; that client never re-arms it.</summary>
+    /// <summary>Releases the departing client and opens any active hold without waiting.</summary>
     /// <param name="client">Departing original world client identity.</param>
     internal void Disarm(object client)
     {
-        if (!ReferenceEquals(client, armedClient) || !holding) return;
+        if (!ReferenceEquals(client, armedClient)) return;
+        armedClient = null;
+        if (!holding) return;
         holding = false;
         notification("VulkanStory: world left before its composition was ready (" + unmet + ")");
     }

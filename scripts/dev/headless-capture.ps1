@@ -330,7 +330,10 @@ function Test-ScenarioDocument($Root) {
     $index = 0
     foreach ($action in $actions.EnumerateArray()) {
         $properties = Get-ScenarioProperties $action 'ActionField'
-        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline','operation','page','width','height','yawDeltaDegrees') @('id','tick','kind') 'ActionField'
+        # Each action kind validates its complete property set below.
+        foreach ($name in @('id','tick','kind')) {
+            if (-not $properties.ContainsKey($name)) { Throw-ScenarioError 'ActionField' "Missing property: $name" }
+        }
         $actionId = Get-ScenarioString $properties['id'] 'ActionId'
         if (-not $ids.Add($actionId)) { Throw-ScenarioError 'DuplicateId' "Action IDs must be unique: $actionId" }
         $tick = Get-ScenarioTick $properties['tick']
