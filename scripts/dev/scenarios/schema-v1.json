@@ -316,6 +316,10 @@
                 "temporalFrameId",
                 "requestedUpscaler",
                 "effectiveUpscaler",
+                "upscaleEvaluatedThisFrame",
+                "taaResolvedThisFrame",
+                "godRaysInScene",
+                "mapPageRendererActive",
                 "requestedFrameGeneration",
                 "effectiveFrameGeneration",
                 "inputsPreparedThisFrame",
@@ -406,6 +410,10 @@
                         "worldReady",
                         "hasCurrentWorldSample",
                         "inputsPreparedThisFrame",
+                        "upscaleEvaluatedThisFrame",
+                        "taaResolvedThisFrame",
+                        "godRaysInScene",
+                        "mapPageRendererActive",
                         "cpuRenderCycleSucceeded",
                         "presentCallReturned"
                       ]

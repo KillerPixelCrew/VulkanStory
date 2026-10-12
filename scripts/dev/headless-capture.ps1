@@ -423,7 +423,7 @@ function Test-ScenarioDocument($Root) {
                         { $_ -in @('requestedFrameGeneration','effectiveFrameGeneration') } { @('off','dlss','fsr3','xess'); break }
                         'phase' { @('completedFrame'); break }
                         'optionsHost' { @('none','main','world'); break }
-                        'optionsPage' { @('Image','Generation','Effects','Device','Status','Graphics','Home'); break }
+                        'optionsPage' { @('Image','Generation','Effects','Device','Performance','Status','Graphics','Home'); break }
                         default { $null }
                     }
                     if ($null -ne $choices -and -not ($choices -ccontains $choice)) {
@@ -461,7 +461,7 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa')) {
+foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive')) {
     $script:assertionKinds.Add($name, 'bool')
 }
 foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','worldPaused')) { $script:assertionKinds.Add($name, 'bool?') }
