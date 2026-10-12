@@ -13,7 +13,7 @@ internal static class RuntimeDownload
         if (File.Exists(Path.Combine(game, "VulkanStory", "package.json")))
             throw new InvalidOperationException("Vulkan Story is already installed. Close the game before updating it.");
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("VulkanStoryInstaller/0.1.2");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("VulkanStoryInstaller/0.1.3");
         using var release = JsonDocument.Parse(await http.GetStringAsync("https://api.github.com/repos/KillerPixelCrew/VulkanStory/releases/latest", token));
         var root = release.RootElement;
         var asset = root.GetProperty("assets").EnumerateArray().Single(a => a.GetProperty("name").GetString() == "VulkanStory-win-x64.zip");
