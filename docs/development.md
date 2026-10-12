@@ -113,7 +113,7 @@ dotnet build src/VulkanStory.Installer.Mod/VulkanStory.Installer.Mod.csproj -c R
 Package these two files at the ZIP root:
 
 ```text
-VulkanStory-Installer-0.1.1.zip
+VulkanStory-Installer-0.1.2.zip
   modinfo.json
   VulkanStory.Installer.Mod.dll
 ```

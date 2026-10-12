@@ -4,7 +4,7 @@
   "name": "VulkanStory",
   "authors": ["N1GHT"],
   "description": "Vulkan rendering and SDL window/input integration through the VulkanStory early runtime.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "side": "Client",
   "requiredOnClient": false,
   "requiredOnServer": false,

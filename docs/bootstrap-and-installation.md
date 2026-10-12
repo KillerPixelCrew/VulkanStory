@@ -6,8 +6,8 @@ A ZIP placed only in `Mods` cannot do that. Player-facing steps are in the packa
 [client README](../packaging/README-client.txt) and
 [Linux README](../packaging/README-linux-client.txt).
 
-The [v0.1.1 general release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1)
-ships the Windows x64 client and optional dedicated-server input companion, plus
+The [v0.1.2 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.2)
+ships the Windows x64 client, installer mod and optional dedicated-server input companion, plus
 `SHA256SUMS.txt` and `archives.json`. Linux activation below describes the source
 tooling; no Linux client archive is published in this release.
 
@@ -162,7 +162,7 @@ Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 
 | Component | Files |
 | --- | --- |
-| Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll` |
+| Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll`, `openxr_loader.dll` |
 | DLSS | `VulkanStoryNgx.dll`, `nvngx_dlss.dll` |
 | FSR 3 | `VulkanStoryFsr3.dll`, `amd_fidelityfx_vk.dll` |
 | FSR 4 | `VulkanStoryFsr4.dll`, `amd_fidelityfx_upscaler_dx12.dll` |
@@ -176,7 +176,7 @@ Packaging uses fresh output directories; build scripts can reuse verified output
 Each script documents its parameters (`Get-Help scripts/<name>.ps1 -Full`) and
 never launches the game. Vendor SDKs are
 pinned submodules under `sdk/` (`dlss`, `fidelityfx-vk`, `fidelityfx`, `xess`,
-`streamline`, `vma`) and are the scripts' default SDK roots. The VMA bridge is
+`streamline`, `vma`, `openxr`) and are the scripts' default SDK roots. The VMA bridge is
 mandatory and its MIT notice ships in `licenses/native/vma/LICENSE.txt`.
 The Windows FSR 3 runtime is rebuilt from the pinned SDK with the tracked
 [luma-history format correction](../native/fsr3/sdk-fixes/README.md).
