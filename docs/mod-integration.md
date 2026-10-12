@@ -6,6 +6,18 @@ Mods using Vintage Story's ordinary `RenderAPI` reach the same graphics adapter
 as the game. Game-facing texture/mesh IDs belong to a shared registry, so a mesh
 uploaded through the API is not placed in a disconnected renderer.
 
+Selected mod shader includes are preserved through the game's include expansion
+and the GLSL rewriter. Changing an include prevents use of the stock native shader
+bundle; it does not by itself disable scene motion. Retained geometry stages must
+still link with the required motion outputs before the renderer publishes them.
+
+Reconstruction and frame-generation providers share a separate motion guide.
+Depth-matching object vectors are retained; pixels without a matching writer use
+depth/camera reprojection, with rotation-only reprojection for the sky. This gives
+static custom geometry camera motion without replacing its shading. Independently
+moving custom geometry still needs object/animation history: camera reprojection
+does not supply that history or certify an absent object writer.
+
 Direct OpenGL calls are different. OpenTK GL calls, native GL imports and GL
 proc-address loaders expect an OpenGL context and cannot operate on Vulkan
 resources. When Vulkan routing is active, `ModGlUsage` examines enabled client

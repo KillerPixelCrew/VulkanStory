@@ -27,6 +27,7 @@ internal static class StartupProfileComposition
             MotionUniformConsumerPatches.CreateGroup(runtime),
             UiConsumerPatches.CreateGroup(runtime),
             MenuSettingsConsumerPatches.CreateGroup(enabled),
+            HotkeyRegistrationConsumerPatches.CreateGroup(enabled),
             ControllerHintConsumerPatches.CreateGroup(enabled),
             AnalogDirectionConsumerPatches.CreateGroup(enabled),
             AnalogClientConsumerPatches.CreateGroup(runtime),

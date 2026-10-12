@@ -69,6 +69,12 @@ internal static class ShaderSourceConsumerPatches
         return session.Graphics;
     }
     private static string? Source(string name) => GameGraphicsAdapter.EmbeddedShaderSource(name);
+    /// <summary>Expands game-style includes through the selected game assets and the owned include route.</summary>
+    /// <param name="program">Shader identity receiving the registry's include metadata.</param>
+    /// <param name="code">Unexpanded source for one stage.</param>
+    /// <returns>The same expanded source used by ordinary registered shader stages.</returns>
+    internal static string ExpandIncludes(ShaderProgram program, string code) =>
+        Expand(program, code, new HashSet<string>());
     private static bool LoadSource(ShaderProgram __0, EnumShaderType __1)
     {
         if (Adapter() is not { } graphics) return true;
@@ -76,7 +82,7 @@ internal static class ShaderSourceConsumerPatches
         if (extension == null) return true;
         if (!graphics.ShaderOverrides.MayReplaceStage(__0.PassName, __0.AssetDomain, extension)) return true;
         if (Source(__0.PassName + "." + extension) is not { } code) return true;
-        code = Expand(__0, code, new HashSet<string>());
+        code = ExpandIncludes(__0, code);
         Shader? stage = __1 == EnumShaderType.VertexShader ? __0.VertexShader : __0.FragmentShader;
         if (stage == null) stage = new Shader(__1, code, __0.PassName + "." + extension);
         else { stage.Code = code; stage.Type = __1; Filename(stage) = __0.PassName + "." + extension; }

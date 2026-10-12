@@ -77,9 +77,11 @@ flags require the deferred child-owned input profile and are refused when it is 
   and only `vulkanstory`/`vulkanstoryinput` removed from `disabledMods`. Renderer
   settings go to the isolated `ModConfig/vulkanstory.json`. Controller and touch
   input are off.
-- **Mods:** the staged `Mods/vulkanstory` and `Mods/vulkanstoryinput` are copied
-  into `<run>/data/Mods` and added with `--addModPath`. The game's installed copies
-  are removed from discovery. Other installed mods load normally.
+- **Mods:** the source user `Mods` and `ModConfig` contents are copied into the
+  isolated data directory, then the staged `vulkanstory` and `vulkanstoryinput`
+  replace their corresponding folders. Copied user mod paths point at the isolated
+  folder; disabled choices are preserved. The game's installed VulkanStory folders
+  are removed from discovery. Base game modules still load from the installation.
 - **Process:** `dotnet exec` runs the official `Vintagestory.dll` with its own
   runtimeconfig and deps files, `--dataPath <run>/data`, and `DOTNET_STARTUP_HOOKS`
   set to the staged bootstrap. The installed `hostfxr.dll` proxy is not used. The

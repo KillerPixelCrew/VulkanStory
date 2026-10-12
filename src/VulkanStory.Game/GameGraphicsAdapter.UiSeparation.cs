@@ -4,6 +4,7 @@ using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
@@ -32,10 +33,23 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         if (program > 0 || failed) return program;
-        var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader, Code = OwnedShaderSource(pass, "vsh"), PrefixCode = prefix };
-        var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader, Code = OwnedShaderSource(pass, "fsh"), PrefixCode = prefix };
-        if (renderer.CompileShader(vertex) && renderer.CompileShader(fragment))
-            program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null, null));
+        try
+        {
+            var source = new ShaderProgram { PassName = pass, AssetDomain = "game", LoadFromFile = false };
+            var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader,
+                Code = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource(pass, "vsh")), PrefixCode = prefix };
+            var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader,
+                Code = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource(pass, "fsh")), PrefixCode = prefix };
+            if (renderer.CompileShader(vertex) && renderer.CompileShader(fragment))
+                program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null,
+                    new HashSet<string>(source.includes)));
+        }
+        catch (Exception error)
+        {
+            failed = true;
+            platform!.Logger.Error("VulkanStory: owned shader '{0}' failed: {1}", pass, error.Message);
+            return 0;
+        }
         if (program <= 0)
         {
             failed = true;

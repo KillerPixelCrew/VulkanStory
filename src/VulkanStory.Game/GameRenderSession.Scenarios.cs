@@ -425,7 +425,8 @@ internal sealed partial class GameRenderSession
                 inputOrientation = currentXessInputs ? "upright" : "renderer",
                 colorTexture = currentXessInputs ? xessInputs.Color : primary?.ColorTextureIds.ElementAtOrDefault(0),
                 depthTexture = currentXessInputs ? xessInputs.Depth : primary?.DepthTextureId,
-                sourceMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
+                sourceMotionTexture = Graphics.PreparedSdkMotionTexture,
+                rawSceneMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
                 motionTexture = sdkInputs.Motion,
                 reactiveTexture = sdkInputs.Reactive,
             } : null;
@@ -456,6 +457,8 @@ internal sealed partial class GameRenderSession
             xessConstants = currentWorldSample ? Device.XessConstantsCapture : null,
             srInputs,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
+            preparedSdkMotionTexture = currentWorldSample ? (int?)Graphics.PreparedSdkMotionTexture : null,
+            sdkMotion = currentWorldSample ? Graphics.SdkMotionCapture : null,
             nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,
             resourceMemory = Device.ResourceMemoryDiagnostics(),
             renderWidth = primary?.Width,

@@ -30,6 +30,7 @@ internal sealed partial class GameGraphicsAdapter
                 !GameFramebufferBindings.OffscreenEnabled(platform!)) return;
             PrepareTemporalImageTargets(targets);
             if (!TerrainShadersReady) return;
+            PrepareSdkMotionPipeline(targets);
             int motion = FrameState.MotionAttachment;
             if (settings.EffectiveTemporalPipeline && motion is >= 0 and < 32)
             {

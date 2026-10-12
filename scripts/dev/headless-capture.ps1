@@ -601,6 +601,7 @@ if (Test-Path -LiteralPath $clientPath) {
             if ($key -in $silentAudioKeys -or $key -eq 'vsyncMode') { $node[$key] = 0 }
             elseif ($key -eq 'pauseGameOnLostFocus') { $node[$key] = $false }
             elseif ($key -eq 'fullScreen') { $node[$key] = $false }
+            elseif ($key -eq 'modPaths') { $node[$key] = @('Mods', (Join-Path $dataRoot 'Mods')) }
             elseif ($key -eq 'disabledMods') {
                 # Only this isolated renderer run enables its own two mods.
                 # Preserve the user's disabled choices for every other mod.
@@ -628,6 +629,20 @@ foreach ($key in $silentAudioKeys) {
 # Mod discovery remains the game's own loader. Private runtime is loaded from
 # this package, so an installed older ordinary mod must not shadow this copy.
 New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Mods') -Force | Out-Null
+# Isolate the complete user mod set and its configuration, not just the runtime.
+$sourceMods = Join-Path $sourceRoot 'Mods'
+if (Test-Path -LiteralPath $sourceMods) {
+    foreach ($mod in Get-ChildItem -LiteralPath $sourceMods) {
+        if ($mod.Name -in @('vulkanstory', 'vulkanstoryinput')) { continue }
+        Copy-Item -LiteralPath $mod.FullName -Destination (Join-Path $dataRoot 'Mods') -Recurse
+    }
+}
+$sourceConfig = Join-Path $sourceRoot 'ModConfig'
+if (Test-Path -LiteralPath $sourceConfig) {
+    foreach ($config in Get-ChildItem -LiteralPath $sourceConfig) {
+        Copy-Item -LiteralPath $config.FullName -Destination (Join-Path $dataRoot 'ModConfig') -Recurse
+    }
+}
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstory') -Destination (Join-Path $dataRoot 'Mods') -Recurse
 if ($CompanionMode -eq 'present') {
     Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstoryinput') -Destination (Join-Path $dataRoot 'Mods') -Recurse

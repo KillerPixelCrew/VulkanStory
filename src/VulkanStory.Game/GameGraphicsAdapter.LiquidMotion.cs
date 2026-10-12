@@ -20,29 +20,6 @@ internal sealed partial class GameGraphicsAdapter
     private int liquidMotionLocation = -1;
     private bool liquidMotionFailed;
 
-    private string ExpandLiquidIncludes(string source, HashSet<string> includes, HashSet<string> active)
-    {
-        return Regex.Replace(source, @"^\s*#include\s+([^\r\n]+)", match =>
-        {
-            string name = match.Groups[1].Value.Trim();
-            if (!active.Add(name)) throw new InvalidOperationException("Recursive liquid shader include: " + name);
-            try
-            {
-                includes.Add(name);
-                // The retained includes belong to this assembly, not the game's asset map.
-                string code = OwnedShaderIncludes.Contains(name) ? RetainedLiquidIncludeSource(name) :
-                    (platform!.AssetManager?.TryGet(new AssetLocation("shaderincludes/" + name))?.ToText()
-                    ?? throw new InvalidOperationException("Liquid shader include missing: " + name));
-                return ExpandLiquidIncludes(code, includes, active);
-            }
-            finally { active.Remove(name); }
-        }, RegexOptions.Multiline);
-    }
-
-    /// <summary>Reads an owned liquid include from the same embedded sources used by ordinary shader routing.</summary>
-    private static string RetainedLiquidIncludeSource(string name) =>
-        EmbeddedShaderSource(name) ?? throw new InvalidOperationException("Owned liquid shader include missing: " + name);
-
     private ShaderProgram? LiquidMotionProgram(int motion)
     {
         if (liquidMotionLocation != motion) { ReloadLiquidMotionProgram(); liquidMotionLocation = motion; }
@@ -51,22 +28,22 @@ internal sealed partial class GameGraphicsAdapter
         int id = 0;
         try
         {
-            var includes = new HashSet<string>(StringComparer.Ordinal);
-            string vertexCode = ExpandLiquidIncludes(OwnedShaderSource("chunkliquidmotion", "vsh"), includes, new());
-            string fragmentCode = ExpandLiquidIncludes(OwnedShaderSource("chunkliquidmotion", "fsh"), includes, new());
+            var source = new ShaderProgram { PassName = "chunkliquidmotion", AssetDomain = "game", LoadFromFile = false };
+            string vertexCode = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource("chunkliquidmotion", "vsh"));
+            string fragmentCode = ShaderSourceConsumerPatches.ExpandIncludes(source, OwnedShaderSource("chunkliquidmotion", "fsh"));
             string prefix = MotionProgramPrefix(motion);
             var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader, Code = vertexCode, PrefixCode = prefix };
             var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader, Code = fragmentCode, PrefixCode = prefix };
             if (!renderer.CompileShader(vertex) || !renderer.CompileShader(fragment))
                 throw new InvalidOperationException(renderer.GetError());
-            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, null));
+            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, new HashSet<string>(source.includes)));
             if (id <= 0) throw new InvalidOperationException(renderer.GetError());
             if (!renderer.NativeProgramWritesOutput(id, motion))
                 throw new InvalidOperationException("Liquid motion shader does not write attachment " + motion + ".");
             // A normal game shader identity lets existing pool origins and dimension transforms
             // use the same routed uniform API as every other terrain draw.
             var program = new ShaderProgram { ProgramId = id, PassName = "chunkliquidmotion", LoadFromFile = false };
-            program.includes.UnionWith(includes);
+            program.includes.UnionWith(source.includes);
             foreach (Match uniform in Regex.Matches(vertexCode + "\n" + fragmentCode, @"\buniform\s+\w+\s+(\w+)"))
             {
                 string name = uniform.Groups[1].Value;

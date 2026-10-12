@@ -168,15 +168,18 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
 
         try
         {
-            if (provider == "dlss") GenerateDlss(primary, scene, ui, motion, frame, camera, hold);
-            else if (provider == "xess") GenerateXess(primary, scene, ui, motion, frame, hold);
-            else GenerateFsr3(graphics, primary, scene, ui, output!, motion, frame, hold);
+            if (!graphics.PrepareSdkMotion(frame, buffers))
+            { Wait(graphics.SdkMotionReadiness); return; }
+            int preparedMotion = graphics.PreparedSdkMotionTexture;
+            if (provider == "dlss") GenerateDlss(primary, scene, ui, preparedMotion, frame, camera, hold);
+            else if (provider == "xess") GenerateXess(primary, scene, ui, preparedMotion, frame, hold);
+            else GenerateFsr3(graphics, primary, scene, ui, output!, preparedMotion, frame, hold);
         }
         catch (Exception failure) { Disable(provider, "frame preparation threw: " + failure.Message); }
     }
 
     private void GenerateFsr3(GameGraphicsAdapter graphics, FrameBufferRef primary, FrameBufferRef scene, FrameBufferRef ui,
-        FrameBufferRef output, int motion, in GameTemporalFrame frame, bool hold)
+        FrameBufferRef output, int motionTexture, in GameTemporalFrame frame, bool hold)
     {
         if (fsr3 == null || fsr3.Width != (uint)output.Width || fsr3.Height != (uint)output.Height ||
             motionWidth != primary.Width || motionHeight != primary.Height)
@@ -198,7 +201,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         ReadyToGenerate = true;
         if (hold) { Wait(HoldReason); return; }
         int hudless = scene.ColorTextureIds[0];
-        int result = fsr3.Evaluate(device, hudless, primary.DepthTextureId, primary.ColorTextureIds[motion],
+        int result = fsr3.Evaluate(device, hudless, primary.DepthTextureId, motionTexture,
             motionRg, hudless, ui.ColorTextureIds[0], fsrScene, fsrUi, fsrDepth, fsrMotion,
             fsrGenerated, output.ColorTextureIds[0], frame.Provider);
         if (result != 0)
@@ -215,7 +218,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     }
 
     private void GenerateDlss(FrameBufferRef primary, FrameBufferRef scene, FrameBufferRef ui,
-        int motion, in GameTemporalFrame frame, in NgxFrameGenerationCamera camera, bool hold)
+        int motionTexture, in GameTemporalFrame frame, in NgxFrameGenerationCamera camera, bool hold)
     {
         if (dlssScene == 0 || dlssWidth != scene.Width || dlssHeight != scene.Height ||
             dlssRenderWidth != primary.Width || dlssRenderHeight != primary.Height)
@@ -233,7 +236,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
         if (presentError != 0)
         { Disable("dlss", "Streamline present failed with Vulkan result " + presentError); return; }
         // Query capabilities after valid tags and before the first enable.
-        int result = device.TagStreamlineFrame(primary.DepthTextureId, primary.ColorTextureIds[motion],
+        int result = device.TagStreamlineFrame(primary.DepthTextureId, motionTexture,
             scene.ColorTextureIds[0], ui.ColorTextureIds[0], dlssDepth, dlssMotion, dlssScene, dlssUi,
             camera, ResetsHistory(frame));
         if (result != 0)
@@ -285,7 +288,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     }
 
     private unsafe void GenerateXess(FrameBufferRef primary, FrameBufferRef scene, FrameBufferRef ui,
-        int motion, in GameTemporalFrame frame, bool hold)
+        int motionTexture, in GameTemporalFrame frame, bool hold)
     {
         if (motionRg == 0 || motionWidth != primary.Width || motionHeight != primary.Height)
         {
@@ -324,7 +327,7 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             constants.ViewMatrix[row * 4 + column] = view[column * 4 + row];
             constants.ProjectionMatrix[row * 4 + column] = projection[column * 4 + row];
         }
-        int result = device.PrepareXessFrame(primary.DepthTextureId, primary.ColorTextureIds[motion],
+        int result = device.PrepareXessFrame(primary.DepthTextureId, motionTexture,
             motionRg, scene.ColorTextureIds[0], ui.ColorTextureIds[0], constants);
         if (result != 0)
         { Disable("xess", "XeSS-FG frame preparation failed (" + result + ")"); return; }

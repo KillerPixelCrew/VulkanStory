@@ -129,7 +129,7 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
     /// <returns>True after provider output succeeds; false when prerequisites or evaluation fail.</returns>
     /// <remarks>Evaluation refusal disables the provider. Unsupported late-overlay depth blit clears output depth to far and logs the limitation once.</remarks>
     internal bool Evaluate(GameGraphicsAdapter graphics, IReadOnlyList<Vintagestory.API.Client.FrameBufferRef> buffers,
-        in TemporalProviderFrame temporal)
+        in GameTemporalFrame temporal)
     {
         RequireLifetime();
         graphics.UpscaledThisFrame = false;
@@ -145,11 +145,14 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         int composition = graphics.UsesFsr3Inputs && graphics.Fsr3HasComposition &&
             buffers.Count > 1 && buffers[1]?.ColorTextureIds is { Length: > 1 } transparency
             ? transparency[1] : 0;
-        var frame = new UpscalerFrame(colors[0], primary.DepthTextureId, colors[motion], output.ColorTextureIds[0], temporal,
-            composition, graphics.Fsr3HasComposition);
         string? error;
         try
         {
+            if (!graphics.PrepareSdkMotion(temporal, buffers))
+            { EvaluationReadiness = graphics.SdkMotionReadiness; return false; }
+            var frame = new UpscalerFrame(colors[0], primary.DepthTextureId, graphics.PreparedSdkMotionTexture,
+                output.ColorTextureIds[0], temporal.Provider, composition, graphics.Fsr3HasComposition,
+                MaterialMotionSource: colors[motion]);
             if (!selected.Evaluate(allocated, frame, out error))
             { EvaluationReadiness = error ?? "provider evaluation failed"; Disable(EvaluationReadiness); return false; }
         }
