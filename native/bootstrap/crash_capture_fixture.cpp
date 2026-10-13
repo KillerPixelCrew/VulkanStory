@@ -12,6 +12,7 @@ LONG CALLBACK handled_exception(EXCEPTION_POINTERS* details) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     if (argc != 5) return 2;
     std::filesystem::path report(argv[2]);
     std::string status = start_crash_monitor(argv[1], report, argv[3]);
