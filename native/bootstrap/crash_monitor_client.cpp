@@ -15,7 +15,8 @@ std::string start_crash_monitor(const std::filesystem::path& executable,
     if (!ready) return "unavailable: CreateEvent " + std::to_string(GetLastError());
     std::wstring command = L"\"" + executable.wstring() + L"\" " + std::to_wstring(GetCurrentProcessId()) +
         L" \"" + report.wstring() + L"\" \"" + ready_name + L"\"";
-    STARTUPINFOW startup{sizeof(startup)};
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
     PROCESS_INFORMATION child{};
     if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
             nullptr, executable.parent_path().c_str(), &startup, &child)) {

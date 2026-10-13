@@ -33,7 +33,7 @@ fs::path read_path(const fs::path& file) {
     std::string value;
     std::getline(input, value);
     if (value.starts_with("\xef\xbb\xbf")) value.erase(0, 3);
-    return fs::u8path(value);
+    return fs::path(std::u8string(value.begin(), value.end()));
 }
 
 void collect_logs(const fs::path& report, std::ostream& log) {
@@ -54,7 +54,8 @@ void collect_logs(const fs::path& report, std::ostream& log) {
 void write_modules(DWORD pid, std::ostream& output) {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
     if (snapshot == INVALID_HANDLE_VALUE) { output << "Module snapshot failed: " << GetLastError() << '\n'; return; }
-    MODULEENTRY32W module{sizeof(module)};
+    MODULEENTRY32W module{};
+    module.dwSize = sizeof(module);
     if (Module32FirstW(snapshot, &module)) do {
         output << "0x" << std::hex << reinterpret_cast<uintptr_t>(module.modBaseAddr) << " size=0x"
             << module.modBaseSize << std::dec << ' ' << utf8(module.szExePath);
@@ -88,7 +89,8 @@ void write_stack(HANDLE process, HANDLE thread, CONTEXT context, std::ostream& o
         if (!address || (address == previous && frame.AddrStack.Offset == previous_stack)) break;
         previous = address;
         previous_stack = frame.AddrStack.Offset;
-        IMAGEHLP_MODULE64 module{sizeof(module)};
+        IMAGEHLP_MODULE64 module{};
+        module.SizeOfStruct = sizeof(module);
         output << "  #" << index << " 0x" << std::hex << address;
         if (SymGetModuleInfo64(process, address, &module))
             output << ' ' << module.ModuleName << "+0x" << (address - module.BaseOfImage);
@@ -220,7 +222,8 @@ int wmain(int argc, wchar_t** argv) {
         std::wstring command = L"\"" + powershell.wstring() + L"\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" +
             (fs::path(argv[0]).parent_path() / L"VulkanStory.CrashReport.ps1").wstring() +
             L"\" -ReportDirectory \"" + report.wstring() + L"\"";
-        STARTUPINFOW startup{sizeof(startup)};
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
         PROCESS_INFORMATION collector{};
         if (CreateProcessW(powershell.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
                 nullptr, report.c_str(), &startup, &collector)) {

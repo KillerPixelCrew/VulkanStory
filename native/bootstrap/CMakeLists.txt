@@ -6,7 +6,7 @@ endif()
 add_library(hostfxr SHARED hostfxr_proxy.cpp crash_monitor_client.cpp hostfxr.def)
 add_executable(VulkanStory.CrashMonitor crash_monitor.cpp)
 target_compile_features(VulkanStory.CrashMonitor PRIVATE cxx_std_20)
-target_compile_definitions(VulkanStory.CrashMonitor PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(VulkanStory.CrashMonitor PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
 target_link_libraries(VulkanStory.CrashMonitor PRIVATE dbghelp version)
 set_target_properties(VulkanStory.CrashMonitor PROPERTIES
   MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
