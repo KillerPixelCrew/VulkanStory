@@ -16,6 +16,7 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 - Render-pass extension points for other mods
 - Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history, rigid entity and inventory-slot transforms with stable identities, managed dependency filenames, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
 - Windows install, update and removal
+- **REN-11: AMD startup compatibility:** process-only relaxed continuation validation prevents the Windows CET rejection of legacy AMD context restores; hardware shadow stacks and official game files are preserved.
 - Automatic Windows crash reports from the early loader: managed exceptions, native fast-fail parameters, thread stacks and bundled logs/settings.
 - Loading screen stays up until the first world frame is complete
 - Shaders ship as one container, `shaders-vk.pak`
@@ -45,7 +46,6 @@ Current release: [v0.1.3](https://github.com/KillerPixelCrew/VulkanStory/release
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
 - **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
-- **REN-11:** Radeon RX 6600 startup crash traced to AMD's context restore being rejected by Windows CET (`FAST_FAIL_SET_CONTEXT_DENIED`, subcode `0x30`). The early loader applies process-only relaxed continuation validation on AMD primary displays while preserving hardware shadow stacks and the official game executable.
 
 ## Planned
 
