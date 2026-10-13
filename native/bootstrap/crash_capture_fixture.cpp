@@ -31,6 +31,18 @@ int wmain(int argc, wchar_t** argv) {
         *memory = 1;
         return 6;
     }
+    if (wcscmp(argv[4], L"raise-fastfail") == 0) {
+        EXCEPTION_RECORD record{};
+        record.ExceptionCode = 0xc0000409;
+        record.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
+        record.NumberParameters = 1;
+        record.ExceptionInformation[0] = 7;
+        CONTEXT context{};
+        RtlCaptureContext(&context);
+        record.ExceptionAddress = reinterpret_cast<void*>(context.Rip);
+        RaiseFailFastException(&record, &context, 0);
+        return 7;
+    }
     if (wcscmp(argv[4], L"handled") == 0) {
         auto handler = AddVectoredExceptionHandler(1, handled_exception);
         RaiseException(0xe0421111, 0, 0, nullptr);

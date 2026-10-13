@@ -210,6 +210,17 @@ int wmain(int argc, wchar_t** argv) {
             break;
         case EXIT_PROCESS_DEBUG_EVENT:
             log << "Exit code=0x" << std::hex << event.u.ExitProcess.dwExitCode << std::dec << '\n';
+            if (!captured && event.u.ExitProcess.dwExitCode != 0) {
+                // TerminateProcess and some fail-fast reporting paths provide no exception event.
+                // Preserve the exit and available logs without inventing a crash stack/subcode.
+                captured = true;
+                std::ofstream output(report / L"crash.txt");
+                output << "VulkanStory abnormal process exit\nExitCode=0x" << std::hex
+                    << event.u.ExitProcess.dwExitCode << std::dec
+                    << "\nWindows supplied no debugger exception event; no exception context was captured.\n";
+                try { collect_logs(report, output); }
+                catch (const std::exception& error) { output << "Log collection failed: " << error.what() << '\n'; }
+            }
             done = true;
             break;
         }
