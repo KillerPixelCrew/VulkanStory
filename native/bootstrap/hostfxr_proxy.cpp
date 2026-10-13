@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 #include "fxr_version.h"
+#include "crash_monitor_client.h"
 
 #if !defined(_M_X64) && !defined(__x86_64__)
 #error B0 supports the x64 apphost only.
@@ -278,6 +279,7 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
         // Setup failures bypass only our hook. Never catch/retry after the real game entry was called.
         std::optional<environment_change> log;
         std::optional<environment_change> hooks;
+        std::optional<environment_change> crash_directory;
         try {
             if (should_activate(host_path, app_path) && fs::is_regular_file(hook) &&
                 fs::is_regular_file(managed / L"VulkanStory.Game.dll") &&
@@ -287,6 +289,14 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
                 if (combined.find(L';') != combined.npos) throw std::runtime_error("A startup-hook path cannot contain a semicolon.");
                 if (existing && !existing->empty()) combined += L";" + *existing;
                 log.emplace(L"VULKANSTORY_BOOTSTRAP_LOG", log_path().wstring());
+                if (GetPrivateProfileIntW(L"Bootstrap", L"CrashCapture", 1, config_path().c_str())) {
+                    try {
+                        auto report = log_path().parent_path().parent_path() / L"Crashes" / log_path().stem();
+                        auto monitor = managed.parent_path() / L"native/win-x64/VulkanStory.CrashMonitor.exe";
+                        trace("native.crash_monitor", start_crash_monitor(monitor, report, log_path()));
+                        crash_directory.emplace(L"VULKANSTORY_CRASH_DIRECTORY", report.wstring());
+                    } catch (const std::exception& error) { trace("native.crash_monitor.unavailable", error.what()); }
+                }
                 hooks.emplace(L"DOTNET_STARTUP_HOOKS", std::move(combined));
                 trace("native.startup_hook.armed", "B0 observer");
             } else trace("native.startup_hook.bypassed", "Disabled, other process, or incomplete payload.");

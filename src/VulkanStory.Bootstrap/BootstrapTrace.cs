@@ -17,6 +17,7 @@ internal sealed class BootstrapTrace
     /// <summary>Creates a sink for an explicitly selected file; directories are created on the first write.</summary>
     /// <param name="path">Destination JSON-lines path.</param>
     internal BootstrapTrace(string path) => this.path = path;
+    internal string FilePath => path;
 
     /// <summary>Consumes the optional bootstrap-log environment override and publishes the selected path to the process.</summary>
     /// <returns>A sink using the override or the per-process file under LocalApplicationData.</returns>
@@ -39,6 +40,7 @@ internal sealed class BootstrapTrace
         // Diagnostics must never turn an observer patch into a game startup failure.
         try
         {
+            if (name == "game.data_path") CrashDiagnostics.SetDataPath(detail);
             string record = JsonSerializer.Serialize(new
             {
                 @event = name, detail, pid = Environment.ProcessId,

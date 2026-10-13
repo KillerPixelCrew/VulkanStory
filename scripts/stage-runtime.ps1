@@ -76,6 +76,8 @@ if ($RuntimeIdentifier -eq 'win-x64') {
     ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
     if (-not $proxy) { throw 'Build the native hostfxr proxy first.' }
     Add-Payload 'hostfxr.dll' $proxy
+    Add-Payload 'VulkanStory/native/win-x64/VulkanStory.CrashMonitor.exe' (Join-Path (Split-Path $proxy -Parent) 'VulkanStory.CrashMonitor.exe')
+    Add-Payload 'VulkanStory/native/win-x64/VulkanStory.CrashReport.ps1' (Join-Path $projectRoot 'native/bootstrap/VulkanStory.CrashReport.ps1')
 }
 Add-Payload 'VulkanStory/loader.ini' (Join-Path $projectRoot 'packaging/loader.ini')
 $readme = if ($RuntimeIdentifier -eq 'linux-x64') { 'packaging/README-linux-client.txt' } else { 'packaging/README-client.txt' }
@@ -91,6 +93,9 @@ if ($RuntimeIdentifier -eq 'win-x64') {
 foreach ($project in @('Bootstrap','Contracts','Game','Input','Platform.Sdl','Render.Vulkan')) {
     Add-Payload "VulkanStory/managed/VulkanStory.$project.dll" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/$managedSuffix/VulkanStory.$project.dll")
     Add-Payload "VulkanStory/managed/VulkanStory.$project.xml" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/$managedSuffix/VulkanStory.$project.xml")
+    if ($Configuration -eq 'Debug') {
+        Add-Payload "VulkanStory/managed/VulkanStory.$project.pdb" (Join-Path $projectRoot "src/VulkanStory.$project/bin/$Configuration/$managedSuffix/VulkanStory.$project.pdb")
+    }
 }
 # Explicit dependency inventory matches BootstrapDependencies; game/Harmony assemblies are excluded.
 $backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/$managedSuffix"

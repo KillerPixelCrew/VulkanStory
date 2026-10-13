@@ -44,6 +44,7 @@ internal static class BootstrapEntry
                 return;
             }
             string managedDirectory = Path.GetDirectoryName(ownPath)!;
+            CrashDiagnostics.Install(trace);
             string profileId = windows ? "vs-1.22.7-win-x64" : "vs-1.22.7-linux-x64";
             GameProfile profile = GameProfile.Load(Path.Combine(managedDirectory, "profiles", profileId + ".json"));
             if (profile.Id != profileId) throw new InvalidDataException("Game profile does not match the selected platform.");

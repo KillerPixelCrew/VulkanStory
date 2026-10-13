@@ -71,7 +71,8 @@ foreach ($entry in $package.files.PSObject.Properties) {
     if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ine $entry.Value) { throw "Package hash mismatch: $($entry.Name)" }
     $sources[$entry.Name] = $source
 }
-foreach ($required in @('hostfxr.dll','VulkanStory/loader.ini','VulkanStory/managed/VulkanStory.Bootstrap.dll',
+foreach ($required in @('hostfxr.dll','VulkanStory/native/win-x64/VulkanStory.CrashMonitor.exe',
+    'VulkanStory/native/win-x64/VulkanStory.CrashReport.ps1','VulkanStory/loader.ini','VulkanStory/managed/VulkanStory.Bootstrap.dll',
     'VulkanStory/managed/VulkanStory.Game.dll','VulkanStory/managed/profiles/vs-1.22.7-win-x64.json','Mods/vulkanstory/modinfo.json',
     'Mods/vulkanstoryinput/modinfo.json','Mods/vulkanstoryinput/VulkanStory.Input.Companion.dll','Mods/vulkanstoryinput/VulkanStory.Input.dll')) {
     if (-not $sources.Contains($required)) { throw "Incomplete client package: $required" }

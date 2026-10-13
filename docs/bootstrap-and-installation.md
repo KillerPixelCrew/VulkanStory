@@ -64,6 +64,31 @@ sequenceDiagram
   to remove `hostfxr.dll`.
 - Events are written to `%LOCALAPPDATA%\VulkanStory\Logs\bootstrap-<pid>-<qpc>.jsonl`.
 
+### Automatic crash reports
+
+Before the real host starts .NET, the enabled Windows proxy starts the bundled
+`VulkanStory.CrashMonitor.exe`, outside the loader lock. It attaches only to this
+game process and waits for the initial attachment event before managed startup.
+An existing debugger is left alone; attachment failures are recorded in the
+bootstrap log and do not prevent the game from starting. Closing the helper
+detaches it without terminating the game.
+
+The managed bootstrap records unhandled exceptions on any managed thread; an
+observer finalizer also records exceptions escaping the game's main entry without
+suppressing them. Native second-chance exceptions, including Windows fast-fail
+`0xC0000409` and stack overflow, are captured by the separate helper because they
+can bypass all in-process exception handlers.
+
+Reports appear under `%LOCALAPPDATA%\VulkanStory\Crashes`. After a crash, a ZIP
+contains the exception parameters, native thread stacks, a stack minidump, loaded
+module/driver versions, managed exception text, matching bootstrap/game logs,
+settings and mod filenames. The helper uses local symbols without downloading
+anything. Settings account fields are removed and the minidump excludes the game
+heap and filters stack data; logs can still contain private information, so review
+the archive before sharing. No debugger installation, administrator rights or
+registry changes are required. `[Bootstrap] CrashCapture=0` disables the native
+helper. The native helper and ZIP collector are Windows-only.
+
 ### Managed bootstrap
 
 `StartupHook.Initialize` runs once, on the entry thread, before `Main`:
@@ -117,6 +142,7 @@ Streamline, FSR 4 and XeSS-FG bridges are Windows-only and are not included.
 ```ini
 [Bootstrap]
 Enabled=1     ; 0 skips VulkanStory at the next launch
+CrashCapture=1 ; Windows only: automatic native crash reports
 DotnetRoot=   ; Windows only: optional absolute .NET root for the proxy
 ```
 
@@ -139,6 +165,8 @@ directory; on Linux the installer copies it there:
       SDL3-CS.dll, Silk.NET.*.dll, Microsoft.*.dll
       profiles/vs-1.22.7-<rid>.json
     native/<rid>/                  # SDL3, shaderc, VMA, provider bridges, vendor runtimes
+      VulkanStory.CrashMonitor.exe # Windows-only native crash capture
+      VulkanStory.CrashReport.ps1  # Automatic report ZIP collection
     shaders-vk.pak                 # Native SPIR-V and shaders.manifest.json in one file
     assets/gamecontrollerdb.txt
     tools/                         # deployment/removal helpers

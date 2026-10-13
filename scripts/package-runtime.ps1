@@ -39,7 +39,7 @@ foreach ($entry in $manifest.files.PSObject.Properties) {
         $client[$relative] = @{ source=$source; hash=$entry.Value }
     }
 }
-$activation = if ($rid -eq 'win-x64') { @('hostfxr.dll') } else {
+$activation = if ($rid -eq 'win-x64') { @('hostfxr.dll','VulkanStory/native/win-x64/VulkanStory.CrashMonitor.exe','VulkanStory/native/win-x64/VulkanStory.CrashReport.ps1') } else {
     @('VulkanStory/tools/install-linux-runtime.sh','VulkanStory/tools/remove-linux-runtime.sh',
       'VulkanStory/loader.ini','VulkanStory/managed/profiles/vs-1.22.7-linux-x64.json',
       'VulkanStory/native/linux-x64/libSDL3.so','VulkanStory/native/linux-x64/libshaderc_shared.so')
