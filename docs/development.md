@@ -113,7 +113,7 @@ dotnet build src/VulkanStory.Installer.Mod/VulkanStory.Installer.Mod.csproj -c R
 Package these two files at the ZIP root:
 
 ```text
-VulkanStory-Installer-0.1.3.zip
+VulkanStory-Installer-0.1.4.zip
   modinfo.json
   VulkanStory.Installer.Mod.dll
 ```
@@ -160,6 +160,7 @@ effective provider state.
 | Evidence | Location |
 | --- | --- |
 | Bootstrap activation | `%LOCALAPPDATA%/VulkanStory/Logs/bootstrap-*.jsonl` |
+| Automatic Windows crash reports | `%LOCALAPPDATA%/VulkanStory/Crashes/<report>/` and its ZIP |
 | Game/provider messages | `<data>/Logs/client-main.log` |
 | Shader/pipeline cache | `<game cache>/vulkanstory-vulkan` |
 | Performance capture | `%LOCALAPPDATA%/VulkanStory/Performance/<capture>/` |
