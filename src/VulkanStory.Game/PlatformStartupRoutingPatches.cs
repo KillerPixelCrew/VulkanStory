@@ -174,6 +174,11 @@ internal static class PlatformStartupRoutingPatches
         __instance.Logger.Notification("Graphics backend: {0}; vendor: {1}; renderer: {2}; Vulkan: {3}",
             device.BackendName, device.VendorString, device.RendererString, device.VersionString);
         __instance.Logger.Notification("Native shader target: {0}; maximum texture size: {1}", device.ShaderVersionString, device.MaxTextureSize);
+        // The original LogAndTestHardwareInfosStage2() ended in LogFrameworkVersions(), and that
+        // CairoAPI touch is what registers cairo-sharp's native resolver (libcairo-2 ->
+        // libcairo.so.2 on Linux). Routing replaces the whole original method, so without this the
+        // first CairoFont use on Linux throws DllNotFoundException for libcairo-2. Repeat it.
+        __instance.Logger.Notification("Cairo Graphics Version: " + Cairo.CairoAPI.VersionString);
         return false;
     }
     private static bool Renderer(ClientPlatformWindows __instance, ref string __result)

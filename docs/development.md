@@ -13,9 +13,10 @@ in `Directory.Build.local.props`, using the example file as the template.
 | Tool/input | Used for |
 | --- | --- |
 | .NET 10 SDK matching `global.json` | Managed projects and tooling |
+| PowerShell 7 (`pwsh`) | Packaging scripts on Windows and Linux hosts |
 | Official game installation | API, client internals, Harmony and supporting references |
 | CMake/Ninja | Native Windows activation shim |
-| Vulkan SDK | Headers and native Vulkan imports |
+| Vulkan SDK (Linux: distribution headers) | Headers and native Vulkan imports |
 | MinGW-w64 GCC/G++ | Native provider and allocation bridges |
 | MSVC x64 build tools | Corrected FidelityFX Vulkan runtime and OpenXR loader |
 | `sdk/` submodules | Pinned vendor source SDKs and VMA |
@@ -31,6 +32,10 @@ alone is not a replacement for those binaries. Native notices travel with the
 bundle. Dependencies are selected from the pinned inputs rather than whatever
 same-named DLL happens to exist elsewhere on the machine.
 
+When the installed `pwsh` targets a .NET runtime the host lacks (for example a
+.NET 9 toolchain on a .NET 10-only host), `DOTNET_ROLL_FORWARD=LatestMajor`
+runs it on the newer shared runtime.
+
 ## Build and package flow
 
 ```mermaid
@@ -42,6 +47,9 @@ flowchart TD
     Runtime --> Shader[Native SPIR-V pack]
     Bridges --> Bundle[prepare-native-bundle.ps1]
     SDK --> Bundle
+    Bridges --> LinuxBundle[prepare-native-bundle-linux.sh]
+    SDK --> LinuxBundle
+    LinuxBundle --> Stage[stage-runtime.ps1]
     Managed --> Stage[stage-runtime.ps1]
     Proxy --> Stage
     Shader --> Stage
@@ -56,7 +64,8 @@ flowchart TD
 
 `build-runtime.ps1` builds production managed projects, the allocator bridge,
 Windows bootstrap, corrected FidelityFX runtime, pinned Khronos OpenXR loader,
-and the shader tool/corpus.
+and the shader tool/corpus (on Linux: managed projects, the allocator bridge
+and the shader tool/corpus).
 Provider bridges are built separately. Staging consumes existing outputs; it does
 not secretly build missing components. Packaging verifies staged hashes and writes
 archives without installing or launching the game.
@@ -97,9 +106,35 @@ destination does not already exist. `package.json` records file hashes and profi
 `archives.json` records archive hashes. Packaging preserves recorded acceptance
 state and does not convert a build into gameplay acceptance.
 
+The Linux client uses the same scripts with `-RuntimeIdentifier linux-x64`; its
+native inputs come from the bash bundle script instead of the Windows one:
+
+```powershell
+pwsh scripts/build-runtime.ps1 -Configuration Release -RuntimeIdentifier linux-x64 -VulkanSdkRoot <vulkan-headers-root>
+bash scripts/prepare-native-bundle-linux.sh <fresh-bundle>/linux-x64 Release
+pwsh scripts/stage-runtime.ps1 -Configuration Release -RuntimeIdentifier linux-x64 `
+  -NativeDirectory <fresh-bundle>/linux-x64/native `
+  -NativeLicensesDirectory <fresh-bundle>/linux-x64/licenses/native `
+  -ManagedLicensesDirectory packaging/notices/managed `
+  -ShaderPack artifacts/runtime-shaders/Release/shaders-vk.pak `
+  -OutputDirectory <fresh-stage>
+
+pwsh scripts/package-runtime.ps1 `
+  -StagingDirectory <fresh-stage> `
+  -OutputDirectory <fresh-archives>
+```
+
+On Linux, `build-runtime.ps1` builds the VMA bridge through
+`native/vma/build.sh` and skips the Windows activation proxy, FidelityFX and
+OpenXR builds; set `VULKAN_SDK` or pass `-VulkanSdkRoot` to the Vulkan headers
+root (distribution headers under `/usr` work). The Streamline fetch and the
+provider bridges are Windows-only and are not part of the Linux flow.
+
 Windows outputs are `VulkanStory-win-x64.zip` and
-`VulkanStory-Input-Companion.zip`. Linux source tooling selects `linux-x64` and
-must build on Linux, but Linux is not a current published client release.
+`VulkanStory-Input-Companion.zip`; the Linux flow writes
+`VulkanStory-linux-x64.zip` and its companion. Linux source tooling selects
+`linux-x64` and must build on Linux, but Linux is not a current published
+client release.
 
 ## Build the small installer mod
 
