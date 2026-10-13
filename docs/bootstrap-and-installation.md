@@ -89,6 +89,26 @@ the archive before sharing. No debugger installation, administrator rights or
 registry changes are required. `[Bootstrap] CrashCapture=0` disables the native
 helper. The native helper and ZIP collector are Windows-only.
 
+### AMD continuation compatibility
+
+The official 1.22.7 Windows executable is CET-compatible. Some AMD Vulkan driver
+context restores are rejected by Windows with `FAST_FAIL_SET_CONTEXT_DENIED`
+(`0xC0000409`, subcode `0x30`). For an AMD primary display and active, strict
+continuation validation, the enabled loader starts the same original executable
+once with Windows' relaxed continuation-validation policy, before managed startup.
+It forwards the original command line and working directory and propagates the
+game's exit code. The child verifies the applied policy and removes its restart
+marker before any game child processes are created.
+
+Relaxed validation permits dynamic-code and legacy-library continuation targets;
+it still validates targets in binaries with exception-continuation metadata.
+Hardware shadow-stack protection remains enabled. This compatibility mode is
+limited to the game process: it does not edit the executable, registry or global
+Windows settings. Set `[Bootstrap] AmdContextCompatibility=0` to retain the original
+strict continuation policy. Non-AMD primary displays and processes already using
+relaxed validation are forwarded directly. Unsupported or disabled bootstrap
+payloads never restart.
+
 ### Managed bootstrap
 
 `StartupHook.Initialize` runs once, on the entry thread, before `Main`:
@@ -143,6 +163,7 @@ Streamline, FSR 4 and XeSS-FG bridges are Windows-only and are not included.
 [Bootstrap]
 Enabled=1     ; 0 skips VulkanStory at the next launch
 CrashCapture=1 ; Windows only: automatic native crash reports
+AmdContextCompatibility=1 ; Windows only: relaxed continuation validation on AMD primary displays
 DotnetRoot=   ; Windows only: optional absolute .NET root for the proxy
 ```
 
