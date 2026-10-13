@@ -25,9 +25,12 @@ int wmain(int argc, wchar_t** argv) {
         if ((flags & context_validation_enabled) == 0) return 77;
         // Valid dynamic executable code, deliberately absent from any continuation table.
         // Strict policy rejects it; relaxed policy permits it while shadow stacks stay on.
-        BYTE code[] = {0xb9, 33, 0, 0, 0, 0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};
+        // RtlCaptureContext resumes at a caller-aligned RSP: allocate shadow space
+        // and CALL ExitProcess so its entry has the Windows x64 alignment/return slot.
+        BYTE code[] = {0x48, 0x83, 0xec, 0x20, 0xb9, 33, 0, 0, 0, 0x48, 0xb8,
+            0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xd0, 0xcc};
         uintptr_t exit = reinterpret_cast<uintptr_t>(&ExitProcess);
-        std::memcpy(code + 7, &exit, sizeof(exit));
+        std::memcpy(code + 11, &exit, sizeof(exit));
         void* entry = VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
         if (!entry) return 6;
         std::memcpy(entry, code, sizeof(code));
