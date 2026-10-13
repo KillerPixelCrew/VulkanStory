@@ -1,6 +1,9 @@
 #include <windows.h>
 #include <filesystem>
 #include <fstream>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 #include "crash_monitor_client.h"
 
 // Separate CPU-only process: validates Windows exception delivery without starting the game.
@@ -15,12 +18,11 @@ int wmain(int argc, wchar_t** argv) {
     std::ofstream(report / L"fixture-ready.txt") << status;
     if (status != "attached") return 3;
     if (wcscmp(argv[4], L"fastfail") == 0) {
-        EXCEPTION_RECORD record{};
-        record.ExceptionCode = 0xc0000409;
-        record.ExceptionFlags = EXCEPTION_NONCONTINUABLE;
-        record.NumberParameters = 1;
-        record.ExceptionInformation[0] = 7;
-        RaiseFailFastException(&record, nullptr, 0);
+#if defined(_MSC_VER)
+        __fastfail(7);
+#else
+        __asm__ __volatile__("int $0x29" : : "c"(7) : "memory");
+#endif
         return 4;
     }
     if (wcscmp(argv[4], L"access-violation") == 0) {

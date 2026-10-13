@@ -192,6 +192,8 @@ int wmain(int argc, wchar_t** argv) {
         case EXIT_THREAD_DEBUG_EVENT: threads.erase(event.dwThreadId); break;
         case LOAD_DLL_DEBUG_EVENT: if (event.u.LoadDll.hFile) CloseHandle(event.u.LoadDll.hFile); break;
         case EXCEPTION_DEBUG_EVENT:
+            log << "Exception code=0x" << std::hex << event.u.Exception.ExceptionRecord.ExceptionCode << std::dec
+                << " firstChance=" << event.u.Exception.dwFirstChance << " thread=" << event.dwThreadId << std::endl;
             if (initial_breakpoint && event.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT) {
                 initial_breakpoint = false;
                 std::ofstream(report / L"monitor-ready.txt") << "attached";
@@ -211,7 +213,11 @@ int wmain(int argc, wchar_t** argv) {
             done = true;
             break;
         }
-        if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, disposition) || done) break;
+        if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, disposition)) {
+            log << "ContinueDebugEvent failed: " << GetLastError() << std::endl;
+            break;
+        }
+        if (done) break;
     }
     if (ready) { SetEvent(ready); CloseHandle(ready); }
     DebugActiveProcessStop(pid);
