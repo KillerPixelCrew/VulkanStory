@@ -284,6 +284,7 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
             DWORD policy = 0;
             bool policy_known = read_context_policy(GetCurrentProcess(), policy);
             trace("native.context.policy", policy_known ? std::to_string(policy) : "unavailable");
+            UINT compatibility_mode = GetPrivateProfileIntW(L"Bootstrap", L"AmdContextCompatibility", 1, config_path().c_str());
             constexpr auto marker = L"VULKANSTORY_AMD_CONTEXT_PARENT_POLICY";
             auto parent_policy = environment(marker);
             if (parent_policy) {
@@ -296,8 +297,7 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
                 trace("native.context.compatibility.active", "AMD continuation compatibility; hardware shadow-stack policy preserved.");
             } else if (policy_known && (policy & context_validation_enabled) != 0 &&
                     (policy & context_validation_relaxed) == 0 &&
-                    GetPrivateProfileIntW(L"Bootstrap", L"AmdContextCompatibility", 1, config_path().c_str()) != 0 &&
-                    primary_display_is_amd()) {
+                    (compatibility_mode == 2 || (compatibility_mode == 1 && primary_display_is_amd()))) {
                 environment_change compatibility(marker, std::to_wstring(policy));
                 PROCESS_INFORMATION child{};
                 if (!start_with_relaxed_continuations(host_path, GetCommandLineW(), child))

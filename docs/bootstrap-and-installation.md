@@ -105,9 +105,11 @@ it still validates targets in binaries with exception-continuation metadata.
 Hardware shadow-stack protection remains enabled. This compatibility mode is
 limited to the game process: it does not edit the executable, registry or global
 Windows settings. Set `[Bootstrap] AmdContextCompatibility=0` to retain the original
-strict continuation policy. Non-AMD primary displays and processes already using
-relaxed validation are forwarded directly. Unsupported or disabled bootstrap
-payloads never restart.
+strict continuation policy. `1` selects AMD primary displays automatically; `2`
+explicitly requests compatibility, including systems rendering on a secondary AMD
+GPU. Non-AMD primary displays in automatic mode and processes already using relaxed
+validation are forwarded directly. Other processes and disabled/incomplete
+bootstrap payloads never restart.
 
 ### Managed bootstrap
 
