@@ -2,6 +2,7 @@ using System.Numerics;
 using HarmonyLib;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
+using Vintagestory.API.MathTools;
 using VulkanStory.Render.Vulkan.Vr;
 
 namespace VulkanStory.Game;
@@ -9,6 +10,8 @@ namespace VulkanStory.Game;
 internal sealed partial class GameRenderSession
 {
     internal int OpenXrEye { get; private set; } = -1;
+    internal (int Width, int Height) RenderExtent => device?.OpenXr is { Width: > 0, Height: > 0 } xr
+        ? (xr.Width, xr.Height) : Window.PixelSize;
     private ClientMain? eyeClient;
     private readonly double[] centreCamera = new double[16], centreOrigin = new double[16], centreProjection = new double[16];
     private double centreEyeX, centreEyeY, centreEyeZ;
@@ -33,13 +36,22 @@ internal sealed partial class GameRenderSession
                 Graphics.TaaResolvedThisFrame = Graphics.GodRaysInScene = false;
                 render(manager, eye == 0 ? delta : 0);
                 Graphics.ComposeUiTarget();
+                if (!ReferenceEquals(screen, ActiveScreen(manager)))
+                {
+                    Device.OpenXr!.SuppressFrame();
+                    break; // Never submit a world in one eye and a new screen in the other.
+                }
                 Device.CopyOpenXrEye(eye);
-                // A disconnect/world transition can dispose the camera during the first
-                // draw. Render the new screen normally for the second image instead.
-                if (!ReferenceEquals(screen, ActiveScreen(manager))) RestoreEyeCamera();
+                if (eye == 0 && eyeClient == null)
+                {
+                    Device.OpenXr!.UseHeadLockedMenu();
+                    break; // A flat menu updates once and the compositor handles both eyes.
+                }
             }
         }
         finally { RestoreEyeCamera(); OpenXrEye = -1; }
+        // TODO(VR-01): replace the per-eye draw replay with multiview after terrain,
+        // entities, post effects and mod passes all expose eye-indexed inputs.
     }
 
     internal void ApplyEyeCamera(ClientMain client)
@@ -51,7 +63,8 @@ internal sealed partial class GameRenderSession
             eyeClient = client;
             camera.CameraMatrix.CopyTo(centreCamera, 0);
             camera.CameraMatrixOrigin.CopyTo(centreOrigin, 0);
-            OpenXrConsumerPatches.Perspective(client).CopyTo(centreProjection, 0);
+            Mat4d.Perspective(centreProjection, camera.Fov,
+                (double)platform.WindowSize.Width / platform.WindowSize.Height, camera.ZNear, camera.ZFar);
             (centreEyeX, centreEyeY, centreEyeZ) = (camera.CameraEyePos.X, camera.CameraEyePos.Y, camera.CameraEyePos.Z);
         }
         OpenXrEyeView eye = xr.Eye(OpenXrEye);
@@ -60,7 +73,8 @@ internal sealed partial class GameRenderSession
         {
             OpenXrEyeView left = xr.Eye(0), right = xr.Eye(1);
             referencePosition = (left.Position + right.Position) * .5f;
-            Vector3 forward = Vector3.Transform(-Vector3.UnitZ, left.Orientation);
+            Quaternion headOrientation = Quaternion.Normalize(Quaternion.Slerp(left.Orientation, right.Orientation, .5f));
+            Vector3 forward = Vector3.Transform(-Vector3.UnitZ, headOrientation);
             float yaw = MathF.Atan2(-forward.X, -forward.Z);
             referenceRotation = Quaternion.Inverse(Quaternion.CreateFromAxisAngle(Vector3.UnitY, yaw));
             referenceReady = true;
@@ -84,6 +98,8 @@ internal sealed partial class GameRenderSession
         FillView(camera.CameraMatrixOrigin, orientation, x - origin.X, y - origin.Y, z - origin.Z);
         for (int index = 0; index < 16; index++) camera.CameraMatrixOriginf[index] = (float)camera.CameraMatrixOrigin[index];
         client.Set3DProjection(camera.ZFar, camera.Fov);
+        // TODO(VR-01): sample poses again near submission, with per-frame owned UBO
+        // storage and synchronization; never overwrite matrices already read by the GPU.
     }
 
     private static void FillView(double[] output, Quaternion orientation, double x, double y, double z)
@@ -102,6 +118,8 @@ internal sealed partial class GameRenderSession
 
     internal void FillEyeProjection(double[] output, double near, double far)
     {
+        // The game adapter uses OpenGL [-1,1] depth. The Vulkan shader path already
+        // remaps it; copying a native Vulkan [0,1] tutorial matrix here would remap twice.
         var eye = Device.OpenXr!.Eye(OpenXrEye);
         double left = Math.Tan(eye.AngleLeft), right = Math.Tan(eye.AngleRight);
         double bottom = Math.Tan(eye.AngleDown), top = Math.Tan(eye.AngleUp);
@@ -119,6 +137,7 @@ internal sealed partial class GameRenderSession
         centreCamera.CopyTo(camera.CameraMatrix, 0);
         centreOrigin.CopyTo(camera.CameraMatrixOrigin, 0);
         centreProjection.CopyTo(OpenXrConsumerPatches.Perspective(client), 0);
+        if (ReferenceEquals(Temporal.CurrentClient, client)) centreProjection.CopyTo(client.PMatrix.Top, 0);
         for (int index = 0; index < 16; index++) camera.CameraMatrixOriginf[index] = (float)centreOrigin[index];
         camera.CameraEyePos.Set(centreEyeX, centreEyeY, centreEyeZ);
         eyeClient = null;

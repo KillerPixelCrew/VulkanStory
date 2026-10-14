@@ -926,8 +926,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // frame's last passes (the blit) write into it, and a headless run - the capture
         // harness, a test driving the post chain - reads it back. Only presenting it needs
         // a surface.
-        CreateDefaultFramebuffer((uint)width, (uint)height);
-        OpenXr?.Attach(_context, width, height);
+        OpenXr?.Attach(_context);
+        CreateDefaultFramebuffer((uint)(OpenXr?.Width ?? width), (uint)(OpenXr?.Height ?? height));
 
         if (!headless)
         {
@@ -1611,6 +1611,10 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         MarkLatency(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
+        // XR images are now queued on the binding's graphics queue. Release and
+        // submit the headset layer before any desktop/auxiliary acquire can block.
+        OpenXr?.EndFrame();
+
         if (PresentXessFrame(renderValue, presentEntry, frameSubmitted)) return;
         RetrySwapchainRestoreIfNeeded();
 
@@ -1624,7 +1628,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
         bool generatedPresented = PresentGeneratedFrame(renderValue);
 
-        bool acquired = _swapchain.TryAcquire(out PresentTarget target);
+        bool acquired = _swapchain.TryAcquire(out PresentTarget target, nonBlocking: OpenXr?.Running == true);
+        // TODO(VR-01): if vkQueuePresentKHR itself stalls on an attended capture,
+        // move mirror presentation off the XR loop with explicit source/timeline ownership.
         long acquireReturned = System.Diagnostics.Stopwatch.GetTimestamp();
         bool renderCompletedAtAcquire = _frames.Timeline.FrameCompleted >= renderValue;
         ReportRebuildFailure();

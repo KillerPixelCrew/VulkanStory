@@ -23,6 +23,8 @@ internal sealed record GamePlatformCallbacks(
     internal Func<bool>? ControllerInputActive { get; init; }
     /// <summary>Renderer state: the last frame could not acquire/present (parked or skipped swapchain). Null falls back to the drawable extent.</summary>
     internal Func<bool>? PresentationStalled { get; init; }
+    internal Func<bool>? HeadsetRunning { get; init; }
+    internal Func<(int Width, int Height)>? RenderExtent { get; init; }
     /// <summary>Receives one SDL gamepad button transition (instance id, button index, down) in queue order during the drain.</summary>
     internal Action<int, int, bool>? GamepadButton { get; init; }
     /// <summary>Runs when the owned window regains input focus, so controller state can resynchronize.</summary>
@@ -266,7 +268,8 @@ internal sealed class GamePlatformAdapter : IDisposable
     private ((int Width, int Height) Logical, (int Width, int Height) Pixels) Extents()
     {
         if (drainExtents is { } cached) return cached;
-        ((int Width, int Height) Logical, (int Width, int Height) Pixels) current = (Window.WindowSize, Window.PixelSize);
+        ((int Width, int Height) Logical, (int Width, int Height) Pixels) current =
+            (Window.WindowSize, callbacks?.RenderExtent?.Invoke() ?? Window.PixelSize);
         if (draining) drainExtents = current;
         return current;
     }
@@ -281,6 +284,7 @@ internal sealed class GamePlatformAdapter : IDisposable
 
     private void WaitWhilePresentationIdle()
     {
+        if (callbacks!.HeadsetRunning?.Invoke() == true) return;
         if (Window.KeepsHidden) return;
         if (callbacks!.PresentationStalled is { } stalled)
         {
@@ -466,7 +470,7 @@ internal sealed class GamePlatformAdapter : IDisposable
     {
         recompose = true;
         drainExtents = null;
-        var pixels = Window.PixelSize;
+        var pixels = callbacks?.RenderExtent?.Invoke() ?? Window.PixelSize;
         if (pixels.Width > 0 && pixels.Height > 0 &&
             (pixels.Width != platform!.WindowSize.Width || pixels.Height != platform.WindowSize.Height))
             pendingPixels = pixels;

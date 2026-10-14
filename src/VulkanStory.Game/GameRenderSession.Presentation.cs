@@ -28,7 +28,7 @@ internal sealed partial class GameRenderSession
         string sr = Graphics.UpscaledThisFrame ? services.RendererSettings.EffectiveUpscaler : "off";
         string fg = frameGeneration!.EffectiveProvider + ": " + frameGeneration.PreparationStatus;
         FrameBufferRef? primary = PrimaryTarget;
-        var display = Window.PixelSize;
+        var display = RenderExtent;
         string text = "Last rendered frame\n" +
             "Upscaler requested: " + settings.Upscaler + " / " + settings.UpscalerQuality + "; evaluated: " + sr + "\n" +
             "Render resolution: " + (Graphics.AllocatedUpscalerPlan is { } plan

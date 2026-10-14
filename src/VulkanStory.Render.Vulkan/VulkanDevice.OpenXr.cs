@@ -7,10 +7,11 @@ public sealed unsafe partial class VulkanDevice
 {
     internal bool OpenXrEnabled { get; set; }
     internal OpenXrRuntime? OpenXr { get; private set; }
-    internal string OpenXrStatus => OpenXr?.Status ?? openXrRefusal ?? "OpenXR disabled.";
+    internal string OpenXrStatus => OpenXr is { } xr ? xr.Status + " " + xr.FrameStatus : openXrRefusal ?? "OpenXR disabled.";
     private string? openXrRefusal;
     private int openXrTransfer;
     private int openXrTransferWidth, openXrTransferHeight;
+    private Format openXrTransferFormat;
 
     private void PrepareOpenXr(bool headless)
     {
@@ -35,11 +36,12 @@ public sealed unsafe partial class VulkanDevice
         _targets.FlushAllPendingClears(commands);
         _targets.EndPass(commands);
         _targets.EndRendering(commands);
-        if (openXrTransferWidth != xr.Width || openXrTransferHeight != xr.Height)
+        if (openXrTransferWidth != xr.Width || openXrTransferHeight != xr.Height || openXrTransferFormat != xr.TransferFormat)
         {
             if (openXrTransfer != 0) ReleaseTexture(openXrTransfer);
-            openXrTransfer = _textures.Create((uint)xr.Width, (uint)xr.Height, Format.R8G8B8A8Unorm);
+            openXrTransfer = _textures.Create((uint)xr.Width, (uint)xr.Height, xr.TransferFormat);
             openXrTransferWidth = xr.Width; openXrTransferHeight = xr.Height;
+            openXrTransferFormat = xr.TransferFormat;
         }
         var transfer = _textures.Get(openXrTransfer) ?? throw new InvalidOperationException("The eye transfer texture was lost.");
         _textures.TransitionTexture(commands, source, ImageLayout.TransferSrcOptimal);
@@ -69,7 +71,10 @@ public sealed unsafe partial class VulkanDevice
             SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
             DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
             Extent = new Extent3D((uint)xr.Width, (uint)xr.Height, 1) };
-        // Raw copy preserves gamma-encoded bytes across the compatible UNORM/sRGB formats.
+        // The blit also handles RGBA/BGRA channel order. A matching UNORM -> sRGB
+        // raw copy then preserves gamma-encoded bytes without a second gamma encode.
+        // TODO(VR-01): write final composition directly to non-owning XR image views,
+        // preserving this colour/Y contract while removing the flip/transfer image.
         _context.Api.CmdCopyImage(commands, transfer.Image, ImageLayout.TransferSrcOptimal,
             destination, ImageLayout.TransferDstOptimal, 1, &copy);
         barrier.SrcStageMask = PipelineStageFlags2.TransferBit;

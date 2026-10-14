@@ -46,14 +46,18 @@ ordinary behavior without repeatedly patching methods.
 `OpenXr` enables the initial headset stereo path on the Device page. Connect the
 headset to the selected PC OpenXR runtime before restarting the game. VR renders
 two eye views with tracked head position/orientation and the runtime's eye FOVs.
-The desktop window mirrors the right eye; its pixel dimensions select each eye's
-output resolution. Keyboard, mouse and ordinary controllers remain the input
-devices. Menus and HUD are drawn in the eye images; tracked motion controllers
-and world-space UI are later work.
+Eye resolution comes from the runtime's recommendations and is independent of
+desktop resizing or minimization. The desktop mirrors the right eye during world
+rendering, with cursor coordinates mapped to the eye-sized game viewport.
+Keyboard, mouse and ordinary controllers remain the input devices. Flat menu
+screens use a head-locked OpenXR quad; world HUD/inventory panels and tracked
+motion-controller input are later work. Both RGBA and BGRA sRGB runtimes are supported.
 
 TAA, temporal upscaling, frame generation and vendor latency pacing are inactive
 in this initial VR mode. Their saved desktop requests are retained. The OpenXR
-runtime owns headset frame pacing. Headset loss or missing tracking submits no
+runtime owns headset frame pacing; headset layers are submitted before desktop
+acquisition, and a busy mirror can skip acquisition without delaying that layer.
+Headset loss or missing tracking submits no
 scene layer; runtime session exit returns to desktop presentation.
 
 | Property | Values |

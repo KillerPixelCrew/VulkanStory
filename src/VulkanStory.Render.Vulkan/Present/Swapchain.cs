@@ -787,9 +787,9 @@ internal sealed unsafe class Swapchain : IDisposable
     /// (<see cref="RebuildFailure" />). A resize or a monitor change is ordinary,
     /// never an error; a lost device throws.
     /// </summary>
-    public bool TryAcquire(out PresentTarget target)
+    public bool TryAcquire(out PresentTarget target, bool nonBlocking = false)
     {
-        bool acquired = TryAcquireCore(out target);
+        bool acquired = TryAcquireCore(out target, nonBlocking);
         LastAcquireSkipped = !acquired;
         return acquired;
     }
@@ -801,7 +801,7 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     public bool LastAcquireSkipped { get; private set; }
 
-    private bool TryAcquireCore(out PresentTarget target)
+    private bool TryAcquireCore(out PresentTarget target, bool nonBlocking)
     {
         target = default;
         _retirement.Collect();
@@ -820,8 +820,16 @@ internal sealed unsafe class Swapchain : IDisposable
 
             long waitStart = VulkanStats.WaitStart();
             if (_context.AcquireDelayForTests > TimeSpan.Zero) System.Threading.Thread.Sleep(_context.AcquireDelayForTests);
-            Result result = _swapchainApi.Acquire(_context.Device, slot.Handle, acquire, ref imageIndex);
+            Result result = nonBlocking && _swapchainApi is NativeSwapchainDispatch native
+                ? native.AcquireNonBlocking(_context.Device, slot.Handle, acquire, ref imageIndex)
+                : _swapchainApi.Acquire(_context.Device, slot.Handle, acquire, ref imageIndex);
             VulkanStats.NoteWait(WaitSite.SwapchainAcquire, waitStart);
+
+            if (nonBlocking && (result is Result.NotReady or Result.Timeout))
+            {
+                slot.ReturnAcquireSemaphore(acquire);
+                return false; // The mirror may skip; XR already received this frame.
+            }
 
             switch (SwapchainPolicy.OnAcquire(result, attempt))
             {

@@ -149,8 +149,9 @@ internal sealed partial class GameRenderSession : IDisposable
             session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
             Performance.TerrainOcclusionCull.Attach(session.device.OcclusionDepth.Test, session.OcclusionCameraPosition,
                 session.CaptureOcclusionDepth, () => session.device?.OcclusionDepth.Reset());
-            platform.WindowSize.Width = pixels.Width;
-            platform.WindowSize.Height = pixels.Height;
+            var renderExtent = session.RenderExtent;
+            platform.WindowSize.Width = renderExtent.Width;
+            platform.WindowSize.Height = renderExtent.Height;
             return session;
         }
         catch (Exception failure)
@@ -207,8 +208,9 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.CaptureUpscalerConstants = SrInputCaptureScheduled;
             Graphics.Stated.UiImageFramebuffer = 0;
             Device.RedirectDefaultFramebuffer(0);
-            var vrSize = Window.PixelSize;
-            Device.OpenXr?.BeginFrame(vrSize.Width, vrSize.Height);
+            delta = Device.OpenXr?.FrameDeltaSeconds ?? delta;
+            // TODO(VR-01): align client interpolation with predicted display time
+            // without changing the authoritative server/physics tick clock.
             gpuCycleStarted = true;
             Device.BeginFrame();
             Graphics.DrainFinalizedMeshes();
@@ -229,7 +231,6 @@ internal sealed partial class GameRenderSession : IDisposable
                 frameGeneration!.Generate(Graphics, platform.FrameBuffers, Temporal.Snapshot(), hold);
             ObserveCompositionReadiness(pipelineSkipsAtStart);
             Device.Present();
-            Device.OpenXr?.EndFrame();
             SampleFps();
             PublishPresentation();
             PublishDiagnosticFrame();
@@ -268,6 +269,7 @@ internal sealed partial class GameRenderSession : IDisposable
         // Limiting occurs before collecting input, alongside vendor sleep.
         // The original applies frame sleep in every VSync mode except "VSync only".
         Device.OpenXr?.PollEvents();
+        Device.OpenXr?.BeginFrame(); // Pace first; collect SDL input after the XR wait.
         if (Device.OpenXr?.Running != true && settings.FrameSleep && !Device.VendorLatencyOwnsFrameCap && settings.MaxFps > 10 && settings.MaxFps < 241)
         {
             // Fractional, high-resolution wait: Thread.Sleep(int) truncates and can

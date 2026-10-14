@@ -125,6 +125,8 @@ internal sealed partial class GameRenderSession
             ControllerInputActive = () => controllers?.InputActive == true,
             // Exact renderer state: the last frame could not acquire/present (C9).
             PresentationStalled = () => device?.PresentationStalled == true,
+            HeadsetRunning = () => device?.OpenXr?.Running == true,
+            RenderExtent = () => this.RenderExtent,
             // Event-tracked controller buttons (C26). Always forwarded so tracked state never
             // diverges; NoteGamepadButton ignores events while tracking is invalid.
             GamepadButton = (id, button, down) => controllers?.NoteGamepadButton(id, button, down),

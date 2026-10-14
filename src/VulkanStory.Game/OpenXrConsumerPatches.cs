@@ -66,6 +66,8 @@ internal static class OpenXrConsumerPatches
     }
     private static bool GameLoop(ClientMain __instance)
     {
+        // TODO(VR-01): make render-stage producers explicitly view-aware; dt=0
+        // prevents stock time advancement but is not a side-effect contract for arbitrary mods.
         if (!RightEye()) return true;
         __instance.MainRenderLoop(0);
         return false;

@@ -61,6 +61,9 @@ internal sealed unsafe class NativeSwapchainDispatch : ISwapchainDispatch
     public Result Acquire(Device device, SwapchainKHR swapchain, Semaphore semaphore, ref uint imageIndex) =>
         api.AcquireNextImage(device, swapchain, ulong.MaxValue, semaphore, default, ref imageIndex);
 
+    internal Result AcquireNonBlocking(Device device, SwapchainKHR swapchain, Semaphore semaphore, ref uint imageIndex) =>
+        api.AcquireNextImage(device, swapchain, 0, semaphore, default, ref imageIndex);
+
     /// <inheritdoc/>
     public Result Present(Queue queue, PresentInfoKHR* info) => api.QueuePresent(queue, info);
 

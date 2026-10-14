@@ -14,7 +14,7 @@ internal sealed partial class GameRenderSession
         if (graphics == null || temporal == null || upscalers == null || frameGeneration == null || window == null)
             throw new InvalidOperationException("Framebuffer host requires the owned session subsystems.");
         return new GameFramebufferHost(
-            PixelSize: () => Window.PixelSize,
+            PixelSize: () => RenderExtent,
             Settings: CaptureFramebufferSettings,
             PlanUpscale: upscalers.Plan,
             DisableUpscaler: upscalers.Disable,

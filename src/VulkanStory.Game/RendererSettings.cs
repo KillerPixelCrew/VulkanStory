@@ -243,6 +243,8 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     private readonly object gate = new();
     private float activeRenderScale, activeLodBias;
     internal bool TaaDisabled { get; private set; }
+    // TODO(VR-01): enable temporal providers only after histories, motion, jitter
+    // and SDK contexts are owned per eye; never share the desktop history between eyes.
     internal bool StereoRendering { get; set; }
     internal RendererSettingsState(RendererSettings settings) => this.settings = settings.Normalize();
     internal RendererSettings Settings => Volatile.Read(ref settings);
