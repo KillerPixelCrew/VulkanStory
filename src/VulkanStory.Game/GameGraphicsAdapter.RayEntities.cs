@@ -53,6 +53,7 @@ internal sealed partial class GameGraphicsAdapter
         }
         if (client.EntityPlayer?.CameraPos is not { } camera) return;
         ulong world = RayWorldIdentity(client.Api.World);
+        // TODO(RT): capture held-item attachments, rigid/custom entity renderers and particle producers with independent pose histories.
         foreach (var pair in RayEntityRenderers(client))
         {
             if (pair.Value is not EntityShapeRenderer shape || shape.entity.Pos.Dimension != client.EntityPlayer.Pos.Dimension) continue;
@@ -93,14 +94,15 @@ internal sealed partial class GameGraphicsAdapter
                     rayActorParts.Add(key, part);
                 }
                 bool reset = frame.Provider.Reset || part.Frame + 1 != frame.FrameId || part.Version != template.Version;
-                if (part.Vertices.Length != data.VerticesCount)
+                bool vertexCountChanged = part.Vertices.Length != data.VerticesCount;
+                if (vertexCountChanged)
                 {
                     part.Vertices = new RayTracingVertex[data.VerticesCount];
                     reset = true;
                 }
                 if (part.Joints.Length != jointCount)
                 { part.Joints = new RayTracingJoint[jointCount]; part.PreviousJoints = new Matrix4x4[jointCount]; reset = true; }
-                bool geometryChanged = part.Version != template.Version || part.Indices.Length != data.IndicesCount || part.Frame == ulong.MaxValue;
+                bool geometryChanged = vertexCountChanged || part.Version != template.Version || part.Indices.Length != data.IndicesCount || part.Frame == ulong.MaxValue;
                 if (part.Indices.Length != data.IndicesCount) part.Indices = new uint[data.IndicesCount];
                 if (geometryChanged) for (int i = 0; i < data.IndicesCount; i++) part.Indices[i] = checked((uint)data.Indices[i]);
                 var previousOrigin = new Vector3((float)(part.X - camera.X), (float)(part.Y - camera.Y), (float)(part.Z - camera.Z));

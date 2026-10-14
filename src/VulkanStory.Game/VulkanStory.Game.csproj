@@ -2,6 +2,7 @@
   <PropertyGroup><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/RendererSettingsPanel.cs" Link="Settings/RendererSettingsPanel.cs" />
+    <Compile Include="../Shared/SettingsScrollContent.cs" Link="Settings/SettingsScrollContent.cs" />
     <Compile Include="../Shared/RendererChoices.cs" Link="Settings/RendererChoices.cs" />
     <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
@@ -70,7 +71,7 @@
   <!-- Keep one maintained fullscreen source and the existing manifest resource names. -->
   <Target Name="EmbedFullscreenAliases" BeforeTargets="AssignTargetPaths">
     <ItemGroup>
-      <_FullscreenShaderAlias Include="fsr-rcas.vsh;taa-debug.vsh;taa-resolve.vsh;taa-cache.vsh" />
+      <_FullscreenShaderAlias Include="fsr-rcas.vsh;taa-debug.vsh;taa-resolve.vsh;taa-cache.vsh;sdk-motion.vsh" />
     </ItemGroup>
     <Copy SourceFiles="@(_FullscreenShaderAlias->'Shaders/fsr-easu.vsh')"
           DestinationFiles="@(_FullscreenShaderAlias->'$(IntermediateOutputPath)fullscreen/%(Identity)')"

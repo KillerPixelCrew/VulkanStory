@@ -14,6 +14,7 @@ internal enum HeadlessScenarioActionKind
     Options,
     Camera,
     Resize,
+    WorldCycle,
     Capture,
     Checkpoint,
     Assert
@@ -36,7 +37,8 @@ internal sealed record HeadlessScenarioAction(
     string? Page = null,
     int Width = 0,
     int Height = 0,
-    float YawDeltaDegrees = 0);
+    float YawDeltaDegrees = 0,
+    string? CameraMode = null);
 
 /// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
@@ -72,6 +74,9 @@ internal sealed class HeadlessScenario
             ["temporalFrameId"] = (JsonValueKind.Number, true),
             ["requestedUpscaler"] = (JsonValueKind.String, false),
             ["effectiveUpscaler"] = (JsonValueKind.String, false),
+            ["upscaleEvaluatedThisFrame"] = (JsonValueKind.True, false),
+            ["taaResolvedThisFrame"] = (JsonValueKind.True, false),
+            ["godRaysInScene"] = (JsonValueKind.True, false),
             ["requestedFrameGeneration"] = (JsonValueKind.String, false),
             ["effectiveFrameGeneration"] = (JsonValueKind.String, false),
             ["inputsPreparedThisFrame"] = (JsonValueKind.True, false),
@@ -89,6 +94,16 @@ internal sealed class HeadlessScenario
             ["dlssDynamicMfgSupport"] = (JsonValueKind.Number, true),
             ["successfulUpscaleFrames"] = (JsonValueKind.Number, true),
             ["preparedFrames"] = (JsonValueKind.Number, true),
+            ["mapPageRendererActive"] = (JsonValueKind.True, false),
+            ["managedDependencyResolutionVerified"] = (JsonValueKind.True, false),
+            ["validAnimatedHistoryUploads"] = (JsonValueKind.Number, false),
+            ["animatedMotionWindows"] = (JsonValueKind.Number, false),
+            ["validRigidHistoryWrites"] = (JsonValueKind.Number, false),
+            ["rigidEntityMotionWindows"] = (JsonValueKind.Number, false),
+            ["validRigidEntityHistoryWrites"] = (JsonValueKind.Number, false),
+            ["inventoryMotionWindows"] = (JsonValueKind.Number, false),
+            ["validInventoryHistoryWrites"] = (JsonValueKind.Number, false),
+            ["inventorySharedGeometryDraws"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -104,7 +119,10 @@ internal sealed class HeadlessScenario
         };
     private static readonly HashSet<string> MonotonicTotals = new(StringComparer.Ordinal)
     {
-        "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents"
+        "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
+        "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
+        "rigidEntityMotionWindows", "validRigidEntityHistoryWrites", "inventoryMotionWindows", "validInventoryHistoryWrites",
+        "inventorySharedGeometryDraws"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)
@@ -201,6 +219,14 @@ internal sealed class HeadlessScenario
             HeadlessScenarioAction action;
             switch (kindText)
             {
+                case "world-cycle":
+                {
+                    RequireOnly(properties, ["id", "tick", "kind"], "ActionField");
+                    if (context != "world")
+                        throw Error("ScenarioContext", "world-cycle requires a world scenario.");
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.WorldCycle);
+                    break;
+                }
                 case "options":
                 {
                     RequireOnly(properties, ["id", "tick", "kind", "operation", "page"], "ActionField");
@@ -236,13 +262,16 @@ internal sealed class HeadlessScenario
                 }
                 case "camera":
                 {
-                    RequireOnly(properties, ["id", "tick", "kind", "yawDeltaDegrees"], "ActionField");
+                    RequireOnly(properties, ["id", "tick", "kind", "yawDeltaDegrees", "mode"], "ActionField");
                     RequireAll(properties, ["yawDeltaDegrees"], "ActionField");
                     if (context != "world" || properties["yawDeltaDegrees"].ValueKind != JsonValueKind.Number ||
                         !properties["yawDeltaDegrees"].TryGetSingle(out float yaw) ||
                         !float.IsFinite(yaw) || Math.Abs(yaw) > 180f)
                         throw Error("CameraRange", "Camera yaw requires a world and finite degrees in -180..180.");
-                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Camera, YawDeltaDegrees: yaw);
+                    string? mode = properties.TryGetValue("mode", out var modeValue) ? RequiredString(modeValue, "CameraMode") : null;
+                    if (mode is not (null or "FirstPerson" or "ThirdPerson" or "Overhead"))
+                        throw Error("CameraMode", "Unknown camera mode: " + mode);
+                    action = new(index, actionId, tick, HeadlessScenarioActionKind.Camera, YawDeltaDegrees: yaw, CameraMode: mode);
                     break;
                 }
                 case "settings":
@@ -315,6 +344,10 @@ internal sealed class HeadlessScenario
                 default:
                     throw Error("ActionKind", "Unknown scenario action kind: " + kindText);
             }
+            if (actions.Count > 0 && actions[^1].Tick == tick &&
+                (action.Kind == HeadlessScenarioActionKind.WorldCycle ||
+                 actions[^1].Kind == HeadlessScenarioActionKind.WorldCycle))
+                throw Error("WorldCycleTick", "world-cycle must be the only action at its declared tick.");
             actions.Add(action);
             index++;
         }

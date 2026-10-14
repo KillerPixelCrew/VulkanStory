@@ -17,6 +17,9 @@
       "type": "string",
       "minLength": 1
     },
+    "context": {
+      "enum": ["world", "main"]
+    },
     "actions": {
       "type": "array",
       "minItems": 1,
@@ -25,6 +28,12 @@
         "oneOf": [
           {
             "$ref": "#/$defs/settings"
+          },
+          {
+            "$ref": "#/$defs/camera"
+          },
+          {
+            "$ref": "#/$defs/world-cycle"
           },
           {
             "$ref": "#/$defs/capture"
@@ -39,6 +48,24 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "actions": {
+            "contains": {
+              "properties": { "kind": { "const": "world-cycle" } },
+              "required": ["kind"]
+            }
+          }
+        },
+        "required": ["actions"]
+      },
+      "then": {
+        "properties": { "context": { "const": "world" } }
+      }
+    }
+  ],
   "$defs": {
     "common": {
       "type": "object",
@@ -65,6 +92,13 @@
     "name": {
       "type": "string",
       "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?![\\s\\S])"
+    },
+    "world-cycle": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        { "properties": { "kind": { "const": "world-cycle" } } }
+      ],
+      "unevaluatedProperties": false
     },
     "settings": {
       "allOf": [
@@ -246,6 +280,20 @@
       ],
       "unevaluatedProperties": false
     },
+    "camera": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "properties": {
+            "kind": { "const": "camera" },
+            "yawDeltaDegrees": { "type": "number", "minimum": -180, "maximum": 180 },
+            "mode": { "enum": ["FirstPerson", "ThirdPerson", "Overhead"] }
+          },
+          "required": ["yawDeltaDegrees"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "capture": {
       "allOf": [
         {
@@ -316,6 +364,11 @@
                 "temporalFrameId",
                 "requestedUpscaler",
                 "effectiveUpscaler",
+                "upscaleEvaluatedThisFrame",
+                "taaResolvedThisFrame",
+                "godRaysInScene",
+                "mapPageRendererActive",
+                "managedDependencyResolutionVerified",
                 "requestedFrameGeneration",
                 "effectiveFrameGeneration",
                 "inputsPreparedThisFrame",
@@ -331,6 +384,14 @@
                 "dlssDynamicMfgSupport",
                 "successfulUpscaleFrames",
                 "preparedFrames",
+                "validAnimatedHistoryUploads",
+                "animatedMotionWindows",
+                "validRigidHistoryWrites",
+                "rigidEntityMotionWindows",
+                "validRigidEntityHistoryWrites",
+                "inventoryMotionWindows",
+                "validInventoryHistoryWrites",
+                "inventorySharedGeometryDraws",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -406,6 +467,11 @@
                         "worldReady",
                         "hasCurrentWorldSample",
                         "inputsPreparedThisFrame",
+                        "upscaleEvaluatedThisFrame",
+                        "taaResolvedThisFrame",
+                        "godRaysInScene",
+                        "mapPageRendererActive",
+                        "managedDependencyResolutionVerified",
                         "cpuRenderCycleSucceeded",
                         "presentCallReturned"
                       ]
@@ -445,6 +511,14 @@
                       "enum": [
                         "displayWidth",
                         "displayHeight",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -631,7 +705,15 @@
                         "scenarioTick",
                         "worldFrame",
                         "sampledAtFrameId",
-                        "completedFrameId"
+                        "completedFrameId",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws"
                       ]
                     },
                     "op": {
@@ -649,7 +731,15 @@
                         "successfulUpscaleFrames",
                         "preparedFrames",
                         "realPresents",
-                        "sdkReportedPresents"
+                        "sdkReportedPresents",
+                        "validAnimatedHistoryUploads",
+                        "animatedMotionWindows",
+                        "validRigidHistoryWrites",
+                        "rigidEntityMotionWindows",
+                        "validRigidEntityHistoryWrites",
+                        "inventoryMotionWindows",
+                        "validInventoryHistoryWrites",
+                        "inventorySharedGeometryDraws"
                       ]
                     },
                     "op": {
@@ -675,5 +765,5 @@
       "unevaluatedProperties": false
     }
   },
-  "$comment": "Structural core schema only. Both runtime parsers remain authoritative for duplicate properties/IDs/names, nondecreasing ticks, prior checkpoint/session relations, lexical integer and finite CLR numeric representation, and provider-quality state inherited across settings actions. Settings choice strings preserve Normalize trim/case behavior; asserted output choice strings are exact canonical values. No input profile is approved by this schema."
+  "$comment": "Structural core schema only. Both runtime parsers remain authoritative for duplicate properties/IDs/names, nondecreasing ticks, sole-action world-cycle ticks, prior checkpoint/session relations, lexical integer and finite CLR numeric representation, and provider-quality state inherited across settings actions. Settings choice strings preserve Normalize trim/case behavior; asserted output choice strings are exact canonical values. No input profile is approved by this schema."
 }

@@ -4,6 +4,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.Client.NoObf;
+using VulkanStory.Settings;
 
 namespace VulkanStory.Game.Input;
 
@@ -75,14 +76,15 @@ internal sealed class ControllerSettingsDialog : GuiDialog
             page = index; RequestRefresh();
         }, ElementBounds.Fixed(0, 0, contentWidth, 28));
         var clip = ElementBounds.Fixed(0, 42, contentWidth, visibleHeight);
-        var body = ElementBounds.Fixed(0, 0, contentWidth, 1).WithParent(clip);
-        composer.AddVerticalScrollbar(value =>
+        var body = new SettingsScrollContent(capi, clip, contentWidth);
+        var hostComposer = composer;
+        hostComposer.AddVerticalScrollbar(value =>
         {
-            if (!ReferenceEquals(SingleComposer, composer)) return;
-            scrollOffset = value; body.fixedY = -value;
-            body.MarkDirtyRecursive(); body.CalcWorldBounds();
+            if (!ReferenceEquals(SingleComposer, hostComposer)) return;
+            scrollOffset = value; body.ScrollTo(value);
         }, ElementBounds.Fixed(width - 20, 42, 20, visibleHeight), "controller-scroll")
-            .BeginClip(clip).BeginChildElements(body);
+            .AddInteractiveElement(body, "controller-content");
+        composer = body.Content;
         double y = 0;
         if (page == 0)
         {
@@ -248,12 +250,11 @@ internal sealed class ControllerSettingsDialog : GuiDialog
         composer.AddStaticText("Text field: LS + RS opens controller keyboard",
             CairoFont.WhiteSmallText(), RowBounds(0, y + 2, 485, 25));
         y += 30;
-        body.fixedHeight = y;
-        composer.EndChildElements().EndClip();
-        composer.AddSmallButton("Close", ClosePanel, ElementBounds.Fixed(width - 110, height - 30, 110, 30));
-        SingleComposer = composer.EndChildElements().Compose();
+        body.SetHeight(y);
+        hostComposer.AddSmallButton("Close", ClosePanel, ElementBounds.Fixed(width - 110, height - 30, 110, 30));
+        SingleComposer = hostComposer.EndChildElements().Compose();
         foreach (Action action in initialize) action();
-        var scrollbar = composer.GetScrollbar("controller-scroll");
+        var scrollbar = hostComposer.GetScrollbar("controller-scroll");
         scrollbar.SetHeights((float)visibleHeight, (float)Math.Max(visibleHeight, y));
         scrollbar.CurrentYPosition = Math.Clamp(scrollOffset, 0, (float)Math.Max(0, y - visibleHeight));
         scrollbar.TriggerChanged();

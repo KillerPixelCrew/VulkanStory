@@ -18,6 +18,8 @@ public sealed unsafe partial class VulkanDevice
 
     private void ReconstructRayFrame(in RayTracingFrame frame)
     {
+        // TODO(RT): integrate AMD Ray Regeneration through its verified runtime API independently of this Vulkan/NRD path.
+        // TODO(RT): synthesize layered/reflection guides for transparent transport before claiming complete scene reconstruction.
         rayReconstructedThisFrame = false;
         rayDlssThisFrame = false;
         if (frame.Reconstruction != rayReconstructionMode)

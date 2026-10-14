@@ -14,7 +14,7 @@ should not be assumed from singleplayer use.
 
 ## Install through the installer mod
 
-1. Place `VulkanStory-Installer-0.1.1.zip` in the game's Mods folder, or your
+1. Place `VulkanStory-Installer-0.1.4.zip` in the game's Mods folder, or your
    Vintage Story data directory's Mods folder. Leave the ZIP compressed.
 2. Start the game and enter a world. The prompt runs after world loading finishes;
    it does not appear on the initial main menu.
@@ -88,7 +88,7 @@ Setting names are case-insensitive in the command parser. Boolean values are
 `fsr3` and `xess` for frame generation.
 
 The settings dialog previews changes. **Save** persists them; **Cancel** restores
-the earlier preview state. Renderer enablement, native shaders and Streamline
+the earlier preview state. Renderer enablement, native shaders, Streamline and OpenXR
 initialization need a restart. Parallel chunk reads apply on the next world load.
 Provider and quality changes otherwise apply through the runtime's control queue.
 They can rebuild resources and briefly stall; initializing FSR or XeSS can take
@@ -172,6 +172,10 @@ settings, reproduction steps, and these logs:
 
 - `%LOCALAPPDATA%/VulkanStory/Logs/bootstrap-*.jsonl`
 - `<Vintage Story data directory>/Logs/client-main.log`
+
+For Windows crashes, attach the report ZIP from
+`%LOCALAPPDATA%/VulkanStory/Crashes`. It includes crash details and matching logs;
+review it for private information before sharing.
 
 For stutter or CPU problems, include a performance capture. A screenshot alone
 does not explain stalls; a CPU trace alone does not establish GPU rendering cost.

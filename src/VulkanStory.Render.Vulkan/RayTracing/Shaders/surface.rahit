@@ -4,5 +4,6 @@ void main() {
     triangle(uint(gl_InstanceCustomIndexEXT), uint(gl_PrimitiveID), mesh, a, b, c);
     vec3 weights = vec3(1.0 - barycentric.x - barycentric.y, barycentric);
     vec4 colour = textureColour(mesh, a, b, c, weights, gl_HitTEXT);
+    // TODO(RT): carry the raster material's alpha-test threshold and alpha-blend policy in the geometry record.
     if (colour.a < 0.01) ignoreIntersectionEXT;
 }

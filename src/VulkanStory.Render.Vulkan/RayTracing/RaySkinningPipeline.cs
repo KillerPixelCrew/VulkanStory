@@ -53,7 +53,9 @@ internal sealed unsafe class RaySkinningPipeline : IDisposable
                             Module = module, PName = entry,
                         },
                     };
-                    VulkanResult.Check(context.Api.CreateComputePipelines(context.Device, default, 1, &create, null, out pipeline), "ray skinning pipeline");
+                    Pipeline created;
+                    VulkanResult.Check(context.Api.CreateComputePipelines(context.Device, default, 1, &create, null, &created), "ray skinning pipeline");
+                    pipeline = created;
                 }
                 finally { context.Api.DestroyShaderModule(context.Device, module, null); }
             }

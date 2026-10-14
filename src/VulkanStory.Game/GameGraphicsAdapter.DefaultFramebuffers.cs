@@ -19,6 +19,7 @@ internal sealed partial class GameGraphicsAdapter
     internal const int FsrFramebufferIndex = 18, TaaHistoryIndexA = 19, TaaHistoryIndexB = 20;
     internal const int TaaSharpenIndex = 21, UpscaledSceneIndex = 22;
     internal const int SceneNoHudIndex = 23, UiTargetIndex = 24, GeneratedFrameIndex = 25;
+    internal const int SdkMotionIndex = 26;
     private const int GlR32f = 0x822E;
     private List<FrameBufferRef>? allocatedFramebuffers;
     private bool taaDisabled;
@@ -46,6 +47,7 @@ internal sealed partial class GameGraphicsAdapter
         sceneNoHudIndex = uiTargetIndex = -1;
         UpscaledThisFrame = UpscaledCompositeReady = false;
         GodRaysInScene = false;
+        ResetSdkMotionPublication();
         ResetFsr3InputPublication();
         AllocatedUpscalerPlan = null;
         FrameState = FrameState with { MotionAttachment = -1, MotionWriteActive = false };
@@ -149,8 +151,8 @@ internal sealed partial class GameGraphicsAdapter
         GameFramebufferBindings.AdoptSettings(platform!, settings);
         ResetFramebufferPublication();
         bool setupSsao = settings.SsaoQuality > 0;
-        List<FrameBufferRef> list = new List<FrameBufferRef>(31);
-        for (int i = 0; i <= 25; i++)
+        List<FrameBufferRef> list = new List<FrameBufferRef>(27);
+        for (int i = 0; i <= SdkMotionIndex; i++)
         {
             list.Add(null!);
         }
@@ -239,6 +241,17 @@ internal sealed partial class GameGraphicsAdapter
         StateDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);
         list[0] = RegisterFramebuffer(primary);
         PublishMotionAttachment(motionAttachmentIndex);
+        // SDKs consume a complete camera/object guide, without rewriting the
+        // scene attachment that retains its writer-depth and reactive metadata.
+        if (motionAttachmentIndex >= 0 && (upscaling || settings.FrameGenerationRequested))
+        {
+            try { list[SdkMotionIndex] = CreateSdkMotionTarget(width, height); }
+            catch (Exception error)
+            {
+                if (upscaling) DisableUpscaler("complete SDK motion image: " + error.Message);
+                FramebufferError("VulkanStory: SDK motion image unavailable: {0}", error.Message);
+            }
+        }
 
         // Transparent: OIT accumulation, revealage, glow. Shares Primary's depth.
         FrameBufferRef transparent = new FrameBufferRef();

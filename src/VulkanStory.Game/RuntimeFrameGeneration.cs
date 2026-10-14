@@ -180,6 +180,11 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
 
         try
         {
+            if (!graphics.RayTracedThisFrame)
+            {
+                if (!graphics.PrepareSdkMotion(frame, buffers)) { Wait(graphics.SdkMotionReadiness); return; }
+                motionId = graphics.PreparedSdkMotionTexture;
+            }
             if (provider == "dlss") GenerateDlss(primary, scene, ui, depthId, motionId, frame, camera, hold);
             else if (provider == "xess") GenerateXess(primary, scene, ui, depthId, motionId, frame, hold);
             else GenerateFsr3(graphics, primary, scene, ui, output!, depthId, motionId, frame, hold);

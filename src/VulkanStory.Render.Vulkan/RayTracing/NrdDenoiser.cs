@@ -202,6 +202,7 @@ internal sealed unsafe class NrdDenoiser : IDisposable
     internal void Denoise(CommandBuffer commands, RayTracingRenderer source, in RayTracingFrame frame,
         ulong frameIdentity, BarrierBatcher barriers)
     {
+        // TODO(RT): add consistent material-factor demodulation/re-modulation around filtering for high-frequency albedo and specular response.
         bool reset = width != source.Width || height != source.Height;
         EnsureImages(source.Width, source.Height);
         int slot = frames.Current.Index;

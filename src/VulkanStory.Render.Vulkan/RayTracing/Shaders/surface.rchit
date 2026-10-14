@@ -14,6 +14,7 @@ void main() {
     result.normal = faceforward(normal, gl_WorldRayDirectionEXT, normal);
     result.albedo = max(colour.rgb, vec3(0.0));
     result.opacity = clamp(colour.a, 0.0, 1.0);
+    // TODO(RT): supply actual normal, roughness, metallic, emission and transmission/IOR material maps instead of these defaults.
     result.roughness = (mesh.kind == 2u || mesh.kind == 3u) ? 0.025 : ((a.flags & (1u << 11)) != 0u ? 0.18 : 0.8);
     result.metallic = 0.0;
     float emission = float(a.flags & 255u) * weights.x + float(b.flags & 255u) * weights.y + float(c.flags & 255u) * weights.z;

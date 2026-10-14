@@ -20,29 +20,6 @@ internal sealed partial class GameGraphicsAdapter
     private int liquidMotionLocation = -1;
     private bool liquidMotionFailed;
 
-    private string ExpandLiquidIncludes(string source, HashSet<string> includes, HashSet<string> active)
-    {
-        return Regex.Replace(source, @"^\s*#include\s+([^\r\n]+)", match =>
-        {
-            string name = match.Groups[1].Value.Trim();
-            if (!active.Add(name)) throw new InvalidOperationException("Recursive liquid shader include: " + name);
-            try
-            {
-                includes.Add(name);
-                // The retained includes belong to this assembly, not the game's asset map.
-                string code = OwnedShaderIncludes.Contains(name) ? RetainedLiquidIncludeSource(name) :
-                    (platform!.AssetManager?.TryGet(new AssetLocation("shaderincludes/" + name))?.ToText()
-                    ?? throw new InvalidOperationException("Liquid shader include missing: " + name));
-                return ExpandLiquidIncludes(code, includes, active);
-            }
-            finally { active.Remove(name); }
-        }, RegexOptions.Multiline);
-    }
-
-    /// <summary>Reads an owned liquid include from the same embedded sources used by ordinary shader routing.</summary>
-    private static string RetainedLiquidIncludeSource(string name) =>
-        EmbeddedShaderSource(name) ?? throw new InvalidOperationException("Owned liquid shader include missing: " + name);
-
     private ShaderProgram? LiquidMotionProgram(int motion)
     {
         if (liquidMotionLocation != motion) { ReloadLiquidMotionProgram(); liquidMotionLocation = motion; }
@@ -52,14 +29,14 @@ internal sealed partial class GameGraphicsAdapter
         try
         {
             var includes = new HashSet<string>(StringComparer.Ordinal);
-            string vertexCode = ExpandLiquidIncludes(OwnedShaderSource("chunkliquidmotion", "vsh"), includes, new());
-            string fragmentCode = ExpandLiquidIncludes(OwnedShaderSource("chunkliquidmotion", "fsh"), includes, new());
+            string vertexCode = ExpandOwnedShaderIncludes(OwnedShaderSource("chunkliquidmotion", "vsh"), includes);
+            string fragmentCode = ExpandOwnedShaderIncludes(OwnedShaderSource("chunkliquidmotion", "fsh"), includes);
             string prefix = MotionProgramPrefix(motion);
             var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader, Code = vertexCode, PrefixCode = prefix };
             var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader, Code = fragmentCode, PrefixCode = prefix };
             if (!renderer.CompileShader(vertex) || !renderer.CompileShader(fragment))
                 throw new InvalidOperationException(renderer.GetError());
-            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, null));
+            id = renderer.LinkProgram(new ShaderProgramDefinition("chunkliquidmotion", vertex, fragment, null, includes));
             if (id <= 0) throw new InvalidOperationException(renderer.GetError());
             if (!renderer.NativeProgramWritesOutput(id, motion))
                 throw new InvalidOperationException("Liquid motion shader does not write attachment " + motion + ".");

@@ -327,23 +327,34 @@ function Test-ScenarioDocument($Root) {
     $captureNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $checkpointIndexes = [System.Collections.Generic.Dictionary[string,int]]::new([StringComparer]::Ordinal)
     $previousTick = -1
+    $previousKind = $null
     $index = 0
     foreach ($action in $actions.EnumerateArray()) {
         $properties = Get-ScenarioProperties $action 'ActionField'
-        Require-ScenarioProperties $properties @('id','tick','kind','values','name','attachments','field','op','expected','baseline','operation','page','width','height','yawDeltaDegrees') @('id','tick','kind') 'ActionField'
+        # Each action kind validates its complete property set below.
+        foreach ($name in @('id','tick','kind')) {
+            if (-not $properties.ContainsKey($name)) { Throw-ScenarioError 'ActionField' "Missing property: $name" }
+        }
         $actionId = Get-ScenarioString $properties['id'] 'ActionId'
         if (-not $ids.Add($actionId)) { Throw-ScenarioError 'DuplicateId' "Action IDs must be unique: $actionId" }
         $tick = Get-ScenarioTick $properties['tick']
         if ($tick -lt $previousTick) { Throw-ScenarioError 'TickRange' 'Action ticks must be nondecreasing.' }
-        $previousTick = $tick
         $kind = Get-ScenarioString $properties['kind'] 'ActionKind'
         switch -CaseSensitive ($kind) {
+            'world-cycle' {
+                Require-ScenarioProperties $properties @('id','tick','kind') @() 'ActionField'
+                if ($context -cne 'world') { Throw-ScenarioError 'ScenarioContext' 'world-cycle requires a world scenario.' }
+            }
             'settings' {
                 Require-ScenarioProperties $properties @('id','tick','kind','values') @('values') 'ActionField'
                 Apply-ScenarioSettings $properties['values']
             }
             'camera' {
-                Require-ScenarioProperties $properties @('id','tick','kind','yawDeltaDegrees') @('yawDeltaDegrees') 'ActionField'
+                Require-ScenarioProperties $properties @('id','tick','kind','yawDeltaDegrees','mode') @('yawDeltaDegrees') 'ActionField'
+                if ($properties.ContainsKey('mode')) {
+                    $mode = Get-ScenarioString $properties['mode'] 'CameraMode'
+                    if ($mode -cnotin @('FirstPerson','ThirdPerson','Overhead')) { Throw-ScenarioError 'CameraMode' "Unknown camera mode: $mode" }
+                }
                 $yaw = Get-ScenarioSettingValue 'YawDeltaDegrees' 'float' $properties['yawDeltaDegrees']
                 if ($context -cne 'world' -or [Math]::Abs($yaw) -gt 180) {
                     Throw-ScenarioError 'CameraRange' 'Camera yaw requires a world and finite degrees in -180..180.'
@@ -423,7 +434,7 @@ function Test-ScenarioDocument($Root) {
                         { $_ -in @('requestedFrameGeneration','effectiveFrameGeneration') } { @('off','dlss','fsr3','xess'); break }
                         'phase' { @('completedFrame'); break }
                         'optionsHost' { @('none','main','world'); break }
-                        'optionsPage' { @('Image','Generation','Effects','Device','Status','Graphics','Home'); break }
+                        'optionsPage' { @('Image','Generation','Effects','Device','Performance','Status','Graphics','Home'); break }
                         default { $null }
                     }
                     if ($null -ne $choices -and -not ($choices -ccontains $choice)) {
@@ -431,7 +442,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -446,6 +457,11 @@ function Test-ScenarioDocument($Root) {
             }
             default { Throw-ScenarioError 'ActionKind' "Unknown scenario action kind: $kind" }
         }
+        if ($tick -eq $previousTick -and ($kind -ceq 'world-cycle' -or $previousKind -ceq 'world-cycle')) {
+            Throw-ScenarioError 'WorldCycleTick' 'world-cycle must be the only action at its declared tick.'
+        }
+        $previousTick = $tick
+        $previousKind = $kind
         $index++
     }
     return @{ Id = $scenarioId; ActionCount = $index; Context = $context }
@@ -461,14 +477,14 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa')) {
+foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive','managedDependencyResolutionVerified')) {
     $script:assertionKinds.Add($name, 'bool')
 }
 foreach ($name in @('WorldCaptured','MotionValid','HasCamera','temporalReset','worldPaused')) { $script:assertionKinds.Add($name, 'bool?') }
 foreach ($name in @('temporalFrameId','renderWidth','renderHeight','configuredDlssGeneratedFrames','dlssStateQueryFrameId','dlssStateQueryResult','dlssMaximumGenerated','dlssDynamicMfgSupport','successfulUpscaleFrames','preparedFrames')) {
     $script:assertionKinds.Add($name, 'number?')
 }
-foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight')) {
+foreach ($name in @('displayWidth','displayHeight','realPresents','hostGeneratedPresents','sdkReportedPresents','sdkReportedDlssPresents','scenarioTick','worldFrame','sampledAtFrameId','completedFrameId','windowWidth','windowHeight','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws')) {
     $script:assertionKinds.Add($name, 'number')
 }
 foreach ($name in @('requestedUpscaler','effectiveUpscaler','requestedFrameGeneration','effectiveFrameGeneration','preparationStatus','sessionId','phase','optionsHost')) {
@@ -601,6 +617,7 @@ if (Test-Path -LiteralPath $clientPath) {
             if ($key -in $silentAudioKeys -or $key -eq 'vsyncMode') { $node[$key] = 0 }
             elseif ($key -eq 'pauseGameOnLostFocus') { $node[$key] = $false }
             elseif ($key -eq 'fullScreen') { $node[$key] = $false }
+            elseif ($key -eq 'modPaths') { $node[$key] = @('Mods', (Join-Path $dataRoot 'Mods')) }
             elseif ($key -eq 'disabledMods') {
                 # Only this isolated renderer run enables its own two mods.
                 # Preserve the user's disabled choices for every other mod.
@@ -628,6 +645,20 @@ foreach ($key in $silentAudioKeys) {
 # Mod discovery remains the game's own loader. Private runtime is loaded from
 # this package, so an installed older ordinary mod must not shadow this copy.
 New-Item -ItemType Directory -Path (Join-Path $dataRoot 'Mods') -Force | Out-Null
+# Isolate the complete user mod set and its configuration, not just the runtime.
+$sourceMods = Join-Path $sourceRoot 'Mods'
+if (Test-Path -LiteralPath $sourceMods) {
+    foreach ($mod in Get-ChildItem -LiteralPath $sourceMods) {
+        if ($mod.Name -in @('vulkanstory', 'vulkanstoryinput')) { continue }
+        Copy-Item -LiteralPath $mod.FullName -Destination (Join-Path $dataRoot 'Mods') -Recurse
+    }
+}
+$sourceConfig = Join-Path $sourceRoot 'ModConfig'
+if (Test-Path -LiteralPath $sourceConfig) {
+    foreach ($config in Get-ChildItem -LiteralPath $sourceConfig) {
+        Copy-Item -LiteralPath $config.FullName -Destination (Join-Path $dataRoot 'ModConfig') -Recurse
+    }
+}
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstory') -Destination (Join-Path $dataRoot 'Mods') -Recurse
 if ($CompanionMode -eq 'present') {
     Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstoryinput') -Destination (Join-Path $dataRoot 'Mods') -Recurse

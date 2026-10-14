@@ -122,7 +122,7 @@ internal static class DroppedFallingMotionConsumerPatches
     {
         var temporal = session.Temporal;
         if (!temporal.EntityMotion.Enabled || !temporal.State.JitterActive ||
-            ShaderProgramBase.CurrentShaderProgram is not { PassName: "standard" } program || !program.HasUniform("taaHistoryValid")) return false;
+            ShaderProgramBase.CurrentShaderProgram is not { } program || !session.Graphics.HasRigidMotionContract(program)) return false;
         bool opened = session.Graphics.BeginMotionWrite(temporal);
         if (!opened && !session.Graphics.FrameState.MotionWriteActive) return false;
         try { temporal.StandardMotion.Apply(program, identity, mesh, matrix); return opened; }
@@ -130,7 +130,8 @@ internal static class DroppedFallingMotionConsumerPatches
     }
     private static void DrawDropped(IRenderAPI render, MultiTextureMeshRef mesh, string sampler, int unit, object renderer, bool shadow)
     {
-        var session = Session(); bool motion = !shadow && session != null && Begin(session, renderer, mesh, droppedMatrix!(renderer));
+        var session = Session(); bool motion = !shadow && session != null && !session.Graphics.HasRigidEntityMotionScope &&
+            Begin(session, renderer, mesh, droppedMatrix!(renderer));
         try { render.RenderMultiTextureMesh(mesh, sampler, unit); }
         finally { if (motion) session!.Graphics.EndMotionWrite(); }
     }

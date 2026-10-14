@@ -6,12 +6,61 @@ Mods using Vintage Story's ordinary `RenderAPI` reach the same graphics adapter
 as the game. Game-facing texture/mesh IDs belong to a shared registry, so a mesh
 uploaded through the API is not placed in a disconnected renderer.
 
+Selected mod shader includes are preserved through asset resolution and the GLSL
+rewriter. Owned passes resolve includes without initializing the game's shader
+registry; ordinary registered stages keep the game's loading lifecycle. Changing
+an include prevents use of the stock native shader
+bundle; it does not by itself disable scene motion. Retained geometry stages must
+still link with the required motion outputs before the renderer publishes them.
+
+Reconstruction and frame-generation providers share a separate motion guide.
+Depth-matching object vectors are retained; pixels without a matching writer use
+depth/camera reprojection, with rotation-only reprojection for the sky. This gives
+static custom geometry camera motion without replacing its shading. Independently
+moving custom geometry still needs object/animation history: camera reprojection
+does not supply that history or certify an absent object writer.
+
+Programs using the ordinary game pose/model producer can use animated history
+independently of their pass name. Eligibility requires linked motion output and
+compatible `Animation`/`AnimationPrev` column-major `mat4` arrays, plus the existing
+previous-camera/model uniforms. Pose uploads must cover whole matrices at offset
+zero and fit the declared capacity. Capture follows accepted model writes and a
+successful upload to the active program's pose buffer. Drawing checks both bound
+pose buffers, the current frame/view, and unchanged model/warp inputs. Shader
+reload, relink, world changes and later buffer writes invalidate readiness.
+
+Pose histories retain original array identity and separate programs/views. Reusing
+one pose for different transforms within a frame declines its writer; mesh or draw
+order is not substituted for object identity. This ABI check does not reconstruct
+arbitrary procedural deformation or prove a shader's motion equations. Such draws
+still require their real previous inputs through the motion-writer contract below.
+
+Rigid entity dispatch supplies the actual entity identity; drawing additionally
+requires a model upload inside that callback and a linked rigid motion interface.
+The core ground-storage producer supplies its actual inventory slot at each draw,
+so distinct slots can share cached geometry without sharing transform history.
+Replacing a stack resets that slot's history. Exact mesh members and geometry
+revisions, shader/view changes, and world transitions invalidate stale captures.
+An ordinary renderer callback can manage many objects, so its receiver alone does
+not establish their identities. Unassociated custom subobjects and deformation
+still need their real previous inputs through the explicit writer contract.
+
 Direct OpenGL calls are different. OpenTK GL calls, native GL imports and GL
 proc-address loaders expect an OpenGL context and cannot operate on Vulkan
 resources. When Vulkan routing is active, `ModGlUsage` examines enabled client
 mod metadata before executing the code. Unsupported direct graphics access is
 refused through the game's mod error path and reported in runtime status.
 Passing this scan does not guarantee that a mod's higher-level behavior works.
+
+While Vulkan owns the game API, legacy instance `Harmony.UnpatchAll()` calls
+without an owner are scoped to that instance's ID. Explicit owner IDs keep their
+normal behavior. World/mod disposal therefore preserves other owners' live hooks,
+including the renderer's resource cleanup routes.
+
+The game's scoped managed-library loader derives dependency filenames from the
+assembly's simple name. Full identities containing version, culture and key data
+retain the original search order and CLR binding behavior. This repairs discovery
+of present dependencies; it cannot supply an absent library or adapt its rendering.
 
 ```mermaid
 flowchart TD

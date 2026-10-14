@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 #include "fxr_version.h"
+#include "crash_monitor_client.h"
+#include "amd_context_compatibility.h"
 
 #if !defined(_M_X64) && !defined(__x86_64__)
 #error B0 supports the x64 apphost only.
@@ -275,18 +277,62 @@ extern "C" int __cdecl hostfxr_main_startupinfo(int argc, const wchar_t** argv, 
         trace("native.hostfxr.entry", "startupinfo");
         auto managed = fs::path(module_path(own_module)).parent_path() / L"VulkanStory/managed";
         auto hook = managed / L"VulkanStory.Bootstrap.dll";
+        bool complete_payload = should_activate(host_path, app_path) && fs::is_regular_file(hook) &&
+            fs::is_regular_file(managed / L"VulkanStory.Game.dll") &&
+            fs::is_regular_file(managed / L"profiles/vs-1.22.7-win-x64.json");
+        if (complete_payload) {
+            DWORD policy = 0;
+            bool policy_known = read_context_policy(GetCurrentProcess(), policy);
+            trace("native.context.policy", policy_known ? std::to_string(policy) : "unavailable");
+            UINT compatibility_mode = GetPrivateProfileIntW(L"Bootstrap", L"AmdContextCompatibility", 1, config_path().c_str());
+            constexpr auto marker = L"VULKANSTORY_AMD_CONTEXT_PARENT_POLICY";
+            auto parent_policy = environment(marker);
+            if (parent_policy) {
+                SetEnvironmentVariableW(marker, nullptr);
+                DWORD previous = static_cast<DWORD>(std::stoul(*parent_policy));
+                if (!policy_known || (policy & context_validation_enabled) == 0 ||
+                        (policy & context_validation_relaxed) == 0 ||
+                        (policy & ~context_validation_relaxed) != (previous & ~context_validation_relaxed))
+                    throw std::runtime_error("Windows did not apply relaxed continuation validation while preserving shadow stacks.");
+                trace("native.context.compatibility.active", "AMD continuation compatibility; hardware shadow-stack policy preserved.");
+            } else if (policy_known && (policy & context_validation_enabled) != 0 &&
+                    (policy & context_validation_relaxed) == 0 &&
+                    (compatibility_mode == 2 || (compatibility_mode == 1 && primary_display_is_amd()))) {
+                environment_change compatibility(marker, std::to_wstring(policy));
+                PROCESS_INFORMATION child{};
+                if (!start_with_relaxed_continuations(host_path, GetCommandLineW(), child))
+                    throw std::runtime_error("Cannot start AMD continuation compatibility; Win32 error " + std::to_string(GetLastError()));
+                trace("native.context.compatibility.restart", "Original executable; child PID " + std::to_string(child.dwProcessId));
+                CloseHandle(child.hThread);
+                DWORD result = 0;
+                bool completed = WaitForSingleObject(child.hProcess, INFINITE) == WAIT_OBJECT_0 &&
+                    GetExitCodeProcess(child.hProcess, &result) != FALSE;
+                DWORD error = GetLastError();
+                CloseHandle(child.hProcess);
+                if (!completed) throw std::runtime_error("Cannot read compatibility process result; Win32 error " + std::to_string(error));
+                trace("native.context.compatibility.return", std::to_string(result));
+                return std::bit_cast<int>(result);
+            }
+        }
         // Setup failures bypass only our hook. Never catch/retry after the real game entry was called.
         std::optional<environment_change> log;
         std::optional<environment_change> hooks;
+        std::optional<environment_change> crash_directory;
         try {
-            if (should_activate(host_path, app_path) && fs::is_regular_file(hook) &&
-                fs::is_regular_file(managed / L"VulkanStory.Game.dll") &&
-                fs::is_regular_file(managed / L"profiles/vs-1.22.7-win-x64.json")) {
+            if (complete_payload) {
                 auto existing = environment(L"DOTNET_STARTUP_HOOKS");
                 std::wstring combined = hook.wstring();
                 if (combined.find(L';') != combined.npos) throw std::runtime_error("A startup-hook path cannot contain a semicolon.");
                 if (existing && !existing->empty()) combined += L";" + *existing;
                 log.emplace(L"VULKANSTORY_BOOTSTRAP_LOG", log_path().wstring());
+                if (GetPrivateProfileIntW(L"Bootstrap", L"CrashCapture", 1, config_path().c_str())) {
+                    try {
+                        auto report = log_path().parent_path().parent_path() / L"Crashes" / log_path().stem();
+                        auto monitor = managed.parent_path() / L"native/win-x64/VulkanStory.CrashMonitor.exe";
+                        trace("native.crash_monitor", start_crash_monitor(monitor, report, log_path()));
+                        crash_directory.emplace(L"VULKANSTORY_CRASH_DIRECTORY", report.wstring());
+                    } catch (const std::exception& error) { trace("native.crash_monitor.unavailable", error.what()); }
+                }
                 hooks.emplace(L"DOTNET_STARTUP_HOOKS", std::move(combined));
                 trace("native.startup_hook.armed", "B0 observer");
             } else trace("native.startup_hook.bypassed", "Disabled, other process, or incomplete payload.");

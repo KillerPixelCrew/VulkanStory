@@ -108,8 +108,8 @@ internal static class RigidContentMotionConsumerPatches
     {
         var temporal = session.Temporal;
         if (!temporal.EntityMotion.Enabled || !temporal.State.JitterActive ||
-            ShaderProgramBase.CurrentShaderProgram is not { PassName: "standard" } program ||
-            !program.HasUniform("taaHistoryValid")) return false;
+            ShaderProgramBase.CurrentShaderProgram is not { } program ||
+            !session.Graphics.HasRigidMotionContract(program)) return false;
         bool opened = session.Graphics.BeginMotionWrite(temporal);
         if (!opened && !session.Graphics.FrameState.MotionWriteActive) return false;
         try

@@ -28,6 +28,7 @@ internal sealed partial class GameRenderSession
         if (!HeadlessHarnessOptions.Active) return;
         if (HeadlessHarnessOptions.Enabled && headlessDeadline.Elapsed.TotalSeconds >= headlessTimeout)
         { FailHeadlessRun("timeout", "renderCycle"); return; }
+        if (ScenarioWorldCyclePending) return;
         if (HeadlessHarnessOptions.MainMenuContext)
         {
             if (HeadlessHarnessOptions.LegacyMainOptionsDiagnostic) PrepareMainOptionsDiagnostic();
@@ -66,6 +67,7 @@ internal sealed partial class GameRenderSession
     /// <summary>Reads and writes configured headless frame output only after the harness readiness/warmup boundaries are satisfied.</summary>
     private void CaptureHeadlessFrame()
     {
+        if (ScenarioWorldCyclePending) return;
         if (HeadlessHarnessOptions.LegacyMainOptionsDiagnostic)
         { CaptureMainOptionsDiagnostic(); return; }
         if (headlessDone || headlessLegacyReady || headlessWorldFrame < 0) return;

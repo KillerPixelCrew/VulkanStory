@@ -69,7 +69,11 @@ internal sealed partial class GameGraphicsAdapter
             shaderCallbacks.LinkError(program.PassName, renderer.GetError());
             return false;
         }
+        int previousId = program.ProgramId;
+        bool wasActive = previousId > 0 && StatedProgram == previousId;
+        if (previousId > 0 && previousId != id) DeleteProgram(previousId);
         program.ProgramId = id;
+        if (wasActive) UseShaderProgram(id);
         SceneShaderLinked(program);
         shaderCallbacks.ProgramLoaded(program.PassName);
         return true;
@@ -78,15 +82,25 @@ internal sealed partial class GameGraphicsAdapter
     internal int GetUniformLocation(ShaderProgram program, string name) =>
         RequireDevice().GetUniformLocation(program.ProgramId, name);
 
-    internal void Uniform(int program, int location, float value) => RequireDevice().SetUniform(program, location, value);
-    internal void Uniform(int program, int location, int value) => RequireDevice().SetUniform(program, location, value);
-    internal void Uniform(int program, int location, float x, float y) => RequireDevice().SetUniform(program, location, x, y);
-    internal void Uniform(int program, int location, float x, float y, float z) => RequireDevice().SetUniform(program, location, x, y, z);
-    internal void Uniform(int program, int location, float x, float y, float z, float w) => RequireDevice().SetUniform(program, location, x, y, z, w);
-    internal void Uniform(int program, int location, int x, int y, int z) => RequireDevice().SetUniform(program, location, x, y, z);
+    internal void Uniform(int program, int location, float value)
+    {
+        InvalidateMotionInput(program, location);
+        RequireDevice().SetUniform(program, location, value);
+    }
+    internal void Uniform(int program, int location, int value)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, value); }
+    internal void Uniform(int program, int location, float x, float y)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y); }
+    internal void Uniform(int program, int location, float x, float y, float z)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y, z); }
+    internal void Uniform(int program, int location, float x, float y, float z, float w)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y, z, w); }
+    internal void Uniform(int program, int location, int x, int y, int z)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y, z); }
 
     internal void UniformArray(int program, int location, int count, float[] values, int components)
     {
+        InvalidateMotionInput(program, location);
         var renderer = RequireDevice();
         switch (components)
         {
@@ -97,12 +111,17 @@ internal sealed partial class GameGraphicsAdapter
             default: throw new ArgumentOutOfRangeException(nameof(components));
         }
     }
-    internal void UniformMatrices(int program, int location, int count, float[] values) =>
+    internal void UniformMatrices(int program, int location, int count, float[] values)
+    {
+        InvalidateMotionInput(program, location);
         RequireDevice().SetUniformMatrices(program, location, count, values);
-    internal void UniformMatrices4x3(int program, int location, int count, float[] values) =>
-        RequireDevice().SetUniformMatrices4x3(program, location, count, values);
+        if (count == 1) CaptureMotionModel(program, location, values);
+    }
+    internal void UniformMatrices4x3(int program, int location, int count, float[] values)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniformMatrices4x3(program, location, count, values); }
     internal void UniformMatrix(int program, int location, ref Matrix4 matrix)
     {
+        InvalidateMotionInput(program, location);
         var renderer = RequireDevice();
         // Retained row-field flattening from the original renderer platform adapter.
         float[] values = [matrix.M11, matrix.M12, matrix.M13, matrix.M14,
@@ -110,11 +129,17 @@ internal sealed partial class GameGraphicsAdapter
             matrix.M31, matrix.M32, matrix.M33, matrix.M34,
             matrix.M41, matrix.M42, matrix.M43, matrix.M44];
         renderer.SetUniformMatrix(program, location, values);
+        CaptureMotionModel(program, location, values);
     }
 
     internal void UseShaderProgram(int id)
     {
         RequireDevice();
+        if (StatedProgram != id)
+        {
+            aoTemporal?.EntityMotion.InvalidateUpload(StatedProgram);
+            aoTemporal?.EntityMotion.InvalidateUpload(id);
+        }
         StatedProgram = id;
     }
     internal void DetachShader(int program, int shader) { RequireDevice(); }
@@ -125,6 +150,9 @@ internal sealed partial class GameGraphicsAdapter
     internal void DeleteProgram(int program)
     {
         ReleasePreviousAnimation(program);
+        aoTemporal?.EntityMotion.ReleaseProgram(program);
+        aoTemporal?.StandardMotion.ReleaseProgram(program);
+        motionInputLocations.Remove(program);
         RequireDevice().DeleteProgram(program);
         worldSamplerNames.Remove(program);
         foreach (var key in programTextures.Keys.Where(key => key.Program == program).ToArray())

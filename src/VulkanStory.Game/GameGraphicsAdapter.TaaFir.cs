@@ -37,7 +37,7 @@ internal sealed partial class GameGraphicsAdapter
         bool dimensionsChanged = width != taaWorkspaceWidth || height != taaWorkspaceHeight;
         bool possibleAo = (postSettings?.Settings.AmbientOcclusion is "auto" or "gtao") &&
             RequireFramebufferHost().Settings().SsaoQuality > 0 &&
-            shaderOverrides?.AllowsRetainedSceneFeatures != false && ambientOcclusionFailure == null;
+            shaderOverrides?.CanPrepareSceneFeatures != false && ambientOcclusionFailure == null;
         if (dimensionsChanged || possibleAo != aoWorkspacePossible)
         {
             aoWorkspaceExpectedBytes = possibleAo

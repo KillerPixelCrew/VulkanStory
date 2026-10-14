@@ -31,9 +31,9 @@ internal sealed partial class GameGraphicsAdapter
         FrameState.MotionAttachment != compiledMotionLocation
             ? "shader motion location " + compiledMotionLocation + " differs from target " + FrameState.MotionAttachment
             : "shader motion location " + compiledMotionLocation + " matches target";
-    private CompiledSceneModes RequestedSceneModes() => new(AoSettings.EffectiveTemporalPipeline && ShaderOverrides.AllowsRetainedSceneFeatures,
+    private CompiledSceneModes RequestedSceneModes() => new(AoSettings.EffectiveTemporalPipeline && ShaderOverrides.CanPrepareSceneFeatures,
         (AoSettings.Settings.AmbientOcclusion == "gtao" ||
-            (AoSettings.Settings.AmbientOcclusion == "auto" && AoSettings.EffectiveTemporalPipeline)) && ClientSettings.SSAOQuality > 0 && ShaderOverrides.AllowsRetainedSceneFeatures,
+            (AoSettings.Settings.AmbientOcclusion == "auto" && AoSettings.EffectiveTemporalPipeline)) && ClientSettings.SSAOQuality > 0 && ShaderOverrides.CanPrepareSceneFeatures,
         ClientSettings.SSAOQuality > 0 ? 4 : 2);
 
     private static string Define(string? prefix, string name, int value)
@@ -101,6 +101,8 @@ internal sealed partial class GameGraphicsAdapter
         AoTemporal.SetMotionShaderMode(complete && requested.Motion);
         compiledMotionLocation = complete && requested.Motion ? requested.MotionLocation : -1;
         SetAmbientOcclusionShaderMode(complete && requested.Gtao);
+        if (complete && requested.Motion)
+            platform!.Logger.Notification("VulkanStory: scene motion writers compiled and certified at attachment {0}.", requested.MotionLocation);
         if (!complete)
         {
             string[] mismatched = sceneMotionWriters.Where(name =>

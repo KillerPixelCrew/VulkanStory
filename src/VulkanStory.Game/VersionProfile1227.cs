@@ -18,7 +18,11 @@ internal static class VersionProfile1227
         // The startup hook runs before Main parses arguments/configures paths.
         // Resolve the game's actual data path only when it requests its first window.
         var plan = StartupProfileComposition.Create1227(runtime,
-            () => GameSessionServices.Load(GamePaths.DataPath), essentials, survival);
+            () =>
+            {
+                runtime.Notify("game.data_path", GamePaths.DataPath);
+                return GameSessionServices.Load(GamePaths.DataPath);
+            }, essentials, survival);
         runtime.Prepare(plan);
     }
     private static Assembly OriginalBuiltin(string gameDirectory, string name)

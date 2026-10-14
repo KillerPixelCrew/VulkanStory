@@ -174,6 +174,20 @@ internal sealed partial class GameRenderSession
     {
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;
         if (scenario == null || scenarioTerminal || headlessDone) return;
+        if (ScenarioWorldCyclePending)
+        {
+            try { AdvanceScenarioWorldCycle(scenario); }
+            catch (Exception error)
+            {
+                try { WriteScenarioEvent(scenarioWorldCycle!.Action, "beforeInput", false, false, null,
+                    error.GetBaseException().Message); }
+                catch { }
+                FailHeadlessRun("World cycle failed: " + error.GetBaseException().Message, "beforeInput");
+            }
+            // A verified reload restores the declared tick for this completed frame.
+            // The next ordinary input boundary advances it exactly once.
+            return;
+        }
         if (scenarioTick == null)
         {
             try { if (!TryStartScenarioContext(scenario)) return; }
@@ -202,12 +216,18 @@ internal sealed partial class GameRenderSession
 
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
                      action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Settings or
-                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize))
+                         HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or
+                         HeadlessScenarioActionKind.Resize or HeadlessScenarioActionKind.WorldCycle))
         {
             string phase = ScenarioActionPhase(action.Kind);
             scenarioFailurePhase = phase;
             try
             {
+                if (action.Kind == HeadlessScenarioActionKind.WorldCycle)
+                {
+                    StartScenarioWorldCycle(action);
+                    return;
+                }
                 if (action.Kind == HeadlessScenarioActionKind.Settings)
                 {
                     JsonObject current = JsonNode.Parse(RuntimeBootstrap.Current.ReadSettings())?.AsObject()
@@ -222,6 +242,14 @@ internal sealed partial class GameRenderSession
                 {
                     var client = Temporal.CurrentClient ?? throw new InvalidOperationException("Camera action requires a world client.");
                     if (client.IsPaused) throw new InvalidOperationException("Camera action requires an unpaused world.");
+                    if (action.CameraMode is { } modeName)
+                    {
+                        var mode = Enum.Parse<EnumCameraMode>(modeName);
+                        for (int attempt = 0; attempt < 2 && client.api.Render.CameraType != mode; attempt++)
+                            client.MainCamera.CycleMode();
+                        if (client.api.Render.CameraType != mode) throw new InvalidOperationException("Camera mode switch failed.");
+                        Temporal.State.RequestReset(EnumTemporalResetReason.Toggle);
+                    }
                     // Official PlayerCamera reads mouseYaw in the Before stage.
                     // Move that real camera input before it builds this frame's matrices.
                     client.mouseYaw = Vintagestory.API.MathTools.GameMath.Mod(
@@ -257,7 +285,8 @@ internal sealed partial class GameRenderSession
         {
             declaredIndex = action.Index,
             actionId = action.Id,
-            actionKind = action.Kind.ToString().ToLowerInvariant(),
+            actionKind = action.Kind == HeadlessScenarioActionKind.WorldCycle
+                ? "world-cycle" : action.Kind.ToString().ToLowerInvariant(),
             declaredTick = action.Tick,
             scenarioTick,
             phase,
@@ -276,7 +305,8 @@ internal sealed partial class GameRenderSession
     private static string ScenarioActionPhase(HeadlessScenarioActionKind kind) => kind switch
     {
         HeadlessScenarioActionKind.Settings => "settings",
-        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize => "beforeInput",
+        HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or HeadlessScenarioActionKind.Resize or
+            HeadlessScenarioActionKind.WorldCycle => "beforeInput",
         HeadlessScenarioActionKind.Capture => "preGenerateReadback",
         _ => "completedFrame"
     };
@@ -425,7 +455,8 @@ internal sealed partial class GameRenderSession
                 inputOrientation = currentXessInputs ? "upright" : "renderer",
                 colorTexture = currentXessInputs ? xessInputs.Color : primary?.ColorTextureIds.ElementAtOrDefault(0),
                 depthTexture = currentXessInputs ? xessInputs.Depth : primary?.DepthTextureId,
-                sourceMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
+                sourceMotionTexture = Graphics.PreparedSdkMotionTexture,
+                rawSceneMotionTexture = primary?.ColorTextureIds.ElementAtOrDefault(Graphics.FrameState.MotionAttachment),
                 motionTexture = sdkInputs.Motion,
                 reactiveTexture = sdkInputs.Reactive,
             } : null;
@@ -456,6 +487,8 @@ internal sealed partial class GameRenderSession
             xessConstants = currentWorldSample ? Device.XessConstantsCapture : null,
             srInputs,
             skyMotion = currentWorldSample ? Graphics.SkyMotionCapture : null,
+            preparedSdkMotionTexture = currentWorldSample ? (int?)Graphics.PreparedSdkMotionTexture : null,
+            sdkMotion = currentWorldSample ? Graphics.SdkMotionCapture : null,
             nativeTaaResolve = currentWorldSample && Graphics.TaaResolvedThisFrame ? Graphics.TaaResolveCapture : null,
             resourceMemory = Device.ResourceMemoryDiagnostics(),
             renderWidth = primary?.Width,
@@ -639,6 +672,16 @@ internal sealed partial class GameRenderSession
         Current("dlssDynamicMfgSupport", queryDynamic);
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
+        Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
+        Aggregate("managedDependencyResolutionVerified", ModCompatibilityConsumerPatches.ManagedDependencyResolutionVerified);
+        Aggregate("validAnimatedHistoryUploads", Temporal.EntityMotion.ValidAnimationUploads);
+        Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
+        Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);
+        Aggregate("rigidEntityMotionWindows", Graphics.RigidEntityMotionWindows);
+        Aggregate("validRigidEntityHistoryWrites", Graphics.ValidRigidEntityHistoryWrites);
+        Aggregate("inventoryMotionWindows", Graphics.InventoryMotionWindows);
+        Aggregate("validInventoryHistoryWrites", Graphics.ValidInventoryHistoryWrites);
+        Aggregate("inventorySharedGeometryDraws", Graphics.InventorySharedGeometryDraws);
         Aggregate("realPresents", Interlocked.Read(ref realPresents));
         Aggregate("sdkReportedPresents", Interlocked.Read(ref sdkPresents));
         Aggregate("hostGeneratedPresents", Interlocked.Read(ref hostGeneratedPresents));
@@ -788,6 +831,7 @@ internal sealed partial class GameRenderSession
 
     private void FailHeadlessRun(string reason, string failedPhase)
     {
+        ClearScenarioWorldCycle();
         try
         {
             if (scenarioFailure != null) return;
@@ -827,6 +871,7 @@ internal sealed partial class GameRenderSession
     private void FinalizeHeadlessRun(bool success, string reason, bool hidden, bool focused,
         bool stagedModLoaded, string modLocation, ulong? completedFrameId = null)
     {
+        ClearScenarioWorldCycle();
         try
         {
             if (HeadlessHarnessOptions.Scenario != null)

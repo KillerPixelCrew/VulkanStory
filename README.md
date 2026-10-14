@@ -4,7 +4,7 @@ A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
 generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
 unmodified game.
 
-> **Current release: [v0.1.1](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1)** for Windows x64. Known defects and
+> **Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4)** for Windows x64. Known defects and
 > remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
@@ -27,6 +27,8 @@ unmodified game.
   Optional algorithms are switchable on the Performance options page.
 - **Performance inspection**: in-game captures with offline flame graphs, allocation
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
+- **Initial OpenXR stereo rendering** with tracked headset views and a desktop mirror,
+  enabled from the Device options page.
 - **Extension points** for other mods to add renderer passes. A separate
   compatibility module for translating supported OpenGL usage by other mods is planned.
 
@@ -52,7 +54,7 @@ VulkanStory starts **before** the game creates its window, so it is installed be
 the game executable, not only into `Mods`.
 
 1. Close the game.
-2. Download **VulkanStory-win-x64.zip** from the [v0.1.1 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1).
+2. Download **VulkanStory-win-x64.zip** from the [v0.1.4 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4).
    Extract it into the folder that contains `Vintagestory.exe`, keeping
    the folder layout. This adds `hostfxr.dll`, `VulkanStory/`, `Mods/vulkanstory` and
    `Mods/vulkanstoryinput`. The game's own files are not modified.
@@ -79,6 +81,8 @@ are not CPU time, and GPU execution time is not measured.
 
 When reporting a problem, include `%LOCALAPPDATA%\VulkanStory\Logs\bootstrap-*.jsonl`
 and the game's `Logs/client-main.log`.
+Windows crashes also produce a report ZIP under `%LOCALAPPDATA%\VulkanStory\Crashes`;
+review it for private information before sharing.
 
 ## Building from source
 
@@ -91,9 +95,9 @@ Prerequisites:
 - CMake and Ninja (native bootstrap), the Vulkan SDK, and MinGW-w64 `g++`/`gcc`
   (provider bridges)
 - Visual Studio 2022 or 2026 with x64 C++ build tools (the corrected FidelityFX
-  Vulkan runtime)
+  Vulkan runtime and OpenXR loader)
 - Vendor SDKs are pinned git submodules under `sdk/` (DLSS, FidelityFX for FSR 3
-  and FSR 4, XeSS, Streamline 2.14.1, VMA). Clone with `--recurse-submodules`, or run
+  and FSR 4, XeSS, Streamline 2.14.1, VMA, OpenXR). Clone with `--recurse-submodules`, or run
   `git submodule update --init`.
 
 ```powershell

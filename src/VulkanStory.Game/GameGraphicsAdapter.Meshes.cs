@@ -14,6 +14,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         internal GameGraphicsAdapter Adapter { get; } = adapter;
         internal int Handle { get; } = handle;
+        internal long GeometryRevision;
         private int released;
         internal bool ClaimRelease() => Interlocked.Exchange(ref released, 1) == 0;
 
@@ -72,7 +73,12 @@ internal sealed partial class GameGraphicsAdapter
     internal void UpdateMesh(MeshRef mesh, MeshData data)
     {
         ParticleMotionHistory.Uploaded(mesh, data);
-        RequireDevice().UpdateMesh(MeshHandle((VAO)mesh), GameMeshLayout.Capture(data));
+        var renderer = RequireDevice();
+        int handle = MeshHandle((VAO)mesh);
+        var layout = GameMeshLayout.Capture(data);
+        // A partially failed upload must not leave previous geometry certified.
+        Meshes.GetValue((VAO)mesh, _ => throw new InvalidOperationException("Updated mesh lost its owner.")).GeometryRevision++;
+        renderer.UpdateMesh(handle, layout);
         RayEntityMeshCapture.Update(mesh, data);
     }
     private int MeshHandle(VAO mesh)
@@ -83,6 +89,8 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal static GameGraphicsAdapter MeshAdapter(VAO mesh) => Meshes.TryGetValue(mesh, out var owner)
         ? owner.Adapter : throw new InvalidOperationException("Active mesh routing has no renderer owner.");
+    internal static long MeshGeometryRevision(MeshRef mesh) => mesh is VAO { Disposed: false, VaoId: > 0 } vao &&
+        Meshes.TryGetValue(vao, out var owner) ? owner.GeometryRevision : -1;
     internal void RequireOwnedMesh(VAO mesh) { RequireDevice(); MeshHandle(mesh); }
     internal void ReleaseMesh(VAO mesh)
     {
@@ -115,7 +123,10 @@ internal sealed partial class GameGraphicsAdapter
         FaceData[] faces = GameSsboFacePacking.Pack(data);
         int byteOffset = data.XyzOffset / 12 * 16;
         // Retained order: ordinary streams first, packed xyz-slot records last.
-        renderer.UpdateMesh(handle, GameMeshLayout.Capture(data));
+        var layout = GameMeshLayout.Capture(data);
+        // Invalidate before the first GPU mutation, including partial update failures.
+        Meshes.GetValue((VAO)mesh, _ => throw new InvalidOperationException("Updated mesh lost its owner.")).GeometryRevision++;
+        renderer.UpdateMesh(handle, layout);
         GCHandle pin = GCHandle.Alloc(faces, GCHandleType.Pinned);
         try { renderer.UpdateMeshStorageBuffer(handle, pin.AddrOfPinnedObject(), byteOffset, 16 * data.VerticesCount); }
         finally { pin.Free(); }

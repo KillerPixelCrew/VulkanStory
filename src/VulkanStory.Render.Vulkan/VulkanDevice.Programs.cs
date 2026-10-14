@@ -311,6 +311,52 @@ public sealed unsafe partial class VulkanDevice
     public int GetUniformLocation(int programId, string name) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
 
+    /// <summary>Checks a linked animation/motion ABI; zero capacity denotes compatible runtime mat4 arrays.</summary>
+    internal bool TryGetAnimatedMotionContract(int programId, int motionAttachment, out int maximumJointMatrices)
+    {
+        maximumJointMatrices = 0;
+        return _programs.TryGetValue(programId, out ShaderProgramResources? program) &&
+            program.AnimatedMotion.TryGet(motionAttachment, out maximumJointMatrices);
+    }
+
+    /// <summary>Checks the linked rigid motion ABI at the active motion attachment.</summary>
+    internal bool HasRigidMotionContract(int programId, int motionAttachment) =>
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) &&
+        program.RigidMotion.Has(motionAttachment);
+
+    /// <summary>Reads a declared scalar float from the actual shadow consumed by the next draw.</summary>
+    internal bool TryReadClientFloatUniform(int programId, string name, out float value)
+    {
+        value = 0;
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program)) return false;
+        int location = program.LocationOf(name);
+        if (location < 0) return false;
+
+        UniformMember member;
+        byte[]? shadow;
+        if (ShaderProgramResources.IsFrameLocation(location))
+        {
+            if (!program.Interface.FrameMemberDeclaredLengths.TryGetValue(name, out int length) || length != 0 ||
+                !FrameGlobals.TryGetMember(name, out member)) return false;
+            shadow = _frameGlobals;
+        }
+        else if (ShaderProgramResources.IsPushLocation(location))
+        {
+            if (!program.Interface.PushMembersByName.TryGetValue(name, out member!)) return false;
+            shadow = program.PushShadow;
+        }
+        else
+        {
+            if (!program.Interface.MembersByName.TryGetValue(name, out member!)) return false;
+            shadow = program.UniformShadow;
+        }
+
+        if (member.Type.Name != "float" || member.ArrayLength != 0 || shadow == null || member.Offset < 0 ||
+            (long)member.Offset + sizeof(float) > shadow.Length) return false;
+        value = BitConverter.ToSingle(shadow, member.Offset);
+        return true;
+    }
+
     // ------------------------------------------------------------------- uniforms
 
     private void Write(int programId, int location, ReadOnlySpan<byte> data)
@@ -493,6 +539,8 @@ public sealed unsafe partial class VulkanDevice
 
     // Uniform state is game-neutral; draw binding consumes its retained dictionaries.
     private readonly ClientUniformBufferManager _clientUniformBuffers = new();
+    /// <summary>The live globally bound buffer consumed for this named block, or zero when absent/deleted.</summary>
+    internal int ClientUniformBufferBoundHandle(string blockName) => _clientUniformBuffers.BoundHandle(blockName);
     /// <summary>Looks up a named client block's descriptor binding in the linked program.</summary>
     internal int? ClientUniformBlockBinding(int programId, string blockName)
     {

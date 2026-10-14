@@ -132,6 +132,14 @@ vec3 basisDirection(vec3 normal, vec3 local) {
     vec3 tangent = normalize(cross(abs(normal.z) < 0.999 ? vec3(0, 0, 1) : vec3(0, 1, 0), normal));
     return tangent * local.x + cross(normal, tangent) * local.y + normal * local.z;
 }
+float misWeight(float selectedPdf, float otherPdf) {
+    float selected = selectedPdf * selectedPdf;
+    return selected / max(selected + otherPdf * otherPdf, 1e-20);
+}
+vec3 sampleSkyDirection(vec3 normal, inout uint rng) {
+    float u = random(rng), phi = 2.0 * PI * random(rng);
+    return basisDirection(normal, vec3(cos(phi) * sqrt(u), sin(phi) * sqrt(u), sqrt(1.0 - u)));
+}
 vec3 sampleBsdf(Surface s, vec3 view, inout uint rng, out bool specular) {
     vec3 f0 = mix(vec3(0.04), s.albedo, s.metallic);
     float weight = clamp(max(max(f0.r, f0.g), f0.b), 0.1, 0.9);

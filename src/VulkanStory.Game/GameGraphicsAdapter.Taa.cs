@@ -329,6 +329,7 @@ internal sealed partial class GameGraphicsAdapter
     internal void ReloadTemporalPrograms()
     {
         var renderer = RequireDevice();
+        ReloadSdkMotionProgram();
         if (taaCacheProgram > 0) renderer.DeleteProgram(taaCacheProgram);
         if (taaResolveProgram > 0) renderer.DeleteProgram(taaResolveProgram);
         if (taaSharpenProgram > 0) renderer.DeleteProgram(taaSharpenProgram);

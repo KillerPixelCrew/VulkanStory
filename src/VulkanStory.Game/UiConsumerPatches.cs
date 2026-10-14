@@ -111,6 +111,7 @@ internal static class UiConsumerPatches
     private static void ReloadUiShader()
     {
         if (!TryScreen(out var graphics)) return;
+        Performance.WorldMapPageCache.ReloadShaders();
         graphics.ReloadUiProgram(); graphics.ReloadTemporalPrograms();
         graphics.ReloadSceneGodRaysProgram();
         graphics.ReloadAmbientOcclusionProgram();

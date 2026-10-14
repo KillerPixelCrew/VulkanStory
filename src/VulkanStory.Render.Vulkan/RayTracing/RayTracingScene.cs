@@ -31,6 +31,7 @@ internal sealed unsafe class RayTracingScene : IDisposable
         internal VulkanBuffer? Instances, Geometry;
         internal RayAccelerationStructure? Top;
         internal uint Capacity;
+        internal uint BuiltInstanceCount;
         internal ulong BuildFrame = ulong.MaxValue;
         internal AccelerationStructureKHR Handle => Top?.Handle ?? default;
         public void Dispose()
@@ -92,6 +93,7 @@ internal sealed unsafe class RayTracingScene : IDisposable
         {
             fixed (RayTracingVertex* vertices = source.Vertices)
                 uploads.UploadToBuffer(Vertices, 0, (nint)vertices, Vertices.Size);
+            SkinPending = false;
             Placement(source, frame);
         }
         private void Placement(RayTracingGeometryUpload source, ulong frame)
@@ -312,8 +314,8 @@ internal sealed unsafe class RayTracingScene : IDisposable
             {
                 skinning ??= new RaySkinningPipeline(context, compiler);
                 RayAccelerationStructure.Barrier(context, commands,
-                    PipelineStageFlags2.CopyBit | PipelineStageFlags2.RayTracingShaderBitKhr | PipelineStageFlags2.AccelerationStructureBuildBitKhr,
-                    AccessFlags2.TransferWriteBit | AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderReadBit,
+                    PipelineStageFlags2.CopyBit | PipelineStageFlags2.ComputeShaderBit | PipelineStageFlags2.RayTracingShaderBitKhr | PipelineStageFlags2.AccelerationStructureBuildBitKhr,
+                    AccessFlags2.TransferWriteBit | AccessFlags2.ShaderStorageWriteBit | AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderReadBit,
                     PipelineStageFlags2.ComputeShaderBit, AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
                 skinning.Record(commands, mesh.SkinInput!, mesh.Vertices, mesh.SkinJoints!, mesh.VertexCount,
                     mesh.SkinJointCount, mesh.SkinReset, mesh.PreviousOriginDelta);
@@ -408,15 +410,25 @@ internal sealed unsafe class RayTracingScene : IDisposable
         {
             SType = StructureType.AccelerationStructureBuildGeometryInfoKhr,
             Type = AccelerationStructureTypeKHR.TopLevelKhr,
-            Flags = BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr,
-            Mode = BuildAccelerationStructureModeKHR.BuildKhr, GeometryCount = 1, PGeometries = &instances,
+            Flags = BuildAccelerationStructureFlagsKHR.PreferFastTraceBitKhr | BuildAccelerationStructureFlagsKHR.AllowUpdateBitKhr,
+            Mode = slot.Top != null && slot.BuiltInstanceCount == LastInstanceCount
+                ? BuildAccelerationStructureModeKHR.UpdateKhr : BuildAccelerationStructureModeKHR.BuildKhr,
+            SrcAccelerationStructure = slot.Top != null && slot.BuiltInstanceCount == LastInstanceCount ? slot.Top.Handle : default,
+            GeometryCount = 1, PGeometries = &instances,
         };
         if (slot.Top == null)
         {
             var sizes = RayAccelerationStructure.Sizes(context, api, topInfo, slot.Capacity);
             slot.Top = new RayAccelerationStructure(context, api, topInfo.Type, sizes, limits.MinAccelerationStructureScratchOffsetAlignment);
         }
+        // A reusable slot still needs a device memory dependency before modifying its AS.
+        RayAccelerationStructure.Barrier(context, commands,
+            PipelineStageFlags2.AccelerationStructureBuildBitKhr | PipelineStageFlags2.RayTracingShaderBitKhr | PipelineStageFlags2.ComputeShaderBit,
+            AccessFlags2.AccelerationStructureWriteBitKhr | AccessFlags2.AccelerationStructureReadBitKhr,
+            PipelineStageFlags2.AccelerationStructureBuildBitKhr,
+            AccessFlags2.AccelerationStructureReadBitKhr | AccessFlags2.AccelerationStructureWriteBitKhr);
         slot.Top.Build(commands, topInfo, new AccelerationStructureBuildRangeInfoKHR { PrimitiveCount = LastInstanceCount });
+        slot.BuiltInstanceCount = LastInstanceCount;
         uploads.NoteUse(commands, slot.Instances); uploads.NoteUse(commands, slot.Geometry);
         RayAccelerationStructure.Barrier(context, commands, PipelineStageFlags2.AccelerationStructureBuildBitKhr,
             AccessFlags2.AccelerationStructureWriteBitKhr, PipelineStageFlags2.RayTracingShaderBitKhr | PipelineStageFlags2.ComputeShaderBit,
@@ -428,6 +440,9 @@ internal sealed unsafe class RayTracingScene : IDisposable
     {
         SType = StructureType.AccelerationStructureGeometryKhr,
         GeometryType = GeometryTypeKHR.TrianglesKhr,
+        // Transparent attenuation must run once per triangle, even if traversal revisits it.
+        Flags = GeometryFlagsKHR.NoDuplicateAnyHitInvocationBitKhr,
+        // TODO(RT): mark verified opaque materials OpaqueBitKhr after adding an opaque shadow closest-hit shader.
         Geometry = new AccelerationStructureGeometryDataKHR
         {
             Triangles = new AccelerationStructureGeometryTrianglesDataKHR
@@ -457,7 +472,7 @@ internal sealed unsafe class RayTracingScene : IDisposable
                 MemoryPoolClass.DeviceBuffers);
         }
         catch { instances.Dispose(); throw; }
-        slot.Top?.Dispose(); slot.Top = null;
+        slot.Top?.Dispose(); slot.Top = null; slot.BuiltInstanceCount = 0;
         slot.Geometry?.Dispose(); slot.Instances?.Dispose();
         slot.Instances = instances; slot.Geometry = geometry; slot.Capacity = capacity;
     }

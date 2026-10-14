@@ -1,4 +1,5 @@
 using System.Globalization;
+using HarmonyLib;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.MathTools;
@@ -24,6 +25,7 @@ internal sealed record HeadlessTimedCommand(long Frame, string Line)
 /// <remarks>
 /// <c>!sand dx dy dz</c> places sand above the first player and wakes it, so it falls as a falling-block entity.
 /// <c>!drop dx dz count</c> spawns dropped flint items on the surface at that offset. Offsets are in blocks.
+/// <c>!ground-items dx dz</c> places or refills real ground storage with two hot raw bowls in separate slots.
 /// <c>!occluder distance</c> builds a granite wall across the camera's view at that distance, spawns four traders behind it
 /// and two in front of it.
 /// <c>!fallingsource</c> arms <see cref="HeadlessFallingMeshSource" /> on the client.
@@ -35,6 +37,7 @@ internal static class HeadlessServerDirective
     {
         string[] parts = line[1..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length == 1 && parts[0] == "fallingsource") { HeadlessFallingMeshSource.Arm(client); return; }
+        if (parts.Length == 1 && parts[0] == "resolve-library") { ModCompatibilityConsumerPatches.VerifyManagedDependencyResolution(); return; }
         ServerMain server = Performance.WorldgenPipeline.IntegratedServer ??
             throw new InvalidOperationException("No integrated server is known to the harness.");
         int Arg(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
@@ -69,6 +72,12 @@ internal static class HeadlessServerDirective
                 }));
                 break;
             }
+            case "ground-items" when parts.Length == 3:
+            {
+                int dx = Arg(1), dz = Arg(2);
+                server.EnqueueMainThreadTask(() => Guarded(line, () => PopulateGroundItems(server, dx, dz)));
+                break;
+            }
             case "occluder" when parts.Length == 2:
             {
                 int distance = Arg(1);
@@ -82,6 +91,52 @@ internal static class HeadlessServerDirective
             }
             default: throw new FormatException("Unknown harness directive: " + line);
         }
+    }
+
+    private static void PopulateGroundItems(ServerMain server, int dx, int dz)
+    {
+        IWorldAccessor world = server;
+        var player = world.AllOnlinePlayers.FirstOrDefault()?.Entity ?? throw new InvalidOperationException("No player.");
+        Block ground = world.GetBlock(new AssetLocation("game:groundstorage")) ?? throw new InvalidOperationException("No ground storage block.");
+        Block bowl = world.GetBlock(new AssetLocation("game:bowl-blue-raw")) ?? throw new InvalidOperationException("No raw bowl block.");
+        if (ground.BlockId == 0 || bowl.BlockId == 0) throw new InvalidOperationException("Ground storage assets were not resolved.");
+        int x = (int)player.Pos.X + dx, z = (int)player.Pos.Z + dz;
+        int surface = world.BlockAccessor.GetRainMapHeightAt(x, z);
+        var pos = new BlockPos(x, surface + 1, z, player.Pos.Dimension);
+        BlockEntity? storage = null;
+        // Refill the same genuine block/slots after a network or provider transition.
+        for (int y = surface + 2; y >= surface - 1; y--)
+        {
+            var probe = new BlockPos(x, y, z, player.Pos.Dimension);
+            if (world.BlockAccessor.GetBlock(probe).BlockId != ground.BlockId) continue;
+            storage = world.BlockAccessor.GetBlockEntity(probe); pos = probe; break;
+        }
+        if (storage == null)
+        {
+            if (world.BlockAccessor.GetBlock(pos).BlockId != 0)
+                throw new InvalidOperationException("Ground storage target is occupied.");
+            var below = pos.DownCopy();
+            if (!world.BlockAccessor.GetBlock(below).CanAttachBlockAt(world.BlockAccessor, ground, below, BlockFacing.UP))
+                throw new InvalidOperationException("Ground storage target has no supporting surface.");
+            world.BlockAccessor.SetBlock(ground.BlockId, pos);
+            storage = world.BlockAccessor.GetBlockEntity(pos) ?? throw new InvalidOperationException("Ground storage entity was not created.");
+        }
+        if (storage is not IBlockEntityContainer container || container.Inventory.Count < 2)
+            throw new InvalidOperationException("Ground storage has no two-slot inventory.");
+        var determine = AccessTools.Method(storage.GetType(), "DetermineStorageProperties", [typeof(ItemSlot)]) ??
+            throw new MissingMethodException("Ground storage property derivation changed.");
+        var angle = AccessTools.Property(storage.GetType(), "MeshAngle") ?? throw new MissingMemberException("Ground storage mesh angle changed.");
+        if (angle.PropertyType != typeof(float) || angle.SetMethod == null) throw new InvalidOperationException("Ground storage angle type changed.");
+        for (int i = 0; i < 2; i++)
+        {
+            var stack = new ItemStack(bowl, 1);
+            bowl.SetTemperature(world, stack, 800f, true);
+            container.Inventory[i].Itemstack = stack;
+        }
+        determine.Invoke(storage, [null]);
+        angle.SetValue(storage, 0f);
+        for (int i = 0; i < 2; i++) container.Inventory[i].MarkDirty();
+        storage.MarkDirty(true);
     }
 
     // A granite wall across the view, four traders behind it and two in plain view in front of it.

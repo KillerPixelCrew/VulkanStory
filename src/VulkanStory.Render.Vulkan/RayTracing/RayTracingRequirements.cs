@@ -16,6 +16,7 @@ internal sealed unsafe class RayTracingRequirements : IDeviceRequirementContribu
 
     public void ContributeDeviceRequirements(DeviceRequirements requirements)
     {
+        // TODO(RT): add a complete compute/ray-query traversal backend for query-only devices; keep full transport and reconstruction coverage.
         string[] extensions = ["VK_KHR_acceleration_structure", "VK_KHR_deferred_host_operations", "VK_KHR_ray_tracing_pipeline"];
         foreach (string extension in extensions)
             if (!requirements.Has(extension))

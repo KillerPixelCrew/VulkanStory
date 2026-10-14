@@ -151,7 +151,8 @@ public sealed unsafe partial class VulkanDevice
         if (color == null || depth == null || sourceMotion == null || motion == null || output == null) return -4;
         // A post-OIT B extraction would turn persistent cloud coverage into
         // history rejection again. Require the material producer's exact frame.
-        if (_fsr3MaterialReactiveFrameId != LatencyFrameId || _fsr3MaterialReactiveSource != frame.Motion ||
+        int materialMotion = frame.MaterialMotionSource > 0 ? frame.MaterialMotionSource : frame.Motion;
+        if (_fsr3MaterialReactiveFrameId != LatencyFrameId || _fsr3MaterialReactiveSource != materialMotion ||
             _textures.Get(_fsr3ReactiveTexture) is not { Format: Format.R8Unorm } reactive ||
             reactive.Width != color.Width || reactive.Height != color.Height) return -5;
         CommandBuffer commands = Commands;

@@ -316,7 +316,7 @@ internal sealed partial class GameRenderSession : IDisposable
             !temporal.MotionValid ? Temporal.MotionReadiness : null;
         if (upscalerFrameRefusal != null)
         { Graphics.UpscaledThisFrame = false; return false; }
-        bool evaluated = upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal.Provider);
+        bool evaluated = upscalers!.Evaluate(Graphics, platform.FrameBuffers, temporal);
         if (!evaluated) upscalerFrameRefusal = upscalers.EvaluationReadiness;
         return evaluated;
     }
@@ -356,9 +356,10 @@ internal sealed partial class GameRenderSession : IDisposable
             reconstructionDecline = null;
             return;
         }
-        if (reconstructionDecline != null) return;
-        reconstructionDecline = services.RendererSettings.UpscalerReplacesTaa
+        string refusal = services.RendererSettings.UpscalerReplacesTaa
             ? upscalerFrameRefusal ?? "upscaler declined" : Graphics.TaaReadiness;
+        if (reconstructionDecline == refusal) return;
+        reconstructionDecline = refusal;
         platform.Logger.Warning("VulkanStory: temporal reconstruction dropped at frame {0}: {1}; motion: {2}.",
             Device.LatencyFrameId, reconstructionDecline, Temporal.MotionReadiness);
     }
@@ -456,6 +457,7 @@ internal sealed partial class GameRenderSession : IDisposable
             // pending timeline retirements. Preserve the entire graph before
             // clearing GUI owners or beginning any dependent release.
             device?.RequireFrameRelease();
+            ClearScenarioWorldCycle();
             // GUI LoadedTextures must be released while routed texture deletion
             // can still reach this live Vulkan adapter. Rollback is too late.
             OptionsSettingsOwner.ClearAll();

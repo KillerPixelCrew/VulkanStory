@@ -372,87 +372,95 @@ internal static class OutfitTexturePrewarm
 
     private static IEnumerable<Input> Inputs(ICoreClientAPI client)
     {
-        Type? dressed = AccessTools.TypeByName("Vintagestory.GameContent.EntityDressedHumanoid");
-        if (dressed == null || client.ModLoader.GetModSystem("Vintagestory.GameContent.HumanoidOutfits") is not { } outfits) yield break;
-        MethodInfo? getConfig = AccessTools.Method(outfits.GetType(), "GetConfig", [typeof(string)]);
-        if (getConfig == null) yield break;
-        var configs = new HashSet<string>(StringComparer.Ordinal);
         var paths = new HashSet<string>(StringComparer.Ordinal);
-        var classes = new Dictionary<string, bool>(StringComparer.Ordinal);
-        foreach (EntityProperties type in client.World.EntityTypes.ToArray())
+        foreach (CompositeShape shape in Variants(client))
         {
-            if (type?.Class == null || type.Code == null) continue;
-            if (!classes.TryGetValue(type.Class, out bool isDressed))
-                classes[type.Class] = isDressed = dressed.IsInstanceOfType(client.ClassRegistry.CreateEntity(type.Class));
-            if (!isDressed) continue;
-            string config = AssetLocation.Create(type.Attributes?["outfitConfigFileName"].AsString("traderaccessories") ?? "traderaccessories",
-                type.Code.Domain).ToString();
-            if (!configs.Add(config)) continue;
-            if (getConfig.Invoke(outfits, [config]) is not { } properties ||
-                AccessTools.Field(properties.GetType(), "Variants")?.GetValue(properties) is not System.Collections.IDictionary variants) continue;
-            foreach (object? variant in variants.Values.Cast<object?>().ToArray())
+            foreach (string field in new[] { "Textures", "OverrideTextures" })
+                if (AccessTools.Field(shape.GetType(), field)?.GetValue(shape) is IDictionary<string, AssetLocation> textures)
+                    foreach (AssetLocation location in textures.Values) yield return new(location.Clone(), null);
+            if (shape.Base == null) continue;
+            AssetLocation path = shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+            if (!paths.Add(path.ToString()) || client.Assets.TryGet(path, false) is not { } asset) continue;
+            if (asset.GetType() != typeof(Asset))
             {
-                if (variant is not CompositeShape shape) continue;
-                foreach (string field in new[] { "Textures", "OverrideTextures" })
-                    if (AccessTools.Field(variant.GetType(), field)?.GetValue(variant) is IDictionary<string, AssetLocation> textures)
-                        foreach (AssetLocation location in textures.Values) yield return new(location.Clone(), null);
-                if (shape.Base == null) continue;
-                AssetLocation path = shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
-                if (!paths.Add(path.ToString()) || client.Assets.TryGet(path, false) is not { } asset) continue;
-                if (asset.GetType() != typeof(Asset))
-                {
-                    // A mod can override ToObject. Preserve that behavior on its owner rather than calling it off-thread.
-                    if (Shape.TryGet(client, path)?.Textures is { } customTextures)
-                        foreach (AssetLocation location in customTextures.Values) yield return new(location.Clone(), null);
-                    continue;
-                }
-                Type? originType = asset.Origin?.GetType();
-                // These stock origins only read immutable path metadata and write the supplied asset's Data.
-                // Unknown origins are loaded on the owner thread before taking the snapshot.
-                bool safeOrigin = originType == typeof(GameOrigin) || originType == typeof(PathOrigin) || originType == typeof(FolderOrigin);
-                if (asset.Data == null && !safeOrigin) asset = client.Assets.Get(path);
-                var owned = new Asset(asset.Data == null ? null : (byte[])asset.Data.Clone(), asset.Location.Clone(), asset.Origin);
-                if (asset is Asset original) owned.FilePath = original.FilePath;
-                yield return new(null, owned);
+                // A mod can override ToObject. Preserve that behavior on its owner rather than calling it off-thread.
+                if (Shape.TryGet(client, path)?.Textures is { } customTextures)
+                    foreach (AssetLocation location in customTextures.Values) yield return new(location.Clone(), null);
+                continue;
             }
+            Type? originType = asset.Origin?.GetType();
+            // These stock origins only read immutable path metadata and write the supplied asset's Data.
+            // Unknown origins are loaded on the owner thread before taking the snapshot.
+            bool safeOrigin = originType == typeof(GameOrigin) || originType == typeof(PathOrigin) || originType == typeof(FolderOrigin);
+            if (asset.Data == null && !safeOrigin) asset = client.Assets.Get(path);
+            var owned = new Asset(asset.Data == null ? null : (byte[])asset.Data.Clone(), asset.Location.Clone(), asset.Origin);
+            if (asset is Asset original) owned.FilePath = original.FilePath;
+            yield return new(null, owned);
         }
     }
 
     /// <summary>Walks dressed-humanoid entity types, their outfit configs and gear shapes, yielding each distinct texture once.</summary>
     private static IEnumerable<AssetLocation> Textures(ICoreClientAPI client)
     {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (CompositeShape shape in Variants(client))
+        {
+            foreach (string field in new[] { "Textures", "OverrideTextures" })
+                if (AccessTools.Field(shape.GetType(), field)?.GetValue(shape) is IDictionary<string, AssetLocation> textures)
+                    foreach (var location in textures.Values.ToArray())
+                        if (seen.Add(location.ToString())) yield return location;
+            if (shape.Base == null) continue;
+            AssetLocation path = shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+            if (!seen.Add("shape:" + path) || Shape.TryGet(client, path)?.Textures is not { } gear) continue;
+            foreach (var location in gear.Values.ToArray())
+                if (seen.Add(location.ToString())) yield return location;
+        }
+    }
+
+    private static IEnumerable<CompositeShape> Variants(ICoreClientAPI client)
+    {
         Type? dressed = AccessTools.TypeByName("Vintagestory.GameContent.EntityDressedHumanoid");
         if (dressed == null || client.ModLoader.GetModSystem("Vintagestory.GameContent.HumanoidOutfits") is not { } outfits) yield break;
         MethodInfo? getConfig = AccessTools.Method(outfits.GetType(), "GetConfig", [typeof(string)]);
         if (getConfig == null) yield break;
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // The public API exposes creation, but its backing registry already has class metadata.
+        // Looking up inheritance must not run arbitrary mod entity constructors during world entry.
+        if (AccessTools.Field(client.ClassRegistry.GetType(), "registry")?.GetValue(client.ClassRegistry) is not ClassRegistry registry)
+        {
+            client.Logger.Warning("VulkanStory: outfit texture prewarm skipped: entity class metadata is unavailable.");
+            yield break;
+        }
         var configs = new HashSet<string>(StringComparer.Ordinal);
-        var classes = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (EntityProperties type in client.World.EntityTypes.ToArray())
         {
             if (type?.Class == null || type.Code == null) continue;
-            // The API has no class-to-type lookup; one unattached instance per class only runs constructors.
-            if (!classes.TryGetValue(type.Class, out bool isDressed))
-                classes[type.Class] = isDressed = dressed.IsInstanceOfType(client.ClassRegistry.CreateEntity(type.Class));
-            if (!isDressed) continue;
+            string className = type.Class switch
+            {
+                "player" => "EntityPlayer", "item" => "EntityItem", "playerbot" => "EntityNpc",
+                "humanoid" => "EntityHumanoid", "living" => "EntityAgent", "blockfalling" => "EntityBlockFalling",
+                "projectile" => "EntityProjectile", _ => type.Class,
+            };
+            if (!registry.entityClassNameToTypeMapping.TryGetValue(className, out Type? entityClass) ||
+                !dressed.IsAssignableFrom(entityClass)) continue;
+            // Match EntityDressedHumanoid.OutfitConfigFileName, including the entity's domain for its default.
             string config = AssetLocation.Create(type.Attributes?["outfitConfigFileName"].AsString("traderaccessories") ?? "traderaccessories",
                 type.Code.Domain).ToString();
             if (!configs.Add(config)) continue;
-            if (getConfig.Invoke(outfits, [config]) is not { } properties ||
-                AccessTools.Field(properties.GetType(), "Variants")?.GetValue(properties) is not System.Collections.IDictionary variants) continue;
-            foreach (object? variant in variants.Values.Cast<object?>().ToArray())
+            CompositeShape[] variants;
+            try
             {
-                if (variant is not CompositeShape shape) continue;
-                foreach (string field in new[] { "Textures", "OverrideTextures" })
-                    if (AccessTools.Field(variant.GetType(), field)?.GetValue(variant) is IDictionary<string, AssetLocation> textures)
-                        foreach (var location in textures.Values.ToArray())
-                            if (seen.Add(location.ToString())) yield return location;
-                if (shape.Base == null) continue;
-                AssetLocation path = shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
-                if (!seen.Add("shape:" + path) || Shape.TryGet(client, path)?.Textures is not { } gear) continue;
-                foreach (var location in gear.Values.ToArray())
-                    if (seen.Add(location.ToString())) yield return location;
+                if (getConfig.Invoke(outfits, [config]) is not { } properties ||
+                    AccessTools.Field(properties.GetType(), "Variants")?.GetValue(properties) is not System.Collections.IDictionary entries) continue;
+                variants = entries.Values.OfType<CompositeShape>().ToArray();
             }
+            catch (Exception error)
+            {
+                // Config discovery is optional. One absent or malformed mod config must not cancel every outfit.
+                client.Logger.Warning("VulkanStory: outfit texture prewarm skipped config {0} for {1}: {2}",
+                    config, type.Code, error.GetBaseException().Message);
+                continue;
+            }
+            foreach (CompositeShape variant in variants) yield return variant;
         }
     }
 }

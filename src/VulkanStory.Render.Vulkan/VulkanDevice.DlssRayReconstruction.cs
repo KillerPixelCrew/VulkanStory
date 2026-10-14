@@ -25,6 +25,7 @@ public sealed unsafe partial class VulkanDevice
             if (!NgxLifetime.Initialized || NgxLifetime.Spent || rayNgxSession == null)
                 throw new NotSupportedException("the shared Vulkan NGX runtime is unavailable");
             uint width = (uint)rayRenderer!.Width, height = (uint)rayRenderer.Height;
+            // TODO(RT): add native presentation-resolution RR output and quality modes with matching downstream target sizes.
             var settings = new NgxDlssSettings(width, height, width, height, NgxPerfQuality.Dlaa, NgxDlssSettings.ContractFlags);
             bool first = rayDlss == null || !rayDlss.Matches(settings);
             if (first)

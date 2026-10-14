@@ -21,11 +21,25 @@ internal sealed class SpirvBlockMember
     public string Name = "";
     /// <summary>The GLSL spelling of the element type (<c>mat4</c>, <c>vec3</c>, a struct's type name).</summary>
     public string GlslType = "";
+    /// <summary>Bit width of the scalar underlying numeric elements, or zero for other types.</summary>
+    public int ScalarWidth;
     public int Offset;
+    /// <summary>Whether Offset was explicitly decorated, including an explicit zero.</summary>
+    public bool HasExplicitOffset;
+    /// <summary>Number of array wrappers; nested arrays are not interchangeable with one mat4 array.</summary>
+    public int ArrayDimensions;
+    /// <summary>Explicit array and matrix strides, or zero when the decoration is absent.</summary>
+    public int ArrayStride;
+    public int MatrixStride;
+    public bool RowMajor;
+    public bool ColumnMajor;
+    /// <summary>Malformed or differing repeated layout decorations make the ABI uncertain.</summary>
+    public bool HasConflictingLayoutDecorations;
     /// <summary>Bytes the member occupies: element size, or length times the array stride.</summary>
     public int Size;
     /// <summary>0 when not an array, -1 for a runtime-sized array.</summary>
     public int ArrayLength;
+    public bool RuntimeArray;
 }
 
 /// <summary>A struct used as a block, with explicit member offsets.</summary>
@@ -51,6 +65,8 @@ internal sealed class SpirvDescriptorBinding
     /// <summary>0 when not an array.</summary>
     public int ArrayLength;
     public bool RuntimeArray;
+    /// <summary>Number of descriptor-array wrappers, even when their length is unresolved.</summary>
+    public int ArrayDimensions;
     /// <summary>The block layout for uniform and storage buffers, null otherwise.</summary>
     public SpirvBlock? Block;
 }
@@ -62,8 +78,10 @@ internal sealed class SpirvInterfaceVariable
     public string Name = "";
     public int Location;
     public string GlslType = "";
+    public int ScalarWidth;
     /// <summary>0 when not an array.</summary>
     public int ArrayLength;
+    public int ArrayDimensions;
 }
 
 /// <summary>Reflected SPIR-V specialization constant and its decoded default value.</summary>
@@ -162,6 +180,8 @@ internal static class SpirvReflection
     private const int DecorationSpecId = 1;
     private const int DecorationBlock = 2;
     private const int DecorationBufferBlock = 3;
+    private const int DecorationRowMajor = 4;
+    private const int DecorationColMajor = 5;
     private const int DecorationArrayStride = 6;
     private const int DecorationMatrixStride = 7;
     private const int DecorationBuiltIn = 11;
@@ -335,7 +355,9 @@ internal static class SpirvReflection
                         Name = NameOf(module, id),
                         Location = (int)location,
                         GlslType = GlslTypeName(module, element),
+                        ScalarWidth = ScalarWidth(module, element),
                         ArrayLength = length,
+                        ArrayDimensions = ArrayDimensions(module, pointee),
                     };
                     (storageClass == StorageInput ? result.Inputs : result.Outputs).Add(variable);
                     break;
@@ -362,6 +384,7 @@ internal static class SpirvReflection
                         Binding = (int)binding,
                         ArrayLength = length,
                         RuntimeArray = runtime,
+                        ArrayDimensions = ArrayDimensions(module, pointee),
                     };
                     TypeInfo elementType = module.Types[element];
                     if (elementType.Op == OpTypeStruct)
@@ -666,8 +689,13 @@ internal static class SpirvReflection
         {
             uint memberType = type.Operands[index];
             UnwrapArray(module, memberType, out uint element, out int length, out bool runtime);
-            TryMemberDecoration(module, structType, index, DecorationOffset, out uint offset);
-            TryMemberDecoration(module, structType, index, DecorationMatrixStride, out uint matrixStride);
+            module.MemberDecorations.TryGetValue((structType, index), out var decorations);
+            bool hasOffset = TryLayoutDecoration(decorations, DecorationOffset, out uint offset, out bool offsetConflict);
+            TryLayoutDecoration(decorations, DecorationMatrixStride, out uint matrixStride, out bool matrixConflict);
+            module.Decorations.TryGetValue(memberType, out var arrayDecorations);
+            TryLayoutDecoration(arrayDecorations, DecorationArrayStride, out uint arrayStride, out bool arrayConflict);
+            bool rowMajor = HasLayoutDecoration(decorations, DecorationRowMajor, out bool rowConflict);
+            bool columnMajor = HasLayoutDecoration(decorations, DecorationColMajor, out bool columnConflict);
 
             int elementSize = SizeOf(module, element, (int)matrixStride);
             int size;
@@ -690,14 +718,81 @@ internal static class SpirvReflection
             {
                 Name = module.MemberNames.TryGetValue((structType, index), out string? name) ? name : "",
                 GlslType = GlslTypeName(module, element),
+                ScalarWidth = ScalarWidth(module, element),
                 Offset = (int)offset,
+                HasExplicitOffset = hasOffset,
+                ArrayDimensions = ArrayDimensions(module, memberType),
+                ArrayStride = (int)arrayStride,
+                MatrixStride = (int)matrixStride,
+                RowMajor = rowMajor,
+                ColumnMajor = columnMajor,
+                HasConflictingLayoutDecorations = offsetConflict || matrixConflict || arrayConflict ||
+                    rowConflict || columnConflict || (rowMajor && columnMajor),
                 Size = size,
                 ArrayLength = runtime ? -1 : length,
+                RuntimeArray = runtime,
             });
             end = Math.Max(end, (int)offset + size);
         }
         block.Size = end;
         return block;
+    }
+
+    private static int ArrayDimensions(Module module, uint typeId)
+    {
+        int dimensions = 0;
+        while (module.Types.TryGetValue(typeId, out TypeInfo? type) &&
+               type.Op is OpTypeArray or OpTypeRuntimeArray)
+        {
+            dimensions++;
+            typeId = type.Operands[0];
+        }
+        return dimensions;
+    }
+
+    private static int ScalarWidth(Module module, uint typeId)
+    {
+        if (!module.Types.TryGetValue(typeId, out TypeInfo? type)) return 0;
+        return type.Op switch
+        {
+            OpTypeInt or OpTypeFloat => (int)type.Operands[0],
+            OpTypeVector or OpTypeMatrix or OpTypeArray or OpTypeRuntimeArray => ScalarWidth(module, type.Operands[0]),
+            _ => 0,
+        };
+    }
+
+    private static bool TryLayoutDecoration(List<(int Decoration, uint[] Literals)>? decorations,
+        int decoration, out uint value, out bool conflict)
+    {
+        value = 0;
+        conflict = false;
+        bool found = false;
+        if (decorations == null) return false;
+        foreach ((int kind, uint[] literals) in decorations)
+        {
+            if (kind != decoration) continue;
+            if (literals.Length != 1) conflict = true;
+            uint declared = literals.Length == 1 ? literals[0] : 0;
+            if (found && value != declared) conflict = true;
+            value = declared;
+            found = true;
+        }
+        return found;
+    }
+
+    private static bool HasLayoutDecoration(List<(int Decoration, uint[] Literals)>? decorations,
+        int decoration, out bool conflict)
+    {
+        conflict = false;
+        bool found = false;
+        if (decorations == null) return false;
+        foreach ((int kind, uint[] literals) in decorations)
+        {
+            if (kind != decoration) continue;
+            found = true;
+            if (literals.Length != 0) conflict = true;
+        }
+        return found;
     }
 
     /// <summary>Size of a non-array type under its explicit layout; a matrix uses its member's stride.</summary>

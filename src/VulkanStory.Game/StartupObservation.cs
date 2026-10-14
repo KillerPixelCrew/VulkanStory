@@ -13,7 +13,7 @@ public static class StartupObservation
     private static int installed;
     internal static event Action<string>? StageEntering;
 
-    /// <summary>Verifies original startup IL and installs observer-only prefixes/postfixes once.</summary>
+    /// <summary>Verifies original startup IL and installs observer-only prefixes/postfixes plus a main-entry exception observer once.</summary>
     /// <param name="gameDirectory">Expected official installation for VintagestoryLib location.</param>
     /// <param name="write">Sink for ordered startup events.</param>
     /// <remarks>Binding checks finish before patching. Installation failures roll back attempted observer patches; callback diagnostics swallow their own failures.</remarks>
@@ -42,10 +42,12 @@ public static class StartupObservation
             harmony = new Harmony(Owner);
             var prefix = new HarmonyMethod(typeof(StartupObservation).GetMethod(nameof(Before), BindingFlags.NonPublic | BindingFlags.Static)!) { priority = Priority.First };
             var postfix = new HarmonyMethod(typeof(StartupObservation).GetMethod(nameof(After), BindingFlags.NonPublic | BindingFlags.Static)!) { priority = Priority.Last };
-            foreach ((MethodBase method, _) in events)
+            var finalizer = new HarmonyMethod(typeof(StartupObservation).GetMethod(nameof(MainFailed), BindingFlags.NonPublic | BindingFlags.Static)!);
+            foreach ((MethodBase method, string name) in events)
             {
                 patchAttempted = true;
-                harmony.Patch(method, prefix: prefix, postfix: postfix);
+                harmony.Patch(method, prefix: prefix, postfix: postfix,
+                    finalizer: name == "game.client.main" ? finalizer : null);
             }
             write("managed.patches.ready", $"profile={StartupIlProfile.Id}; owner={Owner}; methods={events.Count}; observer-only");
         }
@@ -64,6 +66,17 @@ public static class StartupObservation
 
     private static void Before(MethodBase __originalMethod) => Record(__originalMethod, ".enter");
     private static void After(MethodBase __originalMethod) => Record(__originalMethod, ".return");
+    private static Exception? MainFailed(Exception? __exception)
+    {
+        if (__exception is null) return null;
+        try
+        {
+            (AppContext.GetData("VulkanStory.Crash.Write") as Action<Exception>)?.Invoke(__exception);
+            trace?.Invoke("game.client.main.failed", __exception.ToString());
+        }
+        catch { /* Preserve the game's exception and its existing crash handler. */ }
+        return __exception;
+    }
 
     private static void Record(MethodBase method, string phase)
     {

@@ -4,6 +4,7 @@ using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
+using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game;
 
@@ -23,7 +24,7 @@ internal sealed partial class GameGraphicsAdapter
         // This renderer also owns the early menu, before the mod AssetsLoaded
         // stage. Read the game's selected base-asset map, as ShaderRegistry does.
         // The same map contains selected mod overrides after their normal load.
-        IAsset? replacement = platform!.AssetManager?.TryGet_BaseAssets(new AssetLocation("shaders/" + pass + "." + stage));
+        IAsset? replacement = OwnedShaderAsset(new AssetLocation("shaders/" + pass + "." + stage));
         if (replacement != null) return replacement.ToText();
         return EmbeddedShaderSource(pass + "." + stage) ?? throw new InvalidOperationException("Owned shader is missing: " + pass);
     }
@@ -32,10 +33,22 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         if (program > 0 || failed) return program;
-        var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader, Code = OwnedShaderSource(pass, "vsh"), PrefixCode = prefix };
-        var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader, Code = OwnedShaderSource(pass, "fsh"), PrefixCode = prefix };
-        if (renderer.CompileShader(vertex) && renderer.CompileShader(fragment))
-            program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null, null));
+        try
+        {
+            var includes = new HashSet<string>(StringComparer.Ordinal);
+            var vertex = new ShaderStageDefinition { Type = ShaderStageType.VertexShader,
+                Code = ExpandOwnedShaderIncludes(OwnedShaderSource(pass, "vsh"), includes), PrefixCode = prefix };
+            var fragment = new ShaderStageDefinition { Type = ShaderStageType.FragmentShader,
+                Code = ExpandOwnedShaderIncludes(OwnedShaderSource(pass, "fsh"), includes), PrefixCode = prefix };
+            if (renderer.CompileShader(vertex) && renderer.CompileShader(fragment))
+                program = renderer.LinkProgram(new ShaderProgramDefinition(pass, vertex, fragment, null, includes));
+        }
+        catch (Exception error)
+        {
+            failed = true;
+            platform!.Logger.Error("VulkanStory: owned shader '{0}' failed: {1}", pass, error.Message);
+            return 0;
+        }
         if (program <= 0)
         {
             failed = true;

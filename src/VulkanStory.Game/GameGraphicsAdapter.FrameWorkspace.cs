@@ -38,7 +38,9 @@ internal sealed partial class GameGraphicsAdapter
             ulong transparent = checked(half + unorm + Image(width, height, Format.R16Sfloat));
             ulong liquidDepth = Image(width / 4, height / 4, Format.D32Sfloat);
             ulong ssaoTargets = ssao ? checked(3 * Image(width / 2, height / 2, Format.R8G8B8A8Unorm)) : 0;
-            commonWorkspaceBaseBytes = checked(primary + transparent + liquidDepth + ssaoTargets);
+            // Separate full-resolution SDK motion resolve; never aliases the
+            // Primary motion guide that the resolve samples.
+            commonWorkspaceBaseBytes = checked(primary + transparent + liquidDepth + ssaoTargets + half);
             commonWorkspaceOitBytes = checked(unorm + Image(width, height, Format.R16G16B16A16Sfloat, 3));
             commonWorkspaceWidth = width;
             commonWorkspaceHeight = height;
@@ -74,6 +76,7 @@ internal sealed partial class GameGraphicsAdapter
             if (Live((int)EnumFrameBuffer.LiquidDepth) is { } liquid) Credit(liquid.DepthTextureId);
             foreach (int index in new[] { NativeSsaoTargetIndex, NativeSsaoBlurVerticalIndex, NativeSsaoBlurHorizontalIndex })
                 if (Live(index) is { ColorTextureIds.Length: > 0 } target) Credit(target.ColorTextureIds[0]);
+            if (Live(SdkMotionIndex) is { ColorTextureIds.Length: > 0 } sdkMotion) Credit(sdkMotion.ColorTextureIds[0]);
 
             FrameBufferRef? Live(int index) => index >= 0 && index < targets.Count &&
                 targets[index] is { Disposed: false } target ? target : null;

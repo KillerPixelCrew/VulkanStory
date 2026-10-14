@@ -10,9 +10,10 @@ internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Ac
 {
     private readonly HashSet<string> programs = new(StringComparer.OrdinalIgnoreCase);
     private bool known, sharedIncludes;
-    private static readonly string[] Writers =
-        ["chunkopaque", "chunktopsoil", "entityanimated", "standard", "instanced", "decals", "particlescube"];
-    internal bool AllowsRetainedSceneFeatures => known && !sharedIncludes && !Writers.Any(programs.Contains);
+    // Asset origin selects native versus translated source; it cannot establish
+    // whether that source produces motion/G-buffer outputs. Prepare the requested
+    // modes and let the linked retained stages and reflected outputs certify them.
+    internal bool CanPrepareSceneFeatures => known;
     internal bool IsOverridden(string pass) => !known || sharedIncludes ||
         (!string.Equals(pass, "all", StringComparison.OrdinalIgnoreCase) && programs.Contains(pass));
     internal static bool External(IAsset asset) => asset.IsPatched || asset.Origin is not GameOrigin;
@@ -22,7 +23,7 @@ internal sealed class ShaderOverridePolicy(System.Func<AssetManager?> assets, Ac
     }
     internal void MarkIncludes()
     {
-        if (!sharedIncludes) warning("VulkanStory: shared shader includes are overridden; native bundle and stock scene motion/AO modes are disabled.");
+        if (!sharedIncludes) warning("VulkanStory: shared shader includes are overridden; compiling selected sources through the shader rewriter.");
         sharedIncludes = true;
     }
     /// <summary>Rebuilds shader override knowledge from current game assets, failing closed when discovery cannot establish original sources.</summary>

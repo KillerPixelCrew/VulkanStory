@@ -7,6 +7,7 @@ void main() {
     vec4 colour = textureColour(mesh, a, b, c, weights, gl_HitTEXT);
     if (colour.a < 0.01) { ignoreIntersectionEXT; return; }
     if (mesh.kind == 2u || mesh.kind == 3u) {
+        // TODO(RT): replace thin-sheet tinting with medium-aware absorption and dielectric visibility.
         transmission *= mix(vec3(1.0), colour.rgb, 1.0 - clamp(colour.a, 0.0, 1.0));
         ignoreIntersectionEXT;
         return;

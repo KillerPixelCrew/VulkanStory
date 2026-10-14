@@ -40,7 +40,9 @@ internal sealed partial class GameGraphicsAdapter
         if (vao.VaoId == 0 || vao.Disposed)
             throw new ArgumentException(vao.VaoId == 0 ? "Fatal: Trying to render an uninitialized mesh" : "Fatal: Trying to render a disposed mesh");
         RuntimeStats.drawCallsCount--; // Retained stated helper counts only draws it records.
-        RecordStatedDraw(vao, 1, null, null, 0);
+        bool motion = BeginAnimatedMotionWrite() || BeginRigidEntityMotionWrite(mesh);
+        try { RecordStatedDraw(vao, 1, null, null, 0); }
+        finally { if (motion) EndMotionWrite(); }
     }
     internal void RenderMesh(MeshRef mesh, int[] starts, int[] sizes, int groups, bool useSsbo)
     {
@@ -50,7 +52,9 @@ internal sealed partial class GameGraphicsAdapter
         // SSBO storage/index selection is part of the retained mesh's native layout.
         if (TryDrawChunkPoolNative((VAO)mesh, starts, sizes, groups)) return;
         if (TryDrawDecalPoolNative(mesh, starts, sizes, groups)) return;
-        RecordStatedDraw((VAO)mesh, 1, starts, sizes, groups);
+        bool motion = BeginAnimatedMotionWrite() || BeginRigidEntityMotionWrite(mesh);
+        try { RecordStatedDraw((VAO)mesh, 1, starts, sizes, groups); }
+        finally { if (motion) EndMotionWrite(); }
     }
     /// <summary>Draws the adapter-owned mesh with the requested instance count and the current retained render state.</summary>
     /// <param name="mesh">Owned original mesh reference.</param>

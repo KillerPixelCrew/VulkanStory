@@ -25,6 +25,7 @@ vec3 decodeNormal(Vertex v) {
     return n * (vec3(1) - 2.0 * vec3((v.flags >> 13) & 1u, (v.flags >> 17) & 1u, (v.flags >> 21) & 1u));
 }
 void main() {
+    // TODO(RT): apply current/previous wind, liquid and global vertex warps using the raster producer's parameters.
     uint index = gl_GlobalInvocationID.x;
     if (index >= skin.vertexCount) return;
     Vertex vertex = InputVertices(skin.inputAddress).vertices[index];

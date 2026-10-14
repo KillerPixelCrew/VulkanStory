@@ -11,6 +11,30 @@ namespace VulkanStory.Game;
 // Retained primary motion window and far-depth sky/cloud reactive pass.
 internal sealed partial class GameGraphicsAdapter
 {
+    internal long AnimatedMotionWindows { get; private set; }
+    private int motionWriteSuspensions;
+    internal readonly record struct MotionWriteSuspension(int Target, uint Mask, bool Active, int Depth);
+    internal MotionWriteSuspension SuspendMotionWrites()
+    {
+        RequireDevice();
+        int target = CurrentTargetId;
+        uint mask = Stated.DrawBuffers(target);
+        var prior = new MotionWriteSuspension(target, mask, FrameState.MotionWriteActive, ++motionWriteSuspensions);
+        int motion = FrameState.MotionAttachment;
+        FrameState = FrameState with { MotionWriteActive = false };
+        if (motion is >= 0 and < 32) Stated.SetDrawBuffers(target, mask & ~(1u << motion));
+        return prior;
+    }
+    internal void RestoreMotionWrites(MotionWriteSuspension prior)
+    {
+        RequireDevice();
+        if (motionWriteSuspensions != prior.Depth) throw new InvalidOperationException("Motion write suspension order changed.");
+        motionWriteSuspensions--;
+        Stated.SetDrawBuffers(prior.Target, prior.Mask);
+        FrameState = FrameState with { MotionWriteActive = prior.Active };
+        if (prior.Active && FrameState.MotionAttachment is >= 0 and < 32)
+            Stated.SetSlotBlend(FrameState.MotionAttachment, 32774, 1, 0, 1, 0);
+    }
     private readonly NativeFullscreenPass nativeSkyMotion = new("taa-skymotion",
         ["taaRenderSize", "taaJitterPx", "taaInvViewProjJittered", "taaPrevViewProj", "taaCloudReactive"], ["transparentRevealTex"]);
     private int skyMotionProgram, skyMotionLocation = -1;
@@ -58,19 +82,27 @@ internal sealed partial class GameGraphicsAdapter
     /// <returns>True when the motion write mask was opened; false when the scene/target/program prerequisites decline.</returns>
     internal bool BeginAnimatedMotionWrite()
     {
-        RequireDevice();
+        var renderer = RequireDevice();
         if (aoTemporal?.EntityMotion.Enabled != true || !aoTemporal.State.JitterActive ||
-            ShaderProgramBase.CurrentShaderProgram is not { PassName: "entityanimated" } program ||
-            !program.HasUniform("taaHistoryValid")) return false;
+            ShaderProgramBase.CurrentShaderProgram is not { } program || StatedProgram != program.ProgramId ||
+            !renderer.TryGetAnimatedMotionContract(program.ProgramId, FrameState.MotionAttachment, out _) ||
+            !program.ubos.TryGetValue("Animation", out var animation) || animation is not UBO buffer || buffer.Disposed ||
+            !UniformBuffers.TryGetValue(buffer, out var owner) || !ReferenceEquals(owner.Adapter, this) ||
+            !previousAnimations.TryGetValue(program.ProgramId, out var previous) || previous.Buffer.Disposed ||
+            renderer.ClientUniformBufferBoundHandle("Animation") != owner.Handle ||
+            renderer.ClientUniformBufferBoundHandle("AnimationPrev") != UniformBufferHandle(previous.Buffer) ||
+            !aoTemporal.EntityMotion.HasCurrentUpload(program.ProgramId, owner.Handle, UniformBufferHandle(previous.Buffer))) return false;
         // Bone upload supplies per-entity model/joint history. Opening the mask
         // alone does not assert that those histories or the complete frame are valid.
-        return BeginMotionWrite(aoTemporal);
+        bool opened = BeginMotionWrite(aoTemporal);
+        if (opened) AnimatedMotionWindows++;
+        return opened;
     }
     internal bool BeginMotionWrite(GameTemporalOwner temporal, bool onlyMotion = false)
     {
         RequireDevice();
         int motion = FrameState.MotionAttachment;
-        if (FrameState.MotionWriteActive || motion is < 0 or >= 32 || !AoSettings.EffectiveTemporalPipeline ||
+        if (motionWriteSuspensions > 0 || FrameState.MotionWriteActive || motion is < 0 or >= 32 || !AoSettings.EffectiveTemporalPipeline ||
             !temporal.State.JitterActive || currentFramebuffer == null ||
             !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[0]) || currentFramebuffer.ColorTextureIds.Length <= motion)
             return false;

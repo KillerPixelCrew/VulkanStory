@@ -6,8 +6,8 @@ A ZIP placed only in `Mods` cannot do that. Player-facing steps are in the packa
 [client README](../packaging/README-client.txt) and
 [Linux README](../packaging/README-linux-client.txt).
 
-The [v0.1.1 general release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.1)
-ships the Windows x64 client and optional dedicated-server input companion, plus
+The [v0.1.4 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4)
+ships the Windows x64 client, installer mod and optional dedicated-server input companion, plus
 `SHA256SUMS.txt` and `archives.json`. Linux activation below describes the source
 tooling; no Linux client archive is published in this release.
 
@@ -64,6 +64,53 @@ sequenceDiagram
   to remove `hostfxr.dll`.
 - Events are written to `%LOCALAPPDATA%\VulkanStory\Logs\bootstrap-<pid>-<qpc>.jsonl`.
 
+### Automatic crash reports
+
+Before the real host starts .NET, the enabled Windows proxy starts the bundled
+`VulkanStory.CrashMonitor.exe`, outside the loader lock. It attaches only to this
+game process and waits for the initial attachment event before managed startup.
+An existing debugger is left alone; attachment failures are recorded in the
+bootstrap log and do not prevent the game from starting. Closing the helper
+detaches it without terminating the game.
+
+The managed bootstrap records unhandled exceptions on any managed thread; an
+observer finalizer also records exceptions escaping the game's main entry without
+suppressing them. Native second-chance exceptions, including Windows fast-fail
+`0xC0000409` and stack overflow, are captured by the separate helper because they
+can bypass all in-process exception handlers.
+
+Reports appear under `%LOCALAPPDATA%\VulkanStory\Crashes`. After a crash, a ZIP
+contains the exception parameters, native thread stacks, a stack minidump, loaded
+module/driver versions, managed exception text, matching bootstrap/game logs,
+settings and mod filenames. The helper uses local symbols without downloading
+anything. Settings account fields are removed and the minidump excludes the game
+heap and filters stack data; logs can still contain private information, so review
+the archive before sharing. No debugger installation, administrator rights or
+registry changes are required. `[Bootstrap] CrashCapture=0` disables the native
+helper. The native helper and ZIP collector are Windows-only.
+
+### AMD continuation compatibility
+
+The official 1.22.7 Windows executable is CET-compatible. Some AMD Vulkan driver
+context restores are rejected by Windows with `FAST_FAIL_SET_CONTEXT_DENIED`
+(`0xC0000409`, subcode `0x30`). For an AMD primary display and active, strict
+continuation validation, the enabled loader starts the same original executable
+once with Windows' relaxed continuation-validation policy, before managed startup.
+It forwards the original command line and working directory and propagates the
+game's exit code. The child verifies the applied policy and removes its restart
+marker before any game child processes are created.
+
+Relaxed validation permits dynamic-code and legacy-library continuation targets;
+it still validates targets in binaries with exception-continuation metadata.
+Hardware shadow-stack protection remains enabled. This compatibility mode is
+limited to the game process: it does not edit the executable, registry or global
+Windows settings. Set `[Bootstrap] AmdContextCompatibility=0` to retain the original
+strict continuation policy. `1` selects AMD primary displays automatically; `2`
+explicitly requests compatibility, including systems rendering on a secondary AMD
+GPU. Non-AMD primary displays in automatic mode and processes already using relaxed
+validation are forwarded directly. Other processes and disabled/incomplete
+bootstrap payloads never restart.
+
 ### Managed bootstrap
 
 `StartupHook.Initialize` runs once, on the entry thread, before `Main`:
@@ -117,6 +164,8 @@ Streamline, FSR 4 and XeSS-FG bridges are Windows-only and are not included.
 ```ini
 [Bootstrap]
 Enabled=1     ; 0 skips VulkanStory at the next launch
+CrashCapture=1 ; Windows only: automatic native crash reports
+AmdContextCompatibility=1 ; Windows only: relaxed continuation validation on AMD primary displays
 DotnetRoot=   ; Windows only: optional absolute .NET root for the proxy
 ```
 
@@ -139,6 +188,8 @@ directory; on Linux the installer copies it there:
       SDL3-CS.dll, Silk.NET.*.dll, Microsoft.*.dll
       profiles/vs-1.22.7-<rid>.json
     native/<rid>/                  # SDL3, shaderc, VMA, provider bridges, vendor runtimes
+      VulkanStory.CrashMonitor.exe # Windows-only native crash capture
+      VulkanStory.CrashReport.ps1  # Automatic report ZIP collection
     shaders-vk.pak                 # Native SPIR-V and shaders.manifest.json in one file
     assets/gamecontrollerdb.txt
     tools/                         # deployment/removal helpers
@@ -162,7 +213,7 @@ Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 
 | Component | Files |
 | --- | --- |
-| Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll` |
+| Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll`, `openxr_loader.dll` |
 | DLSS | `VulkanStoryNgx.dll`, `nvngx_dlss.dll` |
 | FSR 3 | `VulkanStoryFsr3.dll`, `amd_fidelityfx_vk.dll` |
 | FSR 4 | `VulkanStoryFsr4.dll`, `amd_fidelityfx_upscaler_dx12.dll` |
@@ -176,7 +227,7 @@ Packaging uses fresh output directories; build scripts can reuse verified output
 Each script documents its parameters (`Get-Help scripts/<name>.ps1 -Full`) and
 never launches the game. Vendor SDKs are
 pinned submodules under `sdk/` (`dlss`, `fidelityfx-vk`, `fidelityfx`, `xess`,
-`streamline`, `vma`) and are the scripts' default SDK roots. The VMA bridge is
+`streamline`, `vma`, `openxr`) and are the scripts' default SDK roots. The VMA bridge is
 mandatory and its MIT notice ships in `licenses/native/vma/LICENSE.txt`.
 The Windows FSR 3 runtime is rebuilt from the pinned SDK with the tracked
 [luma-history format correction](../native/fsr3/sdk-fixes/README.md).
