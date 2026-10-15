@@ -49,6 +49,14 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 
 ## Planned
 
+- **PERF-08: Vulkan compute offload** (priority candidates; implement against measured CPU bottlenecks)
+  1. Terrain generation in singleplayer: batch the stock generator's noise and density calculations on the GPU, then feed results into the existing server-side generation passes. Preserve seed/configuration output and chunk borders; overlap readback with CPU work. Keep structures, vegetation and mod callbacks in their existing pipeline, with CPU generation for unsupported paths.
+  2. GPU visibility and draw preparation: move terrain/entity frustum and depth-pyramid occlusion tests into compute, compact visible draws and generate indirect commands without CPU readback per object. Preserve conservative visibility during camera movement and the separate shadow-pass rules.
+  3. GPU particles: move supported particle simulation and render-geometry production onto the GPU, including lifetime, motion and visual properties. Preserve collision behavior, spawn/death events, mod-provider semantics and previous rendered state for temporal reconstruction.
+  4. Animation and mesh deformation: offload measured CPU pose/deformation work for supported entity and animated-block paths, retaining gameplay attachment transforms and correct current/previous geometry for motion vectors.
+  5. Chunk meshing: move suitable block-face generation, visibility and lighting/AO calculations into compute, with meshes consumed directly by rendering. Preserve stock and custom block shapes, material boundaries, chunk-edge updates and mod tessellator behavior; retain CPU handling for unsupported producers.
+  - Use vendor-neutral Vulkan compute with live controls and safe CPU/GPU transitions. Bound GPU memory and queued work so generation cannot starve rendering. Compare CPU time, GPU time, frame-time spikes and chunk throughput on equivalent workloads; gains must include transfer and synchronization costs.
+
 - **MOD-01: General mod compatibility**
   1. Extend motion histories to independently moving custom subobjects and procedural geometry using actual producer identities and previous deformation inputs.
   2. Retain resource/state contracts across mod rendering and world transitions.
