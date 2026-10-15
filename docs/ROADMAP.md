@@ -49,13 +49,47 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 
 ## Planned
 
-- **PERF-08: Vulkan compute offload** (priority candidates; implement against measured CPU bottlenecks)
+### 1. Shared compute foundation
+
+- **PERF-08: Shared GPU geometry and draw preparation**
+  1. Animation and mesh deformation: offload measured CPU pose/deformation work for supported entity and animated-block paths. Produce shared geometry once per rendered frame for both eyes and ray-tracing acceleration structures, retaining gameplay attachment transforms and correct current/previous geometry for motion vectors.
+  2. GPU geometry buffers: provide shared raster/compute/ray-tracing inputs with explicit synchronization, bounded allocation and safe retirement across mesh edits, world changes and runtime settings transitions.
+  3. GPU visibility and draw preparation: move terrain/entity frustum and depth-pyramid occlusion tests into compute, compact visible draws and generate indirect commands without CPU readback per object. Support separate eye visibility, conservative camera-motion handling and separate shadow rules. Keep geometry needed by off-screen reflections, shadows and indirect lighting available to ray tracing.
+  - Vendor-neutral Vulkan compute, live controls and safe CPU/GPU transitions. Measure CPU/GPU time and frame-time spikes including transfer and synchronization costs.
+
+### 2. Complete VR
+
+- **VR-01: OpenXR VR**
+  - First stereo step: OpenXR session and runtime-sized eye swapchains on the renderer's Vulkan device; two tracked eye views, runtime FOVs, predicted frame timing, headset submission before the desktop mirror, and head-locked flat menus. Enable OpenXR on the Device settings page and restart with the headset connected. Raster rendering only; desktop temporal-provider settings are retained. Code TODOs identify direct XR composition, multiview, late pose sampling and the remaining HUD/input work.
+  1. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
+  2. Motion-controller input through OpenXR actions: movement, look, interaction, hotbar, inventory, with bindings for common controllers.
+  3. GUI on world-space panels, plus comfort options (snap/smooth turn, vignette, seated/standing).
+  4. Full-body pose from head and hand tracking via inverse kinematics on the player model.
+  5. Server companion mod that streams head/hand poses so other players see VR players' tracked movement, with fallback to normal animation for players without it.
+  6. Reuse PERF-08 geometry across both eyes and generate eye-specific draw lists. Complete direct XR composition, multiview and late pose sampling with eye-indexed terrain, entity, post-effect and mod-pass inputs.
+
+### 3. Desktop ray tracing
+
+- **RT-01: Vulkan ray tracing and reconstruction**
+  1. Reuse PERF-08 geometry for KHR acceleration structures: persistent terrain, entities and animated blocks, with incremental updates for edits, animation, streaming and world transitions. Retain material, alpha-test and mod-geometry behavior.
+  2. Integrate ray-traced lighting effects, including shadows, reflections and indirect illumination, into the real game render path with live controls and a raster path when tracing is disabled or unavailable.
+  3. Supply current depth, motion, normals, roughness, albedo and hit-distance guides for temporal reconstruction and compute denoising. Keep the reconstruction path vendor-neutral, with vendor-specific backends optional.
+
+### 4. Ray tracing in VR
+
+- **VR-02: Stereo ray tracing**
+  1. Combine completed VR-01 and RT-01 paths: share geometry and scene acceleration structures across eyes, with separate eye rays, depth, motion, reconstruction guides and temporal histories.
+  2. Integrate tracing and denoising into OpenXR frame timing and submission, with bounded GPU work and live quality controls that preserve stereo consistency and headset responsiveness.
+
+### Independent compute work
+
+- **PERF-09: Additional Vulkan compute offload** (can progress independently of the VR/ray-tracing sequence)
   1. Terrain generation in singleplayer: batch the stock generator's noise and density calculations on the GPU, then feed results into the existing server-side generation passes. Preserve seed/configuration output and chunk borders; overlap readback with CPU work. Keep structures, vegetation and mod callbacks in their existing pipeline, with CPU generation for unsupported paths.
-  2. GPU visibility and draw preparation: move terrain/entity frustum and depth-pyramid occlusion tests into compute, compact visible draws and generate indirect commands without CPU readback per object. Preserve conservative visibility during camera movement and the separate shadow-pass rules.
-  3. GPU particles: move supported particle simulation and render-geometry production onto the GPU, including lifetime, motion and visual properties. Preserve collision behavior, spawn/death events, mod-provider semantics and previous rendered state for temporal reconstruction.
-  4. Animation and mesh deformation: offload measured CPU pose/deformation work for supported entity and animated-block paths, retaining gameplay attachment transforms and correct current/previous geometry for motion vectors.
-  5. Chunk meshing: move suitable block-face generation, visibility and lighting/AO calculations into compute, with meshes consumed directly by rendering. Preserve stock and custom block shapes, material boundaries, chunk-edge updates and mod tessellator behavior; retain CPU handling for unsupported producers.
-  - Use vendor-neutral Vulkan compute with live controls and safe CPU/GPU transitions. Bound GPU memory and queued work so generation cannot starve rendering. Compare CPU time, GPU time, frame-time spikes and chunk throughput on equivalent workloads; gains must include transfer and synchronization costs.
+  2. GPU particles: move supported particle simulation and render-geometry production onto the GPU, including lifetime, motion and visual properties. Preserve collision behavior, spawn/death events, mod-provider semantics and previous rendered state for temporal reconstruction; reuse simulation across eyes.
+  3. Chunk meshing: move suitable block-face generation, visibility and lighting/AO calculations into compute, with meshes consumed directly by rendering and suitable geometry shared with RT-01. Preserve stock and custom block shapes, material boundaries, chunk-edge updates and mod tessellator behavior; retain CPU handling for unsupported producers.
+  - Live controls and safe CPU/GPU transitions. Bound GPU memory and queued work so generation cannot starve rendering. Compare CPU time, GPU time, frame-time spikes and chunk throughput on equivalent workloads; gains must include transfer and synchronization costs.
+
+### Other planned features
 
 - **MOD-01: General mod compatibility**
   1. Extend motion histories to independently moving custom subobjects and procedural geometry using actual producer identities and previous deformation inputs.
@@ -71,14 +105,6 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 
 - **GL-02 / GL-03: Managed OpenGL compatibility**
   - Support direct OpenTK rendering and context/window ownership in core adapters. The missing ImGui dependency needed by the supplied GUI addon exposes this requirement, including buffer/texture/shader draws and secondary viewports.
-
-- **VR-01: OpenXR VR**
-  - First stereo step: OpenXR session and runtime-sized eye swapchains on the renderer's Vulkan device; two tracked eye views, runtime FOVs, predicted frame timing, headset submission before the desktop mirror, and head-locked flat menus. Enable OpenXR on the Device settings page and restart with the headset connected. Raster rendering only; desktop temporal-provider settings are retained. Code TODOs identify direct XR composition, multiview, late pose sampling and the remaining HUD/input work.
-  1. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
-  2. Motion-controller input through OpenXR actions: movement, look, interaction, hotbar, inventory, with bindings for common controllers.
-  3. GUI on world-space panels, plus comfort options (snap/smooth turn, vignette, seated/standing).
-  4. Full-body pose from head and hand tracking via inverse kinematics on the player model.
-  5. Server companion mod that streams head/hand poses so other players see VR players' tracked movement, with fallback to normal animation for players without it.
 
 ## Deferred
 
