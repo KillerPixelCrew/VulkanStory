@@ -13,6 +13,9 @@ public sealed unsafe partial class VulkanDevice
     internal (ulong FrameId, int Motion, int Reactive) LastUpscalerInputTextures => _lastUpscalerInputTextures;
 
     /// <inheritdoc/>
+    bool IUpscalerDevice.HasExternalNgxInitializer => _context?.Streamline != null;
+
+    /// <inheritdoc/>
     int IUpscalerDevice.CreateUpscaleTexture(int width, int height, Format format, bool storage,
         IntPtr pixels, int bytesPerPixel) => CreateUpscaleTexture(width, height, format, storage, pixels, bytesPerPixel);
     /// <inheritdoc/>

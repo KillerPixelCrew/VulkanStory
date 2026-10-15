@@ -26,12 +26,13 @@ internal enum NgxLifetimeOutcome
 /// <summary>
 /// The owner of <c>NVSDK_NGX_VULKAN_Init_ProjectID</c> and
 /// <c>NVSDK_NGX_VULKAN_Shutdown1</c>. There is one of these per process
-/// (<see cref="NgxLifetime.Process" />); the type is instantiable only so a test
+/// for standalone rendering (<see cref="NgxLifetime.Process" />); the type is
+/// instantiable only so a test
 /// can drive the contract without touching the process's own lifetime.
 ///
 /// <para><b>Why an owner rather than a rule.</b> Both halves of the NGX lifetime
-/// are process-wide, not per host: NGX allows exactly one Init/Shutdown pair per
-/// process, and the shutdown has to happen after the last feature is released,
+/// belong to a device, not to each consumer: initialization is once per device,
+/// and shutdown has to happen after the last feature is released,
 /// after the frame timeline is drained, and before the VkDevice it was initialised
 /// on is destroyed. Every one of those is an ordering constraint between pieces
 /// that do not otherwise know about each other - the settings tab, the upscaler
@@ -47,9 +48,13 @@ internal enum NgxLifetimeOutcome
 /// cannot bring NGX back up afterwards and the user may switch back on. The only
 /// caller of <see cref="ShutDown" /> is the platform's graphics teardown.</para>
 ///
+/// <para>Streamline initializes its own NGX device instance. Its consumers borrow
+/// that instance and never call this owner's Init or Shutdown. A second Init on
+/// the same device does not acquire a separate initialization reference.</para>
+///
 /// <para><b>What actually crashed on 2026-09-12</b> was none of this: the driver's
 /// <c>Shutdown1</c> takes a second, undeclared parameter and writes the SDK's
-/// remaining reference count through it, while the SDK header declares one. That
+/// remaining instance count through it, while the SDK header declares one. That
 /// is fixed in the shim (<c>native/ngx/vulkanstory_ngx.c</c>); this type is
 /// what makes sure the call it fixed happens exactly once, in the right place.</para>
 /// </summary>
@@ -227,9 +232,9 @@ internal sealed class NgxLifetimeOwner
 }
 
 /// <summary>
-/// The process's one <see cref="NgxLifetimeOwner" />. Every NGX bring-up and the
-/// one shutdown go through this; nothing else in the process may call
-/// <c>NVSDK_NGX_VULKAN_Shutdown1</c>.
+/// The standalone renderer's <see cref="NgxLifetimeOwner" />. Host-owned NGX
+/// initialization and shutdown go through this. A Streamline-owned instance
+/// stays under Streamline's lifetime instead.
 /// </summary>
 internal static class NgxLifetime
 {

@@ -14,6 +14,7 @@ internal static class TextureConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-textures";
     private static System.Func<bool>? routingEnabled;
+    private static long atlasRegionCopies;
     private sealed record Binding(string Target, Type Result, Type[] Parameters, string Prefix);
     private static readonly Binding[] Profile1227 =
     [
@@ -41,6 +42,7 @@ internal static class TextureConsumerPatches
     {
         foreach (var binding in Profile1227) Resolve(binding);
         ResolveSvgLoad();
+        ResolveAtlasDraw();
     }
 
     // This subset is not a complete mandatory graphics-api group and cannot
@@ -55,6 +57,7 @@ internal static class TextureConsumerPatches
         var harmony = new Harmony(Owner);
         (MethodInfo Original, MethodInfo Prefix)[]? methods = null;
         bool attempted = false;
+        MethodInfo? atlasDraw = null;
         return new StartupPatchGroup("graphics-textures", () =>
         {
             methods = Profile1227.Select(binding => (Resolve(binding),
@@ -62,14 +65,18 @@ internal static class TextureConsumerPatches
                     BindingFlags.NonPublic | BindingFlags.Static)!))
                 .Append((ResolveSvgLoad(), typeof(TextureConsumerPatches).GetMethod(nameof(SvgLoad),
                     BindingFlags.NonPublic | BindingFlags.Static)!)).ToArray();
+            atlasDraw = ResolveAtlasDraw();
         }, () =>
         {
-            if (methods is null) throw new InvalidOperationException("Texture targets were not validated.");
+            if (methods is null || atlasDraw is null) throw new InvalidOperationException("Texture targets were not validated.");
             if (routingEnabled != null) throw new InvalidOperationException("Texture routing already has an owner.");
             routingEnabled = enabled;
             attempted = true;
             foreach (var method in methods)
                 harmony.Patch(method.Original, prefix: new HarmonyMethod(method.Prefix) { priority = Priority.First });
+            harmony.Patch(atlasDraw,
+                prefix: new HarmonyMethod(typeof(TextureConsumerPatches), nameof(AtlasDraw)),
+                finalizer: new HarmonyMethod(typeof(TextureConsumerPatches), nameof(AtlasDrawFinished)));
         }, () =>
         {
             if (!attempted) return;
@@ -88,6 +95,50 @@ internal static class TextureConsumerPatches
             method.ContainsGenericParameters || method.GetMethodBody() is null)
             throw new MissingMethodException(typeof(ClientPlatformWindows).FullName, binding.Target);
         return method;
+    }
+
+    private static MethodInfo ResolveAtlasDraw() => typeof(ClientMain).GetMethod("RenderTextureIntoFrameBuffer",
+        BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly, null,
+        [typeof(int), typeof(LoadedTexture), typeof(float), typeof(float), typeof(float), typeof(float),
+         typeof(FrameBufferRef), typeof(float), typeof(float), typeof(float)], null) ??
+        throw new MissingMethodException(typeof(ClientMain).FullName, "RenderTextureIntoFrameBuffer");
+
+    private sealed record AtlasCopy(GameGraphicsAdapter Adapter, int TextureId);
+
+    // The stock skin compositor can read a small region of the atlas it writes.
+    // Snapshot that region before the draw, preserving the original shader/blend path.
+    private static void AtlasDraw(int __0, ref LoadedTexture __1, ref float __2, ref float __3,
+        float __4, float __5, FrameBufferRef __6, out AtlasCopy? __state)
+    {
+        __state = null;
+        if (ScreenManager.Platform is not ClientPlatformWindows platform || !TryAdapter(platform, out var adapter) ||
+            __1 is null || __1.TextureId <= 0 ||
+            (__0 != __1.TextureId && (__0 != 0 || __6.ColorTextureIds is null || !__6.ColorTextureIds.Contains(__1.TextureId)))) return;
+        if (!float.IsFinite(__2) || !float.IsFinite(__3) || !float.IsFinite(__4) || !float.IsFinite(__5) ||
+            __2 < 0 || __3 < 0 || __4 <= 0 || __5 <= 0 ||
+            (double)__2 + __4 > __1.Width || (double)__3 + __5 > __1.Height) return;
+        // A one-texel border retains bilinear samples at fractional rectangle edges.
+        int x = Math.Max(0, (int)Math.Floor(__2) - 1), y = Math.Max(0, (int)Math.Floor(__3) - 1);
+        int right = Math.Min(__1.Width, (int)Math.Ceiling((double)__2 + __4) + 1);
+        int bottom = Math.Min(__1.Height, (int)Math.Ceiling((double)__3 + __5) + 1);
+        int copy = adapter.CopyTextureRegion(__1.TextureId, x, y, right - x, bottom - y);
+        __state = new AtlasCopy(adapter, copy);
+        if (Interlocked.Increment(ref atlasRegionCopies) <= 8)
+            platform.Logger.Notification("VulkanStory atlas feedback: {0}x{1} source, {2}x{3} bounded copy.",
+                __1.Width, __1.Height, right - x, bottom - y);
+        __1 = new LoadedTexture(null!) { TextureId = copy, Width = right - x, Height = bottom - y };
+        GC.SuppressFinalize(__1); // The finalizer below owns the copied GPU texture.
+        __2 -= x;
+        __3 -= y;
+    }
+
+    private static void AtlasDrawFinished(AtlasCopy? __state, Exception? __exception)
+    {
+        if (__state is null) return;
+        try { __state.Adapter.DeleteTexture(__state.TextureId); }
+        catch (Exception cleanup) when (__exception is not null) { throw new AggregateException(__exception, cleanup); }
+        // A void Harmony finalizer rethrows the original exception with its
+        // original stack; returning it would replace that stack at this wrapper.
     }
 
     private static MethodInfo ResolveSvgLoad()

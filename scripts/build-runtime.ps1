@@ -36,6 +36,7 @@ if ($RuntimeIdentifier -eq 'linux-x64') {
     & (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $vmaBuild 'VulkanStoryVma.dll') `
         -VulkanSdkRoot $VulkanSdkRoot -Configuration $Configuration
     & (Join-Path $projectRoot 'native/fsr3/build-sdk.ps1') -VulkanSdkRoot $VulkanSdkRoot
+    & (Join-Path $projectRoot 'native/streamline/build-sdk.ps1')
     & (Join-Path $projectRoot 'native/openxr/build.ps1') -Configuration $Configuration
 }
 # Bootstrap uses reflection to load Game; build it explicitly, without a test project.

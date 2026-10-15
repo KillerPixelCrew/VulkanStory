@@ -19,6 +19,41 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     private Graph.BarrierBatcher _barriers = null!;
 
+    /// <summary>Copies a level-zero rectangle into an independently sampled texture, without duplicating the source atlas or its mip chain.</summary>
+    internal int CopyTextureRegion(int textureId, int x, int y, int width, int height)
+    {
+        VulkanTexture source = _textures.Get(textureId) ?? throw new ArgumentException("Source texture is missing.", nameof(textureId));
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 ||
+            (long)x + width > source.Width || (long)y + height > source.Height ||
+            source.Layers != 1 || source.Cube || source.Volume || source.Aspect != ImageAspectFlags.ColorBit)
+            throw new ArgumentOutOfRangeException(nameof(width), "Copy rectangle must lie inside a two-dimensional color texture.");
+        int copyId = _textures.Create((uint)width, (uint)height, source.Format);
+        try
+        {
+            VulkanTexture copy = _textures.Get(copyId)!;
+            copy.State = source.State with { Mipmapped = false, MaxLevel = 0 };
+            CommandBuffer commands = Commands;
+            _targets.FlushAllPendingClears(commands);
+            _targets.EndRendering(commands);
+            _textures.Require(_barriers, commands, source, Graph.ResourceUsage.TransferSrc);
+            _textures.Require(_barriers, commands, copy, Graph.ResourceUsage.TransferDst);
+            _barriers.Flush(commands);
+            var region = new ImageCopy
+            {
+                SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+                SrcOffset = new Offset3D(x, y, 0),
+                DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+                Extent = new Extent3D((uint)width, (uint)height, 1),
+            };
+            _context.Api.CmdCopyImage(commands, source.Image, ImageLayout.TransferSrcOptimal,
+                copy.Image, ImageLayout.TransferDstOptimal, 1, &region);
+            _textures.Require(_barriers, commands, copy, Graph.ResourceUsage.SampleFragment);
+            _barriers.Flush(commands);
+            return copyId;
+        }
+        catch { DeleteTexture(copyId); throw; }
+    }
+
     /// <summary>Copies a sampled color attachment to a feedback texture before a draw reads its current rendering target.</summary>
     private void SnapshotColorAttachment(CommandBuffer commandBuffer, int textureId, VulkanTexture source)
     {

@@ -91,6 +91,7 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
 
     private readonly nint _library;
     private readonly delegate* unmanaged[Cdecl]<void> _shutdown;
+    private readonly delegate* unmanaged[Cdecl]<int> _shutdownChecked;
     private readonly delegate* unmanaged[Cdecl]<void> _unload;
     private readonly delegate* unmanaged[Cdecl]<Instance, byte*, nint> _instanceProc;
     private readonly delegate* unmanaged[Cdecl]<Device, byte*, nint> _deviceProc;
@@ -132,12 +133,20 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     private int _pendingFailurePresentError;
     private bool _disposed;
     private bool _shutdownComplete;
+    private Exception? _shutdownFailure;
+    private Exception? _disposalFailure;
+    // Silk resolves table entries lazily. These final destruction commands must
+    // already have addresses before slShutdown tears down the SDK's resolver state.
+    private readonly Dictionary<string, VulkanTeardownCommand> _vulkanTeardown = new(StringComparer.Ordinal);
+    private sealed record VulkanTeardownCommand(Instance Instance, Device Device, bool DeviceScope, nint Address);
 
     private StreamlineRuntime(nint library)
     {
         _library = library;
         nint Export(string name) => NativeLibrary.GetExport(library, name);
         _shutdown = (delegate* unmanaged[Cdecl]<void>)Export("VulkanStorySlShutdown");
+        _shutdownChecked = NativeLibrary.TryGetExport(library, "VulkanStorySlShutdownChecked", out nint shutdownChecked)
+            ? (delegate* unmanaged[Cdecl]<int>)shutdownChecked : null;
         _unload = (delegate* unmanaged[Cdecl]<void>)Export("VulkanStorySlUnload");
         _instanceProc = (delegate* unmanaged[Cdecl]<Instance, byte*, nint>)Export("VulkanStorySlGetInstanceProcAddr");
         _deviceProc = (delegate* unmanaged[Cdecl]<Device, byte*, nint>)Export("VulkanStorySlGetDeviceProcAddr");
@@ -248,6 +257,14 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     internal nint GetVulkanProcAddress(Instance instance, Device device, string name)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_vulkanTeardown.TryGetValue(name, out VulkanTeardownCommand? command))
+        {
+            if (command.Instance.Handle != instance.Handle || command.DeviceScope && command.Device.Handle != device.Handle)
+                throw new InvalidOperationException("Vulkan teardown command requested for a different native owner: " + name);
+            return command.Address;
+        }
+        if (_shutdownComplete || _shutdownFailure != null)
+            throw new InvalidOperationException("Streamline Vulkan lookup is unavailable after SDK shutdown: " + name);
         byte[] bytes = Encoding.UTF8.GetBytes(name + "\0");
         fixed (byte* pointer = bytes)
         {
@@ -258,6 +275,45 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
                 return _instanceProc(default, pointer);
             nint address = device.Handle != 0 ? _deviceProc(device, pointer) : 0;
             return address != 0 ? address : _instanceProc(instance, pointer);
+        }
+    }
+
+    /// <summary>Resolves the remaining Vulkan destruction commands while the SDK and their native owners are live.</summary>
+    /// <remarks>Instance commands never use a device lookup. The loaded bridge/interposer modules retain
+    /// these code addresses until the device, instance and their Silk tables have been released.</remarks>
+    internal void PrepareVulkanTeardown(Instance instance, Device device, bool hasDebugMessenger)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_shutdownComplete || _shutdownFailure != null)
+            throw new InvalidOperationException("Vulkan teardown dispatch must be prepared before Streamline shutdown.");
+        if (device.Handle != 0) Resolve("vkDestroyDevice", deviceScope: true);
+        if (instance.Handle != 0)
+        {
+            Resolve("vkDestroyInstance", deviceScope: false);
+            if (hasDebugMessenger) Resolve("vkDestroyDebugUtilsMessengerEXT", deviceScope: false);
+        }
+
+        void Resolve(string name, bool deviceScope)
+        {
+            if (_vulkanTeardown.TryGetValue(name, out VulkanTeardownCommand? existing))
+            {
+                if (existing.Instance.Handle != instance.Handle || existing.DeviceScope != deviceScope ||
+                    deviceScope && existing.Device.Handle != device.Handle)
+                    throw new InvalidOperationException("Streamline Vulkan teardown dispatch changed native ownership: " + name);
+                return;
+            }
+            byte[] bytes = Encoding.UTF8.GetBytes(name + "\0");
+            nint address;
+            fixed (byte* pointer = bytes)
+            {
+                address = deviceScope ? _deviceProc(device, pointer) : _instanceProc(instance, pointer);
+                // A device command may be provided by the instance resolver; its
+                // invocation still belongs to this exact live device.
+                if (address == 0 && deviceScope) address = _instanceProc(instance, pointer);
+            }
+            if (address == 0) throw new InvalidOperationException("Streamline has no Vulkan teardown command: " + name);
+            _vulkanTeardown.Add(name, new(instance, deviceScope ? device : default, deviceScope, address));
+            VulkanContext.TraceLifetime("dispatch." + name, instance, deviceScope ? device : default, address);
         }
     }
     /// <summary>Creates a Vulkan instance through the Streamline proxy so its required extensions can be applied.</summary>
@@ -325,7 +381,14 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     /// <summary>Returns the PCL latency-ping window message, or zero when unavailable.</summary>
     internal uint PclWindowMessage() => _pclWindowMessage == null ? 0 : _pclWindowMessage();
     /// <summary>Queries DLSS-G support for the selected Vulkan physical device.</summary>
-    internal int IsFrameGenerationSupported(PhysicalDevice physical) => _isFrameGenerationSupported(physical);
+    internal int IsFrameGenerationSupported(PhysicalDevice physical)
+    {
+        int result = _isFrameGenerationSupported(physical);
+        UsesVirtualBackbuffers = result == 0;
+        return result;
+    }
+    /// <summary>The loaded and supported DLSS-G proxy returns transfer-source backbuffers consumed by its pacer.</summary>
+    internal bool UsesVirtualBackbuffers { get; private set; }
     /// <summary>Applies the native Reflex mode and a nonnegative maximum FPS.</summary>
     internal int SetReflex(int mode, int maxFps) => _setReflex(mode, (uint)Math.Max(maxFps, 0));
     /// <summary>Obtains Streamline frame identity using the low 32 bits of the renderer frame ID.</summary>
@@ -405,17 +468,38 @@ internal sealed unsafe class StreamlineRuntime : IDisposable
     /// <summary>Shuts down the native Streamline session once; module unloading belongs to disposal.</summary>
     internal void Shutdown()
     {
+        if (_shutdownFailure != null)
+            throw new InvalidOperationException("Streamline shutdown previously failed; cleanup is terminal.", _shutdownFailure);
         if (_shutdownComplete) return;
-        _shutdown();
-        _shutdownComplete = true;
+        try
+        {
+            if (_shutdownChecked != null)
+            {
+                int result = _shutdownChecked();
+                VulkanContext.TraceLifetime("streamline.shutdown.result", default, default,
+                    (nint)_shutdownChecked, result);
+                if (result != 0)
+                    throw new InvalidOperationException("Streamline shutdown failed (" + result + "); Vulkan owners remain live.");
+            }
+            else _shutdown();
+            _shutdownComplete = true;
+        }
+        catch (Exception failure) { _shutdownFailure = failure; throw; }
     }
     /// <inheritdoc/>
     public void Dispose()
     {
+        if (_disposalFailure != null)
+            throw new InvalidOperationException("Streamline disposal previously failed; cleanup is terminal.", _disposalFailure);
         if (_disposed) return;
-        _disposed = true;
-        Shutdown();
-        _unload();
-        NativeLibrary.Free(_library);
+        try
+        {
+            Shutdown();
+            _unload();
+            NativeLibrary.Free(_library);
+            _vulkanTeardown.Clear();
+            _disposed = true;
+        }
+        catch (Exception failure) { _disposalFailure = failure; throw; }
     }
 }

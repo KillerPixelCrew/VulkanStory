@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using Silk.NET.Vulkan;
+using System.Buffers.Binary;
+using VulkanStory.Contracts;
 using EnumDrawMode = VulkanStory.Contracts.MeshDrawMode;
 using DataConversion = VulkanStory.Contracts.MeshDataConversion;
 using CustomMeshDataPartFloat = VulkanStory.Contracts.MeshCustomPartLayout;
@@ -153,6 +155,152 @@ internal sealed unsafe class MeshManager : IDisposable
                 if (mesh != null) live++;
             }
             return live;
+        }
+    }
+
+    /// <summary>Creates immutable buffers for a raw draw without imposing the game's standard stream ordering.</summary>
+    public int CreateRaw(RawMeshDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(definition.VertexStreams);
+        ArgumentNullException.ThrowIfNull(definition.Indices);
+        if (definition.VertexStreams.Length > MaxBuffers)
+            throw new ArgumentException($"Raw meshes support at most {MaxBuffers} vertex streams.", nameof(definition));
+        if (definition.Mode is not (EnumDrawMode.Triangles or EnumDrawMode.Lines or EnumDrawMode.LineStrip))
+            throw new ArgumentException("Unsupported raw mesh topology.", nameof(definition));
+        if (_uploads != null && _frames == null)
+            throw new InvalidOperationException("Staged raw meshes require a frame retirement owner.");
+
+        uint highestIndex = 0;
+        foreach (int index in definition.Indices) highestIndex = Math.Max(highestIndex, unchecked((uint)index));
+        ulong vertexCount = definition.Indices.Length == 0 ? 0 : (ulong)highestIndex + 1;
+        var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
+        if (definition.VertexStreams.Length > limits.MaxVertexInputBindings ||
+            definition.VertexStreams.Length > limits.MaxVertexInputAttributes)
+            throw new NotSupportedException("The raw vertex layout exceeds this device's vertex-input limits.");
+
+        var streams = new RawVertexStream[definition.VertexStreams.Length];
+        var bindings = new VertexBinding[streams.Length];
+        var attributes = new VertexAttribute[streams.Length];
+        var locations = new HashSet<int>();
+        for (int i = 0; i < streams.Length; i++)
+        {
+            RawVertexStream stream = definition.VertexStreams[i] ??
+                throw new ArgumentException("A raw vertex stream cannot be null.", nameof(definition));
+            ArgumentNullException.ThrowIfNull(stream.Data);
+            if (stream.Location < 0 || stream.Location >= limits.MaxVertexInputAttributes || !locations.Add(stream.Location))
+                throw new ArgumentException("Raw attributes require distinct in-range locations.", nameof(definition));
+            if (stream.Components is < 1 or > 4 || stream.Offset < 0 || stream.Stride < 0)
+                throw new ArgumentException("Invalid raw vertex component count, offset or stride.", nameof(definition));
+            int scalarBytes = stream.ElementType switch
+            {
+                RawVertexElementType.Byte or RawVertexElementType.UnsignedByte => 1,
+                RawVertexElementType.Short or RawVertexElementType.UnsignedShort => 2,
+                RawVertexElementType.Int or RawVertexElementType.UnsignedInt or RawVertexElementType.Float => 4,
+                _ => throw new NotSupportedException("Unsupported raw vertex element type."),
+            };
+            if (stream.Integer && stream.ElementType == RawVertexElementType.Float)
+                throw new ArgumentException("A float stream cannot feed an integer vertex attribute.", nameof(definition));
+            int elementBytes = checked(scalarBytes * stream.Components);
+            int stride = stream.Stride == 0 ? elementBytes : stream.Stride;
+            ulong required = (ulong)stream.Offset + (vertexCount == 0 ? 0 :
+                checked((vertexCount - 1) * (ulong)stride + (ulong)elementBytes));
+            if (required > (ulong)stream.Data.Length)
+                throw new ArgumentException("A decoded raw index reads beyond a vertex stream.", nameof(definition));
+
+            // Vulkan has no 32-bit scaled/normalized integer vertex formats.
+            // Convert those GL floating-point inputs instead of misdeclaring them as integers.
+            if (!stream.Integer && stream.ElementType is RawVertexElementType.Int or RawVertexElementType.UnsignedInt)
+            {
+                int count = checked((int)vertexCount);
+                var converted = new byte[checked(count * elementBytes)];
+                for (int vertex = 0; vertex < count; vertex++)
+                for (int component = 0; component < stream.Components; component++)
+                {
+                    ReadOnlySpan<byte> source = stream.Data.AsSpan(checked(stream.Offset + vertex * stride + component * 4), 4);
+                    float value = stream.ElementType == RawVertexElementType.Int
+                        ? stream.Normalized ? (float)Math.Max(-1d, BinaryPrimitives.ReadInt32LittleEndian(source) / (double)int.MaxValue)
+                            : BinaryPrimitives.ReadInt32LittleEndian(source)
+                        : stream.Normalized ? (float)(BinaryPrimitives.ReadUInt32LittleEndian(source) / (double)uint.MaxValue)
+                            : BinaryPrimitives.ReadUInt32LittleEndian(source);
+                    BinaryPrimitives.WriteSingleLittleEndian(converted.AsSpan((vertex * stream.Components + component) * 4, 4), value);
+                }
+                stream = stream with { Data = converted, ElementType = RawVertexElementType.Float,
+                    Offset = 0, Stride = elementBytes, Normalized = false };
+                stride = elementBytes;
+            }
+            else if (stream.Offset % scalarBytes != 0 || stride % scalarBytes != 0)
+            {
+                // GL accepts byte-addressed streams. Without legacyVertexAttributes,
+                // Vulkan requires every fetched attribute address to be aligned to
+                // its component type. Preserve the bytes in an aligned tight stream.
+                int count = checked((int)vertexCount);
+                var aligned = new byte[checked(count * elementBytes)];
+                for (int vertex = 0; vertex < count; vertex++)
+                    stream.Data.AsSpan(checked(stream.Offset + vertex * stride), elementBytes)
+                        .CopyTo(aligned.AsSpan(vertex * elementBytes, elementBytes));
+                stream = stream with { Data = aligned, Offset = 0, Stride = elementBytes };
+                stride = elementBytes;
+            }
+            if (stride > limits.MaxVertexInputBindingStride || stream.Offset > limits.MaxVertexInputAttributeOffset)
+                throw new NotSupportedException("The raw vertex stride or offset exceeds this device's vertex-input limits.");
+            Format format = VertexLayoutBuilder.FormatFor(stream.Components, (int)stream.ElementType, stream.Normalized, stream.Integer);
+            FormatProperties properties;
+            _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice, format, &properties);
+            if ((properties.BufferFeatures & FormatFeatureFlags.VertexBufferBit) == 0)
+                throw new NotSupportedException($"This device cannot fetch raw vertex format {format}.");
+            streams[i] = stream;
+            bindings[i] = new VertexBinding((uint)i, (uint)stride, false);
+            attributes[i] = new VertexAttribute((uint)stream.Location, (uint)i, format, (uint)stream.Offset);
+        }
+
+        var mesh = new VulkanMesh { DrawMode = definition.Mode, IndexCount = definition.Indices.Length };
+        bool queuedUpload = false;
+        try
+        {
+            for (int i = 0; i < streams.Length; i++)
+            {
+                mesh.Buffers[i] = CreateBuffer(Math.Max(4, streams[i].Data.Length), BufferUsageFlags.VertexBufferBit, persistent: false);
+                mesh.BindingOrder.Add(i);
+            }
+            int indexBytes = checked(definition.Indices.Length * sizeof(int));
+            if (indexBytes != 0)
+            {
+                mesh.Indices = CreateBuffer(indexBytes, BufferUsageFlags.IndexBufferBit, persistent: false);
+                mesh.RequestedIndexBytes = (ulong)indexBytes;
+            }
+            mesh.Layout = new VertexLayoutDescription(bindings, attributes);
+            mesh.LayoutId = _layouts.Intern(mesh.Layout);
+            for (int i = 0; i < streams.Length; i++)
+            {
+                fixed (byte* source = streams[i].Data)
+                    FillRawBuffer(mesh.Buffers[i]!, (IntPtr)source, streams[i].Data.Length, ref queuedUpload);
+            }
+            if (mesh.Indices != null)
+            {
+                fixed (int* source = definition.Indices)
+                    FillRawBuffer(mesh.Indices, (IntPtr)source, indexBytes, ref queuedUpload);
+            }
+            return Register(mesh);
+        }
+        catch
+        {
+            // A failed later upload can still leave earlier transfer commands referring to this mesh.
+            if (queuedUpload) _frames!.DeferDeletion(mesh);
+            else mesh.Dispose();
+            throw;
+        }
+    }
+
+    private void FillRawBuffer(VulkanBuffer buffer, IntPtr source, int bytes, ref bool queuedUpload)
+    {
+        if (bytes == 0) return;
+        if (buffer.Mapped != IntPtr.Zero)
+            System.Buffer.MemoryCopy((void*)source, (void*)buffer.Mapped, bytes, bytes);
+        else
+        {
+            queuedUpload = true;
+            _uploads!.UploadToBuffer(buffer, 0, source, (ulong)bytes);
         }
     }
 

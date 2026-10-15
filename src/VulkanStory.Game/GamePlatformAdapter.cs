@@ -29,6 +29,8 @@ internal sealed record GamePlatformCallbacks(
     internal Action<int, int, bool>? GamepadButton { get; init; }
     /// <summary>Runs when the owned window regains input focus, so controller state can resynchronize.</summary>
     internal Action? ControllerFocusGained { get; init; }
+    internal Action? ManagedWindowBeginInput { get; init; }
+    internal System.Func<SdlInputEvent, bool>? ManagedWindowInput { get; init; }
 }
 
 /// <summary>SDL state alongside the unchanged official platform object.</summary>
@@ -210,6 +212,7 @@ internal sealed class GamePlatformAdapter : IDisposable
             var performance = callbacks!.ControllerPerformance;
             performance?.BeginFrame(callbacks.ControllerDiagnosticsEnabled?.Invoke() == true);
             callbacks!.BeforeInput();
+            callbacks.ManagedWindowBeginInput?.Invoke();
             performance?.EndPacing();
             bool devicesChanged;
             draining = true;
@@ -318,6 +321,7 @@ internal sealed class GamePlatformAdapter : IDisposable
     {
         RequireActive();
         if (e.Type == SdlEventPump.Quit) { RequestClose(); return; }
+        if (callbacks?.ManagedWindowInput?.Invoke(e) == true) return;
         if (e.DisplayId != 0 || e.Type is >= SdlEventPump.WindowFirst and <= SdlEventPump.WindowLast)
             drainExtents = null;
         if (e.DisplayId != 0)

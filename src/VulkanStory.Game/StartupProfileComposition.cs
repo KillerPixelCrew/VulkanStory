@@ -15,12 +15,14 @@ internal static class StartupProfileComposition
         return Create(runtime, services, Performance.PerformanceFeatures.Create1227(essentials, survival), ComposeGraphics(
         [
             HarmonyOwnershipConsumerPatches.CreateGroup(enabled),
-            TextureConsumerPatches.CreateSubset(enabled),
             ShaderConsumerPatches.CreateSubset(enabled),
             ShaderSourceConsumerPatches.CreateGroup(runtime),
             MeshConsumerPatches.CreateSubset(enabled),
             StateConsumerPatches.CreateSubset(enabled),
             FramebufferConsumerPatches.CreateSubset(enabled),
+            // The atlas caller wrapper must be compiled after its shader/state
+            // leaves are routed, or the JIT can inline their original GL bodies.
+            TextureConsumerPatches.CreateSubset(enabled),
             QueriesCaptureConsumerPatches.CreateSubset(enabled),
             PlatformStartupRoutingPatches.CreateSubset(runtime),
             TemporalConsumerPatches.CreateGroup(runtime),
@@ -35,6 +37,8 @@ internal static class StartupProfileComposition
             PostProcessingConsumerPatches.CreateGroup(runtime),
             RemainingPlatformConsumerPatches.CreateGroup(enabled),
             ModCompatibilityConsumerPatches.CreateGroup(runtime),
+            ManagedGlCallPatches.CreateGroup(runtime),
+            ManagedWindowBridge.CreateGroup(runtime),
         ]));
     }
     // Called by the supported version adapter after ALL ordinary, scene and

@@ -10,6 +10,42 @@ internal sealed partial class GameRenderSession
     private SdlGamepadInput? controllers;
     private ControllerPerformanceDiagnostics? controllerPerformance;
     private SdlGuiTextInput? guiText;
+    private readonly string? framePhaseTracePath = Environment.GetEnvironmentVariable("VULKANSTORY_FRAME_PHASE_TRACE");
+    private bool framePhaseTraceFailed;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "GetCurrentThreadId")]
+    private static extern uint DiagnosticNativeThreadId();
+
+    // Only the isolated diagnostic workload requests this bounded trace. Native
+    // thread identity connects the last completed phase to the timeout dump.
+    private void TraceFramePhase(string phase)
+    {
+        if (framePhaseTraceFailed || string.IsNullOrWhiteSpace(framePhaseTracePath) ||
+            !Path.IsPathFullyQualified(framePhaseTracePath) ||
+            scenarioTick is not int tick || tick < 379 || tick > 430) return;
+        try
+        {
+            var settings = services.RendererSettings.Settings;
+            File.AppendAllText(framePhaseTracePath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                kind = "frame-control-phase", phase, utc = DateTime.UtcNow,
+                processId = Environment.ProcessId,
+                managedThreadId = Environment.CurrentManagedThreadId,
+                nativeThreadId = OperatingSystem.IsWindows() ? DiagnosticNativeThreadId() : 0u,
+                scenarioTick = tick, worldFrame = headlessWorldFrame,
+                inputFrameId, deviceFrameId = device?.LatencyFrameId,
+                requestedUpscaler = settings.Upscaler,
+                effectiveUpscaler = services.RendererSettings.EffectiveUpscaler,
+                requestedFrameGeneration = settings.FrameGeneration,
+                effectiveFrameGeneration = frameGeneration?.EffectiveProvider,
+                rebuildTargetsPending
+            }) + Environment.NewLine);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            framePhaseTraceFailed = true;
+        }
+    }
     /// <summary>Session-owned negotiated analog state shared by controller input and original client packet consumers.</summary>
     internal ControllerMovementState ControllerMovement { get; } = new();
     /// <summary>Releases controller input/UI ownership for the departing original world.</summary>
@@ -61,8 +97,12 @@ internal sealed partial class GameRenderSession
             BeforeInput: () =>
             {
                 RequireActive();
+                TraceFramePhase("beforeInput.enter");
                 AdvanceHeadlessScenarioBeforeInput();
+                TraceFramePhase("scenario.return");
+                TraceFramePhase("controls.begin");
                 RuntimeBootstrap.Current.ApplyPendingControls();
+                TraceFramePhase("controls.return");
                 try
                 {
                     OptionsSettingsOwner.ApplyPendingReturns();
@@ -85,6 +125,7 @@ internal sealed partial class GameRenderSession
                     controllerEnabled = enabled;
                 }
                 PrepareFramePacing();
+                TraceFramePhase("pacing.return");
                 Device.MarkLatency(inputFrameId, LatencyMarker.InputSample);
             },
             InputPumped: () => { },
@@ -131,6 +172,8 @@ internal sealed partial class GameRenderSession
             // diverges; NoteGamepadButton ignores events while tracking is invalid.
             GamepadButton = (id, button, down) => controllers?.NoteGamepadButton(id, button, down),
             ControllerFocusGained = () => controllers?.ResyncButtons(),
+            ManagedWindowBeginInput = () => ManagedWindowBridge.BeginInputFrame(this),
+            ManagedWindowInput = e => ManagedWindowBridge.DispatchSdlEvent(this, e),
         };
     }
     private void RecomposeControllerGui()

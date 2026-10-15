@@ -76,9 +76,10 @@ internal readonly record struct UpscalePlan(
 /// <item><b>Lifetime.</b> One feature per (render size, display size, preset);
 /// a change retires the old one onto the frame timeline and creates a new one,
 /// so a resize or a preset change cannot leak features - and none of them touches
-/// NGX itself. NGX allows exactly one lifetime per process, owned by
-/// <see cref="NgxLifetime" />: a settings change never ends it, teardown ends it
-/// once, and nothing brings it up again afterwards.</item>
+/// NGX itself. The device initializer owns its lifetime: either Streamline or
+/// <see cref="NgxLifetime" /> for standalone operation. A settings change never
+/// ends it; each consumer releases its features before the owner shuts down
+/// the device's NGX instance.</item>
 /// </list>
 /// </summary>
 internal sealed class DlssUpscaler : IDisposable
@@ -87,6 +88,7 @@ internal sealed class DlssUpscaler : IDisposable
     private readonly Action<string> _log;
     private NgxSession? _session;
     private bool _sessionAdopted;
+    private bool _ownsNgxLifetime;
     private IUpscalerDevice? _device;
     private IntPtr _vkDevice;
     private NgxDlssFeature? _feature;
@@ -181,7 +183,8 @@ internal sealed class DlssUpscaler : IDisposable
     }
 
     /// <summary>
-    /// The half that happens once the device exists: NGX is initialised on it.
+    /// Once the device exists, borrows an existing NGX instance or initializes
+    /// the standalone device instance.
     /// False means the upscaler is not available and the setting has been stood
     /// down; the caller carries on with the old chain.
     /// </summary>
@@ -201,19 +204,31 @@ internal sealed class DlssUpscaler : IDisposable
             return Fail("there is no NGX session to bring up on this device");
         }
 
-        // Through the lifetime owner, never directly: it is the one thing that knows
-        // whether this process still has its single NGX lifetime to spend.
-        NgxLifetimeOutcome brought = NgxLifetime.Initialize(
-            _session, instance, physicalDevice, vkDevice, out NgxResult initialized);
-        if (brought != NgxLifetimeOutcome.Done)
+        // Init is once per device, not once per consumer. Streamline's common
+        // plugin may already own this device even if DLSS-G startup later failed.
+        // Probe the public runtime before taking ownership; function-bind failure
+        // alone does not establish that the device has no NGX lifetime.
+        IntPtr capabilityHandle = IntPtr.Zero;
+        NgxResult capabilities = NgxResult.FailNotInitialized;
+        if (device.HasExternalNgxInitializer)
         {
-            return Fail(brought == NgxLifetimeOutcome.NotInitialized
-                ? "NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(initialized)
-                : "NGX is already " + (brought == NgxLifetimeOutcome.AlreadyShutDown ? "shut down" : "up") +
-                  " in this process, which allows exactly one lifetime");
+            capabilities = NgxInterop.GetCapabilityParameters(out capabilityHandle);
+            if (capabilities == NgxResult.Success && capabilityHandle != IntPtr.Zero)
+                _log("[VulkanStory] DLSS: borrowing Streamline's NGX device lifetime; host Init and Shutdown omitted.");
+            else if (capabilities != NgxResult.FailNotInitialized || capabilityHandle != IntPtr.Zero)
+                return Fail("External NGX ownership cannot be established: " + NgxInterop.Describe(capabilities));
         }
-
-        NgxResult capabilities = NgxInterop.GetCapabilityParameters(out IntPtr capabilityHandle);
+        if (capabilities == NgxResult.FailNotInitialized)
+        {
+            NgxLifetimeOutcome brought = NgxLifetime.Initialize(
+                _session, instance, physicalDevice, vkDevice, out NgxResult initialized);
+            if (brought != NgxLifetimeOutcome.Done)
+                return Fail(brought == NgxLifetimeOutcome.NotInitialized
+                    ? "NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(initialized)
+                    : "NGX device lifetime could not be acquired: " + brought);
+            _ownsNgxLifetime = true;
+            capabilities = NgxInterop.GetCapabilityParameters(out capabilityHandle);
+        }
         if (capabilities != NgxResult.Success || capabilityHandle == IntPtr.Zero)
         {
             return Fail("NVSDK_NGX_VULKAN_GetCapabilityParameters: " + NgxInterop.Describe(capabilities));
@@ -396,13 +411,12 @@ internal sealed class DlssUpscaler : IDisposable
     }
 
     /// <summary>
-    /// Teardown. The order - retire the feature, drain the frame timeline, shut NGX
-    /// down, and only then let the caller destroy the device - is not performed here
-    /// and cannot be got wrong here: <see cref="NgxLifetime.ShutDown" /> performs all
-    /// three steps itself, refuses a second shutdown, and refuses to shut NGX down
-    /// while a feature is still live.
+    /// Retires this consumer's features and drains the frame timeline. An owned
+    /// standalone instance then shuts down through <see cref="NgxLifetime.ShutDown" />.
+    /// A borrowed instance stays initialized until its external owner releases
+    /// its remaining features and shuts down, before Vulkan device destruction.
     ///
-    /// <para>This is the <i>only</i> path that ends an NGX lifetime. A settings
+    /// <para>This is the path that ends our standalone NGX lifetime. A settings
     /// change - the upscaler switched off, a different preset, a runtime stand-down -
     /// never comes here: it retires the feature and leaves NGX up, because the
     /// process cannot bring it back afterwards.</para>
@@ -423,18 +437,27 @@ internal sealed class DlssUpscaler : IDisposable
         }
         else if (_session != null)
         {
-            // Gated on "NGX is up", never on "the upscaler still works": every later
-            // Fail() - a driver that refuses to create the feature is the realistic
-            // one - sets Unavailable while NGX is still initialised on a live device,
-            // and skipping the shutdown would destroy the VkDevice under a live NGX.
-            NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);
-            if (outcome is NgxLifetimeOutcome.ShutdownFailed or NgxLifetimeOutcome.FeatureStillLive)
-                throw new InvalidOperationException("NGX shutdown did not release its owners: " + outcome);
+            // Ownership is acquired before capabilities or feature creation can
+            // fail. Those failures must still release an owned device instance.
+            if (_ownsNgxLifetime)
+            {
+                NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);
+                if (outcome is NgxLifetimeOutcome.ShutdownFailed or NgxLifetimeOutcome.FeatureStillLive)
+                    throw new InvalidOperationException("NGX shutdown did not release its owners: " + outcome);
+            }
+            else
+            {
+                // Release only our SR handles. The external owner ends NGX after
+                // its own feature owners have also released their resources.
+                RetireFeature();
+                device?.DrainDeferredDeletions();
+            }
             _session.Dispose();
         }
 
         _session = null;
         _sessionAdopted = false;
+        _ownsNgxLifetime = false;
         _device = null;
         _vkDevice = IntPtr.Zero;
         Unavailable = "shut down";

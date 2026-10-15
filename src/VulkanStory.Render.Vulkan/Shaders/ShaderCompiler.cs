@@ -179,6 +179,35 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
     public ShaderCompileResult CompileForReflection(string code, string filename, EnumShaderType stage) =>
         CompileUncached(code, filename, stage, optimize: false);
 
+    /// <summary>Compiles original GLSL against OpenGL semantics, without Vulkan rewriting or version promotion.</summary>
+    public bool ValidateGlShader(string code, string filename, EnumShaderType stage, out string log)
+    {
+        CompileOptions* options = _api.CompileOptionsInitialize();
+        if (options == null) throw new InvalidOperationException("shaderc failed to initialise OpenGL compile options");
+        try
+        {
+            _api.CompileOptionsSetSourceLanguage(options, SourceLanguage.Glsl);
+            _api.CompileOptionsSetTargetEnv(options, TargetEnv.Opengl, (uint)EnvVersion.Opengl45);
+            _api.CompileOptionsSetTargetSpirv(options, SpirvVersion.Shaderc10);
+            _api.CompileOptionsSetOptimizationLevel(options, OptimizationLevel.Zero);
+            _api.CompileOptionsSetAutoBindUniforms(options, true);
+            _api.CompileOptionsSetAutoMapLocations(options, true);
+            CompilationResult* compiled = CompileWith(code, filename, stage, options, preprocessOnly: false);
+            try
+            {
+                bool success = Succeeded(compiled, out string? error);
+                byte* message = compiled == null ? null : _api.ResultGetErrorMessage(compiled);
+                log = message == null ? error ?? "" : Marshal.PtrToStringUTF8((IntPtr)message) ?? error ?? "";
+                return success;
+            }
+            finally
+            {
+                if (compiled != null) _api.ResultRelease(compiled);
+            }
+        }
+        finally { _api.CompileOptionsRelease(options); }
+    }
+
     /// <summary>
     /// Stage tag for compute modules in the binary cache key: GL_COMPUTE_SHADER, which no
     /// client stage uses, so a compute module never shares a key with a vertex or fragment one.

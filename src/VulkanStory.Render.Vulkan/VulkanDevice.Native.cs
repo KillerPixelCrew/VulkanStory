@@ -852,10 +852,20 @@ public sealed unsafe partial class VulkanDevice
 
         int width = pass.ViewportWidth >= 0 ? pass.ViewportWidth : (int)target.Width;
         int height = pass.ViewportHeight >= 0 ? pass.ViewportHeight : (int)target.Height;
+        Rect2D scissor = pass.Scissor ?? new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height));
+        // GL scissor origins can be negative, whereas Vulkan requires nonnegative
+        // offsets and signed-range-safe offset + extent. Intersect with the target
+        // using wide arithmetic, preserving the pixels the GL rectangle admits.
+        long left = Math.Clamp((long)scissor.Offset.X, 0, target.Width);
+        long top = Math.Clamp((long)scissor.Offset.Y, 0, target.Height);
+        long right = Math.Clamp((long)scissor.Offset.X + scissor.Extent.Width, 0, target.Width);
+        long bottom = Math.Clamp((long)scissor.Offset.Y + scissor.Extent.Height, 0, target.Height);
+        scissor = new Rect2D(new Offset2D((int)left, (int)top),
+            new Extent2D((uint)Math.Max(0, right - left), (uint)Math.Max(0, bottom - top)));
         var values = new DynamicStateValues
         {
             Viewport = new Viewport(pass.ViewportX, pass.ViewportY, width, height, 0f, 1f),
-            Scissor = pass.Scissor ?? new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
+            Scissor = scissor,
             CullMode = description.Cull,
             FrontFace = description.FrontFace,
             Topology = description.Topology,

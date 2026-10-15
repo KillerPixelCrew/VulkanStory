@@ -12,6 +12,8 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 internal unsafe interface ISwapchainDispatch : System.IDisposable
 {
+    /// <summary>Whether this presentation owner signals application-provided maintenance1 present fences.</summary>
+    bool SupportsPresentFences { get; }
     /// <summary>Creates a swapchain through this presentation owner.</summary>
     /// <param name="device">Borrowed logical device.</param>
     /// <param name="info">Caller-owned Vulkan creation information valid for the call.</param>
@@ -50,6 +52,9 @@ internal sealed unsafe class NativeSwapchainDispatch : ISwapchainDispatch
     internal NativeSwapchainDispatch(KhrSwapchain api) => this.api = api;
 
     /// <inheritdoc/>
+    public bool SupportsPresentFences => true;
+
+    /// <inheritdoc/>
     public Result Create(Device device, SwapchainCreateInfoKHR* info, out SwapchainKHR swapchain) =>
         api.CreateSwapchain(device, info, null, out swapchain);
 
@@ -78,6 +83,39 @@ internal sealed unsafe class NativeSwapchainDispatch : ISwapchainDispatch
     public void Dispose() => api.Dispose();
 }
 
+/// <summary>Native loader dispatch for secondary windows, bypassing presentation-provider hooks on the shared device.</summary>
+/// <remarks>Vulkan interposers retain native instance/device handles. A separate loader table borrows those
+/// handles without changing the primary Streamline swapchain, frame-generation state or error channel.</remarks>
+internal sealed unsafe class AuxiliarySwapchainDispatch : ISwapchainDispatch
+{
+    private readonly NativeSwapchainDispatch dispatch;
+
+    private AuxiliarySwapchainDispatch(KhrSwapchain api)
+    {
+        dispatch = new NativeSwapchainDispatch(api);
+    }
+
+    internal static AuxiliarySwapchainDispatch Create(VulkanContext context)
+    {
+        if (!context.Api.TryGetDeviceExtension(context.Instance, context.Device, out KhrSwapchain api))
+            throw new System.InvalidOperationException("The native Vulkan loader has no auxiliary VK_KHR_swapchain dispatch.");
+        return new AuxiliarySwapchainDispatch(api);
+    }
+
+    public Result Create(Device device, SwapchainCreateInfoKHR* info, out SwapchainKHR chain) =>
+        dispatch.Create(device, info, out chain);
+    public bool SupportsPresentFences => dispatch.SupportsPresentFences;
+    public Result GetImages(Device device, SwapchainKHR chain, ref uint count, Image* images) =>
+        dispatch.GetImages(device, chain, ref count, images);
+    public Result Acquire(Device device, SwapchainKHR chain, Semaphore semaphore, ref uint index) =>
+        dispatch.Acquire(device, chain, semaphore, ref index);
+    public Result Present(Queue queue, PresentInfoKHR* info) => dispatch.Present(queue, info);
+    public void PrepareDestroy(SwapchainKHR chain) => dispatch.PrepareDestroy(chain);
+    public void RequireLifetime() => dispatch.RequireLifetime();
+    public void Destroy(Device device, SwapchainKHR chain) => dispatch.Destroy(device, chain);
+    public void Dispose() => dispatch.Dispose();
+}
+
 /// <summary>Borrows the Streamline runtime and routes the complete swapchain operation set through it.</summary>
 internal sealed unsafe class StreamlineSwapchainDispatch : ISwapchainDispatch
 {
@@ -89,6 +127,11 @@ internal sealed unsafe class StreamlineSwapchainDispatch : ISwapchainDispatch
         _runtime = runtime;
         _device = device;
     }
+
+    internal bool UsesVirtualBackbuffers => _runtime.UsesVirtualBackbuffers;
+
+    /// <inheritdoc/>
+    public bool SupportsPresentFences => false;
 
     /// <inheritdoc/>
     public Result Create(Device device, SwapchainCreateInfoKHR* info, out SwapchainKHR chain) =>
@@ -132,6 +175,9 @@ internal sealed unsafe class Fsr3SwapchainDispatch : ISwapchainDispatch
     private Fsr3SwapchainRuntime? _runtime;
 
     internal Fsr3SwapchainDispatch(VulkanContext context) => _context = context;
+
+    /// <inheritdoc/>
+    public bool SupportsPresentFences => false;
 
     /// <summary>Latest FidelityFX swapchain creation or recreation failure.</summary>
     internal string? FailureReason { get; private set; }

@@ -22,6 +22,7 @@ public sealed class SdlWindowHost : IDisposable
     private const ulong MinimizedFlag = 0x0000000000000040;
     private const ulong MaximizedFlag = 0x0000000000000080;
     private const ulong FocusFlag = 0x0000000000000200;
+    private const ulong AlwaysOnTopFlag = 0x0000000000010000;
     private IntPtr window;
     private readonly Dictionary<string, nint> cursors = new(StringComparer.Ordinal);
     private nint activeCursor;
@@ -56,6 +57,27 @@ public sealed class SdlWindowHost : IDisposable
     public bool IsBorderless => HasFlag(BorderlessFlag);
     /// <summary>Whether SDL allows user resizing.</summary>
     public bool IsResizable => HasFlag(ResizableFlag);
+    /// <summary>Whether SDL keeps this window above ordinary windows.</summary>
+    public bool AlwaysOnTop => HasFlag(AlwaysOnTopFlag);
+    /// <summary>Current native window opacity between zero and one.</summary>
+    public float Opacity
+    {
+        get
+        {
+            float opacity = SDL_GetWindowOpacity(RequireWindow());
+            Check(opacity >= 0, "SDL_GetWindowOpacity");
+            return opacity;
+        }
+    }
+    /// <summary>Window position in SDL desktop coordinates.</summary>
+    public (int X, int Y) Position
+    {
+        get
+        {
+            Check(SDL_GetWindowPosition(RequireWindow(), out int x, out int y), "SDL_GetWindowPosition");
+            return (x, y);
+        }
+    }
     /// <summary>Current per-window relative mouse mode used for gameplay capture.</summary>
     public bool RelativeMouseMode => SDL_GetWindowRelativeMouseMode(RequireWindow());
     /// <summary>Whether SDL text input is enabled for this window.</summary>
@@ -188,6 +210,18 @@ public sealed class SdlWindowHost : IDisposable
     public void Minimize() { if (!keepHidden) Check(SDL_MinimizeWindow(RequireWindow()), "SDL_MinimizeWindow"); }
     /// <summary>Requests SDL's centered window position.</summary>
     public void Center() => Check(SDL_SetWindowPosition(RequireWindow(), 0x2FFF0000, 0x2FFF0000), "SDL_SetWindowPosition");
+    /// <summary>Requests a position in SDL desktop coordinates.</summary>
+    public void SetPosition(int x, int y) => Check(SDL_SetWindowPosition(RequireWindow(), x, y), "SDL_SetWindowPosition");
+    /// <summary>Changes native opacity, preserving SDL's unsupported-operation result.</summary>
+    public void SetOpacity(float opacity)
+    {
+        if (!float.IsFinite(opacity) || opacity < 0 || opacity > 1)
+            throw new ArgumentOutOfRangeException(nameof(opacity));
+        Check(SDL_SetWindowOpacity(RequireWindow(), opacity), "SDL_SetWindowOpacity");
+    }
+    /// <summary>Changes native topmost state unless the host is required to stay hidden.</summary>
+    public void SetAlwaysOnTop(bool enabled) { if (!keepHidden) Check(
+        SDL_SetWindowAlwaysOnTop(RequireWindow(), enabled), "SDL_SetWindowAlwaysOnTop"); }
     /// <summary>Maximizes the window unless the host is required to stay hidden.</summary>
     public void Maximize() { if (!keepHidden) Check(SDL_MaximizeWindow(RequireWindow()), "SDL_MaximizeWindow"); }
     /// <summary>Restores the window unless the host is required to stay hidden.</summary>
@@ -509,6 +543,15 @@ public sealed class SdlWindowHost : IDisposable
     [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_MinimizeWindow(IntPtr window);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_SetWindowPosition(IntPtr window, int x, int y);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_GetWindowPosition(IntPtr window, out int x, out int y);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    private static extern float SDL_GetWindowOpacity(IntPtr window);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_SetWindowOpacity(IntPtr window, float opacity);
+    [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_SetWindowAlwaysOnTop(
+        IntPtr window, [MarshalAs(UnmanagedType.I1)] bool enabled);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)] private static extern bool SDL_MaximizeWindow(IntPtr window);
     [DllImport("SDL3", CallingConvention = CallingConvention.Cdecl)]

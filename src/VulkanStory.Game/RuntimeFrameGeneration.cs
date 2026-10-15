@@ -210,8 +210,8 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
             (!graphics.ComposeGeneratedFrameUi(output, ui) ||
              !device.QueueGeneratedFrameForPresent(output.ColorTextureIds[0])))
         { Wait("generated-frame UI composition and presentation"); return; }
-        // Multi-queue devices retain SDK-owned interpolation/UI at Present;
-        // single-queue devices use host composition and the existing timeline.
+        // Native presentation owns the generated image, UI and frame timeline
+        // on every device, including devices with additional hardware queues.
         // Fsr3FrameGeneration resets its own history after every Disable in Wait.
         historyResetPending = false;
         PreparedThisFrame = true;

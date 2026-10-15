@@ -32,6 +32,7 @@
     <Compile Include="VulkanDevice.Programs.cs" />
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
+    <Compile Include="VulkanDevice.Auxiliary.cs" />
     <Compile Include="VulkanDevice.Shadows.cs" />
     <Compile Include="VulkanDevice.UpscalerHost.cs" />
     <Compile Include="VulkanDevice.Xess.cs" />
@@ -107,6 +108,9 @@
     <Compile Include="Present/Fsr3SwapchainRuntime.cs" />
     <Compile Include="Present/Swapchain.cs" />
     <Compile Include="Present/BlitPresentPath.cs" />
+    <Compile Include="Present/AuxiliaryPresenter.cs" />
+    <Compile Include="Present/OverlayPresentLayer.cs" />
+    <Compile Include="Present/AuxiliaryPresentationRequirements.cs" />
     <Compile Include="Present/SwapchainDispatch.cs" />
     <Compile Include="Present/SwapchainRetirement.cs" />
     <Compile Include="Present/StreamlineRuntime.cs" />

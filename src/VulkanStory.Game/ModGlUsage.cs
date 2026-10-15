@@ -30,9 +30,9 @@ internal sealed record ModGlInspection(ModInfo? Info, string Source, string Asse
     /// <summary>Mod-manager identity retained from the game's own metadata reader.</summary>
     internal string Identity => $"{Info?.ModID ?? "unknown-mod"}@{Info?.Version ?? "unknown-version"}";
     /// <summary>Explicit refusal or a bounded non-acceptance result.</summary>
-    internal string Decision => (Calls.Count != 0 ? $"refused: {Calls.Count} unsupported direct GL operation(s); an exact mod adapter is required" :
+    internal string Decision => (Calls.Count != 0 ? $"refused: {Calls.Count} unsupported direct GL operation(s); a renderer capability is required" :
         Failure != null ? "inspection incomplete; original loader behavior retained; compatibility unverified" :
-        "no detectable direct GL; compatibility unverified") + (Failure != null ? "; metadata error: " + Failure : "");
+        "no unsupported direct GL detected; compatibility unverified") + (Failure != null ? "; metadata error: " + Failure : "");
     /// <summary>Formats image identity and every discovered operation for logs and the status command.</summary>
     internal string Detail => $"{Identity}: {Decision}; {Source}; assembly={AssemblyName}; MVID={Mvid}; SHA256={Sha256}" +
         string.Concat(Calls.Select(call => "\n  " + call.Detail));
@@ -103,6 +103,7 @@ internal static class ModGlUsage
     /// <returns>True when the method belongs to a GL binding or known graphics procedure loader.</returns>
     private static bool IsManagedGl(MethodReference method)
     {
+        if (ManagedGlCallPatches.SupportsManagedCall(method) || ManagedWindowBridge.SupportsManagedCall(method)) return false;
         string type = method.DeclaringType.FullName;
         return ((type.StartsWith("OpenTK.Graphics.OpenGL", StringComparison.Ordinal) ||
                  type.StartsWith("OpenTK.Graphics.ES", StringComparison.Ordinal)) &&

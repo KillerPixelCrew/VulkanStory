@@ -213,6 +213,7 @@ internal sealed partial class GameRenderSession : IDisposable
             // without changing the authoritative server/physics tick clock.
             gpuCycleStarted = true;
             Device.BeginFrame();
+            ManagedWindowBridge.MakePrimaryCurrent(this);
             Graphics.DrainFinalizedMeshes();
             // Background pipeline results publish at BeginFrame; skips counted after it are this frame's.
             long pipelineSkipsAtStart = Device.PipelineDrawsSkipped;
@@ -435,6 +436,8 @@ internal sealed partial class GameRenderSession : IDisposable
             // pending timeline retirements. Preserve the entire graph before
             // clearing GUI owners or beginning any dependent release.
             device?.RequireFrameRelease();
+            ManagedWindowBridge.DisposeForSession(this);
+            managedGl?.Dispose(); managedGl = null;
             ClearScenarioWorldCycle();
             // GUI LoadedTextures must be released while routed texture deletion
             // can still reach this live Vulkan adapter. Rollback is too late.

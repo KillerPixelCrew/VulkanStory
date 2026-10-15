@@ -7,6 +7,14 @@ Both luma history images are RGBA16F, while their GLSL storage declaration says
 changes only that declaration to `rgba16f`; resource precision and the algorithm
 remain unchanged. Original SDK copyright and license notices are preserved.
 
+`swapchain-lifetime.json` preserves NV low-latency swapchain creation metadata,
+removes duplicate semaphore allocation, indexes composition-present semaphores by
+the acquired image instead of reusing semaphore zero, and releases cached UI
+composition GPU objects after presentation drains. Failed image acquisition does
+not signal a binary semaphore that no present will consume. The exact replacements apply only to the
+pinned staged sources; the vendor submodule stays unchanged. Runtime receipts
+and packaging verify both correction manifests.
+
 Build from the repository root:
 
 ```powershell

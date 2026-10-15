@@ -42,6 +42,7 @@ param(
     [string]$XessSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/xess'),
     [string]$StreamlineSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/streamline-release-2.14.1'),
     [string]$StreamlineRuntimeDirectory,
+    [string]$CorrectedStreamlineRuntimeDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native-streamline/Release/win-x64/runtime'),
     [Parameter(Mandatory)][string]$OutputDirectory
 )
 $ErrorActionPreference = 'Stop'
@@ -57,14 +58,29 @@ if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'The corr
 $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
 $fixPath = Join-Path $projectRoot 'native/fsr3/sdk-fixes/luma-history-format.json'
 $fix = Get-Content -LiteralPath $fixPath -Raw | ConvertFrom-Json
+$lifetimeFixPath = Join-Path $projectRoot 'native/fsr3/sdk-fixes/swapchain-lifetime.json'
 $sdkCommit = (& git -C $Fsr3SdkRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $receipt.schema -ne 1 -or $receipt.fix -ne $fix.id -or
     $receipt.sdkCommit -ne $fix.sdkCommit -or $sdkCommit -ne $fix.sdkCommit -or
     $receipt.patchSha256 -ne (Get-FileHash -LiteralPath $fixPath -Algorithm SHA256).Hash -or
+    $receipt.swapchainLifetimePatchSha256 -ne (Get-FileHash -LiteralPath $lifetimeFixPath -Algorithm SHA256).Hash -or
     $receipt.runtimeSha256 -ne (Get-FileHash -LiteralPath (Join-Path $fsr3RuntimeRoot 'amd_fidelityfx_vk.dll') -Algorithm SHA256).Hash) {
     throw 'The corrected FSR3 runtime identity or hash does not match the reviewed SDK correction.'
 }
 if (-not $StreamlineRuntimeDirectory) { $StreamlineRuntimeDirectory = Join-Path $StreamlineSdkRoot 'bin/x64' }
+$streamlineReceiptPath = Join-Path $CorrectedStreamlineRuntimeDirectory 'streamline-sdk-build.json'
+$streamlineReceipt = Get-Content -LiteralPath $streamlineReceiptPath -Raw | ConvertFrom-Json
+if ($streamlineReceipt.schema -ne 1 -or
+    $streamlineReceipt.sdkCommit -ne '2122257e0fce486f91b385aa63b9a09b0a34b363' -or
+    $streamlineReceipt.patchSha256 -ne (Get-FileHash -LiteralPath (Join-Path $projectRoot 'native/streamline/sdk-fixes/prepare.py')).Hash -or
+    $streamlineReceipt.dispatchSha256 -ne (Get-FileHash -LiteralPath (Join-Path $projectRoot 'native/streamline/sdk-fixes/ngx-vulkan-dispatch.h')).Hash) {
+    throw 'The corrected Streamline source identity does not match the pinned SDK corrections.'
+}
+foreach ($name in @('sl.common.dll','sl.interposer.dll')) {
+    if ($streamlineReceipt.binaries.$name -ne (Get-FileHash -LiteralPath (Join-Path $CorrectedStreamlineRuntimeDirectory $name)).Hash) {
+        throw "Corrected Streamline runtime hash mismatch: $name"
+    }
+}
 $streamlineVersion = Get-Content -LiteralPath (Join-Path $StreamlineSdkRoot 'include/sl_version.h') -Raw
 foreach ($part in @(@{ name='MAJOR'; value=2 }, @{ name='MINOR'; value=14 }, @{ name='PATCH'; value=1 })) {
     if ($streamlineVersion -notmatch "(?m)^\s*#define\s+SL_VERSION_$($part.name)\s+$($part.value)\s*$") {
@@ -91,14 +107,16 @@ foreach ($component in $inventory.components.PSObject.Properties) {
     foreach ($name in $component.Value) {
         $source = if ($name -eq 'VulkanStoryVma.dll') { Join-Path $VmaDirectory $name }
         elseif ($name -eq 'openxr_loader.dll') { Join-Path $OpenXrDirectory $name }
+        elseif ($name -in @('VulkanStoryAuxPresent.dll','VulkanStoryWsi.dll','VulkanStoryWsi.json')) { Join-Path $BridgesDirectory $name }
         elseif ($name.StartsWith('VulkanStory')) { Join-Path $BridgesDirectory $name }
         elseif ($component.Name -eq 'core') { Join-Path $CoreNativeDirectory $name }
         elseif ($component.Name -eq 'dlss') { Join-Path $DlssSdkRoot "lib/Windows_x86_64/rel/$name" }
         elseif ($component.Name -eq 'fsr3') { Join-Path $fsr3RuntimeRoot $name }
         elseif ($component.Name -eq 'fsr4') { Join-Path $Fsr4SdkRoot "Kits/FidelityFX/signedbin/$name" }
         elseif ($component.Name -in @('xess','xess-fg')) { Join-Path $XessSdkRoot "bin/$name" }
+        elseif ($component.Name -eq 'streamline' -and $name -in @('sl.common.dll','sl.interposer.dll')) { Join-Path $CorrectedStreamlineRuntimeDirectory $name }
         else { Join-Path $StreamlineRuntimeDirectory $name }
-        if ($component.Name -eq 'streamline' -and -not $name.StartsWith('VulkanStory')) {
+        if ($component.Name -eq 'streamline' -and -not $name.StartsWith('VulkanStory') -and $name -notin @('sl.common.dll','sl.interposer.dll')) {
             $release = Join-Path $StreamlineSdkRoot "bin/x64/$name"
             if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
                 (Get-FileHash -LiteralPath $release -Algorithm SHA256).Hash) {
@@ -119,6 +137,8 @@ Add-Input 'licenses/fsr4/license.md' (Join-Path $Fsr4SdkRoot 'Kits/FidelityFX/do
 Add-Input 'licenses/fsr4/3rdpartynotice.md' (Join-Path $Fsr4SdkRoot '3rdpartynotice.md')
 Add-Input 'licenses/xess/LICENSE.txt' (Join-Path $XessSdkRoot 'LICENSE.txt')
 Add-Input 'licenses/streamline/license.txt' (Join-Path $StreamlineSdkRoot 'license.txt')
+Add-Input 'licenses/streamline/sdk-build.json' $streamlineReceiptPath
+Add-Input 'licenses/streamline/vulkanstory-fixes.json' (Join-Path $CorrectedStreamlineRuntimeDirectory 'vulkanstory-fixes.json')
 Add-Input 'licenses/streamline/3rd-party-licenses.md' (Join-Path $StreamlineSdkRoot '3rd-party-licenses.md')
 Add-Input 'licenses/streamline/ngx-license.txt' (Join-Path $StreamlineSdkRoot 'external/ngx-sdk/license.txt')
 Add-Input 'licenses/streamline/reflex.license.txt' (Join-Path $StreamlineRuntimeDirectory 'reflex.license.txt')

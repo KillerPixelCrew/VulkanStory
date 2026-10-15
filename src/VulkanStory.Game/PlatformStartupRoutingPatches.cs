@@ -207,5 +207,10 @@ internal static class PlatformStartupRoutingPatches
     private static bool DebugMode(ClientPlatformWindows __instance, bool __0)
     { if (!TrySession(__instance, out var session)) return true; Debug(__instance) = __0; session.Device.DebugMode = __0; return false; }
     private static void Exit(ClientPlatformWindows __instance)
-    { if (TrySession(__instance, out var session)) session.Input.RequestWindowExit(); }
+    {
+        // CrashReporter calls Exit after the game loop has already released its
+        // session. Only an active session needs an SDL close request.
+        if (runtime?.IsActive == true && runtime.TrySession(__instance, out var session))
+            session.Input.RequestWindowExit();
+    }
 }

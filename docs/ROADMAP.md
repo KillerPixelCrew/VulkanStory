@@ -93,8 +93,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 
 - **MOD-01: General mod compatibility**
   1. Extend motion histories to independently moving custom subobjects and procedural geometry using actual producer identities and previous deformation inputs.
-  2. Retain resource/state contracts across mod rendering and world transitions.
-  3. Exercise the complete supplied mod set across loading, provider changes and world transitions without patches keyed to mod IDs.
+  2. Completed the shared mesh/shader/window compatibility path, bounded atlas feedback and SDK/overlay presentation lifetime corrections.
+  3. Validated the complete supplied pack through world loading, provider changes, world exit and clean teardown with RTSS enabled and zero Vulkan errors. [Current evidence](validation/mod-compatibility.md).
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.

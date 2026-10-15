@@ -339,6 +339,7 @@ internal sealed unsafe class TextureManager : IDisposable
     private readonly UploadManager _uploads;
     private readonly List<VulkanTexture?> _textures = new();
     private readonly Stack<int> _freeIds = new();
+    private readonly Dictionary<int, SamplerState> _reservedNames = new();
     private bool _disposed;
 
     public SamplerCache Samplers { get; }
@@ -381,7 +382,27 @@ internal sealed unsafe class TextureManager : IDisposable
         }
     }
 
-    private int Register(VulkanTexture texture)
+    /// <summary>Reserves a texture ID in the same namespace as every allocated image, without creating storage.</summary>
+    public int ReserveName()
+    {
+        _uploads.EnterLock();
+        try
+        {
+            int id = AllocateNameLocked();
+            _reservedNames.Add(id, SamplerState.Default);
+            return id;
+        }
+        finally { _uploads.ExitLock(); }
+    }
+
+    private int AllocateNameLocked()
+    {
+        if (_freeIds.Count > 0) return _freeIds.Pop();
+        _textures.Add(null);
+        return _textures.Count - 1;
+    }
+
+    private int Register(VulkanTexture texture, int reservedName = 0)
     {
         // Every created image (2D, array, cube, storage, volume) reaches here once.
         VulkanStats.NoteTextureCreated();
@@ -391,20 +412,42 @@ internal sealed unsafe class TextureManager : IDisposable
         _uploads.EnterLock();
         try
         {
-            if (_freeIds.Count > 0)
+            if (reservedName != 0)
             {
-                int reused = _freeIds.Pop();
-                _textures[reused] = texture;
-                return reused;
+                if (!_reservedNames.Remove(reservedName, out SamplerState state))
+                    throw new InvalidOperationException("Texture storage requires a live, undefined reserved name.");
+                texture.State = state;
+                _textures[reservedName] = texture;
+                return reservedName;
             }
-
-            _textures.Add(texture);
-            return _textures.Count - 1;
+            int id = AllocateNameLocked();
+            _textures[id] = texture;
+            return id;
         }
         finally
         {
             _uploads.ExitLock();
         }
+    }
+
+    /// <summary>Defines the exact immutable 2D mip storage of an existing reserved name.</summary>
+    public void Define2D(int reservedName, uint width, uint height, Format format, uint mipLevels)
+    {
+        if (width == 0 || height == 0 || width > _context.Capabilities.MaxImageDimension2D ||
+            height > _context.Capabilities.MaxImageDimension2D ||
+            mipLevels == 0 || mipLevels > MipLevelsFor(width, height))
+            throw new ArgumentOutOfRangeException(nameof(mipLevels), "Texture storage requires a nonzero extent and a valid mip count.");
+        _uploads.EnterLock();
+        try
+        {
+            if (!_reservedNames.ContainsKey(reservedName))
+                throw new InvalidOperationException("Texture storage requires a live, undefined reserved name.");
+            ImageAspectFlags aspect = IsDepthFormat(format) ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+            ImageUsageFlags usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit |
+                (IsDepthFormat(format) ? ImageUsageFlags.DepthStencilAttachmentBit : ImageUsageFlags.ColorAttachmentBit);
+            CreateImage(width, height, format, mipLevels, 1, false, usage, aspect, MemoryPoolClass.DeviceImages, reservedName);
+        }
+        finally { _uploads.ExitLock(); }
     }
 
     /// <summary>
@@ -529,7 +572,7 @@ internal sealed unsafe class TextureManager : IDisposable
     }
 
     private int CreateImage(uint width, uint height, Format format, uint mipLevels, uint layers, bool cube,
-        ImageUsageFlags usage, ImageAspectFlags aspect, MemoryPoolClass poolClass)
+        ImageUsageFlags usage, ImageAspectFlags aspect, MemoryPoolClass poolClass, int reservedName = 0)
     {
         var imageInfo = new ImageCreateInfo
         {
@@ -610,7 +653,7 @@ internal sealed unsafe class TextureManager : IDisposable
 
         if (_context.PoisonFreshResources) Poison(texture);
 
-        return Register(texture);
+        return Register(texture, reservedName);
     }
 
     /// <summary>
@@ -870,26 +913,31 @@ internal sealed unsafe class TextureManager : IDisposable
     /// </summary>
     public void SetParameter(int textureId, int parameterName, float value)
     {
-        VulkanTexture? texture = Get(textureId);
-        if (texture == null) return;
-
-        SamplerState state = texture.State;
-        int integer = (int)value;
-
-        texture.State = parameterName switch
+        _uploads.EnterLock();
+        try
         {
-            GlEnums.TextureMinFilter => ApplyMinFilter(state, integer),
-            GlEnums.TextureMagFilter => state with { MagFilter = GlEnums.FilterFrom(integer) },
-            GlEnums.TextureWrapS => state with { AddressU = GlEnums.AddressModeFrom(integer) },
-            GlEnums.TextureWrapT => state with { AddressV = GlEnums.AddressModeFrom(integer) },
-            GlEnums.TextureLodBias => state with { LodBias = value },
-            GlEnums.TextureMaxLevel => state with { MaxLevel = integer },
-            GlEnums.TextureCompareMode => state with
+            VulkanTexture? texture = Get(textureId);
+            if (texture == null && !_reservedNames.TryGetValue(textureId, out _)) return;
+            SamplerState state = texture?.State ?? _reservedNames[textureId];
+            int integer = (int)value;
+            state = parameterName switch
             {
-                CompareEnable = integer == GlEnums.TextureCompareRefToTexture,
-            },
-            _ => state,
-        };
+                GlEnums.TextureMinFilter => ApplyMinFilter(state, integer),
+                GlEnums.TextureMagFilter => state with { MagFilter = GlEnums.FilterFrom(integer) },
+                GlEnums.TextureWrapS => state with { AddressU = GlEnums.AddressModeFrom(integer) },
+                GlEnums.TextureWrapT => state with { AddressV = GlEnums.AddressModeFrom(integer) },
+                GlEnums.TextureLodBias => state with { LodBias = value },
+                GlEnums.TextureMaxLevel => state with { MaxLevel = integer },
+                GlEnums.TextureCompareMode => state with
+                {
+                    CompareEnable = integer == GlEnums.TextureCompareRefToTexture,
+                },
+                _ => state,
+            };
+            if (texture != null) texture.State = state;
+            else _reservedNames[textureId] = state;
+        }
+        finally { _uploads.ExitLock(); }
     }
 
     private static SamplerState ApplyMinFilter(SamplerState state, int glFilter)
@@ -910,18 +958,24 @@ internal sealed unsafe class TextureManager : IDisposable
     /// </summary>
     public void SetBorderColor(int textureId, float r, float g, float b, float a)
     {
-        VulkanTexture? texture = Get(textureId);
-        if (texture == null) return;
-
-        bool opaque = a >= 0.5f;
-        bool white = (r + g + b) / 3f >= 0.5f;
-
-        texture.State = texture.State with
+        _uploads.EnterLock();
+        try
         {
-            BorderColor = opaque
-                ? white ? BorderColor.FloatOpaqueWhite : BorderColor.FloatOpaqueBlack
-                : BorderColor.FloatTransparentBlack,
-        };
+            VulkanTexture? texture = Get(textureId);
+            if (texture == null && !_reservedNames.TryGetValue(textureId, out _)) return;
+            SamplerState state = texture?.State ?? _reservedNames[textureId];
+            bool opaque = a >= 0.5f;
+            bool white = (r + g + b) / 3f >= 0.5f;
+            state = state with
+            {
+                BorderColor = opaque
+                    ? white ? BorderColor.FloatOpaqueWhite : BorderColor.FloatOpaqueBlack
+                    : BorderColor.FloatTransparentBlack,
+            };
+            if (texture != null) texture.State = state;
+            else _reservedNames[textureId] = state;
+        }
+        finally { _uploads.ExitLock(); }
     }
 
     /// <summary>
@@ -941,6 +995,11 @@ internal sealed unsafe class TextureManager : IDisposable
         {
             // A texture served by a transient image this frame deletes its own image.
             RestoreBindingLocked(textureId);
+            if (_reservedNames.Remove(textureId))
+            {
+                _freeIds.Push(textureId);
+                return;
+            }
             VulkanTexture? texture = Get(textureId);
             if (texture == null) return;
 
@@ -1128,6 +1187,7 @@ internal sealed unsafe class TextureManager : IDisposable
         _reboundOriginals.Clear();
         foreach (VulkanTexture? texture in _textures) texture?.Dispose();
         _textures.Clear();
+        _reservedNames.Clear();
         Samplers.Dispose();
     }
 }

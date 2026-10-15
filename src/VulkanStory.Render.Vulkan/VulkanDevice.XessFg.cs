@@ -158,7 +158,7 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
-    /// <summary>Recreates the Vulkan surface/swapchain after XeSS relinquishes the window.</summary>
+    /// <summary>Recreates the Vulkan surface/swapchain after a presenter or feature-lifetime transition.</summary>
     private void RestoreVulkanSwapchain()
     {
         if (_swapchain != null || _presentationSurfaceSource == null) return;

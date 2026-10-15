@@ -39,6 +39,8 @@ PFun_slDLSSGGetState* fgState{};
 // True between a successful slInit and the matching slShutdown. The module can
 // stay loaded after shutdown, so it does not mean the SDK is initialized.
 bool initialized{};
+bool shutdownAttempted{};
+int shutdownResult{};
 bool fgConfigured{};
 bool fgResourcesMayExist{};
 bool fgEnabled{};
@@ -70,7 +72,7 @@ bool loadFeature(sl::Feature feature, const char* name, void*& target) {
     return featureFunction && featureFunction(feature, name, target) == sl::Result::eOk && target;
 }
 
-/// @brief Opens the interposer without write/delete sharing and checks its offline Authenticode status and pinned SHA-256 through that handle.
+/// @brief Opens the interposer without write/delete sharing and verifies the build-pinned SHA-256 through that handle.
 /// @details The returned handle keeps the verified file from being written, renamed or deleted; the caller holds it across LoadLibraryExW and closes it afterwards. WinTrust and cryptographic handles are released before returning.
 /// @return The open verified file handle, or INVALID_HANDLE_VALUE when opening or verification fails.
 HANDLE openVerifiedRelease(const wchar_t* path) {
@@ -94,19 +96,26 @@ HANDLE openVerifiedRelease(const wchar_t* path) {
     trust.dwStateAction = WTD_STATEACTION_CLOSE;
     WinVerifyTrust(nullptr, &action, &trust);
     LARGE_INTEGER start{};
-    if (signature != ERROR_SUCCESS || !SetFilePointerEx(input, start, nullptr, FILE_BEGIN)) {
+    if (
+#ifndef VULKANSTORY_CORRECTED_STREAMLINE_SHA256
+        signature != ERROR_SUCCESS ||
+#endif
+        !SetFilePointerEx(input, start, nullptr, FILE_BEGIN)) {
         CloseHandle(input);
         return INVALID_HANDLE_VALUE;
     }
 
-    // The 2.14.1 release shipped with this repository is pinned byte-for-byte.
-    // This is stricter than accepting any Authenticode publisher and avoids
-    // loading a different signed interposer into the process.
+    // Source builds embed their own interposer hash. The original release path
+    // additionally requires Authenticode. Neither accepts a different binary.
     constexpr uint8_t expected[32] = {
+#ifdef VULKANSTORY_CORRECTED_STREAMLINE_SHA256
+        VULKANSTORY_CORRECTED_STREAMLINE_SHA256
+#else
         0x8c, 0x87, 0xc9, 0x49, 0x94, 0x61, 0xda, 0x56,
         0x1e, 0xdd, 0x52, 0x9a, 0xa9, 0xbf, 0x78, 0x31,
         0xd6, 0x7d, 0x7b, 0x94, 0xeb, 0xb1, 0xc1, 0xa5,
         0xed, 0x54, 0xef, 0x49, 0x34, 0xe1, 0xea, 0x4c,
+#endif
     };
     HCRYPTPROV provider{};
     HCRYPTHASH hash{};
@@ -200,6 +209,7 @@ extern "C" {
 /// @return Zero on successful/already-initialized state, a negative local failure or native Streamline result.
 __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, const char* projectId,
     uint32_t loadReflex, uint32_t loadDlssG) {
+    if (shutdownAttempted && shutdownResult != 0) return shutdownResult;
     if (initialized) return 0;
     if (!directory || !projectId) return -1;
     // A module kept loaded after shutdown may still back Vulkan dispatch tables;
@@ -263,14 +273,23 @@ __declspec(dllexport) int VulkanStorySlInitialize(const wchar_t* directory, cons
         return static_cast<int>(result);
     }
     initialized = true;
+    shutdownAttempted = false;
+    shutdownResult = 0;
     return 0;
 }
 
 /// @brief Shuts down Streamline and clears SDK function pointers/state while retaining the interposer module.
 /// @details Call after provider work is retired. Vulkan dispatch pointers can still reference interposer code until Vulkan devices/instances are destroyed. A later VulkanStorySlInitialize re-runs slInit.
-__declspec(dllexport) void VulkanStorySlShutdown() {
-    if (!module) return;
-    if (initialized && shutdown) shutdown();
+__declspec(dllexport) int VulkanStorySlShutdownChecked() {
+    if (!module) return 0;
+    if (shutdownAttempted) return shutdownResult;
+    // An SDK failure may follow partial plugin destruction. Spend the attempt
+    // before calling it; neither feature entry points nor retries remain valid.
+    shutdownAttempted = true;
+    if (initialized && shutdown) {
+        shutdownResult = static_cast<int>(sl::Result::eErrorExceptionHandler);
+        shutdownResult = static_cast<int>(shutdown());
+    }
     initialized = false;
     // Only the Vulkan dispatch entry points remain valid after slShutdown.
     clearSdkFunctions();
@@ -279,6 +298,12 @@ __declspec(dllexport) void VulkanStorySlShutdown() {
     fgEnabled = false;
     currentSwapchain = VK_NULL_HANDLE;
     lastPresentError.store(0, std::memory_order_relaxed);
+    return shutdownResult;
+}
+
+/// @brief Retains the original void ABI for hosts predating checked shutdown.
+__declspec(dllexport) void VulkanStorySlShutdown() {
+    VulkanStorySlShutdownChecked();
 }
 
 // Vulkan dispatch pointers can still point into the interposer after slShutdown.
@@ -286,6 +311,7 @@ __declspec(dllexport) void VulkanStorySlShutdown() {
 /// @brief Unloads interposer code and clears Vulkan dispatch pointers.
 /// @details Call only after shutdown and after every Vulkan object/API table referencing this module is destroyed.
 __declspec(dllexport) void VulkanStorySlUnload() {
+    if (shutdownAttempted && shutdownResult != 0) return;
     if (module) FreeLibrary(module);
     module = nullptr;
     initialized = false;

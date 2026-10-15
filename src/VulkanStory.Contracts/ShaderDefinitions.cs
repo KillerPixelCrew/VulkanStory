@@ -24,6 +24,8 @@ public sealed class ShaderStageDefinition
 /// <param name="FragmentShader">Fragment stage, when present.</param>
 /// <param name="GeometryShader">Geometry stage, when present.</param>
 /// <param name="Includes">Include names associated with this program, when known.</param>
+/// <param name="DeclaredAttributes">Attribute-name locations bound by the caller before linking, when supplied.</param>
 public sealed record ShaderProgramDefinition(
     string PassName, ShaderStageDefinition? VertexShader, ShaderStageDefinition? FragmentShader,
-    ShaderStageDefinition? GeometryShader, IReadOnlySet<string>? Includes);
+    ShaderStageDefinition? GeometryShader, IReadOnlySet<string>? Includes,
+    IReadOnlyDictionary<string, int>? DeclaredAttributes = null);

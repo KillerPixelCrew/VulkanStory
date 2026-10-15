@@ -8,19 +8,19 @@ namespace VulkanStory.Render.Vulkan;
 /// <summary>Frame-generation tagging, presentation selection and resource-retirement portion of the renderer.</summary>
 public sealed unsafe partial class VulkanDevice
 {
-    /// <summary>Whether device support, bound Streamline functions and an active swapchain are all present.</summary>
+    /// <summary>Whether device support and bound Streamline functions are present.</summary>
     internal bool StreamlineFrameGenerationAvailable => _streamlineReflexReady &&
         _streamlineFrameGenerationReady && _streamlineFrameGenerationSupported &&
-        _context.Streamline != null && _swapchain != null;
+        _context.Streamline != null;
 
     /// <summary>Whether the available Streamline path can use the current nonparked, unrecreated swapchain.</summary>
-    internal bool StreamlineFrameGenerationReady => StreamlineFrameGenerationAvailable &&
+    internal bool StreamlineFrameGenerationReady => StreamlineFrameGenerationAvailable && _swapchain != null &&
         !_swapchain!.NeedsRecreation && !_swapchain.Parked && !_swapchain.Fsr3ProxyActive;
 
     /// <summary>Whether the active swapchain is owned by the FidelityFX presentation proxy.</summary>
     internal bool Fsr3ProxyReady => _swapchain is { Fsr3ProxyActive: true };
-    /// <summary>Whether FidelityFX must use the direct path because distinct proxy queues are unavailable.</summary>
-    internal bool Fsr3DirectPresentation => !_context.Fsr3SwapchainQueuesAvailable;
+    /// <summary>FidelityFX records interpolation into the renderer's frame; native presentation owns every real and generated image.</summary>
+    internal bool Fsr3DirectPresentation => true;
     /// <summary>Borrowed active FidelityFX swapchain context, or zero.</summary>
     internal nint Fsr3ProxyContext => _swapchain?.Fsr3ProxyContext ?? 0;
     /// <summary>Output format selected for direct or proxy FidelityFX frame generation.</summary>
@@ -224,11 +224,15 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>
-    /// The provider a Vulkan swapchain presents for. The Vulkan fallback never
-    /// generates XeSS frames: only the Intel DXGI proxy owns that provider's
-    /// present mode and frame cadence.
+    /// The provider owning swapchain presentation. FSR3 interpolation uses the
+    /// renderer's native present loop; XeSS owns its separate DXGI presenter.
     /// </summary>
-    private string SwapchainFrameGenerationProvider => XessSelected ? "off" : _frameGenerationProvider;
+    private string SwapchainFrameGenerationProvider => _frameGenerationProvider switch
+    {
+        "xess" => "off",
+        "fsr3" => "native", // Retain generated-frame FIFO policy with native dispatch ownership.
+        _ => _frameGenerationProvider,
+    };
 
     /// <summary>Reserves the real-present ID and, when requested, an earlier generated-present ID.</summary>
     internal void ReserveFramePresentIds(bool mayGenerate)

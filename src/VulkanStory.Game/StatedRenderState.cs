@@ -44,6 +44,7 @@ internal sealed class StatedRenderState
     }
 
     public bool BlendEnabled { get; private set; }
+    internal int ActiveTextureUnit { get; set; }
 
     /// <summary>The channels <c>glColorMask</c> left writable, applied to every attachment.</summary>
     public ColorComponentFlags ColorMask { get; private set; } =
@@ -182,6 +183,20 @@ internal sealed class StatedRenderState
     public uint DrawBuffers(int framebufferId) =>
         _drawBuffers.TryGetValue(framebufferId, out uint mask) ? mask : 1u;
 
+    internal AttachmentBlend RawBlend(int slot) => _blend[slot];
+    internal void SetSlotBlendSeparate(int slot, int equationRgb, int equationAlpha, int srcRgb, int dstRgb, int srcAlpha, int dstAlpha)
+    {
+        if ((uint)slot >= MaxColorAttachments) return;
+        SetSlotBlend(slot, equationRgb, srcRgb, dstRgb, srcAlpha, dstAlpha);
+        _blend[slot].AlphaOp = equationAlpha switch
+        {
+            32774 => BlendOp.Add, 32778 => BlendOp.Subtract, 32779 => BlendOp.ReverseSubtract,
+            32775 => BlendOp.Min, 32776 => BlendOp.Max,
+            _ => throw new ArgumentOutOfRangeException(nameof(equationAlpha))
+        };
+        _blendSnapshots.Clear();
+    }
+
     public void ForgetFramebuffer(int framebufferId)
     {
         _drawBuffers.Remove(framebufferId);
@@ -240,7 +255,7 @@ internal static class StatedDraw
     /// </summary>
     internal static bool Record(VulkanDevice device, StatedRenderState stated, int programId, int framebufferId,
         int meshId, int instances, int[]? starts, int[]? sizes, int groupCount, out string? refusal,
-        PassDeclaration? declared = null, bool requirePipeline = false)
+        PassDeclaration? declared = null, bool requirePipeline = false, FrontFace? frontFace = null)
     {
         refusal = null;
         RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue);
@@ -293,6 +308,7 @@ internal static class StatedDraw
         var description = new NativePipelineDescription
         {
             ProgramId = programId,
+            FrontFace = frontFace ?? RenderLimits.FrontFace,
             Blend = blend,
             DepthTest = stated.DepthTest,
             DepthWrite = stated.DepthWrite && !samplesBoundDepth,

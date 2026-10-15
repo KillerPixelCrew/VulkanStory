@@ -287,7 +287,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <param name="signalSemaphore">A binary semaphore to signal (the present semaphore), or none.</param>
     /// <param name="frameWaitValue">A frame timeline value to wait on using the renderer's presentation frame-wait stage mask, or zero to omit the wait.</param>
     /// <param name="externalSemaphore">Borrowed external timeline semaphore used for the optional GPU wait and signal.</param>
-    /// <param name="externalWaitValue">External completion value to wait for at the transfer stage before shared-image copies, or zero to omit the wait.</param>
+    /// <param name="externalWaitValue">External completion value to wait for before shared-image ownership acquisition, or zero to omit the wait.</param>
     /// <param name="externalSignalValue">External timeline value to signal after this submission completes, or zero to omit the signal.</param>
     private void Submit(Semaphore waitSemaphore, PipelineStageFlags waitStage, Semaphore signalSemaphore,
         ulong frameWaitValue, Semaphore externalSemaphore = default,
@@ -330,7 +330,10 @@ internal sealed unsafe class FrameSlot : IDisposable
         {
             waits[waitCount] = externalSemaphore;
             waitValues[waitCount] = externalWaitValue;
-            waitStages[waitCount] = PipelineStageFlags.TransferBit;
+            // The shared-image acquire is a queue-family ownership operation.
+            // Without ownership-transfer-use-all-stages, it has no defined
+            // pipeline stage; TRANSFER alone does not order it after this wait.
+            waitStages[waitCount] = PipelineStageFlags.AllCommandsBit;
             waitCount++;
         }
 

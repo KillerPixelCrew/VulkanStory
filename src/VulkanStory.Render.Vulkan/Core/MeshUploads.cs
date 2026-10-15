@@ -9,6 +9,9 @@ internal sealed unsafe class MeshUploads(MeshManager meshes)
     private readonly MeshManager _meshes = meshes;
     private int[] _prunedCustomInts = [];
 
+    /// <summary>Creates an owned immutable snapshot from explicitly located raw vertex streams.</summary>
+    public int CreateRawMesh(RawMeshDefinition data) => _meshes.CreateRaw(data);
+
     /// <summary>Allocates retained mesh buffers and uploads each populated stream using its own counts and destination offsets.</summary>
     /// <param name="data">Neutral mesh data with vertex/index counts and optional custom streams.</param>
     /// <param name="staticDraw">Whether to request persistent/static backing for the mesh.</param>

@@ -55,6 +55,34 @@ public sealed unsafe partial class VulkanDevice
     }
     // -------------------------------------------------------------------- textures
 
+    /// <summary>Reserves an ID in the ordinary texture namespace without allocating an image.</summary>
+    public int ReserveTextureName() => _textures.ReserveName();
+
+    /// <summary>Returns the actual extent, mip count and requested internal format of a live ordinary 2D texture.</summary>
+    public bool TryGetTexture2DDescription(int id, out int width, out int height, out int levels, out int glInternalFormat)
+    {
+        width = height = levels = glInternalFormat = 0;
+        VulkanTexture? texture = _textures.Get(id);
+        if (texture == null || texture.Cube || texture.Volume || texture.Layers != 1) return false;
+        width = checked((int)texture.Width);
+        height = checked((int)texture.Height);
+        levels = checked((int)texture.MipLevels);
+        glInternalFormat = texture.GlInternalFormat;
+        return true;
+    }
+
+    /// <summary>Creates the exact mip storage of an existing reserved texture ID, without changing that ID.</summary>
+    public void DefineTexture2DRaw(int existingReservedId, int width, int height, int internalFormat, int levels)
+    {
+        if (width <= 0 || height <= 0 || levels <= 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (internalFormat is not (0x8058 or 0x881A or 0x822D or 0x822E or 0x8C3A or 0x8814 or
+            0x805B or 0x8051 or 0x8CAC or 0x81A5))
+            throw new NotSupportedException($"Unsupported immutable texture format 0x{internalFormat:X}.");
+        _textures.Define2D(existingReservedId, (uint)width, (uint)height,
+            GlEnums.TextureFormatFromGl(internalFormat), (uint)levels);
+        RecordGlInternalFormat(existingReservedId, internalFormat);
+    }
+
     /// <summary>Creates a renderer-owned 2D texture from the neutral client formats and optional initial pixels.</summary>
     public int CreateTexture2D(
         int width, int height, EnumTextureInternalFormat internalFormat,
@@ -417,6 +445,9 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Creates and uploads a mesh through the neutral mesh-data contract.</summary>
     public int CreateMesh(VulkanStory.Contracts.MeshUploadData data, bool staticDraw) =>
         _meshUploads.CreateMesh(data, staticDraw);
+    /// <summary>Copies raw vertex/index bytes synchronously into a mesh with explicitly located attributes.</summary>
+    public int CreateRawMesh(VulkanStory.Contracts.RawMeshDefinition data) =>
+        _meshUploads.CreateRawMesh(data);
     /// <summary>Updates each supplied mesh stream using its declared destination byte offset.</summary>
     public void UpdateMesh(int meshId, VulkanStory.Contracts.MeshUploadData data) =>
         _meshUploads.UpdateMesh(meshId, data);

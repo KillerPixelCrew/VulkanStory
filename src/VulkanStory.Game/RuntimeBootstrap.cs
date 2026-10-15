@@ -186,6 +186,13 @@ internal sealed partial class ProcessRuntime(Action<string, string> trace)
     internal void Shutdown()
     {
         RequireOwner();
+        string? crashCapture = Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_CRASH_CAPTURE_DIRECTORY");
+        if (!string.IsNullOrWhiteSpace(crashCapture) && Path.IsPathFullyQualified(crashCapture))
+        {
+            Directory.CreateDirectory(crashCapture);
+            File.WriteAllText(Path.Combine(crashCapture, "capture-first-chance-av.enabled"), "runtime shutdown");
+        }
+        Notify("runtime.stopping", "Draining the committed session before Vulkan device destruction.");
         // A drain failure retains the live window/patch owners for diagnosis.
         session?.Dispose();
         session = null;

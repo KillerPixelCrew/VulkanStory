@@ -6,6 +6,8 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Retained provider calls implemented by the real renderer owner.</summary>
 internal interface IUpscalerDevice
 {
+    /// <summary>Whether a device provider may already have initialized NGX on this same logical device.</summary>
+    bool HasExternalNgxInitializer => false;
     /// <summary>Creates a renderer-owned provider texture and returns its renderer ID.</summary>
     /// <param name="width">Texture width in pixels.</param>
     /// <param name="height">Texture height in pixels.</param>

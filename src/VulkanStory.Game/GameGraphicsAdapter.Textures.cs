@@ -9,6 +9,8 @@ namespace VulkanStory.Game;
 // Retained bitmap/atlas bodies from VulkanClientPlatform.Textures.cs.
 internal sealed partial class GameGraphicsAdapter
 {
+    internal int CopyTextureRegion(int textureId, int x, int y, int width, int height) =>
+        RequireDevice().CopyTextureRegion(textureId, x, y, width, height);
     // Retained VulkanClientPlatform.Leaf.cs RGBA pointer upload; baseline
     // 386e0d05386d0b228b439d09aeca851428f7bbf3. Used by the original SVG rasterizer.
     /// <summary>Copies tightly packed RGBA pixels from the supplied pointer into a newly owned 2D texture.</summary>

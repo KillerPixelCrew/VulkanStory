@@ -49,6 +49,7 @@ internal sealed partial class GameGraphicsAdapter
         var renderer = RequireDevice();
         programTextures[(program.ProgramId, name)] = texture;
         renderer.SetSamplerUnit(program.ProgramId, name, unit);
+        Stated.ActiveTextureUnit = unit;
         Stated.BindTexture(unit, texture);
         if (!cube)
             Stated.BindSampler(unit, program.customSamplers.TryGetValue(name, out int sampler) ? sampler : 0);

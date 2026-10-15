@@ -37,9 +37,9 @@ internal sealed unsafe class BlitPresentPath
     {
         Image destination = target.Image;
 
-        // Every present leaves the swapchain image in PRESENT_SRC, and nothing
-        // else writes it, so UNDEFINED discards nothing that matters. The
-        // destination and the source move in one barrier command.
+        // The acquired image is overwritten entirely. Native swapchain images
+        // and FidelityFX replacement buffers can both discard previous contents.
+        // The destination and the source move in one barrier command.
         // The acquire touched it last, at the stage this submission waits on it.
         BarrierBatcher barriers = _barriers ??= _textures.CreateBatcher();
         _swapchainImage.Reset((PipelineStageFlags2)(ulong)AcquireWaitStage);
@@ -69,11 +69,13 @@ internal sealed unsafe class BlitPresentPath
                 1, &blit, Filter.Linear);
         }
 
-        // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC. With synchronization2,
-        // the release has no destination stage or access; the present semaphore
-        // orders the presentation engine after this transition.
+        // Proxy backbuffers are intermediate images. Their SDK consumer defines
+        // the final layout: DLSS-G copies from TRANSFER_SRC, FidelityFX samples
+        // SHADER_READ_ONLY. Only actual WSI images enter PRESENT_SRC.
+        ResourceUsage consumedAs = target.Slot.IsStreamlineReplacement ? ResourceUsage.TransferSrc :
+            target.Slot.IsFsr3Replacement ? ResourceUsage.SampleFragment : ResourceUsage.PresentSrc;
         barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
-            ResourceUsage.PresentSrc, discard: false);
+            consumedAs, discard: false);
         barriers.Flush(commandBuffer);
     }
 }

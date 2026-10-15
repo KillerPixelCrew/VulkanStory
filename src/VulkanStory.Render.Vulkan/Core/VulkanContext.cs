@@ -18,6 +18,7 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Turns on the validation layers and the debug messenger.</summary>
     public bool EnableValidation;
+    public bool PresentationLayer;
 
     /// <summary>Comma list of extra layer checks: sync, best, mobile, gpu, gpu-only (<see cref="VulkanContext.ValidationLayerSettings" />).</summary>
     public string ValidationFeatures = "";
@@ -413,7 +414,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         byte* applicationName = (byte*)SilkMarshal.StringToPtr("VulkanStory");
         byte* engineName = (byte*)SilkMarshal.StringToPtr("VulkanStory.Render.Vulkan");
         nint extensionsPtr = SilkMarshal.StringArrayToPtr(extensions);
-        nint layersPtr = validation ? SilkMarshal.StringArrayToPtr(new[] { ValidationLayer }) : 0;
+        var layers = new List<string>();
+        if (options.PresentationLayer) layers.Add(OverlayPresentLayer.Name);
+        if (validation) layers.Add(ValidationLayer);
+        nint layersPtr = layers.Count != 0 ? SilkMarshal.StringArrayToPtr(layers) : 0;
         // Every string a layer setting points at, freed with the rest below.
         var settingStrings = new List<nint>();
 
@@ -487,8 +491,8 @@ internal sealed unsafe class VulkanContext : IDisposable
                 PApplicationInfo = &applicationInfo,
                 EnabledExtensionCount = (uint)extensions.Count,
                 PpEnabledExtensionNames = (byte**)extensionsPtr,
-                EnabledLayerCount = validation ? 1u : 0u,
-                PpEnabledLayerNames = validation ? (byte**)layersPtr : null,
+                EnabledLayerCount = (uint)layers.Count,
+                PpEnabledLayerNames = layersPtr != 0 ? (byte**)layersPtr : null,
             };
 
             Instance instance;
@@ -1136,6 +1140,9 @@ internal sealed unsafe class VulkanContext : IDisposable
             Synchronization2 = true,
             ShaderDemoteToHelperInvocation = true,
             PipelineCreationCacheControl = pipelineCacheControl,
+            // Streamline associates swapchain objects through core private-data
+            // slots. Function availability alone does not enable this feature.
+            PrivateData = vulkan13Query.PrivateData,
         };
         var vulkan12 = new PhysicalDeviceVulkan12Features
         {
@@ -1269,6 +1276,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             }
             Device = device;
             if (Streamline != null || options.OpenXr != null) Api.CurrentDevice = device;
+            TraceLifetime("device.created", Instance, Device);
         }
         finally
         {
@@ -1501,17 +1509,31 @@ internal sealed unsafe class VulkanContext : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        TraceLifetime("context.dispose.begin", Instance, Device);
+
+        // Preserve the SDK-required shutdown-before-destruction order without a
+        // first-time Silk proc lookup re-entering the interposer after slShutdown.
+        // Resolve both scopes before Device is cleared or SDK resolver state ends.
+        Streamline?.PrepareVulkanTeardown(Instance, Device,
+            _debugUtils != null && _debugMessenger.Handle != 0);
 
         if (Device.Handle != 0)
         {
             VulkanResult.Check(WaitDeviceIdle(), "draining the Vulkan device before context disposal");
+            TraceLifetime("device.idle", Instance, Device);
             _disposed = true;
 
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
+            TraceLifetime("allocator.dispose.begin", Instance, Device);
             Allocator?.Dispose();
+            TraceLifetime("allocator.dispose.end", Instance, Device);
+            TraceLifetime("streamline.shutdown.begin", Instance, Device);
             Streamline?.Shutdown();
+            TraceLifetime("streamline.shutdown.end", Instance, Device);
+            TraceLifetime("device.destroy.begin", Instance, Device);
             Api.DestroyDevice(Device, null);
+            TraceLifetime("device.destroy.end", Instance, Device);
             // Further instance/global symbol lookups must not consult a device
             // that has already been destroyed, including lazy Silk table loads.
             Device = default;
@@ -1539,6 +1561,43 @@ internal sealed unsafe class VulkanContext : IDisposable
         Api?.Dispose();
         Streamline?.Dispose();
         Streamline = null;
+    }
+
+    /// <summary>Records native owner identities only for an explicitly requested diagnostic capture.</summary>
+    internal static void TraceLifetime(string phase, Instance instance, Device device, nint command = 0,
+        int? result = null)
+    {
+        string? path = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.Path.IsPathFullyQualified(path)) return;
+        try
+        {
+            string? module = null;
+            string? moduleOffset = null;
+            if (command != 0)
+            {
+                using var process = System.Diagnostics.Process.GetCurrentProcess();
+                foreach (System.Diagnostics.ProcessModule loaded in process.Modules)
+                {
+                    nuint start = (nuint)loaded.BaseAddress;
+                    nuint address = (nuint)command;
+                    if (address < start || address - start >= (nuint)loaded.ModuleMemorySize) continue;
+                    module = loaded.FileName;
+                    moduleOffset = "0x" + (address - start).ToString("x");
+                    break;
+                }
+            }
+            var record = new { @event = "vulkan-lifetime", phase, utc = DateTime.UtcNow,
+                processId = Environment.ProcessId, threadId = Environment.CurrentManagedThreadId,
+                instance = "0x" + ((nuint)instance.Handle).ToString("x"),
+                device = "0x" + ((nuint)device.Handle).ToString("x"),
+                command = "0x" + ((nuint)command).ToString("x"), module, moduleOffset, result };
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            System.IO.File.AppendAllText(path, System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
+        }
+        catch (Exception)
+        {
+            // A diagnostic destination must not change native resource ownership or cleanup.
+        }
     }
 
     /// <summary>Waits for the logical device through its selected native/proxy dispatch.</summary>

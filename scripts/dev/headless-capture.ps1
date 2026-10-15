@@ -28,7 +28,7 @@ Frame boundary at which the child runs the supplied commands.
 .PARAMETER FixedDt
 Fixed frame timestep in seconds forwarded to the child, constrained to zero through one.
 .PARAMETER TimeoutSeconds
-Child timeout in seconds; the launcher checks at 30-second intervals and kills its own child after the additional grace.
+Child timeout in seconds; the launcher checks at 30-second intervals and kills its own child after the additional grace. NativeCrashCapture allows at most ten further seconds for a timeout snapshot.
 .PARAMETER Upscaler
 Initial isolated upscaler token: off, dlss, fsr3, fsr4, or xess.
 .PARAMETER FrameGeneration
@@ -41,6 +41,12 @@ Currently rejected because the deferred child-owned controller input profile is 
 Currently rejected because the deferred child-owned touch input profile is required.
 .PARAMETER CompanionMode
 Copies the input companion into isolated Mods when present; absent omits it.
+.PARAMETER AdditionalModDirectory
+Copies additional mod entries into the isolated run, rejecting names already supplied by the source data.
+.PARAMETER NativeCrashCapture
+Attaches the native crash monitor only to this launcher's client child. First-chance AV capture is armed by the runtime's shutdown marker under native-crash; normal terminal capture remains active throughout and does not swallow exceptions. At watchdog timeout, requests one thread/stack snapshot and waits at most ten seconds before terminating this child.
+.PARAMETER NativeCrashMonitorPath
+Optional explicit crash-monitor executable. Requires NativeCrashCapture; otherwise uses the staged package's native/win-x64/VulkanStory.CrashMonitor.exe.
 .PARAMETER PreflightOnly
 Returns compact JSON and exit 0/1 for preparation validation without creating a run directory or starting the client.
 .PARAMETER ParityDump
@@ -85,6 +91,9 @@ param(
     [switch]$ControllerEnabled,
     [switch]$TouchEnabled,
     [ValidateSet('present','absent')][string]$CompanionMode = 'present',
+    [string]$AdditionalModDirectory,
+    [switch]$NativeCrashCapture,
+    [string]$NativeCrashMonitorPath,
     [switch]$PreflightOnly,
     [switch]$ParityDump,
     [int]$ParityFrame = -1,
@@ -507,6 +516,7 @@ $scenarioInputHash = $null
 $scenarioContext = 'world'
 $menuOnly = [bool]$MainMenuOptions
 $runRoot = $null
+$nativeCrashMonitor = $null
 try {
     $runRoot = [IO.Path]::GetFullPath($OutputDirectory)
     if (Test-Path -LiteralPath $runRoot) { Throw-ScenarioError 'OutputDirectory' 'Use a fresh output directory; captures never merge or delete runs.' }
@@ -540,6 +550,16 @@ try {
     }
     if ($ControllerEnabled) { Throw-ScenarioError 'InputProfileRequired' '-ControllerEnabled requires the deferred child-owned input profile.' }
     if ($TouchEnabled) { Throw-ScenarioError 'InputProfileRequired' '-TouchEnabled requires the deferred child-owned input profile.' }
+    if ($NativeCrashMonitorPath -and -not $NativeCrashCapture) {
+        Throw-ScenarioError 'NativeCrashCapture' 'NativeCrashMonitorPath requires NativeCrashCapture.'
+    }
+    if ($NativeCrashCapture) {
+        $nativeCrashMonitor = [IO.Path]::GetFullPath($(if ($NativeCrashMonitorPath) { $NativeCrashMonitorPath }
+            else { Join-Path $PackageDirectory 'VulkanStory/native/win-x64/VulkanStory.CrashMonitor.exe' }))
+        if (-not (Test-Path -LiteralPath $nativeCrashMonitor -PathType Leaf)) {
+            Throw-ScenarioError 'NativeCrashCapture' "Crash-monitor executable is missing: $nativeCrashMonitor"
+        }
+    }
     if ($PreflightOnly) {
         [ordered]@{ pass=$true; errorCategory=$null; error=$null; scenarioId=$scenarioId; inputSha256=$scenarioInputHash;
             childStarted=$false; childPid=$null; runDirectoryCreated=$false } | ConvertTo-Json -Compress
@@ -560,6 +580,7 @@ catch {
 $gameRoot = (Resolve-Path -LiteralPath $GameDirectory).Path
 $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sourceRoot = (Resolve-Path -LiteralPath $SourceDataDirectory).Path
+$additionalMods = if ($AdditionalModDirectory) { (Resolve-Path -LiteralPath $AdditionalModDirectory).Path } else { $null }
 if ([IO.Path]::GetFileName($World) -ne $World -or $World.EndsWith('.vcdbs')) { throw 'World must be a save basename, without extension.' }
 $database = Join-Path $sourceRoot "Saves/$World.vcdbs"
 if (-not $menuOnly -and -not (Test-Path -LiteralPath $database)) { throw 'Existing user world is missing; refusing to create a replacement world.' }
@@ -659,6 +680,15 @@ if (Test-Path -LiteralPath $sourceConfig) {
         Copy-Item -LiteralPath $config.FullName -Destination (Join-Path $dataRoot 'ModConfig') -Recurse
     }
 }
+if ($additionalMods) {
+    foreach ($mod in Get-ChildItem -LiteralPath $additionalMods) {
+        $destination = Join-Path (Join-Path $dataRoot 'Mods') $mod.Name
+        if ($mod.Name -in @('vulkanstory', 'vulkanstoryinput') -or (Test-Path -LiteralPath $destination)) {
+            throw "Additional mod entry already exists in the isolated run: $($mod.Name)"
+        }
+        Copy-Item -LiteralPath $mod.FullName -Destination $destination -Recurse
+    }
+}
 Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstory') -Destination (Join-Path $dataRoot 'Mods') -Recurse
 if ($CompanionMode -eq 'present') {
     Copy-Item -LiteralPath (Join-Path $packageRoot 'Mods/vulkanstoryinput') -Destination (Join-Path $dataRoot 'Mods') -Recurse
@@ -712,23 +742,119 @@ if ($ParityDump) {
     $info.Environment['VULKANSTORY_PARITY_FRAME'] = if ($ParityFrame -ge 0) { "$ParityFrame" } else { "$First" }
 }
 if ($AoOutputs) { $info.Environment['VULKANSTORY_AO_OUTPUTS'] = '1' }
-$process = [Diagnostics.Process]::Start($info)
-try { $process.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal } catch { Write-Warning 'Could not lower harness process priority.' }
-$stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
-Write-Host "Headless capture PID $($process.Id), isolated data: $dataRoot"
-$deadline = [Diagnostics.Stopwatch]::StartNew()
-$timedOut = $false
-while (-not $process.WaitForExit(30000)) {
-    Write-Host "Headless PID $($process.Id) remains running."
-    if ($deadline.Elapsed.TotalSeconds -gt $TimeoutSeconds + 30) {
-        $process.Kill() # Only the child handle this run created, never a game-name search.
-        $timedOut = $true
-        $process.WaitForExit()
-        break
-    }
+$reportRoot = $null
+if ($NativeCrashCapture) {
+    $reportRoot = Join-Path $runRoot 'native-crash'
+    New-Item -ItemType Directory -Path $reportRoot | Out-Null
+    [IO.File]::WriteAllText((Join-Path $reportRoot 'bootstrap-path.txt'), (Join-Path $runRoot 'bootstrap.jsonl'))
+    [IO.File]::WriteAllText((Join-Path $reportRoot 'game-data-path.txt'), $dataRoot)
+    $info.Environment['VULKANSTORY_NATIVE_CRASH_CAPTURE_DIRECTORY'] = $reportRoot
 }
-[IO.File]::WriteAllText((Join-Path $runRoot 'stdout.log'), $stdout.GetAwaiter().GetResult())
-[IO.File]::WriteAllText((Join-Path $runRoot 'stderr.log'), $stderr.GetAwaiter().GetResult())
+$process = $null
+$monitor = $null
+$monitorReady = $null
+$stdout = $null
+$stderr = $null
+$processExitCode = $null
+$timedOut = $false
+try {
+    $process = [Diagnostics.Process]::Start($info)
+    try { $process.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal } catch { Write-Warning 'Could not lower harness process priority.' }
+    $stdout = $process.StandardOutput.ReadToEndAsync(); $stderr = $process.StandardError.ReadToEndAsync()
+    Write-Host "Headless capture PID $($process.Id), isolated data: $dataRoot"
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    if ($NativeCrashCapture) {
+        $readyName = 'Local\VulkanStory.HarnessCrashReady.' + $process.Id + '.' + [Guid]::NewGuid().ToString('N')
+        $monitorReady = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $readyName)
+        $monitorInfo = [Diagnostics.ProcessStartInfo]::new($nativeCrashMonitor)
+        $monitorInfo.UseShellExecute = $false
+        $monitorInfo.CreateNoWindow = $true
+        $monitorInfo.WorkingDirectory = Split-Path -Parent $nativeCrashMonitor
+        foreach ($argument in @($process.Id.ToString(), $reportRoot, $readyName, '--capture-first-chance-av')) {
+            $monitorInfo.ArgumentList.Add($argument)
+        }
+        $monitor = [Diagnostics.Process]::Start($monitorInfo)
+        if (-not $monitorReady.WaitOne(10000)) {
+            throw "Native crash monitor did not become ready within 10 seconds for owned child PID $($process.Id); inspect $reportRoot/monitor.txt."
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $reportRoot 'monitor-ready.txt') -PathType Leaf)) {
+            throw "Native crash monitor failed to attach to owned child PID $($process.Id); inspect $reportRoot/monitor.txt."
+        }
+        Write-Host "Native crash monitor PID $($monitor.Id) attached to owned child PID $($process.Id)."
+    }
+    while (-not $process.WaitForExit(30000)) {
+        Write-Host "Headless PID $($process.Id) remains running."
+        if ($deadline.Elapsed.TotalSeconds -gt $TimeoutSeconds + 30) {
+            $timedOut = $true
+            if ($NativeCrashCapture -and $monitor -and -not $process.HasExited -and -not $monitor.HasExited) {
+                try {
+                    $requestPath = Join-Path $reportRoot 'capture-timeout.request'
+                    $completedPath = Join-Path $reportRoot 'capture-timeout.completed'
+                    [IO.File]::WriteAllText($requestPath, "PID=$($process.Id)`nMonitorPID=$($monitor.Id)`n")
+                    Write-Host "Requested timeout thread snapshot for owned child PID $($process.Id)."
+                    $captureWait = [Diagnostics.Stopwatch]::StartNew()
+                    while ($captureWait.ElapsedMilliseconds -lt 10000 -and
+                        -not $process.HasExited -and -not $monitor.HasExited -and
+                        -not (Test-Path -LiteralPath $completedPath -PathType Leaf)) {
+                        $remainingWait = 10000 - [int]$captureWait.ElapsedMilliseconds
+                        if ($remainingWait -le 0) { break }
+                        [void]$process.WaitForExit([Math]::Min(100, $remainingWait))
+                    }
+                    if (Test-Path -LiteralPath $completedPath -PathType Leaf) {
+                        Write-Host "Timeout snapshot receipt: $completedPath"
+                    } else {
+                        Write-Warning "Timeout snapshot did not complete within the owned-process wait; inspect $reportRoot/monitor.txt."
+                    }
+                } catch { Write-Warning "Owned timeout snapshot request failed: $($_.Exception.Message)" }
+            }
+            if (-not $process.HasExited) {
+                $process.Kill() # Only the child handle this run created, never a game-name search.
+            }
+            if (-not $process.WaitForExit(10000)) {
+                throw 'Owned client did not stop within 10 seconds after timeout termination; cleaning up its debugger.'
+            }
+            break
+        }
+    }
+    $processExitCode = $process.ExitCode
+}
+finally {
+    # An attach/preparation exception also stops only the client this launcher created.
+    # The debugger disables kill-on-exit, so dispose it after the owned client has stopped.
+    $ownedClientStopped = $false
+    if ($process) {
+        try {
+            if (-not $process.HasExited) { $process.Kill(); $ownedClientStopped = $process.WaitForExit(10000) }
+            else { $ownedClientStopped = $true }
+        } catch { Write-Warning "Owned client cleanup failed: $($_.Exception.Message)" }
+    }
+    if ($monitor) {
+        try {
+            if (-not $monitor.WaitForExit(10000)) {
+                $monitor.Kill()
+                if (-not $monitor.WaitForExit(5000)) { Write-Warning 'Owned crash monitor did not stop within cleanup timeout.' }
+            }
+            if ($monitor.HasExited) {
+                [IO.File]::WriteAllText((Join-Path $reportRoot 'monitor-exit-code.txt'), $monitor.ExitCode.ToString())
+            }
+        } catch { Write-Warning "Owned crash monitor cleanup failed: $($_.Exception.Message)" }
+        finally { $monitor.Dispose() }
+    }
+    if ($monitorReady) { $monitorReady.Dispose() }
+    if ($process -and -not $ownedClientStopped) {
+        try {
+            # Detaching a stalled debugger allows the already terminated child to exit.
+            if (-not $process.HasExited) { $process.Kill(); $ownedClientStopped = $process.WaitForExit(10000) }
+            else { $ownedClientStopped = $true }
+            if (-not $ownedClientStopped) { Write-Warning 'Owned client did not stop within cleanup timeout.' }
+        } catch { Write-Warning "Owned client cleanup after debugger detach failed: $($_.Exception.Message)" }
+    }
+    try {
+        if ($stdout -and $ownedClientStopped) { [IO.File]::WriteAllText((Join-Path $runRoot 'stdout.log'), $stdout.GetAwaiter().GetResult()) }
+        if ($stderr -and $ownedClientStopped) { [IO.File]::WriteAllText((Join-Path $runRoot 'stderr.log'), $stderr.GetAwaiter().GetResult()) }
+    } catch { Write-Warning "Owned client output capture failed: $($_.Exception.Message)" }
+    if ($process) { $process.Dispose() }
+}
 $expectedFrameCount = $Count
 if (-not [string]::IsNullOrWhiteSpace($Frames)) {
     $frameSet = [System.Collections.Generic.HashSet[long]]::new()
@@ -744,7 +870,7 @@ if (-not [string]::IsNullOrWhiteSpace($Frames)) {
 $verifyArguments = @{
     RunDirectory = $runRoot
     ExpectedFrameCount = $expectedFrameCount
-    ProcessExitCode = $process.ExitCode
+    ProcessExitCode = $processExitCode
     TimedOut = $timedOut
     Visible = [bool]$Visible
     MainMenuOptions = $menuOnly

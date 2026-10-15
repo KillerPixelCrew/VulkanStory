@@ -22,6 +22,25 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal const int MaxShaderSourceBytes = 2 * 1024 * 1024;
 
+    private readonly Dictionary<int, HashSet<int>> _activeVertexInputLocations = new();
+
+    /// <summary>Compiles unmodified client GLSL using shaderc's OpenGL target and returns its real compiler log.</summary>
+    public bool ValidateGlShader(ShaderStageType stage, string source, out string log)
+    {
+        if (stage is not (ShaderStageType.VertexShader or ShaderStageType.FragmentShader or
+            ShaderStageType.GeometryShader or ShaderStageType.ComputeShader))
+        {
+            log = "Unsupported shader stage.";
+            return false;
+        }
+        if (source == null || source.IndexOf('\0') >= 0 || System.Text.Encoding.UTF8.GetByteCount(source) > MaxShaderSourceBytes)
+        {
+            log = "Shader source is null, contains a NUL byte, or exceeds the source byte limit.";
+            return false;
+        }
+        return _shaderCompiler.ValidateGlShader(source, stage.ToString(), (EnumShaderType)stage, out log);
+    }
+
     /// <summary>Stages source for linking without compiling an isolated stage that lacks program-wide interface context.</summary>
     public bool CompileShader(ShaderStageDefinition shader)
     {
@@ -72,7 +91,12 @@ public sealed unsafe partial class VulkanDevice
         TranslatedProgram? native = null;
         bool nativeFailed = false;
         string nativeDetail = "";
-        if (_nativeShaders != null && _modShaderScan != null && _modShaderScan(passName))
+        if (program.DeclaredAttributes is { Count: > 0 })
+        {
+            // API-bound vertex locations must participate in translation; a native variant
+            // has already fixed them and cannot honor a different caller's binding map.
+        }
+        else if (_nativeShaders != null && _modShaderScan != null && _modShaderScan(passName))
         {
             // A mod replaced this program's GLSL (or the scan cannot rule it out): the native SPIR-V would draw
             // vanilla over the mod, so the mod's source goes through the rewriter. Rewritten, not failed.
@@ -120,7 +144,7 @@ public sealed unsafe partial class VulkanDevice
             // The include files the registry assembled the program from decide which
             // of its uniforms read the shared frame block. A program built any other
             // way - a mod's, a test's - keeps every uniform to itself.
-            translated = ShaderTranslator.Translate(stages, _shaderCompiler, null,
+            translated = ShaderTranslator.Translate(stages, _shaderCompiler, program.DeclaredAttributes,
                 program.Includes);
             if (!translated.Success)
             {
@@ -147,6 +171,14 @@ public sealed unsafe partial class VulkanDevice
         }
         resources ??= new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
         _programs[programId] = resources;
+        var activeInputs = new HashSet<int>();
+        if (translated.Spirv.TryGetValue(EnumShaderType.VertexShader, out byte[]? vertexSpirv))
+        {
+            SpirvModuleReflection reflection = SpirvReflection.Reflect(vertexSpirv);
+            foreach (SpirvInterfaceVariable input in reflection.Inputs)
+                if (reflection.UsedVariables.Contains(input.VariableId)) activeInputs.Add(input.Location);
+        }
+        _activeVertexInputLocations[programId] = activeInputs;
         // The variant a native program was linked for (TryLink reports the key as its detail),
         // so a native pipeline request can state the variant it expects.
         if (resources.IsNative) _programVariants[programId] = nativeDetail;
@@ -300,6 +332,7 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
         _programNames.Remove(programId);
+        _activeVertexInputLocations.Remove(programId);
         // No background compile may still be reading its modules or layout.
         _pipelines.CancelProgram(program);
         if (_pipelines.RemoveProgramPipelines(programId) is { } pipelines) _frames.DeferDeletion(pipelines);
@@ -310,6 +343,17 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Returns the program's retained named-uniform location, or the missing-location sentinel.</summary>
     public int GetUniformLocation(int programId, string name) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
+
+    /// <summary>Returns an active attribute's location from this linked program's actual interface, or -1.</summary>
+    public int GetAttributeLocation(int programId, string name)
+    {
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program) ||
+            !_activeVertexInputLocations.TryGetValue(programId, out HashSet<int>? active)) return -1;
+        foreach (VertexInputSlot input in program.Interface.VertexInputs)
+            if (string.Equals(input.Name, name, StringComparison.Ordinal) && active.Contains(input.Location))
+                return input.Location;
+        return -1;
+    }
 
     /// <summary>Checks a linked animation/motion ABI; zero capacity denotes compatible runtime mat4 arrays.</summary>
     internal bool TryGetAnimatedMotionContract(int programId, int motionAttachment, out int maximumJointMatrices)

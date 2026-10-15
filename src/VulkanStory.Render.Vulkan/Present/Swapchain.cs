@@ -127,6 +127,10 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     private readonly AcquireSemaphoreFreeList _freeAcquire;
     private readonly List<Fence> _pendingPresents = new();
     private readonly Stack<Fence> _freePresentFences = new();
+    private readonly bool _devicePresentFencesEnabled;
+    private readonly string? _tracePath;
+    private ulong _submittedPresentFences;
+    private ulong _completedPresentFences;
     private bool _disposed;
     private bool _destroyPrepared;
     private Exception? _disposalFailure;
@@ -136,6 +140,11 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     {
         _context = context;
         _api = api;
+        _devicePresentFencesEnabled = context.Capabilities.PresentFencesEnabled;
+        PresentFencesEnabled = _devicePresentFencesEnabled && api.SupportsPresentFences;
+        string? tracePath = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
+        _tracePath = !string.IsNullOrWhiteSpace(tracePath) && System.IO.Path.IsPathFullyQualified(tracePath)
+            ? tracePath : null;
         Handle = handle;
         Extent = extent;
         Format = format;
@@ -164,9 +173,16 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         var handles = new ulong[_acquireSemaphores.Length];
         for (int i = 0; i < handles.Length; i++) handles[i] = _acquireSemaphores[i].Handle;
         _freeAcquire = new AcquireSemaphoreFreeList(handles);
+        TracePresentFences("swapchain-slot-created");
     }
 
     public SwapchainKHR Handle { get; }
+    /// <summary>FidelityFX replacement buffers are ordinary sampled images, not images owned by the presentation engine.</summary>
+    internal bool IsFsr3Replacement => _api is Fsr3SwapchainDispatch;
+    /// <summary>DLSS-G returns intermediate copy sources instead of native presentable images.</summary>
+    internal bool IsStreamlineReplacement => _api is StreamlineSwapchainDispatch { UsesVirtualBackbuffers: true };
+    /// <summary>Immutable presentation-fence support of this slot's device and dispatch owner.</summary>
+    public bool PresentFencesEnabled { get; }
     public Image[] Images { get; }
     /// <summary>Swapchain image extent in pixels.</summary>
     public Extent2D Extent { get; }
@@ -216,6 +232,7 @@ internal sealed unsafe class SwapchainSlot : IDisposable
             VulkanResult.Check(status, "vkGetFenceStatus for presentation");
             _pendingPresents.RemoveAt(i);
             _freePresentFences.Push(fence);
+            _completedPresentFences++;
         }
         return _pendingPresents.Count == 0;
     }
@@ -223,9 +240,9 @@ internal sealed unsafe class SwapchainSlot : IDisposable
     /// <summary>Prepares a presentation-completion fence for the next supported fenced present.</summary>
     public Fence PreparePresentFence()
     {
-        // Streamline owns presentation completion. Its proxy does not signal
-        // VK_EXT_swapchain_maintenance1 present fences for the application.
-        if (!_context.Capabilities.PresentFencesEnabled || _context.Streamline != null) return default;
+        // The dispatch that created this slot owns presentation completion.
+        // Native auxiliary chains still signal fences on a Streamline device.
+        if (!PresentFencesEnabled) return default;
         PresentsComplete();
         if (_freePresentFences.TryPop(out Fence fence))
             VulkanResult.Check(_context.Api.ResetFences(_context.Device, 1, &fence), "vkResetFences for presentation");
@@ -246,7 +263,12 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         if (result is Result.ErrorOutOfHostMemory or Result.ErrorOutOfDeviceMemory)
             _freePresentFences.Push(fence);
         else
+        {
             _pendingPresents.Add(fence);
+            _submittedPresentFences++;
+            if (_submittedPresentFences == 1)
+                TracePresentFences("swapchain-present-fence-submitted", fence, result);
+        }
     }
 
     private Semaphore[] CreateSemaphores(int count)
@@ -300,12 +322,15 @@ internal sealed unsafe class SwapchainSlot : IDisposable
             Fence fence = pending;
             Result result = _context.Api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue);
             if (result != Result.ErrorDeviceLost) VulkanResult.Check(result, "vkWaitForFences for presentation teardown");
+            if (result == Result.Success) _completedPresentFences++;
+            TracePresentFences("swapchain-present-fence-wait", fence, result);
             _context.Api.DestroyFence(_context.Device, fence, null);
         }
         foreach (Fence fence in _freePresentFences) _context.Api.DestroyFence(_context.Device, fence, null);
         _pendingPresents.Clear();
         _freePresentFences.Clear();
 
+        TracePresentFences("swapchain-present-fences-drained");
         if (Handle.Handle != 0) _api.Destroy(_context.Device, Handle);
         foreach (Semaphore semaphore in _acquireSemaphores)
         {
@@ -315,6 +340,31 @@ internal sealed unsafe class SwapchainSlot : IDisposable
         {
             if (semaphore.Handle != 0) _context.Api.DestroySemaphore(_context.Device, semaphore, null);
         }
+    }
+
+    private void TracePresentFences(string eventName, Fence fence = default, Result? result = null)
+    {
+        if (_tracePath == null) return;
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_tracePath)!);
+            string record = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                @event = eventName,
+                slot = Handle.Handle,
+                dispatch = _api.GetType().Name,
+                devicePresentFencesEnabled = _devicePresentFencesEnabled,
+                dispatchSupportsPresentFences = _api.SupportsPresentFences,
+                presentFencesEnabled = PresentFencesEnabled,
+                submittedPresentFences = _submittedPresentFences,
+                completedPresentFences = _completedPresentFences,
+                pendingPresentFences = _pendingPresents.Count,
+                fence = fence.Handle,
+                result = result?.ToString(),
+            });
+            System.IO.File.AppendAllText(_tracePath, record + Environment.NewLine);
+        }
+        catch { } // Diagnostic output must never change native ownership or release.
     }
     /// <summary>Rejects further use after a retained swapchain/provider release failure.</summary>
     internal void RequireLifetime()
@@ -350,6 +400,7 @@ internal sealed unsafe class Swapchain : IDisposable
     private readonly SwapchainRetirement _retirement;
     private readonly ITimelineClock _clock;
     private readonly bool _relaxedAllowed;
+    private readonly bool _auxiliary;
 
     private SwapchainSlot? _current;
     private uint _width;
@@ -411,13 +462,14 @@ internal sealed unsafe class Swapchain : IDisposable
     internal PresentIdMap PresentIds { get; } = new();
 
     private Swapchain(VulkanContext context, KhrSurface surfaceApi, ISwapchainDispatch swapchainApi, SurfaceKHR surface,
-        ITimelineClock clock)
+        ITimelineClock clock, bool auxiliary = false)
     {
         _context = context;
         _surfaceApi = surfaceApi;
         _swapchainApi = swapchainApi;
         _surface = surface;
         _clock = clock;
+        _auxiliary = auxiliary;
         _retirement = new SwapchainRetirement(clock);
         _relaxedAllowed = Environment.GetEnvironmentVariable(FifoRelaxedVariable)?.Trim() != "0";
     }
@@ -430,7 +482,7 @@ internal sealed unsafe class Swapchain : IDisposable
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync, ITimelineClock clock,
         [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Swapchain? swapchain,
-        out string? failureReason, VendorLatency? vendorLatency = null)
+        out string? failureReason, VendorLatency? vendorLatency = null, bool auxiliary = false)
     {
         swapchain = null;
         failureReason = null;
@@ -472,21 +524,41 @@ internal sealed unsafe class Swapchain : IDisposable
         }
 
         ISwapchainDispatch dispatch;
-        if (context.Streamline != null)
+        if (auxiliary)
+        {
+            swapchainApi.Dispose();
+            try { dispatch = AuxiliarySwapchainDispatch.Create(context); }
+            catch
+            {
+                WindowSurface.Destroy(context, surface);
+                surfaceApi.Dispose();
+                throw;
+            }
+        }
+        else if (context.Streamline != null)
         {
             swapchainApi.Dispose();
             dispatch = new StreamlineSwapchainDispatch(context.Streamline, context.Device);
         }
         else dispatch = new NativeSwapchainDispatch(swapchainApi);
-        var created = new Swapchain(context, surfaceApi, dispatch, surface, clock);
+        var created = new Swapchain(context, surfaceApi, dispatch, surface, clock, auxiliary);
         // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id and its
         // feature were actually enabled; chaining it otherwise is a validation error.
         created.PresentIdEnabled = context.Capabilities.PresentIdEnabled;
-        created._vendorLatency = vendorLatency;
+        created._vendorLatency = auxiliary ? null : vendorLatency;
         created._width = width;
         created._height = height;
         created._vsync = vsync;
-        if (!created.Build(out failureReason))
+        bool built;
+        try { built = created.Build(out failureReason); }
+        catch when (auxiliary)
+        {
+            // The frontend cannot keep a failed secondary creation owner. Its
+            // dispatch and surface must leave together before the SDL window.
+            created.Dispose();
+            throw;
+        }
+        if (!built)
         {
             // A window that starts minimised is not a device the client can use.
             if (created.Parked) failureReason = "surface has zero extent";
@@ -506,11 +578,12 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </summary>
     private void DisableStreamlineForRebuild(SwapchainSlot old)
     {
-        if (_context.Streamline == null) return;
+        if (_auxiliary || _context.Streamline == null) return;
         int result = _context.Streamline.SetFrameGeneration(false, 1, old.Extent.Width,
             old.Extent.Height, old.Format, old.ImageCount);
         StreamlineRuntime.CheckDisableResult(_context, result);
     }
+
 
     private bool Build(out string? failureReason)
     {
@@ -539,12 +612,12 @@ internal sealed unsafe class Swapchain : IDisposable
         bool wantFsr3 = _frameGenerationProvider == "fsr3" && Fsr3ProxyFailure == null &&
             _context.Fsr3SwapchainQueuesAvailable;
         bool haveFsr3 = _swapchainApi is Fsr3SwapchainDispatch;
-        if (wantFsr3 != haveFsr3 || haveFsr3)
+        bool virtualBackbuffers = _swapchainApi is StreamlineSwapchainDispatch { UsesVirtualBackbuffers: true };
+        if (wantFsr3 != haveFsr3 || haveFsr3 || old != null && virtualBackbuffers)
         {
-            // FFX's replacement create function refuses a live proxy chain.
-            // Finish its asynchronous presents, destroy the old chain, and then
-            // create the successor through the same context. Switching owner
-            // follows this path too, so acquire/present never mix providers.
+            // Virtual-image reacquisition cannot prove completion of the SDK's
+            // real WSI presents. Drain and release its old chain before creating
+            // the successor; native chains retain asynchronous retirement.
             if (old != null) DisableStreamlineForRebuild(old);
             old?.PrepareDestroy();
             // Retained slots still belong to the departing dispatch even if a
@@ -590,7 +663,8 @@ internal sealed unsafe class Swapchain : IDisposable
             // Transfer destination because the frame is blitted in rather than
             // rendered directly: the game renders into its own targets and the
             // last step copies the result across, flipping it on the way.
-            ImageUsage = ImageUsageFlags.TransferDstBit,
+            ImageUsage = ImageUsageFlags.TransferDstBit |
+                (capabilities.SupportedUsageFlags & ImageUsageFlags.ColorAttachmentBit),
             ImageSharingMode = SharingMode.Exclusive,
             PreTransform = capabilities.CurrentTransform,
             CompositeAlpha = alpha,
@@ -601,12 +675,10 @@ internal sealed unsafe class Swapchain : IDisposable
             OldSwapchain = old?.Handle ?? default,
         };
 
-        // FidelityFX owns the replacement swapchain and does not accept the
-        // NVIDIA low-latency swapchain creation pNext used by the native path.
         if (_vendorLatency != null && !wantFsr3)
             createInfo.PNext = _vendorLatency.ChainSwapchainCreateInfo(createInfo.PNext);
 
-        Result result = _swapchainApi.Create(_context.Device, &createInfo, out SwapchainKHR handle);
+        Result result = CreateSwapchain(&createInfo, out SwapchainKHR handle);
 
         if (result != Result.Success && _swapchainApi is Fsr3SwapchainDispatch failedFsr3)
         {
@@ -615,7 +687,7 @@ internal sealed unsafe class Swapchain : IDisposable
             _swapchainApi = CreateDefaultDispatch();
             if (_vendorLatency != null)
                 createInfo.PNext = _vendorLatency.ChainSwapchainCreateInfo(createInfo.PNext);
-            result = _swapchainApi.Create(_context.Device, &createInfo, out handle);
+            result = CreateSwapchain(&createInfo, out handle);
         }
 
         // Passing oldSwapchain retires it even when creation fails.
@@ -623,8 +695,7 @@ internal sealed unsafe class Swapchain : IDisposable
         {
             _vendorLatency?.OnSwapchainRetired();
             _retirement.Retire(old, old.LastPresentValue,
-                _context.Capabilities.PresentFencesEnabled && _context.Streamline == null
-                    ? old.PresentsComplete : null);
+                old.PresentFencesEnabled ? old.PresentsComplete : null);
             _current = null;
         }
 
@@ -672,6 +743,51 @@ internal sealed unsafe class Swapchain : IDisposable
     /// _SRGB image format would apply a conversion the GL path never did and
     /// wash the picture out.
     /// </summary>
+    private Result CreateSwapchain(SwapchainCreateInfoKHR* info, out SwapchainKHR chain)
+    {
+        TraceCreation("enter", info);
+        Result result = _swapchainApi.Create(_context.Device, info, out chain);
+        TraceCreation("return", info, chain, result);
+        return result;
+    }
+
+    private void TraceCreation(string phase, SwapchainCreateInfoKHR* info,
+        SwapchainKHR chain = default, Result? result = null)
+    {
+        string? path = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.Path.IsPathFullyQualified(path)) return;
+        try
+        {
+            bool? latency = null;
+            var extensions = new List<string>();
+            for (BaseInStructure* next = (BaseInStructure*)info->PNext;
+                 next != null && extensions.Count < 16; next = next->PNext)
+            {
+                extensions.Add(next->SType.ToString());
+                if (next->SType == StructureType.SwapchainLatencyCreateInfoNV)
+                    latency = (bool)((SwapchainLatencyCreateInfoNV*)next)->LatencyModeEnable;
+            }
+            var record = new
+            {
+                @event = "swapchain-create", phase, utc = DateTime.UtcNow,
+                managedThread = Environment.CurrentManagedThreadId, auxiliary = _auxiliary,
+                dispatch = _swapchainApi.GetType().Name,
+                device = "0x" + ((nuint)_context.Device.Handle).ToString("x"),
+                surface = "0x" + info->Surface.Handle.ToString("x"),
+                oldSwapchain = "0x" + info->OldSwapchain.Handle.ToString("x"),
+                swapchain = "0x" + chain.Handle.ToString("x"),
+                flags = info->Flags.ToString(), usage = info->ImageUsage.ToString(),
+                format = info->ImageFormat.ToString(), mode = info->PresentMode.ToString(),
+                width = info->ImageExtent.Width, height = info->ImageExtent.Height,
+                latencyModeEnable = latency,
+                extensions, result = result?.ToString(),
+            };
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            System.IO.File.AppendAllText(path, System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
+        }
+        catch { } // Opt-in diagnostics cannot change creation or ownership.
+    }
+
     private Format ChooseFormat(out ColorSpaceKHR colorSpace)
     {
         SurfaceFormatKHR[] formats = Array.Empty<SurfaceFormatKHR>();
@@ -759,6 +875,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
     private ISwapchainDispatch CreateDefaultDispatch()
     {
+        if (_auxiliary) return AuxiliarySwapchainDispatch.Create(_context);
         if (_context.Streamline != null)
             return new StreamlineSwapchainDispatch(_context.Streamline, _context.Device);
         if (!_context.Api.TryGetDeviceExtension(_context.Instance, _context.Device,

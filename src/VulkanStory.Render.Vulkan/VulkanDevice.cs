@@ -697,6 +697,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _presentationSurfaceSource = window;
         _presentationWindow = window?.NativeHandle ?? IntPtr.Zero;
         bool headless = window == null;
+        bool presentationLayer = !headless && OverlayPresentLayer.Prepare();
         PrepareOpenXr(headless);
 
         var options = new VulkanContextOptions
@@ -704,6 +705,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             // A window handle of zero means no presentation surface, which is how
             // capability probes and tests bring the device up.
             Headless = headless,
+            PresentationLayer = presentationLayer,
             // Validation layers are chosen when the instance is created, so the
             // client's GlDebugMode setting is too late to turn them on - it is
             // applied to DebugMode only after the device exists. VULKANSTORY_VULKAN_VALIDATION
@@ -723,7 +725,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
                 : window!.RequiredInstanceExtensions(),
-            PrepareFrameGenerationQueues = OpenXr == null && !headless && OperatingSystem.IsWindows(),
+            // Direct FidelityFX interpolation shares the frame submission and
+            // native present owner, including overlay and auxiliary-window work.
+            PrepareFrameGenerationQueues = false,
             OpenXr = OpenXr,
         };
 
@@ -741,6 +745,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             options.PreferredVendorId = vendor;
         }
         options.RequirementContributors.Add(vendorLatencyRequirements);
+        options.RequirementContributors.Add(new AuxiliaryPresentationRequirements());
         ConfigureContextOptions?.Invoke(options);
         // Streamline's signed 2.14.1 Vulkan proxy rejects extensions supplied
         // only by a validation layer. Keep sync-validation acceptance on the
@@ -1615,6 +1620,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         // submit the headset layer before any desktop/auxiliary acquire can block.
         OpenXr?.EndFrame();
 
+        PresentAuxiliaryTargets(renderValue);
+
         if (PresentXessFrame(renderValue, presentEntry, frameSubmitted)) return;
         RetrySwapchainRestoreIfNeeded();
 
@@ -1830,6 +1837,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             VulkanResult.Check(_context.WaitDeviceIdle(), "vkDeviceWaitIdle before device teardown");
         }
         OpenXr?.Dispose(); OpenXr = null;
+        DisposeAuxiliaryTargets();
 
         // Background compiles read program modules and layouts, and a background save
         // reads the driver cache: both end before anything they use is destroyed.

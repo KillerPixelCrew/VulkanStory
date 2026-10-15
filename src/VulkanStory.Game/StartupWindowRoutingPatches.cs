@@ -83,7 +83,9 @@ internal static unsafe class StartupWindowRoutingPatches
         try
         {
             if (!runtime.SelectWindowServices()) return true;
-            runtime.CreateWindow(__1); __result = null!; return false;
+            runtime.CreateWindow(__1);
+            __result = ManagedWindowBridge.CreatePrimary(runtime.Session);
+            return false;
         }
         catch (Exception error) when (!HeadlessHarnessOptions.Enabled && !runtime.HasCommitted && error is not AggregateException)
         {

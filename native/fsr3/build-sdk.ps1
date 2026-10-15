@@ -31,6 +31,10 @@ $dirty = & git -C $sdkRoot status --porcelain --untracked-files=no
 if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'FidelityFX SDK tracked sources must be unchanged before staging.' }
 $recipeHash = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash
 $fixHash = (Get-FileHash -LiteralPath $fixPath -Algorithm SHA256).Hash
+$lifetimeFixPath = Join-Path $PSScriptRoot 'sdk-fixes/swapchain-lifetime.json'
+$lifetimeFix = Get-Content -LiteralPath $lifetimeFixPath -Raw | ConvertFrom-Json
+$lifetimeFixHash = (Get-FileHash -LiteralPath $lifetimeFixPath -Algorithm SHA256).Hash
+if ($lifetimeFix.sdkCommit -ne $commit) { throw 'Swapchain corrections require the pinned SDK commit.' }
 if (Test-Path -LiteralPath $output) {
     $cachedReceiptPath = Join-Path $output 'runtime/fsr3-sdk-build.json'
     $cachedBinaryPath = Join-Path $output 'runtime/amd_fidelityfx_vk.dll'
@@ -39,7 +43,7 @@ if (Test-Path -LiteralPath $output) {
         $cached = Get-Content -LiteralPath $cachedReceiptPath -Raw | ConvertFrom-Json
         if ($cached.schema -eq 1 -and $cached.sdkCommit -eq $commit -and
             $cached.configuration -eq $Configuration -and $cached.patchSha256 -eq $fixHash -and
-            $cached.buildRecipeSha256 -eq $recipeHash -and
+            $cached.buildRecipeSha256 -eq $recipeHash -and $cached.swapchainLifetimePatchSha256 -eq $lifetimeFixHash -and
             $cached.runtimeSha256 -eq (Get-FileHash -LiteralPath $cachedBinaryPath -Algorithm SHA256).Hash) {
             Write-Host "Using verified corrected FidelityFX runtime: $cachedBinaryPath"
             return
@@ -93,6 +97,14 @@ foreach ($number in @(1,2)) {
     if ([regex]::Matches($resourceSource, $pattern).Count -ne 1) { throw 'The SDK luma-history resource is no longer the reviewed RGBA16F image.' }
 }
 [IO.File]::WriteAllText($callback, $text.Replace($fix.before, $fix.after), [Text.UTF8Encoding]::new($false))
+foreach ($replacement in $lifetimeFix.replacements) {
+    $path = Join-Path $source $replacement.file
+    $code = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+    if ([regex]::Matches($code, [regex]::Escape($replacement.before)).Count -ne 1) {
+        throw "Pinned SDK swapchain correction anchor changed: $($replacement.file)"
+    }
+    [IO.File]::WriteAllText($path, $code.Replace($replacement.before, $replacement.after), [Text.UTF8Encoding]::new($false))
+}
 $afterHash = (Get-FileHash -LiteralPath $callback -Algorithm SHA256).Hash
 # The SDK otherwise gives every shader compiler the entire host CPU thread count.
 # Limit only staged build scheduling; shader flags and permutations remain identical.
@@ -122,7 +134,7 @@ Copy-Item -LiteralPath $built -Destination $destination
 $receipt = [ordered]@{
     schema=1; fix=$fix.id; upstream=$fix.upstream; sdkCommit=$commit; configuration=$Configuration
     callback=$fix.file; sourceBeforeSha256=$beforeHash; sourceAfterSha256=$afterHash
-    patchSha256=$fixHash; buildRecipeSha256=$recipeHash
+    patchSha256=$fixHash; buildRecipeSha256=$recipeHash; swapchainLifetimePatchSha256=$lifetimeFixHash
     runtimeSha256=(Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
     cmake=$cmake; compiler=$compiler; generator=$generator; vulkanSdk=$vulkanRoot
     parallel=$Parallel; shaderThreads=$ShaderThreads
