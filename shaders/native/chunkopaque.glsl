@@ -300,6 +300,13 @@ layout(location = 2) out vec4 outMotion;
 void main()
 {
 
+#if GBUFFER == 1
+	// Grass lighting normals point up rather than perpendicular to its quads.
+	// Evaluate derivatives before alpha demotion so GTAO can use the actual surface.
+	vec3 aoSurfaceNormal = vec3(0.0);
+	if (OPTIMUM_OPTIMUMAO > 0) aoSurfaceNormal = cross(dFdx(camPos.xyz), dFdy(camPos.xyz));
+#endif
+
 	// --- Vanilla path (no tiling) ---
 	vec4 texColor = getColorMapped(optimumTextures2D[terrainTexLinear], texture(optimumTextures2D[terrainTex], uv)) * rgba;
 
@@ -349,8 +356,11 @@ void main()
 #if GBUFFER == 1
 	outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
 	outGNormal = gnormal;
-	if (OPTIMUM_OPTIMUMAO > 0) {
-	// Optimum AO class channel (C.5) comes from the vertex, not the render pool.
+	if (OPTIMUM_OPTIMUMAO > 0 && gnormal.w > 0.0) {
+		// Orient the thin surface toward the camera on either side of the quad.
+		// Flipping its upward lighting normal instead creates a line at eye height.
+		outGNormal.xyz = normalize(aoSurfaceNormal);
+		if (dot(outGNormal.xyz, camPos.xyz) > 0.0) outGNormal.xyz = -outGNormal.xyz;
 	}
 #endif
 
