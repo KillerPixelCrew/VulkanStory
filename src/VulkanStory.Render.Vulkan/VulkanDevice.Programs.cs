@@ -331,6 +331,7 @@ public sealed unsafe partial class VulkanDevice
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
+        ProgramDeleted?.Invoke(programId);
         _programNames.Remove(programId);
         _activeVertexInputLocations.Remove(programId);
         // No background compile may still be reading its modules or layout.
@@ -343,6 +344,12 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Returns the program's retained named-uniform location, or the missing-location sentinel.</summary>
     public int GetUniformLocation(int programId, string name) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
+
+    /// <summary>Whether a shared game/mod program name still identifies a linked renderer program.</summary>
+    internal bool IsProgram(int programId) => _programs.ContainsKey(programId);
+
+    /// <summary>Invalidates borrowed API views when their shared renderer program is released.</summary>
+    internal event Action<int>? ProgramDeleted;
 
     /// <summary>Returns an active attribute's location from this linked program's actual interface, or -1.</summary>
     public int GetAttributeLocation(int programId, string name)

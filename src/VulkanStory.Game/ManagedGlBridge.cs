@@ -40,6 +40,7 @@ internal sealed class ManagedGlBridge : IDisposable
     internal ManagedGlBridge(GameRenderSession session)
     {
         this.session = session;
+        Device.ProgramDeleted += ForgetBorrowedProgram;
         string? trace = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
         if (!string.IsNullOrEmpty(trace) && System.IO.Path.IsPathFullyQualified(trace)) drawTracePath = trace;
     }
@@ -110,6 +111,7 @@ internal sealed class ManagedGlBridge : IDisposable
     }
     private sealed class ProgramObject
     {
+        internal bool Borrowed;
         internal readonly Dictionary<int, ShaderObject> Stages = new();
         internal readonly Dictionary<string, int> Attributes = new(StringComparer.Ordinal);
         // Renderer locations encode sampler bindings as negative values. GL
@@ -197,6 +199,7 @@ internal sealed class ManagedGlBridge : IDisposable
             case "GetAttribLocation": { var program = Program(I(a[0])); if (!program.Linked) Error(0x0502); return Device.GetAttributeLocation(program.Backend, (string)a[1]!); }
             case "BindAttribLocation": { var program = Program(I(a[0])); int index = I(a[1]); if (index < 0 || index >= 16) Error(0x0501); program.Attributes[(string)a[2]!] = index; return null; }
             case "Uniform1": Uniform1(method, a); return null;
+            case "Uniform2": case "Uniform3": case "Uniform4": UniformVector(method, a); return null;
             case "UniformMatrix4": UniformMatrix4(a); return null;
             case "GenTexture": { int name = Device.ReserveTextureName(); textures.Add(name, new(name)); return name; }
             case "GenTextures": return GenerateMany(method, a, () => { int name = Device.ReserveTextureName(); textures.Add(name, new(name)); return name; });
@@ -211,6 +214,10 @@ internal sealed class ManagedGlBridge : IDisposable
             case "Enable": SetEnabled(I(a[0]), true); return null;
             case "Disable": SetEnabled(I(a[0]), false); return null;
             case "IsEnabled": return Enabled(I(a[0]));
+            case "DepthMask": State.DepthWrite = Convert.ToBoolean(a[0]); return null;
+            case "DepthFunc": { int function = I(a[0]); if (function < 0x0200 || function > 0x0207) Error(0x0500); State.DepthCompare = GlEnums.CompareOpFrom(function); return null; }
+            case "ColorMask": State.SetColorMask(Convert.ToBoolean(a[0]), Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3])); return null;
+            case "CullFace": State.CullFaces = I(a[0]) switch { 0x0404 => CullModeFlags.FrontBit, 0x0405 => CullModeFlags.BackBit, 0x0408 => CullModeFlags.FrontAndBack, _ => throw new GlError(0x0500) }; return null;
             case "BlendEquation": BlendEquation(I(a[0]), I(a[0])); return null;
             case "BlendEquationSeparate": BlendEquation(I(a[0]), I(a[1])); return null;
             case "BlendFunc": BlendFunc(I(a[0]), I(a[1]), I(a[0]), I(a[1])); return null;
@@ -348,7 +355,20 @@ internal sealed class ManagedGlBridge : IDisposable
     }
 
     private ShaderObject Shader(int name) { if (!shaders.TryGetValue(name, out ShaderObject? shader)) Error(0x0501); return shader!; }
-    private ProgramObject Program(int name) { if (!programs.TryGetValue(name, out ProgramObject? program)) Error(0x0501); return program!; }
+    private ProgramObject Program(int name)
+    {
+        if (programs.TryGetValue(name, out ProgramObject? program)) return program;
+        // RenderAPI-created programs retain their ordinary renderer name. Only
+        // the GL uniform-location view belongs to this bridge, never the program.
+        if (!Device.IsProgram(name)) Error(0x0501);
+        program = new ProgramObject { Backend = name, Linked = true, Borrowed = true };
+        programs.Add(name, program);
+        return program;
+    }
+    private void ForgetBorrowedProgram(int name)
+    {
+        if (programs.TryGetValue(name, out ProgramObject? program) && program.Borrowed) programs.Remove(name);
+    }
     private void ShaderSource(object?[] a)
     {
         ShaderObject shader = Shader(I(a[0]));
@@ -448,7 +468,7 @@ internal sealed class ManagedGlBridge : IDisposable
         int backend = name;
         if (name != 0 && programs.TryGetValue(name, out ProgramObject? program))
         { if (!program.Linked) Error(0x0502); backend = program.Backend; }
-        else if (name != 0 && name >= 0x40000000) Error(0x0501);
+        else if (name != 0 && !Device.IsProgram(name)) Error(0x0501);
         // Original game programs are already the renderer's IDs. This permits
         // SaveGLState to restore the real current game program after a raw draw.
         if (C.Primary) session.Graphics.UseShaderProgram(backend); else C.Program = backend;
@@ -459,7 +479,7 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         foreach (int name in programs.Where(entry => entry.Value.Deleted && (entry.Value.Backend == 0 || !contexts.Values.Any(context =>
             (context.Primary ? session.Graphics.StatedProgram : context.Program) == entry.Value.Backend))).Select(entry => entry.Key).ToArray())
-        { ProgramObject program = programs[name]; if (program.Backend != 0) Device.DeleteProgram(program.Backend); programs.Remove(name); }
+        { ProgramObject program = programs[name]; if (program.Backend != 0) session.Graphics.DeleteProgram(program.Backend); programs.Remove(name); }
         CollectDeletedShaders();
     }
     private int UniformLocation(int name, string uniformName)
@@ -491,8 +511,8 @@ internal sealed class ManagedGlBridge : IDisposable
         ProgramObject program = UniformProgram(location, out int backendLocation);
         if (a.Length == 2)
         {
-            if (a[1] is float value) Device.SetUniform(program.Backend, backendLocation, value);
-            else if (a[1] is int integer) Device.SetUniform(program.Backend, backendLocation, integer);
+            if (a[1] is float value) session.Graphics.Uniform(program.Backend, backendLocation, value);
+            else if (a[1] is int integer) session.Graphics.Uniform(program.Backend, backendLocation, integer);
             else throw new NotSupportedException("Managed GL Uniform1 requires a 32-bit float or signed integer uniform.");
             TraceUniform(program, location, a[1]!);
         }
@@ -504,10 +524,32 @@ internal sealed class ManagedGlBridge : IDisposable
             float[] values;
             if (a[2] is float[] array) { if (count > array.Length) Error(0x0501); values = array; }
             else { values = new float[count]; if (count > 0) { IntPtr pointer = Pointer(a[2]); if (pointer == IntPtr.Zero) Error(0x0501); Marshal.Copy(pointer, values, 0, count); } }
-            Device.SetUniformArray1(program.Backend, backendLocation, count, values);
+            session.Graphics.UniformArray(program.Backend, backendLocation, count, values, 1);
             if (count > 0 && TracePending) TraceUniform(program, location, new { count, values = values.Take(Math.Min(count, 64)).ToArray() });
         }
         else throw new NotSupportedException("Managed GL Uniform1 array/pointer form requires a matching scalar backend capability.");
+    }
+    private void UniformVector(MethodInfo method, object?[] a)
+    {
+        int location = I(a[0]); if (location == -1) return;
+        ProgramObject program = UniformProgram(location, out int backendLocation);
+        int components = method.Name[^1] - '0';
+        if (a.Length == components + 1 && method.GetParameters()[1].ParameterType == typeof(float))
+        {
+            float x = Convert.ToSingle(a[1]), y = Convert.ToSingle(a[2]);
+            if (components == 2) session.Graphics.Uniform(program.Backend, backendLocation, x, y);
+            else if (components == 3) session.Graphics.Uniform(program.Backend, backendLocation, x, y, Convert.ToSingle(a[3]));
+            else session.Graphics.Uniform(program.Backend, backendLocation, x, y, Convert.ToSingle(a[3]), Convert.ToSingle(a[4]));
+        }
+        else
+        {
+            int count = I(a[1]); if (count < 0 || count > int.MaxValue / components) Error(0x0501);
+            int length = count * components;
+            float[] values;
+            if (a[2] is float[] array) { if (array.Length < length) Error(0x0501); values = array; }
+            else { values = new float[length]; if (length > 0) { IntPtr pointer = Pointer(a[2]); if (pointer == IntPtr.Zero) Error(0x0501); Marshal.Copy(pointer, values, 0, length); } }
+            session.Graphics.UniformArray(program.Backend, backendLocation, count, values, components);
+        }
     }
     private void UniformMatrix4(object?[] a)
     {
@@ -533,7 +575,7 @@ internal sealed class ManagedGlBridge : IDisposable
                 for (int row = 0; row < 4; row++) for (int column = row + 1; column < 4; column++)
                     (values[matrixIndex * 16 + row * 4 + column], values[matrixIndex * 16 + column * 4 + row]) =
                         (values[matrixIndex * 16 + column * 4 + row], values[matrixIndex * 16 + row * 4 + column]);
-        Device.SetUniformMatrices(program.Backend, backendLocation, count, values);
+        session.Graphics.UniformMatrices(program.Backend, backendLocation, count, values);
         if (count > 0 && TracePending) TraceUniform(program, location, new { count, values = values.Take(64).ToArray() });
     }
 
@@ -750,6 +792,10 @@ internal sealed class ManagedGlBridge : IDisposable
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],
             0x0BE2 => [State.BlendEnabled ? 1 : 0], 0x0C11 => [State.ScissorEnabled ? 1 : 0], 0x0B44 => [State.CullEnabled ? 1 : 0], 0x0B71 => [State.DepthTest ? 1 : 0],
+            0x0B72 => [State.DepthWrite ? 1 : 0], 0x0B74 => [0x0200 + (int)State.DepthCompare],
+            0x0B45 => [State.CullFaces switch { CullModeFlags.FrontBit => 0x0404, CullModeFlags.BackBit => 0x0405, _ => 0x0408 }],
+            0x0C23 => [(State.ColorMask & ColorComponentFlags.RBit) != 0 ? 1 : 0, (State.ColorMask & ColorComponentFlags.GBit) != 0 ? 1 : 0,
+                (State.ColorMask & ColorComponentFlags.BBit) != 0 ? 1 : 0, (State.ColorMask & ColorComponentFlags.ABit) != 0 ? 1 : 0],
             0x8009 => [BlendEquationToken(blend.ColorOp)], 0x883D => [BlendEquationToken(blend.AlphaOp)],
             0x80C9 => [BlendFactorToken(blend.SrcColor)], 0x80C8 => [BlendFactorToken(blend.DstColor)], 0x80CB => [BlendFactorToken(blend.SrcAlpha)], 0x80CA => [BlendFactorToken(blend.DstAlpha)],
             0x0C10 => [State.Scissor.Offset.X, State.Scissor.Offset.Y, (int)State.Scissor.Extent.Width, (int)State.Scissor.Extent.Height],
@@ -808,7 +854,8 @@ internal sealed class ManagedGlBridge : IDisposable
         if (disposed) return;
         RequireOwner();
         VulkanDevice device = session.Device;
-        foreach (ProgramObject program in programs.Values) if (program.Backend != 0) device.DeleteProgram(program.Backend);
+        device.ProgramDeleted -= ForgetBorrowedProgram;
+        foreach (ProgramObject program in programs.Values) if (!program.Borrowed && program.Backend != 0) device.DeleteProgram(program.Backend);
         foreach (TextureObject texture in textures.Values) device.DeleteTexture(texture.Name);
         programs.Clear(); shaders.Clear(); buffers.Clear(); textures.Clear(); contexts.Clear();
         selected = null; if (ReferenceEquals(current, this)) current = null;

@@ -104,7 +104,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
   5. Pack-declared composite/deferred passes in the frame graph.
 
 - **GL-02 / GL-03: Managed OpenGL compatibility**
-  - Support direct OpenTK rendering and context/window ownership in core adapters. The missing ImGui dependency needed by the supplied GUI addon exposes this requirement, including buffer/texture/shader draws and secondary viewports.
+  - The shared bridge routes supported operations from both OpenTK GL namespaces, including depth/culling/color-mask state and float vector uniforms. Game-created shader programs can be queried through a borrowed GL view; uniform writes retain the game adapter's motion handling. OpenAL procedure lookups are excluded from graphics refusal.
+  - Complete the remaining operation families required by [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12): framebuffer attachments and read/draw bindings, texture definition/conversion and readback, generic buffer/texture overloads, queries and remaining shader/state operations. Unsupported calls still prevent their owning code mod from starting.
 
 ## Deferred
 

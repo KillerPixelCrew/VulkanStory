@@ -112,7 +112,8 @@ internal static class ModGlUsage
             (type == "OpenTK.Windowing.GraphicsLibraryFramework.GLFW" &&
                 method.Name is "GetProcAddress" or "MakeContextCurrent" or "SwapBuffers") ||
             (method.Name == "GetProcAddress" &&
-                (type.StartsWith("OpenTK.", StringComparison.Ordinal) ||
+                (type.StartsWith("OpenTK.Graphics.", StringComparison.Ordinal) ||
+                 type.StartsWith("OpenTK.Windowing.", StringComparison.Ordinal) ||
                  type.StartsWith("Silk.NET.Core.Contexts.", StringComparison.Ordinal)));
     }
 

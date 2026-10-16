@@ -45,12 +45,21 @@ An ordinary renderer callback can manage many objects, so its receiver alone doe
 not establish their identities. Unassociated custom subobjects and deformation
 still need their real previous inputs through the explicit writer contract.
 
-Direct OpenGL calls are different. OpenTK GL calls, native GL imports and GL
-proc-address loaders expect an OpenGL context and cannot operate on Vulkan
-resources. When Vulkan routing is active, `ModGlUsage` examines enabled client
-mod metadata before executing the code. Unsupported direct graphics access is
-refused through the game's mod error path and reported in runtime status.
-Passing this scan does not guarantee that a mod's higher-level behavior works.
+Direct OpenGL calls pass through a managed compatibility bridge when their exact
+OpenTK entry points are supported. Both `OpenTK.Graphics.OpenGL.GL` and
+`OpenTK.Graphics.OpenGL4.GL` feed the same context, resource and fixed-function
+state implementation. Supported depth, culling, color-mask, viewport, blending
+and scissor changes therefore affect subsequent Vulkan draws. Float scalar/vector,
+array and matrix uniform writes use the game adapter's motion-input handling;
+GL queries can borrow a game-created program without taking ownership of it.
+
+This bridge implements a subset of GL, not a complete desktop OpenGL driver.
+Native GL imports and graphics proc-address loaders still need explicit support.
+When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata
+before executing the code. Unsupported graphics access is refused through the
+game's mod error path and reported in runtime status. OpenAL audio procedure
+lookups are not graphics access. Passing this scan does not guarantee that a
+mod's higher-level behavior works.
 
 While Vulkan owns the game API, legacy instance `Harmony.UnpatchAll()` calls
 without an owner are scoped to that instance's ID. Explicit owner IDs keep their
@@ -72,7 +81,9 @@ flowchart TD
     Declared --> Contract[Validate stage and attachments]
     Contract --> Graph[Vulkan frame graph]
     Adapter --> Graph
-    GL --> Refused[Refused while Vulkan is active]
+    GL --> Supported{Supported entry point?}
+    Supported -->|Yes| Adapter
+    Supported -->|No| Refused[Refused while Vulkan is active]
 ```
 
 ## Declared passes

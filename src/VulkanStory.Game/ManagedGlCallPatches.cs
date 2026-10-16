@@ -14,6 +14,7 @@ public static class ManagedGlCallPatches
     [ThreadStatic] private static bool missingContextObserved;
     [ThreadStatic] private static int missingContextError;
     private static readonly Dictionary<int, MethodInfo> Calls = new();
+    private static readonly Type[] Bindings = [typeof(GL), typeof(OpenTK.Graphics.OpenGL.GL)];
     private static readonly HashSet<string> Names = new(StringComparer.Ordinal)
     {
         "GetInteger", "GetBoolean", "GetError", "GenVertexArray", "GenVertexArrays", "BindVertexArray", "DeleteVertexArray", "DeleteVertexArrays",
@@ -23,16 +24,18 @@ public static class ManagedGlCallPatches
         "CreateProgram", "AttachShader", "LinkProgram", "GetProgram", "GetProgramInfoLog", "DetachShader", "DeleteShader", "DeleteProgram", "CreateShader",
         "ShaderSource", "CompileShader", "GetShader", "GetShaderInfoLog", "UseProgram", "UniformMatrix4", "Uniform1", "GetUniformLocation", "GetAttribLocation", "BindAttribLocation",
         "Enable", "Disable", "IsEnabled", "BlendEquation", "BlendEquationSeparate", "BlendFunc", "BlendFuncSeparate", "PolygonMode", "Scissor", "Viewport", "Clear", "ClearColor",
+        "DepthFunc", "DepthMask", "ColorMask", "CullFace",
+        "Uniform2", "Uniform3", "Uniform4",
     };
     private static readonly List<Type> PrefixOwners = new();
-    private static readonly MethodInfo[] SupportedMethods = typeof(GL).GetMethods(BindingFlags.Public | BindingFlags.Static)
+    private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
         .Where(method => Names.Contains(method.Name) && !method.IsGenericMethodDefinition && !method.ContainsGenericParameters &&
             method.GetMethodBody() is not null && SupportedSignature(method)).OrderBy(method => method.MetadataToken).ToArray();
 
     internal static bool SupportsManagedCall(MethodReference reference)
     {
-        if (reference.DeclaringType.FullName != typeof(GL).FullName || reference.HasGenericParameters || reference is GenericInstanceMethod) return false;
-        return SupportedMethods.Any(method => method.Name == reference.Name &&
+        if (!Bindings.Any(binding => binding.FullName == reference.DeclaringType.FullName) || reference.HasGenericParameters || reference is GenericInstanceMethod) return false;
+        return SupportedMethods.Any(method => method.DeclaringType!.FullName == reference.DeclaringType.FullName && method.Name == reference.Name &&
             TypeName(method.ReturnType) == reference.ReturnType.FullName.Replace('/', '+') &&
             method.GetParameters().Select(parameter => TypeName(parameter.ParameterType)).SequenceEqual(
                 reference.Parameters.Select(parameter => parameter.ParameterType.FullName.Replace('/', '+')), StringComparer.Ordinal));
@@ -74,6 +77,11 @@ public static class ManagedGlCallPatches
                     parameters[3].ParameterType == typeof(System.Text.StringBuilder) || parameters[3].ParameterType == typeof(IntPtr) || parameters[3].ParameterType.IsPointer);
             case "Uniform1": return parameters.Length == 2 && parameters[1].ParameterType is { } value && (value == typeof(int) || value == typeof(float)) ||
                 parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(float);
+            case "Uniform2": case "Uniform3": case "Uniform4":
+                int components = method.Name[^1] - '0';
+                return parameters.Length == components + 1 && parameters.Skip(1).All(parameter => parameter.ParameterType == typeof(float)) ||
+                    parameters.Length == 3 && parameters[1].ParameterType == typeof(int) &&
+                    (parameters[2].ParameterType == typeof(IntPtr) || parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(float));
             case "UniformMatrix4": return parameters.Length == 3 && parameters[2].ParameterType == typeof(OpenTK.Mathematics.Matrix4).MakeByRefType() ||
                 parameters.Length == 4 && (parameters[3].ParameterType == typeof(IntPtr) || parameters[3].ParameterType.HasElementType && parameters[3].ParameterType.GetElementType() == typeof(float));
             case "TexParameter": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
@@ -85,6 +93,9 @@ public static class ManagedGlCallPatches
                     parameters[0].ParameterType == typeof(OpenTK.Mathematics.Color4).MakeByRefType());
             case "Scissor": case "Viewport": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(int));
             case "Enable": case "Disable": case "IsEnabled": return parameters.Length == 1;
+            case "DepthFunc": case "CullFace": return parameters.Length == 1 && parameters[0].ParameterType.IsEnum;
+            case "DepthMask": return parameters.Length == 1 && parameters[0].ParameterType == typeof(bool);
+            case "ColorMask": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(bool));
             case "VertexAttribPointer": return parameters.Length == 6 &&
                 (parameters[5].ParameterType == typeof(int) || parameters[5].ParameterType == typeof(IntPtr));
             case "VertexAttribIPointer": return parameters.Length == 5 &&
@@ -250,7 +261,7 @@ public static class ManagedGlCallPatches
     private static bool InputPointer(MethodInfo method, int index) => method.GetParameters()[index].ParameterType.IsByRef &&
         (method.Name, index) is
             ("BufferData", 2) or ("BufferSubData", 3) or ("TexSubImage2D", 8) or
-            ("Uniform1", 2) or ("UniformMatrix4", 3) or ("ShaderSource", 3) or
+            ("Uniform1", 2) or ("Uniform2", 2) or ("Uniform3", 2) or ("Uniform4", 2) or ("UniformMatrix4", 3) or ("ShaderSource", 3) or
             ("GenBuffers", 1) or ("GenVertexArrays", 1) or ("GenTextures", 1) or
             ("DeleteBuffers", 1) or ("DeleteVertexArrays", 1) or ("DeleteTextures", 1);
 }

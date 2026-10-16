@@ -54,7 +54,9 @@ internal sealed class StatedRenderState
     public bool DepthWrite { get; set; } = true;
     public CompareOp DepthCompare { get; set; } = CompareOp.Less;
     public bool CullEnabled { get; set; }
-    public bool CullBack { get; set; } = true;
+    private CullModeFlags cullFaces = CullModeFlags.BackBit;
+    public bool CullBack { get => cullFaces == CullModeFlags.BackBit; set => cullFaces = value ? CullModeFlags.BackBit : CullModeFlags.FrontBit; }
+    internal CullModeFlags CullFaces { get => cullFaces; set => cullFaces = value; }
     public float LineWidth { get; set; } = 1f;
     public bool Wireframe { get; set; }
     public bool ScissorEnabled { get; set; }
@@ -62,7 +64,7 @@ internal sealed class StatedRenderState
     public Rect2D Viewport { get; set; }
     public bool StencilTest { get; set; }
 
-    public CullModeFlags CullMode => CullEnabled ? (CullBack ? CullModeFlags.BackBit : CullModeFlags.FrontBit) : CullModeFlags.None;
+    public CullModeFlags CullMode => CullEnabled ? cullFaces : CullModeFlags.None;
 
     /// <summary><c>glBlendFunc</c>/<c>glBlendFuncSeparate</c> of a named mode: every attachment's factors, add equations.</summary>
     public void SetBlendMode(EnumBlendMode mode)
