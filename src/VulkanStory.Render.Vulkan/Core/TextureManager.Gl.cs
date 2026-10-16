@@ -4,6 +4,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 
 internal sealed unsafe partial class TextureManager
 {
+    internal int CreateTransferSampled(uint width,uint height,Format format) => CreateImage(width,height,format,1,1,false,
+        ImageUsageFlags.SampledBit|ImageUsageFlags.TransferSrcBit|ImageUsageFlags.TransferDstBit,ImageAspectFlags.ColorBit,MemoryPoolClass.DeviceImages);
+
     internal int CreateMipStorage(uint width, uint height, Format format, uint levels)
     {
         ImageAspectFlags aspect = AspectOf(format);

@@ -122,7 +122,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
   - Bound depth sampling can coexist with stencil writes through the core mixed depth/stencil layout. Attachment state, descriptors and barriers share that choice; depth writes while sampling remain refused. Immutable depth/stencil texture storage retains both aspects, with depth-only sampling views and depth readback.
   - Single-sample stencil scaling, mirroring and clipped blits use packed GPU buffers and a compute transform. Destination clipping retains the source mapping; only stencil is copied. Tiling bounds descriptor ranges and scratch storage, with shared fenced compute descriptors and deferred buffer retirement.
   - Multisample depth/stencil resolves use core sample-zero rendering resolves with explicit color-output-stage synchronization. Bounded scratch tiles preserve translated, mirrored and scissored mappings; depth-only/stencil-only copies preserve the other destination aspect.
-  - Complete remaining [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12) compatibility: multisample-to-multisample transforms, and zero-sized/independently shaped mutable texture mip backing. Native GL coverage and full-pack compatibility remain in progress.
+  - Equal-sample color/depth/stencil mirroring preserves individual samples through bounded row/column image copies. Single-sample stencil broadcasts use packed byte transfers and stencil bit-plane draws, preserving destination depth without optional stencil-export support.
+  - Complete remaining [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12) compatibility: zero-sized/independently shaped mutable texture mip backing. Native GL coverage and full-pack compatibility remain in progress.
 
 ## Deferred
 
