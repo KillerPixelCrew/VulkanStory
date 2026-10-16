@@ -10,19 +10,19 @@ public sealed unsafe partial class VulkanDevice
     private int glColorClearProgram, glDepthClearProgram;
     private const ColorComponentFlags AllGlChannels = ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
 
-    internal void ClearGlColor(int framebuffer, int output, ColorComponentFlags mask, float[] color, Rect2D? scissor)
+    internal void ClearGlColor(int framebuffer, int output, ColorComponentFlags mask, float[] color, Rect2D? scissor, bool framebufferSrgb = true)
     {
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(framebuffer));
         if (target is null || (uint)output >= (uint)target.Color.Length || mask == 0) return;
         AttachmentSlot slot = target.DrawColor(output);
-        ClearGlImage(target, slot.TextureId, slot.MipLevel, slot.Layer, mask, color, 1, scissor, false);
+        ClearGlImage(target, slot.TextureId, slot.MipLevel, slot.Layer, mask, color, 1, scissor, false, !framebufferSrgb);
     }
     internal void ClearGlDepth(int framebuffer, float value, Rect2D? scissor)
     {
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(framebuffer));
         if (target is not null) ClearGlImage(target, target.DepthTextureId, target.DepthMipLevel, target.DepthLayer, AllGlChannels, [], value, scissor, true);
     }
-    private void ClearGlImage(VulkanFramebuffer framebuffer, int name, uint level, uint layer, ColorComponentFlags mask, float[] color, float depth, Rect2D? scissor, bool depthOnly)
+    private void ClearGlImage(VulkanFramebuffer framebuffer, int name, uint level, uint layer, ColorComponentFlags mask, float[] color, float depth, Rect2D? scissor, bool depthOnly, bool linearColor = false)
     {
         VulkanTexture? image = _textures.Get(name);
         if (image is null) return;
@@ -41,18 +41,38 @@ public sealed unsafe partial class VulkanDevice
             CommandBuffer command = _frameActive ? Commands : _uploads.BeginRecording(inlineInFrame: false);
             try
             {
-                _textures.Require(_barriers, command, image, ResourceUsage.TransferDst);
-                _barriers.Flush(command);
-                var range = new ImageSubresourceRange(depthOnly ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit, level, 1, layer, 1);
-                if (depthOnly)
+                if (!depthOnly && linearColor && VulkanTexture.LinearColorFormat(image.Format) != image.Format)
                 {
-                    var value = new ClearDepthStencilValue(depth, 0);
-                    _context.Api.CmdClearDepthStencilImage(command, image.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
+                    // Transfer clears use the image's base format. A rendering
+                    // clear uses the selected UNORM view and preserves raw GL
+                    // clear values without an sRGB encode or CPU round trip.
+                    _textures.Require(_barriers, command, image, ResourceUsage.ColorBlend);
+                    _barriers.Flush(command);
+                    var attachment = new RenderingAttachmentInfo { SType = StructureType.RenderingAttachmentInfo,
+                        ImageView = image.ViewOfLayer(layer, level, true), ImageLayout = ImageLayout.ColorAttachmentOptimal,
+                        LoadOp = AttachmentLoadOp.Clear, StoreOp = AttachmentStoreOp.Store,
+                        ClearValue = new ClearValue(new ClearColorValue(color[0], color[1], color[2], color[3])) };
+                    var rendering = new RenderingInfo { SType = StructureType.RenderingInfo,
+                        RenderArea = new Rect2D(new Offset2D(), new Extent2D(imageWidth, imageHeight)), LayerCount = 1,
+                        ColorAttachmentCount = 1, PColorAttachments = &attachment };
+                    _context.Api.CmdBeginRendering(command, &rendering);
+                    _context.Api.CmdEndRendering(command);
                 }
                 else
                 {
-                    var value = new ClearColorValue(color[0], color[1], color[2], color[3]);
-                    _context.Api.CmdClearColorImage(command, image.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
+                    _textures.Require(_barriers, command, image, ResourceUsage.TransferDst);
+                    _barriers.Flush(command);
+                    var range = new ImageSubresourceRange(depthOnly ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit, level, 1, layer, 1);
+                    if (depthOnly)
+                    {
+                        var value = new ClearDepthStencilValue(depth, 0);
+                        _context.Api.CmdClearDepthStencilImage(command, image.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
+                    }
+                    else
+                    {
+                        var value = new ClearColorValue(color[0], color[1], color[2], color[3]);
+                        _context.Api.CmdClearColorImage(command, image.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
+                    }
                 }
             }
             finally { if (!_frameActive) _uploads.EndRecording(); }
@@ -61,7 +81,7 @@ public sealed unsafe partial class VulkanDevice
         }
         if (!_frameActive) throw new InvalidOperationException("Partial/masked framebuffer clears require a graphics recording frame.");
         DrawGlClear(name, (int)level, (int)layer, imageWidth, imageHeight, mask, color, depth,
-            new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), depthOnly);
+            new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), depthOnly, linearColor);
     }
 
     private int GlClearProgram(bool depth)
@@ -91,7 +111,7 @@ public sealed unsafe partial class VulkanDevice
         if (depth) glDepthClearProgram = program; else glColorClearProgram = program;
         return program;
     }
-    private void DrawGlClear(int image, int level, int layer, uint width, uint height, ColorComponentFlags mask, float[] color, float depth, Rect2D clip, bool depthOnly)
+    private void DrawGlClear(int image, int level, int layer, uint width, uint height, ColorComponentFlags mask, float[] color, float depth, Rect2D clip, bool depthOnly, bool linearColor)
     {
         EndNativePass(); _targets.EndPass(Commands); _targets.EndRendering(Commands);
         Action<CommandBuffer>? resume = _targets.ScopeOpened;
@@ -106,10 +126,11 @@ public sealed unsafe partial class VulkanDevice
             AttachmentBlend blend = AttachmentBlend.Default; blend.WriteMask = mask;
             NativePipeline pipeline = RequestNativePipeline(new NativePipelineDescription { ProgramId = program,
                 Blend = depthOnly ? [] : [blend], DepthTest = depthOnly, DepthWrite = depthOnly, DepthCompare = CompareOp.Always,
-                Targets = NativeTargetFormats(target, depthOnly ? 0u : 1u)! }, out string reason) ?? throw new InvalidOperationException(reason);
+                Targets = NativeTargetFormats(target, depthOnly ? 0u : 1u, linearColor)! }, out string reason) ?? throw new InvalidOperationException(reason);
             if (depthOnly) SetUniform(program, GetUniformLocation(program, "clearDepth"), depth);
             else SetUniform(program, GetUniformLocation(program, "clearValue"), color[0], color[1], color[2], color[3]);
             if (!BeginNativePass(new NativePassDescription { Name = "GL/Clear", FramebufferId = target, ColorSlots = depthOnly ? 0u : 1u,
+                LinearColorAttachments = linearColor,
                 Scissor = clip, ViewportWidth = (int)width, ViewportHeight = (int)height }) || !DrawNativeFullscreen(pipeline, [], requirePipeline: true))
                 throw new InvalidOperationException("GL clear draw failed: " + NativeDrawRefusal);
         }

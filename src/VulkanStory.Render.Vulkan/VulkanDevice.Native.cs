@@ -98,12 +98,12 @@ public sealed unsafe partial class VulkanDevice
     /// The attachment formats of a target's colour slots, so a native system can state the
     /// formats its pipeline is built for. Null for a target that does not exist.
     /// </summary>
-    internal RenderTargetFormats? NativeTargetFormats(int framebufferId, uint colorSlots)
+    internal RenderTargetFormats? NativeTargetFormats(int framebufferId, uint colorSlots, bool linearColor = false)
     {
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(framebufferId));
         if (target == null) return null;
 
-        return _targets.DeclaredFormats(target, colorSlots);
+        return _targets.DeclaredFormats(target, colorSlots, linearColor);
     }
 
     /// <summary>
@@ -408,6 +408,7 @@ public sealed unsafe partial class VulkanDevice
         }
 
         CommandBuffer commandBuffer = Commands;
+        _targets.SetColorInterpretation(commandBuffer, target, pass.LinearColorAttachments);
         MarkNativePassSection(pass.Name);
         // A pass that coalesces into the current declaration (a GUI quad after the last one, an
         // entity in the stage's pass) would build a declaration DeclarePass then ignores.

@@ -131,7 +131,6 @@ internal sealed partial class ManagedGlBridge
     {
         if ((mask & ~0x4500) != 0) Error(0x0501);
         if (GlFramebufferStatus(Target) != 0x8CD5) Error(0x0506);
-        if ((mask & 0x4000) != 0) CheckGlColorEncoding();
         session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor, C.ClearDepth);
         if ((mask & 0x0400) != 0) Device.ClearGlStencil(Target, C.ClearStencil, State.StencilFront.WriteMask, State.ScissorEnabled ? State.Scissor : null);
     }
@@ -144,10 +143,9 @@ internal sealed partial class ManagedGlBridge
         Rect2D? clip = State.ScissorEnabled ? State.Scissor : null;
         if (buffer == 0x1800)
         {
-            CheckGlColorEncoding();
             CheckColorSlot(slot);
             float[] color = integer ? ReadInts(a[2], 4).Select(value => (float)value).ToArray() : ReadFloatValues(a[2], 4);
-            if (State.DrawBufferAttachment(Target, slot) >= 0) Device.ClearGlColor(Target, slot, State.SlotColorMask(slot), color, clip);
+            if (State.DrawBufferAttachment(Target, slot) >= 0) Device.ClearGlColor(Target, slot, State.SlotColorMask(slot), color, clip, State.FramebufferSrgb);
         }
         else if (buffer == 0x1801)
         {

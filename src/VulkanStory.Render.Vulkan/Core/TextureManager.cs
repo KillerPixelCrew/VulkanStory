@@ -157,7 +157,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     internal long FrameUse;
 
     /// <summary>
-    /// Single-mip, single-layer attachment views, created on demand and keyed by layer and mip.
+    /// Single-mip, single-layer attachment views, created on demand and keyed by layer, mip and format.
     ///
     /// <see cref="View" /> covers the whole image, which is what a sampler wants.
     /// A colour attachment pointed at one layer of an array needs a view of that
@@ -165,31 +165,37 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// times, once per layer, and a whole-image view there sends all three
     /// attachments to the same layer.
     /// </summary>
-    private readonly Dictionary<(uint Layer, uint Mip), ImageView> _layerViews = new();
+    private readonly Dictionary<(uint Layer, uint Mip, Format Format), ImageView> _layerViews = new();
+
+    internal static Format LinearColorFormat(Format format) => format switch
+    { Format.R8G8B8A8Srgb => Format.R8G8B8A8Unorm, Format.B8G8R8A8Srgb => Format.B8G8R8A8Unorm, _ => format };
+    internal static ImageCreateFlags ColorViewFlags(Format format) =>
+        LinearColorFormat(format) != format ? ImageCreateFlags.CreateMutableFormatBit : 0;
 
     public VulkanTexture(VulkanContext context) => _context = context;
 
-    public ImageView ViewOfLayer(uint layer, uint mipLevel = 0)
+    public ImageView ViewOfLayer(uint layer, uint mipLevel = 0, bool linearColor = false)
     {
         if (Volume) throw new NotSupportedException("Volume textures have no 2D attachment view.");
         if (layer >= Layers) throw new ArgumentOutOfRangeException(nameof(layer));
         if (mipLevel >= MipLevels) throw new ArgumentOutOfRangeException(nameof(mipLevel));
-        if (layer == 0 && Layers == 1 && MipLevels == 1 && !Cube &&
+        Format viewFormat = linearColor ? LinearColorFormat(Format) : Format;
+        if (viewFormat == Format && layer == 0 && Layers == 1 && MipLevels == 1 && !Cube &&
             (Aspect & (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit)) != (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit)) return View;
-        if (_layerViews.TryGetValue((layer, mipLevel), out ImageView existing)) return existing;
+        if (_layerViews.TryGetValue((layer, mipLevel, viewFormat), out ImageView existing)) return existing;
 
         var createInfo = new ImageViewCreateInfo
         {
             SType = StructureType.ImageViewCreateInfo,
             Image = Image,
             ViewType = ImageViewType.Type2D,
-            Format = Format,
+            Format = viewFormat,
             SubresourceRange = new ImageSubresourceRange(Aspect, mipLevel, 1, layer, 1),
         };
 
         VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
             "creating an attachment view for one array layer");
-        _layerViews[(layer, mipLevel)] = view;
+        _layerViews[(layer, mipLevel, viewFormat)] = view;
         return view;
     }
 
@@ -508,6 +514,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
                 ImageUsageFlags.TransferSrcBit | (IsDepthFormat(format)
                     ? ImageUsageFlags.DepthStencilAttachmentBit : ImageUsageFlags.ColorAttachmentBit),
             InitialLayout = ImageLayout.Undefined,
+            Flags = VulkanTexture.ColorViewFlags(format),
         };
         Result result = _context.Api.CreateImage(_context.Device, &imageInfo, null, out Image image);
         if (result != Result.Success) throw new InvalidOperationException("Image workspace query failed: " + result);
@@ -569,6 +576,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
             Extent = new Extent3D(width, height, 1), MipLevels = mipLevels, ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit, Tiling = ImageTiling.Optimal,
             SharingMode = SharingMode.Exclusive, Usage = usage, InitialLayout = ImageLayout.Undefined,
+            Flags = VulkanTexture.ColorViewFlags(format),
         };
         Result result = _context.Api.CreateImage(_context.Device, &imageInfo, null, out Image image);
         if (result != Result.Success) throw new InvalidOperationException("Storage image workspace query failed: " + result);
@@ -597,7 +605,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
             Usage = usage,
             SharingMode = SharingMode.Exclusive,
             InitialLayout = ImageLayout.Undefined,
-            Flags = cube ? ImageCreateFlags.CreateCubeCompatibleBit : 0,
+            Flags = (cube ? ImageCreateFlags.CreateCubeCompatibleBit : 0) | VulkanTexture.ColorViewFlags(format),
         };
 
         Vk api = _context.Api;

@@ -37,7 +37,7 @@ internal sealed partial class GameGraphicsAdapter
             uint slots = state.DrawBuffers(target);
             for (int slot = 0; slot < StatedRenderState.MaxColorAttachments; slot++)
                 if ((slots & (1u << slot)) != 0)
-                    renderer.ClearGlColor(target, slot, state.SlotColorMask(slot), color, scissor);
+                    renderer.ClearGlColor(target, slot, state.SlotColorMask(slot), color, scissor, state.FramebufferSrgb);
         }
         if ((mask & 0x0100) != 0 && state.DepthWrite) renderer.ClearGlDepth(target, depth, scissor);
         // None of this session's render targets has a stencil attachment.

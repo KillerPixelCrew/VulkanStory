@@ -10,7 +10,7 @@ internal sealed unsafe partial class TextureManager
             (aspect == ImageAspectFlags.ColorBit ? ImageUsageFlags.ColorAttachmentBit : ImageUsageFlags.DepthStencilAttachmentBit);
         if (requestedSamples <= 1 && (aspect & (ImageAspectFlags.ColorBit | ImageAspectFlags.DepthBit)) != 0) usage |= ImageUsageFlags.SampledBit;
         Result result = _context.Api.GetPhysicalDeviceImageFormatProperties(_context.PhysicalDevice, format, ImageType.Type2D,
-            ImageTiling.Optimal, usage, 0, out ImageFormatProperties properties);
+            ImageTiling.Optimal, usage, VulkanTexture.ColorViewFlags(format), out ImageFormatProperties properties);
         if (result != Result.Success || width > properties.MaxExtent.Width || height > properties.MaxExtent.Height)
             throw new NotSupportedException("Renderbuffer format or dimensions are unsupported: " + format);
         int selected = 0;

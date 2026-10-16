@@ -418,7 +418,6 @@ internal sealed partial class ManagedGlBridge : IDisposable
 
     private void Draw(int mode, int count, int indexType, long offset, int baseVertex, int[]? suppliedIndices = null)
     {
-        CheckGlColorEncoding();
         if (count < 0 || offset < 0) Error(0x0501);
         if (GlFramebufferStatus(Target) != 0x8CD5) Error(0x0506);
         MeshDrawMode topology = mode switch { 4 => MeshDrawMode.Triangles, 1 => MeshDrawMode.Lines, 3 => MeshDrawMode.LineStrip, _ => throw new NotSupportedException("Managed GL primitive topology " + mode + " has no backend mapping.") };

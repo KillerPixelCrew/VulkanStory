@@ -252,6 +252,8 @@ internal sealed class NativePipeline
 /// </summary>
 internal sealed class NativePassDescription
 {
+    /// <summary>Use compatible UNORM color views to bypass sRGB attachment conversion.</summary>
+    public bool LinearColorAttachments;
     public string Name = "";
 
     /// <summary>A render target id, or <see cref="PassDeclaration.DefaultFramebuffer" /> for the default target.</summary>

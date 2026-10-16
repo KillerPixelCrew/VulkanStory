@@ -13,10 +13,10 @@ internal sealed partial class ManagedGlBridge
     private int ReadTarget => C.Primary ? session.Graphics.ReadFramebufferId : C.ReadFramebuffer == 0 ? C.Target : C.ReadFramebuffer;
     private int PublicFramebuffer(int name) => name == (C.Primary ? PassDeclaration.DefaultFramebuffer : C.Target) ? 0 : name;
     private int ReadBuffer => C.ReadBuffers.TryGetValue(ReadTarget, out int token) ? token : PublicFramebuffer(ReadTarget) == 0 ? 0x0405 : 0x8CE0;
-    private void CheckGlColorEncoding()
+    private void CheckGlBlitColorEncoding()
     {
-        if (!State.FramebufferSrgb && Device.HasGlSrgbAttachment(Target))
-            throw new NotSupportedException("Disabled sRGB conversion requires linear-compatible framebuffer attachment views.");
+        if (!State.FramebufferSrgb && (Device.HasGlSrgbAttachment(Target) || Device.HasGlSrgbAttachment(ReadTarget)))
+            throw new NotSupportedException("Disabled sRGB blits require linear sampling and attachment views.");
     }
 
     private int GenFramebuffer()
@@ -154,7 +154,7 @@ internal sealed partial class ManagedGlBridge
     private void BlitFramebuffer(object?[] a)
     {
         int mask = I(a[8]), filter = I(a[9]);
-        if ((mask & 0x4000) != 0) CheckGlColorEncoding();
+        if ((mask & 0x4000) != 0) CheckGlBlitColorEncoding();
         if ((mask & ~0x4500) != 0) Error(0x0501);
         if (filter is not (0x2600 or 0x2601)) Error(0x0500);
         if ((mask & 0x0500) != 0 && filter != 0x2600) Error(0x0502);

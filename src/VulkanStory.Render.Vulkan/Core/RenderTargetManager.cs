@@ -41,6 +41,7 @@ internal sealed class VulkanFramebuffer
 
     /// <summary>Cached interned id of the attachment formats, or -1 when stale.</summary>
     public int FormatsId = -1;
+    public bool LinearColorAttachments;
 
     /// <summary>
     /// Bound colour slots the declared frame-graph pass leaves out of its scope (the
@@ -429,6 +430,24 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// slot participates unless the declared pass leaves it out; a pass that samples
     /// such a slot moves it to a shader-readable layout itself.
     /// </summary>
+    internal void SetColorInterpretation(CommandBuffer commandBuffer, VulkanFramebuffer framebuffer, bool linearColor)
+    {
+        if (linearColor)
+        {
+            bool hasSrgb = false;
+            foreach (AttachmentSlot slot in framebuffer.Color)
+                if (_textures.Get(slot.TextureId) is { } image && VulkanTexture.LinearColorFormat(image.Format) != image.Format) { hasSrgb = true; break; }
+            linearColor = hasSrgb;
+        }
+        if (framebuffer.LinearColorAttachments == linearColor) return;
+        // Pending load clears belong to the old interpretation. Finish them
+        // before changing views or the interned pipeline formats.
+        FlushAllPendingClears(commandBuffer);
+        EndRendering(commandBuffer);
+        framebuffer.LinearColorAttachments = linearColor;
+        framebuffer.FormatsId = -1;
+    }
+
     public void EnsureRendering(CommandBuffer commandBuffer)
     {
         if (_renderingActive && !_needsRestart) return;
@@ -484,7 +503,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 SType = StructureType.RenderingAttachmentInfo,
                 // The slot's layer, not the whole image: an array attached once
                 // per layer must reach a different layer each time.
-                ImageView = texture.ViewOfLayer(slot.Layer, slot.MipLevel),
+                ImageView = texture.ViewOfLayer(slot.Layer, slot.MipLevel, framebuffer.LinearColorAttachments),
                 ImageLayout = ImageLayout.ColorAttachmentOptimal,
                 // LOAD preserves what is already there, which is GL's model: a
                 // framebuffer keeps its contents until something clears it.
@@ -619,7 +638,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if ((uint)attachment >= (uint)_bound.Color.Length) return;
         if (!_bound.DrawColor(attachment).IsBound) return;
 
-        if (_graph.Enabled && (!_renderingActive || _needsRestart))
+        // Deferred transfer clears carry the image's base format. Linear-view
+        // clears stay in rendering so both load/clear operations use that view.
+        if (_graph.Enabled && !_bound.LinearColorAttachments && (!_renderingActive || _needsRestart))
         {
             VulkanTexture? texture = _textures.Get(_bound.DrawColor(attachment).TextureId);
             if (texture == null) return;
@@ -799,7 +820,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         {
             AttachmentSlot slot = framebuffer.DrawColor(i);
             VulkanTexture? texture = InScope(framebuffer, i) ? _textures.Get(slot.TextureId) : null;
-            colorFormats[i] = texture?.Format ?? Format.Undefined;
+            Format format = texture?.Format ?? Format.Undefined;
+            colorFormats[i] = framebuffer.LinearColorAttachments ? VulkanTexture.LinearColorFormat(format) : format;
         }
 
         Format depthFormat = Format.Undefined;
@@ -830,7 +852,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (expected.ColorFormats.Length != count) return false;
         for (int i = 0; i < count; i++)
         {
-            if (DeclaredColorFormat(framebuffer, colorSlots, i) != expected.ColorFormats[i]) return false;
+            if (DeclaredColorFormat(framebuffer, colorSlots, i, framebuffer.LinearColorAttachments) != expected.ColorFormats[i]) return false;
         }
         return DepthFormatOf(framebuffer) == expected.DepthFormat && StencilFormatOf(framebuffer) == expected.StencilFormat && SamplesOf(framebuffer) == expected.Samples;
     }
@@ -840,14 +862,14 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// on <paramref name="framebuffer" />: every bound slot among them, whatever pass the target
     /// is in now (a native system builds its pipeline before its pass is declared).
     /// </summary>
-    public RenderTargetFormats DeclaredFormats(VulkanFramebuffer framebuffer, uint colorSlots)
+    public RenderTargetFormats DeclaredFormats(VulkanFramebuffer framebuffer, uint colorSlots, bool linearColor = false)
     {
         int count = DeclaredColorCount(framebuffer, colorSlots);
 
         var colorFormats = new Format[count];
         for (int i = 0; i < count; i++)
         {
-            colorFormats[i] = DeclaredColorFormat(framebuffer, colorSlots, i);
+            colorFormats[i] = DeclaredColorFormat(framebuffer, colorSlots, i, linearColor);
         }
 
         return new RenderTargetFormats(colorFormats, DepthFormatOf(framebuffer), StencilFormatOf(framebuffer), SamplesOf(framebuffer));
@@ -865,11 +887,12 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     }
 
     /// <summary>The format of colour slot <paramref name="index" /> in that scope; Undefined for a slot it leaves out.</summary>
-    private Format DeclaredColorFormat(VulkanFramebuffer framebuffer, uint colorSlots, int index)
+    private Format DeclaredColorFormat(VulkanFramebuffer framebuffer, uint colorSlots, int index, bool linearColor)
     {
         bool inScope = framebuffer.DrawColor(index).IsBound && ((colorSlots >> index) & 1) != 0;
         VulkanTexture? texture = inScope ? _textures.Get(framebuffer.DrawColor(index).TextureId) : null;
-        return texture?.Format ?? Format.Undefined;
+        Format format = texture?.Format ?? Format.Undefined;
+        return linearColor ? VulkanTexture.LinearColorFormat(format) : format;
     }
 
     private Format DepthFormatOf(VulkanFramebuffer framebuffer) =>

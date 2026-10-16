@@ -57,7 +57,7 @@ internal sealed partial class GameGraphicsAdapter
         var renderer = RequireDevice();
         if (target == 0) target = PassDeclaration.DefaultFramebuffer;
         if (((Stated.DrawBuffers(target) >> slot) & 1) == 0 || Stated.SlotColorMask(slot) == 0) return;
-        renderer.ClearGlColor(target, slot, Stated.SlotColorMask(slot), [r, g, b, a], Stated.ScissorEnabled ? Stated.Scissor : null);
+        renderer.ClearGlColor(target, slot, Stated.SlotColorMask(slot), [r, g, b, a], Stated.ScissorEnabled ? Stated.Scissor : null, Stated.FramebufferSrgb);
     }
 
     private void ClearTargetDepth(int target, float depth)

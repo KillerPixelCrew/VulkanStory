@@ -336,7 +336,7 @@ internal static class StatedDraw
         PassDeclaration? declared = null, bool requirePipeline = false, FrontFace? frontFace = null)
     {
         refusal = null;
-        RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue);
+        RenderTargetFormats? all = device.NativeTargetFormats(framebufferId, uint.MaxValue, !stated.FramebufferSrgb);
         if (all == null) return Refused("framebuffer " + framebufferId + " does not exist", out refusal);
         int attached = all.ColorFormats.Length;
         uint allSlots = attached >= 32 ? uint.MaxValue : (1u << attached) - 1u;
@@ -378,7 +378,7 @@ internal static class StatedDraw
             if (attachment != 0 && Array.IndexOf(reads, attachment) >= 0) slots &= ~(1u << slot);
         }
         // Every attached slot states exactly the formats already read for the whole target.
-        RenderTargetFormats? formats = slots == allSlots ? all : device.NativeTargetFormats(framebufferId, slots);
+        RenderTargetFormats? formats = slots == allSlots ? all : device.NativeTargetFormats(framebufferId, slots, !stated.FramebufferSrgb);
         if (formats == null) return Refused("no formats for framebuffer " + framebufferId, out refusal);
 
         AttachmentBlend[] blend = stated.BlendFor(framebufferId, Math.Max(formats.ColorFormats.Length, 1));
@@ -432,6 +432,7 @@ internal static class StatedDraw
             TransientSlots = declared?.TransientSlots ?? 0,
             Flags = declared?.Flags ?? PassFlags.AllowSplit,
             Generic = true,
+            LinearColorAttachments = !stated.FramebufferSrgb,
             ViewportX = viewport.Offset.X,
             ViewportY = viewport.Offset.Y,
             ViewportWidth = (int)viewport.Extent.Width,
