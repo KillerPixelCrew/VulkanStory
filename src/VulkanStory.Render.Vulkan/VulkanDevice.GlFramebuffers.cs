@@ -88,7 +88,7 @@ public sealed unsafe partial class VulkanDevice
             VulkanTexture? texture = _textures.Get(id);
             if (texture is not null) { if (samples.HasValue && samples != texture.GlSamples) mismatchedSamples = true; samples ??= texture.GlSamples; }
             return texture is not null && !texture.Volume && mip < texture.MipLevels && layer < texture.Layers &&
-                (texture.DefinedLevels is null || texture.DefinedLevels.Contains((int)mip)) &&
+                texture.AttachmentLevelValid(mip) &&
                 (depth ? (texture.Aspect & ImageAspectFlags.DepthBit) != 0 : texture.Aspect == ImageAspectFlags.ColorBit);
         }
         foreach (AttachmentSlot slot in target.Color)
@@ -98,7 +98,7 @@ public sealed unsafe partial class VulkanDevice
         {
             VulkanTexture? stencil = _textures.Get(target.Stencil.TextureId);
             if (stencil is null || (stencil.Aspect & ImageAspectFlags.StencilBit) == 0 ||
-                target.Stencil.MipLevel >= stencil.MipLevels || target.Stencil.Layer >= stencil.Layers) return 0x8CD6;
+                !stencil.AttachmentLevelValid(target.Stencil.MipLevel) || target.Stencil.Layer >= stencil.Layers) return 0x8CD6;
             if (samples.HasValue && samples != stencil.GlSamples) mismatchedSamples = true;
             if (target.DepthTextureId != 0 && (target.DepthTextureId != target.Stencil.TextureId || target.DepthLayer != target.Stencil.Layer || target.DepthMipLevel != target.Stencil.MipLevel)) return 0x8CDD;
             attached = true;

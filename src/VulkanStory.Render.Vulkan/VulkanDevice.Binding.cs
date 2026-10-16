@@ -31,7 +31,7 @@ public sealed unsafe partial class VulkanDevice
         try
         {
             VulkanTexture copy = _textures.Get(copyId)!;
-            copy.State = source.State with { Mipmapped = false, MaxLevel = 0 };
+            copy.State = source.State with { Mipmapped = false, MaxLevel = 0, BaseLevel = 0 };
             CommandBuffer commands = Commands;
             _targets.FlushAllPendingClears(commands);
             _targets.EndRendering(commands);
@@ -66,6 +66,8 @@ public sealed unsafe partial class VulkanDevice
         VulkanStats.NoteReadSelfCopy();
         VulkanTexture copy = _textures.Get(copyId)!;
         copy.State = source.State;
+        copy.GlImmutable = source.GlImmutable;
+        copy.DefinedLevels = source.DefinedLevels is { } levels ? new HashSet<int>(levels) : null;
 
         // Source, copy, and any texture this draw already queued: one command.
         _textures.Require(_barriers, commandBuffer, source, Graph.ResourceUsage.TransferSrc);

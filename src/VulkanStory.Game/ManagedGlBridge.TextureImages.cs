@@ -80,11 +80,11 @@ internal sealed partial class ManagedGlBridge
     private void GenerateTextureMips(int target)
     {
         TextureObject texture = TextureForImage(target);
-        if (!texture.Images.TryGetValue(0, out TextureLevel image)) Error(0x0502);
+        int first = Device.TextureOf(texture.Name)!.EffectiveBaseLevel;
+        if (!texture.Images.TryGetValue(first, out TextureLevel image)) Error(0x0502);
         Device.GenerateMipmaps(texture.Name);
-        int maximum = Device.TextureOf(texture.Name)!.State.MaxLevel;
-        int last = maximum >= 0 ? Math.Min(texture.Levels - 1, maximum) : texture.Levels - 1;
-        for (int level = 1; level <= last; level++) texture.Images[level] = new(Math.Max(1, image.Width >> level), Math.Max(1, image.Height >> level), Math.Max(1, image.Depth >> level), image.Format);
+        int last = Device.TextureOf(texture.Name)!.EffectiveMaxLevel;
+        for (int level = first + 1; level <= last; level++) texture.Images[level] = new(Math.Max(1, image.Width >> (level - first)), Math.Max(1, image.Height >> (level - first)), Math.Max(1, image.Depth >> (level - first)), image.Format);
     }
 
     private static (int Components, int Bytes, bool Packed) ValidatePixelFormat(int format, int type)

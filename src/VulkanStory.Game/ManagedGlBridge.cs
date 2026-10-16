@@ -871,7 +871,6 @@ internal sealed partial class ManagedGlBridge : IDisposable
         float scalar = vector ? ReadFloatValues(a[2], 1)[0] : Convert.ToSingle(a[2]);
         if (!float.IsFinite(scalar)) Error(0x0501);
         int integer = (int)scalar;
-        if (parameter == 0x813C && integer != 0) throw new NotSupportedException("Nonzero texture base levels require sampler-view offsets.");
         if (parameter == 0x2800 && integer is not (0x2600 or 0x2601) ||
             parameter == 0x2801 && integer is not (0x2600 or 0x2601 or 0x2700 or 0x2701 or 0x2702 or 0x2703) ||
             parameter is 0x2802 or 0x2803 or 0x8072 && integer is not (0x2901 or 0x812F or 0x8370 or 0x812D) ||

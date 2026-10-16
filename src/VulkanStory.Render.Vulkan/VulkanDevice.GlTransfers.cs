@@ -245,7 +245,7 @@ public sealed unsafe partial class VulkanDevice
             if (!BeginNativePass(new NativePassDescription { Name = "GL/Blit", FramebufferId = target, ColorSlots = depth ? 0u : 1u,
                 LinearColorAttachments = linearColor,
                 Reads = [source], ViewportWidth = width, ViewportHeight = height, Scissor = clip }) ||
-                !DrawNativeFullscreen(pipeline, [new NativeTexture(pipeline.Sampler("sourceTexture"), source, sampling, linearColor)], requirePipeline: true))
+                !DrawNativeFullscreen(pipeline, [new NativeTexture(pipeline.Sampler("sourceTexture"), source, sampling, linearColor, UseTextureMipRange: false)], requirePipeline: true))
                 throw new InvalidOperationException("GL blit draw failed: " + NativeDrawRefusal);
         }
         finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { SetGlClipMask(clipMask); _targets.ScopeOpened = resumeQuery; } }

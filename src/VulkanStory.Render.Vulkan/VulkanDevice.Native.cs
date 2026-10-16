@@ -741,12 +741,21 @@ public sealed unsafe partial class VulkanDevice
             }
 
             SamplerState sampling = SamplerState.Default;
+            ImageView sampledView = default;
             if (texture != null)
             {
-                // MAX_LEVEL belongs to the texture, even when the caller overrides the filters.
-                sampling = sampled.Sampling is { } state
-                    ? state with { MaxLevel = texture.State.MaxLevel }
-                    : texture.State;
+                sampling = sampled.Sampling ?? texture.State;
+                if (sampled.UseTextureMipRange)
+                {
+                    if (!texture.TrySamplingView(sampling, sampled.LinearColor, out sampledView, out sampling)) texture = null;
+                }
+                else
+                {
+                    // Framebuffer transfers address physical attachment levels,
+                    // independently of the public texture's sampling range.
+                    sampledView = texture.ViewOfMips(0, texture.MipLevels, sampled.LinearColor, sampledShape: true);
+                    sampling = sampling with { BaseLevel = 0, MaxLevel = (int)texture.MipLevels - 1 };
+                }
             }
 
             // The bound depth attachment is sampled in the read-only depth layout, the one the
@@ -755,8 +764,6 @@ public sealed unsafe partial class VulkanDevice
                 ? ImageLayout.DepthStencilReadOnlyOptimal
                 : ImageLayout.ShaderReadOnlyOptimal;
 
-            ImageView sampledView = texture == null ? default : sampled.LinearColor
-                ? texture.ViewOfMips(0, texture.MipLevels, linearColor: true) : texture.View;
             if (sampler.FrameBinding >= 0)
             {
                 SamplerBindingValue value = texture == null

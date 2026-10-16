@@ -179,6 +179,7 @@ internal static class GlEnums
     public const int TextureCompareMode = 0x884C;
     public const int TextureLodBias = 0x8501;
     public const int TextureMaxLevel = 0x813D;
+    public const int TextureBaseLevel = 0x813C;
     public const int TextureBorderColor = 0x1004;
     public const int TextureCompareRefToTexture = 0x884E;
 }

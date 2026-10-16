@@ -38,6 +38,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// setting after building a chain.
 /// </param>
 /// <param name="AddressW">Optional volume R-axis wrapping; null retains the original clamp-to-edge behavior.</param>
+/// <param name="BaseLevel">GL texture base image; resolved to an image-view offset before sampler creation.</param>
 internal readonly record struct SamplerState(
     Filter MagFilter,
     Filter MinFilter,
@@ -50,7 +51,8 @@ internal readonly record struct SamplerState(
     BorderColor BorderColor,
     bool Mipmapped = false,
     int MaxLevel = -1,
-    SamplerAddressMode? AddressW = null)
+    SamplerAddressMode? AddressW = null,
+    int BaseLevel = 0)
 {
     public static SamplerState Default => new(
         Filter.Nearest, Filter.Nearest, SamplerMipmapMode.Nearest,
@@ -110,6 +112,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     internal int GlSamples { get; set; }
     internal bool IsGlRenderbuffer { get; set; }
     internal HashSet<int>? DefinedLevels { get; set; }
+    internal bool GlImmutable { get; set; }
 
     /// <summary>The image usage it was created with; 0 for images created outside <see cref="TextureManager.Create" />'s paths.</summary>
     public ImageUsageFlags Usage { get; init; }
@@ -204,29 +207,71 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// exactly one level, and a sampled read of level n must not name the levels the
     /// same pass writes: validation checks the layout of every level a view covers.
     /// </summary>
-    private readonly Dictionary<(uint BaseMip, uint MipCount, Format Format), ImageView> _mipViews = new();
+    private readonly Dictionary<(uint BaseMip, uint MipCount, Format Format, ImageViewType Type, uint Layers), ImageView> _mipViews = new();
 
-    public ImageView ViewOfMips(uint baseMip, uint mipCount, bool linearColor = false)
+    public ImageView ViewOfMips(uint baseMip, uint mipCount, bool linearColor = false, bool sampledShape = false)
     {
+        if (mipCount == uint.MaxValue && baseMip < MipLevels) mipCount = MipLevels - baseMip;
+        if (baseMip >= MipLevels || mipCount == 0 || mipCount > MipLevels - baseMip) throw new ArgumentOutOfRangeException(nameof(mipCount));
         Format viewFormat = linearColor ? LinearColorFormat(Format) : Format;
-        if (viewFormat == Format && baseMip == 0 && mipCount >= MipLevels && Layers <= 1 && !Cube && !Volume) return View;
+        ImageViewType type = !sampledShape ? ImageViewType.Type2D : Cube ? ImageViewType.TypeCube : Volume ? ImageViewType.Type3D : Layers > 1 ? ImageViewType.Type2DArray : ImageViewType.Type2D;
+        uint layers = sampledShape ? Layers : 1;
+        if (viewFormat == Format && baseMip == 0 && mipCount == MipLevels && (sampledShape || Layers <= 1 && !Cube && !Volume)) return View;
         lock (_mipViews)
         {
-            if (_mipViews.TryGetValue((baseMip, mipCount, viewFormat), out ImageView existing)) return existing;
+            if (_mipViews.TryGetValue((baseMip, mipCount, viewFormat, type, layers), out ImageView existing)) return existing;
 
             var createInfo = new ImageViewCreateInfo
             {
                 SType = StructureType.ImageViewCreateInfo,
                 Image = Image,
-                ViewType = ImageViewType.Type2D,
+                ViewType = type,
                 Format = viewFormat,
-                SubresourceRange = new ImageSubresourceRange((Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : Aspect, baseMip, mipCount, 0, 1),
+                SubresourceRange = new ImageSubresourceRange((Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : Aspect, baseMip, mipCount, 0, layers),
             };
             VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
                 "vkCreateImageView for mips " + baseMip + "+" + mipCount);
-            _mipViews[(baseMip, mipCount, viewFormat)] = view;
+            _mipViews[(baseMip, mipCount, viewFormat, type, layers)] = view;
             return view;
         }
+    }
+
+    internal int EffectiveBaseLevel => GlImmutable ? Math.Min(State.BaseLevel, (int)MipLevels - 1) : State.BaseLevel;
+    internal int EffectiveMaxLevel
+    {
+        get
+        {
+            int last = State.MaxLevel < 0 ? (int)MipLevels - 1 : Math.Min(State.MaxLevel, (int)MipLevels - 1);
+            return GlImmutable ? Math.Max(EffectiveBaseLevel, last) : last;
+        }
+    }
+    internal bool MipRangeComplete
+    {
+        get
+        {
+            int first = EffectiveBaseLevel, last = EffectiveMaxLevel;
+            if (first < 0 || first >= MipLevels || last < first) return false;
+            if (DefinedLevels is { } levels)
+                for (int level = first; level <= last; level++) if (!levels.Contains(level)) return false;
+            return true;
+        }
+    }
+    internal bool AttachmentLevelValid(uint level) => level < MipLevels &&
+        (DefinedLevels is null || DefinedLevels.Contains((int)level)) &&
+        (GlImmutable || IsGlRenderbuffer || level >= EffectiveBaseLevel && level <= EffectiveMaxLevel &&
+            (level == EffectiveBaseLevel || MipRangeComplete));
+
+    internal bool TrySamplingView(SamplerState sampling, bool linearColor, out ImageView view, out SamplerState effective)
+    {
+        view = default; effective = sampling;
+        int first = EffectiveBaseLevel;
+        if (Released || first < 0 || first >= MipLevels || DefinedLevels is { } images && !images.Contains(first)) return false;
+        int last = EffectiveMaxLevel;
+        if (sampling.Mipmapped && !MipRangeComplete) return false;
+        last = Math.Max(first, last);
+        view = ViewOfMips((uint)first, (uint)(last - first + 1), linearColor, sampledShape: true);
+        effective = sampling with { BaseLevel = 0, MaxLevel = last - first };
+        return true;
     }
 
     /// <inheritdoc/>
@@ -895,9 +940,11 @@ internal sealed unsafe partial class TextureManager : IDisposable
             const FormatFeatureFlags requiredBlitFeatures = FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit;
             if ((properties.OptimalTilingFeatures & requiredBlitFeatures) != requiredBlitFeatures) throw new NotSupportedException("This image format has no Vulkan mip-blit support.");
             Filter filter = texture.Aspect == ImageAspectFlags.ColorBit && (properties.OptimalTilingFeatures & FormatFeatureFlags.SampledImageFilterLinearBit) != 0 ? Filter.Linear : Filter.Nearest;
-            int mipWidth = (int)texture.Width;
-            int mipHeight = (int)texture.Height;
-            int mipDepth = (int)texture.Depth;
+            int baseLevel = texture.EffectiveBaseLevel;
+            if (baseLevel < 0 || baseLevel >= texture.MipLevels) return;
+            int mipWidth = Math.Max(1, (int)texture.Width >> baseLevel);
+            int mipHeight = Math.Max(1, (int)texture.Height >> baseLevel);
+            int mipDepth = Math.Max(1, (int)texture.Depth >> baseLevel);
 
             if (_context.CheckpointsAvailable)
             {
@@ -906,8 +953,9 @@ internal sealed unsafe partial class TextureManager : IDisposable
 
             TransitionTexture(commandBuffer, texture, ResourceUsage.TransferSrc);
 
-            uint lastLevel = texture.State.MaxLevel >= 0 ? Math.Min(texture.MipLevels - 1, (uint)texture.State.MaxLevel) : texture.MipLevels - 1;
-            for (uint level = 1; level <= lastLevel; level++)
+            int maximum = texture.EffectiveMaxLevel;
+            uint lastLevel = maximum < 0 ? 0 : (uint)maximum;
+            for (uint level = (uint)baseLevel + 1; level <= lastLevel; level++)
             {
                 int nextWidth = Math.Max(1, mipWidth / 2);
                 int nextHeight = Math.Max(1, mipHeight / 2);
@@ -971,6 +1019,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
                 0x8072 => state with { AddressW = GlEnums.AddressModeFrom(integer) },
                 GlEnums.TextureLodBias => state with { LodBias = value },
                 GlEnums.TextureMaxLevel => state with { MaxLevel = integer },
+                GlEnums.TextureBaseLevel => state with { BaseLevel = integer },
                 GlEnums.TextureCompareMode => state with
                 {
                     CompareEnable = integer == GlEnums.TextureCompareRefToTexture,

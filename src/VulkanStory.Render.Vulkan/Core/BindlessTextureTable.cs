@@ -134,6 +134,11 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
             return 0;
         }
 
+        if (view.Handle == 0 && !texture.TrySamplingView(state, false, out view, out state))
+        {
+            NotePlaceholder();
+            return 0;
+        }
         SamplerState effective = BindlessKinds.EffectiveState(state, kind);
         lock (_lock)
         {

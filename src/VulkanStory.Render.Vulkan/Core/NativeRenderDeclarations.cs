@@ -45,7 +45,7 @@ internal readonly record struct NativeSamplerSlot(int Index, int PushOffset, int
 }
 
 /// <summary>One sampled texture of a native draw: the slot, the texture handle and the sampler state to read it with (null: the texture's own).</summary>
-internal readonly record struct NativeTexture(NativeSamplerSlot Sampler, int TextureId, SamplerState? Sampling = null, bool LinearColor = false);
+internal readonly record struct NativeTexture(NativeSamplerSlot Sampler, int TextureId, SamplerState? Sampling = null, bool LinearColor = false, bool UseTextureMipRange = true);
 
 /// <summary>
 /// The fixed state a native pipeline is built for (docs/vulkan.md,

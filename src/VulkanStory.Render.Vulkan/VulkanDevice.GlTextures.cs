@@ -20,6 +20,7 @@ public sealed unsafe partial class VulkanDevice
             previous.Format == format && previous.Volume == volume && previous.MipLevels == levels)
         {
             previous.GlInternalFormat = internalFormat;
+            previous.GlImmutable = redefinedLevel < 0;
             if (redefinedLevel < 0) previous.DefinedLevels = null;
             else previous.DefinedLevels?.Add(redefinedLevel);
             return;
@@ -32,6 +33,7 @@ public sealed unsafe partial class VulkanDevice
         {
             VulkanTexture replacement = _textures.Get(replacementName)!;
             replacement.GlInternalFormat = internalFormat;
+            replacement.GlImmutable = redefinedLevel < 0;
             replacement.DefinedLevels = redefinedLevel < 0 ? null : new HashSet<int> { redefinedLevel };
             if (previous is not null && previous.Format == format && previous.Volume == volume)
             {
