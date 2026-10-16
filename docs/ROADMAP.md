@@ -106,7 +106,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 - **GL-02 / GL-03: Managed OpenGL compatibility**
   - The shared bridge routes supported operations from both OpenTK GL namespaces, including depth/culling/color-mask state and float vector uniforms. Game-created shader programs can be queried through a borrowed GL view; uniform writes retain the game adapter's motion handling. OpenAL procedure lookups are excluded from graphics refusal.
   - Shared framebuffer names/views, independent read/draw bindings, attachment queries and output routing, mip attachment views/clears, and 2D readback with pack/unpack row layout are implemented. Temporary pass and motion scopes retain complete draw-buffer routing state.
-  - Complete the remaining operation families required by [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12): generic OpenTK native indirect calls, mutable and volume texture definition/transfers, framebuffer blits/copies, queries and remaining shader/state operations. Unsupported calls still prevent their owning code mod from starting; the issue #12 pack still crashes during item registration.
+  - Supported generic memory wrappers route through metadata-checked native table entries, sharing the same implementation as managed overloads. Native callback failures produce GL errors and diagnostics; table restoration and callback lifetimes are owned by the routing group.
+  - Complete the remaining operation families required by [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12): mutable and volume texture definition/transfers, framebuffer blits/copies, queries and remaining shader/state operations. Unsupported calls still prevent their owning code mod from starting; the issue #12 pack still crashes during item registration.
 
 ## Deferred
 

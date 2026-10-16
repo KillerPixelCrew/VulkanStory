@@ -62,10 +62,15 @@ conversion; byte uploads honor the corresponding unpack row layout. Temporary
 mod passes and motion windows restore the complete draw-buffer routing state.
 
 This bridge implements a subset of GL, not a complete desktop OpenGL driver.
-Generic OpenTK wrappers issue their own native indirect calls; support for a
-non-generic overload does not admit those wrappers. Texture definition, volume
-transfers, framebuffer blits, queries and additional shader/state operations also
-remain incomplete.
+Supported generic memory wrappers use OpenTK's native procedure table. The bridge
+checks the loaded binding's metadata identity, slot and native signature before
+publishing a callback; arrays and references stay pinned by the original wrapper.
+The scanner admits a generic wrapper only when it reaches an implemented entry.
+Callbacks stay rooted for process lifetime and the original table entries are
+restored when routing is removed. Unexpected callback failures set a GL error,
+increment the status counter and are logged without crossing the unmanaged ABI.
+Texture definition, volume transfers, framebuffer blits, queries and additional
+shader/state operations remain incomplete.
 Native GL imports and graphics proc-address loaders still need explicit support.
 When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata
 before executing the code. Unsupported graphics access is refused through the

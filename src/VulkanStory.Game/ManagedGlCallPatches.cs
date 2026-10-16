@@ -7,7 +7,7 @@ using OpenTK.Graphics.OpenGL4;
 namespace VulkanStory.Game;
 
 /// <summary>Installs exact managed OpenTK command entry points for owned Vulkan contexts.</summary>
-public static class ManagedGlCallPatches
+public static partial class ManagedGlCallPatches
 {
     private const string Owner = "vulkanstory.routing.managed-gl";
     private static ProcessRuntime? runtime;
@@ -29,6 +29,7 @@ public static class ManagedGlCallPatches
         "GenFramebuffer", "GenFramebuffers", "DeleteFramebuffer", "DeleteFramebuffers", "BindFramebuffer", "FramebufferTexture2D",
         "CheckFramebufferStatus", "GetFramebufferAttachmentParameter", "DrawBuffer", "DrawBuffers", "ReadBuffer",
         "PixelStore", "GetTexImage", "GetTextureSubImage", "ReadPixels", "GetTexLevelParameter", "IsTexture",
+        "LoadBindings",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -37,7 +38,9 @@ public static class ManagedGlCallPatches
 
     internal static bool SupportsManagedCall(MethodReference reference)
     {
-        if (!Bindings.Any(binding => binding.FullName == reference.DeclaringType.FullName) || reference.HasGenericParameters || reference is GenericInstanceMethod) return false;
+        if (!Bindings.Any(binding => binding.FullName == reference.DeclaringType.FullName)) return false;
+        if (reference is GenericInstanceMethod generic) return SupportsNativeGeneric(generic);
+        if (reference.HasGenericParameters) return false;
         return SupportedMethods.Any(method => method.DeclaringType!.FullName == reference.DeclaringType.FullName && method.Name == reference.Name &&
             TypeName(method.ReturnType) == reference.ReturnType.FullName.Replace('/', '+') &&
             method.GetParameters().Select(parameter => TypeName(parameter.ParameterType)).SequenceEqual(
@@ -122,6 +125,7 @@ public static class ManagedGlCallPatches
         bool attempted = false;
         return new StartupPatchGroup("graphics-managed-gl", () =>
         {
+            _ = NativePlans.Value;
             foreach (string name in Names)
                 if (!targets.Any(target => target.Name == name)) throw new MissingMethodException("OpenTK managed GL entry point is absent: " + name);
             foreach (MethodInfo target in targets)
@@ -143,16 +147,18 @@ public static class ManagedGlCallPatches
                 prefixes.Add((target, prefix));
                 harmony.Patch(target, prefix: new HarmonyMethod(prefix) { priority = Priority.First });
             }
+            InstallNativeEntries();
         }, () =>
         {
             if (!attempted) return;
+            RestoreNativeEntries();
             harmony.UnpatchAll(Owner);
             if (ReferenceEquals(runtime, owner)) runtime = null;
             Calls.Clear(); prefixes.Clear(); PrefixOwners.Clear(); attempted = false;
         });
     }
 
-    /// <summary>Dispatches an emitted exact-signature prefix; original GL remains available only while routing is inactive.</summary>
+    /// <summary>Dispatches an exact-signature prefix; original GL is available only before Vulkan ownership commits.</summary>
     /// <param name="key">Installed overload identity.</param>
     /// <param name="args">Boxed arguments, including mutable by-reference outputs.</param>
     /// <param name="result">Boxed original return type or null for void.</param>
@@ -160,8 +166,14 @@ public static class ManagedGlCallPatches
     public static bool Route(int key, object?[] args, out object? result)
     {
         result = null;
-        if (runtime?.IsActive != true)
+        if (runtime?.HasCommitted != true)
         { missingContextObserved = false; missingContextError = 0; return true; }
+        if (Calls[key].Name == "LoadBindings")
+        {
+            if (args[0] is null) throw new ArgumentNullException("context");
+            ActivateNativeEntries();
+            return false;
+        }
         if (ManagedGlBridge.Current is not { } bridge)
         {
             if (!missingContextObserved) { missingContextObserved = true; missingContextError = 0x0502; }

@@ -53,7 +53,8 @@ internal static class ModCompatibilityConsumerPatches
                 return "Mod GL discovery (latest inspected images): " + (Inspections.Count == 0 ? "no third-party images inspected" :
                     string.Join("\n", Inspections.Values.Select(result => result.Detail))) +
                     "\nGame RenderAPI and supported managed OpenTK calls share renderer routing; unsupported direct graphics access is refused. " +
-                    "Reflection, dynamic/custom loaders, external managed dependencies and native dependency internals are unverified.";
+                    "Reflection, dynamic/custom loaders, external managed dependencies and native dependency internals are unverified." +
+                    "\nNative GL dispatch failures: " + ManagedGlCallPatches.NativeFailureCount;
         }
     }
 

@@ -40,6 +40,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     internal ManagedGlBridge(GameRenderSession session)
     {
         this.session = session;
+        ManagedGlCallPatches.ActivateNativeEntries();
         Device.ProgramDeleted += ForgetBorrowedProgram;
         Device.FramebufferDeleted += ForgetFramebuffer;
         string? trace = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
@@ -143,6 +144,14 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private static IntPtr Pointer(object? value) => value is IntPtr pointer ? pointer : new IntPtr(L(value));
     private void QueueError(int code) { if (!C.Errors.Contains(code)) C.Errors.Enqueue(code); }
 
+    internal void RecordNativeFailure(string detail, bool log)
+    {
+        QueueError(0x0502);
+        if (!log) return;
+        if (drawTracePath is not null) WriteTrace(new { @event = "native-gl-failure", detail, context = C.Id.ToInt64() });
+        session.ReportNativeGlFailure(detail);
+    }
+
     /// <summary>Executes one exact reflected OpenTK overload; array and by-ref outputs remain in args.</summary>
     internal object? Dispatch(MethodInfo method, object?[] args)
     {
@@ -166,6 +175,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         switch (method.Name)
         {
             case "GetError": return C.Errors.TryDequeue(out int error) ? error : 0;
+            case "LoadBindings": if (a[0] is null) throw new ArgumentNullException("context"); ManagedGlCallPatches.ActivateNativeEntries(); return null;
             case "GetInteger": return Query(method, a, false);
             case "GetBoolean": return Query(method, a, true);
             case "GenFramebuffer": return GenFramebuffer();

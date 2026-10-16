@@ -80,7 +80,7 @@ internal sealed partial class ManagedGlBridge
         int required = checked(start + (height - 1) * stride + width * pixelBytes);
         if (capacity.HasValue && required > capacity.Value) Error(0x0502);
         if (destination is Array array && System.Buffer.ByteLength(array) < required) Error(0x0502);
-        if (destination is not Array && Pointer(destination) == IntPtr.Zero) Error(0x0502);
+        if (destination is not System.Array && Pointer(destination) == IntPtr.Zero) Error(0x0502);
         int sourceX = Math.Clamp(x, 0, imageWidth), sourceY = Math.Clamp(y, 0, imageHeight);
         int sourceWidth = (int)Math.Max(0, Math.Min((long)x + width, imageWidth) - sourceX);
         int sourceHeight = (int)Math.Max(0, Math.Min((long)y + height, imageHeight) - sourceY);
