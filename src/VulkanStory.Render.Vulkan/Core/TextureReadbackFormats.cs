@@ -6,13 +6,27 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// <summary>Raw texel sizing shared by framebuffer capture and texture readback.</summary>
 internal static class TextureReadbackFormats
 {
+    /// <summary>The buffer representation of one copied aspect, not the packed image's combined texel.</summary>
+    internal static Format AspectFormat(Format format, ImageAspectFlags aspect) => (format, aspect) switch
+    {
+        (Format.D16UnormS8Uint, ImageAspectFlags.DepthBit) => Format.D16Unorm,
+        (Format.D24UnormS8Uint, ImageAspectFlags.DepthBit) => Format.X8D24UnormPack32,
+        (Format.D32SfloatS8Uint, ImageAspectFlags.DepthBit) => Format.D32Sfloat,
+        (Format.D16UnormS8Uint or Format.D24UnormS8Uint or Format.D32SfloatS8Uint or Format.S8Uint, ImageAspectFlags.StencilBit) => Format.S8Uint,
+        (_, ImageAspectFlags.DepthBit) when TextureManager.IsDepthFormat(format) => format,
+        (_, ImageAspectFlags.ColorBit) when !TextureManager.IsDepthFormat(format) && format != Format.S8Uint => format,
+        _ => throw new ArgumentException("Readback needs one compatible color, depth or stencil aspect.", nameof(aspect)),
+    };
+
+    internal static int BytesPerTexel(Format format, ImageAspectFlags aspect) => BytesPerTexel(AspectFormat(format, aspect));
+
     /// <summary>Returns exact raw-readback texel sizes for supported uncompressed formats.</summary>
     /// <param name="format">Image format being copied to host memory.</param>
     /// <returns>Raw bytes per texel.</returns>
     /// <exception cref="NotSupportedException">The format has no supported uncompressed readback representation.</exception>
     public static int BytesPerTexel(Format format) => format switch
     {
-        Format.R8Unorm or Format.R8SNorm or Format.R8Uint or Format.R8Sint or Format.R8Srgb => 1,
+        Format.R8Unorm or Format.R8SNorm or Format.R8Uint or Format.R8Sint or Format.R8Srgb or Format.S8Uint => 1,
         Format.R8G8Unorm or Format.R8G8SNorm or Format.R8G8Uint or Format.R8G8Sint or Format.R8G8Srgb or
         Format.R16Unorm or Format.R16SNorm or Format.R16Uint or Format.R16Sint or Format.R16Sfloat or
         Format.D16Unorm => 2,
@@ -21,7 +35,7 @@ internal static class TextureReadbackFormats
         Format.R8G8B8A8Unorm or Format.R8G8B8A8SNorm or Format.R8G8B8A8Uint or Format.R8G8B8A8Sint or Format.R8G8B8A8Srgb or
         Format.B8G8R8A8Unorm or Format.B8G8R8A8SNorm or Format.B8G8R8A8Uint or Format.B8G8R8A8Sint or Format.B8G8R8A8Srgb or
         Format.R16G16Unorm or Format.R16G16SNorm or Format.R16G16Uint or Format.R16G16Sint or Format.R16G16Sfloat or
-        Format.R32Uint or Format.R32Sint or Format.R32Sfloat or Format.D32Sfloat or
+        Format.R32Uint or Format.R32Sint or Format.R32Sfloat or Format.D32Sfloat or Format.X8D24UnormPack32 or
         Format.B10G11R11UfloatPack32 or Format.E5B9G9R9UfloatPack32 => 4,
         Format.R16G16B16Unorm or Format.R16G16B16SNorm or Format.R16G16B16Uint or Format.R16G16B16Sint or
         Format.R16G16B16Sfloat => 6,

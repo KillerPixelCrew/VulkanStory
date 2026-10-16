@@ -226,9 +226,9 @@ public sealed unsafe partial class VulkanDevice
             return;
         }
 
-        // The copy writes whole texels of the image's format whatever the caller
+        // The copy writes whole texels of the selected aspect whatever the caller
         // sized its destination for; the buffer holds them all, the caller gets its bytes.
-        ulong copied = (ulong)width * height * (ulong)BytesPerPixel(texture.Format);
+        ulong copied = (ulong)width * height * (ulong)TextureReadbackFormats.BytesPerTexel(texture.Format, aspect);
         ulong handed = Math.Min(bytes, copied);
         using var readback = new VulkanBuffer(_context, Math.Max(bytes, copied),
             BufferUsageFlags.TransferDstBit,
@@ -272,9 +272,9 @@ public sealed unsafe partial class VulkanDevice
         if (x < 0 || y < 0 || width <= 0 || height <= 0 || (long)x + width > Math.Max(1u, texture.Width >> level) ||
             (long)y + height > Math.Max(1u, texture.Height >> level)) throw new ArgumentOutOfRangeException(nameof(width));
         EndNativePass();
-        Format readbackFormat = texture.Format == Format.D32SfloatS8Uint ? Format.D32Sfloat : texture.Format;
-        var bytes = new byte[checked(width * height * BytesPerPixel(readbackFormat))];
         ImageAspectFlags aspect = (texture.Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+        Format readbackFormat = TextureReadbackFormats.AspectFormat(texture.Format, aspect);
+        var bytes = new byte[checked(width * height * BytesPerPixel(readbackFormat))];
         fixed (byte* destination = bytes)
             ReadBack(texture, x, y, (uint)width, (uint)height, aspect, (ulong)bytes.Length, (IntPtr)destination, (uint)level);
         return TextureDump.ToParityReadback(readbackFormat, texture.GlInternalFormat, width, height, bytes) ??

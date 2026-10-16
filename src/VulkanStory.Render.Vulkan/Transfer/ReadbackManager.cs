@@ -67,9 +67,9 @@ internal sealed unsafe class ReadbackManager : IDisposable
     {
         FrameSlot slot = _frames.Current;
         CommandBuffer commandBuffer = slot.CommandBuffer;
-        // The copy writes whole texels whatever the caller asked for, so the
+        // The copy writes whole texels of the selected aspect, so the
         // reservation covers them all; only the requested bytes are handed out.
-        ulong texel = (ulong)TextureReadbackFormats.BytesPerTexel(texture.Format);
+        ulong texel = (ulong)TextureReadbackFormats.BytesPerTexel(texture.Format, aspect);
         ulong copied = (ulong)width * height * texel;
         VulkanBuffer arena = Reserve(slot.Index, Math.Max(bytes, copied), OffsetAlignmentFor(texel), out ulong offset);
 
