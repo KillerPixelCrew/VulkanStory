@@ -356,6 +356,10 @@ public enum ResourceUsage
     PresentSrc,
     /// <summary>Sampled read-only depth with writable stencil in the same image.</summary>
     DepthReadStencilWriteSampled,
+    /// <summary>Multisample depth/stencil attachment loaded and read by a fixed-function resolve.</summary>
+    DepthStencilResolveSource,
+    /// <summary>Single-sample depth/stencil attachment written by a fixed-function resolve.</summary>
+    DepthStencilResolveDestination,
 }
 
 /// <summary>
@@ -403,6 +407,11 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.DepthReadStencilWriteSampled => new(ImageLayout.DepthReadOnlyStencilAttachmentOptimal,
             DepthTests | PipelineStageFlags2.AllGraphicsBit,
             AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit | AccessFlags2.ShaderReadBit),
+        ResourceUsage.DepthStencilResolveSource => new(ImageLayout.DepthStencilAttachmentOptimal,
+            DepthTests | PipelineStageFlags2.ColorAttachmentOutputBit,
+            AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit | AccessFlags2.ColorAttachmentReadBit),
+        ResourceUsage.DepthStencilResolveDestination => new(ImageLayout.DepthStencilAttachmentOptimal,
+            PipelineStageFlags2.ColorAttachmentOutputBit, AccessFlags2.ColorAttachmentReadBit | AccessFlags2.ColorAttachmentWriteBit),
         ResourceUsage.SampleFragment => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleVertex => new(ImageLayout.ShaderReadOnlyOptimal,
@@ -447,8 +456,9 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         {
             ResourceUsage.ColorWrite or ResourceUsage.ColorBlend =>
                 (PipelineStageFlags2.ColorAttachmentOutputBit, AccessFlags2.ColorAttachmentWriteBit),
-            ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled or ResourceUsage.DepthReadStencilWriteSampled =>
+            ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled or ResourceUsage.DepthReadStencilWriteSampled or ResourceUsage.DepthStencilResolveSource =>
                 (DepthTests, AccessFlags2.DepthStencilAttachmentWriteBit),
+            ResourceUsage.DepthStencilResolveDestination => (PipelineStageFlags2.ColorAttachmentOutputBit, AccessFlags2.ColorAttachmentWriteBit),
             ResourceUsage.TransferDst => (PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
             // A dispatch's storage write: the next barrier must make it available.
             ResourceUsage.StorageWrite or ResourceUsage.StorageReadWrite =>

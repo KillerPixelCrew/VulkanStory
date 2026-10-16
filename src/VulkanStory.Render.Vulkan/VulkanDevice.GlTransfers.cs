@@ -86,6 +86,13 @@ public sealed unsafe partial class VulkanDevice
             right = Math.Min(right, (long)clip.Offset.X + clip.Extent.Width); top = Math.Min(top, (long)clip.Offset.Y + clip.Extent.Height);
         }
         if (left >= right || bottom >= top) return;
+        if (aspect is ImageAspectFlags.DepthBit or ImageAspectFlags.StencilBit && source.Samples!=SampleCountFlags.Count1Bit && destination.Samples==SampleCountFlags.Count1Bit)
+        {
+            ResolveGlDepthStencil(source,(uint)sourceLevel,(uint)sourceLayer,destination,(uint)destinationLevel,(uint)destinationLayer,
+                sourceRect,destinationRect,sourceWidth,sourceHeight,destinationWidth,destinationHeight,
+                new Rect2D(new Offset2D((int)left,(int)bottom),new Extent2D((uint)(right-left),(uint)(top-bottom))),aspect,destinationId);
+            return;
+        }
         if (aspect == ImageAspectFlags.StencilBit && source.Samples == SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit &&
             (sourceDeltaX != destinationDeltaX || sourceDeltaY != destinationDeltaY))
         {
