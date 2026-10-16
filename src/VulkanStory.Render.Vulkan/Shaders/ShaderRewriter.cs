@@ -141,7 +141,7 @@ internal static class ShaderRewriter
         ParsedShader parsed, ProgramInterfaceLayout layout, EnumShaderType stage, bool emitDepthRemap,
         List<Edit> edits)
     {
-        string frameBlock = BuildFrameBlock(layout, stage);
+        string frameBlock = BuildFrameBlock(layout, stage, emitDepthRemap);
         string block = BuildUniformBlock(layout, stage);
         string push = BuildPushBlock(layout, stage);
         string arrays = BuildTextureArrays(layout, stage);
@@ -160,12 +160,13 @@ internal static class ShaderRewriter
         header.Append(block);
         header.Append(push);
         header.Append(arrays);
+        if (emitDepthRemap) header.Append(GlClipShader.Declarations(parsed.Source));
 
         // The geometry stage's EmitVertex() replacement lives in the header so
         // it precedes every function that may call it.
         if (emitDepthRemap && stage == EnumShaderType.GeometryShader)
         {
-            header.Append("void " + EmitVertexReplacementName + "() { " + DepthRemapStatement + " EmitVertex(); }\n");
+            header.Append("void " + EmitVertexReplacementName + "();\n");
         }
 
         if (parsed.VersionStart >= 0)
@@ -191,10 +192,10 @@ internal static class ShaderRewriter
     /// length this program declared. Anonymous like the program's own block, so
     /// every reference in the body resolves unchanged.
     /// </summary>
-    private static string BuildFrameBlock(ProgramInterfaceLayout layout, EnumShaderType stage)
+    private static string BuildFrameBlock(ProgramInterfaceLayout layout, EnumShaderType stage, bool clipping)
     {
-        if (!layout.FrameMembersByStage.TryGetValue(stage, out HashSet<string>? stageMembers)) return "";
-        if (stageMembers.Count == 0) return "";
+        layout.FrameMembersByStage.TryGetValue(stage, out HashSet<string>? stageMembers);
+        if ((stageMembers is null || stageMembers.Count == 0) && !clipping) return "";
 
         var builder = new StringBuilder();
         builder.Append(CultureInfo.InvariantCulture, $"\nlayout(scalar, set = {FrameGlobals.Set}");
@@ -204,7 +205,7 @@ internal static class ShaderRewriter
 
         foreach (UniformMember member in FrameGlobals.Members)
         {
-            if (!stageMembers.Contains(member.Name)) continue;
+            if (stageMembers is null || !stageMembers.Contains(member.Name) || FrameGlobals.OwnerOf(member.Name) == GlClipShader.Owner) continue;
 
             builder.Append(CultureInfo.InvariantCulture, $"    layout(offset = {member.Offset}) ");
             builder.Append(member.Type.Name).Append(' ').Append(member.Name);
@@ -216,6 +217,7 @@ internal static class ShaderRewriter
             builder.Append(";\n");
         }
 
+        if (clipping) builder.Append(GlClipShader.Fields());
         builder.Append("};\n");
         return builder.ToString();
     }
@@ -497,6 +499,7 @@ internal static class ShaderRewriter
     private static void AddLocationEdit(
         ProgramInterfaceLayout layout, GlslDeclaration declaration, EnumShaderType stage, List<Edit> edits)
     {
+        if (declaration.Name.StartsWith("gl_", StringComparison.Ordinal)) return;
         int location;
         if (stage == EnumShaderType.VertexShader && declaration.Kind == GlslDeclarationKind.Input)
         {
@@ -577,6 +580,8 @@ internal static class ShaderRewriter
         if (stage == EnumShaderType.GeometryShader)
         {
             AddGeometryDepthRemapEdits(parsed, edits, result);
+            edits.Add(new Edit(parsed.Source.Length, 0, "\nvoid " + EmitVertexReplacementName + "() { " +
+                GlClipShader.Apply(parsed.Source) + " " + DepthRemapStatement + " EmitVertex(); }\n"));
             return;
         }
 
@@ -591,6 +596,7 @@ internal static class ShaderRewriter
         edits.Add(new Edit(parsed.Source.Length, 0,
             "\n\nvoid main()\n{\n" +
             "    " + MainReplacementName + "();\n" +
+            "    " + GlClipShader.Apply(parsed.Source) + "\n" +
             "    " + DepthRemapStatement + "\n" +
             "}\n"));
     }

@@ -120,10 +120,12 @@ internal sealed class NativeShaderBuilder
 
         var includes = new SortedSet<string>(StringComparer.Ordinal);
         string source;
+        string clipFrame;
         string fileName = name + ".glsl";
         try
         {
             source = ExpandIncludes(Path.Combine(sourceDirectory, fileName), sourceDirectory, includes);
+            clipFrame = ExpandIncludes(Path.Combine(sourceDirectory, IncludeDirectoryName, "frame.glsl"), sourceDirectory, includes);
         }
         catch (InvalidDataException error)
         {
@@ -159,6 +161,12 @@ internal sealed class NativeShaderBuilder
             {
                 string stageDefine = i == 0 ? "OPTIMUM_VERTEX" : "OPTIMUM_FRAGMENT";
                 string code = ShaderCompiler.SplicePrefix(source, "#define " + stageDefine + " 1\n" + prefix);
+                if (stages[i].Type == EnumShaderType.VertexShader)
+                {
+                    code = ShaderCompiler.SplicePrefix(code, clipFrame + "\n" + GlClipShader.Declarations("") + "#define main _optimum_native_main\n");
+                    code += "\n#undef main\nvoid main() { _optimum_native_main(); " +
+                        GlClipShader.Apply("", FrameGlobals.InstanceName + ".", nativeDepth: true) + " }\n";
+                }
                 ShaderCompileResult optimised = _compiler.Compile(code, fileName, stages[i].Type);
                 ShaderCompileResult reflection = optimised.Success
                     ? _compiler.CompileForReflection(code, fileName, stages[i].Type)

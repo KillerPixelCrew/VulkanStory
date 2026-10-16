@@ -518,7 +518,7 @@ internal sealed partial class ProgramInterfaceLayout
         {
             foreach (GlslDeclaration declaration in parsed.Declarations)
             {
-                if (declaration.Location < 0) continue;
+                if (declaration.Name.StartsWith("gl_", StringComparison.Ordinal) || declaration.Location < 0) continue;
 
                 if (stage == EnumShaderType.VertexShader && declaration.Kind == GlslDeclarationKind.Input)
                 {
@@ -554,7 +554,7 @@ internal sealed partial class ProgramInterfaceLayout
         {
             foreach (GlslDeclaration declaration in parsed.Declarations)
             {
-                if (declaration.Location >= 0) continue;
+                if (declaration.Name.StartsWith("gl_", StringComparison.Ordinal) || declaration.Location >= 0) continue;
                 int span = LocationSpan(declaration);
 
                 if (stage == EnumShaderType.VertexShader && declaration.Kind == GlslDeclarationKind.Input)

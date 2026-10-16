@@ -13,6 +13,7 @@ public static partial class ManagedGlCallPatches
         "BufferData", "BufferSubData", "TexSubImage2D", "GetTexImage", "GetTextureSubImage", "ReadPixels",
         "TexImage2D", "TexImage3D", "TexSubImage3D",
         "TexParameter",
+        "ClipPlane", "GetClipPlane",
         "Uniform1", "Uniform2", "Uniform3", "Uniform4", "UniformMatrix4",
         "GenBuffers", "GenVertexArrays", "GenTextures", "GenFramebuffers",
         "DeleteBuffers", "DeleteVertexArrays", "DeleteTextures", "DeleteFramebuffers", "DrawBuffers",

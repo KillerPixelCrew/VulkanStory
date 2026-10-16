@@ -96,6 +96,7 @@ public sealed unsafe partial class VulkanDevice
         EndNativePass(); _targets.EndPass(Commands); _targets.EndRendering(Commands);
         Action<CommandBuffer>? resume = _targets.ScopeOpened;
         _targets.ScopeOpened = null;
+        int clipMask = DisableGlClipping();
         int target = 0;
         try
         {
@@ -112,6 +113,6 @@ public sealed unsafe partial class VulkanDevice
                 Scissor = clip, ViewportWidth = (int)width, ViewportHeight = (int)height }) || !DrawNativeFullscreen(pipeline, [], requirePipeline: true))
                 throw new InvalidOperationException("GL clear draw failed: " + NativeDrawRefusal);
         }
-        finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { _targets.ScopeOpened = resume; } }
+        finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { SetGlClipMask(clipMask); _targets.ScopeOpened = resume; } }
     }
 }

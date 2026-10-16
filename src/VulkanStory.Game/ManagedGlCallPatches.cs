@@ -38,6 +38,7 @@ public static partial class ManagedGlCallPatches
         "ClearBuffer",
         "GenQuery", "GenQueries", "DeleteQuery", "DeleteQueries", "BeginQuery", "EndQuery", "QueryCounter", "GetQueryObject", "Finish",
         "PolygonOffset",
+        "ClipPlane", "GetClipPlane",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -77,6 +78,8 @@ public static partial class ManagedGlCallPatches
         }
         switch (method.Name)
         {
+            case "ClipPlane": case "GetClipPlane": return parameters.Length == 2 &&
+                (parameters[1].ParameterType == typeof(double[]) || parameters[1].ParameterType.IsPointer && parameters[1].ParameterType.GetElementType() == typeof(double) || parameters[1].ParameterType == typeof(IntPtr));
             case "GetInteger": return parameters.Length == 1 && method.ReturnType == typeof(int) || parameters.Length == 2 && Output(1) || parameters.Length == 3 && Output(2);
             case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true) || parameters.Length == 3 && Output(2, true);
             case "GetFloat": return parameters.Length == 1 && method.ReturnType == typeof(float) || parameters.Length == 2 &&

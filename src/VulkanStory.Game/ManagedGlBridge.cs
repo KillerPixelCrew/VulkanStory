@@ -49,7 +49,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     internal void SelectContext(nint contextId, int targetId, int width, int height)
     {
         RequireOwner();
-        if (contextId == 0) { selected = null; if (ReferenceEquals(current, this)) current = null; return; }
+        if (contextId == 0) { Device.SetGlClipPlanes(new float[32], 0); selected = null; if (ReferenceEquals(current, this)) current = null; return; }
         if (!contexts.TryGetValue(contextId, out Context? context))
         {
             context = new Context { Id = contextId, Primary = targetId <= 0, Target = targetId, Width = width, Height = height };
@@ -61,6 +61,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (context.Primary != (targetId <= 0)) throw new InvalidOperationException("A managed GL context cannot change primary-window ownership.");
         context.Target = targetId; context.Width = width; context.Height = height;
         selected = context; current = this;
+        SyncClipping();
     }
     internal void ReleaseContext(nint contextId)
     {
@@ -68,7 +69,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (!contexts.Remove(contextId, out Context? context)) return;
         ReleaseContextQueries(context);
         foreach (int framebuffer in framebuffers.Where(entry => ReferenceEquals(entry.Value, context)).Select(entry => entry.Key).ToArray()) Device.DeleteFramebuffer(framebuffer);
-        if (ReferenceEquals(selected, context)) { selected = null; if (ReferenceEquals(current, this)) current = null; }
+        if (ReferenceEquals(selected, context)) { Device.SetGlClipPlanes(new float[32], 0); selected = null; if (ReferenceEquals(current, this)) current = null; }
         CollectDeletedPrograms(); CollectDeletedTextures();
     }
     private void RequireOwner()
@@ -97,6 +98,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal readonly StatedRenderState State = new();
         internal readonly Queue<int> Errors = new();
         internal int PolygonFront = 0x1B02, PolygonBack = 0x1B02;
+        internal readonly double[] ClipPlanes = new double[32];
+        internal int ClipMask;
         internal float[] ClearColor = [0, 0, 0, 0];
         internal float ClearDepth = 1f;
         internal readonly Stack<string> DebugGroups = new();
@@ -276,6 +279,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "Enable": if (a.Length == 2) SetIndexedEnabled(I(a[0]), I(a[1]), true); else SetEnabled(I(a[0]), true); return null;
             case "Disable": if (a.Length == 2) SetIndexedEnabled(I(a[0]), I(a[1]), false); else SetEnabled(I(a[0]), false); return null;
             case "IsEnabled": return a.Length == 2 ? IndexedEnabled(I(a[0]), I(a[1])) : Enabled(I(a[0]));
+            case "ClipPlane": ClipPlane(a); return null;
+            case "GetClipPlane": GetClipPlane(a); return null;
             case "DepthMask": State.DepthWrite = Convert.ToBoolean(a[0]); return null;
             case "DepthFunc": { int function = I(a[0]); if (function < 0x0200 || function > 0x0207) Error(0x0500); State.DepthCompare = GlEnums.CompareOpFrom(function); return null; }
             case "ColorMask": if (a.Length == 5) { int slot = I(a[0]); CheckColorSlot(slot); State.SetSlotColorMask(slot, Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3]), Convert.ToBoolean(a[4])); } else State.SetColorMask(Convert.ToBoolean(a[0]), Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3])); return null;
@@ -824,10 +829,18 @@ internal sealed partial class ManagedGlBridge : IDisposable
     }
 
     private bool Enabled(int cap) => cap switch
-    { 0x0BE2 => State.BlendEnabled, 0x0B44 => State.CullEnabled, 0x0B71 => State.DepthTest, 0x0C11 => State.ScissorEnabled,
+    { >= 0x3000 and <= 0x3007 => (C.ClipMask & (1 << (cap - 0x3000))) != 0,
+        0x0BE2 => State.BlendEnabled, 0x0B44 => State.CullEnabled, 0x0B71 => State.DepthTest, 0x0C11 => State.ScissorEnabled,
         0x8037 => State.PolygonOffsetFill, 0x2A02 => State.PolygonOffsetLine, 0x2A01 => State.PolygonOffsetPoint, _ => throw new GlError(0x0500) };
     private void SetEnabled(int cap, bool enabled)
     {
+        if (cap >= 0x3000 && cap <= 0x3007)
+        {
+            int bit = 1 << (cap - 0x3000);
+            C.ClipMask = enabled ? C.ClipMask | bit : C.ClipMask & ~bit;
+            SyncClipping();
+            return;
+        }
         switch (cap)
         { case 0x0BE2: State.SetBlendEnabled(enabled); break; case 0x0B44: State.CullEnabled = enabled; break; case 0x0B71: State.DepthTest = enabled; break; case 0x0C11: State.ScissorEnabled = enabled; break;
             case 0x8037: State.PolygonOffsetFill = enabled; break; case 0x2A02: State.PolygonOffsetLine = enabled; break; case 0x2A01: State.PolygonOffsetPoint = enabled; break; default: Error(0x0500); break; }
@@ -878,6 +891,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         return name switch
         {
             0x821B => [3], 0x821C => [3], 0x9126 => [1],
+            0x0D32 => [VulkanDevice.MaxGlClipPlanes],
+            >= 0x3000 and <= 0x3007 => [Enabled(name) ? 1 : 0],
             0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],

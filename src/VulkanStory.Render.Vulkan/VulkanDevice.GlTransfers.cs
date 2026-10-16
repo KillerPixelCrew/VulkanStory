@@ -162,6 +162,7 @@ public sealed unsafe partial class VulkanDevice
         // must not resume/count an application's running occlusion query.
         Action<CommandBuffer>? resumeQuery = _targets.ScopeOpened;
         _targets.ScopeOpened = null;
+        int clipMask = DisableGlClipping();
         int target = 0;
         try
         {
@@ -189,6 +190,6 @@ public sealed unsafe partial class VulkanDevice
                 !DrawNativeFullscreen(pipeline, [new NativeTexture(pipeline.Sampler("sourceTexture"), source, sampling)], requirePipeline: true))
                 throw new InvalidOperationException("GL blit draw failed: " + NativeDrawRefusal);
         }
-        finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { _targets.ScopeOpened = resumeQuery; } }
+        finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { SetGlClipMask(clipMask); _targets.ScopeOpened = resumeQuery; } }
     }
 }

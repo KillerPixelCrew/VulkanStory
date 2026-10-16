@@ -110,6 +110,9 @@ internal static class FrameGlobals
         new("colorMapRects", "vec4", 40, "colormap.vsh"),
         new("pointLights", "vec3", MaxDynamicLights, "fogandlight.vsh"),
         new("pointLightColors", "vec3", MaxDynamicLights, "fogandlight.vsh"),
+        // Renderer-owned GL state. Append to keep every existing frame offset stable.
+        new("vulkanstoryClipPlanes", "vec4", 8, "vulkanstory_clip"),
+        new("vulkanstoryClipMask", "int", 0, "vulkanstory_clip"),
     };
 
     private static readonly Dictionary<string, (UniformMember Member, string Owner)> ByName = new(StringComparer.Ordinal);

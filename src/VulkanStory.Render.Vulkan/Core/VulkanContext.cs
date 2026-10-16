@@ -1030,6 +1030,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         };
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
+        if (!available.ShaderClipDistance)
+            throw new NotSupportedException("GL user clipping requires Vulkan shaderClipDistance support.");
 
         // Diagnostics for a lost device. Both are optional and cost nothing when
         // the GPU is healthy, so they are taken wherever the driver offers them.

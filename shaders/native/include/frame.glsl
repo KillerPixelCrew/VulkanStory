@@ -1,4 +1,4 @@
-// Generated from Optimum.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
+// Generated from VulkanStory.Render.Vulkan/Shaders/FrameGlobals.cs (FrameGlobals.GenerateInclude).
 // Regenerate with FrameGlobals.GenerateInclude; ShaderDeliveryTests verifies the compiled ABI.
 //
 // The FrameGlobals block (docs/vulkan.md): set 0, binding 0, scalar
@@ -68,9 +68,11 @@ layout(set = OPTIMUM_SET_FRAME, binding = OPTIMUM_BINDING_FRAME_GLOBALS, scalar)
     layout(offset = 416) vec4 colorMapRects[40];
     layout(offset = 1056) vec3 pointLights[100];
     layout(offset = 2256) vec3 pointLightColors[100];
+    layout(offset = 3456) vec4 vulkanstoryClipPlanes[8];
+    layout(offset = 3584) int vulkanstoryClipMask;
 } optimumFrame;
 
-// Block size: 3456 bytes.
+// Block size: 3588 bytes.
 
 #endif
 
@@ -154,4 +156,11 @@ layout(set = OPTIMUM_SET_FRAME, binding = OPTIMUM_BINDING_FRAME_GLOBALS, scalar)
 #define OPTIMUM_FRAME_NAMES_UNDERWATEREFFECTS_FSH
 #define cameraUnderwater optimumFrame.cameraUnderwater
 #define waterMurkColor optimumFrame.waterMurkColor
+#endif
+
+// vulkanstory_clip
+#if defined(OPTIMUM_FRAME_OWNER_VULKANSTORY_CLIP) && !defined(OPTIMUM_FRAME_NAMES_VULKANSTORY_CLIP)
+#define OPTIMUM_FRAME_NAMES_VULKANSTORY_CLIP
+#define vulkanstoryClipPlanes optimumFrame.vulkanstoryClipPlanes
+#define vulkanstoryClipMask optimumFrame.vulkanstoryClipMask
 #endif
