@@ -109,6 +109,8 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         DynamicState.Scissor,
         DynamicState.LineWidth,
         DynamicState.DepthBias,
+        DynamicState.BlendConstants,
+        DynamicState.RasterizerDiscardEnable,
         DynamicState.CullMode,
         DynamicState.FrontFace,
         DynamicState.PrimitiveTopology,
@@ -1029,7 +1031,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                 var multisample = new PipelineMultisampleStateCreateInfo
                 {
                     SType = StructureType.PipelineMultisampleStateCreateInfo,
-                    RasterizationSamples = SampleCountFlags.Count1Bit,
+                    RasterizationSamples = request.Targets.Samples,
                 };
 
                 var depthStencil = new PipelineDepthStencilStateCreateInfo
@@ -1063,6 +1065,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                     ColorAttachmentCount = (uint)request.Targets.ColorFormats.Length,
                     PColorAttachmentFormats = request.Targets.ColorFormats.Length == 0 ? null : colorFormatsPtr,
                     DepthAttachmentFormat = request.Targets.DepthFormat,
+                    StencilAttachmentFormat = request.Targets.StencilFormat,
                 };
 
                 var createInfo = new GraphicsPipelineCreateInfo

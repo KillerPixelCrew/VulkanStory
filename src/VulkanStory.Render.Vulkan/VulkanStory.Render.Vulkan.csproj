@@ -64,6 +64,8 @@
     <Compile Include="VulkanDevice.GlClears.cs" />
     <Compile Include="VulkanDevice.GlQueries.cs" />
     <Compile Include="VulkanDevice.GlClipping.cs" />
+    <Compile Include="VulkanDevice.GlRenderbuffers.cs" />
+    <Compile Include="Core/TextureManager.Renderbuffers.cs" />
     <Compile Include="Core/TextureReadbackFormats.cs" />
     <Compile Include="Core/TextureDump.cs" />
     <Compile Include="Core/FramebufferCapture.cs" />

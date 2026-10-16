@@ -37,6 +37,7 @@ internal sealed class VulkanFramebuffer
     public int DepthTextureId;
     public uint DepthLayer;
     public uint DepthMipLevel;
+    public AttachmentSlot Stencil;
 
     /// <summary>Cached interned id of the attachment formats, or -1 when stale.</summary>
     public int FormatsId = -1;
@@ -165,7 +166,13 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         VulkanFramebuffer? framebuffer = Get(framebufferId);
         if (framebuffer == null) return;
 
-        if (attachmentIndex < 0)
+        if (attachmentIndex == -2)
+        {
+            AttachmentSlot previous = framebuffer.Stencil;
+            if (previous.TextureId == textureId && previous.Layer == layer && previous.MipLevel == mipLevel) return;
+            framebuffer.Stencil = new AttachmentSlot { TextureId = textureId, Layer = layer, MipLevel = mipLevel };
+        }
+        else if (attachmentIndex < 0)
         {
             if (framebuffer.DepthTextureId == textureId && framebuffer.DepthLayer == layer && framebuffer.DepthMipLevel == mipLevel) return;
             framebuffer.DepthTextureId = textureId;
@@ -202,7 +209,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         var changed = new List<int>();
         foreach (VulkanFramebuffer? framebuffer in _framebuffers)
         {
-            if (framebuffer is null || framebuffer.DepthTextureId != texture && !framebuffer.Color.Any(slot => slot.TextureId == texture)) continue;
+            if (framebuffer is null || framebuffer.DepthTextureId != texture && framebuffer.Stencil.TextureId != texture && !framebuffer.Color.Any(slot => slot.TextureId == texture)) continue;
             framebuffer.FormatsId = -1;
             if (ReferenceEquals(_bound, framebuffer)) _needsRestart = true;
             changed.Add(framebuffer.Id);
@@ -258,6 +265,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     {
         if (_bound == null || textureId <= 0) return false;
         if (_bound.DepthTextureId == textureId) return true;
+        if (_bound.Stencil.TextureId == textureId) return true;
 
         for (int i = 0; i < _bound.Color.Length; i++)
         {
@@ -493,8 +501,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             if (depth != null)
             {
                 ImageLayout depthLayout = DepthReadOnly
-                    ? ImageLayout.DepthReadOnlyOptimal
-                    : ImageLayout.DepthAttachmentOptimal;
+                    ? ImageLayout.DepthStencilReadOnlyOptimal
+                    : ImageLayout.DepthStencilAttachmentOptimal;
                 // Read-only depth may be sampled by the draws of this scope.
                 if (graph) scopeDepth = depth;
                 else _textures.Require(_barriers, commandBuffer, depth,
@@ -508,6 +516,26 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                     StoreOp = AttachmentStoreOp.Store,
                 };
                 hasDepth = true;
+            }
+        }
+
+        RenderingAttachmentInfo stencilAttachment = default;
+        bool hasStencil = false;
+        if (framebuffer.Stencil.TextureId > 0 && _textures.Get(framebuffer.Stencil.TextureId) is { } stencil)
+        {
+            stencilAttachment = new RenderingAttachmentInfo
+            {
+                SType = StructureType.RenderingAttachmentInfo,
+                ImageView = stencil.ViewOfLayer(framebuffer.Stencil.Layer, framebuffer.Stencil.MipLevel),
+                ImageLayout = DepthReadOnly ? ImageLayout.DepthStencilReadOnlyOptimal : ImageLayout.DepthStencilAttachmentOptimal,
+                LoadOp = AttachmentLoadOp.Load, StoreOp = AttachmentStoreOp.Store,
+            };
+            hasStencil = true;
+            if (!hasDepth)
+            {
+                if (graph) scopeDepth = stencil;
+                else _textures.Require(_barriers, commandBuffer, stencil, DepthReadOnly ? ResourceUsage.DepthReadOnly : ResourceUsage.DepthWrite);
+                depthAttachment = stencilAttachment; // The recorder tracks the one depth/stencil image.
             }
         }
 
@@ -530,6 +558,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 ColorAttachmentCount = (uint)attachments.Length,
                 PColorAttachments = attachments.Length == 0 ? null : attachmentsPtr,
                 PDepthAttachment = hasDepth ? &depthAttachment : null,
+                PStencilAttachment = hasStencil ? &stencilAttachment : null,
             };
 
             _context.Api.CmdBeginRendering(commandBuffer, &rendering);
@@ -779,7 +808,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             depthFormat = _textures.Get(framebuffer.DepthTextureId)?.Format ?? Format.Undefined;
         }
 
-        framebuffer.FormatsId = _formats.Intern(new RenderTargetFormats(colorFormats, depthFormat));
+        framebuffer.FormatsId = _formats.Intern(new RenderTargetFormats(colorFormats, depthFormat, StencilFormatOf(framebuffer), SamplesOf(framebuffer)));
         return framebuffer.FormatsId;
     }
 
@@ -803,7 +832,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         {
             if (DeclaredColorFormat(framebuffer, colorSlots, i) != expected.ColorFormats[i]) return false;
         }
-        return DepthFormatOf(framebuffer) == expected.DepthFormat;
+        return DepthFormatOf(framebuffer) == expected.DepthFormat && StencilFormatOf(framebuffer) == expected.StencilFormat && SamplesOf(framebuffer) == expected.Samples;
     }
 
     /// <summary>
@@ -821,7 +850,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             colorFormats[i] = DeclaredColorFormat(framebuffer, colorSlots, i);
         }
 
-        return new RenderTargetFormats(colorFormats, DepthFormatOf(framebuffer));
+        return new RenderTargetFormats(colorFormats, DepthFormatOf(framebuffer), StencilFormatOf(framebuffer), SamplesOf(framebuffer));
     }
 
     /// <summary>Colour attachments of the scope a pass declared with <paramref name="colorSlots" /> opens (highest bound slot among them + 1).</summary>
@@ -847,6 +876,14 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         framebuffer.DepthTextureId > 0
             ? _textures.Get(framebuffer.DepthTextureId)?.Format ?? Format.Undefined
             : Format.Undefined;
+
+    private Format StencilFormatOf(VulkanFramebuffer framebuffer) => _textures.Get(framebuffer.Stencil.TextureId)?.Format ?? Format.Undefined;
+    private SampleCountFlags SamplesOf(VulkanFramebuffer framebuffer)
+    {
+        foreach (AttachmentSlot slot in framebuffer.Color)
+            if (_textures.Get(slot.TextureId) is { } color) return color.Samples;
+        return _textures.Get(framebuffer.DepthTextureId)?.Samples ?? _textures.Get(framebuffer.Stencil.TextureId)?.Samples ?? SampleCountFlags.Count1Bit;
+    }
 
     /// <summary>Colour attachments of the scope the framebuffer opens (highest participating slot + 1).</summary>
     public int EnabledAttachmentCount(VulkanFramebuffer framebuffer) =>

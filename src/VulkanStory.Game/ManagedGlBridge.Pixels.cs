@@ -7,6 +7,14 @@ namespace VulkanStory.Game;
 
 internal sealed partial class ManagedGlBridge
 {
+    private byte[] PixelInputBytes(object? source, int required)
+    {
+        if (C.PixelUnpackBuffer is not { } buffer) return CopyBytes(source, required, false);
+        if (source is System.Array) Error(0x0502);
+        long offset = L(source);
+        if (offset < 0 || offset > buffer.Data.Length - (long)required) Error(0x0502);
+        return buffer.Data.AsSpan((int)offset, required).ToArray();
+    }
     private int PixelStoreValue(int token) => C.PixelStorage.TryGetValue(token, out int value) ? value : token is 0x0CF5 or 0x0D05 ? 4 : 0;
 
     private void PixelStore(int token, int value)
@@ -60,7 +68,8 @@ internal sealed partial class ManagedGlBridge
 
     private void ReadPixels(object?[] a)
     {
-        if (Device.FramebufferStatus(ReadTarget) != 0x8CD5) Error(0x0506);
+        if (GlFramebufferStatus(ReadTarget) != 0x8CD5) Error(0x0506);
+        if (Device.FramebufferSamples(ReadTarget) != 0) Error(0x0502);
         int format = I(a[4]);
         int attachment = format == 0x1902 ? 0x8D00 : ReadBuffer;
         if (PublicFramebuffer(ReadTarget) == 0 && attachment != 0x8D00) attachment = 0x8CE0;
@@ -89,9 +98,17 @@ internal sealed partial class ManagedGlBridge
         int alignment = PixelStoreValue(0x0D05), stride = checked((checked(rowLength * pixelBytes) + alignment - 1) & ~(alignment - 1));
         int start = checked(PixelStoreValue(0x0D03) * stride + PixelStoreValue(0x0D04) * pixelBytes);
         int required = checked(start + (height - 1) * stride + width * pixelBytes);
+        int bufferOffset = 0;
+        if (C.PixelPackBuffer is { } pack)
+        {
+            if (destination is System.Array) Error(0x0502);
+            long offset = L(destination);
+            if (offset < 0 || offset > pack.Data.Length - (long)required) Error(0x0502);
+            bufferOffset = (int)offset;
+        }
         if (capacity.HasValue && required > capacity.Value) Error(0x0502);
         if (destination is Array array && System.Buffer.ByteLength(array) < required) Error(0x0502);
-        if (destination is not System.Array && Pointer(destination) == IntPtr.Zero) Error(0x0502);
+        if (C.PixelPackBuffer is null && destination is not System.Array && Pointer(destination) == IntPtr.Zero) Error(0x0502);
         int sourceX = Math.Clamp(x, 0, imageWidth), sourceY = Math.Clamp(y, 0, imageHeight);
         int sourceWidth = (int)Math.Max(0, Math.Min((long)x + width, imageWidth) - sourceX);
         int sourceHeight = (int)Math.Max(0, Math.Min((long)y + height, imageHeight) - sourceY);
@@ -126,7 +143,8 @@ internal sealed partial class ManagedGlBridge
             if (swap && packed)
                 for (int at = 0; at < row.Length; at += 4) row.AsSpan(at, 4).Reverse();
             int offset = checked(start + rowIndex * stride);
-            if (destination is Array outputArray) System.Buffer.BlockCopy(row, 0, outputArray, offset, row.Length);
+            if (C.PixelPackBuffer is { } packBuffer) row.CopyTo(packBuffer.Data, checked(bufferOffset + offset));
+            else if (destination is Array outputArray) System.Buffer.BlockCopy(row, 0, outputArray, offset, row.Length);
             else Marshal.Copy(row, 0, IntPtr.Add(Pointer(destination), offset), row.Length);
         }
     }

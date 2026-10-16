@@ -155,18 +155,23 @@ internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
     public Format[] ColorFormats { get; }
     /// <summary>Depth attachment format included in rendering/pipeline compatibility.</summary>
     public Format DepthFormat { get; }
+    public Format StencilFormat { get; }
+    public SampleCountFlags Samples { get; }
 
-    public RenderTargetFormats(Format[] colorFormats, Format depthFormat)
+    public RenderTargetFormats(Format[] colorFormats, Format depthFormat, Format stencilFormat = Format.Undefined,
+        SampleCountFlags samples = SampleCountFlags.Count1Bit)
     {
         ColorFormats = colorFormats;
         DepthFormat = depthFormat;
+        StencilFormat = stencilFormat;
+        Samples = samples;
     }
 
     /// <inheritdoc/>
     public bool Equals(RenderTargetFormats? other)
     {
         if (other is null) return false;
-        if (DepthFormat != other.DepthFormat) return false;
+        if (DepthFormat != other.DepthFormat || StencilFormat != other.StencilFormat || Samples != other.Samples) return false;
         if (ColorFormats.Length != other.ColorFormats.Length) return false;
 
         for (int i = 0; i < ColorFormats.Length; i++)
@@ -184,6 +189,8 @@ internal sealed class RenderTargetFormats : IEquatable<RenderTargetFormats>
     {
         var hash = new HashCode();
         hash.Add(DepthFormat);
+        hash.Add(StencilFormat);
+        hash.Add(Samples);
         foreach (Format format in ColorFormats) hash.Add(format);
         return hash.ToHashCode();
     }
@@ -281,8 +288,10 @@ internal enum DynamicStateDirty : uint
     StencilReference = 1 << 12,
     LineWidth = 1 << 13,
     DepthBias = 1 << 16,
+    BlendConstants = 1 << 17,
+    RasterizerDiscard = 1 << 18,
     /// <summary>The Vulkan 1.3 core set every pipeline declares dynamic.</summary>
-    All = ((1 << 14) - 1) | DepthBias,
+    All = ((1 << 14) - 1) | DepthBias | BlendConstants | RasterizerDiscard,
     /// <summary>vkCmdSetColorWriteEnableEXT or vkCmdSetColorWriteMaskEXT, per the colour write tier.</summary>
     ColorWrite = 1 << 14,
     /// <summary>vkCmdSetColorBlendEnableEXT + vkCmdSetColorBlendEquationEXT (mask tier with dynamic blend).</summary>
@@ -310,6 +319,9 @@ internal struct DynamicStateValues
     public uint StencilCompareMask;
     public uint StencilWriteMask;
     public uint StencilReference;
+    public StencilOpState StencilBack;
+    public System.Numerics.Vector4 BlendConstants;
+    public bool RasterizerDiscard;
     public float LineWidth;
     public float DepthBiasConstant;
     public float DepthBiasSlope;
@@ -376,6 +388,8 @@ internal sealed class DynamicStateCache
             if (_last.StencilCompareMask != next.StencilCompareMask) dirty |= DynamicStateDirty.StencilCompareMask;
             if (_last.StencilWriteMask != next.StencilWriteMask) dirty |= DynamicStateDirty.StencilWriteMask;
             if (_last.StencilReference != next.StencilReference) dirty |= DynamicStateDirty.StencilReference;
+            if (!_last.StencilBack.Equals(next.StencilBack))
+                dirty |= DynamicStateDirty.StencilOp | DynamicStateDirty.StencilCompareMask | DynamicStateDirty.StencilWriteMask | DynamicStateDirty.StencilReference;
             // Bitwise, so a NaN width is not "changed" forever.
             if (BitConverter.SingleToInt32Bits(_last.LineWidth) != BitConverter.SingleToInt32Bits(next.LineWidth))
             {
@@ -384,6 +398,8 @@ internal sealed class DynamicStateCache
             if (_last.ColorWrite != next.ColorWrite) dirty |= DynamicStateDirty.ColorWrite;
             if (_last.DepthBiasConstant != next.DepthBiasConstant || _last.DepthBiasSlope != next.DepthBiasSlope) dirty |= DynamicStateDirty.DepthBias;
             if (_last.BlendStateId != next.BlendStateId) dirty |= DynamicStateDirty.ColorBlend;
+            if (_last.BlendConstants != next.BlendConstants) dirty |= DynamicStateDirty.BlendConstants;
+            if (_last.RasterizerDiscard != next.RasterizerDiscard) dirty |= DynamicStateDirty.RasterizerDiscard;
         }
 
         _serial = serial;

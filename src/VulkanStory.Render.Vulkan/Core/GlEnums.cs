@@ -56,6 +56,8 @@ internal static class GlEnums
         DstColor => BlendFactor.DstColor,
         OneMinusDstColor => BlendFactor.OneMinusDstColor,
         SrcAlphaSaturate => BlendFactor.SrcAlphaSaturate,
+        0x8001 => BlendFactor.ConstantColor, 0x8002 => BlendFactor.OneMinusConstantColor,
+        0x8003 => BlendFactor.ConstantAlpha, 0x8004 => BlendFactor.OneMinusConstantAlpha,
         _ => BlendFactor.One,
     };
 

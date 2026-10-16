@@ -24,8 +24,8 @@ namespace VulkanStory.Game;
 /// - texture units: 2D/legacy array, volume and cube bindings are retained independently;
 ///   the linked sampler kind selects the binding used by a draw;
 /// - viewport: a framebuffer bind does not change it; the platform's own bind states the full target.
-/// Stencil is recorded but never applied: no framebuffer of this client has a stencil attachment,
-/// so a stencil test passes on either path.
+/// Stencil retains separate front/back operations and masks. Draws on targets without
+/// a stencil attachment bypass the stencil test, as on GL.
 /// </summary>
 internal sealed class StatedRenderState
 {
@@ -66,6 +66,10 @@ internal sealed class StatedRenderState
     public Rect2D Scissor { get; set; }
     public Rect2D Viewport { get; set; }
     public bool StencilTest { get; set; }
+    internal StencilOpState StencilFront = NativePipelineDescription.DefaultStencil, StencilBack = NativePipelineDescription.DefaultStencil;
+    internal System.Numerics.Vector4 BlendConstants;
+    internal bool RasterizerDiscard;
+    internal bool FramebufferSrgb;
     internal bool PolygonOffsetFill, PolygonOffsetLine, PolygonOffsetPoint;
     internal float PolygonOffsetFactor, PolygonOffsetUnits;
 
@@ -387,6 +391,10 @@ internal static class StatedDraw
             DepthTest = stated.DepthTest,
             DepthWrite = stated.DepthWrite && !samplesBoundDepth,
             DepthCompare = stated.DepthCompare,
+            StencilTest = stated.StencilTest,
+            StencilFront = stated.StencilFront, StencilBack = stated.StencilBack,
+            BlendConstants = stated.BlendConstants,
+            RasterizerDiscard = stated.RasterizerDiscard,
             Cull = stated.CullMode,
             Topology = meshId > 0 ? device.NativeMeshTopology(meshId) : PrimitiveTopology.TriangleList,
             PolygonMode = stated.Wireframe ? PolygonMode.Line : PolygonMode.Fill,

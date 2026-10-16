@@ -39,6 +39,10 @@ public static partial class ManagedGlCallPatches
         "GenQuery", "GenQueries", "DeleteQuery", "DeleteQueries", "BeginQuery", "EndQuery", "QueryCounter", "GetQueryObject", "Finish",
         "PolygonOffset",
         "ClipPlane", "GetClipPlane",
+        "ClearStencil", "StencilFunc", "StencilFuncSeparate", "StencilMask", "StencilMaskSeparate", "StencilOp", "StencilOpSeparate",
+        "BlendColor",
+        "GenRenderbuffer", "GenRenderbuffers", "DeleteRenderbuffer", "DeleteRenderbuffers", "BindRenderbuffer", "IsRenderbuffer",
+        "RenderbufferStorage", "RenderbufferStorageMultisample", "FramebufferRenderbuffer", "GetRenderbufferParameter",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -92,8 +96,9 @@ public static partial class ManagedGlCallPatches
             case "ClearBuffer": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } clearType && (clearType == typeof(int) || clearType == typeof(float));
             case "PushDebugGroup": return parameters.Length == 4 && parameters[3].ParameterType == typeof(string);
             case "DebugMessageInsert": return parameters.Length == 6 && parameters[5].ParameterType == typeof(string);
-            case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers": case "GenQueries":
-            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": case "DeleteQueries": return parameters.Length == 2 && Output(1);
+            case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers": case "GenQueries": case "GenRenderbuffers":
+            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": case "DeleteQueries": case "DeleteRenderbuffers": return parameters.Length == 2 && Output(1);
+            case "GetRenderbufferParameter": return parameters.Length == 2 && method.ReturnType == typeof(int) || parameters.Length == 3 && Output(2);
             case "GetQueryObject": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } queryType &&
                 (queryType == typeof(int) || queryType == typeof(uint) || queryType == typeof(long) || queryType == typeof(ulong));
             case "DrawBuffers": return parameters.Length == 2 && (parameters[1].ParameterType.IsArray && parameters[1].ParameterType.GetElementType()!.IsEnum || Output(1));

@@ -56,7 +56,7 @@ internal sealed partial class ManagedGlBridge
         Device.DefineMutableTexture(texture.Name, baseWidth, baseHeight, baseDepth, format, levels, volume, level);
         texture.Width = baseWidth; texture.Height = baseHeight; texture.Depth = baseDepth; texture.Levels = levels; texture.Format = format;
         texture.Images[level] = new(width, height, depth, format);
-        if (pixels is not System.Array && Pointer(pixels) == IntPtr.Zero) return;
+        if (C.PixelUnpackBuffer is null && pixels is not System.Array && Pointer(pixels) == IntPtr.Zero) return;
         UploadPixels(texture.Name, level, 0, 0, 0, width, height, depth, sourceFormat, sourceType, pixels);
     }
 
@@ -108,7 +108,7 @@ internal sealed partial class ManagedGlBridge
         int alignment = PixelStoreValue(0x0CF5), stride = checked((checked(rowLength * pixelBytes) + alignment - 1) & ~(alignment - 1));
         int slice = checked(stride * imageHeight);
         int start = checked(PixelStoreValue(0x0CF4) * pixelBytes + PixelStoreValue(0x0CF3) * stride + (image.Volume ? PixelStoreValue(0x806D) * slice : 0));
-        byte[] input = CopyBytes(pixels, checked(start + (depth - 1) * slice + (height - 1) * stride + width * pixelBytes), false);
+        byte[] input = PixelInputBytes(pixels, checked(start + (depth - 1) * slice + (height - 1) * stride + width * pixelBytes));
         byte[] converted = ConvertPixels(input, start, stride, slice, width, height, depth, sourceFormat, sourceType, layout, image.Format, image.GlInternalFormat,
             PixelStoreValue(0x0CF0) != 0, out int storageBytes);
         GCHandle pin = GCHandle.Alloc(converted, GCHandleType.Pinned);

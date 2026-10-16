@@ -43,7 +43,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 _textures.Require(_barriers, command, image, ResourceUsage.TransferDst);
                 _barriers.Flush(command);
-                var range = new ImageSubresourceRange(image.Aspect, level, 1, layer, 1);
+                var range = new ImageSubresourceRange(depthOnly ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit, level, 1, layer, 1);
                 if (depthOnly)
                 {
                     var value = new ClearDepthStencilValue(depth, 0);

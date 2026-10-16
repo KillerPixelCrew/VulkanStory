@@ -93,6 +93,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal readonly Dictionary<int, GlQuery> Queries = new();
         internal readonly Dictionary<int, GlQuery> ActiveQueries = new();
         internal BufferObject? ArrayBuffer;
+        internal BufferObject? PixelPackBuffer, PixelUnpackBuffer;
         internal int VertexArray;
         internal readonly Dictionary<int, VertexArrayObject> Arrays = new() { [0] = new() };
         internal readonly StatedRenderState State = new();
@@ -100,6 +101,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal int PolygonFront = 0x1B02, PolygonBack = 0x1B02;
         internal readonly double[] ClipPlanes = new double[32];
         internal int ClipMask;
+        internal int ClearStencil;
+        internal RenderbufferObject? Renderbuffer;
         internal float[] ClearColor = [0, 0, 0, 0];
         internal float ClearDepth = 1f;
         internal readonly Stack<string> DebugGroups = new();
@@ -208,7 +211,17 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "DeleteFramebuffers": DeleteMany(a, DeleteFramebuffer); return null;
             case "BindFramebuffer": BindFramebuffer(I(a[0]), I(a[1])); return null;
             case "FramebufferTexture2D": FramebufferTexture(I(a[0]), I(a[1]), I(a[2]), I(a[3]), I(a[4])); return null;
-            case "CheckFramebufferStatus": { int framebuffer = FramebufferFor(I(a[0])); int status = Device.FramebufferStatus(framebuffer); session.Graphics.RefreshManagedFramebuffer(framebuffer); return status; }
+            case "CheckFramebufferStatus": { int framebuffer = FramebufferFor(I(a[0])); int status = GlFramebufferStatus(framebuffer); session.Graphics.RefreshManagedFramebuffer(framebuffer); return status; }
+            case "GenRenderbuffer": return GenRenderbuffer();
+            case "GenRenderbuffers": { int count = I(a[0]); if (count < 0) Error(0x0501); int[] names = Enumerable.Range(0, count).Select(_ => GenRenderbuffer()).ToArray(); WriteOutput(method, a, 1, names, false); return null; }
+            case "DeleteRenderbuffer": DeleteRenderbuffer(I(a[0])); return null;
+            case "DeleteRenderbuffers": { int count = I(a[0]); if (count < 0) Error(0x0501); foreach (int name in ReadInts(a[1], count)) DeleteRenderbuffer(name); return null; }
+            case "BindRenderbuffer": BindRenderbuffer(I(a[0]), I(a[1])); return null;
+            case "IsRenderbuffer": return renderbuffers.TryGetValue(I(a[0]), out RenderbufferObject? renderbuffer) && renderbuffer.Created && !renderbuffer.Deleted;
+            case "RenderbufferStorage": RenderbufferStorage(I(a[0]), 0, I(a[1]), I(a[2]), I(a[3])); return null;
+            case "RenderbufferStorageMultisample": RenderbufferStorage(I(a[0]), I(a[1]), I(a[2]), I(a[3]), I(a[4])); return null;
+            case "FramebufferRenderbuffer": FramebufferRenderbuffer(I(a[0]), I(a[1]), I(a[2]), I(a[3])); return null;
+            case "GetRenderbufferParameter": return RenderbufferQuery(method, a);
             case "GetFramebufferAttachmentParameter": return FramebufferAttachmentQuery(method, a);
             case "DrawBuffer": SelectDrawBuffers([I(a[0])]); return null;
             case "DrawBuffers": { int count = I(a[0]); if (count < 0 || count > StatedRenderState.MaxColorAttachments) Error(0x0501); SelectDrawBuffers(ReadInts(a[1], count)); return null; }
@@ -282,6 +295,14 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "ClipPlane": ClipPlane(a); return null;
             case "GetClipPlane": GetClipPlane(a); return null;
             case "DepthMask": State.DepthWrite = Convert.ToBoolean(a[0]); return null;
+            case "ClearStencil": C.ClearStencil = I(a[0]); return null;
+            case "BlendColor": { float Clamp(object? value) { float f = Convert.ToSingle(value); return float.IsNaN(f) ? 0f : Math.Clamp(f, 0f, 1f); } State.BlendConstants = new(Clamp(a[0]), Clamp(a[1]), Clamp(a[2]), Clamp(a[3])); return null; }
+            case "StencilFunc": SetStencil(0x0408, 0, I(a[0]), I(a[1]), unchecked((uint)L(a[2]))); return null;
+            case "StencilFuncSeparate": SetStencil(I(a[0]), 0, I(a[1]), I(a[2]), unchecked((uint)L(a[3]))); return null;
+            case "StencilMask": SetStencil(0x0408, 1, 0, mask: unchecked((uint)L(a[0]))); return null;
+            case "StencilMaskSeparate": SetStencil(I(a[0]), 1, 0, mask: unchecked((uint)L(a[1]))); return null;
+            case "StencilOp": SetStencil(0x0408, 2, I(a[0]), I(a[1]), unchecked((uint)I(a[2]))); return null;
+            case "StencilOpSeparate": SetStencil(I(a[0]), 2, I(a[1]), I(a[2]), unchecked((uint)I(a[3]))); return null;
             case "DepthFunc": { int function = I(a[0]); if (function < 0x0200 || function > 0x0207) Error(0x0500); State.DepthCompare = GlEnums.CompareOpFrom(function); return null; }
             case "ColorMask": if (a.Length == 5) { int slot = I(a[0]); CheckColorSlot(slot); State.SetSlotColorMask(slot, Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3]), Convert.ToBoolean(a[4])); } else State.SetColorMask(Convert.ToBoolean(a[0]), Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3])); return null;
             case "CullFace": State.CullFaces = I(a[0]) switch { 0x0404 => CullModeFlags.FrontBit, 0x0405 => CullModeFlags.BackBit, 0x0408 => CullModeFlags.FrontAndBack, _ => throw new GlError(0x0500) }; return null;
@@ -295,7 +316,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "ClearColor": C.ClearColor = a.Length == 1 && a[0] is Color4 color
                 ? [color.R, color.G, color.B, color.A]
                 : [Convert.ToSingle(a[0]), Convert.ToSingle(a[1]), Convert.ToSingle(a[2]), Convert.ToSingle(a[3])]; return null;
-            case "Clear": { int mask = I(a[0]); if ((mask & ~0x4500) != 0) Error(0x0501); if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506); session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor, C.ClearDepth); return null; }
+            case "Clear": ClearTarget(I(a[0])); return null;
             case "ClearBuffer": ClearBuffer(method, a); return null;
             default: throw new NotSupportedException("Managed GL does not implement " + method + ".");
         }
@@ -316,23 +337,25 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private VertexArrayObject Array => C.Arrays[C.VertexArray];
     private BufferObject BoundBuffer(int target)
     {
-        BufferObject? buffer = target switch { 0x8892 => C.ArrayBuffer, 0x8893 => Array.Elements, _ => null };
-        if (target is not (0x8892 or 0x8893)) Error(0x0500);
+        BufferObject? buffer = target switch { 0x8892 => C.ArrayBuffer, 0x8893 => Array.Elements, 0x88EB => C.PixelPackBuffer, 0x88EC => C.PixelUnpackBuffer, _ => null };
+        if (target is not (0x8892 or 0x8893 or 0x88EB or 0x88EC)) Error(0x0500);
         if (buffer is null) Error(0x0502);
         return buffer!;
     }
     private void BindBuffer(int target, int name)
     {
-        if (target is not (0x8892 or 0x8893)) Error(0x0500);
+        if (target is not (0x8892 or 0x8893 or 0x88EB or 0x88EC)) Error(0x0500);
         if (name < 0) Error(0x0501);
         BufferObject? buffer = null;
         if (name != 0 && !buffers.TryGetValue(name, out buffer)) { buffer = new(name); buffers.Add(name, buffer); }
-        if (target == 0x8892) C.ArrayBuffer = buffer; else Array.Elements = buffer;
+        switch (target) { case 0x8892: C.ArrayBuffer = buffer; break; case 0x8893: Array.Elements = buffer; break; case 0x88EB: C.PixelPackBuffer = buffer; break; case 0x88EC: C.PixelUnpackBuffer = buffer; break; }
     }
     private void DeleteBuffer(int name)
     {
         if (!buffers.Remove(name, out BufferObject? buffer)) return;
         if (ReferenceEquals(C.ArrayBuffer, buffer)) C.ArrayBuffer = null;
+        if (ReferenceEquals(C.PixelPackBuffer, buffer)) C.PixelPackBuffer = null;
+        if (ReferenceEquals(C.PixelUnpackBuffer, buffer)) C.PixelUnpackBuffer = null;
         // Delete detaches from the bound VAO only; other VAOs retain the object
         // (not a lookup through the now-deleted public name).
         if (ReferenceEquals(Array.Elements, buffer)) Array.Elements = null;
@@ -383,8 +406,9 @@ internal sealed partial class ManagedGlBridge : IDisposable
 
     private void Draw(int mode, int count, int indexType, long offset, int baseVertex, int[]? suppliedIndices = null)
     {
+        CheckGlColorEncoding();
         if (count < 0 || offset < 0) Error(0x0501);
-        if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506);
+        if (GlFramebufferStatus(Target) != 0x8CD5) Error(0x0506);
         MeshDrawMode topology = mode switch { 4 => MeshDrawMode.Triangles, 1 => MeshDrawMode.Lines, 3 => MeshDrawMode.LineStrip, _ => throw new NotSupportedException("Managed GL primitive topology " + mode + " has no backend mapping.") };
         int size = indexType switch { 0x1401 => 1, 0x1403 => 2, 0x1405 => 4, _ => 0 };
         if (size == 0) Error(0x0500);
@@ -847,10 +871,15 @@ internal sealed partial class ManagedGlBridge : IDisposable
 
     private bool Enabled(int cap) => cap switch
     { >= 0x3000 and <= 0x3007 => (C.ClipMask & (1 << (cap - 0x3000))) != 0,
+        0x0B90 => State.StencilTest,
+        0x8C89 => State.RasterizerDiscard,
+        0x8DB9 => State.FramebufferSrgb,
         0x0BE2 => State.BlendEnabled, 0x0B44 => State.CullEnabled, 0x0B71 => State.DepthTest, 0x0C11 => State.ScissorEnabled,
         0x8037 => State.PolygonOffsetFill, 0x2A02 => State.PolygonOffsetLine, 0x2A01 => State.PolygonOffsetPoint, _ => throw new GlError(0x0500) };
     private void SetEnabled(int cap, bool enabled)
     {
+        if (cap == 0x8DB9) { State.FramebufferSrgb = enabled; return; }
+        if (cap == 0x8C89) { State.RasterizerDiscard = enabled; return; }
         if (cap >= 0x3000 && cap <= 0x3007)
         {
             int bit = 1 << (cap - 0x3000);
@@ -859,14 +888,15 @@ internal sealed partial class ManagedGlBridge : IDisposable
             return;
         }
         switch (cap)
-        { case 0x0BE2: State.SetBlendEnabled(enabled); break; case 0x0B44: State.CullEnabled = enabled; break; case 0x0B71: State.DepthTest = enabled; break; case 0x0C11: State.ScissorEnabled = enabled; break;
+        { case 0x0B90: State.StencilTest = enabled; break; case 0x0BE2: State.SetBlendEnabled(enabled); break; case 0x0B44: State.CullEnabled = enabled; break; case 0x0B71: State.DepthTest = enabled; break; case 0x0C11: State.ScissorEnabled = enabled; break;
             case 0x8037: State.PolygonOffsetFill = enabled; break; case 0x2A02: State.PolygonOffsetLine = enabled; break; case 0x2A01: State.PolygonOffsetPoint = enabled; break; default: Error(0x0500); break; }
     }
     private static int BlendFactorToken(BlendFactor factor) => factor switch
     { BlendFactor.Zero => 0, BlendFactor.One => 1, BlendFactor.SrcColor => 0x0300, BlendFactor.OneMinusSrcColor => 0x0301,
         BlendFactor.SrcAlpha => 0x0302, BlendFactor.OneMinusSrcAlpha => 0x0303, BlendFactor.DstAlpha => 0x0304,
         BlendFactor.OneMinusDstAlpha => 0x0305, BlendFactor.DstColor => 0x0306, BlendFactor.OneMinusDstColor => 0x0307,
-        BlendFactor.SrcAlphaSaturate => 0x0308, _ => throw new NotSupportedException("Managed GL blend factor has no token mapping: " + factor) };
+        BlendFactor.SrcAlphaSaturate => 0x0308, BlendFactor.ConstantColor => 0x8001, BlendFactor.OneMinusConstantColor => 0x8002,
+        BlendFactor.ConstantAlpha => 0x8003, BlendFactor.OneMinusConstantAlpha => 0x8004, _ => throw new NotSupportedException("Managed GL blend factor has no token mapping: " + factor) };
     private static int BlendEquationToken(BlendOp equation) => equation switch
     { BlendOp.Add => 0x8006, BlendOp.Subtract => 0x800A, BlendOp.ReverseSubtract => 0x800B, BlendOp.Min => 0x8007, BlendOp.Max => 0x8008,
         _ => throw new NotSupportedException("Managed GL blend equation has no token mapping: " + equation) };
@@ -882,7 +912,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         for (int slot = 0; slot < StatedRenderState.MaxColorAttachments; slot++)
         { AttachmentBlend blend = State.RawBlend(slot); State.SetSlotBlendSeparate(slot, BlendEquationToken(blend.ColorOp), BlendEquationToken(blend.AlphaOp), srcRgb, dstRgb, srcAlpha, dstAlpha); }
     }
-    private static bool ValidFactor(int token) => token is 0 or 1 || token >= 0x0300 && token <= 0x0308;
+    private static bool ValidFactor(int token) => token is 0 or 1 || token >= 0x0300 && token <= 0x0308 || token >= 0x8001 && token <= 0x8004;
     private void PolygonMode(int face, int mode)
     {
         if (face is not (0x0404 or 0x0405 or 0x0408) || mode is not (0x1B00 or 0x1B01 or 0x1B02)) Error(0x0500);
@@ -910,6 +940,11 @@ internal sealed partial class ManagedGlBridge : IDisposable
             0x821B => [3], 0x821C => [3], 0x9126 => [1],
             0x0D32 => [VulkanDevice.MaxGlClipPlanes],
             0x821D => [0], // No optional GL extensions are advertised by the compatibility context.
+            0x8CA7 => [C.Renderbuffer?.Name ?? 0], 0x84E8 => [Device.MaxGlRenderbufferSize],
+            0x88ED => [C.PixelPackBuffer?.Name ?? 0], 0x88EF => [C.PixelUnpackBuffer?.Name ?? 0],
+            0x8D57 => [Device.MaxGlRenderbufferSamples], 0x80A9 => [Device.FramebufferSamples(Target)], 0x80A8 => [Device.FramebufferSamples(Target) > 0 ? 1 : 0],
+            0x8DB9 => [State.FramebufferSrgb ? 1 : 0], 0x8C89 => [State.RasterizerDiscard ? 1 : 0],
+            >= 0x0B90 and <= 0x0B98 or >= 0x8800 and <= 0x8803 or >= 0x8CA3 and <= 0x8CA5 => [StencilQuery(name)],
             >= 0x3000 and <= 0x3007 => [Enabled(name) ? 1 : 0],
             0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
@@ -996,6 +1031,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         foreach (int framebuffer in framebuffers.Keys) device.DeleteFramebuffer(framebuffer);
         framebuffers.Clear();
         foreach (ProgramObject program in programs.Values) if (!program.Borrowed && program.Backend != 0) device.DeleteProgram(program.Backend);
+        foreach (RenderbufferObject renderbuffer in renderbuffers.Values) if (renderbuffer.Image != 0) device.DeleteTexture(renderbuffer.Image);
+        renderbuffers.Clear(); renderbufferAttachments.Clear();
         foreach (TextureObject texture in textures.Values) if (!texture.Borrowed) device.DeleteTexture(texture.Name);
         programs.Clear(); shaders.Clear(); buffers.Clear(); textures.Clear(); contexts.Clear();
         selected = null; if (ReferenceEquals(current, this)) current = null;

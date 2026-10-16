@@ -571,17 +571,36 @@ public sealed unsafe partial class VulkanDevice
 
         if ((dirty & DynamicStateDirty.StencilTestEnable) != 0) api.CmdSetStencilTestEnable(commandBuffer, values.StencilTest);
         if ((dirty & DynamicStateDirty.StencilOp) != 0)
-            api.CmdSetStencilOp(commandBuffer, StencilFaceFlags.FaceFrontAndBack,
+        {
+            api.CmdSetStencilOp(commandBuffer, StencilFaceFlags.FaceFrontBit,
                 values.StencilFail, values.StencilPass, values.StencilDepthFail, values.StencilCompare);
+            api.CmdSetStencilOp(commandBuffer, StencilFaceFlags.FaceBackBit,
+                values.StencilBack.FailOp, values.StencilBack.PassOp, values.StencilBack.DepthFailOp, values.StencilBack.CompareOp);
+        }
         if ((dirty & DynamicStateDirty.StencilCompareMask) != 0)
-            api.CmdSetStencilCompareMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilCompareMask);
+        {
+            api.CmdSetStencilCompareMask(commandBuffer, StencilFaceFlags.FaceFrontBit, values.StencilCompareMask);
+            api.CmdSetStencilCompareMask(commandBuffer, StencilFaceFlags.FaceBackBit, values.StencilBack.CompareMask);
+        }
         if ((dirty & DynamicStateDirty.StencilWriteMask) != 0)
-            api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilWriteMask);
+        {
+            api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceFrontBit, values.StencilWriteMask);
+            api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceBackBit, values.StencilBack.WriteMask);
+        }
         if ((dirty & DynamicStateDirty.StencilReference) != 0)
-            api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilReference);
+        {
+            api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontBit, values.StencilReference);
+            api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceBackBit, values.StencilBack.Reference);
+        }
 
         if ((dirty & DynamicStateDirty.LineWidth) != 0) api.CmdSetLineWidth(commandBuffer, values.LineWidth);
         if ((dirty & DynamicStateDirty.DepthBias) != 0) api.CmdSetDepthBias(commandBuffer, values.DepthBiasConstant, 0f, values.DepthBiasSlope);
+        if ((dirty & DynamicStateDirty.RasterizerDiscard) != 0) api.CmdSetRasterizerDiscardEnable(commandBuffer, values.RasterizerDiscard);
+        if ((dirty & DynamicStateDirty.BlendConstants) != 0)
+        {
+            float* constants = stackalloc float[4] { values.BlendConstants.X, values.BlendConstants.Y, values.BlendConstants.Z, values.BlendConstants.W };
+            api.CmdSetBlendConstants(commandBuffer, constants);
+        }
 
         int emitted = DynamicStateCache.CommandCount(dirty & DynamicStateDirty.All) + extraCommands;
         _dynamicStateCommands += emitted;

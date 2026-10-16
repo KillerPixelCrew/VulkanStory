@@ -61,7 +61,8 @@ public sealed unsafe partial class VulkanDevice
         int ProgramId, int FormatsId, int BlendId, bool DepthTest, bool DepthWrite,
         CompareOp DepthCompare, CullModeFlags Cull, PrimitiveTopology Topology,
         int VertexLayoutId, PolygonMode PolygonMode, FrontFace FrontFace, float LineWidth,
-        bool SamplesBoundDepth, float DepthBiasConstant, float DepthBiasSlope);
+        bool SamplesBoundDepth, float DepthBiasConstant, float DepthBiasSlope,
+        bool StencilTest, StencilOpState StencilFront, StencilOpState StencilBack, System.Numerics.Vector4 BlendConstants, bool RasterizerDiscard);
 
     /// <summary>Native passes declared and native draws recorded (every kind). Tests only.</summary>
     internal long NativePassesForTests => _nativePasses;
@@ -222,6 +223,14 @@ public sealed unsafe partial class VulkanDevice
             error = "a pipeline that samples the bound depth attachment cannot also write depth";
             return null;
         }
+        static bool WritesStencil(StencilOpState state) => (state.WriteMask & 255) != 0 &&
+            (state.FailOp != StencilOp.Keep || state.PassOp != StencilOp.Keep || state.DepthFailOp != StencilOp.Keep);
+        if (description.SamplesBoundDepth && description.StencilTest && description.Targets.StencilFormat != Format.Undefined &&
+            (WritesStencil(description.StencilFront) || WritesStencil(description.StencilBack)))
+        {
+            error = "sampling bound depth while writing stencil requires separate depth/stencil layout support";
+            return null;
+        }
         if (description.VertexLayoutId < 0 || description.VertexLayoutId >= _meshes.LayoutCount)
         {
             error = "vertex layout " + description.VertexLayoutId + " does not exist";
@@ -241,7 +250,8 @@ public sealed unsafe partial class VulkanDevice
         var cacheKey = new NativePipelineCacheKey(description.ProgramId, formatsId, rawBlendId,
             description.DepthTest, description.DepthWrite, description.DepthCompare,
             description.Cull, description.Topology, description.VertexLayoutId, description.PolygonMode,
-            description.FrontFace, description.LineWidth, description.SamplesBoundDepth, description.DepthBiasConstant, description.DepthBiasSlope);
+            description.FrontFace, description.LineWidth, description.SamplesBoundDepth, description.DepthBiasConstant, description.DepthBiasSlope,
+            description.StencilTest, description.StencilFront, description.StencilBack, description.BlendConstants, description.RasterizerDiscard);
         if (_nativePipelines.TryGetValue(cacheKey, out NativePipeline? cached) &&
             ReferenceEquals(cached.Program, program))
         {
@@ -741,7 +751,7 @@ public sealed unsafe partial class VulkanDevice
             // The bound depth attachment is sampled in the read-only depth layout, the one the
             // scope holds it in, exactly as the emulated resolve keys it.
             ImageLayout layout = depthReadOnly && _targets.IsBoundDepth(sampled.TextureId)
-                ? ImageLayout.DepthReadOnlyOptimal
+                ? ImageLayout.DepthStencilReadOnlyOptimal
                 : ImageLayout.ShaderReadOnlyOptimal;
 
             if (sampler.FrameBinding >= 0)
@@ -881,14 +891,17 @@ public sealed unsafe partial class VulkanDevice
             DepthTest = description.DepthTest,
             DepthWrite = description.DepthWrite,
             DepthCompare = description.DepthCompare,
-            StencilTest = false,
-            StencilFail = StencilOp.Keep,
-            StencilPass = StencilOp.Keep,
-            StencilDepthFail = StencilOp.Keep,
-            StencilCompare = CompareOp.Always,
-            StencilCompareMask = 0xFF,
-            StencilWriteMask = 0xFF,
-            StencilReference = 0,
+            StencilTest = description.StencilTest && description.Targets?.StencilFormat != Format.Undefined,
+            StencilFail = description.StencilFront.FailOp,
+            StencilPass = description.StencilFront.PassOp,
+            StencilDepthFail = description.StencilFront.DepthFailOp,
+            StencilCompare = description.StencilFront.CompareOp,
+            StencilCompareMask = description.StencilFront.CompareMask,
+            StencilWriteMask = description.StencilFront.WriteMask,
+            StencilReference = description.StencilFront.Reference,
+            StencilBack = description.StencilBack,
+            BlendConstants = description.BlendConstants,
+            RasterizerDiscard = description.RasterizerDiscard,
             // Clamped through the same device range as the emulated path's, so a native line
             // draw and the seam's neutral body rasterize identically.
             LineWidth = _context.Capabilities.ClampLineWidth(description.LineWidth),

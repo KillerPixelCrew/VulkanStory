@@ -103,6 +103,9 @@ internal sealed partial class GameGraphicsAdapter
     private static bool SameFixedState(NativePipelineDescription cached, NativePipelineDescription wanted)
     {
         if (cached.DepthTest != wanted.DepthTest || cached.DepthWrite != wanted.DepthWrite ||
+            cached.StencilTest != wanted.StencilTest || !cached.StencilFront.Equals(wanted.StencilFront) || !cached.StencilBack.Equals(wanted.StencilBack) ||
+            cached.BlendConstants != wanted.BlendConstants ||
+            cached.RasterizerDiscard != wanted.RasterizerDiscard ||
             cached.DepthCompare != wanted.DepthCompare || cached.Cull != wanted.Cull ||
             cached.FrontFace != wanted.FrontFace || cached.Topology != wanted.Topology ||
             cached.PolygonMode != wanted.PolygonMode || cached.SamplesBoundDepth != wanted.SamplesBoundDepth ||

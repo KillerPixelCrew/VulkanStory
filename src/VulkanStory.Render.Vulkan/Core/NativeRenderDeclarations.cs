@@ -69,6 +69,15 @@ internal sealed class NativePipelineDescription
     public bool DepthTest;
     public bool DepthWrite;
     public CompareOp DepthCompare = CompareOp.Less;
+    public bool StencilTest;
+    public StencilOpState StencilFront = DefaultStencil, StencilBack = DefaultStencil;
+    public System.Numerics.Vector4 BlendConstants;
+    public bool RasterizerDiscard;
+    internal static StencilOpState DefaultStencil => new()
+    {
+        FailOp = StencilOp.Keep, PassOp = StencilOp.Keep, DepthFailOp = StencilOp.Keep,
+        CompareOp = CompareOp.Always, CompareMask = uint.MaxValue, WriteMask = uint.MaxValue,
+    };
     /// <summary>Sentinel for an absent native sampler declaration.</summary>
     public CullModeFlags Cull = CullModeFlags.None;
 

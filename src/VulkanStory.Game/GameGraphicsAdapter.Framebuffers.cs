@@ -134,9 +134,9 @@ internal sealed partial class GameGraphicsAdapter
         var colors = new int[StatedRenderState.MaxColorAttachments];
         for (int slot = 0; slot < colors.Length; slot++)
             if (renderer.TryFramebufferAttachment(handle, 0x8CE0 + slot, out int texture, out _, out _))
-            { colors[slot] = texture; if (texture != 0) count = slot + 1; }
+            { colors[slot] = renderer.IsTexture(texture) ? texture : 0; if (texture != 0) count = slot + 1; }
         view.ColorTextureIds = colors[..count];
-        if (renderer.TryFramebufferAttachment(handle, 0x8D00, out int depth, out _, out _)) view.DepthTextureId = depth;
+        if (renderer.TryFramebufferAttachment(handle, 0x8D00, out int depth, out _, out _)) view.DepthTextureId = renderer.IsTexture(depth) ? depth : 0;
     }
 
     private void ForgetFramebufferView(int handle)

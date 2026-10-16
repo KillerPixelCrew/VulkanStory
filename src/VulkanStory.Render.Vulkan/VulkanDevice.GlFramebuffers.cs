@@ -6,7 +6,7 @@ namespace VulkanStory.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     internal bool IsFramebuffer(int name) => _targets.Get(name) is not null;
-    internal bool IsTexture(int name) => _textures.Get(name) is not null;
+    internal bool IsTexture(int name) => _textures.Get(name) is { IsGlRenderbuffer: false };
     internal bool IsDepthTexture(int name) => _textures.Get(name) is { } texture && (texture.Aspect & ImageAspectFlags.DepthBit) != 0;
 
     internal void SetFramebufferColorRoutes(int name, int[]? routes)
@@ -35,6 +35,8 @@ public sealed unsafe partial class VulkanDevice
         if (target is null) return false;
         if (attachment == 0x8D00)
         { texture = target.DepthTextureId; mipLevel = (int)target.DepthMipLevel; layer = (int)target.DepthLayer; return true; }
+        if (attachment is 0x8D20 or 0x821A)
+        { AttachmentSlot stencil = target.Stencil; texture = stencil.TextureId; mipLevel = (int)stencil.MipLevel; layer = (int)stencil.Layer; return true; }
         int slot = attachment - 0x8CE0;
         if ((uint)slot >= (uint)target.Color.Length) return false;
         AttachmentSlot value = target.Color[slot];
@@ -46,7 +48,10 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!IsFramebuffer(name)) throw new ArgumentOutOfRangeException(nameof(name));
         EndStagePass();
-        _targets.Attach(name, attachment == 0x8D00 ? -1 : attachment - 0x8CE0, texture, (uint)layer, (uint)mipLevel);
+        if (attachment is 0x8D00 or 0x821A) _targets.Attach(name, -1, texture, (uint)layer, (uint)mipLevel);
+        if (attachment is 0x8D20 or 0x821A) _targets.Attach(name, -2, texture, (uint)layer, (uint)mipLevel);
+        if (attachment >= 0x8CE0 && attachment < 0x8CE0 + RenderLimits.MaxColorAttachments)
+            _targets.Attach(name, attachment - 0x8CE0, texture, (uint)layer, (uint)mipLevel);
         RefreshFramebufferExtent(name);
     }
 
@@ -64,6 +69,7 @@ public sealed unsafe partial class VulkanDevice
         }
         foreach (AttachmentSlot slot in target.Color) Include(slot.TextureId, slot.MipLevel);
         Include(target.DepthTextureId, target.DepthMipLevel);
+        Include(target.Stencil.TextureId, target.Stencil.MipLevel);
         target.Width = width == uint.MaxValue ? 1 : width;
         target.Height = height == uint.MaxValue ? 1 : height;
     }
@@ -73,18 +79,31 @@ public sealed unsafe partial class VulkanDevice
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(name));
         if (target is null) return 0x8219; // GL_FRAMEBUFFER_UNDEFINED
         bool attached = false;
+        int? samples = null;
+        bool mismatchedSamples = false;
         bool Valid(int id, uint mip, uint layer, bool depth)
         {
             if (id == 0) return true;
             attached = true;
             VulkanTexture? texture = _textures.Get(id);
+            if (texture is not null) { if (samples.HasValue && samples != texture.GlSamples) mismatchedSamples = true; samples ??= texture.GlSamples; }
             return texture is not null && !texture.Volume && mip < texture.MipLevels && layer < texture.Layers &&
                 (texture.DefinedLevels is null || texture.DefinedLevels.Contains((int)mip)) &&
-                ((texture.Aspect & ImageAspectFlags.DepthBit) != 0) == depth;
+                (depth ? (texture.Aspect & ImageAspectFlags.DepthBit) != 0 : texture.Aspect == ImageAspectFlags.ColorBit);
         }
         foreach (AttachmentSlot slot in target.Color)
             if (!Valid(slot.TextureId, slot.MipLevel, slot.Layer, false)) return 0x8CD6;
         if (!Valid(target.DepthTextureId, target.DepthMipLevel, target.DepthLayer, true)) return 0x8CD6;
+        if (target.Stencil.TextureId != 0)
+        {
+            VulkanTexture? stencil = _textures.Get(target.Stencil.TextureId);
+            if (stencil is null || (stencil.Aspect & ImageAspectFlags.StencilBit) == 0 ||
+                target.Stencil.MipLevel >= stencil.MipLevels || target.Stencil.Layer >= stencil.Layers) return 0x8CD6;
+            if (samples.HasValue && samples != stencil.GlSamples) mismatchedSamples = true;
+            if (target.DepthTextureId != 0 && (target.DepthTextureId != target.Stencil.TextureId || target.DepthLayer != target.Stencil.Layer || target.DepthMipLevel != target.Stencil.MipLevel)) return 0x8CDD;
+            attached = true;
+        }
+        if (mismatchedSamples) return 0x8D56;
         if (!attached) return 0x8CD7;
         RefreshFramebufferExtent(target.Id);
         return 0x8CD5;

@@ -12,8 +12,9 @@ public sealed unsafe partial class VulkanDevice
     private int glColorBlitProgram, glDepthBlitProgram;
 
     private void TransferImages(VulkanTexture source, uint sourceLevel, uint sourceLayer, VulkanTexture destination, uint destinationLevel, uint destinationLayer,
-        int sx, int sy, int dx, int dy, int width, int height)
+        int sx, int sy, int dx, int dy, int width, int height, ImageAspectFlags aspect = 0)
     {
+        if (aspect == 0) aspect = (source.Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : source.Aspect;
         EndNativePass();
         CommandBuffer command = _frameActive ? Commands : _uploads.BeginRecording(inlineInFrame: false);
         try
@@ -22,15 +23,33 @@ public sealed unsafe partial class VulkanDevice
             _textures.Require(_barriers, command, source, ResourceUsage.TransferSrc);
             _textures.Require(_barriers, command, destination, ResourceUsage.TransferDst);
             _barriers.Flush(command);
-            var copy = new ImageCopy
+            if (source.Samples != destination.Samples)
             {
-                SrcSubresource = new ImageSubresourceLayers(source.Aspect, sourceLevel, sourceLayer, 1),
-                DstSubresource = new ImageSubresourceLayers(destination.Aspect, destinationLevel, destinationLayer, 1),
-                SrcOffset = new Offset3D(sx, sy, 0), DstOffset = new Offset3D(dx, dy, 0),
-                Extent = new Extent3D((uint)width, (uint)height, 1),
-            };
-            _context.Api.CmdCopyImage(command, source.Image, ImageLayout.TransferSrcOptimal,
-                destination.Image, ImageLayout.TransferDstOptimal, 1, &copy);
+                if (source.Samples == SampleCountFlags.Count1Bit || destination.Samples != SampleCountFlags.Count1Bit ||
+                    aspect != ImageAspectFlags.ColorBit || source.Format != destination.Format)
+                    throw new NotSupportedException("This image transfer requires a matching color multisample resolve.");
+                var resolve = new ImageResolve
+                {
+                    SrcSubresource = new ImageSubresourceLayers(aspect, sourceLevel, sourceLayer, 1),
+                    DstSubresource = new ImageSubresourceLayers(aspect, destinationLevel, destinationLayer, 1),
+                    SrcOffset = new Offset3D(sx, sy, 0), DstOffset = new Offset3D(dx, dy, 0),
+                    Extent = new Extent3D((uint)width, (uint)height, 1),
+                };
+                _context.Api.CmdResolveImage(command, source.Image, ImageLayout.TransferSrcOptimal,
+                    destination.Image, ImageLayout.TransferDstOptimal, 1, &resolve);
+            }
+            else
+            {
+                var copy = new ImageCopy
+                {
+                    SrcSubresource = new ImageSubresourceLayers(aspect, sourceLevel, sourceLayer, 1),
+                    DstSubresource = new ImageSubresourceLayers(aspect, destinationLevel, destinationLayer, 1),
+                    SrcOffset = new Offset3D(sx, sy, 0), DstOffset = new Offset3D(dx, dy, 0),
+                    Extent = new Extent3D((uint)width, (uint)height, 1),
+                };
+                _context.Api.CmdCopyImage(command, source.Image, ImageLayout.TransferSrcOptimal,
+                    destination.Image, ImageLayout.TransferDstOptimal, 1, &copy);
+            }
         }
         finally { if (!_frameActive) _uploads.EndRecording(); }
         if (!_frameActive) _uploads.SubmitStandalone();
@@ -39,15 +58,16 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Copies/scales a GL rectangle without changing its affine mapping when framebuffer/scissor bounds clip it.</summary>
     internal void BlitTextureRectangle(int sourceId, int sourceLevel, int sourceLayer, int destinationId, int destinationLevel, int destinationLayer,
         TextureBlitRectangle sourceRect, TextureBlitRectangle destinationRect, int sourceWidth, int sourceHeight,
-        int destinationWidth, int destinationHeight, Rect2D? scissor, bool linear)
+        int destinationWidth, int destinationHeight, Rect2D? scissor, bool linear, ImageAspectFlags aspect = 0)
     {
         VulkanTexture source = _textures.Get(sourceId) ?? throw new ArgumentException("Missing blit source.");
         VulkanTexture destination = _textures.Get(destinationId) ?? throw new ArgumentException("Missing blit destination.");
-        bool depth = (source.Aspect & ImageAspectFlags.DepthBit) != 0;
+        if (aspect == 0) aspect = (source.Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : source.Aspect;
+        bool depth = aspect != ImageAspectFlags.ColorBit;
         if (source.Volume || destination.Volume || sourceLayer < 0 || sourceLayer >= source.Layers || destinationLayer < 0 || destinationLayer >= destination.Layers ||
             sourceLevel < 0 || sourceLevel >= source.MipLevels || destinationLevel < 0 || destinationLevel >= destination.MipLevels)
             throw new ArgumentException("Blits require valid 2D image levels.");
-        if (depth != ((destination.Aspect & ImageAspectFlags.DepthBit) != 0) || depth && linear)
+        if ((destination.Aspect & aspect) != aspect || depth && linear)
             throw new ArgumentException("Depth transfers require depth images and nearest filtering.");
         long sourceDeltaX = (long)sourceRect.X1 - sourceRect.X0, sourceDeltaY = (long)sourceRect.Y1 - sourceRect.Y0;
         long destinationDeltaX = (long)destinationRect.X1 - destinationRect.X0, destinationDeltaY = (long)destinationRect.Y1 - destinationRect.Y0;
@@ -69,7 +89,9 @@ public sealed unsafe partial class VulkanDevice
         int copyId = 0, sourceOriginX = 0, sourceOriginY = 0;
         try
         {
-            if (source.Image.Handle == destination.Image.Handle || source.Layers > 1 || source.Cube)
+            if (source.Image.Handle == destination.Image.Handle || source.Layers > 1 || source.Cube ||
+                source.Samples != SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit &&
+                (sourceDeltaX != destinationDeltaX || sourceDeltaY != destinationDeltaY))
             {
                 // GL leaves overlapping self blits undefined. Snapshot only the
                 // sampled rectangle (plus the linear-filter halo), never an atlas.
@@ -78,23 +100,29 @@ public sealed unsafe partial class VulkanDevice
                 int endX = (int)Math.Min(sourceWidth, (long)Math.Max(sourceRect.X0, sourceRect.X1) + (linear ? 1 : 0));
                 int endY = (int)Math.Min(sourceHeight, (long)Math.Max(sourceRect.Y0, sourceRect.Y1) + (linear ? 1 : 0));
                 if (sourceOriginX >= endX || sourceOriginY >= endY) return;
-                copyId = _textures.Create((uint)(endX - sourceOriginX), (uint)(endY - sourceOriginY), source.Format);
+                copyId = source.Aspect != ImageAspectFlags.ColorBit || source.Samples != SampleCountFlags.Count1Bit && destination.Samples != SampleCountFlags.Count1Bit
+                    ? _textures.CreateRenderbuffer((uint)(endX - sourceOriginX), (uint)(endY - sourceOriginY), source.Format, source.Aspect,
+                        source.Samples == destination.Samples && source.Samples != SampleCountFlags.Count1Bit ? (int)source.Samples : 0, out _)
+                    : _textures.Create((uint)(endX - sourceOriginX), (uint)(endY - sourceOriginY), source.Format);
                 VulkanTexture copy = _textures.Get(copyId)!;
-                TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, copy, 0, 0, sourceOriginX, sourceOriginY, 0, 0, endX - sourceOriginX, endY - sourceOriginY);
+                TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, copy, 0, 0, sourceOriginX, sourceOriginY, 0, 0, endX - sourceOriginX, endY - sourceOriginY, aspect);
                 sourceId = copyId; source = copy; sourceLevel = sourceLayer = 0;
             }
             // A translation has integer clipping boundaries and is an exact
             // image copy, including between frames during resource construction.
-            if (sourceDeltaX == destinationDeltaX && sourceDeltaY == destinationDeltaY && source.Format == destination.Format)
+            if (sourceDeltaX == destinationDeltaX && sourceDeltaY == destinationDeltaY && source.Format == destination.Format &&
+                (source.Samples == destination.Samples || source.Samples != SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit))
             {
                 long ox = (long)sourceRect.X0 - destinationRect.X0, oy = (long)sourceRect.Y0 - destinationRect.Y0;
                 left = Math.Max(left, -ox); bottom = Math.Max(bottom, -oy);
                 right = Math.Min(right, sourceWidth - ox); top = Math.Min(top, sourceHeight - oy);
                 if (left < right && bottom < top)
                     TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, destination, (uint)destinationLevel, (uint)destinationLayer,
-                        checked((int)(left + ox - sourceOriginX)), checked((int)(bottom + oy - sourceOriginY)), (int)left, (int)bottom, (int)(right - left), (int)(top - bottom));
+                        checked((int)(left + ox - sourceOriginX)), checked((int)(bottom + oy - sourceOriginY)), (int)left, (int)bottom, (int)(right - left), (int)(top - bottom), aspect);
                 return;
             }
+            if (aspect == ImageAspectFlags.StencilBit || source.Samples != SampleCountFlags.Count1Bit)
+                throw new NotSupportedException("Transformed stencil or multisample-to-multisample blits require another transfer path.");
             if (!_frameActive) throw new InvalidOperationException("Scaled framebuffer rendering requires an active renderer frame.");
             DrawGlBlit(sourceId, sourceLevel, destinationId, destinationLevel, destinationLayer, sourceRect, destinationRect,
                 sourceWidth, sourceHeight, destinationWidth, destinationHeight, sourceOriginX, sourceOriginY,

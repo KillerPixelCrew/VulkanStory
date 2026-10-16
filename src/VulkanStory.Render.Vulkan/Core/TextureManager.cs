@@ -106,6 +106,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public uint Depth { get; init; } = 1;
     public uint MipLevels { get; init; }
     public uint Layers { get; init; }
+    public SampleCountFlags Samples { get; init; } = SampleCountFlags.Count1Bit;
+    internal int GlSamples { get; set; }
+    internal bool IsGlRenderbuffer { get; set; }
     internal HashSet<int>? DefinedLevels { get; set; }
 
     /// <summary>The image usage it was created with; 0 for images created outside <see cref="TextureManager.Create" />'s paths.</summary>
@@ -171,7 +174,8 @@ internal sealed unsafe class VulkanTexture : IDisposable
         if (Volume) throw new NotSupportedException("Volume textures have no 2D attachment view.");
         if (layer >= Layers) throw new ArgumentOutOfRangeException(nameof(layer));
         if (mipLevel >= MipLevels) throw new ArgumentOutOfRangeException(nameof(mipLevel));
-        if (layer == 0 && Layers == 1 && MipLevels == 1 && !Cube) return View;
+        if (layer == 0 && Layers == 1 && MipLevels == 1 && !Cube &&
+            (Aspect & (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit)) != (ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit)) return View;
         if (_layerViews.TryGetValue((layer, mipLevel), out ImageView existing)) return existing;
 
         var createInfo = new ImageViewCreateInfo
@@ -209,7 +213,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
                 Image = Image,
                 ViewType = ImageViewType.Type2D,
                 Format = Format,
-                SubresourceRange = new ImageSubresourceRange(Aspect, baseMip, mipCount, 0, 1),
+                SubresourceRange = new ImageSubresourceRange((Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : Aspect, baseMip, mipCount, 0, 1),
             };
             VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
                 "vkCreateImageView for mips " + baseMip + "+" + mipCount);
@@ -577,7 +581,8 @@ internal sealed unsafe partial class TextureManager : IDisposable
     }
 
     private int CreateImage(uint width, uint height, Format format, uint mipLevels, uint layers, bool cube,
-        ImageUsageFlags usage, ImageAspectFlags aspect, MemoryPoolClass poolClass, int reservedName = 0)
+        ImageUsageFlags usage, ImageAspectFlags aspect, MemoryPoolClass poolClass, int reservedName = 0,
+        SampleCountFlags samples = SampleCountFlags.Count1Bit)
     {
         var imageInfo = new ImageCreateInfo
         {
@@ -587,7 +592,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
             Extent = new Extent3D(width, height, 1),
             MipLevels = mipLevels,
             ArrayLayers = cube ? 6 : layers,
-            Samples = SampleCountFlags.Count1Bit,
+            Samples = samples,
             Tiling = ImageTiling.Optimal,
             Usage = usage,
             SharingMode = SharingMode.Exclusive,
@@ -632,7 +637,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
                 : layers > 1 ? ImageViewType.Type2DArray
                 : ImageViewType.Type2D,
             Format = format,
-            SubresourceRange = new ImageSubresourceRange(aspect, 0, mipLevels, 0, viewLayers),
+            SubresourceRange = new ImageSubresourceRange((aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : aspect, 0, mipLevels, 0, viewLayers),
         };
         if (api.CreateImageView(_context.Device, &viewInfo, null, out ImageView view) != Result.Success)
         {
@@ -651,6 +656,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
             Height = height,
             MipLevels = mipLevels,
             Layers = viewLayers,
+            Samples = samples,
             Cube = cube,
             Aspect = aspect,
             Usage = usage,
@@ -767,7 +773,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
         {
             TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
             var range = new ImageSubresourceRange(texture.Aspect, 0, texture.MipLevels, 0, texture.Layers);
-            if (texture.Aspect == ImageAspectFlags.DepthBit)
+            if (texture.Aspect != ImageAspectFlags.ColorBit)
             {
                 var depth = new ClearDepthStencilValue(VulkanPoison.Depth, 0);
                 _context.Api.CmdClearDepthStencilImage(commandBuffer, texture.Image,

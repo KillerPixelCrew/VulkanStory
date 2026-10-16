@@ -48,7 +48,7 @@ internal sealed partial class ManagedGlBridge
     private object? FloatQuery(MethodInfo method, object?[] a)
     {
         float[] values = I(a[0]) switch
-        { 0x0C22 => C.ClearColor, 0x0B73 => [C.ClearDepth], 0x8038 => [State.PolygonOffsetFactor], 0x2A00 => [State.PolygonOffsetUnits], _ => IntegerValues(I(a[0])).Select(value => (float)value).ToArray() };
+        { 0x0C22 => C.ClearColor, 0x0B73 => [C.ClearDepth], 0x8005 => [State.BlendConstants.X, State.BlendConstants.Y, State.BlendConstants.Z, State.BlendConstants.W], 0x8038 => [State.PolygonOffsetFactor], 0x2A00 => [State.PolygonOffsetUnits], _ => IntegerValues(I(a[0])).Select(value => (float)value).ToArray() };
         if (a.Length > 1) WriteFloats(method, a, 1, values);
         return method.ReturnType == typeof(void) ? null : values[0];
     }
@@ -94,15 +94,24 @@ internal sealed partial class ManagedGlBridge
         nint pointer = Pointer(value); if (pointer == 0) Error(0x0501);
         var values = new float[count]; Marshal.Copy(pointer, values, 0, count); return values;
     }
+    private void ClearTarget(int mask)
+    {
+        if ((mask & ~0x4500) != 0) Error(0x0501);
+        if (GlFramebufferStatus(Target) != 0x8CD5) Error(0x0506);
+        if ((mask & 0x4000) != 0) CheckGlColorEncoding();
+        session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor, C.ClearDepth);
+        if ((mask & 0x0400) != 0) Device.ClearGlStencil(Target, C.ClearStencil, State.StencilFront.WriteMask, State.ScissorEnabled ? State.Scissor : null);
+    }
     private void ClearBuffer(MethodInfo method, object?[] a)
     {
         int buffer = I(a[0]), slot = I(a[1]);
-        if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506);
+        if (GlFramebufferStatus(Target) != 0x8CD5) Error(0x0506);
         Type input = method.GetParameters()[2].ParameterType;
         bool integer = input.HasElementType && input.GetElementType() is { } element && (element == typeof(int) || element == typeof(uint));
         Rect2D? clip = State.ScissorEnabled ? State.Scissor : null;
         if (buffer == 0x1800)
         {
+            CheckGlColorEncoding();
             CheckColorSlot(slot);
             float[] color = integer ? ReadInts(a[2], 4).Select(value => (float)value).ToArray() : ReadFloatValues(a[2], 4);
             if (State.DrawBufferAttachment(Target, slot) >= 0) Device.ClearGlColor(Target, slot, State.SlotColorMask(slot), color, clip);
@@ -115,7 +124,7 @@ internal sealed partial class ManagedGlBridge
             if (State.DepthWrite) Device.ClearGlDepth(Target, depth, clip);
         }
         else if (buffer == 0x1802)
-        { if (!integer) Error(0x0500); if (slot != 0) Error(0x0501); _ = ReadInts(a[2], 1); /* No stencil image is attached. */ }
+        { if (!integer) Error(0x0500); if (slot != 0) Error(0x0501); Device.ClearGlStencil(Target, ReadInts(a[2], 1)[0], State.StencilFront.WriteMask, clip); }
         else Error(0x0500);
     }
 }

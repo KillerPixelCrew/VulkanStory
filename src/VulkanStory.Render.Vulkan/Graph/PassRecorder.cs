@@ -88,7 +88,7 @@ internal sealed unsafe class PassRecorder
             if (clear.Depth)
             {
                 var value = new ClearDepthStencilValue(clear.R, 0);
-                var range = new ImageSubresourceRange(target.Aspect, clear.MipLevel, 1, clear.Layer, 1);
+                var range = new ImageSubresourceRange(ImageAspectFlags.DepthBit, clear.MipLevel, 1, clear.Layer, 1);
                 _context.Api.CmdClearDepthStencilImage(commandBuffer, target.Image, ImageLayout.TransferDstOptimal,
                     &value, 1, &range);
             }
@@ -170,7 +170,7 @@ internal sealed unsafe class PassRecorder
         }
         if (depth != null)
         {
-            _uses.Add(new AttachmentUse(framebuffer.DepthTextureId,
+            _uses.Add(new AttachmentUse(depth.Id,
                 depthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite, false));
         }
 
@@ -268,7 +268,7 @@ internal sealed unsafe class PassRecorder
                 int id = i < other.Color.Length ? other.Color[i].TextureId : other.DepthTextureId;
                 if (id <= 0) continue;
                 VulkanTexture? texture = _textures.Get(id);
-                if (texture == null || InScope(texture, colour, depth)) continue;
+                if (texture == null || (texture.Usage & ImageUsageFlags.SampledBit) == 0 || InScope(texture, colour, depth)) continue;
                 if (flushClears)
                 {
                     FlushClears(commandBuffer, texture);
