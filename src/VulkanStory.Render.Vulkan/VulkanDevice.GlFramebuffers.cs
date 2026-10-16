@@ -79,6 +79,7 @@ public sealed unsafe partial class VulkanDevice
             attached = true;
             VulkanTexture? texture = _textures.Get(id);
             return texture is not null && !texture.Volume && mip < texture.MipLevels && layer < texture.Layers &&
+                (texture.DefinedLevels is null || texture.DefinedLevels.Contains((int)mip)) &&
                 ((texture.Aspect & ImageAspectFlags.DepthBit) != 0) == depth;
         }
         foreach (AttachmentSlot slot in target.Color)

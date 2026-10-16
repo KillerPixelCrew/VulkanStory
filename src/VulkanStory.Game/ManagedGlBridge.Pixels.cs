@@ -21,12 +21,21 @@ internal sealed partial class ManagedGlBridge
 
     private object? TextureLevelQuery(MethodInfo method, object?[] a)
     {
-        if (I(a[0]) != 0x0DE1) Error(0x0500);
+        int target = I(a[0]); if (target is not (0x0DE1 or 0x806F)) Error(0x0500);
         int level = I(a[1]); if (level < 0) Error(0x0501);
-        bool defined = Device.TryGetTexture2DDescription(BoundTexture(), out int width, out int height, out int levels, out int format) && level < levels;
+        int name = BoundTexture(target);
+        TextureLevel image = default;
+        bool defined;
+        if (textures.TryGetValue(name, out TextureObject? texture)) defined = texture.Images.TryGetValue(level, out image);
+        else
+        {
+            var storage = Device.TextureOf(name);
+            defined = storage is not null && storage.Volume == (target == 0x806F) && level < storage.MipLevels;
+            if (defined) image = new(Math.Max(1, (int)storage!.Width >> level), Math.Max(1, (int)storage.Height >> level), Math.Max(1, (int)storage.Depth >> level), storage.GlInternalFormat);
+        }
         int value = I(a[2]) switch
-        { 0x1000 => defined ? Math.Max(1, width >> level) : 0, 0x1001 => defined ? Math.Max(1, height >> level) : 0,
-            0x1003 => defined ? format : 0, 0x8071 => defined ? 1 : 0, _ => throw new GlError(0x0500) };
+        { 0x1000 => defined ? image.Width : 0, 0x1001 => defined ? image.Height : 0,
+            0x1003 => defined ? image.Format : 0, 0x8071 => defined ? image.Depth : 0, _ => throw new GlError(0x0500) };
         if (a.Length > 3) WriteOutput(method, a, 3, [value], false);
         return method.ReturnType == typeof(void) ? null : value;
     }
@@ -36,6 +45,7 @@ internal sealed partial class ManagedGlBridge
         if (I(a[0]) != 0x0DE1) Error(0x0500);
         int name = BoundTexture(), level = I(a[1]);
         if (level < 0) Error(0x0501);
+        if (textures.TryGetValue(name, out TextureObject? image) && !image.Images.ContainsKey(level)) return;
         if (!Device.TryGetTexture2DDescription(name, out int width, out int height, out int levels, out _) || level >= levels) Error(0x0502);
         PackPixels(name, level, 0, 0, Math.Max(1, width >> level), Math.Max(1, height >> level), I(a[2]), I(a[3]), a[4], null);
     }
@@ -68,6 +78,7 @@ internal sealed partial class ManagedGlBridge
         if (packed && channels.Length != 4) Error(0x0502);
         if (level < 0 || !clip && (x < 0 || y < 0) || width < 0 || height < 0) Error(0x0501);
         if (!Device.TryGetTexture2DDescription(texture, out int storageWidth, out int storageHeight, out int levels, out _) || level >= levels) Error(0x0502);
+        if (Device.TextureOf(texture)!.DefinedLevels is { } defined && !defined.Contains(level)) Error(0x0502);
         bool depth = Device.IsDepthTexture(texture);
         if (depth != (format == 0x1902)) Error(0x0502);
         int imageWidth = Math.Max(1, storageWidth >> level), imageHeight = Math.Max(1, storageHeight >> level);

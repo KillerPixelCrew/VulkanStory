@@ -58,6 +58,8 @@
     <Compile Include="Core/VulkanResources.cs" />
     <Compile Include="Core/FrameRing.cs" />
     <Compile Include="Core/TextureManager.cs" />
+    <Compile Include="Core/TextureManager.Gl.cs" />
+    <Compile Include="VulkanDevice.GlTextures.cs" />
     <Compile Include="Core/TextureReadbackFormats.cs" />
     <Compile Include="Core/TextureDump.cs" />
     <Compile Include="Core/FramebufferCapture.cs" />

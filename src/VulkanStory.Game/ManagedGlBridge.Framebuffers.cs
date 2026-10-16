@@ -80,7 +80,7 @@ internal sealed partial class ManagedGlBridge
         if (mipLevel < 0 || mipLevel > (int)Math.Log2(Device.MaxTextureSize) || texture < 0) Error(0x0501);
         if (texture != 0)
         {
-            bool owned = textures.TryGetValue(texture, out TextureObject? image) && image.Created && !image.Deleted;
+            bool owned = textures.TryGetValue(texture, out TextureObject? image) && image.Created && !image.Deleted && image.Target == 0x0DE1;
             if (!owned && !Device.TryGetTexture2DDescription(texture, out _, out _, out _, out _)) Error(0x0502);
         }
         Device.AttachFramebufferTextureLevel(framebuffer, attachment, texture, mipLevel);

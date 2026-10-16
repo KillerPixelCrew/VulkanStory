@@ -71,6 +71,14 @@ blits outside an active renderer frame still need a graphics recording scope.
 `DrawArrays` feeds the shared raw-mesh path without changing the VAO's element
 buffer binding.
 
+Mutable 2D/3D image definitions and subimage uploads share the renderer's texture
+namespace. Reallocation preserves sampler state and compatible mip contents,
+invalidates attachment views and retires old storage against GPU users. Volume
+storage has actual depth and mip extents, with independently retained volume/cube
+texture-unit bindings. Source conversion handles normalized scalar, half/float,
+RGBA/BGRA and packed byte data with the unpack row/slice layout. Undefined mip
+levels remain distinguishable from allocated storage in queries/completeness.
+
 This bridge implements a subset of GL, not a complete desktop OpenGL driver.
 Supported generic memory wrappers use OpenTK's native procedure table. The bridge
 checks the loaded binding's metadata identity, slot and native signature before
@@ -79,8 +87,9 @@ The scanner admits a generic wrapper only when it reaches an implemented entry.
 Callbacks stay rooted for process lifetime and the original table entries are
 restored when routing is removed. Unexpected callback failures set a GL error,
 increment the status counter and are logged without crossing the unmanaged ABI.
-Texture definition, volume transfers, outside-frame scaled blits, queries and additional
-shader/state operations remain incomplete.
+Zero-sized/independently shaped mutable mip backing, nonzero base-mip sampling,
+outside-frame scaled blits, queries and additional shader/state operations remain
+incomplete.
 Native GL imports and graphics proc-address loaders still need explicit support.
 When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata
 before executing the code. Unsupported graphics access is refused through the

@@ -197,6 +197,19 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (_bound == framebuffer) _needsRestart = true;
     }
 
+    internal int[] InvalidateTexture(int texture)
+    {
+        var changed = new List<int>();
+        foreach (VulkanFramebuffer? framebuffer in _framebuffers)
+        {
+            if (framebuffer is null || framebuffer.DepthTextureId != texture && !framebuffer.Color.Any(slot => slot.TextureId == texture)) continue;
+            framebuffer.FormatsId = -1;
+            if (ReferenceEquals(_bound, framebuffer)) _needsRestart = true;
+            changed.Add(framebuffer.Id);
+        }
+        return changed.ToArray();
+    }
+
     private void NoteFeedbackSplit()
     {
         FeedbackSplits++;

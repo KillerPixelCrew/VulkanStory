@@ -101,6 +101,13 @@ internal static class GlEnums
     /// </summary>
     public static Format TextureFormatFromGl(int glInternalFormat) => glInternalFormat switch
     {
+        0x1903 or 0x8229 => Format.R8Unorm,
+        0x8227 or 0x822B => Format.R8G8Unorm,
+        0x822F => Format.R16G16Sfloat,
+        0x8230 => Format.R32G32Sfloat,
+        0x881B => Format.R16G16B16A16Sfloat,
+        0x8815 => Format.R32G32B32A32Sfloat,
+        0x1902 or 0x81A6 or 0x81A7 => Format.D32Sfloat,
         0x8058 => Format.R8G8B8A8Unorm,        // GL_RGBA8
         0x881A => Format.R16G16B16A16Sfloat,   // GL_RGBA16F
         0x822D => Format.R16Sfloat,            // GL_R16F

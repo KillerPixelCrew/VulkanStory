@@ -37,6 +37,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// negative value for no limit. The client clamps this to the mipmap quality
 /// setting after building a chain.
 /// </param>
+/// <param name="AddressW">Optional volume R-axis wrapping; null retains the original clamp-to-edge behavior.</param>
 internal readonly record struct SamplerState(
     Filter MagFilter,
     Filter MinFilter,
@@ -48,7 +49,8 @@ internal readonly record struct SamplerState(
     float MaxAnisotropy,
     BorderColor BorderColor,
     bool Mipmapped = false,
-    int MaxLevel = -1)
+    int MaxLevel = -1,
+    SamplerAddressMode? AddressW = null)
 {
     public static SamplerState Default => new(
         Filter.Nearest, Filter.Nearest, SamplerMipmapMode.Nearest,
@@ -101,8 +103,10 @@ internal sealed unsafe class VulkanTexture : IDisposable
 
     public uint Width { get; init; }
     public uint Height { get; init; }
+    public uint Depth { get; init; } = 1;
     public uint MipLevels { get; init; }
     public uint Layers { get; init; }
+    internal HashSet<int>? DefinedLevels { get; set; }
 
     /// <summary>The image usage it was created with; 0 for images created outside <see cref="TextureManager.Create" />'s paths.</summary>
     public ImageUsageFlags Usage { get; init; }
@@ -110,7 +114,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// <summary>Whether the view is a cube rather than a six-layer array.</summary>
     public bool Cube { get; init; }
 
-    /// <summary>Whether the image is 3D (<see cref="TextureManager.CreateVolume" />); GL-created textures never are.</summary>
+    /// <summary>Whether the image is 3D (<see cref="TextureManager.CreateVolume" />).</summary>
     public bool Volume { get; init; }
     public ImageAspectFlags Aspect { get; init; }
 
@@ -271,7 +275,7 @@ internal sealed unsafe class SamplerCache : IDisposable
             MipmapMode = state.MipmapMode,
             AddressModeU = state.AddressU,
             AddressModeV = state.AddressV,
-            AddressModeW = SamplerAddressMode.ClampToEdge,
+            AddressModeW = state.AddressW ?? SamplerAddressMode.ClampToEdge,
             MipLodBias = Math.Clamp(state.LodBias, -_context.Capabilities.MaxSamplerLodBias,
                 _context.Capabilities.MaxSamplerLodBias),
             AnisotropyEnable = maxAnisotropy > 1f,
@@ -317,7 +321,7 @@ internal sealed unsafe class SamplerCache : IDisposable
 /// fields mods read and pass back. So this is a handle table, and 0 means "no
 /// texture" exactly as it does in GL.
 /// </summary>
-internal sealed unsafe class TextureManager : IDisposable
+internal sealed unsafe partial class TextureManager : IDisposable
 {
     /// <summary>GL_SHORT source pixels converted to GL_RGBA16 storage.</summary>
     internal static ushort ShortToUnorm16(short value) =>
@@ -663,11 +667,12 @@ internal sealed unsafe class TextureManager : IDisposable
     /// array's slot 0 still needs a 3D view. Uploads address it as layer 0 of a
     /// one-texel-deep image.
     /// </summary>
-    public int CreateVolume(uint width, uint height, uint depth, Format format)
+    public int CreateVolume(uint width, uint height, uint depth, Format format, uint mipLevels = 1)
     {
         width = Math.Max(1, width);
         height = Math.Max(1, height);
         depth = Math.Max(1, depth);
+        if (mipLevels == 0 || mipLevels > MipLevelsFor(Math.Max(width, depth), height)) throw new ArgumentOutOfRangeException(nameof(mipLevels));
 
         var imageInfo = new ImageCreateInfo
         {
@@ -675,7 +680,7 @@ internal sealed unsafe class TextureManager : IDisposable
             ImageType = ImageType.Type3D,
             Format = format,
             Extent = new Extent3D(width, height, depth),
-            MipLevels = 1,
+            MipLevels = mipLevels,
             ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal,
@@ -716,7 +721,7 @@ internal sealed unsafe class TextureManager : IDisposable
             Image = image,
             ViewType = ImageViewType.Type3D,
             Format = format,
-            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, mipLevels, 0, 1),
         };
         if (api.CreateImageView(_context.Device, &viewInfo, null, out ImageView view) != Result.Success)
         {
@@ -733,9 +738,11 @@ internal sealed unsafe class TextureManager : IDisposable
             Format = format,
             Width = width,
             Height = height,
-            MipLevels = 1,
+            Depth = depth,
+            MipLevels = mipLevels,
             Layers = 1,
             Volume = true,
+            Usage = imageInfo.Usage,
             Aspect = ImageAspectFlags.ColorBit,
         };
 
@@ -859,8 +866,13 @@ internal sealed unsafe class TextureManager : IDisposable
             if (!ReferenceEquals(Get(textureId), texture)) return;
 
             Vk api = _context.Api;
+            api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice, texture.Format, out FormatProperties properties);
+            const FormatFeatureFlags requiredBlitFeatures = FormatFeatureFlags.BlitSrcBit | FormatFeatureFlags.BlitDstBit;
+            if ((properties.OptimalTilingFeatures & requiredBlitFeatures) != requiredBlitFeatures) throw new NotSupportedException("This image format has no Vulkan mip-blit support.");
+            Filter filter = texture.Aspect == ImageAspectFlags.ColorBit && (properties.OptimalTilingFeatures & FormatFeatureFlags.SampledImageFilterLinearBit) != 0 ? Filter.Linear : Filter.Nearest;
             int mipWidth = (int)texture.Width;
             int mipHeight = (int)texture.Height;
+            int mipDepth = (int)texture.Depth;
 
             if (_context.CheckpointsAvailable)
             {
@@ -869,10 +881,12 @@ internal sealed unsafe class TextureManager : IDisposable
 
             TransitionTexture(commandBuffer, texture, ResourceUsage.TransferSrc);
 
-            for (uint level = 1; level < texture.MipLevels; level++)
+            uint lastLevel = texture.State.MaxLevel >= 0 ? Math.Min(texture.MipLevels - 1, (uint)texture.State.MaxLevel) : texture.MipLevels - 1;
+            for (uint level = 1; level <= lastLevel; level++)
             {
                 int nextWidth = Math.Max(1, mipWidth / 2);
                 int nextHeight = Math.Max(1, mipHeight / 2);
+                int nextDepth = Math.Max(1, mipDepth / 2);
 
                 // The level is about to be overwritten whole: discard it.
                 TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferDst, discard: true);
@@ -883,19 +897,21 @@ internal sealed unsafe class TextureManager : IDisposable
                     DstSubresource = new ImageSubresourceLayers(texture.Aspect, level, 0, texture.Layers),
                 };
                 blit.SrcOffsets.Element0 = new Offset3D(0, 0, 0);
-                blit.SrcOffsets.Element1 = new Offset3D(mipWidth, mipHeight, 1);
+                blit.SrcOffsets.Element1 = new Offset3D(mipWidth, mipHeight, mipDepth);
                 blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
-                blit.DstOffsets.Element1 = new Offset3D(nextWidth, nextHeight, 1);
+                blit.DstOffsets.Element1 = new Offset3D(nextWidth, nextHeight, nextDepth);
 
                 api.CmdBlitImage(commandBuffer,
                     texture.Image, ImageLayout.TransferSrcOptimal,
                     texture.Image, ImageLayout.TransferDstOptimal,
-                    1, &blit, Filter.Linear);
+                    1, &blit, filter);
 
                 TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferSrc, discard: false);
 
                 mipWidth = nextWidth;
                 mipHeight = nextHeight;
+                mipDepth = nextDepth;
+                texture.DefinedLevels?.Add((int)level);
             }
 
             // Every level is TRANSFER_SRC again, so the tracker merged the
@@ -927,6 +943,7 @@ internal sealed unsafe class TextureManager : IDisposable
                 GlEnums.TextureMagFilter => state with { MagFilter = GlEnums.FilterFrom(integer) },
                 GlEnums.TextureWrapS => state with { AddressU = GlEnums.AddressModeFrom(integer) },
                 GlEnums.TextureWrapT => state with { AddressV = GlEnums.AddressModeFrom(integer) },
+                0x8072 => state with { AddressW = GlEnums.AddressModeFrom(integer) },
                 GlEnums.TextureLodBias => state with { LodBias = value },
                 GlEnums.TextureMaxLevel => state with { MaxLevel = integer },
                 GlEnums.TextureCompareMode => state with

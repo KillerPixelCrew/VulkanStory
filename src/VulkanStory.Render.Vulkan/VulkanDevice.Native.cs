@@ -116,6 +116,15 @@ public sealed unsafe partial class VulkanDevice
             : Array.Empty<int>();
     }
 
+    internal TextureKind NativeSamplerKind(int programId, int index)
+    {
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? program) || (uint)index >= (uint)program.Interface.Samplers.Count) return TextureKind.Texture2D;
+        SamplerBinding sampler = program.Interface.Samplers[index];
+        TextureKind kind = sampler.Kind;
+        if (sampler.IsFrameTexture) BindlessKinds.TryFromGlslType(sampler.TypeName, out kind);
+        return kind;
+    }
+
     /// <summary>Whether the linked shader actually writes a colour output location.</summary>
     internal bool NativeProgramWritesOutput(int programId, int location) =>
         _programs.TryGetValue(programId, out ShaderProgramResources? program) &&

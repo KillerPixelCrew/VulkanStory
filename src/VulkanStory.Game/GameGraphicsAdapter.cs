@@ -31,6 +31,7 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         this.shaderCallbacks = shaderCallbacks;
         Stated.ColorRoutesChanged = device.SetFramebufferColorRoutes;
         device.FramebufferDeleted += ForgetFramebufferView;
+        device.FramebufferStorageChanged += RefreshManagedFramebuffer;
     }
 
     /// <summary>Associates one original platform with a borrowed Vulkan device and installs owned mod-pass hooks.</summary>
@@ -160,6 +161,7 @@ internal sealed partial class GameGraphicsAdapter : IDisposable
         queries.Clear();
         ResetFramebufferPublication();
         if (device is not null) device.FramebufferDeleted -= ForgetFramebufferView;
+        if (device is not null) device.FramebufferStorageChanged -= RefreshManagedFramebuffer;
         Stated.ColorRoutesChanged = null;
         framebufferViews.Clear();
         platform = null;

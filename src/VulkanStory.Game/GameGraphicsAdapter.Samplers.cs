@@ -14,7 +14,7 @@ internal sealed partial class GameGraphicsAdapter
         legacyBoundTexture2D = texture;
     }
     internal void BindLegacyCube(int texture)
-    { RequireDevice(); Stated.BindTexture(0, texture); }
+    { RequireDevice(); Stated.BindTextureTarget(0, texture, 0x8513); }
     internal void GenerateLegacyTextureMips()
     {
         var renderer = RequireDevice();
@@ -50,7 +50,7 @@ internal sealed partial class GameGraphicsAdapter
         programTextures[(program.ProgramId, name)] = texture;
         renderer.SetSamplerUnit(program.ProgramId, name, unit);
         Stated.ActiveTextureUnit = unit;
-        Stated.BindTexture(unit, texture);
+        Stated.BindTextureTarget(unit, texture, cube ? 0x8513 : 0x0DE1);
         if (!cube)
             Stated.BindSampler(unit, program.customSamplers.TryGetValue(name, out int sampler) ? sampler : 0);
         if (program.clampTToEdge) renderer.SetTextureParameter(texture, GameGlTextureTokens.TextureWrapT, 33071);

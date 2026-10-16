@@ -21,8 +21,8 @@ namespace VulkanStory.Game;
 /// - colour mask: <c>glColorMask</c> is global (<see cref="ColorMask" />);
 /// - draw buffers: per framebuffer, and a framebuffer nobody selected for writes attachment 0 only,
 ///   GL's default for a framebuffer object (<see cref="DrawBuffers" />);
-/// - texture units: one texture per unit, whatever its dimensionality, as the device's table has it
-///   (a cube and a 2D bind to the same unit replace each other there too);
+/// - texture units: 2D/legacy array, volume and cube bindings are retained independently;
+///   the linked sampler kind selects the binding used by a draw;
 /// - viewport: a framebuffer bind does not change it; the platform's own bind states the full target.
 /// Stencil is recorded but never applied: no framebuffer of this client has a stencil attachment,
 /// so a stencil test passes on either path.
@@ -38,6 +38,8 @@ internal sealed class StatedRenderState
     private readonly Dictionary<int, int[]> _drawBufferRoutes = new();
     internal Action<int, int[]?>? ColorRoutesChanged;
     private readonly int[] _unitTextures = new int[MaxTextureUnits];
+    private readonly int[] _unitVolumes = new int[MaxTextureUnits];
+    private readonly int[] _unitCubes = new int[MaxTextureUnits];
     private readonly int[] _unitSamplers = new int[MaxTextureUnits];
 
     public StatedRenderState()
@@ -249,6 +251,28 @@ internal sealed class StatedRenderState
 
     public int TextureAt(int unit) => (uint)unit < MaxTextureUnits ? _unitTextures[unit] : 0;
 
+    internal void BindTextureTarget(int unit, int texture, int target)
+    {
+        if ((uint)unit >= MaxTextureUnits) return;
+        if (target == 0x806F) _unitVolumes[unit] = texture;
+        else if (target == 0x8513) _unitCubes[unit] = texture;
+        else _unitTextures[unit] = texture;
+    }
+
+    internal int TextureAt(int unit, TextureKind kind) => (uint)unit >= MaxTextureUnits ? 0 : kind switch
+    { TextureKind.Texture3D => _unitVolumes[unit], TextureKind.TextureCube or TextureKind.ShadowCube => _unitCubes[unit], _ => _unitTextures[unit] };
+
+    internal bool HasTexture(int texture) => _unitTextures.Contains(texture) || _unitVolumes.Contains(texture) || _unitCubes.Contains(texture);
+    internal void ForgetTexture(int texture)
+    {
+        for (int unit = 0; unit < MaxTextureUnits; unit++)
+        {
+            if (_unitTextures[unit] == texture) _unitTextures[unit] = 0;
+            if (_unitVolumes[unit] == texture) _unitVolumes[unit] = 0;
+            if (_unitCubes[unit] == texture) _unitCubes[unit] = 0;
+        }
+    }
+
     public void BindSampler(int unit, int samplerId)
     {
         if ((uint)unit < MaxTextureUnits) _unitSamplers[unit] = samplerId;
@@ -317,7 +341,7 @@ internal static class StatedDraw
         for (int i = 0; i < names.Length; i++)
         {
             units[i] = i < samplerUnits.Length ? samplerUnits[i] : -1;
-            reads[i] = stated.TextureAt(units[i]);
+            reads[i] = stated.TextureAt(units[i], device.NativeSamplerKind(programId, i));
             if (reads[i] != 0 && reads[i] == depthTexture)
             {
                 if (stated.DepthWrite && stated.DepthTest)

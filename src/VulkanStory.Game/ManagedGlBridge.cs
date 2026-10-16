@@ -133,9 +133,11 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private sealed class TextureObject(int name)
     {
         internal readonly int Name = name;
-        internal int Width, Height, Levels, Format;
-        internal bool Immutable, Deleted, Created;
+        internal int Width, Height, Depth = 1, Levels, Format, Target;
+        internal bool Immutable, Deleted, Created, Borrowed;
+        internal readonly Dictionary<int, TextureLevel> Images = new();
     }
+    private readonly record struct TextureLevel(int Width, int Height, int Depth, int Format);
     private sealed class GlError(int code) : Exception { internal readonly int Code = code; }
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void Error(int code) => throw new GlError(code);
@@ -243,8 +245,11 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "ActiveTexture": { int unit = I(a[0]) - 0x84C0; if ((uint)unit >= StatedRenderState.MaxTextureUnits) Error(0x0500); ActiveUnit = unit; return null; }
             case "BindTexture": BindTexture(I(a[0]), I(a[1])); return null;
             case "TexStorage2D": TextureStorage(I(a[0]), I(a[1]), I(a[2]), I(a[3]), I(a[4])); return null;
-            case "TexSubImage2D": TextureUpload(a); return null;
-            case "GenerateMipmap": if (I(a[0]) != 0x0DE1) Error(0x0500); if (BoundTexture() == 0) Error(0x0502); Device.GenerateMipmaps(BoundTexture()); return null;
+            case "TexImage2D": TextureImage(a, false); return null;
+            case "TexImage3D": TextureImage(a, true); return null;
+            case "TexSubImage2D": TextureSubImage(a, false); return null;
+            case "TexSubImage3D": TextureSubImage(a, true); return null;
+            case "GenerateMipmap": GenerateTextureMips(I(a[0])); return null;
             case "TexParameter": TextureParameter(a); return null;
             case "Enable": SetEnabled(I(a[0]), true); return null;
             case "Disable": SetEnabled(I(a[0]), false); return null;
@@ -713,17 +718,27 @@ internal sealed partial class ManagedGlBridge : IDisposable
         _ => throw new InvalidOperationException("Unrecognized managed GL vertex scalar type.")
     };
 
-    private int BoundTexture() => State.TextureAt(ActiveUnit);
+    private int BoundTexture(int target = 0x0DE1) => State.TextureAt(ActiveUnit, target == 0x806F ? TextureKind.Texture3D : TextureKind.Texture2D);
     private void BindTexture(int target, int name)
     {
-        if (target != 0x0DE1) Error(0x0500);
+        if (target is not (0x0DE1 or 0x806F)) Error(0x0500);
         if (name < 0) Error(0x0501);
         if (name != 0)
         {
-            if (textures.TryGetValue(name, out TextureObject? texture)) { if (texture.Deleted) Error(0x0502); texture.Created = true; }
-            else if (!Device.IsTexture(name)) Error(0x0502);
+            if (textures.TryGetValue(name, out TextureObject? texture))
+            {
+                if (texture.Deleted || texture.Target != 0 && texture.Target != target) Error(0x0502);
+                if (!texture.Created)
+                {
+                    Device.SetTextureParameter(name, 0x2800, 0x2601);
+                    Device.SetTextureParameter(name, 0x2801, 0x2702);
+                    if (target == 0x806F) Device.SetTextureParameter(name, 0x8072, 0x2901);
+                }
+                texture.Created = true; texture.Target = target;
+            }
+            else if (!Device.IsTexture(name) || Device.TextureOf(name)!.Volume != (target == 0x806F)) Error(0x0502);
         }
-        State.BindTexture(ActiveUnit, name);
+        State.BindTextureTarget(ActiveUnit, name, target);
         CollectDeletedTextures();
     }
     private void TextureStorage(int target, int levels, int format, int width, int height)
@@ -733,50 +748,28 @@ internal sealed partial class ManagedGlBridge : IDisposable
         TextureObject? texture = null;
         if (BoundTexture() == 0 || !textures.TryGetValue(BoundTexture(), out texture)) Error(0x0502);
         if (texture!.Immutable) Error(0x0502);
-        Device.DefineTexture2DRaw(texture.Name, width, height, format, levels);
+        RequireImageFormat(format);
+        if (format is 0x1902 or 0x1903 or 0x1907 or 0x1908 or 0x8227) Error(0x0500);
+        Device.DefineMutableTexture(texture.Name, width, height, 1, format, levels, false, -1);
         texture.Width = width; texture.Height = height; texture.Levels = levels; texture.Format = format; texture.Immutable = true;
-    }
-    private void TextureUpload(object?[] a)
-    {
-        if (I(a[0]) != 0x0DE1) Error(0x0500);
-        int level = I(a[1]), x = I(a[2]), y = I(a[3]), width = I(a[4]), height = I(a[5]);
-        int format = I(a[6]), type = I(a[7]), name = BoundTexture();
-        if (name == 0) Error(0x0502);
-        if (level < 0 || x < 0 || y < 0 || width < 0 || height < 0) Error(0x0501);
-        if (type != 0x1401 || format is not (0x1908 or 0x80E1 or 0x1903))
-            throw new NotSupportedException("Managed GL texture uploads support unsigned-byte RGBA, BGRA and red source texels.");
-        if (!Device.TryGetTexture2DDescription(name, out int storageWidth, out int storageHeight, out int levels, out int storageFormat)) Error(0x0502);
-        if (level >= levels || (long)x + width > Math.Max(1, storageWidth >> level) || (long)y + height > Math.Max(1, storageHeight >> level)) Error(0x0501);
-        if (width == 0 || height == 0) return;
-        if (format == 0x1903 || storageFormat is not (0x8058 or 0x80E1 or 0x1908))
-            throw new NotSupportedException("Managed GL source-to-storage texture conversion requires an RGBA8/BGRA8 image for this byte upload route.");
-        int components = format == 0x1903 ? 1 : 4;
-        int rowBytes = checked(width * components), rowLength = PixelStoreValue(0x0CF2);
-        if (rowLength == 0) rowLength = width;
-        int alignment = PixelStoreValue(0x0CF5), sourceStride = checked((checked(rowLength * components) + alignment - 1) & ~(alignment - 1));
-        int sourceStart = checked(PixelStoreValue(0x0CF3) * sourceStride + PixelStoreValue(0x0CF4) * components);
-        byte[] source = CopyBytes(a[8], checked(sourceStart + sourceStride * (height - 1) + rowBytes), false);
-        byte[] packed = new byte[checked(rowBytes * height)];
-        for (int row = 0; row < height; row++) source.AsSpan(sourceStart + row * sourceStride, rowBytes).CopyTo(packed.AsSpan(row * rowBytes, rowBytes));
-        if ((format == 0x80E1) != (storageFormat == 0x80E1))
-            for (int pixel = 0; pixel < packed.Length; pixel += 4) (packed[pixel], packed[pixel + 2]) = (packed[pixel + 2], packed[pixel]);
-        GCHandle pin = GCHandle.Alloc(packed, GCHandleType.Pinned);
-        try { Device.UploadTexture2D(name, level, x, y, width, height, components == 1 ? TexturePixelFormat.Red : TexturePixelFormat.Rgba, pin.AddrOfPinnedObject()); }
-        finally { pin.Free(); }
+        texture.Images.Clear();
+        for (int level = 0; level < levels; level++) texture.Images[level] = new(Math.Max(1, width >> level), Math.Max(1, height >> level), 1, format);
     }
     private void TextureParameter(object?[] a)
     {
-        if (I(a[0]) != 0x0DE1) Error(0x0500);
-        int name = BoundTexture(); if (name == 0) Error(0x0502);
+        int target = I(a[0]); if (target is not (0x0DE1 or 0x806F)) Error(0x0500);
+        int name = BoundTexture(target); if (name == 0) Error(0x0502);
         int parameter = I(a[1]);
-        if (parameter is not (0x2800 or 0x2801 or 0x2802 or 0x2803 or 0x813C or 0x813D or 0x8501 or 0x84FE))
+        if (parameter is not (0x2800 or 0x2801 or 0x2802 or 0x2803 or 0x8072 or 0x813C or 0x813D or 0x8501 or 0x84FE or 0x884C))
             throw new NotSupportedException("Managed GL texture parameter 0x" + parameter.ToString("X") + " is unsupported.");
         float scalar = Convert.ToSingle(a[2]);
         if (!float.IsFinite(scalar)) Error(0x0501);
         int integer = (int)scalar;
+        if (parameter == 0x813C && integer != 0) throw new NotSupportedException("Nonzero texture base levels require sampler-view offsets.");
         if (parameter == 0x2800 && integer is not (0x2600 or 0x2601) ||
             parameter == 0x2801 && integer is not (0x2600 or 0x2601 or 0x2700 or 0x2701 or 0x2702 or 0x2703) ||
-            parameter is 0x2802 or 0x2803 && integer is not (0x2901 or 0x812F or 0x8370 or 0x812D)) Error(0x0500);
+            parameter is 0x2802 or 0x2803 or 0x8072 && integer is not (0x2901 or 0x812F or 0x8370 or 0x812D) ||
+            parameter == 0x884C && integer is not (0 or 0x884E)) Error(0x0500);
         if (parameter is 0x813C or 0x813D && integer < 0 || parameter == 0x84FE && scalar < 1) Error(0x0501);
         if (a[2] is float value) Device.SetTextureParameter(name, parameter, value);
         else Device.SetTextureParameter(name, parameter, I(a[2]));
@@ -785,15 +778,15 @@ internal sealed partial class ManagedGlBridge : IDisposable
     {
         if (name == 0) return;
         if (!textures.TryGetValue(name, out TextureObject? texture))
-        { session.Graphics.DeleteTexture(name); for (int unit = 0; unit < StatedRenderState.MaxTextureUnits; unit++) if (State.TextureAt(unit) == name) State.BindTexture(unit, 0); return; }
+        { session.Graphics.DeleteTexture(name); State.ForgetTexture(name); return; }
         texture.Deleted = true;
-        for (int unit = 0; unit < StatedRenderState.MaxTextureUnits; unit++) if (State.TextureAt(unit) == name) State.BindTexture(unit, 0);
+        State.ForgetTexture(name);
         CollectDeletedTextures();
     }
     private void CollectDeletedTextures()
     {
         foreach (int name in textures.Where(entry => entry.Value.Deleted && !contexts.Values.Any(context =>
-            Enumerable.Range(0, StatedRenderState.MaxTextureUnits).Any(unit => (context.Primary ? session.Graphics.Stated : context.State).TextureAt(unit) == entry.Key))).Select(entry => entry.Key).ToArray())
+            (context.Primary ? session.Graphics.Stated : context.State).HasTexture(entry.Key))).Select(entry => entry.Key).ToArray())
         { Device.DeleteTexture(name); textures.Remove(name); }
     }
 
@@ -848,6 +841,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],
+            0x806A => [BoundTexture(0x806F)], 0x8073 => [Device.MaxVolumeSize],
             0x0BE2 => [State.BlendEnabled ? 1 : 0], 0x0C11 => [State.ScissorEnabled ? 1 : 0], 0x0B44 => [State.CullEnabled ? 1 : 0], 0x0B71 => [State.DepthTest ? 1 : 0],
             0x0B72 => [State.DepthWrite ? 1 : 0], 0x0B74 => [0x0200 + (int)State.DepthCompare],
             0x0B45 => [State.CullFaces switch { CullModeFlags.FrontBit => 0x0404, CullModeFlags.BackBit => 0x0405, _ => 0x0408 }],
@@ -928,7 +922,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         foreach (int framebuffer in framebuffers.Keys) device.DeleteFramebuffer(framebuffer);
         framebuffers.Clear();
         foreach (ProgramObject program in programs.Values) if (!program.Borrowed && program.Backend != 0) device.DeleteProgram(program.Backend);
-        foreach (TextureObject texture in textures.Values) device.DeleteTexture(texture.Name);
+        foreach (TextureObject texture in textures.Values) if (!texture.Borrowed) device.DeleteTexture(texture.Name);
         programs.Clear(); shaders.Clear(); buffers.Clear(); textures.Clear(); contexts.Clear();
         selected = null; if (ReferenceEquals(current, this)) current = null;
         disposed = true;

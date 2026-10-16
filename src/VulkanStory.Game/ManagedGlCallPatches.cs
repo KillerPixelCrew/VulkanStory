@@ -32,6 +32,7 @@ public static partial class ManagedGlCallPatches
         "LoadBindings",
         "BlitFramebuffer", "CopyTexSubImage2D",
         "DrawArrays",
+        "TexImage2D", "TexImage3D", "TexSubImage3D",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -101,6 +102,9 @@ public static partial class ManagedGlCallPatches
                 parameters.Length == 4 && (parameters[3].ParameterType == typeof(IntPtr) || parameters[3].ParameterType.HasElementType && parameters[3].ParameterType.GetElementType() == typeof(float));
             case "TexParameter": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
             case "TexSubImage2D": return parameters.Length == 9 && Bytes(8);
+            case "TexImage2D": return parameters.Length == 9 && Bytes(8);
+            case "TexImage3D": return parameters.Length == 10 && Bytes(9);
+            case "TexSubImage3D": return parameters.Length == 11 && Bytes(10);
             case "DrawElements": return parameters.Length == 4 && (parameters[3].ParameterType == typeof(int) || parameters[3].ParameterType == typeof(IntPtr));
             case "DrawElementsBaseVertex": return parameters.Length == 5 && (parameters[3].ParameterType == typeof(int) || parameters[3].ParameterType == typeof(IntPtr));
             case "ClearColor": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(float)) ||
@@ -289,5 +293,6 @@ public static partial class ManagedGlCallPatches
             ("GenBuffers", 1) or ("GenVertexArrays", 1) or ("GenTextures", 1) or
             ("GenFramebuffers", 1) or ("DeleteFramebuffers", 1) or ("DrawBuffers", 1) or
             ("GetTexImage", 4) or ("GetTextureSubImage", 11) or ("ReadPixels", 6) or
+            ("TexImage2D", 8) or ("TexImage3D", 9) or ("TexSubImage3D", 10) or
             ("DeleteBuffers", 1) or ("DeleteVertexArrays", 1) or ("DeleteTextures", 1);
 }
