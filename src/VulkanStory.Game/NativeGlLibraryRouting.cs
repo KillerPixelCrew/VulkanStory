@@ -17,6 +17,7 @@ internal static class NativeGlLibraryRouting
     private sealed record ImportPatch(nint Slot, nint Original, nint Replacement);
     private sealed record ModuleRoute(string Path, List<ImportPatch> Patches);
     private static ProcessRuntime? runtime;
+    private static int bootstrapLookups;
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint ProcedureLoader(nint module, nint name);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)] private delegate nint GlProcedureLoader(nint name);
     private static readonly ProcedureLoader LoadProcedure = ResolveProcedure;
@@ -95,7 +96,7 @@ internal static class NativeGlLibraryRouting
             if (Modules.ContainsKey(__result)) return;
             if (!Roots.Any(root => path.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
             {
-                runtime.Notify("native-gl.module-outside-mod-roots", path);
+                TraceBootstrap("native-gl.module-outside-mod-roots", path);
                 return;
             }
             var patches = new List<ImportPatch>();
@@ -146,7 +147,7 @@ internal static class NativeGlLibraryRouting
                         WriteSlot(slot, replacement);
                     }
                 }
-                runtime.Notify("native-gl.library-routed", path + "; imports=" + patches.Count);
+                TraceBootstrap("native-gl.library-routed", path + "; imports=" + patches.Count);
             }
             catch
             {
@@ -197,7 +198,18 @@ internal static class NativeGlLibraryRouting
         Modules.Remove(module);
     }
 
-    private static nint GlAddress(string name) => name == "wglGetProcAddress" ? GlLoaderPointer : ManagedGlCallPatches.ProcedureAddress(name);
+    private static void TraceBootstrap(string name, string detail)
+    {
+        try { runtime?.Notify(name, detail); }
+        catch { /* Diagnostics cannot change native loading or procedure results. */ }
+    }
+    private static nint GlAddress(string name)
+    {
+        nint address = name == "wglGetProcAddress" ? GlLoaderPointer : ManagedGlCallPatches.ProcedureAddress(name);
+        if ((name is "wglGetProcAddress" or "glGetString" or "glGetStringi") && Interlocked.Increment(ref bootstrapLookups) <= 8)
+            TraceBootstrap("native-gl.bootstrap-lookup", name + " -> 0x" + address.ToString("x") + "; context=" + (ManagedGlBridge.Current is not null));
+        return address;
+    }
     private static nint ResolveGlProcedure(nint name)
     {
         try { return runtime?.HasCommitted == true && unchecked((nuint)name) > ushort.MaxValue ? GlAddress(Marshal.PtrToStringUTF8(name) ?? "") : 0; }
@@ -207,8 +219,12 @@ internal static class NativeGlLibraryRouting
     {
         try
         {
-            if (IsGlLibrary(Path.GetFileName(ModulePath(module))))
+            string path = ModulePath(module);
+            if (IsGlLibrary(Path.GetFileName(path)))
                 return runtime?.HasCommitted == true && unchecked((nuint)name) > ushort.MaxValue ? GlAddress(Marshal.PtrToStringUTF8(name) ?? "") : 0;
+            if (unchecked((nuint)name) > ushort.MaxValue && (Marshal.PtrToStringUTF8(name) is "wglGetProcAddress" or "glGetString") &&
+                Interlocked.Increment(ref bootstrapLookups) <= 8)
+                TraceBootstrap("native-gl.bootstrap-outside-gl-module", path + "; module=0x" + module.ToString("x"));
             return GetProcAddress(module, name);
         }
         catch { return 0; }

@@ -12,6 +12,7 @@ public static partial class ManagedGlCallPatches
     private static readonly Dictionary<string, nint> NativeProcedures = new(StringComparer.Ordinal);
     private static readonly Dictionary<int, Type> ProcedureReturnTypes = new();
     private static readonly Dictionary<string, nint> NativeStrings = new(StringComparer.Ordinal);
+    private static int nativeStringCalls;
 
     internal static nint ProcedureAddress(string name) =>
         NativeProcedures.TryGetValue(name, out nint address) ? address : 0;
@@ -91,6 +92,12 @@ public static partial class ManagedGlCallPatches
                 if (parameters[i].ParameterType == typeof(string))
                     arguments[i] = Marshal.PtrToStringUTF8((nint)arguments[i]!) ?? "";
             Route(key, arguments, out object? result);
+            if (command.Name == "GetString" && Interlocked.Increment(ref nativeStringCalls) <= 4)
+            {
+                try { owner.Notify("native-gl.bootstrap-string", "token=" + Convert.ToInt32(arguments[0]).ToString("x") +
+                    "; value=" + (result ?? "<null>") + "; ABI=" + returns.Name); }
+                catch { /* Keep the actual GL string result if diagnostics fail. */ }
+            }
             if (returns == typeof(void) || result is null) return zero;
             if (result is string text)
             {

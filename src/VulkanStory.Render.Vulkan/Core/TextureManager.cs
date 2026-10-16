@@ -802,8 +802,8 @@ internal sealed unsafe partial class TextureManager : IDisposable
     }
 
     /// <summary>
-    /// Uploads pixels into a region: staged, copied, and back to a shader-readable
-    /// layout, recorded into the upload batch that the next frame submission runs
+    /// Uploads pixels into a region: staged and copied into transfer layout,
+    /// recorded into the upload batch that the next frame submission runs
     /// first. Nothing waits. When the frame command buffer being recorded already
     /// used the texture, the copy goes inline into it instead, so a draw recorded
     /// before the upload still sees the old texels, as on GL.
@@ -817,6 +817,9 @@ internal sealed unsafe partial class TextureManager : IDisposable
 
         ulong size = (ulong)width * height * (ulong)bytesPerPixel;
         if (size == 0) return;
+        if (level < 0 || level >= texture.MipLevels || layer >= texture.Layers || x < 0 || y < 0 || bytesPerPixel <= 0 ||
+            (ulong)x + width > Math.Max(1u, texture.Width >> level) || (ulong)y + height > Math.Max(1u, texture.Height >> level))
+            throw new ArgumentOutOfRangeException(nameof(width), "Upload region is outside the selected image subresource.");
 
         VulkanStats.NoteUploadRequest();
         CommandBuffer commandBuffer = _uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));
@@ -835,7 +838,12 @@ internal sealed unsafe partial class TextureManager : IDisposable
                 _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Upload(textureId, width, height));
             }
 
-            TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
+            _uploads.NoteUse(commandBuffer, texture);
+            lock (_barrierLock)
+            {
+                _barriers.RequireUpload(texture, (uint)level, layer, x, y, width, height);
+                _barriers.Flush(commandBuffer);
+            }
 
             var region = new BufferImageCopy
             {
@@ -847,7 +855,9 @@ internal sealed unsafe partial class TextureManager : IDisposable
             _context.Api.CmdCopyBufferToImage(commandBuffer, staging.Buffer, texture.Image,
                 ImageLayout.TransferDstOptimal, 1, &region);
 
-            TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
+            // The next real consumer establishes its stage/layout through Require.
+            // Keeping consecutive writes in transfer layout avoids whole-image
+            // layout round trips during atlas construction.
         }
         finally
         {

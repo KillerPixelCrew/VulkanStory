@@ -61,6 +61,16 @@ internal sealed unsafe class BarrierBatcher
         }
     }
 
+    public void RequireUpload(VulkanTexture texture, uint mip, uint layer, int x, int y, uint width, uint height)
+    {
+        lock (texture.Sync)
+        {
+            _scratch.Clear();
+            texture.Sync.RequireUpload(mip, layer, x, y, width, height, _scratch);
+            foreach (ImageTransition transition in _scratch) Append(texture.Image, texture.Aspect, transition);
+        }
+    }
+
     private void Append(Image image, ImageAspectFlags aspect, ImageTransition transition)
     {
         BarrierSides sides = transition.Sides;

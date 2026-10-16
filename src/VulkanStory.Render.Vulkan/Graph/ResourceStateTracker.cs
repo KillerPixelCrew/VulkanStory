@@ -60,6 +60,9 @@ internal sealed class ResourceStateTracker
 {
     private SubresourceState _whole = SubresourceState.Undefined;
     private SubresourceState[]? _split;
+    private bool _uploadRegionValid;
+    private uint _uploadMip, _uploadLayer;
+    private long _uploadLeft, _uploadTop, _uploadRight, _uploadBottom;
 
     public ResourceStateTracker(uint mipLevels, uint layers, bool depth)
     {
@@ -94,6 +97,7 @@ internal sealed class ResourceStateTracker
     /// </summary>
     public void Reset(PipelineStageFlags2 priorStage)
     {
+        _uploadRegionValid = false;
         _whole = SubresourceState.Undefined with { VisibleStages = priorStage };
         _split = null;
     }
@@ -106,6 +110,7 @@ internal sealed class ResourceStateTracker
     /// </summary>
     public void Discard()
     {
+        _uploadRegionValid = false;
         if (_split == null)
         {
             _whole = _whole with { Layout = ImageLayout.Undefined };
@@ -123,6 +128,7 @@ internal sealed class ResourceStateTracker
     public int Require(uint baseMip, uint mipCount, uint baseLayer, uint layerCount, ResourceUsage usage,
         bool discard, List<ImageTransition> output)
     {
+        _uploadRegionValid = false;
         if (baseMip >= MipLevels || baseLayer >= Layers) return 0;
         mipCount = Math.Min(mipCount, MipLevels - baseMip);
         layerCount = Math.Min(layerCount, Layers - baseLayer);
@@ -173,6 +179,30 @@ internal sealed class ResourceStateTracker
 
         TryMerge();
         return output.Count - before;
+    }
+
+    /// <summary>
+    /// Orders an upload against prior uses, retaining a conservative bound of
+    /// consecutive writes to this mip/layer. Disjoint regions have no WAW hazard.
+    /// Any ordinary resource use invalidates this shortcut before changing state.
+    /// </summary>
+    public int RequireUpload(uint mip, uint layer, int x, int y, uint width, uint height, List<ImageTransition> output)
+    {
+        if (mip >= MipLevels || layer >= Layers || width == 0 || height == 0) return 0;
+        long right = (long)x + width, bottom = (long)y + height;
+        SubresourceState state = StateOf(mip, layer);
+        if (_uploadRegionValid && _uploadMip == mip && _uploadLayer == layer &&
+            state.Layout == ImageLayout.TransferDstOptimal && state.ReadStages == PipelineStageFlags2.None &&
+            (right <= _uploadLeft || x >= _uploadRight || bottom <= _uploadTop || y >= _uploadBottom))
+        {
+            _uploadLeft = Math.Min(_uploadLeft, x); _uploadTop = Math.Min(_uploadTop, y);
+            _uploadRight = Math.Max(_uploadRight, right); _uploadBottom = Math.Max(_uploadBottom, bottom);
+            return 0;
+        }
+        int count = Require(mip, 1, layer, 1, ResourceUsage.TransferDst, false, output);
+        _uploadRegionValid = true; _uploadMip = mip; _uploadLayer = layer;
+        _uploadLeft = x; _uploadTop = y; _uploadRight = right; _uploadBottom = bottom;
+        return count;
     }
 
     /// <summary>
