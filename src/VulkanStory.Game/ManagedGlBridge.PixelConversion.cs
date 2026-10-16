@@ -13,7 +13,8 @@ internal sealed partial class ManagedGlBridge
         {
             case Format.R8Unorm: components = 1; scalarBytes = 1; break;
             case Format.R8G8Unorm: components = 2; scalarBytes = 1; break;
-            case Format.R8G8B8A8Unorm: case Format.B8G8R8A8Unorm: components = 4; scalarBytes = 1; break;
+            case Format.R8G8B8A8Unorm: case Format.B8G8R8A8Unorm:
+            case Format.R8G8B8A8Srgb: case Format.B8G8R8A8Srgb: components = 4; scalarBytes = 1; break;
             case Format.R16Sfloat: case Format.D16Unorm: components = 1; scalarBytes = 2; break;
             case Format.R16G16Sfloat: components = 2; scalarBytes = 2; break;
             case Format.R16G16B16A16Sfloat: case Format.R16G16B16A16Unorm: components = 4; scalarBytes = 2; break;
@@ -63,12 +64,15 @@ internal sealed partial class ManagedGlBridge
                     }
                     for (int component = 0; component < components; component++)
                     {
-                        int channel = storage == Format.B8G8R8A8Unorm ? component == 0 ? 2 : component == 2 ? 0 : component : component;
+                        int channel = storage is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb ? component == 0 ? 2 : component == 2 ? 0 : component : component;
                         float value = Read(source, channel);
                         Span<byte> target = output.AsSpan(destination + component * scalarBytes, scalarBytes);
                         switch (storage)
                         {
                             case Format.R8Unorm: case Format.R8G8Unorm: case Format.R8G8B8A8Unorm: case Format.B8G8R8A8Unorm:
+                            case Format.R8G8B8A8Srgb: case Format.B8G8R8A8Srgb:
+                                // Texture transfer values are already encoded;
+                                // sRGB conversion belongs to sampling/rendering.
                                 target[0] = (byte)Math.Round(Math.Clamp(value, 0, 1) * 255); break;
                             case Format.R16Sfloat: case Format.R16G16Sfloat: case Format.R16G16B16A16Sfloat:
                                 BinaryPrimitives.WriteUInt16LittleEndian(target, BitConverter.HalfToUInt16Bits((Half)value)); break;

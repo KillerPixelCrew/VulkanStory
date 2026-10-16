@@ -288,7 +288,8 @@ internal static class TextureDump
     /// </summary>
     public static int GlInternalFormatOf(Format format) => format switch
     {
-        Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb or Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb => 0x8058,
+        Format.R8G8B8A8Unorm or Format.B8G8R8A8Unorm => 0x8058,
+        Format.R8G8B8A8Srgb or Format.B8G8R8A8Srgb => 0x8C43,
         Format.R8Unorm => 0x8229,
         Format.R16G16Sfloat => 0x822F,
         Format.R16G16B16A16Sfloat => 0x881A,

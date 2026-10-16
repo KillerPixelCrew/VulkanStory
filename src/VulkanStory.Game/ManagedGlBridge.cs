@@ -844,7 +844,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (BoundTexture() == 0 || !textures.TryGetValue(BoundTexture(), out texture)) Error(0x0502);
         if (texture!.Immutable) Error(0x0502);
         RequireImageFormat(format);
-        if (format is 0x1902 or 0x1903 or 0x1907 or 0x1908 or 0x8227) Error(0x0500);
+        if (format is 0x1902 or 0x1903 or 0x1907 or 0x1908 or 0x8227 or 0x8C42) Error(0x0500);
         Device.DefineMutableTexture(texture.Name, width, height, 1, format, levels, false, -1);
         texture.Width = width; texture.Height = height; texture.Levels = levels; texture.Format = format; texture.Immutable = true;
         texture.Images.Clear();
