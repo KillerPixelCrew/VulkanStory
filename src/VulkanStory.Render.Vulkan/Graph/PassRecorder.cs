@@ -170,7 +170,8 @@ internal sealed unsafe class PassRecorder
         }
         if (depth != null)
         {
-            _uses.Add(new AttachmentUse(depth.Id,
+            int depthStencilName = framebuffer.DepthTextureId != 0 ? framebuffer.DepthTextureId : framebuffer.Stencil.TextureId;
+            _uses.Add(new AttachmentUse(depthStencilName,
                 depthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite, false));
         }
 

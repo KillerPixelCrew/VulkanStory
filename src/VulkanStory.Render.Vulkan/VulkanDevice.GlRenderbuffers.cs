@@ -90,7 +90,7 @@ public sealed unsafe partial class VulkanDevice
         try
         {
             temporary = CreateFramebuffer((int)width, (int)height);
-            AttachFramebufferTextureLevel(temporary, 0x8D20, image.Id, (int)slot.MipLevel, (int)slot.Layer);
+            AttachFramebufferTextureLevel(temporary, 0x8D20, slot.TextureId, (int)slot.MipLevel, (int)slot.Layer);
             StencilOpState state = NativePipelineDescription.DefaultStencil;
             state.Reference = unchecked((uint)value) & 255; state.WriteMask = mask; state.PassOp = StencilOp.Replace;
             NativePipeline pipeline = RequestNativePipeline(new NativePipelineDescription
