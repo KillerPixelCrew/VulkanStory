@@ -10,6 +10,7 @@ internal struct AttachmentSlot
 {
     public int TextureId;
     public uint Layer;
+    public uint MipLevel;
 
     public readonly bool IsBound => TextureId > 0;
 }
@@ -25,8 +26,17 @@ internal sealed class VulkanFramebuffer
     public uint Height;
 
     public AttachmentSlot[] Color = new AttachmentSlot[RenderLimits.MaxColorAttachments];
+    // Physical attachment slots stay stable for attachment queries/readback.
+    // Only dynamic-rendering output slots follow glDrawBuffers' routing.
+    public int[]? ColorRoutes;
+    public AttachmentSlot DrawColor(int output)
+    {
+        int attachment = ColorRoutes is null ? output : ColorRoutes[output];
+        return attachment >= 0 && attachment < Color.Length ? Color[attachment] : default;
+    }
     public int DepthTextureId;
     public uint DepthLayer;
+    public uint DepthMipLevel;
 
     /// <summary>Cached interned id of the attachment formats, or -1 when stale.</summary>
     public int FormatsId = -1;
@@ -150,28 +160,40 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         return framebuffer.Id;
     }
 
-    public void Attach(int framebufferId, int attachmentIndex, int textureId, uint layer = 0)
+    public void Attach(int framebufferId, int attachmentIndex, int textureId, uint layer = 0, uint mipLevel = 0)
     {
         VulkanFramebuffer? framebuffer = Get(framebufferId);
         if (framebuffer == null) return;
 
         if (attachmentIndex < 0)
         {
-            if (framebuffer.DepthTextureId == textureId && framebuffer.DepthLayer == layer) return;
+            if (framebuffer.DepthTextureId == textureId && framebuffer.DepthLayer == layer && framebuffer.DepthMipLevel == mipLevel) return;
             framebuffer.DepthTextureId = textureId;
             framebuffer.DepthLayer = layer;
+            framebuffer.DepthMipLevel = mipLevel;
         }
         else if (attachmentIndex < RenderLimits.MaxColorAttachments)
         {
             AttachmentSlot previous = framebuffer.Color[attachmentIndex];
-            if (previous.TextureId == textureId && previous.Layer == layer) return;
-            framebuffer.Color[attachmentIndex] = new AttachmentSlot { TextureId = textureId, Layer = layer };
+            if (previous.TextureId == textureId && previous.Layer == layer && previous.MipLevel == mipLevel) return;
+            framebuffer.Color[attachmentIndex] = new AttachmentSlot { TextureId = textureId, Layer = layer, MipLevel = mipLevel };
         }
 
         framebuffer.FormatsId = -1;
 
         // GL attaches to the bound framebuffer, so an open scope no longer
         // describes the target: the next draw must reopen on the new views.
+        if (_bound == framebuffer) _needsRestart = true;
+    }
+
+    public void SetColorRoutes(int framebufferId, int[]? routes)
+    {
+        VulkanFramebuffer? framebuffer = Get(framebufferId);
+        if (framebuffer is null) return;
+        if (routes is null ? framebuffer.ColorRoutes is null : framebuffer.ColorRoutes is not null && routes.AsSpan().SequenceEqual(framebuffer.ColorRoutes)) return;
+        framebuffer.ColorRoutes = routes is null ? null : (int[])routes.Clone();
+        framebuffer.FormatsId = -1;
+        framebuffer.PassExclusion = 0;
         if (_bound == framebuffer) _needsRestart = true;
     }
 
@@ -183,7 +205,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
     /// <summary>Whether colour slot <paramref name="index" /> is part of the scope the framebuffer opens.</summary>
     private static bool InScope(VulkanFramebuffer framebuffer, int index) =>
-        framebuffer.Color[index].IsBound && ((framebuffer.PassExclusion >> index) & 1) == 0;
+        framebuffer.DrawColor(index).IsBound && ((framebuffer.PassExclusion >> index) & 1) == 0;
 
     private bool _needsRestart;
 
@@ -226,7 +248,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         for (int i = 0; i < _bound.Color.Length; i++)
         {
-            if (_bound.Color[i].TextureId != textureId) continue;
+            if (_bound.DrawColor(i).TextureId != textureId) continue;
             // Left out of the declared pass's scope: sampled directly, not feedback.
             if (((_bound.PassExclusion >> i) & 1) != 0) continue;
             return true;
@@ -327,7 +349,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         uint exclusion = 0;
         for (int i = 0; i < target.Color.Length; i++)
         {
-            if (target.Color[i].IsBound && ((colorSlots >> i) & 1) == 0) exclusion |= 1u << i;
+            if (target.DrawColor(i).IsBound && ((colorSlots >> i) & 1) == 0) exclusion |= 1u << i;
         }
         if (target.PassExclusion == exclusion) return;
         target.PassExclusion = exclusion;
@@ -407,7 +429,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         for (int i = 0; i < count; i++)
         {
-            AttachmentSlot slot = framebuffer.Color[i];
+            AttachmentSlot slot = framebuffer.DrawColor(i);
 
             if (!InScope(framebuffer, i))
             {
@@ -441,7 +463,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 SType = StructureType.RenderingAttachmentInfo,
                 // The slot's layer, not the whole image: an array attached once
                 // per layer must reach a different layer each time.
-                ImageView = texture.ViewOfLayer(slot.Layer),
+                ImageView = texture.ViewOfLayer(slot.Layer, slot.MipLevel),
                 ImageLayout = ImageLayout.ColorAttachmentOptimal,
                 // LOAD preserves what is already there, which is GL's model: a
                 // framebuffer keeps its contents until something clears it.
@@ -467,7 +489,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 depthAttachment = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
-                    ImageView = depth.ViewOfLayer(framebuffer.DepthLayer),
+                    ImageView = depth.ViewOfLayer(framebuffer.DepthLayer, framebuffer.DepthMipLevel),
                     ImageLayout = depthLayout,
                     LoadOp = AttachmentLoadOp.Load,
                     StoreOp = AttachmentStoreOp.Store,
@@ -553,14 +575,14 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     {
         if (_bound == null) return;
         if ((uint)attachment >= (uint)_bound.Color.Length) return;
-        if (!_bound.Color[attachment].IsBound) return;
+        if (!_bound.DrawColor(attachment).IsBound) return;
 
         if (_graph.Enabled && (!_renderingActive || _needsRestart))
         {
-            VulkanTexture? texture = _textures.Get(_bound.Color[attachment].TextureId);
+            VulkanTexture? texture = _textures.Get(_bound.DrawColor(attachment).TextureId);
             if (texture == null) return;
             EndRendering(commandBuffer);
-            _graph.PromoteColorClear(texture, _bound.Color[attachment].Layer, r, g, b, a);
+            _graph.PromoteColorClear(texture, _bound.DrawColor(attachment).Layer, r, g, b, a, _bound.DrawColor(attachment).MipLevel);
             return;
         }
 
@@ -600,13 +622,13 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         // shader never writes, and Vulkan would write garbage into it. Both rules are the
         // platform's now, applied to the draw buffers and mask it stated before calling here.
         if ((uint)attachment >= (uint)_bound.Color.Length) return;
-        if (!_bound.Color[attachment].IsBound) return;
+        if (!_bound.DrawColor(attachment).IsBound) return;
 
         if (_graph.Enabled && !ClearColorOnGraph(commandBuffer, attachment, r, g, b, a)) return;
         if (!_graph.Enabled && !InScope(_bound, attachment))
         {
             // Left out of the declared pass: GL still clears the texture, outside any scope.
-            ClearImage(commandBuffer, _bound.Color[attachment], r, g, b, a);
+            ClearImage(commandBuffer, _bound.DrawColor(attachment), r, g, b, a);
             return;
         }
         if (!_graph.Enabled) EnsureRendering(commandBuffer);
@@ -635,7 +657,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.TransferDst);
         _barriers.Flush(commandBuffer);
         var value = new ClearColorValue(r, g, b, a);
-        var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, slot.Layer, 1);
+        var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, slot.MipLevel, 1, slot.Layer, 1);
         _context.Api.CmdClearColorImage(commandBuffer, texture.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
     }
 
@@ -656,10 +678,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             // texture, so the clear is promoted and lands before the texture's next use.
             if (((target.PassExclusion >> attachment) & 1) != 0)
             {
-                VulkanTexture? excluded = _textures.Get(target.Color[attachment].TextureId);
+                VulkanTexture? excluded = _textures.Get(target.DrawColor(attachment).TextureId);
                 if (excluded != null)
                 {
-                    _graph.PromoteColorClear(excluded, target.Color[attachment].Layer, r, g, b, a);
+                    _graph.PromoteColorClear(excluded, target.DrawColor(attachment).Layer, r, g, b, a, target.DrawColor(attachment).MipLevel);
                 }
             }
             return false;
@@ -667,10 +689,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         if (!_renderingActive || _needsRestart)
         {
-            VulkanTexture? texture = _textures.Get(target.Color[attachment].TextureId);
+            VulkanTexture? texture = _textures.Get(target.DrawColor(attachment).TextureId);
             if (texture == null) return false;
             EndRendering(commandBuffer);
-            _graph.PromoteColorClear(texture, target.Color[attachment].Layer, r, g, b, a);
+            _graph.PromoteColorClear(texture, target.DrawColor(attachment).Layer, r, g, b, a, target.DrawColor(attachment).MipLevel);
             return false;
         }
 
@@ -691,7 +713,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 // No pass open (or the scope is about to change): LOAD_OP_CLEAR on the next scope.
                 EndRendering(commandBuffer);
                 SetDepthReadOnly(false);
-                _graph.PromoteDepthClear(texture, depth, _bound.DepthLayer);
+                _graph.PromoteDepthClear(texture, depth, _bound.DepthLayer, _bound.DepthMipLevel);
                 return;
             }
             _graph.NoteInPassClear();
@@ -733,7 +755,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         for (int i = 0; i < count; i++)
         {
-            AttachmentSlot slot = framebuffer.Color[i];
+            AttachmentSlot slot = framebuffer.DrawColor(i);
             VulkanTexture? texture = InScope(framebuffer, i) ? _textures.Get(slot.TextureId) : null;
             colorFormats[i] = texture?.Format ?? Format.Undefined;
         }
@@ -795,7 +817,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         int count = 0;
         for (int i = 0; i < RenderLimits.MaxColorAttachments; i++)
         {
-            if (framebuffer.Color[i].IsBound && ((colorSlots >> i) & 1) != 0) count = i + 1;
+            if (framebuffer.DrawColor(i).IsBound && ((colorSlots >> i) & 1) != 0) count = i + 1;
         }
         return count;
     }
@@ -803,8 +825,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// <summary>The format of colour slot <paramref name="index" /> in that scope; Undefined for a slot it leaves out.</summary>
     private Format DeclaredColorFormat(VulkanFramebuffer framebuffer, uint colorSlots, int index)
     {
-        bool inScope = framebuffer.Color[index].IsBound && ((colorSlots >> index) & 1) != 0;
-        VulkanTexture? texture = inScope ? _textures.Get(framebuffer.Color[index].TextureId) : null;
+        bool inScope = framebuffer.DrawColor(index).IsBound && ((colorSlots >> index) & 1) != 0;
+        VulkanTexture? texture = inScope ? _textures.Get(framebuffer.DrawColor(index).TextureId) : null;
         return texture?.Format ?? Format.Undefined;
     }
 

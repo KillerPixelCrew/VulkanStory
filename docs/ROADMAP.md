@@ -94,7 +94,7 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 - **MOD-01: General mod compatibility**
   1. Extend motion histories to independently moving custom subobjects and procedural geometry using actual producer identities and previous deformation inputs.
   2. Completed the shared mesh/shader/window compatibility path, bounded atlas feedback and SDK/overlay presentation lifetime corrections.
-  3. Validated the complete supplied pack through world loading, provider changes, world exit and clean teardown with RTSS enabled and zero Vulkan errors. [Current evidence](validation/mod-compatibility.md).
+  3. Validated the original issue #10 pack through world loading, provider changes, world exit and clean teardown with RTSS enabled and zero Vulkan errors. [Current evidence](validation/mod-compatibility.md).
 
 - **PACK-01: Shader packs**
   1. Pack contract: replaceable programs, provided uniforms/samplers, readable and writable attachments, pass order, options. Decide which internal layouts become public API.
@@ -105,7 +105,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
 
 - **GL-02 / GL-03: Managed OpenGL compatibility**
   - The shared bridge routes supported operations from both OpenTK GL namespaces, including depth/culling/color-mask state and float vector uniforms. Game-created shader programs can be queried through a borrowed GL view; uniform writes retain the game adapter's motion handling. OpenAL procedure lookups are excluded from graphics refusal.
-  - Complete the remaining operation families required by [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12): framebuffer attachments and read/draw bindings, texture definition/conversion and readback, generic buffer/texture overloads, queries and remaining shader/state operations. Unsupported calls still prevent their owning code mod from starting.
+  - Shared framebuffer names/views, independent read/draw bindings, attachment queries and output routing, mip attachment views/clears, and 2D readback with pack/unpack row layout are implemented. Temporary pass and motion scopes retain complete draw-buffer routing state.
+  - Complete the remaining operation families required by [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12): generic OpenTK native indirect calls, mutable and volume texture definition/transfers, framebuffer blits/copies, queries and remaining shader/state operations. Unsupported calls still prevent their owning code mod from starting; the issue #12 pack still crashes during item registration.
 
 ## Deferred
 

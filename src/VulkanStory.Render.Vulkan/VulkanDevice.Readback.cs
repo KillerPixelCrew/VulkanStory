@@ -214,13 +214,13 @@ public sealed unsafe partial class VulkanDevice
     /// whole device.
     /// </summary>
     private void ReadBack(VulkanTexture texture, int x, int y, uint width, uint height,
-        ImageAspectFlags aspect, ulong bytes, IntPtr destination)
+        ImageAspectFlags aspect, ulong bytes, IntPtr destination, uint mipLevel = 0)
     {
         if (_frameActive)
         {
             _targets.FlushPendingClears(Commands, texture);
             _targets.EndRendering(Commands);
-            ReadbackTicket ticket = _readbacks.CopyToHost(texture, x, y, width, height, aspect, bytes);
+            ReadbackTicket ticket = _readbacks.CopyToHost(texture, x, y, width, height, aspect, bytes, mipLevel);
             SubmitPartial();
             _readbacks.WaitAndCopy(ticket, destination);
             return;
@@ -242,7 +242,7 @@ public sealed unsafe partial class VulkanDevice
 
             var region = new BufferImageCopy
             {
-                ImageSubresource = new ImageSubresourceLayers(aspect, 0, 0, 1),
+                ImageSubresource = new ImageSubresourceLayers(aspect, mipLevel, 0, 1),
                 ImageOffset = new Offset3D(x, y, 0),
                 ImageExtent = new Extent3D(width, height, 1),
             };
@@ -261,6 +261,23 @@ public sealed unsafe partial class VulkanDevice
         _frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);
 
         System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)handed);
+    }
+
+    /// <summary>Reads a real 2D image region for API callers, inside or outside an active frame.</summary>
+    internal TextureCaptureData ReadTexturePixels(int textureId, int level, int x, int y, int width, int height)
+    {
+        VulkanTexture texture = _textures.Get(textureId) ?? throw new ArgumentException("No live texture.");
+        if (texture.Cube || texture.Volume || texture.Layers != 1 || level < 0 || level >= texture.MipLevels)
+            throw new ArgumentOutOfRangeException(nameof(level));
+        if (x < 0 || y < 0 || width <= 0 || height <= 0 || (long)x + width > Math.Max(1u, texture.Width >> level) ||
+            (long)y + height > Math.Max(1u, texture.Height >> level)) throw new ArgumentOutOfRangeException(nameof(width));
+        EndNativePass();
+        var bytes = new byte[checked(width * height * BytesPerPixel(texture.Format))];
+        ImageAspectFlags aspect = (texture.Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+        fixed (byte* destination = bytes)
+            ReadBack(texture, x, y, (uint)width, (uint)height, aspect, (ulong)bytes.Length, (IntPtr)destination, (uint)level);
+        return TextureDump.ToParityReadback(texture.Format, texture.GlInternalFormat, width, height, bytes) ??
+            throw new NotSupportedException("GL readback conversion is unavailable for " + texture.Format);
     }
 
     private void RecordGlInternalFormat(int textureId, int glInternalFormat)

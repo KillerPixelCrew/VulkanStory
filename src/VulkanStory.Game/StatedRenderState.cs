@@ -35,6 +35,8 @@ internal sealed class StatedRenderState
     private readonly AttachmentBlend[] _blend = new AttachmentBlend[MaxColorAttachments];
     private readonly Dictionary<(int FramebufferId, int Count), AttachmentBlend[]> _blendSnapshots = new();
     private readonly Dictionary<int, uint> _drawBuffers = new();
+    private readonly Dictionary<int, int[]> _drawBufferRoutes = new();
+    internal Action<int, int[]?>? ColorRoutesChanged;
     private readonly int[] _unitTextures = new int[MaxTextureUnits];
     private readonly int[] _unitSamplers = new int[MaxTextureUnits];
 
@@ -177,9 +179,43 @@ internal sealed class StatedRenderState
 
     public void SetDrawBuffers(int framebufferId, uint mask)
     {
+        _drawBufferRoutes.Remove(framebufferId);
+        ColorRoutesChanged?.Invoke(framebufferId, null);
         if (_drawBuffers.TryGetValue(framebufferId, out uint current) && current == mask) return;
         _drawBuffers[framebufferId] = mask;
         _blendSnapshots.Clear();
+    }
+
+    internal void SetDrawBufferRoutes(int framebufferId, int[] routes)
+    {
+        uint mask = 0;
+        bool remapped = false;
+        for (int i = 0; i < routes.Length; i++)
+            if (routes[i] >= 0) { mask |= 1u << i; remapped |= routes[i] != i; }
+        if (!remapped) { SetDrawBuffers(framebufferId, mask); return; }
+        _drawBufferRoutes[framebufferId] = (int[])routes.Clone();
+        _drawBuffers[framebufferId] = mask;
+        ColorRoutesChanged?.Invoke(framebufferId, routes);
+        _blendSnapshots.Clear();
+    }
+
+    internal int DrawBufferAttachment(int framebufferId, int output) =>
+        _drawBufferRoutes.TryGetValue(framebufferId, out int[]? routes) ? routes[output] :
+            (DrawBuffers(framebufferId) & (1u << output)) != 0 ? output : -1;
+
+    internal int[]? CaptureDrawBufferRoutes(int framebufferId) =>
+        _drawBufferRoutes.TryGetValue(framebufferId, out int[]? routes) ? (int[])routes.Clone() : null;
+
+    internal void RestoreDrawBuffers(int framebufferId, uint mask, int[]? routes)
+    {
+        if (routes is null) SetDrawBuffers(framebufferId, mask);
+        else
+        {
+            _drawBufferRoutes[framebufferId] = (int[])routes.Clone();
+            _drawBuffers[framebufferId] = mask;
+            ColorRoutesChanged?.Invoke(framebufferId, routes);
+            _blendSnapshots.Clear();
+        }
     }
 
     public uint DrawBuffers(int framebufferId) =>
@@ -202,6 +238,7 @@ internal sealed class StatedRenderState
     public void ForgetFramebuffer(int framebufferId)
     {
         _drawBuffers.Remove(framebufferId);
+        _drawBufferRoutes.Remove(framebufferId);
         _blendSnapshots.Clear();
     }
 

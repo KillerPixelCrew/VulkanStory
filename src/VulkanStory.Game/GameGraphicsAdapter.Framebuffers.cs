@@ -14,13 +14,16 @@ internal sealed partial class GameGraphicsAdapter
         internal bool Released;
     }
     private static readonly ConditionalWeakTable<FrameBufferRef, FramebufferOwner> FramebufferOwners = new();
+    private readonly Dictionary<int, FrameBufferRef> framebufferViews = new();
     private FrameBufferRef? currentFramebuffer;
+    internal int ReadFramebufferId { get; set; } = PassDeclaration.DefaultFramebuffer;
 
     private FrameBufferRef RegisterFramebuffer(FrameBufferRef target)
     {
         // Original shadow placeholders bind name zero and own no native target.
         int handle = target.FboId == 0 ? PassDeclaration.DefaultFramebuffer : target.FboId;
         FramebufferOwners.Add(target, new FramebufferOwner(this, handle));
+        if (handle > 0) framebufferViews.Add(handle, target);
         return target;
     }
 
@@ -100,10 +103,55 @@ internal sealed partial class GameGraphicsAdapter
         renderer.EndStagePass();
         currentFramebuffer = target;
         CurrentTargetId = handle;
+        ReadFramebufferId = handle;
         GameFramebufferBindings.Set(platform!, target);
         // Original null binding retains the viewport. The private setter always retains it.
         if (target != null && !keepViewport)
             Stated.Viewport = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)target.Width, (uint)target.Height));
+    }
+
+    internal int CreateManagedFramebuffer()
+    {
+        int handle = RequireDevice().CreateFramebuffer(1, 1);
+        RegisterFramebuffer(new FrameBufferRef { FboId = handle, Width = 1, Height = 1, ColorTextureIds = [] });
+        return handle;
+    }
+
+    internal void BindManagedFramebuffer(int handle)
+    {
+        if (handle <= 0) { SetFramebuffer(null, keepViewport: true); return; }
+        if (!framebufferViews.TryGetValue(handle, out FrameBufferRef? view))
+            throw new InvalidOperationException("The shared framebuffer name has no game adapter view.");
+        SetFramebuffer(view, keepViewport: true);
+    }
+
+    internal void RefreshManagedFramebuffer(int handle)
+    {
+        var renderer = RequireDevice();
+        if (!framebufferViews.TryGetValue(handle, out FrameBufferRef? view)) return;
+        (view.Width, view.Height) = renderer.FramebufferExtent(handle);
+        int count = 0;
+        var colors = new int[StatedRenderState.MaxColorAttachments];
+        for (int slot = 0; slot < colors.Length; slot++)
+            if (renderer.TryFramebufferAttachment(handle, 0x8CE0 + slot, out int texture, out _, out _))
+            { colors[slot] = texture; if (texture != 0) count = slot + 1; }
+        view.ColorTextureIds = colors[..count];
+        if (renderer.TryFramebufferAttachment(handle, 0x8D00, out int depth, out _, out _)) view.DepthTextureId = depth;
+    }
+
+    private void ForgetFramebufferView(int handle)
+    {
+        Stated.ForgetFramebuffer(handle);
+        if (ReadFramebufferId == handle) ReadFramebufferId = PassDeclaration.DefaultFramebuffer;
+        if (!framebufferViews.Remove(handle, out FrameBufferRef? view)) return;
+        if (FramebufferOwners.TryGetValue(view, out FramebufferOwner? owner)) owner.Released = true;
+        view.Disposed = true;
+        if (ReferenceEquals(currentFramebuffer, view))
+        {
+            currentFramebuffer = null;
+            CurrentTargetId = PassDeclaration.DefaultFramebuffer;
+            if (platform is not null) GameFramebufferBindings.Set(platform, null);
+        }
     }
 
     /// <summary>Releases an owned framebuffer and optionally its owned attachment textures.</summary>

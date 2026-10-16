@@ -11,7 +11,7 @@ namespace VulkanStory.Game;
 
 /// <summary>GL command/resource semantics for managed callers using an owned Vulkan window context.</summary>
 /// <remarks>Names are shared by the session. VAOs, bindings, error flags and fixed-function state belong to a context.</remarks>
-internal sealed class ManagedGlBridge : IDisposable
+internal sealed partial class ManagedGlBridge : IDisposable
 {
     [ThreadStatic] private static ManagedGlBridge? current;
     internal static ManagedGlBridge? Current => current;
@@ -33,7 +33,7 @@ internal sealed class ManagedGlBridge : IDisposable
     private VulkanDevice Device => session.Graphics.ManagedGlDevice;
     private Context C => selected ?? throw new InvalidOperationException("No managed GL context is current.");
     private StatedRenderState State => C.Primary ? session.Graphics.RequireStatedState() : C.State;
-    private int Target => C.Primary ? session.Graphics.CurrentTargetId : C.Target;
+    private int Target => C.Primary ? session.Graphics.CurrentTargetId : C.DrawFramebuffer == 0 ? C.Target : C.DrawFramebuffer;
     private int CurrentProgram => C.Primary ? session.Graphics.StatedProgram : C.Program;
     private int ActiveUnit { get => C.Primary ? State.ActiveTextureUnit : C.ActiveTexture; set { if (C.Primary) State.ActiveTextureUnit = value; else C.ActiveTexture = value; } }
 
@@ -41,6 +41,7 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         this.session = session;
         Device.ProgramDeleted += ForgetBorrowedProgram;
+        Device.FramebufferDeleted += ForgetFramebuffer;
         string? trace = Environment.GetEnvironmentVariable("VULKANSTORY_MANAGED_GL_TRACE");
         if (!string.IsNullOrEmpty(trace) && System.IO.Path.IsPathFullyQualified(trace)) drawTracePath = trace;
     }
@@ -53,6 +54,7 @@ internal sealed class ManagedGlBridge : IDisposable
             context = new Context { Id = contextId, Primary = targetId <= 0, Target = targetId, Width = width, Height = height };
             context.State.Viewport = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
             context.State.SetSlotBlend(0, 0x8006, 1, 0, 1, 0);
+            context.State.ColorRoutesChanged = Device.SetFramebufferColorRoutes;
             contexts.Add(contextId, context);
         }
         if (context.Primary != (targetId <= 0)) throw new InvalidOperationException("A managed GL context cannot change primary-window ownership.");
@@ -63,6 +65,7 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         RequireOwner();
         if (!contexts.Remove(contextId, out Context? context)) return;
+        foreach (int framebuffer in framebuffers.Where(entry => ReferenceEquals(entry.Value, context)).Select(entry => entry.Key).ToArray()) Device.DeleteFramebuffer(framebuffer);
         if (ReferenceEquals(selected, context)) { selected = null; if (ReferenceEquals(current, this)) current = null; }
         CollectDeletedPrograms(); CollectDeletedTextures();
     }
@@ -81,7 +84,9 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         internal nint Id;
         internal bool Primary;
-        internal int Target, Width, Height, Program, ActiveTexture;
+        internal int Target, Width, Height, Program, ActiveTexture, DrawFramebuffer, ReadFramebuffer;
+        internal readonly Dictionary<int, int> ReadBuffers = new();
+        internal readonly Dictionary<int, int> PixelStorage = new();
         internal BufferObject? ArrayBuffer;
         internal int VertexArray;
         internal readonly Dictionary<int, VertexArrayObject> Arrays = new() { [0] = new() };
@@ -128,7 +133,7 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         internal readonly int Name = name;
         internal int Width, Height, Levels, Format;
-        internal bool Immutable, Deleted;
+        internal bool Immutable, Deleted, Created;
     }
     private sealed class GlError(int code) : Exception { internal readonly int Code = code; }
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
@@ -163,6 +168,23 @@ internal sealed class ManagedGlBridge : IDisposable
             case "GetError": return C.Errors.TryDequeue(out int error) ? error : 0;
             case "GetInteger": return Query(method, a, false);
             case "GetBoolean": return Query(method, a, true);
+            case "GenFramebuffer": return GenFramebuffer();
+            case "GenFramebuffers": return GenerateMany(method, a, GenFramebuffer);
+            case "DeleteFramebuffer": DeleteFramebuffer(I(a[0])); return null;
+            case "DeleteFramebuffers": DeleteMany(a, DeleteFramebuffer); return null;
+            case "BindFramebuffer": BindFramebuffer(I(a[0]), I(a[1])); return null;
+            case "FramebufferTexture2D": FramebufferTexture(I(a[0]), I(a[1]), I(a[2]), I(a[3]), I(a[4])); return null;
+            case "CheckFramebufferStatus": { int framebuffer = FramebufferFor(I(a[0])); int status = Device.FramebufferStatus(framebuffer); session.Graphics.RefreshManagedFramebuffer(framebuffer); return status; }
+            case "GetFramebufferAttachmentParameter": return FramebufferAttachmentQuery(method, a);
+            case "DrawBuffer": SelectDrawBuffers([I(a[0])]); return null;
+            case "DrawBuffers": { int count = I(a[0]); if (count < 0 || count > StatedRenderState.MaxColorAttachments) Error(0x0501); SelectDrawBuffers(ReadInts(a[1], count)); return null; }
+            case "ReadBuffer": SelectReadBuffer(I(a[0])); return null;
+            case "PixelStore": PixelStore(I(a[0]), I(a[1])); return null;
+            case "GetTexImage": GetTexImage(a); return null;
+            case "GetTextureSubImage": GetTextureSubImage(a); return null;
+            case "ReadPixels": ReadPixels(a); return null;
+            case "GetTexLevelParameter": return TextureLevelQuery(method, a);
+            case "IsTexture": return textures.TryGetValue(I(a[0]), out TextureObject? queriedTexture) ? queriedTexture.Created && !queriedTexture.Deleted : Device.IsTexture(I(a[0]));
             case "GenBuffer": { int name = Name(); buffers.Add(name, new(name)); return name; }
             case "GenBuffers": return GenerateMany(method, a, () => { int name = Name(); buffers.Add(name, new(name)); return name; });
             case "DeleteBuffer": DeleteBuffer(I(a[0])); return null;
@@ -228,7 +250,7 @@ internal sealed class ManagedGlBridge : IDisposable
             case "ClearColor": C.ClearColor = a.Length == 1 && a[0] is Color4 color
                 ? [color.R, color.G, color.B, color.A]
                 : [Convert.ToSingle(a[0]), Convert.ToSingle(a[1]), Convert.ToSingle(a[2]), Convert.ToSingle(a[3])]; return null;
-            case "Clear": { int mask = I(a[0]); if ((mask & ~0x4500) != 0) Error(0x0501); session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor); return null; }
+            case "Clear": { int mask = I(a[0]); if ((mask & ~0x4500) != 0) Error(0x0501); if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506); session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor); return null; }
             default: throw new NotSupportedException("Managed GL does not implement " + method + ".");
         }
     }
@@ -308,6 +330,7 @@ internal sealed class ManagedGlBridge : IDisposable
     private void Draw(int mode, int count, int indexType, long offset, int baseVertex)
     {
         if (count < 0 || offset < 0) Error(0x0501);
+        if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506);
         MeshDrawMode topology = mode switch { 4 => MeshDrawMode.Triangles, 1 => MeshDrawMode.Lines, 3 => MeshDrawMode.LineStrip, _ => throw new NotSupportedException("Managed GL primitive topology " + mode + " has no backend mapping.") };
         int size = indexType switch { 0x1401 => 1, 0x1403 => 2, 0x1405 => 4, _ => 0 };
         if (size == 0) Error(0x0500);
@@ -669,6 +692,11 @@ internal sealed class ManagedGlBridge : IDisposable
     {
         if (target != 0x0DE1) Error(0x0500);
         if (name < 0) Error(0x0501);
+        if (name != 0)
+        {
+            if (textures.TryGetValue(name, out TextureObject? texture)) { if (texture.Deleted) Error(0x0502); texture.Created = true; }
+            else if (!Device.IsTexture(name)) Error(0x0502);
+        }
         State.BindTexture(ActiveUnit, name);
         CollectDeletedTextures();
     }
@@ -697,10 +725,13 @@ internal sealed class ManagedGlBridge : IDisposable
         if (format == 0x1903 || storageFormat is not (0x8058 or 0x80E1 or 0x1908))
             throw new NotSupportedException("Managed GL source-to-storage texture conversion requires an RGBA8/BGRA8 image for this byte upload route.");
         int components = format == 0x1903 ? 1 : 4;
-        int rowBytes = checked(width * components), sourceStride = checked((rowBytes + 3) & ~3);
-        byte[] source = CopyBytes(a[8], checked(sourceStride * (height - 1) + rowBytes), false);
+        int rowBytes = checked(width * components), rowLength = PixelStoreValue(0x0CF2);
+        if (rowLength == 0) rowLength = width;
+        int alignment = PixelStoreValue(0x0CF5), sourceStride = checked((checked(rowLength * components) + alignment - 1) & ~(alignment - 1));
+        int sourceStart = checked(PixelStoreValue(0x0CF3) * sourceStride + PixelStoreValue(0x0CF4) * components);
+        byte[] source = CopyBytes(a[8], checked(sourceStart + sourceStride * (height - 1) + rowBytes), false);
         byte[] packed = new byte[checked(rowBytes * height)];
-        for (int row = 0; row < height; row++) source.AsSpan(row * sourceStride, rowBytes).CopyTo(packed.AsSpan(row * rowBytes, rowBytes));
+        for (int row = 0; row < height; row++) source.AsSpan(sourceStart + row * sourceStride, rowBytes).CopyTo(packed.AsSpan(row * rowBytes, rowBytes));
         if ((format == 0x80E1) != (storageFormat == 0x80E1))
             for (int pixel = 0; pixel < packed.Length; pixel += 4) (packed[pixel], packed[pixel + 2]) = (packed[pixel + 2], packed[pixel]);
         GCHandle pin = GCHandle.Alloc(packed, GCHandleType.Pinned);
@@ -803,6 +834,11 @@ internal sealed class ManagedGlBridge : IDisposable
             0x0B40 => C.PolygonFront != C.PolygonBack ? [C.PolygonFront, C.PolygonBack] :
                 [State.Wireframe ? 0x1B01 : 0x1B02, State.Wireframe ? 0x1B01 : 0x1B02],
             0x0D33 => [Device.MaxTextureSize], 0x8872 => [StatedRenderState.MaxTextureUnits],
+            0x8CDF => [StatedRenderState.MaxColorAttachments], 0x8824 => [StatedRenderState.MaxColorAttachments],
+            0x8CA6 => [PublicFramebuffer(Target)], 0x8CAA => [PublicFramebuffer(ReadTarget)],
+            0x0C01 => [DrawBufferToken(0)], 0x0C02 => [ReadBuffer],
+            >= 0x0CF0 and <= 0x0CF5 or >= 0x0D00 and <= 0x0D05 or 0x806B or 0x806C or 0x806D or 0x806E => [PixelStoreValue(name)],
+            >= 0x8825 and < 0x8825 + StatedRenderState.MaxColorAttachments => [DrawBufferToken(name - 0x8825)],
             _ => throw new GlError(0x0500),
         };
         if (a.Length > 1) WriteOutput(method, a, 1, values, boolean);
@@ -831,6 +867,13 @@ internal sealed class ManagedGlBridge : IDisposable
     }
     private static int[] ReadInts(object? value, int count)
     {
+        if (value is Array enumArray && enumArray.GetType().GetElementType()!.IsEnum)
+        {
+            if (enumArray.Length < count) Error(0x0501);
+            var tokens = new int[count];
+            for (int i = 0; i < count; i++) tokens[i] = Convert.ToInt32(enumArray.GetValue(i));
+            return tokens;
+        }
         if (value is int[] ints) { if (ints.Length < count) Error(0x0501); return ints[..count]; }
         if (value is uint[] unsigned) { if (unsigned.Length < count) Error(0x0501); return unsigned.Take(count).Select(word => unchecked((int)word)).ToArray(); }
         if (value is int scalar && count == 1) return [scalar];
@@ -855,6 +898,9 @@ internal sealed class ManagedGlBridge : IDisposable
         RequireOwner();
         VulkanDevice device = session.Device;
         device.ProgramDeleted -= ForgetBorrowedProgram;
+        device.FramebufferDeleted -= ForgetFramebuffer;
+        foreach (int framebuffer in framebuffers.Keys) device.DeleteFramebuffer(framebuffer);
+        framebuffers.Clear();
         foreach (ProgramObject program in programs.Values) if (!program.Borrowed && program.Backend != 0) device.DeleteProgram(program.Backend);
         foreach (TextureObject texture in textures.Values) device.DeleteTexture(texture.Name);
         programs.Clear(); shaders.Clear(); buffers.Clear(); textures.Clear(); contexts.Clear();

@@ -354,6 +354,12 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Unbinds and removes a framebuffer through the renderer target manager.</summary>
     public void DeleteFramebuffer(int framebufferId)
     {
+        if (_frameActive && _targets.Bound?.Id == framebufferId)
+        {
+            EndNativePass();
+            _targets.EndPass(Commands);
+            _targets.EndRendering(Commands);
+        }
         _targets.Delete(framebufferId);
         FramebufferDeleted?.Invoke(framebufferId);
     }

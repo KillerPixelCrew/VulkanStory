@@ -150,7 +150,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     internal long FrameUse;
 
     /// <summary>
-    /// Single-mip, single-layer attachment views, created on demand and keyed by layer.
+    /// Single-mip, single-layer attachment views, created on demand and keyed by layer and mip.
     ///
     /// <see cref="View" /> covers the whole image, which is what a sampler wants.
     /// A colour attachment pointed at one layer of an array needs a view of that
@@ -158,16 +158,17 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// times, once per layer, and a whole-image view there sends all three
     /// attachments to the same layer.
     /// </summary>
-    private readonly Dictionary<uint, ImageView> _layerViews = new();
+    private readonly Dictionary<(uint Layer, uint Mip), ImageView> _layerViews = new();
 
     public VulkanTexture(VulkanContext context) => _context = context;
 
-    public ImageView ViewOfLayer(uint layer)
+    public ImageView ViewOfLayer(uint layer, uint mipLevel = 0)
     {
         if (Volume) throw new NotSupportedException("Volume textures have no 2D attachment view.");
         if (layer >= Layers) throw new ArgumentOutOfRangeException(nameof(layer));
+        if (mipLevel >= MipLevels) throw new ArgumentOutOfRangeException(nameof(mipLevel));
         if (layer == 0 && Layers == 1 && MipLevels == 1 && !Cube) return View;
-        if (_layerViews.TryGetValue(layer, out ImageView existing)) return existing;
+        if (_layerViews.TryGetValue((layer, mipLevel), out ImageView existing)) return existing;
 
         var createInfo = new ImageViewCreateInfo
         {
@@ -175,12 +176,12 @@ internal sealed unsafe class VulkanTexture : IDisposable
             Image = Image,
             ViewType = ImageViewType.Type2D,
             Format = Format,
-            SubresourceRange = new ImageSubresourceRange(Aspect, 0, 1, layer, 1),
+            SubresourceRange = new ImageSubresourceRange(Aspect, mipLevel, 1, layer, 1),
         };
 
         VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
             "creating an attachment view for one array layer");
-        _layerViews[layer] = view;
+        _layerViews[(layer, mipLevel)] = view;
         return view;
     }
 

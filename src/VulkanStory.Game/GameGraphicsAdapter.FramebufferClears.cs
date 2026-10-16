@@ -20,15 +20,7 @@ internal sealed partial class GameGraphicsAdapter
     internal void SelectDrawBuffer(DrawBufferMode selector)
     {
         int target = CurrentFramebufferHandle();
-        int value = (int)selector;
-        uint mask = value switch
-        {
-            0 => 0,
-            1029 when target == PassDeclaration.DefaultFramebuffer => 1,
-            36064 when target != PassDeclaration.DefaultFramebuffer => 1,
-            _ => throw new NotSupportedException("Unsupported draw buffer for the current Vulkan framebuffer: " + value),
-        };
-        Stated.SetDrawBuffers(target, mask);
+        SelectDrawBufferTokens(target, [(int)selector]);
     }
 
     /// <summary>Translates the original draw-buffer selector array into a color-write mask for the currently bound target.</summary>
@@ -38,22 +30,24 @@ internal sealed partial class GameGraphicsAdapter
     {
         int target = CurrentFramebufferHandle();
         ArgumentNullException.ThrowIfNull(selectors);
-        if (count < 0 || count > selectors.Length || count > 32)
+        if (count < 0 || count > selectors.Length || count > StatedRenderState.MaxColorAttachments)
             throw new ArgumentOutOfRangeException(nameof(count));
-        uint mask = 0;
-        for (int slot = 0; slot < count; slot++)
+        SelectDrawBufferTokens(target, selectors.Take(count).Select(selector => (int)selector).ToArray());
+    }
+
+    private void SelectDrawBufferTokens(int target, int[] selectors)
+    {
+        var routes = Enumerable.Repeat(-1, StatedRenderState.MaxColorAttachments).ToArray();
+        var used = new HashSet<int>();
+        for (int output = 0; output < selectors.Length; output++)
         {
-            int value = (int)selectors[slot];
-            if (value == 0) continue;
-            // The retained state uses identity attachment slots plus a mask.
-            // Every targeted vanilla call uses this layout. Reordering needs
-            // an explicit compatibility route rather than a silent remap.
-            if (target == PassDeclaration.DefaultFramebuffer ? slot == 0 && value == 1029 : value == 36064 + slot)
-                mask |= 1u << slot;
-            else
-                throw new NotSupportedException("Draw-buffer attachment remapping is not supported by this route.");
+            int token = selectors[output];
+            if (token == 0) continue;
+            int slot = target == PassDeclaration.DefaultFramebuffer ? token is 1026 or 1029 ? 0 : -1 : token - 0x8CE0;
+            if ((uint)slot >= (uint)routes.Length || !used.Add(slot)) throw new ArgumentException("Invalid or repeated framebuffer color selector.");
+            routes[output] = slot;
         }
-        Stated.SetDrawBuffers(target, mask);
+        Stated.SetDrawBufferRoutes(target, routes);
     }
 
     // Retained ClearTargetColor/ClearTargetDepth algorithms. The backend owns

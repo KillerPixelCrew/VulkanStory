@@ -22,6 +22,7 @@ internal sealed partial class GameGraphicsAdapter
     private bool modMotionWriterActive;
     private int modMotionFramebuffer;
     private uint modMotionDrawBuffers;
+    private int[]? modMotionDrawRoutes;
     internal long ModPassesRun { get; private set; }
     internal long ModPassesSkipped { get; private set; }
     internal string? CurrentModPass { get; private set; }
@@ -122,11 +123,13 @@ internal sealed partial class GameGraphicsAdapter
             !VulkanStoryPassContract.IsMotionWindowSlot((EnumVulkanStoryPass)(int)stage)) return false;
         int target = CurrentTargetId;
         uint buffers = Stated.DrawBuffers(target);
+        int[]? routes = Stated.CaptureDrawBufferRoutes(target);
         bool opened = BeginMotionWrite(aoTemporal, writer.Mode == EnumVulkanStoryMotionWrite.MotionOnly);
         if (opened)
         {
             modMotionFramebuffer = target;
             modMotionDrawBuffers = buffers;
+            modMotionDrawRoutes = routes;
             modMotionWriterActive = true;
         }
         return opened;
@@ -138,7 +141,7 @@ internal sealed partial class GameGraphicsAdapter
         if (!modMotionWriterActive) return;
         modMotionWriterActive = false;
         try { EndMotionWrite(); }
-        finally { Stated.SetDrawBuffers(modMotionFramebuffer, modMotionDrawBuffers); }
+        finally { Stated.RestoreDrawBuffers(modMotionFramebuffer, modMotionDrawBuffers, modMotionDrawRoutes); modMotionDrawRoutes = null; }
     }
 
     /// <summary>Executes registrations for the current stage using validated attachment plans and restores render state after each callback.</summary>
@@ -185,6 +188,7 @@ internal sealed partial class GameGraphicsAdapter
         }
         int targetId = plan.Target?.FboId ?? PassDeclaration.DefaultFramebuffer;
         uint savedDrawBuffers = Stated.DrawBuffers(targetId);
+        int[]? savedDrawRoutes = Stated.CaptureDrawBufferRoutes(targetId);
         var savedViewport = Stated.Viewport;
         bool motion = false;
         try
@@ -210,7 +214,7 @@ internal sealed partial class GameGraphicsAdapter
                 RequireDevice().EndStagePass();
                 CurrentModPass = null;
                 StatedPass = null;
-                Stated.SetDrawBuffers(targetId, savedDrawBuffers);
+                Stated.RestoreDrawBuffers(targetId, savedDrawBuffers, savedDrawRoutes);
                 Stated.Viewport = savedViewport;
             }
         }

@@ -61,7 +61,7 @@ public sealed class PassDeclaration
 }
 
 /// <summary>A clear issued with no pass open, waiting for the next use of its image.</summary>
-internal readonly record struct PendingClear(VulkanTexture Texture, uint Layer, bool Depth, float R, float G, float B, float A);
+internal readonly record struct PendingClear(VulkanTexture Texture, uint Layer, bool Depth, float R, float G, float B, float A, uint MipLevel = 0);
 
 /// <summary>
 /// The streaming frame graph (Vulkan-native plan, Phase 2 step 2). The client's
@@ -266,14 +266,14 @@ internal sealed class FrameGraph
     /// <summary>Whether deferred image clears remain to be promoted or recorded.</summary>
     public bool HasPendingClears => _pending.Count > 0;
 
-    public void PromoteColorClear(VulkanTexture texture, uint layer, float r, float g, float b, float a)
+    public void PromoteColorClear(VulkanTexture texture, uint layer, float r, float g, float b, float a, uint mipLevel = 0)
     {
-        Replace(new PendingClear(texture, layer, false, r, g, b, a));
+        Replace(new PendingClear(texture, layer, false, r, g, b, a, mipLevel));
     }
 
-    public void PromoteDepthClear(VulkanTexture texture, float depth, uint layer = 0)
+    public void PromoteDepthClear(VulkanTexture texture, float depth, uint layer = 0, uint mipLevel = 0)
     {
-        Replace(new PendingClear(texture, layer, true, depth, 0, 0, 0));
+        Replace(new PendingClear(texture, layer, true, depth, 0, 0, 0, mipLevel));
     }
 
     private void Replace(PendingClear clear)
@@ -282,7 +282,7 @@ internal sealed class FrameGraph
         {
             PendingClear existing = _pending[i];
             if (ReferenceEquals(existing.Texture, clear.Texture) && existing.Layer == clear.Layer &&
-                existing.Depth == clear.Depth)
+                existing.Depth == clear.Depth && existing.MipLevel == clear.MipLevel)
             {
                 _pending[i] = clear;
                 return;
@@ -301,13 +301,13 @@ internal sealed class FrameGraph
     }
 
     /// <summary>Takes the clear of one attachment view into a load op, if one is pending.</summary>
-    public bool TakeForLoad(VulkanTexture texture, uint layer, bool depth, out PendingClear clear)
+    public bool TakeForLoad(VulkanTexture texture, uint layer, bool depth, out PendingClear clear, uint mipLevel = 0)
     {
         for (int i = 0; i < _pending.Count; i++)
         {
             PendingClear candidate = _pending[i];
             if (!ReferenceEquals(candidate.Texture, texture) || candidate.Depth != depth) continue;
-            if (candidate.Layer != layer) continue;
+            if (candidate.Layer != layer || candidate.MipLevel != mipLevel) continue;
             _pending.RemoveAt(i);
             clear = candidate;
             PromotedClears++;

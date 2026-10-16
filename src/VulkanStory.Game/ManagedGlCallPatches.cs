@@ -26,6 +26,9 @@ public static class ManagedGlCallPatches
         "Enable", "Disable", "IsEnabled", "BlendEquation", "BlendEquationSeparate", "BlendFunc", "BlendFuncSeparate", "PolygonMode", "Scissor", "Viewport", "Clear", "ClearColor",
         "DepthFunc", "DepthMask", "ColorMask", "CullFace",
         "Uniform2", "Uniform3", "Uniform4",
+        "GenFramebuffer", "GenFramebuffers", "DeleteFramebuffer", "DeleteFramebuffers", "BindFramebuffer", "FramebufferTexture2D",
+        "CheckFramebufferStatus", "GetFramebufferAttachmentParameter", "DrawBuffer", "DrawBuffers", "ReadBuffer",
+        "PixelStore", "GetTexImage", "GetTextureSubImage", "ReadPixels", "GetTexLevelParameter", "IsTexture",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -65,8 +68,15 @@ public static class ManagedGlCallPatches
         {
             case "GetInteger": return parameters.Length == 1 && method.ReturnType == typeof(int) || parameters.Length == 2 && Output(1);
             case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true);
-            case "GenBuffers": case "GenVertexArrays": case "GenTextures":
-            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": return parameters.Length == 2 && Output(1);
+            case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers":
+            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": return parameters.Length == 2 && Output(1);
+            case "DrawBuffers": return parameters.Length == 2 && (parameters[1].ParameterType.IsArray && parameters[1].ParameterType.GetElementType()!.IsEnum || Output(1));
+            case "GetFramebufferAttachmentParameter": return parameters.Length == 3 && method.ReturnType == typeof(int) || parameters.Length == 4 && Output(3);
+            case "GetTexLevelParameter": return parameters.Length == 3 && method.ReturnType == typeof(int) || parameters.Length == 4 && Output(3);
+            case "GetTexImage": return parameters.Length == 5 && Bytes(4);
+            case "GetTextureSubImage": return parameters.Length == 12 && Bytes(11);
+            case "ReadPixels": return parameters.Length == 7 && Bytes(6);
+            case "PixelStore": return parameters.Length == 2 && parameters[1].ParameterType == typeof(int);
             case "BufferData": return parameters.Length == 4 && Bytes(2);
             case "BufferSubData": return parameters.Length == 4 && Bytes(3);
             case "ShaderSource": return parameters.Length == 2 && parameters[1].ParameterType == typeof(string) ||
@@ -263,5 +273,7 @@ public static class ManagedGlCallPatches
             ("BufferData", 2) or ("BufferSubData", 3) or ("TexSubImage2D", 8) or
             ("Uniform1", 2) or ("Uniform2", 2) or ("Uniform3", 2) or ("Uniform4", 2) or ("UniformMatrix4", 3) or ("ShaderSource", 3) or
             ("GenBuffers", 1) or ("GenVertexArrays", 1) or ("GenTextures", 1) or
+            ("GenFramebuffers", 1) or ("DeleteFramebuffers", 1) or ("DrawBuffers", 1) or
+            ("GetTexImage", 4) or ("GetTextureSubImage", 11) or ("ReadPixels", 6) or
             ("DeleteBuffers", 1) or ("DeleteVertexArrays", 1) or ("DeleteTextures", 1);
 }

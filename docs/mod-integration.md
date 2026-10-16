@@ -53,7 +53,19 @@ and scissor changes therefore affect subsequent Vulkan draws. Float scalar/vecto
 array and matrix uniform writes use the game adapter's motion-input handling;
 GL queries can borrow a game-created program without taking ownership of it.
 
+Framebuffer operations share the game's framebuffer names and adapter views.
+Read and draw bindings remain independent, and draw-buffer selections route
+fragment outputs to physical attachments. Attachment views and deferred clears
+retain their mip level. The 2D readback path uses the renderer's staging/timeline
+ownership and applies pack row length, alignment, skips, byte swapping and channel
+conversion; byte uploads honor the corresponding unpack row layout. Temporary
+mod passes and motion windows restore the complete draw-buffer routing state.
+
 This bridge implements a subset of GL, not a complete desktop OpenGL driver.
+Generic OpenTK wrappers issue their own native indirect calls; support for a
+non-generic overload does not admit those wrappers. Texture definition, volume
+transfers, framebuffer blits, queries and additional shader/state operations also
+remain incomplete.
 Native GL imports and graphics proc-address loaders still need explicit support.
 When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata
 before executing the code. Unsupported graphics access is refused through the

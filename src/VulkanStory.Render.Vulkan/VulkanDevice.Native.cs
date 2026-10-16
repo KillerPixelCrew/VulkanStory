@@ -128,7 +128,7 @@ public sealed unsafe partial class VulkanDevice
     internal int NativeFramebufferColorTexture(int framebufferId, int slot)
     {
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(framebufferId));
-        return target != null && (uint)slot < (uint)target.Color.Length ? target.Color[slot].TextureId : 0;
+        return target != null && (uint)slot < (uint)target.Color.Length ? target.DrawColor(slot).TextureId : 0;
     }
 
     /// <summary>The depth texture attached to a framebuffer, 0 without one.</summary>

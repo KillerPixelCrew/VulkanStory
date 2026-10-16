@@ -385,6 +385,22 @@ internal static class TextureDump
             case Format.R32G32B32A32Sfloat:
                 readback.Floats = MemoryMarshal.Cast<byte, float>(data).Slice(0, texels * 4).ToArray();
                 return readback;
+            case Format.B10G11R11UfloatPack32:
+            {
+                var words = MemoryMarshal.Cast<byte, uint>(data);
+                var floats = new float[texels * 4];
+                static float Decode(uint value, int mantissaBits) => (float)BitConverter.UInt16BitsToHalf(
+                    (ushort)(((value >> mantissaBits) << 10) | ((value & ((1u << mantissaBits) - 1)) << (10 - mantissaBits))));
+                for (int i = 0; i < texels; i++)
+                {
+                    floats[i * 4] = Decode(words[i] & 0x7ff, 6);
+                    floats[i * 4 + 1] = Decode((words[i] >> 11) & 0x7ff, 6);
+                    floats[i * 4 + 2] = Decode(words[i] >> 22, 5);
+                    floats[i * 4 + 3] = 1f;
+                }
+                readback.Floats = floats;
+                return readback;
+            }
             case Format.R16Sfloat:
             {
                 var source = MemoryMarshal.Cast<byte, Half>(data);

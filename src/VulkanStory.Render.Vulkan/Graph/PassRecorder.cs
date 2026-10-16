@@ -88,14 +88,14 @@ internal sealed unsafe class PassRecorder
             if (clear.Depth)
             {
                 var value = new ClearDepthStencilValue(clear.R, 0);
-                var range = new ImageSubresourceRange(target.Aspect, 0, 1, clear.Layer, 1);
+                var range = new ImageSubresourceRange(target.Aspect, clear.MipLevel, 1, clear.Layer, 1);
                 _context.Api.CmdClearDepthStencilImage(commandBuffer, target.Image, ImageLayout.TransferDstOptimal,
                     &value, 1, &range);
             }
             else
             {
                 var value = new ClearColorValue(clear.R, clear.G, clear.B, clear.A);
-                var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, clear.Layer, 1);
+                var range = new ImageSubresourceRange(ImageAspectFlags.ColorBit, clear.MipLevel, 1, clear.Layer, 1);
                 _context.Api.CmdClearColorImage(commandBuffer, target.Image, ImageLayout.TransferDstOptimal,
                     &value, 1, &range);
             }
@@ -165,7 +165,7 @@ internal sealed unsafe class PassRecorder
         {
             if (colour[i] == null) continue;
             bool isTransient = ((transient >> i) & 1) != 0;
-            _uses.Add(new AttachmentUse(framebuffer.Color[i].TextureId,
+            _uses.Add(new AttachmentUse(framebuffer.DrawColor(i).TextureId,
                 isTransient ? ResourceUsage.ColorWrite : ResourceUsage.ColorBlend, isTransient));
         }
         if (depth != null)
@@ -209,7 +209,7 @@ internal sealed unsafe class PassRecorder
             if (texture == null) continue;
 
             AttachmentUse attachment = _uses[use];
-            if (_graph.TakeForLoad(texture, framebuffer.Color[i].Layer, depth: false, out PendingClear clear))
+            if (_graph.TakeForLoad(texture, framebuffer.DrawColor(i).Layer, depth: false, out PendingClear clear, framebuffer.DrawColor(i).MipLevel))
             {
                 attachments[i].LoadOp = AttachmentLoadOp.Clear;
                 attachments[i].ClearValue = new ClearValue(new ClearColorValue(clear.R, clear.G, clear.B, clear.A));
@@ -230,7 +230,7 @@ internal sealed unsafe class PassRecorder
         if (depth != null)
         {
             _textures.Require(_barriers, commandBuffer, depth, _uses[use].Usage);
-            if (!depthReadOnly && _graph.TakeForLoad(depth, framebuffer.DepthLayer, depth: true, out PendingClear clear))
+            if (!depthReadOnly && _graph.TakeForLoad(depth, framebuffer.DepthLayer, depth: true, out PendingClear clear, framebuffer.DepthMipLevel))
             {
                 depthAttachment.LoadOp = AttachmentLoadOp.Clear;
                 depthAttachment.ClearValue = new ClearValue(depthStencil: new ClearDepthStencilValue(clear.R, 0));
