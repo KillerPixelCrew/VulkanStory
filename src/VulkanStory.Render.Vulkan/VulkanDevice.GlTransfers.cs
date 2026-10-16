@@ -147,7 +147,6 @@ public sealed unsafe partial class VulkanDevice
             }
             if (aspect == ImageAspectFlags.StencilBit || source.Samples != SampleCountFlags.Count1Bit)
                 throw new NotSupportedException("Transformed stencil or multisample-to-multisample blits require another transfer path.");
-            if (!_frameActive) throw new InvalidOperationException("Scaled framebuffer rendering requires an active renderer frame.");
             DrawGlBlit(sourceId, sourceLevel, destinationId, destinationLevel, destinationLayer, sourceRect, destinationRect,
                 sourceWidth, sourceHeight, destinationWidth, destinationHeight, sourceOriginX, sourceOriginY,
                 new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), linear, depth, !framebufferSrgb && !depth);
@@ -207,6 +206,12 @@ public sealed unsafe partial class VulkanDevice
         TextureBlitRectangle destinationRect, int sourceWidth, int sourceHeight, int width, int height,
         int originX, int originY, Rect2D clip, bool linear, bool depth, bool linearColor)
     {
+        if (!_frameActive)
+        {
+            RecordGlGraphics(() => DrawGlBlit(source, level, destination, destinationLevel, destinationLayer, sourceRect,
+                destinationRect, sourceWidth, sourceHeight, width, height, originX, originY, clip, linear, depth, linearColor));
+            return;
+        }
         EndNativePass();
         _targets.EndPass(Commands);
         _targets.EndRendering(Commands);

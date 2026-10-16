@@ -290,6 +290,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// <summary>Records the render-start boundary once for the current latency frame.</summary>
     internal void NoteRenderStageStarted()
     {
+        if (standaloneGlRecording) return;
         if (_latencyRenderStartFrame == _latencyFrameId) return;
         _latencyRenderStartFrame = _latencyFrameId;
         MarkLatency(_latencyFrameId, LatencyMarker.SimulationEnd);
@@ -1222,25 +1223,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
 
         // The slot's previous frame has completed (FrameRing waited for it), so
         // its indirect cursor and descriptor arena reset wholesale.
-        BeginIndirectFrame(slot.Index);
-        _descriptorArenas[slot.Index].Reset();
-        _computeArenas[slot.Index].Reset();
-        _resourceAge.NoteFrame(ResourceIds.Highest);
-        _dynamicState.Invalidate();
-
-        // The slot's previous frame has finished: its query results move to the
-        // host buffer before the pools reset, and its readback arena is free again.
-        _queryRing.BeginSlot(slot.Index, slot.CommandBuffer);
-        _gpuTimestamps?.BeginSlot(slot.Index, slot.CommandBuffer);
-        // The occlusion depth this slot captured is complete; publish it before the arena is reused.
-        _occlusionDepth?.Collect(slot.Index);
-        _readbacks.BeginSlot(slot.Index);
-
-        // Sets naming resources deleted since last frame leave the cache now and
-        // are freed once the Frame timeline has passed every frame that could
-        // have bound them.
-        IDisposable? freedSets = _descriptors.CollectReleases();
-        if (freedSets != null) _frames.DeferDeletion(freedSets);
+        PrepareGraphicsSlot(slot);
 
         VulkanStats.NoteFrame();
         if (StatsLogPath != null &&

@@ -79,7 +79,6 @@ public sealed unsafe partial class VulkanDevice
             if (!_frameActive) _uploads.SubmitStandalone();
             return;
         }
-        if (!_frameActive) throw new InvalidOperationException("Partial/masked framebuffer clears require a graphics recording frame.");
         DrawGlClear(name, (int)level, (int)layer, imageWidth, imageHeight, mask, color, depth,
             new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), depthOnly, linearColor);
     }
@@ -113,6 +112,11 @@ public sealed unsafe partial class VulkanDevice
     }
     private void DrawGlClear(int image, int level, int layer, uint width, uint height, ColorComponentFlags mask, float[] color, float depth, Rect2D clip, bool depthOnly, bool linearColor)
     {
+        if (!_frameActive)
+        {
+            RecordGlGraphics(() => DrawGlClear(image, level, layer, width, height, mask, color, depth, clip, depthOnly, linearColor));
+            return;
+        }
         EndNativePass(); _targets.EndPass(Commands); _targets.EndRendering(Commands);
         Action<CommandBuffer>? resume = _targets.ScopeOpened;
         _targets.ScopeOpened = null;

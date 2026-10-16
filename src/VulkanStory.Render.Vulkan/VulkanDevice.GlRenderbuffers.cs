@@ -83,7 +83,11 @@ public sealed unsafe partial class VulkanDevice
             if (!_frameActive) _uploads.SubmitStandalone();
             return;
         }
-        if (!_frameActive) throw new InvalidOperationException("Partial/masked stencil clears require a graphics recording frame.");
+        if (!_frameActive)
+        {
+            RecordGlGraphics(() => ClearGlStencil(framebuffer, value, mask, scissor));
+            return;
+        }
         int temporary = 0, clipMask = DisableGlClipping();
         Action<CommandBuffer>? resume = _targets.ScopeOpened;
         _targets.ScopeOpened = null;

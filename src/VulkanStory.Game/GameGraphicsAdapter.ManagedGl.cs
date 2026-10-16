@@ -11,14 +11,19 @@ internal sealed partial class GameGraphicsAdapter
 
     // The caller has already snapshotted the VAO's CPU streams into an owned mesh.
     // Recording uses the same target, uniforms, descriptors and pipeline path as
-    // other stated draws; it never creates a second primary frame.
+    // other stated draws; off-frame calls use a fenced graphics batch without presentation.
     internal void RecordManagedGlDraw(int mesh, int program, StatedRenderState state,
         int target, bool primary)
     {
         var renderer = RequireDevice();
+        if (!renderer.GraphicsRecordingActive)
+        {
+            renderer.RecordGlGraphics(() => RecordManagedGlDraw(mesh, program, state, target, primary));
+            return;
+        }
         // Intermediate images retain GL row order. Viewport, scissor and winding
         // use the existing renderer convention; presentation flips the rows once.
-        PassDeclaration? declaration = primary
+        PassDeclaration? declaration = primary && renderer.DisplayFrameActive
             ? StatedPass?.FramebufferId == target ? StatedPass : StageDrawDeclaration()
             : null;
         if (!StatedDraw.Record(renderer, state, program, target, mesh, 1, null, null, 0,
