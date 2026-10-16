@@ -33,6 +33,7 @@
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
+    <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.Auxiliary.cs" />
     <Compile Include="VulkanDevice.Shadows.cs" />
     <Compile Include="VulkanDevice.UpscalerHost.cs" />

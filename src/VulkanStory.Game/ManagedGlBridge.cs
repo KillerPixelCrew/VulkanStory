@@ -189,6 +189,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "DrawBuffer": SelectDrawBuffers([I(a[0])]); return null;
             case "DrawBuffers": { int count = I(a[0]); if (count < 0 || count > StatedRenderState.MaxColorAttachments) Error(0x0501); SelectDrawBuffers(ReadInts(a[1], count)); return null; }
             case "ReadBuffer": SelectReadBuffer(I(a[0])); return null;
+            case "BlitFramebuffer": BlitFramebuffer(a); return null;
+            case "CopyTexSubImage2D": CopyTexSubImage(a); return null;
             case "PixelStore": PixelStore(I(a[0]), I(a[1])); return null;
             case "GetTexImage": GetTexImage(a); return null;
             case "GetTextureSubImage": GetTextureSubImage(a); return null;
@@ -213,6 +215,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "DisableVertexAttribArray": AttributeEnabled(I(a[0]), false); return null;
             case "DrawElements": Draw(I(a[0]), I(a[1]), I(a[2]), L(a[3]), 0); return null;
             case "DrawElementsBaseVertex": Draw(I(a[0]), I(a[1]), I(a[2]), L(a[3]), I(a[4])); return null;
+            case "DrawArrays": DrawArrays(I(a[0]), I(a[1]), I(a[2])); return null;
             case "CreateShader": { int type = I(a[0]); if (type is not (0x8B31 or 0x8B30 or 0x8DD9)) Error(0x0500); int name = Name(); shaders.Add(name, new(type)); return name; }
             case "ShaderSource": ShaderSource(a); return null;
             case "CompileShader": CompileShader(I(a[0])); return null;
@@ -337,7 +340,15 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (enabled) Array.Enabled.Add(index); else Array.Enabled.Remove(index);
         if (Array.Attributes.TryGetValue(index, out Attribute? attribute)) attribute.Enabled = enabled;
     }
-    private void Draw(int mode, int count, int indexType, long offset, int baseVertex)
+    private void DrawArrays(int mode, int first, int count)
+    {
+        if (first < 0 || count < 0 || (long)first + count > int.MaxValue) Error(0x0501);
+        var indices = new int[count];
+        for (int i = 0; i < count; i++) indices[i] = first + i;
+        Draw(mode, count, 0x1405, 0, 0, indices);
+    }
+
+    private void Draw(int mode, int count, int indexType, long offset, int baseVertex, int[]? suppliedIndices = null)
     {
         if (count < 0 || offset < 0) Error(0x0501);
         if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506);
@@ -352,17 +363,22 @@ internal sealed partial class ManagedGlBridge : IDisposable
             throw new NotSupportedException("Managed GL drawing with distinct front/back polygon modes needs per-face rasterization capability.");
         if (C.PolygonFront == 0x1B00)
             throw new NotSupportedException("Managed GL point polygon mode needs a point-polygon pipeline capability.");
-        if (C.VertexArray == 0 || Array.Elements is null || CurrentProgram == 0) Error(0x0502);
+        if (C.VertexArray == 0 || suppliedIndices is null && Array.Elements is null || CurrentProgram == 0) Error(0x0502);
         if (Array.Enabled.Any(index => !Array.Attributes.ContainsKey(index)))
             throw new NotSupportedException("Managed GL drawing a constant/default vertex attribute needs a constant-attribute backend capability.");
-        byte[] elements = Array.Elements!.Data;
-        if (offset > elements.LongLength - (long)count * size) Error(0x0502);
-        var indices = new int[count];
+        byte[] elements = Array.Elements?.Data ?? [];
+        if (suppliedIndices is null && offset > elements.LongLength - (long)count * size) Error(0x0502);
+        int[] indices = suppliedIndices ?? new int[count];
         long maximum = 0;
         for (int index = 0; index < count; index++)
         {
-            ReadOnlySpan<byte> value = elements.AsSpan(checked((int)offset + index * size), size);
-            long raw = size == 1 ? value[0] : size == 2 ? BinaryPrimitives.ReadUInt16LittleEndian(value) : BinaryPrimitives.ReadUInt32LittleEndian(value);
+            long raw;
+            if (suppliedIndices is not null) raw = unchecked((uint)suppliedIndices[index]);
+            else
+            {
+                ReadOnlySpan<byte> value = elements.AsSpan(checked((int)offset + index * size), size);
+                raw = size == 1 ? value[0] : size == 2 ? BinaryPrimitives.ReadUInt16LittleEndian(value) : BinaryPrimitives.ReadUInt32LittleEndian(value);
+            }
             long adjusted = raw + baseVertex;
             if (adjusted < 0 || adjusted > uint.MaxValue) Error(0x0502);
             indices[index] = unchecked((int)(uint)adjusted);

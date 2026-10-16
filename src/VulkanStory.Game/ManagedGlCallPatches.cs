@@ -30,6 +30,8 @@ public static partial class ManagedGlCallPatches
         "CheckFramebufferStatus", "GetFramebufferAttachmentParameter", "DrawBuffer", "DrawBuffers", "ReadBuffer",
         "PixelStore", "GetTexImage", "GetTextureSubImage", "ReadPixels", "GetTexLevelParameter", "IsTexture",
         "LoadBindings",
+        "BlitFramebuffer", "CopyTexSubImage2D",
+        "DrawArrays",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))

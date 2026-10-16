@@ -1,5 +1,7 @@
 using System.Reflection;
 using VulkanStory.Render.Vulkan.Graph;
+using VulkanStory.Render.Vulkan;
+using Silk.NET.Vulkan;
 
 namespace VulkanStory.Game;
 
@@ -124,5 +126,67 @@ internal sealed partial class ManagedGlBridge
     {
         if (token != 0 && (PublicFramebuffer(ReadTarget) == 0 ? token is not (0x0402 or 0x0405) : (uint)(token - 0x8CE0) >= StatedRenderState.MaxColorAttachments)) Error(0x0500);
         C.ReadBuffers[ReadTarget] = token;
+    }
+
+    private void BlitFramebuffer(object?[] a)
+    {
+        int mask = I(a[8]), filter = I(a[9]);
+        if ((mask & ~0x4500) != 0) Error(0x0501);
+        if (filter is not (0x2600 or 0x2601)) Error(0x0500);
+        if ((mask & 0x0500) != 0 && filter != 0x2600) Error(0x0502);
+        if (Device.FramebufferStatus(ReadTarget) != 0x8CD5 || Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506);
+        var sourceRect = new TextureBlitRectangle(I(a[0]), I(a[1]), I(a[2]), I(a[3]));
+        var destinationRect = new TextureBlitRectangle(I(a[4]), I(a[5]), I(a[6]), I(a[7]));
+        var transfers = new List<(int Source, int SourceLevel, int SourceLayer, int Destination, int DestinationLevel, int DestinationLayer)>();
+        if ((mask & 0x4000) != 0 && ReadBuffer != 0)
+        {
+            int attachment = PublicFramebuffer(ReadTarget) == 0 ? 0x8CE0 : ReadBuffer;
+            if (Device.TryFramebufferAttachment(ReadTarget, attachment, out int source, out int level, out int sourceLayer) && source != 0)
+                for (int output = 0; output < StatedRenderState.MaxColorAttachments; output++)
+                {
+                    int slot = State.DrawBufferAttachment(Target, output);
+                    if (slot >= 0 && Device.TryFramebufferAttachment(Target, 0x8CE0 + slot, out int destination, out int destinationLevel, out int destinationLayer) && destination != 0)
+                        transfers.Add((source, level, sourceLayer, destination, destinationLevel, destinationLayer));
+                }
+        }
+        if ((mask & 0x0100) != 0 && Device.TryFramebufferAttachment(ReadTarget, 0x8D00, out int sourceDepth, out int sourceDepthLevel, out int sourceDepthLayer) && sourceDepth != 0 &&
+            Device.TryFramebufferAttachment(Target, 0x8D00, out int destinationDepth, out int destinationDepthLevel, out int destinationDepthLayer) && destinationDepth != 0)
+        {
+            if (Device.TextureOf(sourceDepth)!.Format != Device.TextureOf(destinationDepth)!.Format) Error(0x0502);
+            transfers.Add((sourceDepth, sourceDepthLevel, sourceDepthLayer, destinationDepth, destinationDepthLevel, destinationDepthLayer));
+        }
+        if (transfers.Count == 0) return;
+        (int Width, int Height) sourceSize = (int.MaxValue, int.MaxValue), destinationSize = (int.MaxValue, int.MaxValue);
+        foreach (var transfer in transfers)
+        {
+            var read = Device.TextureOf(transfer.Source)!;
+            var draw = Device.TextureOf(transfer.Destination)!;
+            sourceSize = (Math.Min(sourceSize.Width, (int)Math.Max(1u, read.Width >> transfer.SourceLevel)), Math.Min(sourceSize.Height, (int)Math.Max(1u, read.Height >> transfer.SourceLevel)));
+            destinationSize = (Math.Min(destinationSize.Width, (int)Math.Max(1u, draw.Width >> transfer.DestinationLevel)), Math.Min(destinationSize.Height, (int)Math.Max(1u, draw.Height >> transfer.DestinationLevel)));
+        }
+        Rect2D? clip = State.ScissorEnabled ? State.Scissor : null;
+        foreach (var transfer in transfers)
+            Device.BlitTextureRectangle(transfer.Source, transfer.SourceLevel, transfer.SourceLayer, transfer.Destination, transfer.DestinationLevel, transfer.DestinationLayer,
+                sourceRect, destinationRect, sourceSize.Width, sourceSize.Height, destinationSize.Width, destinationSize.Height, clip, filter == 0x2601);
+        // There are no stencil attachments in this renderer; their clear/blit bit has no image to write.
+    }
+
+    private void CopyTexSubImage(object?[] a)
+    {
+        if (I(a[0]) != 0x0DE1) Error(0x0500);
+        int level = I(a[1]), x = I(a[2]), y = I(a[3]), sx = I(a[4]), sy = I(a[5]), width = I(a[6]), height = I(a[7]);
+        if (level < 0 || x < 0 || y < 0 || width < 0 || height < 0) Error(0x0501);
+        if (!Device.TryGetTexture2DDescription(BoundTexture(), out int storageWidth, out int storageHeight, out int levels, out _) || level >= levels) Error(0x0502);
+        if ((long)x + width > Math.Max(1, storageWidth >> level) || (long)y + height > Math.Max(1, storageHeight >> level)) Error(0x0501);
+        if (Device.FramebufferStatus(ReadTarget) != 0x8CD5) Error(0x0506);
+        bool depth = Device.IsDepthTexture(BoundTexture());
+        int attachment = depth ? 0x8D00 : PublicFramebuffer(ReadTarget) == 0 ? 0x8CE0 : ReadBuffer;
+        int source = 0, sourceLevel = 0, sourceLayer = 0;
+        if (attachment == 0 || !Device.TryFramebufferAttachment(ReadTarget, attachment, out source, out sourceLevel, out sourceLayer) || source == 0) Error(0x0502);
+        if (Device.IsDepthTexture(source) != depth) Error(0x0502);
+        var readImage = Device.TextureOf(source)!;
+        Device.BlitTextureRectangle(source, sourceLevel, sourceLayer, BoundTexture(), level, 0,
+            new TextureBlitRectangle(sx, sy, checked(sx + width), checked(sy + height)), new TextureBlitRectangle(x, y, checked(x + width), checked(y + height)),
+            (int)Math.Max(1u, readImage.Width >> sourceLevel), (int)Math.Max(1u, readImage.Height >> sourceLevel), Math.Max(1, storageWidth >> level), Math.Max(1, storageHeight >> level), null, false);
     }
 }
