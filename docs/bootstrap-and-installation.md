@@ -214,6 +214,7 @@ Windows `native/win-x64` (from `packaging/native-win-x64.json`):
 | Component | Files |
 | --- | --- |
 | Core | `SDL3.dll`, `shaderc_shared.dll`, `VulkanStoryVma.dll`, `openxr_loader.dll` |
+| Presentation | `VulkanStoryAuxPresent.dll`, `VulkanStoryWsi.dll`, `VulkanStoryWsi.json` |
 | DLSS | `VulkanStoryNgx.dll`, `nvngx_dlss.dll` |
 | FSR 3 | `VulkanStoryFsr3.dll`, `amd_fidelityfx_vk.dll` |
 | FSR 4 | `VulkanStoryFsr4.dll`, `amd_fidelityfx_upscaler_dx12.dll` |
@@ -232,13 +233,17 @@ mandatory and its MIT notice ships in `licenses/native/vma/LICENSE.txt`.
 The Windows FSR 3 runtime is rebuilt from the pinned SDK with the tracked
 [luma-history format correction](../native/fsr3/sdk-fixes/README.md).
 Bundling requires its matching source/correction and binary hash receipt.
+The Streamline common/interposer components are also rebuilt from the pinned SDK
+with the renderer's Vulkan dispatch corrections; their source and binary receipts
+ship with the native notices. Other Streamline redistributables retain their
+release hashes.
 
 | Step | Script | Result |
 | --- | --- | --- |
-| 1 | `fetch-streamline-release.ps1` | Hash-checked Streamline 2.14.1 release ZIP extracted to the git-ignored `sdk/streamline-release-2.14.1`. The production `bin/x64` runtimes come only from this ZIP |
+| 1 | `fetch-streamline-release.ps1` | Hash-checked Streamline 2.14.1 release ZIP extracted to the git-ignored `sdk/streamline-release-2.14.1`. Supplies the redistributables and reference hashes; corrected common/interposer builds are produced from the pinned source SDK |
 | 2 | `build-runtime.ps1` | Managed projects, required VMA bridge in `artifacts/native-vma/<Configuration>/<rid>`, corrected Windows FidelityFX Vulkan runtime in `artifacts/native-fsr3-sdk/Release/win-x64/runtime`, Windows proxy (CMake), and shader corpus/pack in `artifacts/runtime-shaders/<Configuration>`. Requires `g++` and Vulkan headers; the Windows SDK build also needs MSVC x64 tools and the Vulkan import library. Matching corrected SDK builds are reused. `-RuntimeIdentifier linux-x64` builds on Linux |
-| 3 | `build-provider-bridges.ps1` | Five Windows provider bridges plus the required VMA bridge (needs `g++`/`gcc` and `VULKAN_SDK`) |
-| 4 | `prepare-native-bundle.ps1` | Bridges, core binaries, vendor runtimes and notices from `native-win-x64.json`. `-VmaDirectory` accepts the runtime build's allocator bridge. Streamline runtimes must match the release hashes |
+| 3 | `build-provider-bridges.ps1` | Windows provider, auxiliary-presentation, WSI and VMA bridges (needs `g++`/`gcc` and `VULKAN_SDK`) |
+| 4 | `prepare-native-bundle.ps1` | Bridges, core binaries, vendor runtimes and notices from `native-win-x64.json`. `-VmaDirectory` accepts the runtime build's allocator bridge. Corrected runtimes require matching source/build receipts; other Streamline runtimes must match release hashes |
 | 5 | `stage-runtime.ps1` | The layout above plus `optional-server/`. Checks the `-ShaderPack` index, blob hashes and manifest coverage, and writes the SHA256 inventory `package.json` |
 | 6 | `package-runtime.ps1` | Verifies the staged hashes and writes `VulkanStory-<rid>.zip`, `VulkanStory-Input-Companion.zip` and `archives.json` |
 

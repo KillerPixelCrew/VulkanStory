@@ -29,8 +29,8 @@ unmodified game.
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
 - **Initial OpenXR stereo rendering** with tracked headset views and a desktop mirror,
   enabled from the Device options page.
-- **Extension points** for other mods to add renderer passes. A separate
-  compatibility module for translating supported OpenGL usage by other mods is planned.
+- **Mod compatibility**: shared translation of supported managed/native OpenGL calls
+  and mod-created GLFW windows, plus extension points for custom Vulkan render passes.
 
 ## Requirements
 
