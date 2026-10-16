@@ -963,7 +963,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             0x0BA2 => [State.Viewport.Offset.X, State.Viewport.Offset.Y, (int)State.Viewport.Extent.Width, (int)State.Viewport.Extent.Height],
             0x0B40 => C.PolygonFront != C.PolygonBack ? [C.PolygonFront, C.PolygonBack] :
                 [State.Wireframe ? 0x1B01 : 0x1B02, State.Wireframe ? 0x1B01 : 0x1B02],
-            0x0D33 => [Device.MaxTextureSize], 0x8872 => [StatedRenderState.MaxTextureUnits],
+            0x0D33 => [Device.MaxTextureSize], 0x8872 or 0x8B4D => [StatedRenderState.MaxTextureUnits],
             0x8CDF => [StatedRenderState.MaxColorAttachments], 0x8824 => [StatedRenderState.MaxColorAttachments],
             0x8CA6 => [PublicFramebuffer(Target)], 0x8CAA => [PublicFramebuffer(ReadTarget)],
             0x0C01 => [DrawBufferToken(0)], 0x0C02 => [ReadBuffer],

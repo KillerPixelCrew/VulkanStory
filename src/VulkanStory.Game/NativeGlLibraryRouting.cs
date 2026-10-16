@@ -13,6 +13,9 @@ internal static class NativeGlLibraryRouting
     private static readonly object Gate = new();
     private static readonly HashSet<string> Roots = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<nint, ModuleRoute> Modules = new();
+    private static readonly Dictionary<Guid, HashSet<int>> ResolverTokens = new();
+    private static readonly HashSet<MethodBase> PatchedResolvers = new();
+    private static Harmony? resolverHarmony;
     private sealed record ImportPatch(nint Slot, nint Original, nint Replacement);
     private sealed record ModuleRoute(string Path, List<ImportPatch> Patches);
     private static ProcessRuntime? runtime;
@@ -28,20 +31,32 @@ internal static class NativeGlLibraryRouting
     [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool VirtualProtect(nint address, nuint size, uint protection, out uint previous);
 
-    internal static void RegisterImage(string path)
+    internal static void RegisterImage(ModGlInspection inspection)
     {
-        if (!OperatingSystem.IsWindows() || !File.Exists(path)) return;
-        string root = Path.GetFullPath(Path.GetDirectoryName(path)!) + Path.DirectorySeparatorChar;
-        lock (Gate) Roots.Add(root);
+        if (!OperatingSystem.IsWindows()) return;
+        lock (Gate)
+        {
+            if (File.Exists(inspection.Source))
+                Roots.Add(Path.GetFullPath(Path.GetDirectoryName(inspection.Source)!) + Path.DirectorySeparatorChar);
+            foreach (var method in inspection.NativeResolvers)
+            {
+                if (!ResolverTokens.TryGetValue(method.Module, out HashSet<int>? tokens)) ResolverTokens.Add(method.Module, tokens = new());
+                tokens.Add(method.Token);
+            }
+        }
+        if (inspection.NativeResolvers.Count == 0) return;
+        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies()) PatchResolvers(assembly);
     }
 
     internal static void Install(Harmony harmony, ProcessRuntime owner)
     {
         if (!OperatingSystem.IsWindows()) return;
         runtime = owner;
-        foreach (MethodInfo method in typeof(NativeLibrary).GetMethods(BindingFlags.Static | BindingFlags.Public)
-            .Where(method => method.Name == nameof(NativeLibrary.Load) && method.GetParameters().FirstOrDefault()?.ParameterType == typeof(string)))
-            harmony.Patch(method, postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Loaded)) { priority = Priority.First });
+        resolverHarmony = harmony;
+        foreach (string name in new[] { "glGetString", "glGetIntegerv", "glGetError" })
+            if (ManagedGlCallPatches.ProcedureAddress(name) == 0)
+                throw new MissingMethodException("Native GL bootstrap procedure is missing: " + name);
+        AppDomain.CurrentDomain.AssemblyLoad += AssemblyLoaded;
         harmony.Patch(AccessTools.Method(typeof(NativeLibrary), nameof(NativeLibrary.Free), [typeof(nint)]),
             postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Freed)) { priority = Priority.First });
         harmony.Patch(AccessTools.Method(typeof(NativeLibrary), nameof(NativeLibrary.GetExport), [typeof(nint), typeof(string)]),
@@ -52,12 +67,43 @@ internal static class NativeGlLibraryRouting
 
     internal static void Restore()
     {
+        AppDomain.CurrentDomain.AssemblyLoad -= AssemblyLoaded;
         lock (Gate)
         {
             foreach (nint module in Modules.Keys.ToArray()) RestoreModule(module);
             Roots.Clear();
+            ResolverTokens.Clear(); PatchedResolvers.Clear(); resolverHarmony = null;
         }
         runtime = null;
+    }
+
+    private static void AssemblyLoaded(object? sender, AssemblyLoadEventArgs args) => PatchResolvers(args.LoadedAssembly);
+    private static void PatchResolvers(Assembly assembly)
+    {
+        if (assembly.IsDynamic) return;
+        lock (Gate)
+        {
+            if (resolverHarmony is null) return;
+            foreach (Module module in assembly.GetModules())
+            {
+                if (!ResolverTokens.TryGetValue(module.ModuleVersionId, out HashSet<int>? tokens)) continue;
+                foreach (int token in tokens)
+                {
+                    MethodBase method = module.ResolveMethod(token) ?? throw new MissingMethodException("Inspected native resolver is missing.");
+                    if (PatchedResolvers.Contains(method)) continue;
+                    if (method is not MethodInfo callback || callback.ContainsGenericParameters || callback.ReturnType != typeof(nint) ||
+                        !callback.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual(
+                            new[] { typeof(string), typeof(Assembly), typeof(DllImportSearchPath?) }))
+                        throw new NotSupportedException("Native resolver signature cannot be routed: " + method);
+                    // CLR calls this delegate to resolve a P/Invoke. Its returned
+                    // module is routed before CLR enters the imported function,
+                    // even when the callback's NativeLibrary.Load call was inlined.
+                    resolverHarmony.Patch(callback, postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Loaded)) { priority = Priority.First });
+                    PatchedResolvers.Add(method);
+                    runtime?.Notify("native-gl.resolver-routed", callback.DeclaringType?.FullName + "." + callback.Name);
+                }
+            }
+        }
     }
 
     private static string ModulePath(nint module)
@@ -73,7 +119,12 @@ internal static class NativeGlLibraryRouting
         string path = ModulePath(__result);
         lock (Gate)
         {
-            if (Modules.ContainsKey(__result) || !Roots.Any(root => path.StartsWith(root, StringComparison.OrdinalIgnoreCase))) return;
+            if (Modules.ContainsKey(__result)) return;
+            if (!Roots.Any(root => path.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
+            {
+                runtime.Notify("native-gl.module-outside-mod-roots", path);
+                return;
+            }
             var patches = new List<ImportPatch>();
             Modules.Add(__result, new(path, patches));
             try
@@ -122,6 +173,7 @@ internal static class NativeGlLibraryRouting
                         WriteSlot(slot, replacement);
                     }
                 }
+                runtime.Notify("native-gl.library-routed", path + "; imports=" + patches.Count);
             }
             catch
             {
