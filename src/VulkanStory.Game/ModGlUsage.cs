@@ -25,7 +25,6 @@ internal sealed record ModGlCall(string Caller, int? Offset, string Operation)
 internal sealed record ModGlInspection(ModInfo? Info, string Source, string AssemblyName, Guid Mvid,
     string Sha256, IReadOnlyList<ModGlCall> Calls, string? Failure)
 {
-    internal IReadOnlyList<(Guid Module, int Token)> NativeResolvers { get; init; } = [];
     /// <summary>True only when an unsupported graphics operation was observed.</summary>
     internal bool Refused => Calls.Count != 0;
     /// <summary>Mod-manager identity retained from the game's own metadata reader.</summary>
@@ -56,7 +55,6 @@ internal static class ModGlUsage
         string name = "unreadable";
         Guid mvid = Guid.Empty;
         var calls = new List<ModGlCall>();
-        var nativeResolvers = new HashSet<(Guid Module, int Token)>();
         try
         {
             using var stream = new MemoryStream(image, writable: false);
@@ -78,15 +76,6 @@ internal static class ModGlUsage
                         // Include ldftn/ldvirtftn as well as calls: delegates can
                         // execute the same native operation after initialization.
                         if (instruction.Operand is not MethodReference target) continue;
-                        // Bind the actual callback passed to DllImportResolver, not
-                        // an inlineable framework Load wrapper. MethodDef tokens
-                        // refer to this exact module and need no dependency loading.
-                        if ((instruction.OpCode.Code is Mono.Cecil.Cil.Code.Ldftn or Mono.Cecil.Cil.Code.Ldvirtftn) &&
-                            target.MetadataToken.TokenType == TokenType.Method &&
-                            instruction.Next?.OpCode.Code == Mono.Cecil.Cil.Code.Newobj &&
-                            instruction.Next?.Operand is MethodReference constructor &&
-                            constructor.DeclaringType.FullName == "System.Runtime.InteropServices.DllImportResolver")
-                            nativeResolvers.Add((module.Mvid, target.MetadataToken.ToInt32()));
                         if (imports.TryGetValue(target.FullName, out string? entry))
                         {
                             calls.Add(new(method.FullName, instruction.Offset, entry));
@@ -100,7 +89,7 @@ internal static class ModGlUsage
                     calls.Add(new(import.Key, null, import.Value));
             }
             info ??= readInfo?.Invoke(assembly);
-            return new(info, source, name, mvid, hash, calls, null) { NativeResolvers = nativeResolvers.ToArray() };
+            return new(info, source, name, mvid, hash, calls, null);
         }
         catch (Exception error) when (error is BadImageFormatException or IOException or ArgumentException or
             InvalidOperationException or NotSupportedException or IndexOutOfRangeException or AssemblyResolutionException)

@@ -13,9 +13,7 @@ internal static class NativeGlLibraryRouting
     private static readonly object Gate = new();
     private static readonly HashSet<string> Roots = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<nint, ModuleRoute> Modules = new();
-    private static readonly Dictionary<Guid, HashSet<int>> ResolverTokens = new();
-    private static readonly HashSet<MethodBase> PatchedResolvers = new();
-    private static Harmony? resolverHarmony;
+    private static MethodInfo? loadCallback;
     private sealed record ImportPatch(nint Slot, nint Original, nint Replacement);
     private sealed record ModuleRoute(string Path, List<ImportPatch> Patches);
     private static ProcessRuntime? runtime;
@@ -31,32 +29,37 @@ internal static class NativeGlLibraryRouting
     [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool VirtualProtect(nint address, nuint size, uint protection, out uint previous);
 
-    internal static void RegisterImage(ModGlInspection inspection)
+    internal static void RegisterImage(string path)
+    {
+        if (!OperatingSystem.IsWindows() || !File.Exists(path)) return;
+        lock (Gate) Roots.Add(Path.GetFullPath(Path.GetDirectoryName(path)!) + Path.DirectorySeparatorChar);
+    }
+
+    internal static void Prepare()
     {
         if (!OperatingSystem.IsWindows()) return;
-        lock (Gate)
-        {
-            if (File.Exists(inspection.Source))
-                Roots.Add(Path.GetFullPath(Path.GetDirectoryName(inspection.Source)!) + Path.DirectorySeparatorChar);
-            foreach (var method in inspection.NativeResolvers)
-            {
-                if (!ResolverTokens.TryGetValue(method.Module, out HashSet<int>? tokens)) ResolverTokens.Add(method.Module, tokens = new());
-                tokens.Add(method.Token);
-            }
-        }
-        if (inspection.NativeResolvers.Count == 0) return;
-        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies()) PatchResolvers(assembly);
+        MethodInfo callback = typeof(NativeLibrary).GetMethod("LoadLibraryCallbackStub", BindingFlags.Static | BindingFlags.NonPublic,
+            null, [typeof(string), typeof(Assembly), typeof(bool), typeof(uint)], null)
+            ?? throw new MissingMethodException("CLR native import resolution callback is unavailable.");
+        MethodInfo invoke = typeof(DllImportResolver).GetMethod("Invoke")!;
+        if (callback.ReturnType != typeof(nint) || callback.GetMethodBody() is not { } body ||
+            body.ExceptionHandlingClauses.Count != 0 || PatchProcessor.GetOriginalInstructions(callback).Count(instruction => instruction.Calls(invoke)) != 1)
+            throw new NotSupportedException("CLR native import resolution callback does not match the supported return boundary.");
+        loadCallback = callback;
     }
 
     internal static void Install(Harmony harmony, ProcessRuntime owner)
     {
         if (!OperatingSystem.IsWindows()) return;
         runtime = owner;
-        resolverHarmony = harmony;
+        if (loadCallback is null) throw new InvalidOperationException("Native import callback was not prepared.");
         foreach (string name in new[] { "glGetString", "glGetIntegerv", "glGetError" })
             if (ManagedGlCallPatches.ProcedureAddress(name) == 0)
                 throw new MissingMethodException("Native GL bootstrap procedure is missing: " + name);
-        AppDomain.CurrentDomain.AssemblyLoad += AssemblyLoaded;
+        // Native CLR code invokes this callback; it cannot inline it into a mod's
+        // caller. Route the returned module before CLR enters its imported function.
+        // The mod's own resolver and exception filters are never rewritten.
+        harmony.Patch(loadCallback, postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Loaded)) { priority = Priority.First });
         harmony.Patch(AccessTools.Method(typeof(NativeLibrary), nameof(NativeLibrary.Free), [typeof(nint)]),
             postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Freed)) { priority = Priority.First });
         harmony.Patch(AccessTools.Method(typeof(NativeLibrary), nameof(NativeLibrary.GetExport), [typeof(nint), typeof(string)]),
@@ -67,43 +70,13 @@ internal static class NativeGlLibraryRouting
 
     internal static void Restore()
     {
-        AppDomain.CurrentDomain.AssemblyLoad -= AssemblyLoaded;
         lock (Gate)
         {
             foreach (nint module in Modules.Keys.ToArray()) RestoreModule(module);
             Roots.Clear();
-            ResolverTokens.Clear(); PatchedResolvers.Clear(); resolverHarmony = null;
+            loadCallback = null;
         }
         runtime = null;
-    }
-
-    private static void AssemblyLoaded(object? sender, AssemblyLoadEventArgs args) => PatchResolvers(args.LoadedAssembly);
-    private static void PatchResolvers(Assembly assembly)
-    {
-        if (assembly.IsDynamic) return;
-        lock (Gate)
-        {
-            if (resolverHarmony is null) return;
-            foreach (Module module in assembly.GetModules())
-            {
-                if (!ResolverTokens.TryGetValue(module.ModuleVersionId, out HashSet<int>? tokens)) continue;
-                foreach (int token in tokens)
-                {
-                    MethodBase method = module.ResolveMethod(token) ?? throw new MissingMethodException("Inspected native resolver is missing.");
-                    if (PatchedResolvers.Contains(method)) continue;
-                    if (method is not MethodInfo callback || callback.ContainsGenericParameters || callback.ReturnType != typeof(nint) ||
-                        !callback.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual(
-                            new[] { typeof(string), typeof(Assembly), typeof(DllImportSearchPath?) }))
-                        throw new NotSupportedException("Native resolver signature cannot be routed: " + method);
-                    // CLR calls this delegate to resolve a P/Invoke. Its returned
-                    // module is routed before CLR enters the imported function,
-                    // even when the callback's NativeLibrary.Load call was inlined.
-                    resolverHarmony.Patch(callback, postfix: new HarmonyMethod(typeof(NativeGlLibraryRouting), nameof(Loaded)) { priority = Priority.First });
-                    PatchedResolvers.Add(method);
-                    runtime?.Notify("native-gl.resolver-routed", callback.DeclaringType?.FullName + "." + callback.Name);
-                }
-            }
-        }
     }
 
     private static string ModulePath(nint module)

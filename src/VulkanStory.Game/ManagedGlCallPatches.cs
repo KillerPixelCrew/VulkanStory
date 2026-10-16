@@ -159,6 +159,7 @@ public static partial class ManagedGlCallPatches
         return new StartupPatchGroup("graphics-managed-gl", () =>
         {
             _ = NativePlans.Value;
+            NativeGlLibraryRouting.Prepare();
             foreach (string name in Names)
                 if (!targets.Any(target => target.Name == name)) throw new MissingMethodException("OpenTK managed GL entry point is absent: " + name);
             foreach (MethodInfo target in targets)

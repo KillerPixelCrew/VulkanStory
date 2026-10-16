@@ -10,7 +10,7 @@ using GameMod = Vintagestory.API.Common.Mod;
 namespace VulkanStory.Game;
 
 /// <summary>Refuses unadapted third-party direct GL before enabled mod code initializes under the active Vulkan renderer.</summary>
-/// <remarks>Supported graphics calls share the renderer bridge; native resolvers retain their inspected module/token identity.</remarks>
+/// <remarks>Supported graphics calls share the renderer bridge; native import routing is restricted to inspected mod roots.</remarks>
 internal static class ModCompatibilityConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.mod-compatibility";
@@ -218,7 +218,7 @@ internal static class ModCompatibilityConsumerPatches
     /// <param name="result">Metadata-only image decision.</param>
     private static void Record(ModGlInspection result)
     {
-        NativeGlLibraryRouting.RegisterImage(result);
+        NativeGlLibraryRouting.RegisterImage(result.Source);
         lock (Gate) Inspections[result.Source] = result;
         runtime?.Notify("mod.gl.discovery", result.Detail);
     }
