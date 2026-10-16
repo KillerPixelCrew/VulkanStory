@@ -224,6 +224,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Records mip generation for a live texture using the renderer upload/resource path.</summary>
     public void GenerateMipmaps(int textureId)
     {
+        if (GenerateGlMutableMips(textureId)) return;
         FlushPendingClears(textureId);
         _textures.GenerateMipmaps(textureId);
     }
@@ -242,6 +243,14 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     private void ReleaseTexture(int textureId)
     {
+        var attachments = glLevelAttachments.Where(entry => entry.Value.Texture == textureId).ToArray();
+        if (attachments.Length != 0) EndStagePass();
+        foreach (var attachment in attachments)
+        {
+            glLevelAttachments.Remove(attachment.Key);
+            ApplyGlLevelAttachment(attachment.Key.Framebuffer, attachment.Key.Attachment, 0, 0, 0);
+        }
+        ReleaseGlMutableLevels(textureId);
         if (_sampledTextureOverrides.Remove(textureId, out int copy)) _readSelfCopies?.Release(copy);
         _transients?.Forget(textureId);
         _textures.RestoreBinding(textureId);
@@ -260,11 +269,16 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>Updates a retained client texture sampling parameter by its raw GL parameter name.</summary>
     public void SetTextureParameter(int textureId, int parameterName, int value) =>
-        _textures.SetParameter(textureId, parameterName, value);
+        SetTextureParameter(textureId, parameterName, (float)value);
 
     /// <summary>Updates a retained client texture sampling parameter by its raw GL parameter name.</summary>
-    public void SetTextureParameter(int textureId, int parameterName, float value) =>
+    public void SetTextureParameter(int textureId, int parameterName, float value)
+    {
+        if (parameterName == 0x813C && glMutableLevels.ContainsKey(textureId)) EndNativePass();
         _textures.SetParameter(textureId, parameterName, value);
+        if (parameterName == 0x813C && glMutableLevels.TryGetValue(textureId, out GlMutableLevels? storage))
+            RebuildGlSamplingStorage(textureId, storage);
+    }
 
     /// <summary>Updates the texture's retained RGBA sampler-border state.</summary>
     public void SetTextureBorderColor(int textureId, float r, float g, float b, float a) =>
@@ -361,6 +375,7 @@ public sealed unsafe partial class VulkanDevice
             _targets.EndRendering(Commands);
         }
         _targets.Delete(framebufferId);
+        foreach (var attachment in glLevelAttachments.Keys.Where(key => key.Framebuffer == framebufferId).ToArray()) glLevelAttachments.Remove(attachment);
         FramebufferDeleted?.Invoke(framebufferId);
     }
 

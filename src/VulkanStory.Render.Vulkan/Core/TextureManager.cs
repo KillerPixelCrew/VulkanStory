@@ -113,6 +113,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
     internal bool IsGlRenderbuffer { get; set; }
     internal HashSet<int>? DefinedLevels { get; set; }
     internal bool GlImmutable { get; set; }
+    // Logical GL level represented by physical mip zero of an assembled image.
+    internal int GlSamplingOrigin { get; set; }
+    internal bool GlLevelBacking { get; set; }
 
     /// <summary>The image usage it was created with; 0 for images created outside <see cref="TextureManager.Create" />'s paths.</summary>
     public ImageUsageFlags Usage { get; init; }
@@ -236,12 +239,12 @@ internal sealed unsafe class VulkanTexture : IDisposable
         }
     }
 
-    internal int EffectiveBaseLevel => GlImmutable ? Math.Min(State.BaseLevel, (int)MipLevels - 1) : State.BaseLevel;
+    internal int EffectiveBaseLevel => GlImmutable ? Math.Min(State.BaseLevel, (int)MipLevels - 1) : State.BaseLevel - GlSamplingOrigin;
     internal int EffectiveMaxLevel
     {
         get
         {
-            int last = State.MaxLevel < 0 ? (int)MipLevels - 1 : Math.Min(State.MaxLevel, (int)MipLevels - 1);
+            int last = State.MaxLevel < 0 ? (int)MipLevels - 1 : Math.Min(State.MaxLevel - GlSamplingOrigin, (int)MipLevels - 1);
             return GlImmutable ? Math.Max(EffectiveBaseLevel, last) : last;
         }
     }
@@ -258,7 +261,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     }
     internal bool AttachmentLevelValid(uint level) => level < MipLevels &&
         (DefinedLevels is null || DefinedLevels.Contains((int)level)) &&
-        (GlImmutable || IsGlRenderbuffer || level >= EffectiveBaseLevel && level <= EffectiveMaxLevel &&
+        (GlImmutable || IsGlRenderbuffer || GlLevelBacking || level >= EffectiveBaseLevel && level <= EffectiveMaxLevel &&
             (level == EffectiveBaseLevel || MipRangeComplete));
 
     internal bool TrySamplingView(SamplerState sampling, bool linearColor, out ImageView view, out SamplerState effective)

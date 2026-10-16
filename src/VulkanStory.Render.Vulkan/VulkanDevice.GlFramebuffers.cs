@@ -48,11 +48,11 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!IsFramebuffer(name)) throw new ArgumentOutOfRangeException(nameof(name));
         EndStagePass();
-        if (attachment is 0x8D00 or 0x821A) _targets.Attach(name, -1, texture, (uint)layer, (uint)mipLevel);
-        if (attachment is 0x8D20 or 0x821A) _targets.Attach(name, -2, texture, (uint)layer, (uint)mipLevel);
+        if (attachment is 0x8D00 or 0x821A) glLevelAttachments[(name, 0x8D00)] = (texture, mipLevel, layer);
+        if (attachment is 0x8D20 or 0x821A) glLevelAttachments[(name, 0x8D20)] = (texture, mipLevel, layer);
         if (attachment >= 0x8CE0 && attachment < 0x8CE0 + RenderLimits.MaxColorAttachments)
-            _targets.Attach(name, attachment - 0x8CE0, texture, (uint)layer, (uint)mipLevel);
-        RefreshFramebufferExtent(name);
+            glLevelAttachments[(name, attachment)] = (texture, mipLevel, layer);
+        ApplyGlLevelAttachment(name, attachment, texture, mipLevel, layer);
     }
 
     private void RefreshFramebufferExtent(int name)
@@ -78,6 +78,8 @@ public sealed unsafe partial class VulkanDevice
     {
         VulkanFramebuffer? target = _targets.Get(ResolveNativeFramebuffer(name));
         if (target is null) return 0x8219; // GL_FRAMEBUFFER_UNDEFINED
+        foreach (var attachment in glLevelAttachments.Where(entry => entry.Key.Framebuffer == target.Id))
+            if (!GlLevelAttachmentComplete(attachment.Value.Texture, attachment.Value.Level)) return 0x8CD6;
         bool attached = false;
         int? samples = null;
         bool mismatchedSamples = false;

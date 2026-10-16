@@ -38,6 +38,7 @@
     <Compile Include="VulkanDevice.GlDepthStencilResolves.cs" />
     <Compile Include="VulkanDevice.GlMultisampleTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilBroadcast.cs" />
+    <Compile Include="VulkanDevice.GlMutableLevels.cs" />
     <Compile Include="VulkanDevice.GlRecording.cs" />
     <Compile Include="VulkanDevice.Auxiliary.cs" />
     <Compile Include="VulkanDevice.Shadows.cs" />

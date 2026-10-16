@@ -266,6 +266,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Reads a real 2D image region for API callers, inside or outside an active frame.</summary>
     internal TextureCaptureData ReadTexturePixels(int textureId, int level, int x, int y, int width, int height)
     {
+        ResolveGlTextureLevel(ref textureId, ref level);
         VulkanTexture texture = _textures.Get(textureId) ?? throw new ArgumentException("No live texture.");
         if (texture.Cube || texture.Volume || texture.Layers != 1 || level < 0 || level >= texture.MipLevels)
             throw new ArgumentOutOfRangeException(nameof(level));

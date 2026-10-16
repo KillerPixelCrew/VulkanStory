@@ -13,6 +13,8 @@ public sealed unsafe partial class VulkanDevice
     {
         RequireFrameLifetime();
         _frames.RequireResourceLifetime();
+        if (redefinedLevel < 0 && glMutableLevels.ContainsKey(name))
+        { EndNativePass(); EndGlLevelRendering(); ReleaseGlMutableLevels(name); }
         Format format = GlEnums.TextureFormatFromGl(internalFormat);
         _textures.RestoreBinding(name);
         VulkanTexture? previous = _textures.Get(name);
@@ -21,8 +23,10 @@ public sealed unsafe partial class VulkanDevice
         {
             previous.GlInternalFormat = internalFormat;
             previous.GlImmutable = redefinedLevel < 0;
+            previous.GlSamplingOrigin = 0;
             if (redefinedLevel < 0) previous.DefinedLevels = null;
             else previous.DefinedLevels?.Add(redefinedLevel);
+            RefreshGlLevelAttachments(name);
             return;
         }
         EndNativePass();
@@ -68,12 +72,14 @@ public sealed unsafe partial class VulkanDevice
             replacementName = 0;
             foreach (int framebuffer in _targets.InvalidateTexture(name))
             { RefreshFramebufferExtent(framebuffer); FramebufferStorageChanged?.Invoke(framebuffer); }
+            RefreshGlLevelAttachments(name);
         }
         finally { if (replacementName != 0) DeleteTexture(replacementName); }
     }
 
     internal void UploadTextureStorage(int name, int level, int x, int y, int z, int width, int height, int depth, IntPtr pixels, int bytesPerPixel)
     {
+        ResolveGlTextureLevel(ref name, ref level);
         VulkanTexture image = _textures.Get(name) ?? throw new ArgumentException("Texture image is absent.");
         if (_frameActive) { _targets.FlushPendingClears(Commands, image); _targets.EndRendering(Commands); }
         if (image.Volume) _textures.UploadVolume(name, level, x, y, z, (uint)width, (uint)height, (uint)depth, pixels, bytesPerPixel);

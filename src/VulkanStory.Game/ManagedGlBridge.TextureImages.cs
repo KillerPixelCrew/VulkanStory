@@ -36,7 +36,6 @@ internal sealed partial class ManagedGlBridge
         object? pixels = a[volume ? 9 : 8];
         int limit = volume ? Device.MaxVolumeSize : Device.MaxTextureSize;
         if (level < 0 || level > (int)Math.Log2(limit) || width < 0 || height < 0 || depth < 0 || border != 0 || width > limit || height > limit || depth > limit) Error(0x0501);
-        if (width == 0 || height == 0 || depth == 0) throw new NotSupportedException("Zero-sized mutable image levels need undefined-level storage.");
         RequireImageFormat(format);
         if (volume && (format is 0x1902 or 0x81A5 or 0x81A6 or 0x81A7 or 0x8CAC)) Error(0x0502);
         ValidatePixelFormat(sourceFormat, sourceType);
@@ -44,19 +43,11 @@ internal sealed partial class ManagedGlBridge
         if (depthFormat != (sourceFormat == 0x1902)) Error(0x0502);
         TextureObject texture = TextureForImage(target);
         if (texture.Immutable) Error(0x0502);
-        int baseWidth = texture.Width, baseHeight = texture.Height, baseDepth = texture.Depth;
-        if (level == 0 || baseWidth == 0)
-        {
-            long w = (long)width << level, h = (long)height << level, d = volume ? (long)depth << level : 1;
-            if (w > limit || h > limit || d > limit) Error(0x0501);
-            baseWidth = (int)w; baseHeight = (int)h; baseDepth = (int)d;
-        }
-        else if (width != Math.Max(1, baseWidth >> level) || height != Math.Max(1, baseHeight >> level) || depth != Math.Max(1, baseDepth >> level) || format != texture.Format)
-            throw new NotSupportedException("Independent mutable mip extents/formats need per-level image backing.");
-        int levels = 1 + (int)Math.Log2(Math.Max(baseWidth, Math.Max(baseHeight, baseDepth)));
-        Device.DefineMutableTexture(texture.Name, baseWidth, baseHeight, baseDepth, format, levels, volume, level);
-        texture.Width = baseWidth; texture.Height = baseHeight; texture.Depth = baseDepth; texture.Levels = levels; texture.Format = format;
+        Device.DefineGlMutableLevel(texture.Name, level, width, height, depth, format, volume);
+        if (level == 0) { texture.Width = width; texture.Height = height; texture.Depth = depth; texture.Format = format; }
+        texture.Levels = Math.Max(texture.Levels, level + 1);
         texture.Images[level] = new(width, height, depth, format);
+        if (width == 0 || height == 0 || depth == 0) return;
         if (C.PixelUnpackBuffer is null && pixels is not System.Array && Pointer(pixels) == IntPtr.Zero) return;
         UploadPixels(texture.Name, level, 0, 0, 0, width, height, depth, sourceFormat, sourceType, pixels);
     }
@@ -81,10 +72,12 @@ internal sealed partial class ManagedGlBridge
     private void GenerateTextureMips(int target)
     {
         TextureObject texture = TextureForImage(target);
-        int first = Device.TextureOf(texture.Name)!.EffectiveBaseLevel;
-        if (!texture.Images.TryGetValue(first, out TextureLevel image)) Error(0x0502);
+        var storage = Device.TextureOf(texture.Name)!;
+        int first = storage.GlSamplingOrigin + storage.EffectiveBaseLevel;
+        if (!texture.Images.TryGetValue(first, out TextureLevel image) || image.Width == 0 || image.Height == 0 || image.Depth == 0) Error(0x0502);
         Device.GenerateMipmaps(texture.Name);
-        int last = Device.TextureOf(texture.Name)!.EffectiveMaxLevel;
+        storage = Device.TextureOf(texture.Name)!;
+        int last = storage.GlSamplingOrigin + storage.EffectiveMaxLevel;
         for (int level = first + 1; level <= last; level++) texture.Images[level] = new(Math.Max(1, image.Width >> (level - first)), Math.Max(1, image.Height >> (level - first)), Math.Max(1, image.Depth >> (level - first)), image.Format);
     }
 
@@ -100,7 +93,7 @@ internal sealed partial class ManagedGlBridge
     private void UploadPixels(int name, int level, int x, int y, int z, int width, int height, int depth, int sourceFormat, int sourceType, object? pixels)
     {
         var layout = ValidatePixelFormat(sourceFormat, sourceType);
-        var image = Device.TextureOf(name)!;
+        var image = Device.GlTextureLevel(name, level)!;
         bool imageDepth = (image.Aspect & ImageAspectFlags.DepthBit) != 0;
         if (imageDepth != (sourceFormat == 0x1902)) Error(0x0502);
         int pixelBytes = layout.Packed ? 4 : layout.Components * layout.Bytes;

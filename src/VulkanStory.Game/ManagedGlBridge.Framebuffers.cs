@@ -98,8 +98,8 @@ internal sealed partial class ManagedGlBridge
             renderbufferAttachments.TryGetValue((framebuffer, 0x8D00), out RenderbufferObject? depthObject);
             renderbufferAttachments.TryGetValue((framebuffer, 0x8D20), out RenderbufferObject? stencilObject);
             if (!ReferenceEquals(depthObject, stencilObject)) Error(0x0502);
-            if (depthObject is null && (!Device.TryFramebufferAttachment(framebuffer, 0x8D00, out int depthImage, out int depthLevel, out int depthLayer) ||
-                !Device.TryFramebufferAttachment(framebuffer, 0x8D20, out int stencilImage, out int stencilLevel, out int stencilLayer) ||
+            if (depthObject is null && (!Device.TryGlFramebufferAttachment(framebuffer, 0x8D00, out int depthImage, out int depthLevel, out int depthLayer) ||
+                !Device.TryGlFramebufferAttachment(framebuffer, 0x8D20, out int stencilImage, out int stencilLevel, out int stencilLayer) ||
                 depthImage != stencilImage || depthLevel != stencilLevel || depthLayer != stencilLayer)) Error(0x0502);
         }
         if (renderbufferAttachments.TryGetValue((framebuffer, I(a[1]) == 0x821A ? 0x8D00 : I(a[1])), out RenderbufferObject? renderbuffer))
@@ -108,7 +108,7 @@ internal sealed partial class ManagedGlBridge
             if (a.Length > 3) WriteOutput(method, a, 3, [rboValue], false);
             return method.ReturnType == typeof(void) ? null : rboValue;
         }
-        if (!Device.TryFramebufferAttachment(framebuffer, I(a[1]), out int texture, out int level, out int layer)) Error(0x0500);
+        if (!Device.TryGlFramebufferAttachment(framebuffer, I(a[1]), out int texture, out int level, out int layer)) Error(0x0500);
         int value = I(a[2]) switch
         { 0x8CD0 => texture == 0 ? 0 : 0x1702, 0x8CD1 => texture, 0x8CD2 => level, 0x8CD3 => 0, 0x8CD4 => layer, _ => throw new GlError(0x0500) };
         if (a.Length > 3) WriteOutput(method, a, 3, [value], false);
@@ -205,17 +205,19 @@ internal sealed partial class ManagedGlBridge
         if (I(a[0]) != 0x0DE1) Error(0x0500);
         int level = I(a[1]), x = I(a[2]), y = I(a[3]), sx = I(a[4]), sy = I(a[5]), width = I(a[6]), height = I(a[7]);
         if (level < 0 || x < 0 || y < 0 || width < 0 || height < 0) Error(0x0501);
-        if (!Device.TryGetTexture2DDescription(BoundTexture(), out int storageWidth, out int storageHeight, out int levels, out _) || level >= levels) Error(0x0502);
+        int destination = BoundTexture();
+        Device.ResolveGlTextureLevel(ref destination, ref level);
+        if (!Device.TryGetTexture2DDescription(destination, out int storageWidth, out int storageHeight, out int levels, out _) || level >= levels) Error(0x0502);
         if ((long)x + width > Math.Max(1, storageWidth >> level) || (long)y + height > Math.Max(1, storageHeight >> level)) Error(0x0501);
         if (GlFramebufferStatus(ReadTarget) != 0x8CD5) Error(0x0506);
         if (Device.FramebufferSamples(ReadTarget) != 0) Error(0x0502);
-        bool depth = Device.IsDepthTexture(BoundTexture());
+        bool depth = Device.IsDepthTexture(destination);
         int attachment = depth ? 0x8D00 : PublicFramebuffer(ReadTarget) == 0 ? 0x8CE0 : ReadBuffer;
         int source = 0, sourceLevel = 0, sourceLayer = 0;
         if (attachment == 0 || !Device.TryFramebufferAttachment(ReadTarget, attachment, out source, out sourceLevel, out sourceLayer) || source == 0) Error(0x0502);
         if (Device.IsDepthTexture(source) != depth) Error(0x0502);
         var readImage = Device.TextureOf(source)!;
-        Device.BlitTextureRectangle(source, sourceLevel, sourceLayer, BoundTexture(), level, 0,
+        Device.BlitTextureRectangle(source, sourceLevel, sourceLayer, destination, level, 0,
             new TextureBlitRectangle(sx, sy, checked(sx + width), checked(sy + height)), new TextureBlitRectangle(x, y, checked(x + width), checked(y + height)),
             (int)Math.Max(1u, readImage.Width >> sourceLevel), (int)Math.Max(1u, readImage.Height >> sourceLevel), Math.Max(1, storageWidth >> level), Math.Max(1, storageHeight >> level), null, false);
     }

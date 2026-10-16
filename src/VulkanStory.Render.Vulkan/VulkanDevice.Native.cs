@@ -609,6 +609,8 @@ public sealed unsafe partial class VulkanDevice
         }
 
         commandBuffer = Commands;
+        for (int i = 0; i < textures.Length; i++)
+            if (textures[i].Sampler.IsPresent) PrepareGlMutableSampling(textures[i].TextureId);
         ReleaseReadSelfCopies();
         EnsureBindlessPlaceholdersReadable(commandBuffer);
 

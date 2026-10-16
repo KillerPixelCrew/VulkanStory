@@ -4,6 +4,31 @@ namespace VulkanStory.Render.Vulkan.Core;
 
 internal sealed unsafe partial class TextureManager
 {
+    internal SamplerState SamplingState(int name)
+    {
+        _uploads.EnterLock();
+        try { return Get(name)?.State ?? _reservedNames.GetValueOrDefault(name, SamplerState.Default); }
+        finally { _uploads.ExitLock(); }
+    }
+
+    // Move ownership without invalidating recorded users of the original image.
+    // The public name remains reserved with exactly the same sampler state.
+    internal int DetachStorage(int name)
+    {
+        _uploads.EnterLock();
+        try
+        {
+            RestoreBindingLocked(name);
+            if (Get(name) is not { } image) return 0;
+            int detached = AllocateNameLocked();
+            _textures[detached] = image;
+            _textures[name] = null;
+            _reservedNames[name] = image.State;
+            return detached;
+        }
+        finally { _uploads.ExitLock(); }
+    }
+
     internal int CreateTransferSampled(uint width,uint height,Format format) => CreateImage(width,height,format,1,1,false,
         ImageUsageFlags.SampledBit|ImageUsageFlags.TransferSrcBit|ImageUsageFlags.TransferDstBit,ImageAspectFlags.ColorBit,MemoryPoolClass.DeviceImages);
 
