@@ -217,8 +217,10 @@ internal sealed partial class ManagedGlBridge
         if (attachment == 0 || !Device.TryFramebufferAttachment(ReadTarget, attachment, out source, out sourceLevel, out sourceLayer) || source == 0) Error(0x0502);
         if (Device.IsDepthTexture(source) != depth) Error(0x0502);
         var readImage = Device.TextureOf(source)!;
+        // Texture copies consume framebuffer component values, like ReadPixels.
+        // FRAMEBUFFER_SRGB controls rendering/blits, not this transfer.
         Device.BlitTextureRectangle(source, sourceLevel, sourceLayer, destination, level, 0,
             new TextureBlitRectangle(sx, sy, checked(sx + width), checked(sy + height)), new TextureBlitRectangle(x, y, checked(x + width), checked(y + height)),
-            (int)Math.Max(1u, readImage.Width >> sourceLevel), (int)Math.Max(1u, readImage.Height >> sourceLevel), Math.Max(1, storageWidth >> level), Math.Max(1, storageHeight >> level), null, false);
+            (int)Math.Max(1u, readImage.Width >> sourceLevel), (int)Math.Max(1u, readImage.Height >> sourceLevel), Math.Max(1, storageWidth >> level), Math.Max(1, storageHeight >> level), null, false, framebufferSrgb: false);
     }
 }
