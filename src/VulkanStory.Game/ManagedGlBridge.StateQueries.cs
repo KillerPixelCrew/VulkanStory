@@ -48,7 +48,7 @@ internal sealed partial class ManagedGlBridge
     private object? FloatQuery(MethodInfo method, object?[] a)
     {
         float[] values = I(a[0]) switch
-        { 0x0C22 => C.ClearColor, 0x0B73 => [C.ClearDepth], _ => IntegerValues(I(a[0])).Select(value => (float)value).ToArray() };
+        { 0x0C22 => C.ClearColor, 0x0B73 => [C.ClearDepth], 0x8038 => [State.PolygonOffsetFactor], 0x2A00 => [State.PolygonOffsetUnits], _ => IntegerValues(I(a[0])).Select(value => (float)value).ToArray() };
         if (a.Length > 1) WriteFloats(method, a, 1, values);
         return method.ReturnType == typeof(void) ? null : values[0];
     }

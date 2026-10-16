@@ -581,6 +581,7 @@ public sealed unsafe partial class VulkanDevice
             api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilReference);
 
         if ((dirty & DynamicStateDirty.LineWidth) != 0) api.CmdSetLineWidth(commandBuffer, values.LineWidth);
+        if ((dirty & DynamicStateDirty.DepthBias) != 0) api.CmdSetDepthBias(commandBuffer, values.DepthBiasConstant, 0f, values.DepthBiasSlope);
 
         int emitted = DynamicStateCache.CommandCount(dirty & DynamicStateDirty.All) + extraCommands;
         _dynamicStateCommands += emitted;

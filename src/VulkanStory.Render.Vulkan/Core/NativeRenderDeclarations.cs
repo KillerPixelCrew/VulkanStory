@@ -86,6 +86,7 @@ internal sealed class NativePipelineDescription
 
     /// <summary>The width a line-topology draw rasterizes with (autocamera's debug path sets 2).</summary>
     public float LineWidth = 1.0f;
+    public float DepthBiasConstant, DepthBiasSlope;
 
     /// <summary>
     /// The vertex layout the pipeline's draws feed it with: <see cref="MeshManager.EmptyLayoutId" />

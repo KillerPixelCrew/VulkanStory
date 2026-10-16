@@ -108,6 +108,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         DynamicState.Viewport,
         DynamicState.Scissor,
         DynamicState.LineWidth,
+        DynamicState.DepthBias,
         DynamicState.CullMode,
         DynamicState.FrontFace,
         DynamicState.PrimitiveTopology,
@@ -1022,6 +1023,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                     CullMode = CullModeFlags.None,
                     FrontFace = RenderLimits.FrontFace,
                     LineWidth = 1.0f,
+                    DepthBiasEnable = true,
                 };
 
                 var multisample = new PipelineMultisampleStateCreateInfo

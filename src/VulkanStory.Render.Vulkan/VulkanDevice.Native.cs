@@ -61,7 +61,7 @@ public sealed unsafe partial class VulkanDevice
         int ProgramId, int FormatsId, int BlendId, bool DepthTest, bool DepthWrite,
         CompareOp DepthCompare, CullModeFlags Cull, PrimitiveTopology Topology,
         int VertexLayoutId, PolygonMode PolygonMode, FrontFace FrontFace, float LineWidth,
-        bool SamplesBoundDepth);
+        bool SamplesBoundDepth, float DepthBiasConstant, float DepthBiasSlope);
 
     /// <summary>Native passes declared and native draws recorded (every kind). Tests only.</summary>
     internal long NativePassesForTests => _nativePasses;
@@ -241,7 +241,7 @@ public sealed unsafe partial class VulkanDevice
         var cacheKey = new NativePipelineCacheKey(description.ProgramId, formatsId, rawBlendId,
             description.DepthTest, description.DepthWrite, description.DepthCompare,
             description.Cull, description.Topology, description.VertexLayoutId, description.PolygonMode,
-            description.FrontFace, description.LineWidth, description.SamplesBoundDepth);
+            description.FrontFace, description.LineWidth, description.SamplesBoundDepth, description.DepthBiasConstant, description.DepthBiasSlope);
         if (_nativePipelines.TryGetValue(cacheKey, out NativePipeline? cached) &&
             ReferenceEquals(cached.Program, program))
         {
@@ -892,6 +892,8 @@ public sealed unsafe partial class VulkanDevice
             // Clamped through the same device range as the emulated path's, so a native line
             // draw and the seam's neutral body rasterize identically.
             LineWidth = _context.Capabilities.ClampLineWidth(description.LineWidth),
+            DepthBiasConstant = description.DepthBiasConstant,
+            DepthBiasSlope = description.DepthBiasSlope,
             ColorWrite = colorWrite,
             BlendStateId = dynamicBlend ? pipeline.DynamicBlendId : 0,
         };

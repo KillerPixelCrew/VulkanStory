@@ -66,6 +66,8 @@ internal sealed class StatedRenderState
     public Rect2D Scissor { get; set; }
     public Rect2D Viewport { get; set; }
     public bool StencilTest { get; set; }
+    internal bool PolygonOffsetFill, PolygonOffsetLine, PolygonOffsetPoint;
+    internal float PolygonOffsetFactor, PolygonOffsetUnits;
 
     public CullModeFlags CullMode => CullEnabled ? cullFaces : CullModeFlags.None;
 
@@ -389,6 +391,8 @@ internal static class StatedDraw
             Topology = meshId > 0 ? device.NativeMeshTopology(meshId) : PrimitiveTopology.TriangleList,
             PolygonMode = stated.Wireframe ? PolygonMode.Line : PolygonMode.Fill,
             LineWidth = stated.LineWidth,
+            DepthBiasConstant = (stated.Wireframe ? stated.PolygonOffsetLine : stated.PolygonOffsetFill) ? stated.PolygonOffsetUnits : 0f,
+            DepthBiasSlope = (stated.Wireframe ? stated.PolygonOffsetLine : stated.PolygonOffsetFill) ? stated.PolygonOffsetFactor : 0f,
             VertexLayoutId = layoutId,
             SamplesBoundDepth = samplesBoundDepth,
             Targets = formats,

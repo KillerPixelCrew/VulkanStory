@@ -64,6 +64,14 @@ outside a frame still need a graphics recording scope. Sampler binding, scalar
 float queries, core renderer strings and scoped debug-group state share the same
 context as the draw calls.
 
+GPU timer queries use timestamp pools, queue timestamp precision and nanosecond
+conversion. Availability reads do not wait; result reads submit/wait for their
+recording owner. Reusing/deleting a query retires its old pool through the GPU
+timeline. Occlusion results share the existing segmented sample-query owner.
+`Finish` submits pending work and waits on the renderer/transfer timelines.
+Polygon offset is dynamic raster state, with mode-specific enable flags and zero
+bias on unrelated draws.
+
 Framebuffer operations share the game's framebuffer names and adapter views.
 Read and draw bindings remain independent, and draw-buffer selections route
 fragment outputs to physical attachments. Attachment views and deferred clears
@@ -99,7 +107,7 @@ Callbacks stay rooted for process lifetime and the original table entries are
 restored when routing is removed. Unexpected callback failures set a GL error,
 increment the status counter and are logged without crossing the unmanaged ABI.
 Zero-sized/independently shaped mutable mip backing, nonzero base-mip sampling,
-outside-frame scaled blits/partial clears, GPU queries and additional shader/state operations remain
+outside-frame scaled blits/partial clears and additional shader/state operations remain
 incomplete.
 Native GL imports and graphics proc-address loaders still need explicit support.
 When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata

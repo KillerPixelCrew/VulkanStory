@@ -324,6 +324,14 @@ internal sealed unsafe class QueryRing : IDisposable
         return query.PreviousResult;
     }
 
+    internal ulong GetResult64(int id)
+    {
+        if (!_objects.TryGetValue(id, out QueryObject? query) || query.Latest is not { } record) return 0;
+        Refresh(record);
+        if (record.Ended && !record.Lost && record.Indices.Count == 0) return 0;
+        return record.Resolved ? record.Samples : 0;
+    }
+
     private static int Clamp(ulong samples) => (int)Math.Min(samples, int.MaxValue);
 
     /// <summary>Reads one result early, once the timeline has passed the command buffer that carried it.</summary>

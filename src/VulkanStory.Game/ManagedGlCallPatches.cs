@@ -36,6 +36,8 @@ public static partial class ManagedGlCallPatches
         "GetFloat", "GetString", "ClearDepth", "BindSampler", "PushDebugGroup", "PopDebugGroup", "DebugMessageInsert",
         "GetActiveUniform", "GetUniform", "ProgramUniform1",
         "ClearBuffer",
+        "GenQuery", "GenQueries", "DeleteQuery", "DeleteQueries", "BeginQuery", "EndQuery", "QueryCounter", "GetQueryObject", "Finish",
+        "PolygonOffset",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -86,8 +88,10 @@ public static partial class ManagedGlCallPatches
             case "ClearBuffer": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } clearType && (clearType == typeof(int) || clearType == typeof(float));
             case "PushDebugGroup": return parameters.Length == 4 && parameters[3].ParameterType == typeof(string);
             case "DebugMessageInsert": return parameters.Length == 6 && parameters[5].ParameterType == typeof(string);
-            case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers":
-            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": return parameters.Length == 2 && Output(1);
+            case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers": case "GenQueries":
+            case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": case "DeleteQueries": return parameters.Length == 2 && Output(1);
+            case "GetQueryObject": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } queryType &&
+                (queryType == typeof(int) || queryType == typeof(uint) || queryType == typeof(long) || queryType == typeof(ulong));
             case "DrawBuffers": return parameters.Length == 2 && (parameters[1].ParameterType.IsArray && parameters[1].ParameterType.GetElementType()!.IsEnum || Output(1));
             case "GetFramebufferAttachmentParameter": return parameters.Length == 3 && method.ReturnType == typeof(int) || parameters.Length == 4 && Output(3);
             case "GetTexLevelParameter": return parameters.Length == 3 && method.ReturnType == typeof(int) || parameters.Length == 4 && Output(3);
@@ -309,5 +313,6 @@ public static partial class ManagedGlCallPatches
             ("TexImage2D", 8) or ("TexImage3D", 9) or ("TexSubImage3D", 10) or
             ("ClearBuffer", 2) or
             ("TexParameter", 2) or
+            ("GenQueries", 1) or ("DeleteQueries", 1) or
             ("DeleteBuffers", 1) or ("DeleteVertexArrays", 1) or ("DeleteTextures", 1);
 }

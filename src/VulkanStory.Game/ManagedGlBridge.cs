@@ -66,6 +66,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     {
         RequireOwner();
         if (!contexts.Remove(contextId, out Context? context)) return;
+        ReleaseContextQueries(context);
         foreach (int framebuffer in framebuffers.Where(entry => ReferenceEquals(entry.Value, context)).Select(entry => entry.Key).ToArray()) Device.DeleteFramebuffer(framebuffer);
         if (ReferenceEquals(selected, context)) { selected = null; if (ReferenceEquals(current, this)) current = null; }
         CollectDeletedPrograms(); CollectDeletedTextures();
@@ -88,6 +89,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal int Target, Width, Height, Program, ActiveTexture, DrawFramebuffer, ReadFramebuffer;
         internal readonly Dictionary<int, int> ReadBuffers = new();
         internal readonly Dictionary<int, int> PixelStorage = new();
+        internal readonly Dictionary<int, GlQuery> Queries = new();
+        internal readonly Dictionary<int, GlQuery> ActiveQueries = new();
         internal BufferObject? ArrayBuffer;
         internal int VertexArray;
         internal readonly Dictionary<int, VertexArrayObject> Arrays = new() { [0] = new() };
@@ -182,7 +185,17 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "GetFloat": return FloatQuery(method, a);
             case "GetString": return StringQuery(I(a[0]));
             case "ClearDepth": { float value = Convert.ToSingle(a[0]); C.ClearDepth = float.IsNaN(value) ? 0 : Math.Clamp(value, 0f, 1f); return null; }
+            case "GenQuery": return GenQuery();
+            case "GenQueries": return GenerateMany(method, a, GenQuery);
+            case "DeleteQuery": DeleteQuery(I(a[0])); return null;
+            case "DeleteQueries": DeleteMany(a, DeleteQuery); return null;
+            case "BeginQuery": BeginQuery(I(a[0]), I(a[1])); return null;
+            case "EndQuery": EndQuery(I(a[0])); return null;
+            case "QueryCounter": QueryCounter(I(a[0]), I(a[1])); return null;
+            case "GetQueryObject": return GetQueryObject(method, a);
+            case "Finish": Device.FinishGlWork(); return null;
             case "BindSampler": { int unit = I(a[0]), sampler = I(a[1]); if ((uint)unit >= StatedRenderState.MaxTextureUnits) Error(0x0501); if (sampler != 0 && !Device.TryNativeSamplerState(sampler, out _)) Error(0x0502); State.BindSampler(unit, sampler); return null; }
+            case "PolygonOffset": { float factor = Convert.ToSingle(a[0]), units = Convert.ToSingle(a[1]); if (!float.IsFinite(factor) || !float.IsFinite(units)) Error(0x0501); State.PolygonOffsetFactor = factor; State.PolygonOffsetUnits = units; return null; }
             case "PushDebugGroup": PushDebugGroup(a); return null;
             case "PopDebugGroup": if (C.DebugGroups.Count == 0) Error(0x0504); C.DebugGroups.Pop(); return null;
             case "DebugMessageInsert": DebugMessage(a); return null;
@@ -811,11 +824,13 @@ internal sealed partial class ManagedGlBridge : IDisposable
     }
 
     private bool Enabled(int cap) => cap switch
-    { 0x0BE2 => State.BlendEnabled, 0x0B44 => State.CullEnabled, 0x0B71 => State.DepthTest, 0x0C11 => State.ScissorEnabled, _ => throw new GlError(0x0500) };
+    { 0x0BE2 => State.BlendEnabled, 0x0B44 => State.CullEnabled, 0x0B71 => State.DepthTest, 0x0C11 => State.ScissorEnabled,
+        0x8037 => State.PolygonOffsetFill, 0x2A02 => State.PolygonOffsetLine, 0x2A01 => State.PolygonOffsetPoint, _ => throw new GlError(0x0500) };
     private void SetEnabled(int cap, bool enabled)
     {
         switch (cap)
-        { case 0x0BE2: State.SetBlendEnabled(enabled); break; case 0x0B44: State.CullEnabled = enabled; break; case 0x0B71: State.DepthTest = enabled; break; case 0x0C11: State.ScissorEnabled = enabled; break; default: Error(0x0500); break; }
+        { case 0x0BE2: State.SetBlendEnabled(enabled); break; case 0x0B44: State.CullEnabled = enabled; break; case 0x0B71: State.DepthTest = enabled; break; case 0x0C11: State.ScissorEnabled = enabled; break;
+            case 0x8037: State.PolygonOffsetFill = enabled; break; case 0x2A02: State.PolygonOffsetLine = enabled; break; case 0x2A01: State.PolygonOffsetPoint = enabled; break; default: Error(0x0500); break; }
     }
     private static int BlendFactorToken(BlendFactor factor) => factor switch
     { BlendFactor.Zero => 0, BlendFactor.One => 1, BlendFactor.SrcColor => 0x0300, BlendFactor.OneMinusSrcColor => 0x0301,
@@ -867,6 +882,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],
             0x8919 => [State.SamplerAt(ActiveUnit)], 0x826C => [64], 0x826D => [C.DebugGroups.Count + 1],
+            0x8037 => [State.PolygonOffsetFill ? 1 : 0], 0x2A02 => [State.PolygonOffsetLine ? 1 : 0], 0x2A01 => [State.PolygonOffsetPoint ? 1 : 0],
             0x806A => [BoundTexture(0x806F)], 0x8073 => [Device.MaxVolumeSize],
             0x0BE2 => [State.BlendEnabled ? 1 : 0], 0x0C11 => [State.ScissorEnabled ? 1 : 0], 0x0B44 => [State.CullEnabled ? 1 : 0], 0x0B71 => [State.DepthTest ? 1 : 0],
             0x0B72 => [State.DepthWrite ? 1 : 0], 0x0B74 => [0x0200 + (int)State.DepthCompare],
@@ -941,6 +957,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (disposed) return;
         RequireOwner();
         VulkanDevice device = session.Device;
+        foreach (Context context in contexts.Values) ReleaseContextQueries(context);
         device.ProgramDeleted -= ForgetBorrowedProgram;
         device.FramebufferDeleted -= ForgetFramebuffer;
         foreach (int framebuffer in framebuffers.Keys) device.DeleteFramebuffer(framebuffer);

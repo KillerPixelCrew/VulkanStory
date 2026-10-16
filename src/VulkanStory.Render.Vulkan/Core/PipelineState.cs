@@ -263,7 +263,7 @@ internal static class RenderLimits
 
 /// <summary>One bit per dynamic-state command a draw may record.</summary>
 [Flags]
-internal enum DynamicStateDirty : ushort
+internal enum DynamicStateDirty : uint
 {
     None = 0,
     Viewport = 1 << 0,
@@ -280,8 +280,9 @@ internal enum DynamicStateDirty : ushort
     StencilWriteMask = 1 << 11,
     StencilReference = 1 << 12,
     LineWidth = 1 << 13,
+    DepthBias = 1 << 16,
     /// <summary>The Vulkan 1.3 core set every pipeline declares dynamic.</summary>
-    All = (1 << 14) - 1,
+    All = ((1 << 14) - 1) | DepthBias,
     /// <summary>vkCmdSetColorWriteEnableEXT or vkCmdSetColorWriteMaskEXT, per the colour write tier.</summary>
     ColorWrite = 1 << 14,
     /// <summary>vkCmdSetColorBlendEnableEXT + vkCmdSetColorBlendEquationEXT (mask tier with dynamic blend).</summary>
@@ -310,6 +311,8 @@ internal struct DynamicStateValues
     public uint StencilWriteMask;
     public uint StencilReference;
     public float LineWidth;
+    public float DepthBiasConstant;
+    public float DepthBiasSlope;
     /// <summary>
     /// The colour write state the tier makes dynamic: enable bits (enable tier) or
     /// the effective masks packed four bits per attachment (mask tier); 0 otherwise.
@@ -379,6 +382,7 @@ internal sealed class DynamicStateCache
                 dirty |= DynamicStateDirty.LineWidth;
             }
             if (_last.ColorWrite != next.ColorWrite) dirty |= DynamicStateDirty.ColorWrite;
+            if (_last.DepthBiasConstant != next.DepthBiasConstant || _last.DepthBiasSlope != next.DepthBiasSlope) dirty |= DynamicStateDirty.DepthBias;
             if (_last.BlendStateId != next.BlendStateId) dirty |= DynamicStateDirty.ColorBlend;
         }
 
