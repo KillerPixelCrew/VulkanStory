@@ -17,7 +17,8 @@ public static partial class ManagedGlCallPatches
     private static readonly Type[] Bindings = [typeof(GL), typeof(OpenTK.Graphics.OpenGL.GL)];
     private static readonly HashSet<string> Names = new(StringComparer.Ordinal)
     {
-        "GetInteger", "GetBoolean", "GetError", "GenVertexArray", "GenVertexArrays", "BindVertexArray", "DeleteVertexArray", "DeleteVertexArrays",
+        "GetInteger", "GetBoolean", "GetDouble", "GetError", "GenVertexArray", "GenVertexArrays", "BindVertexArray", "IsVertexArray", "DeleteVertexArray", "DeleteVertexArrays",
+        "GetVertexAttrib", "GetVertexAttribPointer",
         "GenBuffer", "GenBuffers", "BindBuffer", "DeleteBuffer", "DeleteBuffers", "BufferData", "BufferSubData", "VertexAttribPointer", "VertexAttribIPointer",
         "EnableVertexAttribArray", "DisableVertexAttribArray", "DrawElements", "DrawElementsBaseVertex", "ActiveTexture", "GenTexture", "GenTextures",
         "BindTexture", "DeleteTexture", "DeleteTextures", "TexStorage2D", "TexSubImage2D", "GenerateMipmap", "TexParameter",
@@ -88,6 +89,13 @@ public static partial class ManagedGlCallPatches
             case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true) || parameters.Length == 3 && Output(2, true);
             case "GetFloat": return parameters.Length == 1 && method.ReturnType == typeof(float) || parameters.Length == 2 &&
                 (parameters[1].ParameterType == typeof(IntPtr) || parameters[1].ParameterType.HasElementType && parameters[1].ParameterType.GetElementType() == typeof(float));
+            case "GetDouble": return parameters.Length == 1 && method.ReturnType == typeof(double) || parameters.Length == 2 &&
+                (parameters[1].ParameterType == typeof(IntPtr) || parameters[1].ParameterType.HasElementType && parameters[1].ParameterType.GetElementType() == typeof(double));
+            case "GetVertexAttrib": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType &&
+                parameters[2].ParameterType.GetElementType() is { } attributeType && (attributeType == typeof(int) || attributeType == typeof(float) || attributeType == typeof(double));
+            case "GetVertexAttribPointer": return parameters.Length == 3 &&
+                (parameters[2].ParameterType == typeof(IntPtr) || parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(IntPtr) ||
+                 parameters[2].ParameterType.IsPointer && parameters[2].ParameterType.GetElementType()!.IsPointer);
             case "GetString": return parameters.Length is 1 or 2 && method.ReturnType == typeof(string);
             case "GetActiveUniform": return parameters.Length == 4 && method.ReturnType == typeof(string) && parameters[2].ParameterType.IsByRef && parameters[3].ParameterType.IsByRef ||
                 parameters.Length == 7 && method.ReturnType == typeof(void) && parameters.Skip(3).All(parameter => parameter.ParameterType.IsPointer || parameter.ParameterType == typeof(nint));

@@ -63,8 +63,41 @@ internal sealed partial class ManagedGlBridge
         Marshal.Copy(values, 0, pointer, values.Length);
     }
 
+    // Advertise only implemented extension contracts. All enumeration APIs share
+    // this list so native loaders and managed consumers see the same capabilities.
+    private static readonly string[] GlExtensions = ["GL_ARB_vertex_array_object"];
     private static string StringQuery(int token) => token switch
-    { 0x1F00 => "VulkanStory", 0x1F01 => "VulkanStory Vulkan compatibility renderer", 0x1F02 => "3.3 VulkanStory", 0x1F03 => "", 0x8B8C => "3.30", _ => throw new GlError(0x0500) };
+    { 0x1F00 => "VulkanStory", 0x1F01 => "VulkanStory Vulkan compatibility renderer", 0x1F02 => "3.3 VulkanStory", 0x1F03 => string.Join(' ', GlExtensions), 0x8B8C => "3.30", _ => throw new GlError(0x0500) };
+    private static string IndexedStringQuery(int token, int index)
+    {
+        if (token != 0x1F03) Error(0x0500);
+        if ((uint)index >= GlExtensions.Length) Error(0x0501);
+        return GlExtensions[index];
+    }
+
+    private object? DoubleQuery(MethodInfo method, object?[] a)
+    {
+        double[] values = I(a[0]) switch
+        {
+            0x0C22 => C.ClearColor.Select(value => (double)value).ToArray(),
+            0x0B73 => [C.ClearDepth],
+            0x8005 => [State.BlendConstants.X, State.BlendConstants.Y, State.BlendConstants.Z, State.BlendConstants.W],
+            0x8038 => [State.PolygonOffsetFactor], 0x2A00 => [State.PolygonOffsetUnits],
+            _ => IntegerValues(I(a[0])).Select(value => (double)value).ToArray()
+        };
+        if (a.Length > 1) WriteDoubles(method, a, 1, values);
+        return method.ReturnType == typeof(void) ? null : values[0];
+    }
+    private static void WriteDoubles(MethodInfo method, object?[] a, int index, double[] values)
+    {
+        Type parameter = method.GetParameters()[index].ParameterType;
+        if (parameter.IsByRef && a[index] is not IntPtr)
+        { if (values.Length != 1) throw new NotSupportedException("Vector queries require an array/pointer destination."); a[index] = values[0]; return; }
+        if (a[index] is double[] array)
+        { if (array.Length < values.Length) Error(0x0501); values.CopyTo(array, 0); return; }
+        nint pointer = Pointer(a[index]); if (pointer == 0) Error(0x0501);
+        Marshal.Copy(values, 0, pointer, values.Length);
+    }
     private static string DebugText(object? value, int length)
     {
         string text = (string)value!;

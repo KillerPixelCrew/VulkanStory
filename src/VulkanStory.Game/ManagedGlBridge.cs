@@ -114,11 +114,12 @@ internal sealed partial class ManagedGlBridge : IDisposable
     }
     private sealed class VertexArrayObject
     {
+        internal bool Created;
         internal BufferObject? Elements;
         internal readonly Dictionary<int, Attribute> Attributes = new();
         internal readonly HashSet<int> Enabled = new();
     }
-    private sealed record Attribute(BufferObject Buffer, int Components, int Type, bool Normalized, bool Integer, int Stride, int Offset)
+    private sealed record Attribute(BufferObject? Buffer, int Components, int Type, bool Normalized, bool Integer, int Stride, int Offset)
     { internal bool Enabled; }
     private sealed class ShaderObject(int type)
     {
@@ -189,7 +190,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "GetInteger": return a.Length == 3 ? QueryIndexed(method, a, false) : Query(method, a, false);
             case "GetBoolean": return a.Length == 3 ? QueryIndexed(method, a, true) : Query(method, a, true);
             case "GetFloat": return FloatQuery(method, a);
-            case "GetString": if (a.Length == 2) { if (I(a[0]) != 0x1F03) Error(0x0500); Error(0x0501); return null; } return StringQuery(I(a[0]));
+            case "GetDouble": return DoubleQuery(method, a);
+            case "GetString": return a.Length == 2 ? IndexedStringQuery(I(a[0]), I(a[1])) : StringQuery(I(a[0]));
             case "ClearDepth": { float value = Convert.ToSingle(a[0]); C.ClearDepth = float.IsNaN(value) ? 0 : Math.Clamp(value, 0f, 1f); return null; }
             case "GenQuery": return GenQuery();
             case "GenQueries": return GenerateMany(method, a, GenQuery);
@@ -243,13 +245,16 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "BufferSubData": BufferSubData(I(a[0]), L(a[1]), L(a[2]), a[3]); return null;
             case "GenVertexArray": { int name = Name(); C.Arrays.Add(name, new()); return name; }
             case "GenVertexArrays": return GenerateMany(method, a, () => { int name = Name(); C.Arrays.Add(name, new()); return name; });
-            case "BindVertexArray": if (!C.Arrays.ContainsKey(I(a[0]))) Error(0x0502); C.VertexArray = I(a[0]); return null;
+            case "BindVertexArray": BindVertexArray(I(a[0])); return null;
+            case "IsVertexArray": return I(a[0]) != 0 && C.Arrays.TryGetValue(I(a[0]), out VertexArrayObject? queriedArray) && queriedArray.Created;
             case "DeleteVertexArray": DeleteVertexArray(I(a[0])); return null;
             case "DeleteVertexArrays": DeleteMany(a, DeleteVertexArray); return null;
             case "VertexAttribPointer": SetAttribute(I(a[0]), I(a[1]), I(a[2]), Convert.ToBoolean(a[3]), I(a[4]), L(a[5]), false); return null;
             case "VertexAttribIPointer": SetAttribute(I(a[0]), I(a[1]), I(a[2]), false, I(a[3]), L(a[4]), true); return null;
             case "EnableVertexAttribArray": AttributeEnabled(I(a[0]), true); return null;
             case "DisableVertexAttribArray": AttributeEnabled(I(a[0]), false); return null;
+            case "GetVertexAttrib": return VertexAttributeQuery(method, a);
+            case "GetVertexAttribPointer": VertexAttributePointerQuery(method, a); return null;
             case "DrawElements": Draw(I(a[0]), I(a[1]), I(a[2]), L(a[3]), 0); return null;
             case "DrawElementsBaseVertex": Draw(I(a[0]), I(a[1]), I(a[2]), L(a[3]), I(a[4])); return null;
             case "DrawArrays": DrawArrays(I(a[0]), I(a[1]), I(a[2])); return null;
@@ -359,7 +364,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         // Delete detaches from the bound VAO only; other VAOs retain the object
         // (not a lookup through the now-deleted public name).
         if (ReferenceEquals(Array.Elements, buffer)) Array.Elements = null;
-        foreach (int index in Array.Attributes.Where(entry => ReferenceEquals(entry.Value.Buffer, buffer)).Select(entry => entry.Key).ToArray()) Array.Attributes.Remove(index);
+        foreach (int index in Array.Attributes.Where(entry => ReferenceEquals(entry.Value.Buffer, buffer)).Select(entry => entry.Key).ToArray())
+            Array.Attributes[index] = Array.Attributes[index] with { Buffer = null };
     }
     private void BufferData(int target, long size, object? data, int usage)
     {
@@ -379,6 +385,12 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (name == 0) return;
         C.Arrays.Remove(name);
         if (C.VertexArray == name) C.VertexArray = 0;
+    }
+    private void BindVertexArray(int name)
+    {
+        if (!C.Arrays.TryGetValue(name, out VertexArrayObject? array)) Error(0x0502);
+        C.VertexArray = name;
+        if (name != 0) array!.Created = true;
     }
     private void SetAttribute(int index, int components, int type, bool normalized, int stride, long offset, bool integer)
     {
@@ -445,6 +457,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         foreach (var entry in Array.Attributes.OrderBy(entry => entry.Key))
         {
             Attribute attribute = entry.Value; if (!attribute.Enabled) continue;
+            if (attribute.Buffer is null) Error(0x0502);
             int scalar = attribute.Type is 0x1400 or 0x1401 ? 1 : attribute.Type is 0x1402 or 0x1403 ? 2 : 4;
             int bytes = scalar * attribute.Components, stride = attribute.Stride == 0 ? bytes : attribute.Stride;
             if ((long)attribute.Offset + maximum * stride + bytes > attribute.Buffer.Data.LongLength) Error(0x0502);
@@ -939,14 +952,14 @@ internal sealed partial class ManagedGlBridge : IDisposable
         {
             0x821B => [3], 0x821C => [3], 0x9126 => [1],
             0x0D32 => [VulkanDevice.MaxGlClipPlanes],
-            0x821D => [0], // No optional GL extensions are advertised by the compatibility context.
+            0x821D => [GlExtensions.Length],
             0x8CA7 => [C.Renderbuffer?.Name ?? 0], 0x84E8 => [Device.MaxGlRenderbufferSize],
             0x88ED => [C.PixelPackBuffer?.Name ?? 0], 0x88EF => [C.PixelUnpackBuffer?.Name ?? 0],
             0x8D57 => [Device.MaxGlRenderbufferSamples], 0x80A9 => [Device.FramebufferSamples(Target)], 0x80A8 => [Device.FramebufferSamples(Target) > 0 ? 1 : 0],
             0x8DB9 => [State.FramebufferSrgb ? 1 : 0], 0x8C89 => [State.RasterizerDiscard ? 1 : 0],
             >= 0x0B90 and <= 0x0B98 or >= 0x8800 and <= 0x8803 or >= 0x8CA3 and <= 0x8CA5 => [StencilQuery(name)],
             >= 0x3000 and <= 0x3007 => [Enabled(name) ? 1 : 0],
-            0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
+            0x8869 => [16], 0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],
             0x8919 => [State.SamplerAt(ActiveUnit)], 0x826C => [64], 0x826D => [C.DebugGroups.Count + 1],
