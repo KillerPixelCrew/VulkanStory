@@ -47,12 +47,11 @@ internal sealed class StatedRenderState
         for (int i = 0; i < _blend.Length; i++) _blend[i] = AttachmentBlend.Default;
     }
 
-    public bool BlendEnabled { get; private set; }
+    public bool BlendEnabled => _blend[0].Enabled;
     internal int ActiveTextureUnit { get; set; }
 
     /// <summary>The channels <c>glColorMask</c> left writable, applied to every attachment.</summary>
-    public ColorComponentFlags ColorMask { get; private set; } =
-        ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+    public ColorComponentFlags ColorMask => _blend[0].WriteMask;
 
     public bool DepthTest { get; set; }
     public bool DepthWrite { get; set; } = true;
@@ -89,8 +88,8 @@ internal sealed class StatedRenderState
     /// <summary><c>glEnable/glDisable(GL_BLEND)</c>: the functions stay.</summary>
     public void SetBlendEnabled(bool enabled)
     {
-        if (BlendEnabled == enabled) return;
-        BlendEnabled = enabled;
+        if (_blend.All(blend => blend.Enabled == enabled)) return;
+        for (int slot = 0; slot < _blend.Length; slot++) _blend[slot].Enabled = enabled;
         _blendSnapshots.Clear();
     }
 
@@ -117,8 +116,19 @@ internal sealed class StatedRenderState
     {
         ColorComponentFlags next = (r ? ColorComponentFlags.RBit : 0) | (g ? ColorComponentFlags.GBit : 0) |
                     (b ? ColorComponentFlags.BBit : 0) | (a ? ColorComponentFlags.ABit : 0);
-        if (ColorMask == next) return;
-        ColorMask = next;
+        if (_blend.All(blend => blend.WriteMask == next)) return;
+        for (int slot = 0; slot < _blend.Length; slot++) _blend[slot].WriteMask = next;
+        _blendSnapshots.Clear();
+    }
+
+    internal bool SlotBlendEnabled(int slot) => _blend[slot].Enabled;
+    internal ColorComponentFlags SlotColorMask(int slot) => _blend[slot].WriteMask;
+    internal void SetSlotBlendEnabled(int slot, bool enabled)
+    { _blend[slot].Enabled = enabled; _blendSnapshots.Clear(); }
+    internal void SetSlotColorMask(int slot, bool r, bool g, bool b, bool a)
+    {
+        _blend[slot].WriteMask = (r ? ColorComponentFlags.RBit : 0) | (g ? ColorComponentFlags.GBit : 0) |
+            (b ? ColorComponentFlags.BBit : 0) | (a ? ColorComponentFlags.ABit : 0);
         _blendSnapshots.Clear();
     }
 
@@ -135,8 +145,7 @@ internal sealed class StatedRenderState
     {
         if ((uint)slot >= MaxColorAttachments) return new AttachmentBlend { WriteMask = 0 };
         AttachmentBlend blend = _blend[slot];
-        blend.Enabled = BlendEnabled;
-        blend.WriteMask = ((DrawBuffers(framebufferId) >> slot) & 1) != 0 ? ColorMask : 0;
+        if (((DrawBuffers(framebufferId) >> slot) & 1) == 0) blend.WriteMask = 0;
         if (IsUiImage(framebufferId)) blend = blend.ForUiImage();
         return blend;
     }

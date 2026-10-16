@@ -208,6 +208,42 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// or positive, nor with GL's "not found" answer of -1.
     /// </summary>
     private const int FirstSamplerLocation = -2;
+    private readonly Dictionary<int, int> apiToStorage = new();
+    private readonly Dictionary<string, int> namedApiLocations = new(StringComparer.Ordinal);
+
+    internal bool TryStorageLocation(int apiLocation, out int storageLocation) => apiToStorage.TryGetValue(apiLocation, out storageLocation);
+
+    internal int ApiLocationOf(string name)
+    {
+        int index = 0;
+        string lookup = name;
+        int bracket = name.LastIndexOf('[');
+        if (bracket >= 0 && name.EndsWith("]", StringComparison.Ordinal))
+        {
+            if (!int.TryParse(name.AsSpan(bracket + 1, name.Length - bracket - 2), out index) || index < 0) return -1;
+            lookup = name[..bracket];
+        }
+        int storage = LocationOf(lookup);
+        if (storage == -1) return -1;
+        UniformMember? member = null;
+        int count = 1;
+        if (Interface.MembersByName.TryGetValue(lookup, out member) || Interface.PushMembersByName.TryGetValue(lookup, out member)) count = member.ElementCount;
+        else if (Interface.FrameMemberDeclaredLengths.TryGetValue(lookup, out int length) && FrameGlobals.TryGetMember(lookup, out UniformMember frame))
+        { member = frame; count = Math.Max(1, length); }
+        if (index >= count) return -1;
+        if (!namedApiLocations.TryGetValue(lookup, out int first))
+        {
+            first = apiToStorage.Count;
+            int stride = member is null ? 0 : member.Size / member.ElementCount;
+            for (int element = 0; element < count; element++)
+            {
+                int raw = storage + element * stride;
+                apiToStorage.Add(first + element, raw);
+            }
+            namedApiLocations.Add(lookup, first);
+        }
+        return first + index;
+    }
 
     /// <summary>
     /// Where frame block locations start: the member's offset in the shared block
@@ -245,6 +281,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// </summary>
     public int LocationOf(string name)
     {
+        if (name.EndsWith("[0]", StringComparison.Ordinal)) name = name[..^3];
         if (Interface.FrameMemberDeclaredLengths.ContainsKey(name) &&
             FrameGlobals.TryGetMember(name, out UniformMember frameMember))
         {

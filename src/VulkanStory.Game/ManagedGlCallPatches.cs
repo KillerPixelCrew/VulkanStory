@@ -33,6 +33,9 @@ public static partial class ManagedGlCallPatches
         "BlitFramebuffer", "CopyTexSubImage2D",
         "DrawArrays",
         "TexImage2D", "TexImage3D", "TexSubImage3D",
+        "GetFloat", "GetString", "ClearDepth", "BindSampler", "PushDebugGroup", "PopDebugGroup", "DebugMessageInsert",
+        "GetActiveUniform", "GetUniform", "ProgramUniform1",
+        "ClearBuffer",
     };
     private static readonly List<Type> PrefixOwners = new();
     private static readonly MethodInfo[] SupportedMethods = Bindings.SelectMany(binding => binding.GetMethods(BindingFlags.Public | BindingFlags.Static))
@@ -72,8 +75,17 @@ public static partial class ManagedGlCallPatches
         }
         switch (method.Name)
         {
-            case "GetInteger": return parameters.Length == 1 && method.ReturnType == typeof(int) || parameters.Length == 2 && Output(1);
-            case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true);
+            case "GetInteger": return parameters.Length == 1 && method.ReturnType == typeof(int) || parameters.Length == 2 && Output(1) || parameters.Length == 3 && Output(2);
+            case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true) || parameters.Length == 3 && Output(2, true);
+            case "GetFloat": return parameters.Length == 1 && method.ReturnType == typeof(float) || parameters.Length == 2 &&
+                (parameters[1].ParameterType == typeof(IntPtr) || parameters[1].ParameterType.HasElementType && parameters[1].ParameterType.GetElementType() == typeof(float));
+            case "GetString": return parameters.Length == 1 && method.ReturnType == typeof(string);
+            case "GetActiveUniform": return parameters.Length == 4 && method.ReturnType == typeof(string) && parameters[2].ParameterType.IsByRef && parameters[3].ParameterType.IsByRef;
+            case "GetUniform": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } uniformType && (uniformType == typeof(int) || uniformType == typeof(float));
+            case "ProgramUniform1": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
+            case "ClearBuffer": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } clearType && (clearType == typeof(int) || clearType == typeof(float));
+            case "PushDebugGroup": return parameters.Length == 4 && parameters[3].ParameterType == typeof(string);
+            case "DebugMessageInsert": return parameters.Length == 6 && parameters[5].ParameterType == typeof(string);
             case "GenBuffers": case "GenVertexArrays": case "GenTextures": case "GenFramebuffers":
             case "DeleteBuffers": case "DeleteVertexArrays": case "DeleteTextures": case "DeleteFramebuffers": return parameters.Length == 2 && Output(1);
             case "DrawBuffers": return parameters.Length == 2 && (parameters[1].ParameterType.IsArray && parameters[1].ParameterType.GetElementType()!.IsEnum || Output(1));
@@ -95,12 +107,13 @@ public static partial class ManagedGlCallPatches
                 parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(float);
             case "Uniform2": case "Uniform3": case "Uniform4":
                 int components = method.Name[^1] - '0';
-                return parameters.Length == components + 1 && parameters.Skip(1).All(parameter => parameter.ParameterType == typeof(float)) ||
+                return components == 2 && parameters.Length == 3 && parameters[1].ParameterType == typeof(int) && parameters[2].ParameterType == typeof(int) ||
+                    parameters.Length == components + 1 && parameters.Skip(1).All(parameter => parameter.ParameterType == typeof(float)) ||
                     parameters.Length == 3 && parameters[1].ParameterType == typeof(int) &&
                     (parameters[2].ParameterType == typeof(IntPtr) || parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(float));
             case "UniformMatrix4": return parameters.Length == 3 && parameters[2].ParameterType == typeof(OpenTK.Mathematics.Matrix4).MakeByRefType() ||
                 parameters.Length == 4 && (parameters[3].ParameterType == typeof(IntPtr) || parameters[3].ParameterType.HasElementType && parameters[3].ParameterType.GetElementType() == typeof(float));
-            case "TexParameter": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
+            case "TexParameter": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float) || parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() == typeof(float));
             case "TexSubImage2D": return parameters.Length == 9 && Bytes(8);
             case "TexImage2D": return parameters.Length == 9 && Bytes(8);
             case "TexImage3D": return parameters.Length == 10 && Bytes(9);
@@ -111,10 +124,10 @@ public static partial class ManagedGlCallPatches
                 parameters.Length == 1 && (parameters[0].ParameterType == typeof(OpenTK.Mathematics.Color4) ||
                     parameters[0].ParameterType == typeof(OpenTK.Mathematics.Color4).MakeByRefType());
             case "Scissor": case "Viewport": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(int));
-            case "Enable": case "Disable": case "IsEnabled": return parameters.Length == 1;
+            case "Enable": case "Disable": case "IsEnabled": return parameters.Length is 1 or 2;
             case "DepthFunc": case "CullFace": return parameters.Length == 1 && parameters[0].ParameterType.IsEnum;
             case "DepthMask": return parameters.Length == 1 && parameters[0].ParameterType == typeof(bool);
-            case "ColorMask": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(bool));
+            case "ColorMask": return parameters.Length == 4 && parameters.All(parameter => parameter.ParameterType == typeof(bool)) || parameters.Length == 5 && parameters.Skip(1).All(parameter => parameter.ParameterType == typeof(bool));
             case "VertexAttribPointer": return parameters.Length == 6 &&
                 (parameters[5].ParameterType == typeof(int) || parameters[5].ParameterType == typeof(IntPtr));
             case "VertexAttribIPointer": return parameters.Length == 5 &&
@@ -294,5 +307,7 @@ public static partial class ManagedGlCallPatches
             ("GenFramebuffers", 1) or ("DeleteFramebuffers", 1) or ("DrawBuffers", 1) or
             ("GetTexImage", 4) or ("GetTextureSubImage", 11) or ("ReadPixels", 6) or
             ("TexImage2D", 8) or ("TexImage3D", 9) or ("TexSubImage3D", 10) or
+            ("ClearBuffer", 2) or
+            ("TexParameter", 2) or
             ("DeleteBuffers", 1) or ("DeleteVertexArrays", 1) or ("DeleteTextures", 1);
 }

@@ -343,7 +343,10 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>Returns the program's retained named-uniform location, or the missing-location sentinel.</summary>
     public int GetUniformLocation(int programId, string name) =>
-        _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.LocationOf(name) : -1;
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) ? program.ApiLocationOf(name) : -1;
+
+    internal bool IsUniformLocation(int programId, int location) =>
+        _programs.TryGetValue(programId, out ShaderProgramResources? program) && program.TryStorageLocation(location, out _);
 
     /// <summary>Whether a shared game/mod program name still identifies a linked renderer program.</summary>
     internal bool IsProgram(int programId) => _programs.ContainsKey(programId);
@@ -412,6 +415,7 @@ public sealed unsafe partial class VulkanDevice
 
     private void Write(int programId, int location, ReadOnlySpan<byte> data)
     {
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? owner) || !owner.TryStorageLocation(location, out location)) return;
         // A member of the shared frame block: one shadow for every program.
         if (ShaderProgramResources.IsFrameLocation(location))
         {
@@ -457,14 +461,15 @@ public sealed unsafe partial class VulkanDevice
     /// <remarks>Sampler locations update the descriptor unit table; other unresolved locations are ignored.</remarks>
     public void SetUniform(int programId, int location, int value)
     {
+        if (!_programs.TryGetValue(programId, out ShaderProgramResources? owner) || !owner.TryStorageLocation(location, out int storageLocation)) return;
         // Assigning a sampler its texture unit is an int write to its uniform
         // location in GL. Here the sampler is a descriptor binding, so the same
         // call has to reach the unit table instead of the uniform block.
-        if (ShaderProgramResources.IsSamplerLocation(location))
+        if (ShaderProgramResources.IsSamplerLocation(storageLocation))
         {
             if (_programs.TryGetValue(programId, out ShaderProgramResources? program))
             {
-                program.SetSamplerUnitByLocation(location, value);
+                program.SetSamplerUnitByLocation(storageLocation, value);
             }
             return;
         }
@@ -473,6 +478,12 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>Writes a scalar/vector value into the linked program's CPU uniform shadow.</summary>
     /// <remarks>A negative or unresolved location is ignored by the retained uniform-writing path.</remarks>
+    public void SetUniform(int programId, int location, int x, int y)
+    {
+        int* values = stackalloc int[2] { x, y };
+        Write(programId, location, new ReadOnlySpan<byte>(values, 2 * sizeof(int)));
+    }
+
     public void SetUniform(int programId, int location, int x, int y, int z)
     {
         // Scalar block layout stores an ivec3 as three consecutive 32-bit ints.

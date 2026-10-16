@@ -95,6 +95,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal readonly Queue<int> Errors = new();
         internal int PolygonFront = 0x1B02, PolygonBack = 0x1B02;
         internal float[] ClearColor = [0, 0, 0, 0];
+        internal float ClearDepth = 1f;
+        internal readonly Stack<string> DebugGroups = new();
     }
     private sealed class BufferObject(int name)
     {
@@ -120,11 +122,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         internal bool Borrowed;
         internal readonly Dictionary<int, ShaderObject> Stages = new();
         internal readonly Dictionary<string, int> Attributes = new(StringComparer.Ordinal);
-        // Renderer locations encode sampler bindings as negative values. GL
-        // exposes an independent nonnegative namespace, with -1 only for missing.
+        // Public uniform locations are shared with game RenderAPI callers.
         internal readonly Dictionary<string, int> NamedLocations = new(StringComparer.Ordinal);
-        internal readonly Dictionary<int, int> Locations = new();
-        internal readonly Dictionary<int, int> PublicLocations = new();
         internal readonly Dictionary<int, object> TracedUniformValues = new();
         internal int Backend;
         internal bool Linked, Deleted;
@@ -178,8 +177,15 @@ internal sealed partial class ManagedGlBridge : IDisposable
         {
             case "GetError": return C.Errors.TryDequeue(out int error) ? error : 0;
             case "LoadBindings": if (a[0] is null) throw new ArgumentNullException("context"); ManagedGlCallPatches.ActivateNativeEntries(); return null;
-            case "GetInteger": return Query(method, a, false);
-            case "GetBoolean": return Query(method, a, true);
+            case "GetInteger": return a.Length == 3 ? QueryIndexed(method, a, false) : Query(method, a, false);
+            case "GetBoolean": return a.Length == 3 ? QueryIndexed(method, a, true) : Query(method, a, true);
+            case "GetFloat": return FloatQuery(method, a);
+            case "GetString": return StringQuery(I(a[0]));
+            case "ClearDepth": { float value = Convert.ToSingle(a[0]); C.ClearDepth = float.IsNaN(value) ? 0 : Math.Clamp(value, 0f, 1f); return null; }
+            case "BindSampler": { int unit = I(a[0]), sampler = I(a[1]); if ((uint)unit >= StatedRenderState.MaxTextureUnits) Error(0x0501); if (sampler != 0 && !Device.TryNativeSamplerState(sampler, out _)) Error(0x0502); State.BindSampler(unit, sampler); return null; }
+            case "PushDebugGroup": PushDebugGroup(a); return null;
+            case "PopDebugGroup": if (C.DebugGroups.Count == 0) Error(0x0504); C.DebugGroups.Pop(); return null;
+            case "DebugMessageInsert": DebugMessage(a); return null;
             case "GenFramebuffer": return GenFramebuffer();
             case "GenFramebuffers": return GenerateMany(method, a, GenFramebuffer);
             case "DeleteFramebuffer": DeleteFramebuffer(I(a[0])); return null;
@@ -233,6 +239,9 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "DeleteProgram": DeleteProgram(I(a[0])); return null;
             case "UseProgram": UseProgram(I(a[0])); return null;
             case "GetUniformLocation": return UniformLocation(I(a[0]), (string)a[1]!);
+            case "GetActiveUniform": return ActiveUniform(method, a);
+            case "GetUniform": ReadUniform(method, a); return null;
+            case "ProgramUniform1": SetProgramUniform(a); return null;
             case "GetAttribLocation": { var program = Program(I(a[0])); if (!program.Linked) Error(0x0502); return Device.GetAttributeLocation(program.Backend, (string)a[1]!); }
             case "BindAttribLocation": { var program = Program(I(a[0])); int index = I(a[1]); if (index < 0 || index >= 16) Error(0x0501); program.Attributes[(string)a[2]!] = index; return null; }
             case "Uniform1": Uniform1(method, a); return null;
@@ -251,12 +260,12 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "TexSubImage3D": TextureSubImage(a, true); return null;
             case "GenerateMipmap": GenerateTextureMips(I(a[0])); return null;
             case "TexParameter": TextureParameter(a); return null;
-            case "Enable": SetEnabled(I(a[0]), true); return null;
-            case "Disable": SetEnabled(I(a[0]), false); return null;
-            case "IsEnabled": return Enabled(I(a[0]));
+            case "Enable": if (a.Length == 2) SetIndexedEnabled(I(a[0]), I(a[1]), true); else SetEnabled(I(a[0]), true); return null;
+            case "Disable": if (a.Length == 2) SetIndexedEnabled(I(a[0]), I(a[1]), false); else SetEnabled(I(a[0]), false); return null;
+            case "IsEnabled": return a.Length == 2 ? IndexedEnabled(I(a[0]), I(a[1])) : Enabled(I(a[0]));
             case "DepthMask": State.DepthWrite = Convert.ToBoolean(a[0]); return null;
             case "DepthFunc": { int function = I(a[0]); if (function < 0x0200 || function > 0x0207) Error(0x0500); State.DepthCompare = GlEnums.CompareOpFrom(function); return null; }
-            case "ColorMask": State.SetColorMask(Convert.ToBoolean(a[0]), Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3])); return null;
+            case "ColorMask": if (a.Length == 5) { int slot = I(a[0]); CheckColorSlot(slot); State.SetSlotColorMask(slot, Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3]), Convert.ToBoolean(a[4])); } else State.SetColorMask(Convert.ToBoolean(a[0]), Convert.ToBoolean(a[1]), Convert.ToBoolean(a[2]), Convert.ToBoolean(a[3])); return null;
             case "CullFace": State.CullFaces = I(a[0]) switch { 0x0404 => CullModeFlags.FrontBit, 0x0405 => CullModeFlags.BackBit, 0x0408 => CullModeFlags.FrontAndBack, _ => throw new GlError(0x0500) }; return null;
             case "BlendEquation": BlendEquation(I(a[0]), I(a[0])); return null;
             case "BlendEquationSeparate": BlendEquation(I(a[0]), I(a[1])); return null;
@@ -268,7 +277,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "ClearColor": C.ClearColor = a.Length == 1 && a[0] is Color4 color
                 ? [color.R, color.G, color.B, color.A]
                 : [Convert.ToSingle(a[0]), Convert.ToSingle(a[1]), Convert.ToSingle(a[2]), Convert.ToSingle(a[3])]; return null;
-            case "Clear": { int mask = I(a[0]); if ((mask & ~0x4500) != 0) Error(0x0501); if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506); session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor); return null; }
+            case "Clear": { int mask = I(a[0]); if ((mask & ~0x4500) != 0) Error(0x0501); if (Device.FramebufferStatus(Target) != 0x8CD5) Error(0x0506); session.Graphics.ClearManagedGlTarget(Target, State, mask, C.ClearColor, C.ClearDepth); return null; }
+            case "ClearBuffer": ClearBuffer(method, a); return null;
             default: throw new NotSupportedException("Managed GL does not implement " + method + ".");
         }
     }
@@ -460,8 +470,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private void LinkProgram(int name)
     {
         ProgramObject program = Program(name);
-        program.Linked = false; program.NamedLocations.Clear(); program.Locations.Clear();
-        program.PublicLocations.Clear(); program.TracedUniformValues.Clear();
+        program.Linked = false; program.NamedLocations.Clear(); program.TracedUniformValues.Clear();
         if (program.Stages.Values.Any(stage => !stage.Compiled)) { program.Log = "An attached shader has not compiled successfully."; return; }
         if (program.Stages.Values.GroupBy(stage => stage.Type).Any(group => group.Count() > 1)) { program.Log = "Multiple source objects for one stage require a source-linker capability."; return; }
         ShaderStageDefinition? Stage(int type)
@@ -501,6 +510,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
     {
         ProgramObject program = Program(I(a[0]));
         int value = I(a[1]) switch { 0x8B82 => program.Linked ? 1 : 0, 0x8B80 => program.Deleted ? 1 : 0, 0x8B84 => program.Log.Length == 0 ? 0 : program.Log.Length + 1, 0x8B85 => program.Stages.Count, _ => -1 };
+        if (I(a[1]) == 0x8B86) value = Device.ActiveGlUniforms(program.Backend).Length;
+        if (I(a[1]) == 0x8B87) value = Device.ActiveGlUniforms(program.Backend).Select(uniform => System.Text.Encoding.UTF8.GetByteCount(uniform.Name) + 1).DefaultIfEmpty(0).Max();
         if (value < 0) Error(0x0500);
         if (a.Length > 2) WriteOutput(method, a, 2, [value], false);
         return method.ReturnType == typeof(void) ? null : value;
@@ -543,20 +554,16 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (program.NamedLocations.TryGetValue(uniformName, out int location)) return location;
         int backendLocation = Device.GetUniformLocation(program.Backend, uniformName);
         if (backendLocation == -1) return -1;
-        if (!program.PublicLocations.TryGetValue(backendLocation, out location))
-        {
-            location = program.Locations.Count;
-            program.Locations.Add(location, backendLocation);
-            program.PublicLocations.Add(backendLocation, location);
-        }
-        program.NamedLocations.Add(uniformName, location);
-        return location;
+        program.NamedLocations.Add(uniformName, backendLocation);
+        return backendLocation;
     }
     private ProgramObject UniformProgram(int location, out int backendLocation)
     {
         backendLocation = -1;
         ProgramObject? program = programs.Values.FirstOrDefault(program => program.Backend == CurrentProgram && program.Linked);
-        if (program is null || !program.Locations.TryGetValue(location, out backendLocation)) Error(0x0502);
+        if (program is null && Device.IsProgram(CurrentProgram)) program = Program(CurrentProgram);
+        if (program is null || !Device.IsUniformLocation(program.Backend, location)) Error(0x0502);
+        backendLocation = location;
         return program!;
     }
     private void Uniform1(MethodInfo method, object?[] a)
@@ -588,6 +595,8 @@ internal sealed partial class ManagedGlBridge : IDisposable
         int location = I(a[0]); if (location == -1) return;
         ProgramObject program = UniformProgram(location, out int backendLocation);
         int components = method.Name[^1] - '0';
+        if (components == 2 && a.Length == 3 && a[1] is int integerX && a[2] is int integerY)
+        { session.Graphics.Uniform(program.Backend, backendLocation, integerX, integerY); return; }
         if (a.Length == components + 1 && method.GetParameters()[1].ParameterType == typeof(float))
         {
             float x = Convert.ToSingle(a[1]), y = Convert.ToSingle(a[2]);
@@ -650,7 +659,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             object[] uniforms = managedProgram.Value is { } program
                 ? program.NamedLocations.Take(64).Select(entry => (object)new
                 {
-                    name = entry.Key, location = entry.Value, backendLocation = program.Locations[entry.Value],
+                    name = entry.Key, location = entry.Value, backendLocation = entry.Value,
                     value = program.TracedUniformValues.GetValueOrDefault(entry.Value)
                 }).ToArray() : [];
             object[] attributes = streams.Select(stream => (object)new
@@ -760,9 +769,20 @@ internal sealed partial class ManagedGlBridge : IDisposable
         int target = I(a[0]); if (target is not (0x0DE1 or 0x806F)) Error(0x0500);
         int name = BoundTexture(target); if (name == 0) Error(0x0502);
         int parameter = I(a[1]);
+        bool vector = a[2] is System.Array or IntPtr;
+        if (parameter == 0x1004)
+        {
+            if (!vector) Error(0x0500);
+            float[] border = ReadFloatValues(a[2], 4);
+            bool black = border[0] == 0 && border[1] == 0 && border[2] == 0 && border[3] is 0 or 1;
+            bool white = border.All(value => value == 1);
+            if (!black && !white) throw new NotSupportedException("Arbitrary GL border colors require custom-border-color support.");
+            Device.SetTextureBorderColor(name, border[0], border[1], border[2], border[3]);
+            return;
+        }
         if (parameter is not (0x2800 or 0x2801 or 0x2802 or 0x2803 or 0x8072 or 0x813C or 0x813D or 0x8501 or 0x84FE or 0x884C))
             throw new NotSupportedException("Managed GL texture parameter 0x" + parameter.ToString("X") + " is unsupported.");
-        float scalar = Convert.ToSingle(a[2]);
+        float scalar = vector ? ReadFloatValues(a[2], 1)[0] : Convert.ToSingle(a[2]);
         if (!float.IsFinite(scalar)) Error(0x0501);
         int integer = (int)scalar;
         if (parameter == 0x813C && integer != 0) throw new NotSupportedException("Nonzero texture base levels require sampler-view offsets.");
@@ -771,7 +791,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             parameter is 0x2802 or 0x2803 or 0x8072 && integer is not (0x2901 or 0x812F or 0x8370 or 0x812D) ||
             parameter == 0x884C && integer is not (0 or 0x884E)) Error(0x0500);
         if (parameter is 0x813C or 0x813D && integer < 0 || parameter == 0x84FE && scalar < 1) Error(0x0501);
-        if (a[2] is float value) Device.SetTextureParameter(name, parameter, value);
+        if (a[2] is float || vector) Device.SetTextureParameter(name, parameter, scalar);
         else Device.SetTextureParameter(name, parameter, I(a[2]));
     }
     private void DeleteTexture(int name)
@@ -833,14 +853,20 @@ internal sealed partial class ManagedGlBridge : IDisposable
     }
     private object? Query(MethodInfo method, object?[] a, bool boolean)
     {
+        int[] values = IntegerValues(I(a[0]));
+        if (a.Length > 1) WriteOutput(method, a, 1, values, boolean);
+        return method.ReturnType == typeof(void) ? null : boolean ? values[0] != 0 : values[0];
+    }
+    private int[] IntegerValues(int name)
+    {
         AttachmentBlend blend = State.RawBlend(0);
-        int name = I(a[0]);
-        int[] values = name switch
+        return name switch
         {
             0x821B => [3], 0x821C => [3], 0x9126 => [1],
             0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],
             0x84E0 => [0x84C0 + ActiveUnit], 0x8069 => [BoundTexture()],
+            0x8919 => [State.SamplerAt(ActiveUnit)], 0x826C => [64], 0x826D => [C.DebugGroups.Count + 1],
             0x806A => [BoundTexture(0x806F)], 0x8073 => [Device.MaxVolumeSize],
             0x0BE2 => [State.BlendEnabled ? 1 : 0], 0x0C11 => [State.ScissorEnabled ? 1 : 0], 0x0B44 => [State.CullEnabled ? 1 : 0], 0x0B71 => [State.DepthTest ? 1 : 0],
             0x0B72 => [State.DepthWrite ? 1 : 0], 0x0B74 => [0x0200 + (int)State.DepthCompare],
@@ -861,8 +887,6 @@ internal sealed partial class ManagedGlBridge : IDisposable
             >= 0x8825 and < 0x8825 + StatedRenderState.MaxColorAttachments => [DrawBufferToken(name - 0x8825)],
             _ => throw new GlError(0x0500),
         };
-        if (a.Length > 1) WriteOutput(method, a, 1, values, boolean);
-        return method.ReturnType == typeof(void) ? null : boolean ? values[0] != 0 : values[0];
     }
     private static void WriteOutput(MethodInfo method, object?[] a, int index, int[] values, bool boolean)
     {

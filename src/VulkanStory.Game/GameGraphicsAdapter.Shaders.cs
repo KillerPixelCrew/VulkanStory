@@ -97,6 +97,8 @@ internal sealed partial class GameGraphicsAdapter
     { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y, z, w); }
     internal void Uniform(int program, int location, int x, int y, int z)
     { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y, z); }
+    internal void Uniform(int program, int location, int x, int y)
+    { InvalidateMotionInput(program, location); RequireDevice().SetUniform(program, location, x, y); }
 
     internal void UniformArray(int program, int location, int count, float[] values, int components)
     {

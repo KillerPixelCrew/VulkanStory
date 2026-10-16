@@ -52,6 +52,17 @@ state implementation. Supported depth, culling, color-mask, viewport, blending
 and scissor changes therefore affect subsequent Vulkan draws. Float scalar/vector,
 array and matrix uniform writes use the game adapter's motion-input handling;
 GL queries can borrow a game-created program without taking ownership of it.
+Program-owned public locations are nonnegative and shared by both APIs, including
+array element ranges; renderer storage offsets stay internal. Active-uniform
+metadata and value reads use the linked program's retained interface/shadows.
+
+Blend enable and color masks retain per-output indexed state. Clears apply those
+masks, draw routing, clear depth and scissor rectangles; partial clears use owned
+GPU programs without contributing samples to application occlusion queries.
+Full image clears also work between rendering frames. Partial/masked clears
+outside a frame still need a graphics recording scope. Sampler binding, scalar
+float queries, core renderer strings and scoped debug-group state share the same
+context as the draw calls.
 
 Framebuffer operations share the game's framebuffer names and adapter views.
 Read and draw bindings remain independent, and draw-buffer selections route
@@ -88,7 +99,7 @@ Callbacks stay rooted for process lifetime and the original table entries are
 restored when routing is removed. Unexpected callback failures set a GL error,
 increment the status counter and are logged without crossing the unmanaged ABI.
 Zero-sized/independently shaped mutable mip backing, nonzero base-mip sampling,
-outside-frame scaled blits, queries and additional shader/state operations remain
+outside-frame scaled blits/partial clears, GPU queries and additional shader/state operations remain
 incomplete.
 Native GL imports and graphics proc-address loaders still need explicit support.
 When Vulkan routing is active, `ModGlUsage` examines enabled client mod metadata

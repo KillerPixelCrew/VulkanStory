@@ -28,23 +28,18 @@ internal sealed partial class GameGraphicsAdapter
         RuntimeStats.drawCallsCount++;
     }
 
-    internal void ClearManagedGlTarget(int target, StatedRenderState state, int mask, float[] color)
+    internal void ClearManagedGlTarget(int target, StatedRenderState state, int mask, float[] color, float depth = 1f)
     {
         var renderer = RequireDevice();
-        if (state.ScissorEnabled)
-            throw new NotSupportedException("Managed GL scissored clears require an attachment-rectangle clear capability.");
-        const ColorComponentFlags all = ColorComponentFlags.RBit | ColorComponentFlags.GBit |
-            ColorComponentFlags.BBit | ColorComponentFlags.ABit;
-        if ((mask & 0x4000) != 0 && state.ColorMask != 0)
+        Rect2D? scissor = state.ScissorEnabled ? state.Scissor : null;
+        if ((mask & 0x4000) != 0)
         {
-            if (state.ColorMask != all)
-                throw new NotSupportedException("Managed GL masked color clears require a masked attachment-clear capability.");
             uint slots = state.DrawBuffers(target);
             for (int slot = 0; slot < StatedRenderState.MaxColorAttachments; slot++)
                 if ((slots & (1u << slot)) != 0)
-                    renderer.ClearNativeColor(target, slot, color[0], color[1], color[2], color[3]);
+                    renderer.ClearGlColor(target, slot, state.SlotColorMask(slot), color, scissor);
         }
-        if ((mask & 0x0100) != 0 && state.DepthWrite) renderer.ClearNativeDepth(target, 1f);
+        if ((mask & 0x0100) != 0 && state.DepthWrite) renderer.ClearGlDepth(target, depth, scissor);
         // None of this session's render targets has a stencil attachment.
         // GL ignores clear bits for missing buffers (secondary windows request
         // color|depth|stencil even when their surface has only color).
