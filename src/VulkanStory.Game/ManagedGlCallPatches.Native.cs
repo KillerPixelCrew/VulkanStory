@@ -64,10 +64,16 @@ public static partial class ManagedGlCallPatches
 
     private static (int Slot, Type[] Parameters)? NativeSignature(MethodDefinition method)
     {
+        var shape = RawNativeSignature(method);
+        return shape is { } native && native.ReturnType == typeof(void) ? (native.Slot, native.Parameters) : null;
+    }
+
+    private static (int Slot, Type ReturnType, Type[] Parameters)? RawNativeSignature(MethodDefinition method)
+    {
         if (!method.HasBody) return null;
         var instructions = method.Body.Instructions;
         var indirect = instructions.Where(instruction => instruction.OpCode.Code == CecilCode.Calli).ToArray();
-        if (indirect.Length != 1 || indirect[0].Operand is not CallSite signature || AbiType(signature.ReturnType) != typeof(void) || signature.HasThis) return null;
+        if (indirect.Length != 1 || indirect[0].Operand is not CallSite signature || AbiType(signature.ReturnType) is not { } returns || signature.HasThis) return null;
         Type?[] types = signature.Parameters.Select(parameter => AbiType(parameter.ParameterType)).ToArray();
         if (types.Any(type => type is null)) return null;
         for (int i = 0; i + 2 < instructions.Count; i++)
@@ -82,7 +88,7 @@ public static partial class ManagedGlCallPatches
                 CecilCode.Ldc_I4_4 => 4, CecilCode.Ldc_I4_5 => 5, CecilCode.Ldc_I4_6 => 6, CecilCode.Ldc_I4_7 => 7, CecilCode.Ldc_I4_8 => 8,
                 _ => -1,
             };
-            if (slot >= 0) return (slot, types.Select(type => type!).ToArray());
+            if (slot >= 0) return (slot, returns, types.Select(type => type!).ToArray());
         }
         return null;
     }

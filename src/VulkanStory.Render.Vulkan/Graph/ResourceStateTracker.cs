@@ -366,7 +366,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.DepthReadOnly => new(ImageLayout.DepthReadOnlyOptimal, DepthTests,
             AccessFlags2.DepthStencilAttachmentReadBit),
         ResourceUsage.DepthReadOnlySampled => new(ImageLayout.DepthReadOnlyOptimal,
-            DepthTests | PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit,
+            DepthTests | PipelineStageFlags2.AllGraphicsBit,
             AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleFragment => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderReadBit),
@@ -477,12 +477,12 @@ internal static class BufferUsageState
         }
         if ((usage & BufferUsageFlags.UniformBufferBit) != 0)
         {
-            stage |= PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit;
+            stage |= PipelineStageFlags2.AllGraphicsBit;
             access |= AccessFlags2.UniformReadBit;
         }
         if ((usage & BufferUsageFlags.StorageBufferBit) != 0)
         {
-            stage |= PipelineStageFlags2.VertexShaderBit | PipelineStageFlags2.FragmentShaderBit |
+            stage |= PipelineStageFlags2.AllGraphicsBit |
                      PipelineStageFlags2.ComputeShaderBit;
             access |= AccessFlags2.ShaderStorageReadBit;
         }

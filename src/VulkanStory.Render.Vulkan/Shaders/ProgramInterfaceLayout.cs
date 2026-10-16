@@ -107,7 +107,19 @@ internal sealed partial class ProgramInterfaceLayout
     public Dictionary<string, int> FrameMemberDeclaredLengths { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Whether the program reads anything from the shared frame block.</summary>
-    public bool UsesFrameBlock => FrameMemberDeclaredLengths.Count > 0;
+    public bool UsesFrameBlock => FrameMemberDeclaredLengths.Count > 0 || usesCompiledFrameBlock;
+    private bool usesCompiledFrameBlock;
+
+    /// <summary>Includes dependencies introduced by rewriting as well as source declarations.</summary>
+    internal void IncludeCompiledResources(SpirvModuleReflection module)
+    {
+        foreach (SpirvDescriptorBinding binding in module.Bindings)
+        {
+            if (binding.Set == SetConvention.FrameSet && binding.Binding == SetConvention.FrameGlobalsBinding &&
+                binding.Kind == SpirvDescriptorKind.UniformBuffer)
+                usesCompiledFrameBlock = true;
+        }
+    }
 
     /// <summary>Members in declaration order, vertex stage first.</summary>
     public List<UniformMember> Members { get; } = new();

@@ -1,10 +1,11 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace VulkanStory.Game;
 
 internal sealed partial class ManagedGlBridge
 {
-    private object ActiveUniform(MethodInfo method, object?[] a)
+    private object? ActiveUniform(MethodInfo method, object?[] a)
     {
         ProgramObject program = Program(I(a[0]));
         if (!program.Linked) Error(0x0502);
@@ -13,6 +14,21 @@ internal sealed partial class ManagedGlBridge
         if ((uint)index >= (uint)uniforms.Length) Error(0x0501);
         var uniform = uniforms[index];
         int type = UniformTypeToken(uniform.Type);
+        if (a.Length == 7)
+        {
+            int capacity = I(a[2]); if (capacity < 0) Error(0x0501);
+            byte[] name = System.Text.Encoding.UTF8.GetBytes(uniform.Name);
+            int count = Math.Min(name.Length, Math.Max(0, capacity - 1));
+            if (Pointer(a[3]) != 0) Marshal.WriteInt32(Pointer(a[3]), count);
+            if (Pointer(a[4]) != 0) Marshal.WriteInt32(Pointer(a[4]), uniform.Count);
+            if (Pointer(a[5]) != 0) Marshal.WriteInt32(Pointer(a[5]), type);
+            if (capacity > 0)
+            {
+                nint pointer = Pointer(a[6]); if (pointer == 0) Error(0x0501);
+                Marshal.Copy(name, 0, pointer, count); Marshal.WriteByte(pointer, count, 0);
+            }
+            return null;
+        }
         WriteOutput(method, a, 2, [uniform.Count], false);
         Type outputType = method.GetParameters()[3].ParameterType.GetElementType()!;
         a[3] = outputType.IsEnum ? Enum.ToObject(outputType, type) : type;

@@ -326,7 +326,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 fixed (byte* push = _pushShadow)
                 {
-                    api.CmdPushConstants(commandBuffer, shared.Layout, SharedPipelineLayout.Stages, 0, (uint)pushSize, push);
+                    api.CmdPushConstants(commandBuffer, shared.Layout, shared.EnabledStages, 0, (uint)pushSize, push);
                 }
                 _pushShadow.AsSpan(0, pushSize).CopyTo(_pushedBytes);
                 _pushedLength = Math.Max(_pushedLength, pushSize);

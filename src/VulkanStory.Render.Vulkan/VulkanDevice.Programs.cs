@@ -72,6 +72,11 @@ public sealed unsafe partial class VulkanDevice
     /// <returns>Registered program ID, or the retained failure sentinel when compilation/linking fails.</returns>
     public int LinkProgram(ShaderProgramDefinition program)
     {
+        if (program.GeometryShader is not null && !_context.GeometryShadersEnabled)
+        {
+            AddDiagnostic(VulkanContext.ErrorPrefix + $"shader program '{program.PassName}' requires the unavailable Vulkan geometryShader feature");
+            return 0;
+        }
         var stages = new List<ShaderStageSource>();
         AddStage(stages, program.VertexShader, EnumShaderType.VertexShader, program.PassName);
         AddStage(stages, program.FragmentShader, EnumShaderType.FragmentShader, program.PassName);

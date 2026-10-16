@@ -218,6 +218,7 @@ internal static class ModCompatibilityConsumerPatches
     /// <param name="result">Metadata-only image decision.</param>
     private static void Record(ModGlInspection result)
     {
+        NativeGlLibraryRouting.RegisterImage(result.Source);
         lock (Gate) Inspections[result.Source] = result;
         runtime?.Notify("mod.gl.discovery", result.Detail);
     }
@@ -230,8 +231,7 @@ internal static class ModCompatibilityConsumerPatches
         mod.SetError(ModError.Loading);
         lock (Gate) Refused.Add(mod);
         mod.Logger.Error("VulkanStory: " + result.Detail +
-            "\nThis mod needs a version-specific GL adapter. Provide its ZIP/DLL, dependencies, shaders and a representative scene. " +
-            "The renderer remains Vulkan; use the mod manager to disable this mod or restart with VulkanStory disabled.");
+            "\nThese operations need support in VulkanStory's shared GL bridge. Include the ZIP/DLL, dependencies, shaders and a representative scene when reporting them.");
     }
 
     /// <summary>Reapplies original dependency errors after source refusals before any mod-system constructors execute.</summary>

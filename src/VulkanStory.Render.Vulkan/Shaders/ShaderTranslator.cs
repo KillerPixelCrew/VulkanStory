@@ -155,13 +155,15 @@ internal static class ShaderTranslator
             }
 
             program.Spirv[stage] = compiled.Spirv;
+            SpirvModuleReflection reflected = SpirvReflection.Reflect(compiled.Spirv);
+            program.Layout.IncludeCompiledResources(reflected);
             if (stage == EnumShaderType.FragmentShader)
             {
                 // Compiled stores include out/inout helper and pointer writes
                 // that a textual assignment scan cannot identify reliably.
                 program.Layout.WrittenFragmentOutputs.Clear();
                 program.Layout.WrittenFragmentOutputs.UnionWith(
-                    SpirvReflection.Reflect(compiled.Spirv).WrittenOutputLocations);
+                    reflected.WrittenOutputLocations);
             }
         }
 

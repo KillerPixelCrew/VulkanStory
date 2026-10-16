@@ -84,8 +84,9 @@ public static partial class ManagedGlCallPatches
             case "GetBoolean": return parameters.Length == 1 && method.ReturnType == typeof(bool) || parameters.Length == 2 && Output(1, true) || parameters.Length == 3 && Output(2, true);
             case "GetFloat": return parameters.Length == 1 && method.ReturnType == typeof(float) || parameters.Length == 2 &&
                 (parameters[1].ParameterType == typeof(IntPtr) || parameters[1].ParameterType.HasElementType && parameters[1].ParameterType.GetElementType() == typeof(float));
-            case "GetString": return parameters.Length == 1 && method.ReturnType == typeof(string);
-            case "GetActiveUniform": return parameters.Length == 4 && method.ReturnType == typeof(string) && parameters[2].ParameterType.IsByRef && parameters[3].ParameterType.IsByRef;
+            case "GetString": return parameters.Length is 1 or 2 && method.ReturnType == typeof(string);
+            case "GetActiveUniform": return parameters.Length == 4 && method.ReturnType == typeof(string) && parameters[2].ParameterType.IsByRef && parameters[3].ParameterType.IsByRef ||
+                parameters.Length == 7 && method.ReturnType == typeof(void) && parameters.Skip(3).All(parameter => parameter.ParameterType.IsPointer || parameter.ParameterType == typeof(nint));
             case "GetUniform": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } uniformType && (uniformType == typeof(int) || uniformType == typeof(float));
             case "ProgramUniform1": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
             case "ClearBuffer": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } clearType && (clearType == typeof(int) || clearType == typeof(float));
@@ -105,7 +106,8 @@ public static partial class ManagedGlCallPatches
             case "BufferData": return parameters.Length == 4 && Bytes(2);
             case "BufferSubData": return parameters.Length == 4 && Bytes(3);
             case "ShaderSource": return parameters.Length == 2 && parameters[1].ParameterType == typeof(string) ||
-                parameters.Length == 4 && parameters[2].ParameterType == typeof(string[]) && Output(3);
+                parameters.Length == 4 && (parameters[2].ParameterType == typeof(string[]) && Output(3) ||
+                    (parameters[2].ParameterType.IsPointer || parameters[2].ParameterType == typeof(nint)) && Output(3));
             case "GetProgram": case "GetShader": return parameters.Length == 2 && method.ReturnType == typeof(int) || parameters.Length == 3 && Output(2);
             case "GetProgramInfoLog": case "GetShaderInfoLog": return parameters.Length == 1 && method.ReturnType == typeof(string) ||
                 parameters.Length == 4 && Output(2) && (parameters[3].ParameterType == typeof(string).MakeByRefType() ||
@@ -174,9 +176,12 @@ public static partial class ManagedGlCallPatches
                 harmony.Patch(target, prefix: new HarmonyMethod(prefix) { priority = Priority.First });
             }
             InstallNativeEntries();
+            InstallNativeProcedures();
+            NativeGlLibraryRouting.Install(harmony, owner);
         }, () =>
         {
             if (!attempted) return;
+            NativeGlLibraryRouting.Restore();
             RestoreNativeEntries();
             harmony.UnpatchAll(Owner);
             if (ReferenceEquals(runtime, owner)) runtime = null;

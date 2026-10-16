@@ -107,6 +107,7 @@ internal static class GlslParser
         var result = new ParsedShader { Source = source };
         int position = 0;
         int length = source.Length;
+        var constants = new Dictionary<string, int>(StringComparer.Ordinal);
 
         while (position < length)
         {
@@ -130,11 +131,13 @@ internal static class GlslParser
             if (position > statementStart)
             {
                 GlslDeclaration? declaration =
-                    Classify(source, statementStart, position - statementStart, hadBraceBlock);
+                    Classify(source, statementStart, position - statementStart, hadBraceBlock, constants);
                 if (declaration != null)
                 {
                     result.Declarations.Add(declaration);
                 }
+                if (!hadBraceBlock)
+                    ReadIntegerConstants(StripComments(source.Substring(statementStart, position - statementStart)), constants);
             }
             else
             {
@@ -324,7 +327,8 @@ internal static class GlslParser
         "readonly", "writeonly", "coherent", "volatile", "restrict",
     };
 
-    private static GlslDeclaration? Classify(string source, int start, int length, bool hadBraceBlock)
+    private static GlslDeclaration? Classify(string source, int start, int length, bool hadBraceBlock,
+        IReadOnlyDictionary<string, int> constants)
     {
         string text = source.Substring(start, length);
         string stripped = StripComments(text);
@@ -407,7 +411,7 @@ internal static class GlslParser
         declaration.TypeName = typeName;
 
         // C-style array-on-the-type: "uniform vec3[64] samples;" (ssao.fsh).
-        ReadArraySuffix(stripped, ref cursor, declaration);
+        ReadArraySuffix(stripped, ref cursor, declaration, constants);
 
         string? name = ReadIdentifier(stripped, ref cursor);
         if (name == null)
@@ -418,7 +422,7 @@ internal static class GlslParser
         declaration.Name = name;
 
         // Array-on-the-name: "uniform vec3 pointLights[100];".
-        ReadArraySuffix(stripped, ref cursor, declaration);
+        ReadArraySuffix(stripped, ref cursor, declaration, constants);
 
         SkipSpace(stripped, ref cursor);
         if (cursor < stripped.Length && stripped[cursor] == '=')
@@ -455,7 +459,39 @@ internal static class GlslParser
         return declaration;
     }
 
-    private static void ReadArraySuffix(string text, ref int cursor, GlslDeclaration declaration)
+    private static void ReadIntegerConstants(string text, Dictionary<string, int> constants)
+    {
+        int cursor = 0;
+        if (ReadIdentifier(text, ref cursor) != "const") return;
+        string? type = ReadIdentifier(text, ref cursor);
+        if (type is "highp" or "mediump" or "lowp") type = ReadIdentifier(text, ref cursor);
+        if (type is not ("int" or "uint")) return;
+
+        // Only global scalar const declarations participate. Function bodies and
+        // local shadows never enter this table. Keep the source declaration intact.
+        while (cursor < text.Length)
+        {
+            string? name = ReadIdentifier(text, ref cursor);
+            if (name == null) return;
+            SkipSpace(text, ref cursor);
+            if (cursor >= text.Length || text[cursor++] != '=') return;
+            int start = cursor, parentheses = 0;
+            while (cursor < text.Length)
+            {
+                char c = text[cursor];
+                if (parentheses == 0 && c is ',' or ';') break;
+                if (c == '(') parentheses++;
+                if (c == ')') parentheses--;
+                cursor++;
+            }
+            if (TryEvaluateConstantInt(text.Substring(start, cursor - start), out int value, constants))
+                constants.TryAdd(name, value);
+            if (cursor >= text.Length || text[cursor++] != ',') return;
+        }
+    }
+
+    private static void ReadArraySuffix(string text, ref int cursor, GlslDeclaration declaration,
+        IReadOnlyDictionary<string, int> constants)
     {
         SkipSpace(text, ref cursor);
         if (cursor >= text.Length || text[cursor] != '[') return;
@@ -466,7 +502,7 @@ internal static class GlslParser
         string inside = text.Substring(cursor + 1, close - cursor - 1).Trim();
         cursor = close + 1;
 
-        if (TryEvaluateConstantInt(inside, out int size))
+        if (TryEvaluateConstantInt(inside, out int size, constants))
         {
             declaration.ArrayLength = size;
         }
@@ -482,14 +518,17 @@ internal static class GlslParser
     /// GLSL permits any constant expression there and the shaders use it -
     /// fogandlight.vsh declares <c>uniform vec4 fogSpheres[3 * 8];</c>. By this
     /// point the preprocessor has already substituted every macro, so what is
-    /// left is arithmetic over literals.
+    /// left is arithmetic over literals and previously declared global const integers.
     /// </summary>
-    internal static bool TryEvaluateConstantInt(string expression, out int value)
+    internal static bool TryEvaluateConstantInt(string expression, out int value,
+        IReadOnlyDictionary<string, int>? constants = null)
     {
         int cursor = 0;
         value = 0;
 
-        if (!TryParseAdditive(expression, ref cursor, out int result)) return false;
+        int result;
+        try { if (!TryParseAdditive(expression, ref cursor, out result, constants)) return false; }
+        catch (OverflowException) { return false; }
 
         SkipSpace(expression, ref cursor);
         if (cursor != expression.Length) return false;
@@ -498,10 +537,10 @@ internal static class GlslParser
         return true;
     }
 
-    private static bool TryParseAdditive(string text, ref int cursor, out int value)
+    private static bool TryParseAdditive(string text, ref int cursor, out int value, IReadOnlyDictionary<string, int>? constants)
     {
         value = 0;
-        if (!TryParseMultiplicative(text, ref cursor, out int left)) return false;
+        if (!TryParseMultiplicative(text, ref cursor, out int left, constants)) return false;
 
         while (true)
         {
@@ -512,18 +551,18 @@ internal static class GlslParser
             if (op != '+' && op != '-') break;
 
             cursor++;
-            if (!TryParseMultiplicative(text, ref cursor, out int right)) return false;
-            left = op == '+' ? left + right : left - right;
+            if (!TryParseMultiplicative(text, ref cursor, out int right, constants)) return false;
+            left = checked(op == '+' ? left + right : left - right);
         }
 
         value = left;
         return true;
     }
 
-    private static bool TryParseMultiplicative(string text, ref int cursor, out int value)
+    private static bool TryParseMultiplicative(string text, ref int cursor, out int value, IReadOnlyDictionary<string, int>? constants)
     {
         value = 0;
-        if (!TryParseUnary(text, ref cursor, out int left)) return false;
+        if (!TryParseUnary(text, ref cursor, out int left, constants)) return false;
 
         while (true)
         {
@@ -534,12 +573,12 @@ internal static class GlslParser
             if (op != '*' && op != '/' && op != '%') break;
 
             cursor++;
-            if (!TryParseUnary(text, ref cursor, out int right)) return false;
+            if (!TryParseUnary(text, ref cursor, out int right, constants)) return false;
             if (op != '*' && right == 0) return false;
 
             left = op switch
             {
-                '*' => left * right,
+                '*' => checked(left * right),
                 '/' => left / right,
                 _ => left % right,
             };
@@ -549,7 +588,7 @@ internal static class GlslParser
         return true;
     }
 
-    private static bool TryParseUnary(string text, ref int cursor, out int value)
+    private static bool TryParseUnary(string text, ref int cursor, out int value, IReadOnlyDictionary<string, int>? constants)
     {
         value = 0;
         SkipSpace(text, ref cursor);
@@ -559,15 +598,15 @@ internal static class GlslParser
         if (c == '+' || c == '-')
         {
             cursor++;
-            if (!TryParseUnary(text, ref cursor, out int inner)) return false;
-            value = c == '-' ? -inner : inner;
+            if (!TryParseUnary(text, ref cursor, out int inner, constants)) return false;
+            value = c == '-' ? checked(-inner) : inner;
             return true;
         }
 
         if (c == '(')
         {
             cursor++;
-            if (!TryParseAdditive(text, ref cursor, out int inner)) return false;
+            if (!TryParseAdditive(text, ref cursor, out int inner, constants)) return false;
             SkipSpace(text, ref cursor);
             if (cursor >= text.Length || text[cursor] != ')') return false;
             cursor++;
@@ -575,6 +614,11 @@ internal static class GlslParser
             return true;
         }
 
+        if (IsIdentifierStart(c))
+        {
+            string? name = ReadIdentifier(text, ref cursor);
+            return name != null && constants != null && constants.TryGetValue(name, out value);
+        }
         if (!char.IsDigit(c)) return false;
 
         int start = cursor;

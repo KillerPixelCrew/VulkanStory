@@ -173,9 +173,9 @@ internal sealed partial class ManagedGlBridge : IDisposable
                 result = Convert.ChangeType(result, method.ReturnType, System.Globalization.CultureInfo.InvariantCulture);
             return result;
         }
-        catch (GlError failure) { QueueError(failure.Code); TraceGlError(method.Name, failure.Code); return result; }
-        catch (OverflowException) { QueueError(0x0501); TraceGlError(method.Name, 0x0501); return result; }
-        catch (OutOfMemoryException) { QueueError(0x0505); TraceGlError(method.Name, 0x0505); return result; }
+        catch (GlError failure) { QueueError(failure.Code); TraceGlError(method.Name, failure.Code, args); return result; }
+        catch (OverflowException) { QueueError(0x0501); TraceGlError(method.Name, 0x0501, args); return result; }
+        catch (OutOfMemoryException) { QueueError(0x0505); TraceGlError(method.Name, 0x0505, args); return result; }
     }
     private object? Command(MethodInfo method, object?[] a)
     {
@@ -186,7 +186,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
             case "GetInteger": return a.Length == 3 ? QueryIndexed(method, a, false) : Query(method, a, false);
             case "GetBoolean": return a.Length == 3 ? QueryIndexed(method, a, true) : Query(method, a, true);
             case "GetFloat": return FloatQuery(method, a);
-            case "GetString": return StringQuery(I(a[0]));
+            case "GetString": if (a.Length == 2) { if (I(a[0]) != 0x1F03) Error(0x0500); Error(0x0501); return null; } return StringQuery(I(a[0]));
             case "ClearDepth": { float value = Convert.ToSingle(a[0]); C.ClearDepth = float.IsNaN(value) ? 0 : Math.Clamp(value, 0f, 1f); return null; }
             case "GenQuery": return GenQuery();
             case "GenQueries": return GenerateMany(method, a, GenQuery);
@@ -461,6 +461,21 @@ internal sealed partial class ManagedGlBridge : IDisposable
             int[]? lengths = a.Length > 3 && a[3] is not null && !(a[3] is IntPtr ptr && ptr == IntPtr.Zero) ? ReadInts(a[3], count) : null;
             shader.Source = string.Concat(sources.Take(count).Select((text, index) => lengths is null || lengths[index] < 0 ? text : text[..Math.Min(text.Length, lengths[index])]));
         }
+        else if (a.Length == 4)
+        {
+            int count = I(a[1]); if (count < 0) Error(0x0501);
+            nint pointers = Pointer(a[2]), lengths = Pointer(a[3]);
+            if (count > 0 && pointers == 0) Error(0x0501);
+            var text = new System.Text.StringBuilder();
+            for (int index = 0; index < count; index++)
+            {
+                nint pointer = Marshal.ReadIntPtr(pointers, checked(index * nint.Size));
+                if (pointer == 0) Error(0x0501);
+                int length = lengths == 0 ? -1 : Marshal.ReadInt32(lengths, checked(index * sizeof(int)));
+                text.Append(length < 0 ? Marshal.PtrToStringUTF8(pointer) : Marshal.PtrToStringUTF8(pointer, length));
+            }
+            shader.Source = text.ToString();
+        }
         else throw new NotSupportedException("Managed GL ShaderSource requires the string or string-array OpenTK overload.");
         shader.Compiled = false; shader.Log = "";
     }
@@ -715,11 +730,13 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (tracedMainDraws == 8 && tracedAuxiliaryDraws == 8)
             foreach (ProgramObject program in programs.Values) program.TracedUniformValues.Clear();
     }
-    private void TraceGlError(string command, int error)
+    private void TraceGlError(string command, int error, object?[] args)
     {
         if (drawTracePath is null || tracedErrors >= 8) return;
         tracedErrors++;
-        WriteTrace(new { @event = "gl-error", command, error, primary = C.Primary, frameId = Device.LatencyFrameId,
+        string? token = args.Length > 0 && args[0] is not null && (args[0]!.GetType().IsEnum || args[0] is int or uint)
+            ? Convert.ToInt64(args[0]).ToString("x") : null;
+        WriteTrace(new { @event = "gl-error", command, error, token, primary = C.Primary, frameId = Device.LatencyFrameId,
             target = Target, context = C.Id.ToInt64(), backendProgram = CurrentProgram });
     }
     private void WriteTrace(object snapshot)
@@ -892,6 +909,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
         {
             0x821B => [3], 0x821C => [3], 0x9126 => [1],
             0x0D32 => [VulkanDevice.MaxGlClipPlanes],
+            0x821D => [0], // No optional GL extensions are advertised by the compatibility context.
             >= 0x3000 and <= 0x3007 => [Enabled(name) ? 1 : 0],
             0x85B5 => [C.VertexArray], 0x8894 => [C.ArrayBuffer?.Name ?? 0], 0x8895 => [Array.Elements?.Name ?? 0],
             0x8B8D => [CurrentProgram == 0 ? 0 : programs.FirstOrDefault(entry => entry.Value.Backend == CurrentProgram).Key is int owned && owned != 0 ? owned : CurrentProgram],

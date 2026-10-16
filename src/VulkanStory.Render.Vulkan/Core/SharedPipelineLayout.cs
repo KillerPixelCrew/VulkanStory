@@ -11,7 +11,7 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// | set 0 | FrameGlobals dynamic UBO and the fixed frame textures; a normal set (dynamic buffers cannot be update-after-bind) |
 /// | set 1 | the bindless texture table's layout (<see cref="BindlessTextureTable" />), not owned here |
 /// | set 2 | FaceData, the animation blocks, the program record (dynamic) and the named-block range, a normal set built per draw |
-/// | push  | <see cref="SetConvention.PushConstantBytes" /> for vertex and fragment |
+/// | push  | <see cref="SetConvention.PushConstantBytes" /> for enabled vertex, geometry and fragment stages |
 ///
 /// Created once at device bring-up; destroyed at teardown after the device-idle
 /// wait, before the table's set layout it names.
@@ -19,6 +19,9 @@ namespace VulkanStory.Render.Vulkan.Core;
 internal sealed unsafe class SharedPipelineLayout : IDisposable
 {
     public const ShaderStageFlags Stages = ShaderStageFlags.VertexBit | ShaderStageFlags.FragmentBit;
+    public ShaderStageFlags EnabledStages { get; }
+    internal static ShaderStageFlags StagesFor(VulkanContext context) =>
+        Stages | (context.GeometryShadersEnabled ? ShaderStageFlags.GeometryBit : 0);
 
     private readonly VulkanContext _context;
     private readonly bool _ownsTextureSetLayout;
@@ -59,12 +62,13 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     private SharedPipelineLayout(VulkanContext context, DescriptorSetLayout textureSetLayout, bool ownsTextureSetLayout)
     {
         _context = context;
+        EnabledStages = StagesFor(context);
         _ownsTextureSetLayout = ownsTextureSetLayout;
         TextureSetLayout = textureSetLayout;
         Vk api = context.Api;
 
-        DescriptorSetLayoutBinding[] frameBindings = FrameBindings();
-        DescriptorSetLayoutBinding[] storageBindings = StorageBindings();
+        DescriptorSetLayoutBinding[] frameBindings = FrameBindings(EnabledStages);
+        DescriptorSetLayoutBinding[] storageBindings = StorageBindings(EnabledStages);
 
         FrameSetLayout = CreateSetLayout(frameBindings, "set 0 (frame)");
         try
@@ -83,7 +87,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
         setLayouts[SetConvention.StorageSet] = StorageSetLayout;
         var pushConstants = new PushConstantRange
         {
-            StageFlags = Stages,
+            StageFlags = EnabledStages,
             Offset = 0,
             Size = SetConvention.PushConstantBytes,
         };
@@ -107,7 +111,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     }
 
     /// <summary>Set 0: the FrameGlobals dynamic UBO and the fixed frame textures.</summary>
-    internal static DescriptorSetLayoutBinding[] FrameBindings()
+    internal static DescriptorSetLayoutBinding[] FrameBindings(ShaderStageFlags stages = Stages)
     {
         var bindings = new DescriptorSetLayoutBinding[1 + SetConvention.FrameTextures.Length];
         bindings[0] = new DescriptorSetLayoutBinding
@@ -115,7 +119,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
             Binding = (uint)SetConvention.FrameGlobalsBinding,
             DescriptorType = DescriptorType.UniformBufferDynamic,
             DescriptorCount = 1,
-            StageFlags = Stages,
+            StageFlags = stages,
         };
         for (int i = 0; i < SetConvention.FrameTextures.Length; i++)
         {
@@ -124,7 +128,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
                 Binding = (uint)SetConvention.FrameTextures[i].Value,
                 DescriptorType = DescriptorType.CombinedImageSampler,
                 DescriptorCount = SetConvention.FrameTextures[i].Capacity,
-                StageFlags = Stages,
+                StageFlags = stages,
             };
         }
         return bindings;
@@ -137,7 +141,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
     /// a normal set, so the dynamic buffer is legal beside the update-after-bind set 1;
     /// the device floor counts it (<see cref="DescriptorIndexingFloor.RequiredDynamicUniformBuffers" />).
     /// </summary>
-    internal static DescriptorSetLayoutBinding[] StorageBindings()
+    internal static DescriptorSetLayoutBinding[] StorageBindings(ShaderStageFlags stages = Stages)
     {
         int named = SetConvention.NamedBlockLastBinding - SetConvention.NamedBlockFirstBinding + 1;
         var bindings = new DescriptorSetLayoutBinding[SetConvention.StorageBuffers.Length + 1 + named];
@@ -149,7 +153,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
                 Binding = (uint)buffer.Value,
                 DescriptorType = DescriptorType.StorageBuffer,
                 DescriptorCount = buffer.Capacity,
-                StageFlags = Stages,
+                StageFlags = stages,
             };
         }
         bindings[index++] = new DescriptorSetLayoutBinding
@@ -157,7 +161,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
             Binding = (uint)SetConvention.ProgramRecordBinding,
             DescriptorType = DescriptorType.UniformBufferDynamic,
             DescriptorCount = 1,
-            StageFlags = Stages,
+            StageFlags = stages,
         };
         for (int binding = SetConvention.NamedBlockFirstBinding; binding <= SetConvention.NamedBlockLastBinding; binding++)
         {
@@ -166,7 +170,7 @@ internal sealed unsafe class SharedPipelineLayout : IDisposable
                 Binding = (uint)binding,
                 DescriptorType = DescriptorType.StorageBuffer,
                 DescriptorCount = 1,
-                StageFlags = Stages,
+                StageFlags = stages,
             };
         }
         return bindings;

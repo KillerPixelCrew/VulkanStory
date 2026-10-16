@@ -555,6 +555,8 @@ internal sealed class NativeShaderLibrary
 
         var oracle = new GlslUniformOracle(new[] { vertex.Code, fragment.Code });
         translated.Layout = ProgramInterfaceLayout.FromNative(variant, oracle);
+        foreach (byte[] spirv in translated.Spirv.Values)
+            translated.Layout.IncludeCompiledResources(SpirvReflection.Reflect(spirv));
         if (translated.Layout.HasErrors)
         {
             detail = "[" + key + "] " + string.Join("; ", translated.Layout.Errors);

@@ -210,6 +210,7 @@ internal sealed unsafe class VulkanContext : IDisposable
     public bool BufferDeviceAddressEnabled { get; private set; }
     /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
+    internal bool GeometryShadersEnabled { get; private set; }
 
     /// <summary>vkCmdSetColorWriteEnableEXT, when the enable tier is selected.</summary>
     public ExtColorWriteEnable? ColorWriteEnableApi { get; private set; }
@@ -1030,6 +1031,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         };
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
+        GeometryShadersEnabled = available.GeometryShader;
         if (!available.ShaderClipDistance)
             throw new NotSupportedException("GL user clipping requires Vulkan shaderClipDistance support.");
 
@@ -1077,6 +1079,8 @@ internal sealed unsafe class VulkanContext : IDisposable
             SamplerAnisotropy = available.SamplerAnisotropy,
             DepthClamp = available.DepthClamp,
             ShaderClipDistance = available.ShaderClipDistance,
+            GeometryShader = available.GeometryShader,
+            ShaderTessellationAndGeometryPointSize = available.ShaderTessellationAndGeometryPointSize,
             OcclusionQueryPrecise = available.OcclusionQueryPrecise,
         };
 

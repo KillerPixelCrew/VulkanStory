@@ -201,6 +201,7 @@ internal static unsafe partial class ManagedWindowBridge
                 Add(AccessTools.Method(typeof(NativeWindow), name)!, nameof(MonitorScale));
             Add(typeof(GLFW).GetMethod(nameof(GLFW.GetCurrentContext), Type.EmptyTypes)!, nameof(GetCurrentContext));
             Add(typeof(GLFW).GetMethod(nameof(GLFW.MakeContextCurrent), [typeof(Window).MakePointerType()])!, nameof(MakeContextCurrent));
+            Add(typeof(GLFW).GetMethod(nameof(GLFW.GetProcAddress), [typeof(string)])!, nameof(GetGlProcedure));
             Add(typeof(GLFW).GetMethod(nameof(GLFW.GetClipboardString), [typeof(Window).MakePointerType()])!, nameof(GetClipboard));
             Add(typeof(GLFW).GetMethod(nameof(GLFW.SetClipboardString), [typeof(Window).MakePointerType(), typeof(string)])!, nameof(SetClipboard));
             Add(typeof(GLFW).GetMethod(nameof(GLFW.GetWindowOpacity), [typeof(Window).MakePointerType()])!, nameof(GetOpacity));
@@ -552,6 +553,12 @@ internal static unsafe partial class ManagedWindowBridge
         nint token = (nint)__0;
         if (token == 0) { current?.Group.Gl.SelectContext(0, 0, 0, 0); current = null; }
         else RequireTokenEntry(token).MakeCurrent();
+        return false;
+    }
+    private static bool GetGlProcedure(string __0, ref nint __result)
+    {
+        if (!ManagedWindowRouting) return true;
+        __result = ManagedGlBridge.Current is null ? 0 : ManagedGlCallPatches.ProcedureAddress(__0);
         return false;
     }
     private static bool GetClipboard(Window* __0, ref string __result)
