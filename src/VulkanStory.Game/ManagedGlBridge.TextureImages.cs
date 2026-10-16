@@ -5,8 +5,9 @@ namespace VulkanStory.Game;
 
 internal sealed partial class ManagedGlBridge
 {
-    private static void RequireImageFormat(int format)
+    private static void RequireImageFormat(int format, bool immutableStorage = false)
     {
+        if (immutableStorage && (format is 0x88F0 or 0x8CAD)) return;
         if (format is not (0x1902 or 0x1903 or 0x1907 or 0x1908 or 0x8227 or 0x8229 or 0x822B or 0x822D or 0x822E or 0x822F or 0x8230 or
             0x8051 or 0x8058 or 0x805B or 0x8814 or 0x8815 or 0x881A or 0x881B or 0x8C3A or 0x8C42 or 0x8C43 or 0x80E1 or 0x81A5 or 0x81A6 or 0x81A7 or 0x8CAC))
             throw new NotSupportedException("GL image storage format 0x" + format.ToString("X") + " has no storage conversion.");

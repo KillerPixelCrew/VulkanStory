@@ -110,6 +110,7 @@ internal static class GlEnums
         0x881B => Format.R16G16B16A16Sfloat,
         0x8815 => Format.R32G32B32A32Sfloat,
         0x1902 or 0x81A6 or 0x81A7 => Format.D32Sfloat,
+        0x88F0 or 0x8CAD => Format.D32SfloatS8Uint,
         0x8058 => Format.R8G8B8A8Unorm,        // GL_RGBA8
         0x8C42 or 0x8C43 => Format.R8G8B8A8Srgb, // GL_SRGB_ALPHA / GL_SRGB8_ALPHA8
         0x881A => Format.R16G16B16A16Sfloat,   // GL_RGBA16F

@@ -354,6 +354,8 @@ public enum ResourceUsage
     TransferDst,
     /// <summary>Handed to vkQueuePresentKHR.</summary>
     PresentSrc,
+    /// <summary>Sampled read-only depth with writable stencil in the same image.</summary>
+    DepthReadStencilWriteSampled,
 }
 
 /// <summary>
@@ -398,6 +400,9 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.DepthReadOnlySampled => new(ImageLayout.DepthStencilReadOnlyOptimal,
             DepthTests | PipelineStageFlags2.AllGraphicsBit,
             AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderReadBit),
+        ResourceUsage.DepthReadStencilWriteSampled => new(ImageLayout.DepthReadOnlyStencilAttachmentOptimal,
+            DepthTests | PipelineStageFlags2.AllGraphicsBit,
+            AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit | AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleFragment => new(ImageLayout.ShaderReadOnlyOptimal,
             PipelineStageFlags2.FragmentShaderBit, AccessFlags2.ShaderReadBit),
         ResourceUsage.SampleVertex => new(ImageLayout.ShaderReadOnlyOptimal,
@@ -442,7 +447,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         {
             ResourceUsage.ColorWrite or ResourceUsage.ColorBlend =>
                 (PipelineStageFlags2.ColorAttachmentOutputBit, AccessFlags2.ColorAttachmentWriteBit),
-            ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled =>
+            ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled or ResourceUsage.DepthReadStencilWriteSampled =>
                 (DepthTests, AccessFlags2.DepthStencilAttachmentWriteBit),
             ResourceUsage.TransferDst => (PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
             // A dispatch's storage write: the next barrier must make it available.
@@ -466,6 +471,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ImageLayout.ColorAttachmentOptimal => ResourceUsage.ColorBlend,
         ImageLayout.DepthAttachmentOptimal or ImageLayout.DepthStencilAttachmentOptimal => ResourceUsage.DepthWrite,
         ImageLayout.DepthReadOnlyOptimal or ImageLayout.DepthStencilReadOnlyOptimal => ResourceUsage.DepthReadOnlySampled,
+        ImageLayout.DepthReadOnlyStencilAttachmentOptimal => ResourceUsage.DepthReadStencilWriteSampled,
         ImageLayout.TransferSrcOptimal => ResourceUsage.TransferSrc,
         ImageLayout.TransferDstOptimal => ResourceUsage.TransferDst,
         ImageLayout.PresentSrcKhr => ResourceUsage.PresentSrc,
@@ -480,6 +486,7 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         (ResourceUsage.DepthWrite, false) => ResourceUsage.ColorBlend,
         (ResourceUsage.DepthReadOnly, false) => ResourceUsage.ColorBlend,
         (ResourceUsage.DepthReadOnlySampled, false) => ResourceUsage.ColorBlend,
+        (ResourceUsage.DepthReadStencilWriteSampled, false) => ResourceUsage.ColorBlend,
         _ => usage,
     };
 }

@@ -223,14 +223,6 @@ public sealed unsafe partial class VulkanDevice
             error = "a pipeline that samples the bound depth attachment cannot also write depth";
             return null;
         }
-        static bool WritesStencil(StencilOpState state) => (state.WriteMask & 255) != 0 &&
-            (state.FailOp != StencilOp.Keep || state.PassOp != StencilOp.Keep || state.DepthFailOp != StencilOp.Keep);
-        if (description.SamplesBoundDepth && description.StencilTest && description.Targets.StencilFormat != Format.Undefined &&
-            (WritesStencil(description.StencilFront) || WritesStencil(description.StencilBack)))
-        {
-            error = "sampling bound depth while writing stencil requires separate depth/stencil layout support";
-            return null;
-        }
         if (description.VertexLayoutId < 0 || description.VertexLayoutId >= _meshes.LayoutCount)
         {
             error = "vertex layout " + description.VertexLayoutId + " does not exist";
@@ -571,6 +563,9 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
+    private static bool WritesStencil(StencilOpState state) => (state.WriteMask & 255) != 0 &&
+        (state.FailOp != StencilOp.Keep || state.PassOp != StencilOp.Keep || state.DepthFailOp != StencilOp.Keep);
+
     /// <summary>
     /// Everything a native draw needs before its draw command: the pass and pipeline are
     /// checked, the textures the draw samples are put into the layout a shader read needs,
@@ -662,7 +657,9 @@ public sealed unsafe partial class VulkanDevice
         _barriers.Flush(commandBuffer);
 
         // Decided before the scope opens, since it decides the depth attachment's layout.
-        _targets.SetDepthReadOnly(depthReadOnly);
+        bool stencilWritable = pipeline.Description.StencilTest && bound.Stencil.TextureId != 0 &&
+            (WritesStencil(pipeline.Description.StencilFront) || WritesStencil(pipeline.Description.StencilBack));
+        _targets.SetDepthReadOnly(depthReadOnly, stencilWritable);
         _targets.EnsureRendering(commandBuffer);
 
         if (!_targets.ScopeFormatsMatch(bound, pipeline.Description.Targets))
@@ -761,7 +758,7 @@ public sealed unsafe partial class VulkanDevice
             // The bound depth attachment is sampled in the read-only depth layout, the one the
             // scope holds it in, exactly as the emulated resolve keys it.
             ImageLayout layout = depthReadOnly && _targets.IsBoundDepth(sampled.TextureId)
-                ? ImageLayout.DepthStencilReadOnlyOptimal
+                ? _targets.DepthSamplingLayout
                 : ImageLayout.ShaderReadOnlyOptimal;
 
             if (sampler.FrameBinding >= 0)

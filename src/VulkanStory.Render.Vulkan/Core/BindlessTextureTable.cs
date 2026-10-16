@@ -536,8 +536,11 @@ internal static class BindlessKinds
         if (!dimensions) return false;
 
         string name = shape.Format.ToString();
-        bool unsigned = name.Contains("Uint", StringComparison.Ordinal);
-        bool signed = name.Contains("Sint", StringComparison.Ordinal);
+        // A combined depth/stencil format's Uint suffix describes stencil;
+        // its default sampled view exposes floating-point depth only.
+        bool depth = TextureManager.IsDepthFormat(shape.Format);
+        bool unsigned = !depth && name.Contains("Uint", StringComparison.Ordinal);
+        bool signed = !depth && name.Contains("Sint", StringComparison.Ordinal);
         return kind switch
         {
             _ when IsShadow(kind) => TextureManager.IsDepthFormat(shape.Format),

@@ -272,11 +272,12 @@ public sealed unsafe partial class VulkanDevice
         if (x < 0 || y < 0 || width <= 0 || height <= 0 || (long)x + width > Math.Max(1u, texture.Width >> level) ||
             (long)y + height > Math.Max(1u, texture.Height >> level)) throw new ArgumentOutOfRangeException(nameof(width));
         EndNativePass();
-        var bytes = new byte[checked(width * height * BytesPerPixel(texture.Format))];
+        Format readbackFormat = texture.Format == Format.D32SfloatS8Uint ? Format.D32Sfloat : texture.Format;
+        var bytes = new byte[checked(width * height * BytesPerPixel(readbackFormat))];
         ImageAspectFlags aspect = (texture.Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
         fixed (byte* destination = bytes)
             ReadBack(texture, x, y, (uint)width, (uint)height, aspect, (ulong)bytes.Length, (IntPtr)destination, (uint)level);
-        return TextureDump.ToParityReadback(texture.Format, texture.GlInternalFormat, width, height, bytes) ??
+        return TextureDump.ToParityReadback(readbackFormat, texture.GlInternalFormat, width, height, bytes) ??
             throw new NotSupportedException("GL readback conversion is unavailable for " + texture.Format);
     }
 

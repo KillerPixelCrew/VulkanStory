@@ -6,7 +6,7 @@ internal sealed unsafe partial class TextureManager
 {
     internal int CreateMipStorage(uint width, uint height, Format format, uint levels)
     {
-        ImageAspectFlags aspect = IsDepthFormat(format) ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+        ImageAspectFlags aspect = AspectOf(format);
         ImageUsageFlags usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferSrcBit | ImageUsageFlags.TransferDstBit |
             (IsDepthFormat(format) ? ImageUsageFlags.DepthStencilAttachmentBit : ImageUsageFlags.ColorAttachmentBit);
         return CreateImage(width, height, format, levels, 1, false, usage, aspect, MemoryPoolClass.DeviceImages);

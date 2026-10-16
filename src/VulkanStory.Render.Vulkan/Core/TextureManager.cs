@@ -503,7 +503,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
         {
             if (!_reservedNames.ContainsKey(reservedName))
                 throw new InvalidOperationException("Texture storage requires a live, undefined reserved name.");
-            ImageAspectFlags aspect = IsDepthFormat(format) ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
+            ImageAspectFlags aspect = AspectOf(format);
             ImageUsageFlags usage = ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit |
                 (IsDepthFormat(format) ? ImageUsageFlags.DepthStencilAttachmentBit : ImageUsageFlags.ColorAttachmentBit);
             CreateImage(width, height, format, mipLevels, 1, false, usage, aspect, MemoryPoolClass.DeviceImages, reservedName);
@@ -529,9 +529,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
         height = Math.Max(1, height);
 
         uint mipLevels = generateMipmaps ? MipLevelsFor(width, height) : 1;
-        ImageAspectFlags aspect = IsDepthFormat(format)
-            ? ImageAspectFlags.DepthBit
-            : ImageAspectFlags.ColorBit;
+        ImageAspectFlags aspect = AspectOf(format);
 
         ImageUsageFlags usage =
             ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit | ImageUsageFlags.TransferSrcBit
@@ -1267,6 +1265,9 @@ internal sealed unsafe partial class TextureManager : IDisposable
     public static bool IsDepthFormat(Format format) => format is
         Format.D16Unorm or Format.D32Sfloat or Format.D24UnormS8Uint or Format.D32SfloatS8Uint
         or Format.X8D24UnormPack32 or Format.D16UnormS8Uint;
+
+    internal static ImageAspectFlags AspectOf(Format format) => format is Format.D24UnormS8Uint or Format.D32SfloatS8Uint or Format.D16UnormS8Uint
+        ? ImageAspectFlags.DepthBit | ImageAspectFlags.StencilBit : IsDepthFormat(format) ? ImageAspectFlags.DepthBit : ImageAspectFlags.ColorBit;
 
     /// <inheritdoc/>
     public void Dispose()

@@ -119,7 +119,7 @@ internal sealed unsafe class PassRecorder
     /// </summary>
     public void Prepare(CommandBuffer commandBuffer, VulkanFramebuffer framebuffer, ReadOnlySpan<VulkanTexture?> colour,
         VulkanTexture? depth, bool depthReadOnly, int formatsId, IReadOnlyList<VulkanFramebuffer?> framebuffers,
-        Span<RenderingAttachmentInfo> attachments, ref RenderingAttachmentInfo depthAttachment)
+        Span<RenderingAttachmentInfo> attachments, ref RenderingAttachmentInfo depthAttachment, bool stencilWritable = false)
     {
         PassDeclaration? declaration = ReferenceEquals(DeclaredOn, framebuffer) ? Declared : null;
         bool split = declaration != null && Opened;
@@ -172,7 +172,7 @@ internal sealed unsafe class PassRecorder
         {
             int depthStencilName = framebuffer.DepthTextureId != 0 ? framebuffer.DepthTextureId : framebuffer.Stencil.TextureId;
             _uses.Add(new AttachmentUse(depthStencilName,
-                depthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite, false));
+                depthReadOnly ? stencilWritable ? ResourceUsage.DepthReadStencilWriteSampled : ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite, false));
         }
 
         int passIndex;

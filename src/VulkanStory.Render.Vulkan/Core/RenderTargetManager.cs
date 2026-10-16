@@ -235,17 +235,21 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     ///
     /// GL lets a pass sample the depth buffer it is drawing against as long as
     /// depth writes are off - the liquid pass reads scene depth that way to fade
-    /// water at its edges. Vulkan allows the same only if the attachment is in
-    /// DEPTH_READ_ONLY_OPTIMAL for both the attachment and the descriptor, so
-    /// the scope switches layout for such draws and back for the next that
-    /// writes depth.
+    /// water at its edges. Attachment and descriptor share a read-only depth layout; stencil
+    /// remains writable when its fixed-function operations need it.
     /// </summary>
     public bool DepthReadOnly { get; private set; }
+    public bool StencilWritable { get; private set; }
+    internal ImageLayout DepthSamplingLayout => StencilWritable ? ImageLayout.DepthReadOnlyStencilAttachmentOptimal : ImageLayout.DepthStencilReadOnlyOptimal;
+    private ImageLayout DepthAttachmentLayout => DepthReadOnly ? DepthSamplingLayout : ImageLayout.DepthStencilAttachmentOptimal;
+    private ResourceUsage DepthUsage => !DepthReadOnly ? ResourceUsage.DepthWrite : StencilWritable ? ResourceUsage.DepthReadStencilWriteSampled : ResourceUsage.DepthReadOnlySampled;
 
-    public void SetDepthReadOnly(bool readOnly)
+    public void SetDepthReadOnly(bool readOnly, bool stencilWritable = false)
     {
-        if (DepthReadOnly == readOnly) return;
+        stencilWritable &= readOnly;
+        if (DepthReadOnly == readOnly && StencilWritable == stencilWritable) return;
         DepthReadOnly = readOnly;
+        StencilWritable = stencilWritable;
         if (_renderingActive) _needsRestart = true;
     }
 
@@ -519,13 +523,11 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             VulkanTexture? depth = _textures.Get(framebuffer.DepthTextureId);
             if (depth != null)
             {
-                ImageLayout depthLayout = DepthReadOnly
-                    ? ImageLayout.DepthStencilReadOnlyOptimal
-                    : ImageLayout.DepthStencilAttachmentOptimal;
+                ImageLayout depthLayout = DepthAttachmentLayout;
                 // Read-only depth may be sampled by the draws of this scope.
                 if (graph) scopeDepth = depth;
                 else _textures.Require(_barriers, commandBuffer, depth,
-                    DepthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite);
+                    DepthUsage);
                 depthAttachment = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
@@ -546,14 +548,14 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             {
                 SType = StructureType.RenderingAttachmentInfo,
                 ImageView = stencil.ViewOfLayer(framebuffer.Stencil.Layer, framebuffer.Stencil.MipLevel),
-                ImageLayout = DepthReadOnly ? ImageLayout.DepthStencilReadOnlyOptimal : ImageLayout.DepthStencilAttachmentOptimal,
+                ImageLayout = DepthAttachmentLayout,
                 LoadOp = AttachmentLoadOp.Load, StoreOp = AttachmentStoreOp.Store,
             };
             hasStencil = true;
             if (!hasDepth)
             {
                 if (graph) scopeDepth = stencil;
-                else _textures.Require(_barriers, commandBuffer, stencil, DepthReadOnly ? ResourceUsage.DepthReadOnly : ResourceUsage.DepthWrite);
+                else _textures.Require(_barriers, commandBuffer, stencil, DepthUsage);
                 depthAttachment = stencilAttachment; // The recorder tracks the one depth/stencil image.
             }
         }
@@ -561,7 +563,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (graph)
         {
             _recorder.Prepare(commandBuffer, framebuffer, scopeColour, scopeDepth, DepthReadOnly,
-                FormatsIdOf(framebuffer), _framebuffers, attachments, ref depthAttachment);
+                FormatsIdOf(framebuffer), _framebuffers, attachments, ref depthAttachment, StencilWritable);
             scopeColour.Clear();
         }
 
