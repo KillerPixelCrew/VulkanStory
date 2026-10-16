@@ -571,7 +571,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private object? ShaderQuery(MethodInfo method, object?[] a)
     {
         ShaderObject shader = Shader(I(a[0]));
-        int value = I(a[1]) switch { 0x8B81 => shader.Compiled ? 1 : 0, 0x8B80 => shader.Deleted ? 1 : 0, 0x8B4F => shader.Type, 0x8B84 => shader.Log.Length == 0 ? 0 : shader.Log.Length + 1, 0x8B88 => shader.Source.Length + 1, _ => -1 };
+        int value = I(a[1]) switch { 0x8B81 => shader.Compiled ? 1 : 0, 0x8B80 => shader.Deleted ? 1 : 0, 0x8B4F => shader.Type, 0x8B84 => shader.Log.Length == 0 ? 0 : System.Text.Encoding.UTF8.GetByteCount(shader.Log) + 1, 0x8B88 => shader.Source.Length == 0 ? 0 : System.Text.Encoding.UTF8.GetByteCount(shader.Source) + 1, _ => -1 };
         if (value < 0) Error(0x0500);
         if (a.Length > 2) WriteOutput(method, a, 2, [value], false);
         return method.ReturnType == typeof(void) ? null : value;
@@ -579,7 +579,7 @@ internal sealed partial class ManagedGlBridge : IDisposable
     private object? ProgramQuery(MethodInfo method, object?[] a)
     {
         ProgramObject program = Program(I(a[0]));
-        int value = I(a[1]) switch { 0x8B82 => program.Linked ? 1 : 0, 0x8B80 => program.Deleted ? 1 : 0, 0x8B84 => program.Log.Length == 0 ? 0 : program.Log.Length + 1, 0x8B85 => program.Stages.Count, _ => -1 };
+        int value = I(a[1]) switch { 0x8B82 => program.Linked ? 1 : 0, 0x8B80 => program.Deleted ? 1 : 0, 0x8B84 => program.Log.Length == 0 ? 0 : System.Text.Encoding.UTF8.GetByteCount(program.Log) + 1, 0x8B85 => program.Stages.Count, _ => -1 };
         if (I(a[1]) == 0x8B86) value = Device.ActiveGlUniforms(program.Backend).Length;
         if (I(a[1]) == 0x8B87) value = Device.ActiveGlUniforms(program.Backend).Select(uniform => System.Text.Encoding.UTF8.GetByteCount(uniform.Name) + 1).DefaultIfEmpty(0).Max();
         if (value < 0) Error(0x0500);
@@ -591,12 +591,27 @@ internal sealed partial class ManagedGlBridge : IDisposable
         if (method.ReturnType == typeof(string)) return log;
         if (a.Length < 4) throw new NotSupportedException("Managed GL info-log output overload " + method + " is unsupported.");
         int capacity = I(a[1]); if (capacity < 0) Error(0x0501);
-        string text = log[..Math.Min(log.Length, Math.Max(0, capacity - 1))];
-        WriteOutput(method, a, 2, [text.Length], false);
-        if (a[3] is System.Text.StringBuilder builder) { builder.Clear(); builder.Append(text); }
-        else if (method.GetParameters()[3].ParameterType.GetElementType() == typeof(string)) a[3] = text;
-        else { IntPtr pointer = Pointer(a[3]); byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text + (capacity > 0 ? "\0" : "")); if (bytes.Length > 0) Marshal.Copy(bytes, 0, pointer, bytes.Length); }
+        int count = WriteTextOutput(method, a, 3, capacity, log);
+        if (a[2] is not IntPtr length || length != 0) WriteOutput(method, a, 2, [count], false);
         return null;
+    }
+    private static int WriteTextOutput(MethodInfo method, object?[] a, int index, int capacity, string text)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        int count = Math.Min(bytes.Length, Math.Max(0, capacity - 1));
+        // The reflected command can describe string&, while a native thunk
+        // supplies char*. Choose from the actual argument before its wrapper type.
+        if (a[index] is System.Text.StringBuilder builder)
+        { builder.Clear(); builder.Append(System.Text.Encoding.UTF8.GetString(bytes, 0, count)); }
+        else if (a[index] is not IntPtr && method.GetParameters()[index].ParameterType == typeof(string).MakeByRefType())
+            a[index] = System.Text.Encoding.UTF8.GetString(bytes, 0, count);
+        else
+        {
+            if (capacity == 0) return count;
+            IntPtr pointer = Pointer(a[index]); if (pointer == IntPtr.Zero) Error(0x0501);
+            Marshal.Copy(bytes, 0, pointer, count); Marshal.WriteByte(pointer, count, 0);
+        }
+        return count;
     }
     private void UseProgram(int name)
     {
@@ -992,14 +1007,14 @@ internal sealed partial class ManagedGlBridge : IDisposable
         {
             if (values.Length != 1) throw new NotSupportedException("Managed GL multi-value queries require an array or pointer destination.");
             Type element = type.GetElementType()!;
-            a[index] = element == typeof(bool) ? values[0] != 0 : Convert.ChangeType(values[0], element, System.Globalization.CultureInfo.InvariantCulture); return;
+            a[index] = element == typeof(bool) ? values[0] != 0 : element.IsEnum ? Enum.ToObject(element, values[0]) : Convert.ChangeType(values[0], element, System.Globalization.CultureInfo.InvariantCulture); return;
         }
         if (a[index] is Array array)
         {
             if (array.Length < values.Length) Error(0x0501);
             Type element = array.GetType().GetElementType()!;
             for (int i = 0; i < values.Length; i++)
-                array.SetValue(element == typeof(bool) ? values[i] != 0 : Convert.ChangeType(values[i], element, System.Globalization.CultureInfo.InvariantCulture), i);
+                array.SetValue(element == typeof(bool) ? values[i] != 0 : element.IsEnum ? Enum.ToObject(element, values[i]) : Convert.ChangeType(values[i], element, System.Globalization.CultureInfo.InvariantCulture), i);
             return;
         }
         IntPtr pointer = Pointer(a[index]); if (pointer == IntPtr.Zero) Error(0x0501);

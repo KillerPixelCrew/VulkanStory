@@ -28,17 +28,13 @@ public static partial class ManagedGlCallPatches
         {
             string[] names = (string[])(binding.GetField("EntryPointNames", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)?.GetValue(null)
                 ?? throw new MissingFieldException(binding.FullName, "EntryPointNames"));
-            foreach (MethodInfo method in SupportedMethods.Where(method => method.DeclaringType == binding &&
-                method.GetParameters().All(parameter => parameter.ParameterType.IsPrimitive || parameter.ParameterType.IsEnum ||
-                    parameter.ParameterType.IsPointer || parameter.ParameterType == typeof(nint) || parameter.ParameterType == typeof(string))))
+            foreach (MethodInfo method in SupportedMethods.Where(method => method.DeclaringType == binding))
             {
                 var shape = RawNativeSignature((MethodDefinition)image.MainModule.LookupToken(method.MetadataToken));
                 if (shape is not { } native || native.Parameters.Length != method.GetParameters().Length ||
                     (uint)native.Slot >= names.Length || NativeProcedures.ContainsKey(names[native.Slot])) continue;
-                // String arguments arrive as borrowed UTF-8 pointers. All other
-                // parameters must keep the exact widths of OpenTK's own calli.
                 ParameterInfo[] parameters = method.GetParameters();
-                if (parameters.Where((parameter, index) => parameter.ParameterType == typeof(string) && native.Parameters[index] != typeof(nint)).Any()) continue;
+                if (parameters.Where((parameter, index) => !NativeParameter(method.Name, index, parameter.ParameterType, native.Parameters[index])).Any()) continue;
                 if (method.ReturnType == typeof(string) && native.ReturnType != typeof(nint)) continue;
 
                 int key = Calls.Count + 1;
@@ -47,6 +43,24 @@ public static partial class ManagedGlCallPatches
                 NativeProcedures.Add(names[native.Slot], EmitNativeProcedure(key, native.ReturnType, native.Parameters));
             }
         }
+        foreach (string required in new[] { "glGetString", "glGetStringi", "glGetIntegerv", "glShaderSource", "glGetShaderInfoLog", "glGetProgramInfoLog", "glGetActiveUniform" })
+            if (!NativeProcedures.ContainsKey(required)) throw new MissingMethodException("Native GL export is absent: " + required);
+    }
+
+    private static bool NativeParameter(string command, int index, Type managed, Type native)
+    {
+        if (managed.IsPrimitive || managed.IsEnum) return true;
+        if (native != typeof(nint)) return false;
+        if (managed.IsPointer || managed == typeof(nint) || managed == typeof(string)) return true;
+        if (managed.IsByRef)
+        {
+            Type value = managed.GetElementType()!;
+            if (value.IsPrimitive || value.IsEnum) return true;
+            return value == typeof(string) && ((command is "GetShaderInfoLog" or "GetProgramInfoLog") && index == 3 || command == "GetActiveUniform" && index == 6);
+        }
+        // These wrappers marshal managed strings, but their checked calli takes
+        // char**. Dispatch already accepts that borrowed pointer directly.
+        return command == "ShaderSource" && index == 2 && managed == typeof(string[]);
     }
 
     private static nint EmitNativeProcedure(int key, Type returns, Type[] parameters)

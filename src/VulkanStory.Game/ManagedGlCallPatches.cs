@@ -98,7 +98,9 @@ public static partial class ManagedGlCallPatches
                  parameters[2].ParameterType.IsPointer && parameters[2].ParameterType.GetElementType()!.IsPointer);
             case "GetString": return parameters.Length is 1 or 2 && method.ReturnType == typeof(string);
             case "GetActiveUniform": return parameters.Length == 4 && method.ReturnType == typeof(string) && parameters[2].ParameterType.IsByRef && parameters[3].ParameterType.IsByRef ||
-                parameters.Length == 7 && method.ReturnType == typeof(void) && parameters.Skip(3).All(parameter => parameter.ParameterType.IsPointer || parameter.ParameterType == typeof(nint));
+                parameters.Length == 7 && method.ReturnType == typeof(void) && Output(3) &&
+                parameters[4].ParameterType.HasElementType && parameters[5].ParameterType.HasElementType &&
+                (parameters[6].ParameterType == typeof(string).MakeByRefType() || parameters[6].ParameterType.IsPointer || parameters[6].ParameterType == typeof(nint));
             case "GetUniform": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } uniformType && (uniformType == typeof(int) || uniformType == typeof(float));
             case "ProgramUniform1": return parameters.Length == 3 && (parameters[2].ParameterType == typeof(int) || parameters[2].ParameterType == typeof(float));
             case "ClearBuffer": return parameters.Length == 3 && parameters[2].ParameterType.HasElementType && parameters[2].ParameterType.GetElementType() is { } clearType && (clearType == typeof(int) || clearType == typeof(float));

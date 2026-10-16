@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.InteropServices;
 
 namespace VulkanStory.Game;
 
@@ -17,16 +16,10 @@ internal sealed partial class ManagedGlBridge
         if (a.Length == 7)
         {
             int capacity = I(a[2]); if (capacity < 0) Error(0x0501);
-            byte[] name = System.Text.Encoding.UTF8.GetBytes(uniform.Name);
-            int count = Math.Min(name.Length, Math.Max(0, capacity - 1));
-            if (Pointer(a[3]) != 0) Marshal.WriteInt32(Pointer(a[3]), count);
-            if (Pointer(a[4]) != 0) Marshal.WriteInt32(Pointer(a[4]), uniform.Count);
-            if (Pointer(a[5]) != 0) Marshal.WriteInt32(Pointer(a[5]), type);
-            if (capacity > 0)
-            {
-                nint pointer = Pointer(a[6]); if (pointer == 0) Error(0x0501);
-                Marshal.Copy(name, 0, pointer, count); Marshal.WriteByte(pointer, count, 0);
-            }
+            int count = WriteTextOutput(method, a, 6, capacity, uniform.Name);
+            if (a[3] is not IntPtr length || length != 0) WriteOutput(method, a, 3, [count], false);
+            WriteOutput(method, a, 4, [uniform.Count], false);
+            WriteOutput(method, a, 5, [type], false);
             return null;
         }
         WriteOutput(method, a, 2, [uniform.Count], false);

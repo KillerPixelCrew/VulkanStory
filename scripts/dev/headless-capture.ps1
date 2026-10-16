@@ -47,6 +47,8 @@ Copies additional mod entries into the isolated run, rejecting names already sup
 Attaches the native crash monitor only to this launcher's client child. First-chance AV capture is armed by the runtime's shutdown marker under native-crash; normal terminal capture remains active throughout and does not swallow exceptions. At watchdog timeout, requests one thread/stack snapshot and waits at most ten seconds before terminating this child.
 .PARAMETER NativeCrashMonitorPath
 Optional explicit crash-monitor executable. Requires NativeCrashCapture; otherwise uses the staged package's native/win-x64/VulkanStory.CrashMonitor.exe.
+.PARAMETER NativeCrashFirstChanceAv
+Requires NativeCrashCapture. Arms the monitor's existing bounded first-chance access-violation capture before startup instead of waiting for shutdown.
 .PARAMETER PreflightOnly
 Returns compact JSON and exit 0/1 for preparation validation without creating a run directory or starting the client.
 .PARAMETER ParityDump
@@ -94,6 +96,7 @@ param(
     [string]$AdditionalModDirectory,
     [switch]$NativeCrashCapture,
     [string]$NativeCrashMonitorPath,
+    [switch]$NativeCrashFirstChanceAv,
     [switch]$PreflightOnly,
     [switch]$ParityDump,
     [int]$ParityFrame = -1,
@@ -553,6 +556,9 @@ try {
     if ($NativeCrashMonitorPath -and -not $NativeCrashCapture) {
         Throw-ScenarioError 'NativeCrashCapture' 'NativeCrashMonitorPath requires NativeCrashCapture.'
     }
+    if ($NativeCrashFirstChanceAv -and -not $NativeCrashCapture) {
+        Throw-ScenarioError 'NativeCrashCapture' 'NativeCrashFirstChanceAv requires NativeCrashCapture.'
+    }
     if ($NativeCrashCapture) {
         $nativeCrashMonitor = [IO.Path]::GetFullPath($(if ($NativeCrashMonitorPath) { $NativeCrashMonitorPath }
             else { Join-Path $PackageDirectory 'VulkanStory/native/win-x64/VulkanStory.CrashMonitor.exe' }))
@@ -746,6 +752,9 @@ $reportRoot = $null
 if ($NativeCrashCapture) {
     $reportRoot = Join-Path $runRoot 'native-crash'
     New-Item -ItemType Directory -Path $reportRoot | Out-Null
+    if ($NativeCrashFirstChanceAv) {
+        [IO.File]::WriteAllText((Join-Path $reportRoot 'capture-first-chance-av.enabled'), 'isolated startup diagnostic')
+    }
     [IO.File]::WriteAllText((Join-Path $reportRoot 'bootstrap-path.txt'), (Join-Path $runRoot 'bootstrap.jsonl'))
     [IO.File]::WriteAllText((Join-Path $reportRoot 'game-data-path.txt'), $dataRoot)
     $info.Environment['VULKANSTORY_NATIVE_CRASH_CAPTURE_DIRECTORY'] = $reportRoot
