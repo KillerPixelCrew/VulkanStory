@@ -4,7 +4,7 @@ A Vulkan renderer, SDL3 window and input layer, and modern upscaling / frame
 generation for **Vintage Story 1.22.7**, delivered as a mod for the official,
 unmodified game.
 
-> **Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4)** for Windows x64. Known defects and
+> **Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.5)** for Windows x64. Known defects and
 > remaining work are tracked in the [roadmap](docs/ROADMAP.md).
 
 ## Features
@@ -54,7 +54,7 @@ VulkanStory starts **before** the game creates its window, so it is installed be
 the game executable, not only into `Mods`.
 
 1. Close the game.
-2. Download **VulkanStory-win-x64.zip** from the [v0.1.4 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4).
+2. Download **VulkanStory-win-x64.zip** from the [v0.1.5 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.5).
    Extract it into the folder that contains `Vintagestory.exe`, keeping
    the folder layout. This adds `hostfxr.dll`, `VulkanStory/`, `Mods/vulkanstory` and
    `Mods/vulkanstoryinput`. The game's own files are not modified.

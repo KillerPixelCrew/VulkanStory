@@ -14,7 +14,7 @@ should not be assumed from singleplayer use.
 
 ## Install through the installer mod
 
-1. Place `VulkanStory-Installer-0.1.4.zip` in the game's Mods folder, or your
+1. Place `VulkanStory-Installer-0.1.5.zip` in the game's Mods folder, or your
    Vintage Story data directory's Mods folder. Leave the ZIP compressed.
 2. Start the game and enter a world. The prompt runs after world loading finishes;
    it does not appear on the initial main menu.

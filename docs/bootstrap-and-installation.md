@@ -6,7 +6,7 @@ A ZIP placed only in `Mods` cannot do that. Player-facing steps are in the packa
 [client README](../packaging/README-client.txt) and
 [Linux README](../packaging/README-linux-client.txt).
 
-The [v0.1.4 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4)
+The [v0.1.5 release](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.5)
 ships the Windows x64 client, installer mod and optional dedicated-server input companion, plus
 `SHA256SUMS.txt` and `archives.json`. Linux activation below describes the source
 tooling; no Linux client archive is published in this release.

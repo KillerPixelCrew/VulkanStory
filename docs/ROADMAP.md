@@ -1,6 +1,6 @@
 # Roadmap
 
-Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.4) (Windows x64, Vintage Story 1.22.7).
+Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/releases/tag/v0.1.5) (Windows x64, Vintage Story 1.22.7).
 
 ## Done
 
