@@ -755,11 +755,13 @@ public sealed unsafe partial class VulkanDevice
                 ? ImageLayout.DepthStencilReadOnlyOptimal
                 : ImageLayout.ShaderReadOnlyOptimal;
 
+            ImageView sampledView = texture == null ? default : sampled.LinearColor
+                ? texture.ViewOfMips(0, texture.MipLevels, linearColor: true) : texture.View;
             if (sampler.FrameBinding >= 0)
             {
                 SamplerBindingValue value = texture == null
                     ? default
-                    : new SamplerBindingValue((uint)sampler.FrameBinding, texture.View,
+                    : new SamplerBindingValue((uint)sampler.FrameBinding, sampledView,
                         _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, sampler.Kind)), texture.Id, layout);
                 if (texture == null) VulkanStats.NoteSamplerPlaceholder();
                 int frameIndex = FrameTextureIndex(sampler.FrameBinding);
@@ -771,7 +773,7 @@ public sealed unsafe partial class VulkanDevice
                 continue;
             }
 
-            uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling, layout);
+            uint slot = _bindless!.Resolve(texture, sampler.Kind, sampling, layout, sampledView);
             if (RenderTrace.Enabled)
             {
                 RenderTrace.Write("native sample program=" + program.ProgramId + " sampler=" + sampler.Index +

@@ -58,7 +58,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Copies/scales a GL rectangle without changing its affine mapping when framebuffer/scissor bounds clip it.</summary>
     internal void BlitTextureRectangle(int sourceId, int sourceLevel, int sourceLayer, int destinationId, int destinationLevel, int destinationLayer,
         TextureBlitRectangle sourceRect, TextureBlitRectangle destinationRect, int sourceWidth, int sourceHeight,
-        int destinationWidth, int destinationHeight, Rect2D? scissor, bool linear, ImageAspectFlags aspect = 0)
+        int destinationWidth, int destinationHeight, Rect2D? scissor, bool linear, ImageAspectFlags aspect = 0, bool framebufferSrgb = true)
     {
         VulkanTexture source = _textures.Get(sourceId) ?? throw new ArgumentException("Missing blit source.");
         VulkanTexture destination = _textures.Get(destinationId) ?? throw new ArgumentException("Missing blit destination.");
@@ -86,10 +86,12 @@ public sealed unsafe partial class VulkanDevice
             right = Math.Min(right, (long)clip.Offset.X + clip.Extent.Width); top = Math.Min(top, (long)clip.Offset.Y + clip.Extent.Height);
         }
         if (left >= right || bottom >= top) return;
-        int copyId = 0, sourceOriginX = 0, sourceOriginY = 0;
+        bool linearResolve = !framebufferSrgb && !depth && VulkanTexture.LinearColorFormat(source.Format) != source.Format &&
+            source.Samples != SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit;
+        int copyId = 0, linearMultisampleId = 0, sourceOriginX = 0, sourceOriginY = 0;
         try
         {
-            if (source.Image.Handle == destination.Image.Handle || source.Layers > 1 || source.Cube ||
+            if (linearResolve || source.Image.Handle == destination.Image.Handle || source.Layers > 1 || source.Cube ||
                 source.Samples != SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit &&
                 (sourceDeltaX != destinationDeltaX || sourceDeltaY != destinationDeltaY))
             {
@@ -100,17 +102,39 @@ public sealed unsafe partial class VulkanDevice
                 int endX = (int)Math.Min(sourceWidth, (long)Math.Max(sourceRect.X0, sourceRect.X1) + (linear ? 1 : 0));
                 int endY = (int)Math.Min(sourceHeight, (long)Math.Max(sourceRect.Y0, sourceRect.Y1) + (linear ? 1 : 0));
                 if (sourceOriginX >= endX || sourceOriginY >= endY) return;
-                copyId = source.Aspect != ImageAspectFlags.ColorBit || source.Samples != SampleCountFlags.Count1Bit && destination.Samples != SampleCountFlags.Count1Bit
-                    ? _textures.CreateRenderbuffer((uint)(endX - sourceOriginX), (uint)(endY - sourceOriginY), source.Format, source.Aspect,
-                        source.Samples == destination.Samples && source.Samples != SampleCountFlags.Count1Bit ? (int)source.Samples : 0, out _)
-                    : _textures.Create((uint)(endX - sourceOriginX), (uint)(endY - sourceOriginY), source.Format);
+                uint copyWidth = (uint)(endX - sourceOriginX), copyHeight = (uint)(endY - sourceOriginY);
+                if (linearResolve)
+                {
+                    // Resolves name VkImage, not a view. Copy samples without
+                    // conversion into matching UNORM storage, then resolve that
+                    // image so disabled GL sRGB state never invokes an EOTF.
+                    Format format = VulkanTexture.LinearColorFormat(source.Format);
+                    linearMultisampleId = _textures.CreateRenderbuffer(copyWidth, copyHeight, format, ImageAspectFlags.ColorBit,
+                        (int)source.Samples, out int samples);
+                    if ((SampleCountFlags)samples != source.Samples) throw new NotSupportedException("Linear resolve storage has no matching sample count.");
+                    VulkanTexture multisample = _textures.Get(linearMultisampleId)!;
+                    TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, multisample, 0, 0,
+                        sourceOriginX, sourceOriginY, 0, 0, (int)copyWidth, (int)copyHeight, aspect);
+                    copyId = _textures.Create(copyWidth, copyHeight, format);
+                    TransferImages(multisample, 0, 0, _textures.Get(copyId)!, 0, 0, 0, 0, 0, 0, (int)copyWidth, (int)copyHeight, aspect);
+                }
+                else
+                {
+                    copyId = source.Aspect != ImageAspectFlags.ColorBit || source.Samples != SampleCountFlags.Count1Bit && destination.Samples != SampleCountFlags.Count1Bit
+                        ? _textures.CreateRenderbuffer(copyWidth, copyHeight, source.Format, source.Aspect,
+                            source.Samples == destination.Samples && source.Samples != SampleCountFlags.Count1Bit ? (int)source.Samples : 0, out _)
+                        : _textures.Create(copyWidth, copyHeight, source.Format);
+                    TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, _textures.Get(copyId)!, 0, 0,
+                        sourceOriginX, sourceOriginY, 0, 0, (int)copyWidth, (int)copyHeight, aspect);
+                }
                 VulkanTexture copy = _textures.Get(copyId)!;
-                TransferImages(source, (uint)sourceLevel, (uint)sourceLayer, copy, 0, 0, sourceOriginX, sourceOriginY, 0, 0, endX - sourceOriginX, endY - sourceOriginY, aspect);
                 sourceId = copyId; source = copy; sourceLevel = sourceLayer = 0;
             }
             // A translation has integer clipping boundaries and is an exact
             // image copy, including between frames during resource construction.
-            if (sourceDeltaX == destinationDeltaX && sourceDeltaY == destinationDeltaY && source.Format == destination.Format &&
+            bool sameBits = source.Format == destination.Format || !framebufferSrgb && !depth &&
+                VulkanTexture.LinearColorFormat(source.Format) == VulkanTexture.LinearColorFormat(destination.Format);
+            if (sourceDeltaX == destinationDeltaX && sourceDeltaY == destinationDeltaY && sameBits &&
                 (source.Samples == destination.Samples || source.Samples != SampleCountFlags.Count1Bit && destination.Samples == SampleCountFlags.Count1Bit))
             {
                 long ox = (long)sourceRect.X0 - destinationRect.X0, oy = (long)sourceRect.Y0 - destinationRect.Y0;
@@ -126,9 +150,9 @@ public sealed unsafe partial class VulkanDevice
             if (!_frameActive) throw new InvalidOperationException("Scaled framebuffer rendering requires an active renderer frame.");
             DrawGlBlit(sourceId, sourceLevel, destinationId, destinationLevel, destinationLayer, sourceRect, destinationRect,
                 sourceWidth, sourceHeight, destinationWidth, destinationHeight, sourceOriginX, sourceOriginY,
-                new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), linear, depth);
+                new Rect2D(new Offset2D((int)left, (int)bottom), new Extent2D((uint)(right - left), (uint)(top - bottom))), linear, depth, !framebufferSrgb && !depth);
         }
-        finally { if (copyId != 0) DeleteTexture(copyId); }
+        finally { if (copyId != 0) DeleteTexture(copyId); if (linearMultisampleId != 0) DeleteTexture(linearMultisampleId); }
     }
 
     private int GlBlitProgram(bool depth)
@@ -181,7 +205,7 @@ public sealed unsafe partial class VulkanDevice
 
     private void DrawGlBlit(int source, int level, int destination, int destinationLevel, int destinationLayer, TextureBlitRectangle sourceRect,
         TextureBlitRectangle destinationRect, int sourceWidth, int sourceHeight, int width, int height,
-        int originX, int originY, Rect2D clip, bool linear, bool depth)
+        int originX, int originY, Rect2D clip, bool linear, bool depth, bool linearColor)
     {
         EndNativePass();
         _targets.EndPass(Commands);
@@ -201,7 +225,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 ProgramId = program, Blend = depth ? [] : [AttachmentBlend.Default],
                 DepthTest = depth, DepthWrite = depth, DepthCompare = CompareOp.Always,
-                Targets = NativeTargetFormats(target, depth ? 0u : 1u)!,
+                Targets = NativeTargetFormats(target, depth ? 0u : 1u, linearColor)!,
             }, out string reason) ?? throw new InvalidOperationException("GL blit pipeline refused: " + reason);
             WriteNative(pipeline, pipeline.Uniform("source0"), sourceRect.X0, sourceRect.Y0);
             WriteNative(pipeline, pipeline.Uniform("destination0"), destinationRect.X0, destinationRect.Y0);
@@ -214,8 +238,9 @@ public sealed unsafe partial class VulkanDevice
             var sampling = SamplerState.Default with { MagFilter = Filter.Nearest, MinFilter = Filter.Nearest,
                 AddressU = SamplerAddressMode.ClampToEdge, AddressV = SamplerAddressMode.ClampToEdge, Mipmapped = true };
             if (!BeginNativePass(new NativePassDescription { Name = "GL/Blit", FramebufferId = target, ColorSlots = depth ? 0u : 1u,
+                LinearColorAttachments = linearColor,
                 Reads = [source], ViewportWidth = width, ViewportHeight = height, Scissor = clip }) ||
-                !DrawNativeFullscreen(pipeline, [new NativeTexture(pipeline.Sampler("sourceTexture"), source, sampling)], requirePipeline: true))
+                !DrawNativeFullscreen(pipeline, [new NativeTexture(pipeline.Sampler("sourceTexture"), source, sampling, linearColor)], requirePipeline: true))
                 throw new InvalidOperationException("GL blit draw failed: " + NativeDrawRefusal);
         }
         finally { try { EndNativePass(); if (target != 0) DeleteFramebuffer(target); } finally { SetGlClipMask(clipMask); _targets.ScopeOpened = resumeQuery; } }

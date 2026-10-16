@@ -113,7 +113,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     /// <summary>The texture id of a kind's placeholder. Tests and diagnostics.</summary>
     public int PlaceholderTextureId(TextureKind kind) => _placeholders[(int)kind];
 
-    /// <summary><see cref="Resolve(VulkanTexture?, TextureKind, SamplerState, ImageLayout)" /> for what a texture id resolves to now, aliasing included.</summary>
+    /// <summary>Resolves the current physical texture, including aliases, to a descriptor slot.</summary>
     public uint Resolve(int textureId, TextureKind kind, SamplerState state,
         ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal) =>
         Resolve(_textures.Get(textureId), kind, state, layout);
@@ -126,7 +126,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     /// texture that cannot sit behind the kind, or a full array.
     /// </summary>
     public uint Resolve(VulkanTexture? texture, TextureKind kind, SamplerState state,
-        ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal)
+        ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal, ImageView view = default)
     {
         if (texture == null || !BindlessKinds.Suits(TextureShape.Of(texture), kind))
         {
@@ -144,13 +144,14 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
                 NotePlaceholder();
                 return 0;
             }
-            uint slot = _book.Acquire(new BindlessSlotKey(texture.Id, kind, effective, layout), out bool created);
+            ImageView selectedView = view.Handle != 0 ? view : texture.View;
+            uint slot = _book.Acquire(new BindlessSlotKey(texture.Id, kind, effective, layout, selectedView.Handle), out bool created);
             if (slot == 0)
             {
                 NotePlaceholder();
                 return 0;
             }
-            if (created) Queue(new PendingWrite(kind, slot, texture.View, _textures.Samplers.Get(effective), layout));
+            if (created) Queue(new PendingWrite(kind, slot, selectedView, _textures.Samplers.Get(effective), layout));
             return slot;
         }
     }
@@ -650,9 +651,9 @@ internal sealed class BindlessSlotAllocator
 /// What a slot holds: a combined image sampler of one physical texture
 /// (<see cref="VulkanTexture.Id" />, never reused, so a GL id handed to a new texture
 /// or aliased to a transient image cannot reach an old slot), under one effective
-/// sampler state and image layout, in one kind's array.
+/// sampler state, image layout and view, in one kind's array.
 /// </summary>
-internal readonly record struct BindlessSlotKey(ulong TextureId, TextureKind Kind, SamplerState State, ImageLayout Layout);
+internal readonly record struct BindlessSlotKey(ulong TextureId, TextureKind Kind, SamplerState State, ImageLayout Layout, ulong View = 0);
 
 /// <summary>
 /// The bookkeeping of the bindless table, without a device: which key owns which

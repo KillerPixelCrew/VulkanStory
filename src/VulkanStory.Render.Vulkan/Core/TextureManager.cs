@@ -204,26 +204,27 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// exactly one level, and a sampled read of level n must not name the levels the
     /// same pass writes: validation checks the layout of every level a view covers.
     /// </summary>
-    private readonly Dictionary<(uint BaseMip, uint MipCount), ImageView> _mipViews = new();
+    private readonly Dictionary<(uint BaseMip, uint MipCount, Format Format), ImageView> _mipViews = new();
 
-    public ImageView ViewOfMips(uint baseMip, uint mipCount)
+    public ImageView ViewOfMips(uint baseMip, uint mipCount, bool linearColor = false)
     {
-        if (baseMip == 0 && mipCount >= MipLevels && Layers <= 1 && !Cube && !Volume) return View;
+        Format viewFormat = linearColor ? LinearColorFormat(Format) : Format;
+        if (viewFormat == Format && baseMip == 0 && mipCount >= MipLevels && Layers <= 1 && !Cube && !Volume) return View;
         lock (_mipViews)
         {
-            if (_mipViews.TryGetValue((baseMip, mipCount), out ImageView existing)) return existing;
+            if (_mipViews.TryGetValue((baseMip, mipCount, viewFormat), out ImageView existing)) return existing;
 
             var createInfo = new ImageViewCreateInfo
             {
                 SType = StructureType.ImageViewCreateInfo,
                 Image = Image,
                 ViewType = ImageViewType.Type2D,
-                Format = Format,
+                Format = viewFormat,
                 SubresourceRange = new ImageSubresourceRange((Aspect & ImageAspectFlags.DepthBit) != 0 ? ImageAspectFlags.DepthBit : Aspect, baseMip, mipCount, 0, 1),
             };
             VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
                 "vkCreateImageView for mips " + baseMip + "+" + mipCount);
-            _mipViews[(baseMip, mipCount)] = view;
+            _mipViews[(baseMip, mipCount, viewFormat)] = view;
             return view;
         }
     }
