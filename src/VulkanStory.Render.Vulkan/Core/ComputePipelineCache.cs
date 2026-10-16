@@ -5,11 +5,12 @@ using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
-/// <summary>Whether a compute program's binding is a storage image or a combined image sampler.</summary>
+/// <summary>A compute binding's image, sampler or storage-buffer descriptor kind.</summary>
 internal enum ComputeSlotKind
 {
     Sampled,
     Storage,
+    Buffer,
 }
 
 /// <summary>One binding of a compute program's pass set.</summary>
@@ -238,8 +239,8 @@ internal sealed unsafe class ComputeProgram : IDisposable
     }
 
     /// <summary>Maps a compute slot kind to its Vulkan descriptor type.</summary>
-    public static DescriptorType TypeOf(ComputeSlotKind kind) =>
-        kind == ComputeSlotKind.Storage ? DescriptorType.StorageImage : DescriptorType.CombinedImageSampler;
+    public static DescriptorType TypeOf(ComputeSlotKind kind) => kind switch
+    { ComputeSlotKind.Storage => DescriptorType.StorageImage, ComputeSlotKind.Buffer => DescriptorType.StorageBuffer, _ => DescriptorType.CombinedImageSampler };
 
     /// <summary>Looks up a declared compute descriptor slot by binding number.</summary>
     public bool TryGetSlot(uint binding, out ComputeSlot slot)

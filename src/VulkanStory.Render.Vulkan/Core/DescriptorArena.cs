@@ -270,17 +270,35 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
         }
     }
 
+    /// <summary>Allocates consecutive storage-buffer bindings beginning at zero.</summary>
+    public DescriptorSet GetBuffers(DescriptorSetLayout layout, ReadOnlySpan<DescriptorBufferInfo> buffers)
+    {
+        DescriptorSet set = Allocate(layout);
+        Allocations++;
+        Span<WriteDescriptorSet> writes = buffers.Length <= MaxStackWrites ? stackalloc WriteDescriptorSet[buffers.Length] : new WriteDescriptorSet[buffers.Length];
+        fixed (DescriptorBufferInfo* bufferPtr = buffers)
+        fixed (WriteDescriptorSet* writePtr = writes)
+        {
+            for (int i = 0; i < buffers.Length; i++) writes[i] = new WriteDescriptorSet
+            { SType = StructureType.WriteDescriptorSet, DstSet = set, DstBinding = (uint)i, DescriptorCount = 1,
+                DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = bufferPtr + i };
+            _context.Api.UpdateDescriptorSets(_context.Device, (uint)writes.Length, writePtr, 0, null);
+        }
+        return set;
+    }
+
     private DescriptorPool CreatePool()
     {
-        var sizes = stackalloc DescriptorPoolSize[2]
+        var sizes = stackalloc DescriptorPoolSize[3]
         {
             new DescriptorPoolSize(DescriptorType.StorageImage, SetsPerPool * ImagesPerSet),
             new DescriptorPoolSize(DescriptorType.CombinedImageSampler, SetsPerPool * ImagesPerSet),
+            new DescriptorPoolSize(DescriptorType.StorageBuffer, SetsPerPool * ImagesPerSet),
         };
         var createInfo = new DescriptorPoolCreateInfo
         {
             SType = StructureType.DescriptorPoolCreateInfo,
-            PoolSizeCount = 2,
+            PoolSizeCount = 3,
             PPoolSizes = sizes,
             MaxSets = SetsPerPool,
         };

@@ -120,7 +120,8 @@ Current release: [v0.1.4](https://github.com/KillerPixelCrew/VulkanStory/release
   - GL draws, scaled blits and partial color/depth/stencil clears outside a display frame use fenced graphics slots with shared descriptor, uniform and retirement ownership. These batches submit without presenting, advancing display counters or starting provider render markers.
   - Texture base/max levels select rebased sampling views and relative sampler LOD limits, including immutable-range clamps and incomplete mutable mip placeholders. Mip generation starts at the effective base; framebuffer attachments and blits retain physical image levels and completeness rules. Feedback copies retain the source sampling range.
   - Bound depth sampling can coexist with stencil writes through the core mixed depth/stencil layout. Attachment state, descriptors and barriers share that choice; depth writes while sampling remain refused. Immutable depth/stencil texture storage retains both aspects, with depth-only sampling views and depth readback.
-  - Complete remaining [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12) compatibility: transformed stencil/multisample blits and depth/stencil resolves, and zero-sized/independently shaped mutable texture mip backing. Native GL coverage and full-pack compatibility remain in progress.
+  - Single-sample stencil scaling, mirroring and clipped blits use packed GPU buffers and a compute transform. Destination clipping retains the source mapping; only stencil is copied. Tiling bounds descriptor ranges and scratch storage, with shared fenced compute descriptors and deferred buffer retirement.
+  - Complete remaining [issue #12](https://github.com/KillerPixelCrew/VulkanStory/issues/12) compatibility: multisample transforms and depth/stencil resolves, and zero-sized/independently shaped mutable texture mip backing. Native GL coverage and full-pack compatibility remain in progress.
 
 ## Deferred
 
