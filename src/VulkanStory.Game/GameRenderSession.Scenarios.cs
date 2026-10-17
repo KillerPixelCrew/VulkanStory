@@ -201,8 +201,8 @@ internal sealed partial class GameRenderSession
                         scenarioFocusRequested = true;
                         try { Window.Focus(); }
                         catch (InvalidOperationException error)
-                        { MirrorValidationMessage("Focused scenario could not raise its window: " + error.Message); }
-                        MirrorValidationMessage("Focused scenario requested window focus once; waiting for confirmation.");
+                        { Console.Error.WriteLine("[VulkanStory] Focused scenario could not raise its window: " + error.Message); }
+                        Console.Error.WriteLine("[VulkanStory] Focused scenario requested window focus once; waiting for confirmation.");
                     }
                     if (!Window.IsFocused) return;
                 }
