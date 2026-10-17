@@ -9,6 +9,9 @@ public static class HeadlessHarnessOptions
     public static readonly bool Enabled = ResolveFlag("VULKANSTORY_HEADLESS");
     /// <summary>Explicit diagnostic launch only; routine harness windows stay hidden.</summary>
     public static readonly bool KeepWindowHidden = Enabled && !ResolveFlag("VULKANSTORY_HEADLESS_VISIBLE");
+    /// <summary>Explicit focused check: request focus once and wait for it before the scenario starts.</summary>
+    internal static readonly bool RequireInitialFocus = Enabled && !KeepWindowHidden &&
+        ResolveFlag("VULKANSTORY_HEADLESS_REQUIRE_FOCUS");
 
     /// <summary>The chat-command script, or null when there is none.</summary>
     public static readonly string? CommandScriptPath = ResolveExistingFile("VULKANSTORY_HEADLESS_COMMANDS");

@@ -13,6 +13,7 @@ internal sealed partial class GameRenderSession
     private readonly List<ScenarioCaptureReceipt> scenarioCaptures = new();
     private string? scenarioSessionId;
     private int? scenarioTick;
+    private bool scenarioFocusRequested;
     private string scenarioFailurePhase = "renderCycle";
     private string? scenarioFailure;
     private bool scenarioTerminal;
@@ -190,7 +191,23 @@ internal sealed partial class GameRenderSession
         }
         if (scenarioTick == null)
         {
-            try { if (!TryStartScenarioContext(scenario)) return; }
+            try
+            {
+                if (HeadlessHarnessOptions.RequireInitialFocus)
+                {
+                    if (!Window.IsVisible) return;
+                    if (!scenarioFocusRequested)
+                    {
+                        scenarioFocusRequested = true;
+                        try { Window.Focus(); }
+                        catch (InvalidOperationException error)
+                        { MirrorValidationMessage("Focused scenario could not raise its window: " + error.Message); }
+                        MirrorValidationMessage("Focused scenario requested window focus once; waiting for confirmation.");
+                    }
+                    if (!Window.IsFocused) return;
+                }
+                if (!TryStartScenarioContext(scenario)) return;
+            }
             catch (Exception error) { FailHeadlessRun(error.GetBaseException().Message, "beforeInput"); return; }
             scenarioTick = 0;
         }

@@ -61,6 +61,8 @@ Enables the child's diagnostic AO output environment flag.
 Enables asynchronous pipelines in the isolated child via its environment flag.
 .PARAMETER Visible
 Allows the diagnostic child window to be visible and changes verifier visibility expectations.
+.PARAMETER Focus
+Requires Visible and Scenario. Requests focus once, then waits for confirmed focus before starting scenario ticks. Focus is never repeatedly reclaimed.
 .PARAMETER KeepOpen
 Requires Visible and disables child exit-on-capture-completion; the launcher's timeout still applies.
 .PARAMETER MainMenuOptions
@@ -103,6 +105,7 @@ param(
     [switch]$AoOutputs,
     [switch]$AsyncPipelines,
     [switch]$Visible,
+    [switch]$Focus,
     [switch]$KeepOpen,
     [switch]$MainMenuOptions,
     [ValidateSet('open','save','cancel')][string]$MainOptionsAction = 'open',
@@ -112,6 +115,7 @@ param(
     [string]$Python = 'python'
 )
 $ErrorActionPreference = 'Stop'
+if ($Focus -and (-not $Visible -or -not $Scenario)) { throw 'Focus requires Visible and an explicit scenario.' }
 if ($KeepOpen -and -not $Visible) { throw 'KeepOpen requires the explicitly selected Visible diagnostic mode.' }
 if ($MainMenuOptions -and ($Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
     throw 'MainMenuOptions cannot combine with commands/parity/input profiles.'
@@ -723,6 +727,7 @@ foreach ($argument in $launchArguments) { $info.ArgumentList.Add($argument) }
 $info.Environment['DOTNET_STARTUP_HOOKS'] = $hook
 $info.Environment['VULKANSTORY_HEADLESS'] = '1'
 $info.Environment['VULKANSTORY_HEADLESS_VISIBLE'] = if ($Visible) { '1' } else { '0' }
+$info.Environment['VULKANSTORY_HEADLESS_REQUIRE_FOCUS'] = if ($Focus) { '1' } else { '0' }
 $info.Environment['VULKANSTORY_HEADLESS_MAIN_OPTIONS'] = if ($menuOnly) { '1' } else { '0' }
 $info.Environment['VULKANSTORY_HEADLESS_MAIN_ACTION'] = $MainOptionsAction
 $info.Environment['VULKANSTORY_HEADLESS_OPTIONS_PAGE'] = $OptionsPage
