@@ -350,7 +350,10 @@ internal sealed class DlssUpscaler : IDisposable
     {
         if (!Active || _device == null || !plan.IsValid) return false;
 
-        NgxDlssSettings settings = plan.ToSettings();
+        NgxDlssSettings settings = plan.ToSettings() with
+        {
+            RenderPreset = _state.DlssPreset switch { "j" => 10, "k" => 11, "l" => 12, "m" => 13, _ => 0u },
+        };
         if (_feature != null && _feature.Matches(settings))
         {
             return true;

@@ -29,7 +29,7 @@ values to supported ranges, depending on the entry point.
 | --- | --- |
 | `Enabled`, `NativeShaders`, `Streamline`, `OpenXr` | Next game launch |
 | `ParallelChunkReads` | Next world load |
-| Reconstruction provider/quality, render scale, TAA/AO | Live; may rebuild targets and reset history |
+| Reconstruction provider/quality, DLSS model preset, render scale, TAA/AO | Live; may rebuild targets and reset history |
 | Generation provider | Live; resets previous presentation/provider state |
 | Generation multiplier | Live, bounded by active SDK capability |
 | Input, FPS counter and latency policy | Live |
@@ -65,6 +65,7 @@ scene layer; runtime session exit returns to desktop presentation.
 | `Upscaler` | `off`, `dlss`, `xess`, `fsr3`, `fsr4` |
 | `UpscalerQuality` | `dlaa`, `quality`, `balanced`, `performance`, `ultraperformance` |
 | XeSS quality additions | `ultraqualityplus`, `ultraquality` |
+| `DlssPreset` | `default`, `j`, `k`, `l`, `m` |
 | `FrameGeneration` | `off`, `dlss`, `xess`, `fsr3` |
 | `LowLatencyMode` | `off`, `on`, `boost` |
 | `AmbientOcclusion` | `auto`, `vanilla`, `gtao` |
@@ -74,6 +75,16 @@ scene layer; runtime session exit returns to desktop presentation.
 `dlaa` is displayed as Native AA. Quality choices are interpreted by the selected
 backend. `fsr3` is the settings identifier for FSR 3.1 reconstruction; generation
 has its own independent provider property.
+
+Upscaler, quality, frame-generation provider and multiplier use dropdowns.
+Unavailable choices remain visible in grey and cannot be selected. XeSS-only
+quality choices are grey for other providers. Multiplier limits follow SDK
+reports as they become available; FSR 3 FG supports 2x.
+
+The DLSS preset selector appears when DLSS reconstruction is selected. Default
+uses the runtime's model choice; J, K, L and M request the corresponding NGX model
+hint. Changing it retires the old feature and applies the hint on the next DLSS
+feature without restarting. Save retains it and Cancel restores the previous hint.
 
 ## Numeric ranges
 
@@ -101,6 +112,7 @@ scale. GTAO also depends on the game's AO quality and compatible scene shaders.
 ```text
 .vulkanstory set Upscaler xess
 .vulkanstory set UpscalerQuality quality
+.vulkanstory set DlssPreset k
 .vulkanstory set FrameGeneration xess
 .vulkanstory set FrameGenerationMultiplier 2
 .vulkanstory set AmbientOcclusion gtao
@@ -134,6 +146,7 @@ choice and range definitions live in
 | `TaaJitterDev` | bool | `false` | Development option requesting the temporal jitter window independently of the normal TAA/SR selection. |
 | `Upscaler` | string | `"off"` | Requested SR provider identifier; effective availability is tracked separately by RendererSettingsState. |
 | `UpscalerQuality` | string | `"quality"` | Requested SR quality identifier; allowed names are normalized against the requested provider. |
+| `DlssPreset` | string | `"default"` | NGX reconstruction model hint, applied when the DLSS feature is created. |
 | `UpscalerLodBiasOffset` | float | `1f` | Requested blend between provider-recommended and ordinary terrain mip bias, normalized to zero through one. |
 | `FrameGeneration` | string | `"off"` | Requested FG provider identifier; per-frame eligibility and effective activation are tracked separately. |
 | `FrameGenerationMultiplier` | int | `2` | Requested total output multiplier, normalized to 2 through 6; actual provider limits may be lower. |

@@ -20,6 +20,8 @@ internal static class RendererChoices
     private static readonly (string Value, string Label)[] Quality = [("dlaa", "Native AA"), ("quality", "Quality"), ("balanced", "Balanced"), ("performance", "Performance"), ("ultraperformance", "Ultra Performance")];
     private static readonly (string Value, string Label)[] XessQuality = [("dlaa", "Native AA"), ("ultraqualityplus", "Ultra Quality+"), ("ultraquality", "Ultra Quality"), ("quality", "Quality"), ("balanced", "Balanced"), ("performance", "Performance"), ("ultraperformance", "Ultra Performance")];
     private static readonly (string Value, string Label)[] Generation = [("off", "Off"), ("dlss", "DLSS-G"), ("xess", "XeSS-FG"), ("fsr3", "FSR 3 FG")];
+    private static readonly (string Value, string Label)[] DlssPresets = [("default", "Default"), ("j", "J"), ("k", "K"), ("l", "L"), ("m", "M")];
+    private static readonly (string Value, string Label)[] Multipliers = [("2", "2x"), ("3", "3x"), ("4", "4x"), ("5", "5x"), ("6", "6x")];
     private static readonly (string Value, string Label)[] Latency = [("off", "Off"), ("on", "On"), ("boost", "Boost")];
     private static readonly (string Value, string Label)[] Occlusion = [("auto", "Auto"), ("vanilla", "SSAO"), ("gtao", "GTAO")];
     private static readonly (string Value, string Label)[] OcclusionQuality = [("low", "Low"), ("medium", "Medium"), ("high", "High"), ("ultra", "Ultra")];
@@ -47,6 +49,8 @@ internal static class RendererChoices
         "Upscaler" => Upscalers,
         "UpscalerQuality" => xess ? XessQuality : Quality,
         "FrameGeneration" => Generation,
+        "DlssPreset" => DlssPresets,
+        "FrameGenerationMultiplier" => Multipliers,
         "LowLatencyMode" => Latency,
         "AmbientOcclusion" => Occlusion,
         "AmbientOcclusionPreset" => OcclusionQuality,

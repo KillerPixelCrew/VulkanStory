@@ -31,6 +31,18 @@ internal sealed class RendererSettingsPanel
     internal double? ErrorContentY { get; private set; }
     private long nextStatusRefresh;
     private Action? refreshImageStatus;
+    private string availabilityJson = "{}";
+    private Dictionary<string, string> unavailable = new();
+    private bool availabilityReady;
+    private void ReadAvailability()
+    {
+        string json = (AppContext.GetData("VulkanStory.Runtime.SettingsAvailability") as Func<string>)?.Invoke() ?? "{}";
+        availabilityReady = json != "{}";
+        if (json == availabilityJson) return;
+        availabilityJson = json;
+        unavailable = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
+        refresh = true;
+    }
     /// <summary>Creates an editable JSON draft and retains the initial committed state for Cancel restoration.</summary>
     /// <param name="json">Current renderer settings serialized as a JSON object.</param>
     /// <param name="apply">Persists/applies a draft, returning null on success or a visible error message.</param>
@@ -56,6 +68,8 @@ internal sealed class RendererSettingsPanel
         if (Environment.TickCount64 >= nextStatusRefresh)
         {
             nextStatusRefresh = Environment.TickCount64 + 1000;
+            ReadAvailability();
+            value |= refresh; refresh = false;
             if (page == 0) refreshImageStatus?.Invoke();
             if (PageNames[page] == "Status") return true;
         }
@@ -170,6 +184,7 @@ internal sealed class RendererSettingsPanel
         bool initializing = true;
         bool Editable() => Live() && !controllerPending && !initializing;
         var initialize = new List<Action>();
+        ReadAvailability();
         refreshImageStatus = null;
         ErrorContentY = null;
         double y = includePages ? AddPageNavigation(composer, width, canInteract: canInteract) : 0;
@@ -184,7 +199,7 @@ internal sealed class RendererSettingsPanel
         int textSequence = 0;
         void DefinedChoice(string label, string key)
         {
-            var values = RendererChoices.Get(key, draft["Upscaler"]?.GetValue<string>() == "xess");
+            var values = RendererChoices.Get(key, xess: key == "UpscalerQuality");
             Choice(label, key, values.Select(item => item.Value).ToArray(), values.Select(item => item.Label).ToArray());
         }
         switch (page)
@@ -192,6 +207,7 @@ internal sealed class RendererSettingsPanel
             case 0:
                 DefinedChoice("Upscaler", "Upscaler");
                 DefinedChoice("Quality", "UpscalerQuality");
+                if (draft["Upscaler"]?.GetValue<string>() == "dlss") DefinedChoice("DLSS preset", "DlssPreset");
                 Slider("Render scale (%)", "RenderScale");
                 Switch("Temporal anti-aliasing", "Taa");
                 Slider("TAA sharpness (%)", "TaaSharpness");
@@ -210,10 +226,10 @@ internal sealed class RendererSettingsPanel
                 break;
             case 1:
                 DefinedChoice("Frame generation", "FrameGeneration");
-                Slider("Requested multiplier", "FrameGenerationMultiplier");
+                DefinedChoice("Multiplier", "FrameGenerationMultiplier");
                 DefinedChoice("Low latency", "LowLatencyMode");
                 Switch("Show FPS counter", "ShowFpsCounter");
-                Text("Available providers and multipliers depend on your GPU. Unsupported settings fall back automatically.");
+                Text("Greyed-out choices are unavailable. Multiplier limits update when the selected provider reports its capabilities.");
                 Text("With frame generation selected, low latency remains enabled. Boost depends on the provider.");
                 break;
             case 2:
@@ -367,13 +383,43 @@ internal sealed class RendererSettingsPanel
         }
         void Choice(string label, string key, string[] values, string[] labels)
         {
-            int index = Array.FindIndex(values, value => value == draft[key]?.GetValue<string>());
-            if (index < 0) index = 0;
-            Label(label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, labelWidth, labelHeight))
-                .AddSmallButton(labels[index], () =>
+            string Current() => key == "FrameGenerationMultiplier"
+                ? (draft[key]?.GetValue<int>() ?? 2).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : draft[key]?.GetValue<string>() ?? values[0];
+            string? Refusal(string value)
+            {
+                string provider = draft["Upscaler"]?.GetValue<string>() ?? "off";
+                string generation = draft["FrameGeneration"]?.GetValue<string>() ?? "off";
+                if (key is "Upscaler" or "FrameGeneration")
+                    return value == "off" ? null : !availabilityReady ? "Renderer inactive" : unavailable.GetValueOrDefault(key + "." + value);
+                if (key is "UpscalerQuality" or "DlssPreset")
                 {
-                    if (!Editable()) return true;
-                    draft[key] = values[(index + 1) % values.Length];
+                    if (provider == "off") return "Select an upscaler first";
+                    if (!availabilityReady) return "Renderer inactive";
+                    if (unavailable.TryGetValue("Upscaler." + provider, out string? reason)) return reason;
+                    if (key == "UpscalerQuality" && !RendererChoices.Contains(key, value, xess: provider == "xess"))
+                        return "Requires XeSS";
+                }
+                if (key == "FrameGenerationMultiplier")
+                {
+                    if (generation == "off") return "Select frame generation first";
+                    if (!availabilityReady) return "Renderer inactive";
+                    if (unavailable.TryGetValue("FrameGeneration." + generation, out string? reason)) return reason;
+                    if (unavailable.TryGetValue("FrameGenerationMaximum." + generation, out string? maximum) &&
+                        int.TryParse(maximum, out int limit) && int.Parse(value) > limit)
+                        return "Exceeds the provider limit";
+                }
+                return null;
+            }
+            int index = Array.FindIndex(values, value => value == Current());
+            if (index < 0) index = 0;
+            Label(label, CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y, labelWidth, labelHeight));
+            bool[] enabled = values.Select(value => Refusal(value) == null).ToArray();
+            var dropdown = new RendererChoiceDropDown(composer.Api, values, labels, enabled, index, value =>
+                {
+                    if (!Editable() || Refusal(value) != null) return;
+                    if (key == "FrameGenerationMultiplier") draft[key] = int.Parse(value);
+                    else draft[key] = value;
                     // XeSS-only quality modes fall back when another provider is selected.
                     if (key == "Upscaler" && draft[key]?.GetValue<string>() != "xess" &&
                         draft["UpscalerQuality"]?.GetValue<string>() is string quality &&
@@ -381,10 +427,12 @@ internal sealed class RendererSettingsPanel
                         !RendererChoices.Contains("UpscalerQuality", quality))
                         draft["UpscalerQuality"] = "quality";
                     Preview();
-                    refresh = true; return true;
+                    refresh = true;
                 },
-                    ElementBounds.Fixed(controlX, controlY, controlWidth, 28));
+                    ElementBounds.Fixed(controlX, controlY, controlWidth, 28), Editable);
+            composer.AddInteractiveElement(dropdown, key);
             NextRow();
+            if (Refusal(Current()) is string reason) Text(label + ": " + reason);
         }
     }
     /// <summary>Adds guarded Cancel and Save buttons; Save is disabled while a controller transition is pending.</summary>
@@ -395,5 +443,82 @@ internal sealed class RendererSettingsPanel
                 ElementBounds.Fixed(width - 260, y, 120, 30))
             .AddSmallButton("Save", () => Live() && !controllerPending ? Save() : true,
                 ElementBounds.Fixed(width - 120, y, 120, 30));
+    }
+}
+
+/// <summary>Stock dropdown visuals with disabled entries and guarded mouse/keyboard selection.</summary>
+internal sealed class RendererChoiceDropDown : GuiElementDropDown
+{
+    private readonly bool[] available;
+    private readonly Func<bool> editable;
+    private int acceptedIndex;
+
+    internal RendererChoiceDropDown(ICoreClientAPI api, string[] values, string[] labels, bool[] available,
+        int selectedIndex, Action<string> changed, ElementBounds bounds, Func<bool> editable)
+        : base(api, values, labels.Select((label, index) => available[index] ? label :
+            "<font color=\"#777777\">" + label + "</font>").ToArray(), selectedIndex, null, bounds,
+            CairoFont.WhiteSmallishText(), false)
+    {
+        this.available = available;
+        this.editable = editable;
+        acceptedIndex = selectedIndex;
+        onSelectionChanged = (value, selected) =>
+        {
+            int index = Array.IndexOf(values, value);
+            if (!selected || !editable() || index < 0 || !available[index])
+            { SetSelectedIndex(acceptedIndex); return; }
+            if (index == acceptedIndex) return;
+            acceptedIndex = index;
+            changed(value);
+        };
+    }
+
+    private void MoveSelection(int start, int direction, bool hover)
+    {
+        for (int step = 0; step < available.Length; step++)
+        {
+            int index = (start + direction * step + available.Length * 2) % available.Length;
+            if (!available[index]) continue;
+            listMenu.HoveredIndex = index;
+            if (!hover)
+            {
+                SetSelectedIndex(index);
+                onSelectionChanged?.Invoke(listMenu.Values[index], true);
+            }
+            return;
+        }
+    }
+
+    public override void OnKeyDown(ICoreClientAPI api, KeyEvent args)
+    {
+        if (!HasFocus || !editable()) return;
+        bool open = listMenu.IsOpened;
+        int current = open ? listMenu.HoveredIndex : acceptedIndex;
+        if (args.KeyCode is (int)GlKeys.Up or (int)GlKeys.Down or (int)GlKeys.Home or (int)GlKeys.End)
+        {
+            int direction = args.KeyCode is (int)GlKeys.Up or (int)GlKeys.End ? -1 : 1;
+            int start = args.KeyCode == (int)GlKeys.Home ? 0 : args.KeyCode == (int)GlKeys.End
+                ? available.Length - 1 : current + direction;
+            MoveSelection(start, direction, open);
+            args.Handled = true;
+            return;
+        }
+        if (open && (args.KeyCode is (int)GlKeys.Enter or (int)GlKeys.KeypadEnter) &&
+            (current < 0 || current >= available.Length || !available[current]))
+        { args.Handled = true; return; }
+        base.OnKeyDown(api, args);
+    }
+
+    public override void OnMouseWheel(ICoreClientAPI api, MouseWheelEventArgs args)
+    {
+        if (!editable()) return;
+        if (HasFocus && !listMenu.IsOpened && IsPositionInside(api.Input.MouseX, api.Input.MouseY))
+        {
+            int direction = args.delta > 0 ? -1 : 1;
+            MoveSelection(acceptedIndex + direction, direction, false);
+            args.SetHandled(true);
+            return;
+        }
+        base.OnMouseWheel(api, args);
     }
 }

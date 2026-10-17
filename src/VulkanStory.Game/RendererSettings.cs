@@ -27,6 +27,8 @@ internal sealed record RendererSettings
     public string Upscaler { get; init; } = "off";
     /// <summary>Requested SR quality identifier; allowed names are normalized against the requested provider.</summary>
     public string UpscalerQuality { get; init; } = "quality";
+    /// <summary>NGX reconstruction model hint, applied when the DLSS feature is created.</summary>
+    public string DlssPreset { get; init; } = "default";
     /// <summary>Requested blend between provider-recommended and ordinary terrain mip bias, normalized to zero through one.</summary>
     public float UpscalerLodBiasOffset { get; init; } = 1f;
     /// <summary>Requested FG provider identifier; per-frame eligibility and effective activation are tracked separately.</summary>
@@ -217,6 +219,7 @@ internal sealed record RendererSettings
             TaaSharpness = RendererChoices.Range(nameof(TaaSharpness)).Clamp(TaaSharpness),
             TaaMipBias = RendererChoices.Range(nameof(TaaMipBias)).Clamp(TaaMipBias),
             Upscaler = provider, UpscalerQuality = quality,
+            DlssPreset = Choice(DlssPreset, nameof(DlssPreset), "default"),
             UpscalerLodBiasOffset = RendererChoices.Range(nameof(UpscalerLodBiasOffset)).Clamp(UpscalerLodBiasOffset),
             FrameGeneration = Choice(FrameGeneration, nameof(FrameGeneration), "off"),
             FrameGenerationMultiplier = RendererChoices.Range(nameof(FrameGenerationMultiplier)).Clamp(FrameGenerationMultiplier),
@@ -255,6 +258,7 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     internal bool EffectiveTemporalPipeline => !StereoRendering && (EffectiveTaa || UpscalerReplacesTaa || Settings.FrameGeneration != "off");
     public bool DlssRequested => EffectiveUpscaler == "dlss";
     public string Quality => Settings.UpscalerQuality;
+    public string DlssPreset => Settings.DlssPreset;
     public float LodBiasOffset => Settings.UpscalerLodBiasOffset;
     internal float ActiveRenderScale => Volatile.Read(ref activeRenderScale);
     internal float ActiveLodBias => Volatile.Read(ref activeLodBias);

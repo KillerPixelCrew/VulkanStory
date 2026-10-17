@@ -26,6 +26,16 @@ internal sealed class SettingsScrollContent : GuiElement
     }
 
     public override bool Focusable => true;
+    private bool PopupContains(int x, int y)
+    {
+        foreach (string key in new[] { "Upscaler", "UpscalerQuality", "DlssPreset", "FrameGeneration",
+            "FrameGenerationMultiplier", "LowLatencyMode", "AmbientOcclusion", "AmbientOcclusionPreset", "WorldgenWorkers" })
+            if (Content.GetElement(key) is GuiElementDropDown dropdown && dropdown.listMenu.IsOpened &&
+                dropdown.IsPositionInside(x, y)) return true;
+        return false;
+    }
+
+    public override bool IsPositionInside(int x, int y) => base.IsPositionInside(x, y) || PopupContains(x, y);
 
     public override void BeforeCalcBounds()
     {

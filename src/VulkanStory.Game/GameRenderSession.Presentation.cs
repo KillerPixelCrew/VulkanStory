@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Vintagestory.API.Client;
+using VulkanStory.Settings;
+using VulkanStory.Render.Vulkan.Core;
 
 namespace VulkanStory.Game;
 
@@ -7,6 +10,40 @@ internal sealed partial class GameRenderSession
 {
     private string presentation = "Waiting for the first Vulkan frame.";
     private long nextPresentationPublish;
+    private string settingsAvailability = "{}";
+    private bool? xessRuntimesInstalled;
+    internal string SettingsAvailability => Volatile.Read(ref settingsAvailability);
+    private void PublishSettingsAvailability()
+    {
+        var unavailable = new Dictionary<string, string>();
+        foreach (var (provider, _) in RendererChoices.Get("Upscaler"))
+            if (provider != "off")
+            {
+                string? reason = services.RendererSettings.StereoRendering ? "Unavailable in VR" : upscalers?.Unavailable(provider);
+                if (reason != null) unavailable["Upscaler." + provider] = reason;
+            }
+        foreach (var (provider, _) in RendererChoices.Get("FrameGeneration"))
+        {
+            if (provider == "off") continue;
+            string? reason = services.RendererSettings.StereoRendering ? "Unavailable in VR" : frameGeneration?.Unavailable(provider);
+            if (reason == null && provider == "dlss" && !Device.StreamlineFrameGenerationAvailable)
+                reason = "Streamline DLSS-G and Reflex are unavailable";
+            if (reason == null && provider == "fsr3" && Fsr3Native.TryLoad(out string? fsrFailure) == null)
+                reason = fsrFailure ?? "FidelityFX frame generation is unavailable";
+            if (reason == null && provider == "xess")
+            {
+                if (upscalers?.XessInteropAvailable != true) reason = "Vulkan/DX12 image sharing is unavailable";
+                else if (!(xessRuntimesInstalled ??= new[] { "VulkanStoryXessFg.dll", "libxess_fg.dll", "libxell.dll" }.All(file =>
+                    File.Exists(Path.Combine(NativeRuntimePaths.DirectoryContaining(file), file)))))
+                    reason = "XeSS-FG runtimes are not installed";
+                else reason = Device.XessProxyFailure;
+            }
+            if (reason != null) unavailable["FrameGeneration." + provider] = reason;
+            if (frameGeneration?.MaximumMultiplier(provider) is uint maximum)
+                unavailable["FrameGenerationMaximum." + provider] = maximum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        Volatile.Write(ref settingsAvailability, JsonSerializer.Serialize(unavailable));
+    }
     /// <summary>Atomically published last-rendered-frame status for ordinary Options; provider requests and actual evaluation/readiness remain distinct.</summary>
     internal string Presentation => Volatile.Read(ref presentation);
     /// <summary>Primary scene framebuffer when allocated and not disposed; otherwise null.</summary>
@@ -25,12 +62,14 @@ internal sealed partial class GameRenderSession
             nextPresentationPublish = now + Stopwatch.Frequency / 4;
         }
         RendererSettings settings = services.RendererSettings.Settings;
+        PublishSettingsAvailability();
         string sr = Graphics.UpscaledThisFrame ? services.RendererSettings.EffectiveUpscaler : "off";
         string fg = frameGeneration!.EffectiveProvider + ": " + frameGeneration.PreparationStatus;
         FrameBufferRef? primary = PrimaryTarget;
         var display = RenderExtent;
         string text = "Last rendered frame\n" +
-            "Upscaler requested: " + settings.Upscaler + " / " + settings.UpscalerQuality + "; evaluated: " + sr + "\n" +
+            "Upscaler requested: " + settings.Upscaler + " / " + settings.UpscalerQuality +
+                (settings.Upscaler == "dlss" ? "; model preset: " + settings.DlssPreset.ToUpperInvariant() : "") + "; evaluated: " + sr + "\n" +
             "Render resolution: " + (Graphics.AllocatedUpscalerPlan is { } plan
                 ? plan.RenderWidth + "x" + plan.RenderHeight + " -> " + plan.DisplayWidth + "x" + plan.DisplayHeight
                 : primary != null ? primary.Width + "x" + primary.Height + " -> " + display.Width + "x" + display.Height

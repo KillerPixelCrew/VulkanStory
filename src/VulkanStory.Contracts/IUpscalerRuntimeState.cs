@@ -10,6 +10,8 @@ public interface IUpscalerRuntimeState
     bool DlssRequested { get; }
     /// <summary>Requested quality token interpreted by the selected provider.</summary>
     string Quality { get; }
+    /// <summary>Requested DLSS model preset hint; default follows the installed runtime.</summary>
+    string DlssPreset => "default";
     /// <summary>Host-supplied mip adjustment used when deriving the active plan.</summary>
     float LodBiasOffset { get; }
     /// <summary>Publishes the effective reconstruction scale and texture mip bias to the host.</summary>

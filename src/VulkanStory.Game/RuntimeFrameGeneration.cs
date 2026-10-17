@@ -91,6 +91,13 @@ internal sealed class RuntimeFrameGeneration(VulkanDevice device, RendererSettin
     /// <summary>DLSS-G query receipt for the current harness frame, including query identity and return code.</summary>
     internal DlssQueryObservation? HeadlessDlssQueryObservation { get; private set; }
     internal string? Unavailable(string provider) => failed.GetValueOrDefault(provider);
+    internal uint? MaximumMultiplier(string provider) => provider switch
+    {
+        "fsr3" => 2,
+        "dlss" => lastReportedDlssGeneratedLimit is uint dlss ? dlss + 1 : null,
+        "xess" => device.XessLastReportedGeneratedLimit is uint xess ? xess + 1 : null,
+        _ => null,
+    };
 
     /// <summary>Prepares the selected frame-generation provider using the completed HUD-free scene and matching temporal frame.</summary>
     /// <param name="graphics">Adapter publishing this frame scene/UI identities and motion readiness.</param>

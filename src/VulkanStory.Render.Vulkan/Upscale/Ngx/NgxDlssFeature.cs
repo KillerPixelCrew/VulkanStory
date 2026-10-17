@@ -37,7 +37,8 @@ internal readonly record struct NgxDlssSettings(
     uint DisplayWidth,
     uint DisplayHeight,
     NgxPerfQuality Quality,
-    NgxDlssCreateFlags Flags)
+    NgxDlssCreateFlags Flags,
+    uint RenderPreset = 0)
 {
     /// <summary>
     /// The flags Optimum's temporal contract implies, and the reasons are in the
@@ -56,7 +57,7 @@ internal readonly record struct NgxDlssSettings(
     /// <inheritdoc/>
     public override string ToString() =>
         RenderWidth + "x" + RenderHeight + " -> " + DisplayWidth + "x" + DisplayHeight +
-        " " + Quality + " [" + Flags + "]";
+        " " + Quality + " [" + Flags + "]; model preset " + RenderPreset;
 }
 
 /// <summary>
@@ -228,6 +229,10 @@ internal sealed unsafe class NgxDlssFeature : IDisposable
         block.SetInt(NgxParameterNames.PerfQualityValue, (int)settings.Quality);
         block.SetInt(NgxParameterNames.DlssFeatureCreateFlags, (int)settings.Flags);
         block.SetInt(NgxParameterNames.DlssEnableOutputSubrects, 0);
+        // nvsdk_ngx_defs.h: hints are creation parameters, one for each quality.
+        // Set all modes so native AA and future quality changes use the same hint.
+        foreach (string quality in new[] { "DLAA", "Quality", "Balanced", "Performance", "UltraPerformance", "UltraQuality" })
+            block.SetUInt("DLSS.Hint.Render.Preset." + quality, settings.RenderPreset);
 
         IntPtr handle = IntPtr.Zero;
         NgxResult created = NgxShim.IsAvailable

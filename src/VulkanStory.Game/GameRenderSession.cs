@@ -131,6 +131,7 @@ internal sealed partial class GameRenderSession : IDisposable
             session.frameGeneration = new RuntimeFrameGeneration(session.device, services.RendererSettings,
                 message => platform.Logger.Notification("{0}", message),
                 message => platform.Logger.Error("{0}", message), session.temporal.RequestReset);
+            session.PublishSettingsAvailability();
             // The headless harness is not held unless a validation run opts in; its captures
             // read the composed frame before any hold either way.
             session.composition = new CompositionReadiness(!HeadlessHarnessOptions.Active ||

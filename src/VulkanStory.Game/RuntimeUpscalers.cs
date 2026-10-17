@@ -11,6 +11,8 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
     private readonly Dictionary<string, IUpscalerBackend> providers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> failures = new(StringComparer.OrdinalIgnoreCase);
     private VulkanDevice? device;
+    private readonly XessFgInteropRequirements xessInterop = new();
+    internal bool XessInteropAvailable => xessInterop.Available;
     private UpscalerPlan allocated, lastEvaluated;
     private bool depthRefusalLogged;
     internal string EvaluationReadiness { get; private set; } = "not evaluated";
@@ -51,7 +53,7 @@ internal sealed class RuntimeUpscalers(RendererSettingsState state, string dataP
         target.ConfigureContextOptions = options =>
         {
             previous?.Invoke(options);
-            options.RequirementContributors.Add(new XessFgInteropRequirements());
+            options.RequirementContributors.Add(xessInterop);
             foreach (IUpscalerBackend backend in providers.Values)
                 if (backend.Requirements != null) options.RequirementContributors.Add(backend.Requirements);
         };
