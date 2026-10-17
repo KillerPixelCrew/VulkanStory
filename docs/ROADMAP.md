@@ -10,6 +10,7 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - Stable geometry boundaries against sky and clouds with TAA and upscaling
 - Frame generation: DLSS-G (up to 6×), FSR 3 FG, XeSS-FG
 - Low latency: Reflex / PC Latency, Anti-Lag, XeLL
+- ReScaleFrame integration: shared SR, frame-generation and latency owners with live provider switching. VulkanStory supplies scene/camera/motion/HUD inputs and Vulkan resource operations; the pinned native and managed dependencies ship with the runtime.
 - Options menu integration, with clipped scrolling, upscaler/quality and frame-generation/multiplier dropdowns that grey out unavailable choices, and live DLSS model preset selection (Default, J, K, L, M)
 - Controllers (remapping, radial menu, glyphs, analog movement + server companion), touch
 - Screenshot, timelapse and AVI capture
@@ -72,17 +73,6 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
-
-### ReScaleFrame integration (in progress)
-
-- Native Vulkan provider bridges and SDK corrections live in the pinned
-  ReScaleFrame dependency, with one shared FSR4 compatibility implementation.
-- SR selection/evaluation, FG lifecycle and latency control are routed through
-  ReScaleFrame's managed Vulkan module. The corresponding VulkanStory controllers
-  are adapters; provider choices, live transitions and temporal-reset behavior
-  retain their existing paths.
-- Keep scene, camera, motion/depth and HUD input production in VulkanStory;
-  package the ReScaleFrame dependency with the runtime.
 
 ### 1. Shared compute foundation
 
