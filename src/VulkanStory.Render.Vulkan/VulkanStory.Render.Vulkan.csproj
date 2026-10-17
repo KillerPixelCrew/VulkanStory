@@ -5,6 +5,7 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../sdk/rescaleframe/runtime/managed/ReScaleFrame.Vulkan/ReScaleFrame.Vulkan.csproj" />
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
     <ProjectReference Include="../VulkanStory.Platform.Sdl/VulkanStory.Platform.Sdl.csproj" />
     <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
@@ -19,12 +20,16 @@
   </ItemGroup>
   <!-- Retained backend and facade. Game types stay in the integration project. -->
   <ItemGroup>
+    <Compile Include="ReScaleFrameUsings.cs" />
+    <Compile Include="Upscale/ProviderImages.cs" />
     <Compile Include="VulkanDevice.cs" />
+    <Compile Include="VulkanDevice.LatencyHost.cs" />
     <Compile Include="VulkanDevice.OpenXr.cs" />
     <Compile Include="Vr/OpenXrRuntime.cs" />
     <Compile Include="VulkanDevice.Binding.cs" />
     <Compile Include="VulkanDevice.Dlss.cs" />
     <Compile Include="VulkanDevice.FrameGeneration.cs" />
+    <Compile Include="VulkanDevice.FrameGenerationHost.cs" />
     <Compile Include="VulkanDevice.HeldFrame.cs" />
     <Compile Include="VulkanDevice.Fsr3.cs" />
     <Compile Include="VulkanDevice.Fsr4.cs" />
@@ -55,8 +60,6 @@
     <Compile Include="Core/DescriptorBindingTypes.cs" />
     <Compile Include="Core/BindlessTextureTable.cs" />
     <Compile Include="Core/CacheFileWriter.cs" />
-    <Compile Include="Core/IDeviceRequirementContributor.cs" />
-    <Compile Include="Core/NativeRuntimePaths.cs" />
     <Compile Include="Core/VulkanCapabilities.cs" />
     <Compile Include="Core/VulkanContext.cs" />
     <Compile Include="Core/VulkanAllocator.cs" />
@@ -114,14 +117,7 @@
     <Compile Include="Frame/GpuTimestamps.cs" />
     <Compile Include="Frame/QueryRing.cs" />
     <Compile Include="Frame/IndirectRing.cs" />
-    <Compile Include="Latency/FrameTiming.cs" />
-    <Compile Include="Latency/AmdAntiLagFunctions.cs" />
-    <Compile Include="Latency/NvLowLatency2Functions.cs" />
     <Compile Include="Latency/SdlInputAgeRecorder.cs" />
-    <Compile Include="Latency/VendorLatency.cs" />
-    <Compile Include="Present/GeneratedFramePacer.cs" />
-    <Compile Include="Present/PreciseSleep.cs" />
-    <Compile Include="Present/Fsr3SwapchainRuntime.cs" />
     <Compile Include="Present/Swapchain.cs" />
     <Compile Include="Present/BlitPresentPath.cs" />
     <Compile Include="Present/AuxiliaryPresenter.cs" />
@@ -129,13 +125,9 @@
     <Compile Include="Present/AuxiliaryPresentationRequirements.cs" />
     <Compile Include="Present/SwapchainDispatch.cs" />
     <Compile Include="Present/SwapchainRetirement.cs" />
-    <Compile Include="Present/StreamlineRuntime.cs" />
-    <Compile Include="Present/StreamlineTaggedImage.Texture.cs" />
-    <Compile Include="Present/IDx12SharedRuntime.cs" />
     <Compile Include="Present/VulkanSharedImage.cs" />
     <Compile Include="Present/XessSharedFence.cs" />
     <Compile Include="Present/XessFgInteropRequirements.cs" />
-    <Compile Include="Present/XessFgRuntime.cs" />
     <Compile Include="Present/XessFgPresenter.cs" />
     <Compile Include="Shaders/GlslParser.cs" />
     <Compile Include="Shaders/FrameGlobals.cs" />
@@ -152,28 +144,7 @@
     <Compile Include="Shaders/NativeShaderPack.cs" />
     <Compile Include="Shaders/SetConvention.cs" />
     <Compile Include="Shaders/SpirvReflection.cs" />
-    <Compile Include="Upscale/Ngx/NgxDeviceRequirements.cs" />
-    <Compile Include="Upscale/Ngx/NgxDlssFeature.cs" />
-    <Compile Include="Upscale/Ngx/NgxFrameGenerationCamera.cs" />
-    <Compile Include="Upscale/Ngx/NgxInterop.cs" />
-    <Compile Include="Upscale/Ngx/NgxLifetime.cs" />
-    <Compile Include="Upscale/Ngx/NgxParameters.cs" />
-    <Compile Include="Upscale/Ngx/NgxResourceVk.cs" />
-    <Compile Include="Upscale/Ngx/NgxResourceVk.Texture.cs" />
-    <Compile Include="Upscale/Ngx/NgxSession.cs" />
-    <Compile Include="Upscale/Ngx/NgxShim.cs" />
-    <Compile Include="Upscale/Fsr3Native.cs" />
-    <Compile Include="Upscale/Fsr3Image.Texture.cs" />
-    <Compile Include="Upscale/IUpscalerDevice.cs" />
-    <Compile Include="Upscale/IUpscalerBackend.cs" />
-    <Compile Include="Upscale/DlssUpscaler.cs" />
-    <Compile Include="Upscale/Fsr3Backend.cs" />
-    <Compile Include="Upscale/Fsr3FrameGeneration.cs" />
-    <Compile Include="Upscale/XessNative.cs" />
-    <Compile Include="Upscale/XessBackend.cs" />
-    <Compile Include="Upscale/Fsr4Runtime.cs" />
     <Compile Include="Upscale/Fsr4SharedFrames.cs" />
-    <Compile Include="Upscale/Fsr4Backend.cs" />
     <Compile Include="Transfer/UploadManager.cs" />
     <Compile Include="Transfer/ReadbackManager.cs" />
   </ItemGroup>

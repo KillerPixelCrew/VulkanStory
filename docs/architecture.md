@@ -35,16 +35,19 @@ flowchart TD
     M[VulkanStory.Mod ModSystem] -. AppContext delegates .-> G
     G --> R[VulkanStory.Render.Vulkan]
     G --> W[VulkanStory.Platform.Sdl]
-    R --> P[Native provider bridges]
+    G --> O[ReScaleFrame.Vulkan: SR, FG, latency]
+    R --> O
+    O --> P[Native provider bridges]
     R --> W
 ```
 
 | Project | Responsibility | References |
 | --- | --- | --- |
 | `VulkanStory.Bootstrap` | Startup-hook entry: process/profile checks, dependency resolver, loads the game integration | Framework only |
-| `VulkanStory.Contracts` | Game-independent renderer contracts: mesh/texture/shader definitions, temporal frame data, upscaler plans, latency selection, occlusion test | None |
+| `VulkanStory.Contracts` | Game-independent renderer contracts, with forwarded temporal/provider types preserving their public names | ReScaleFrame.Contracts |
 | `VulkanStory.Platform.Sdl` | SDL3 window, Vulkan surface support, event pump, window coordinates | `ppy.SDL3-CS` |
-| `VulkanStory.Render.Vulkan` | Vulkan device, resources, frame graph, pipelines and shader translation, upscalers, frame generation, presentation, latency | Contracts, Platform.Sdl, Silk.NET Vulkan/Shaderc |
+| `VulkanStory.Render.Vulkan` | Vulkan device, resources, frame graph, pipelines, shader translation, and provider resource/presentation adapters | Contracts, Platform.Sdl, ReScaleFrame.Vulkan, Silk.NET Vulkan/Shaderc |
+| `ReScaleFrame.Vulkan` | SR/FG controllers, SDK wrappers, runtime provider transitions, latency tokens/markers and generated-present pacing | ReScaleFrame.Contracts, Silk.NET Vulkan |
 | `VulkanStory.Game` | Process runtime, startup routing, Harmony patches, graphics/platform adapters, temporal state, controller input, mod pass API | All of the above, official game assemblies, game-shipped Harmony and Mono.Cecil |
 | `VulkanStory.Mod` | Ordinary client `ModSystem`: settings dialog, `.vulkanstory` command, FPS HUD, world lifecycle callbacks | `VintagestoryAPI` only |
 | `VulkanStory.Installer.Mod` | Separate client mod: first-world prompt, release download and fresh runtime extraction | `VintagestoryAPI` and framework libraries |
@@ -58,7 +61,7 @@ Other source trees:
 | --- | --- |
 | `native/bootstrap` | Windows `hostfxr.dll` proxy (CMake) |
 | `native/vma`, `sdk/vma` | Required allocation bridge and unmodified Vulkan Memory Allocator 3.4.0 submodule |
-| `native/ngx`, `fsr3`, `fsr4`, `xess-fg`, `streamline` | C/C++ provider bridges loaded by the renderer |
+| `sdk/rescaleframe/runtime/vulkan` | ReScaleFrame-owned C/C++ provider bridges and guarded SDK corrections; existing native ABI names are retained during migration |
 | `shaders/native` | Maintained GLSL corpus for native (non-translated) pipelines |
 | `tools/VulkanStory.Shaders.Compiler` | Compiles `shaders/native` to SPIR-V plus `shaders.manifest.json`, packed into `shaders-vk.pak` |
 | `tools/VulkanStory.GameProfile` | Verifies an installation against the startup IL profile and writes an operand inventory |
@@ -275,6 +278,11 @@ HUD-free scene capture, separately composited UI, final composition, presentatio
 or frame generation. Screenshots read the completed composition.
 
 ## Providers
+
+Native provider source and the managed SR, frame-generation and latency controllers
+live in the pinned ReScaleFrame submodule. The game adapter produces scene, camera,
+motion and HUD inputs. The renderer implements resource, queue and presentation
+operations through host interfaces; provider policy and SDK contexts live in ReScaleFrame.
 
 | Kind | Providers |
 | --- | --- |

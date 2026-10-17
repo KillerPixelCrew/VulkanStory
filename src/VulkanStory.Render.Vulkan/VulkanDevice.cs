@@ -27,240 +27,44 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     void ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
 
     /// <summary>Renderer-owned frame timing recorder shared with latency boundary callbacks.</summary>
-    internal FrameTimingRecorder Latency { get; private set; } = new();
-    private VendorLatency? _vendorLatency;
-    private bool _streamlineReflexReady;
-    private bool _streamlineFrameGenerationReady;
-    private bool _streamlinePclReady;
-    private bool _streamlineFrameTokenReady;
-    private ulong _streamlineTokenFrameId;
-    private nint _streamlineTokenPointer;
-    private bool _streamlineTokenMismatchLogged;
-    private bool _pclAsyncPresentFailureLogged;
-    private bool _pclPingFailureLogged;
-    private bool _pclMarkerFailureLogged;
-    private bool _xellMarkerFailureLogged;
-    private int _pclPingSuccessCount;
-    internal int PclPingSuccessCountForTests => _pclPingSuccessCount;
-    private int _pclMarkerSuccessCount;
-    internal int PclMarkerSuccessCountForTests => _pclMarkerSuccessCount;
-    private int _reflexSleepSuccessCount;
-    internal int ReflexSleepSuccessCountForTests => _reflexSleepSuccessCount;
-    internal bool StreamlineReflexReadyForTests => _streamlineReflexReady;
-    internal bool StreamlinePclReadyForTests => _streamlinePclReady;
-    private bool _streamlineFrameGenerationSupported;
-    private int _appliedLatencyMode = -1;
-    private int _vendorFrameCap;
-    private static readonly bool LatencyTraceEnabled =
-        Environment.GetEnvironmentVariable("VULKANSTORY_LATENCY_TRACE") == "1";
-    private static void TraceLatency(string message)
-    {
-        if (LatencyTraceEnabled) Console.Error.WriteLine("[VulkanStory latency] " + message);
-    }
-    private RendererLatencySelection _latencySelection = new("on", "off");
-    /// <summary>Host-selected latency settings snapshot read and written with volatile semantics.</summary>
+    internal FrameTimingRecorder Latency { get => LatencyController.Latency; private set => LatencyController.Latency = value; }
+    private LatencySession? latencyController;
+    private LatencySession LatencyController => latencyController ??= new LatencySession(this);
+    private VendorLatency? _vendorLatency { get => LatencyController._vendorLatency; set => LatencyController._vendorLatency = value; }
+    private bool _streamlineReflexReady { get => LatencyController._streamlineReflexReady; set => LatencyController._streamlineReflexReady = value; }
+    private bool _streamlineFrameGenerationReady { get => LatencyController._streamlineFrameGenerationReady; set => LatencyController._streamlineFrameGenerationReady = value; }
+    private bool _streamlinePclReady { get => LatencyController._streamlinePclReady; set => LatencyController._streamlinePclReady = value; }
+    private bool _streamlineFrameTokenReady { get => LatencyController._streamlineFrameTokenReady; set => LatencyController._streamlineFrameTokenReady = value; }
+    private ulong _streamlineTokenFrameId { get => LatencyController._streamlineTokenFrameId; set => LatencyController._streamlineTokenFrameId = value; }
+    private nint _streamlineTokenPointer { get => LatencyController._streamlineTokenPointer; set => LatencyController._streamlineTokenPointer = value; }
+    private bool _streamlineFrameGenerationSupported { get => LatencyController._streamlineFrameGenerationSupported; set => LatencyController._streamlineFrameGenerationSupported = value; }
+    private int _appliedLatencyMode { get => LatencyController._appliedLatencyMode; set => LatencyController._appliedLatencyMode = value; }
+    private const string XessProvider = "xess";
+    private bool XessSelected => _frameGenerationProvider == XessProvider;
+    private VendorLatency? GenericLatency => LatencyController.GenericLatency;
+    private int DesiredLatencyMode => LatencyController.DesiredLatencyMode;
+    private static void TraceLatency(string message) => LatencySession.TraceLatency(message);
+    internal int PclPingSuccessCountForTests => LatencyController.PclPingSuccessCountForTests;
+    internal int PclMarkerSuccessCountForTests => LatencyController.PclMarkerSuccessCountForTests;
+    internal int ReflexSleepSuccessCountForTests => LatencyController.ReflexSleepSuccessCountForTests;
+    internal bool StreamlineReflexReadyForTests => LatencyController.StreamlineReflexReadyForTests;
+    internal bool StreamlinePclReadyForTests => LatencyController.StreamlinePclReadyForTests;
     public RendererLatencySelection LatencySelection
     {
-        get => System.Threading.Volatile.Read(ref _latencySelection);
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            System.Threading.Volatile.Write(ref _latencySelection, value);
-        }
+        get => LatencyController.LatencySelection;
+        set => LatencyController.LatencySelection = value;
     }
-    private int DesiredLatencyMode => LatencySelection.EffectiveMode;
-    /// <summary>Whether XeSS-FG is the selected presentation provider; its presenter then owns XeLL pacing instead of the generic vendor latency path.</summary>
-    private bool XessSelected => _frameGenerationProvider == XessProvider;
-    private const string XessProvider = "xess";
-    /// <summary>
-    /// The generic vendor latency path (Reflex/Anti-Lag via <see cref="VendorLatency" />), or null while
-    /// XeSS-FG is selected and its presenter owns pacing. Only for calls whose XeSS branch does nothing else.
-    /// </summary>
-    private VendorLatency? GenericLatency => XessSelected ? null : _vendorLatency;
-    /// <summary>Whether the selected active vendor presenter or extension currently owns frame limiting.</summary>
-    internal bool VendorLatencyOwnsFrameCap => XessSelected
-        ? _xessPresenter != null
-        : _vendorLatency?.OwnsFrameCap == true || _streamlineReflexReady;
-    /// <summary>Stores the host FPS limit and forwards it to the active vendor pacing authority.</summary>
-    internal void SetVendorLatencyFrameCap(int maxFps)
-    {
-        _vendorFrameCap = Math.Max(0, maxFps);
-        if (_xessPresenter is { } intel)
-        {
-            // Until the first pre-input sleep boundary configures XeLL, that boundary applies the cap.
-            if (_xessProtocolReady) ApplyXellOptions(intel, "frame-cap options");
-            return;
-        }
-        if (XessSelected) return;
-        _vendorLatency?.SetFrameCap(maxFps);
-        if (_streamlineReflexReady && _context.Streamline is { } streamline)
-            RequireLatencyProtocol("Streamline", streamline.SetReflex(DesiredLatencyMode, _vendorFrameCap),
-                "Reflex frame-cap options");
-    }
-    /// <summary>Applies XeLL options when the presenter has not configured them yet or the frame cap changed.</summary>
-    /// <remarks>XeSS-FG requires XeLL enabled even when the generic preference is Off, so the generic latency mode does not select these options.</remarks>
-    private void ApplyXellOptions(XessFgPresenter intel, string operation)
-    {
-        if (_xessProtocolReady && _xellAppliedFrameCap == _vendorFrameCap) return;
-        // XeLL requires GPU work to be finished before its mode changes.
-        intel.WaitForGpuIdle();
-        RequireLatencyProtocol("XeLL", intel.Runtime.SetLatencyMode(_vendorFrameCap, true), operation);
-        _xessProtocolReady = true;
-        _xellAppliedFrameCap = _vendorFrameCap;
-    }
-    /// <summary>Begins vendor frame identity and performs the selected latency sleep before input collection.</summary>
-    internal void SleepVendorLatency(ulong frameId, bool mayGenerate)
-    {
-        // PCL needs a frame token even when another vendor owns low-latency sleep.
-        StreamlineRuntime? streamline = _context.Streamline;
-        bool streamlineActive = streamline != null &&
-            (_streamlinePclReady || _streamlineReflexReady || _streamlineFrameGenerationReady);
-        int tokenResult = streamlineActive ? streamline!.BeginFrame(frameId) : -1;
-        bool streamlineFrameBegun = tokenResult == 0;
-        _streamlineFrameTokenReady = streamlineFrameBegun;
-        _streamlineTokenFrameId = streamlineFrameBegun ? frameId : 0;
-        _streamlineTokenPointer = streamlineFrameBegun ? streamline!.CurrentFrameToken() : 0;
-        if (streamlineActive)
-        {
-            RequireLatencyProtocol("Streamline", tokenResult, "frame-token creation");
-            if (_streamlineTokenPointer == 0)
-            {
-                _streamlineFrameTokenReady = false;
-                throw new InvalidOperationException("Streamline returned an empty token for frame " + frameId + ".");
-            }
-        }
-        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " token=" + tokenResult);
-        int latencyMode = DesiredLatencyMode;
-        if (!XessSelected && _appliedLatencyMode != latencyMode)
-        {
-            _vendorLatency?.SetMode(latencyMode);
-            if (_streamlineReflexReady && streamline != null)
-                RequireLatencyProtocol("Streamline", streamline.SetReflex(latencyMode, _vendorFrameCap), "Reflex mode options");
-            _appliedLatencyMode = latencyMode;
-        }
-        // Streamline requires one sleep call per frame even with Reflex Off. Keep
-        // it before XeLL or Anti-Lag so their input pacing follows the final sleep.
-        if (_streamlineReflexReady && streamlineFrameBegun)
-        {
-            long sleepStarted = VulkanStats.WaitStart();
-            int result;
-            try { result = streamline!.ReflexSleep(); }
-            finally { VulkanStats.NoteWait(WaitSite.ReflexSleep, sleepStarted); }
-            RequireLatencyProtocol("Streamline", result, "Reflex sleep");
-            _reflexSleepSuccessCount++;
-            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " reflexSleep=" + result +
-                " mode=" + (XessSelected ? 0 : latencyMode));
-        }
-        if (_xessPresenter is { } intel)
-        {
-            ApplyXellOptions(intel, "mode options");
-            // XeLL must be enabled before FG and remain enabled for its presenter.
-            // A paused presenter resumes generation at the first sleep boundary
-            // after a frame prepared complete inputs again.
-            if (!_xessGenerationEnabled && !_xessGenerationPaused)
-                SetXessGenerationEnabled(intel, true);
-            ReserveFramePresentIds(mayGenerate);
-            int sleepResult = intel.Runtime.Sleep(frameId);
-            RequireLatencyProtocol("XeLL", sleepResult, "sleep");
-            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xellSleep=" + sleepResult);
-            return;
-        }
-        if (XessSelected)
-        {
-            ReserveFramePresentIds(mayGenerate);
-            return;
-        }
-        if (_swapchain != null) ReserveFramePresentIds(mayGenerate);
-        _vendorLatency?.Sleep(frameId, RealPresentId);
-    }
-    /// <summary>Throws when a required vendor latency or presentation-protocol call reports failure.</summary>
-    /// <param name="vendor">Protocol owner named in the failure, such as Streamline or XeLL.</param>
-    private void RequireLatencyProtocol(string vendor, int result, string operation)
-    {
-        if (result != 0)
-            throw new InvalidOperationException(vendor + " " + operation + " failed (" + result +
-                ") at frame " + _latencyFrameId + ".");
-    }
-    /// <summary>Marks the actual input-start boundary for the active AMD latency extension.</summary>
-    internal void MarkVendorInputStart(ulong frameId)
-    {
-        _vendorLatency?.InputStart(frameId);
-        if (LatencyTraceEnabled && _vendorLatency?.Kind == VendorLatencyKind.AntiLag)
-            TraceLatency("frame=" + frameId + " amdInputStart");
-    }
-    /// <summary>Records renderer timing and forwards the supported vendor/PCL marker for the current frame.</summary>
-    internal void MarkLatency(ulong frameId, LatencyMarker marker)
-    {
-        Latency.Marker(frameId, marker);
-        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " boundary=" + marker);
-        if (_streamlinePclReady && _streamlineFrameTokenReady &&
-            frameId != _streamlineTokenFrameId && !_streamlineTokenMismatchLogged)
-        {
-            _streamlineTokenMismatchLogged = true;
-            MirrorValidationMessage("Streamline PCL frame-token mismatch: marker frame=" +
-                frameId + ", token frame=" + _streamlineTokenFrameId);
-        }
-        if (_streamlinePclReady && _streamlineFrameTokenReady &&
-            frameId == _streamlineTokenFrameId && marker != LatencyMarker.InputSample)
-        {
-            int result = _context.Streamline!.Marker((uint)marker);
-            if (result == 0) System.Threading.Interlocked.Increment(ref _pclMarkerSuccessCount);
-            if (result != 0 && !_pclMarkerFailureLogged)
-            {
-                _pclMarkerFailureLogged = true;
-                MirrorValidationMessage("Streamline PCL marker failed: frame=" + frameId +
-                    ", marker=" + marker + ", result=" + result);
-            }
-            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " pcl=" + marker + " result=" + result);
-        }
-        if (marker == LatencyMarker.PresentEnd && frameId == _streamlineTokenFrameId)
-            _streamlineFrameTokenReady = false;
-        if (_xessPresenter is { } intel)
-        {
-            int result = intel.Runtime.Marker(frameId, marker);
-            if (result != 0 && !_xellMarkerFailureLogged)
-            {
-                _xellMarkerFailureLogged = true;
-                MirrorValidationMessage("XeLL marker failed: frame=" + frameId +
-                    ", marker=" + marker + ", result=" + result);
-            }
-            if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " xell=" + marker + " result=" + result);
-            return;
-        }
-        GenericLatency?.Marker(frameId, marker);
-    }
-    /// <summary>Registered PCL latency-ping message, or zero when PCL is unavailable.</summary>
-    internal uint PclWindowMessage => _streamlinePclReady ? _context.Streamline?.PclWindowMessage() ?? 0 : 0;
-    /// <summary>Forwards an observed latency-ping boundary to the available Streamline PCL path.</summary>
-    internal void MarkPclLatencyPing()
-    {
-        if (!_streamlinePclReady || !_streamlineFrameTokenReady ||
-            _context.Streamline is not { } streamline) return;
-        int result = streamline.Marker(8); // sl::PCLMarker::ePCLatencyPing
-        if (result == 0) _pclPingSuccessCount++;
-        if (LatencyTraceEnabled) TraceLatency("frame=" + _streamlineTokenFrameId +
-            " pcl=PCLatencyPing result=" + result);
-        if (result != 0 && !_pclPingFailureLogged)
-        {
-            _pclPingFailureLogged = true;
-            MirrorValidationMessage("Streamline PCL ping marker failed: " + result);
-        }
-    }
-    /// <summary>Forwards an asynchronous present marker using the explicitly retained frame token.</summary>
-    private void MarkAsyncPclPresent(ulong frameId, nint token, LatencyMarker marker)
-    {
-        if (!_streamlinePclReady || token == 0 || _context.Streamline is not { } streamline) return;
-        int result = streamline.MarkerForToken(token, (uint)marker);
-        if (result == 0) System.Threading.Interlocked.Increment(ref _pclMarkerSuccessCount);
-        if (LatencyTraceEnabled) TraceLatency("frame=" + frameId + " pclAsync=" + marker +
-            " result=" + result);
-        if (result != 0 && !_pclAsyncPresentFailureLogged)
-        {
-            _pclAsyncPresentFailureLogged = true;
-            MirrorValidationMessage("Streamline PCL async present marker failed: frame=" +
-                frameId + ", marker=" + marker + ", result=" + result);
-        }
-    }
+    internal bool VendorLatencyOwnsFrameCap => LatencyController.VendorLatencyOwnsFrameCap;
+    internal void SetVendorLatencyFrameCap(int maxFps) => LatencyController.SetVendorLatencyFrameCap(maxFps);
+    internal void SleepVendorLatency(ulong frameId, bool mayGenerate) => LatencyController.SleepVendorLatency(frameId, mayGenerate);
+    internal void MarkVendorInputStart(ulong frameId) => LatencyController.MarkVendorInputStart(frameId);
+    internal void MarkLatency(ulong frameId, LatencyMarker marker) => LatencyController.MarkLatency(frameId, marker);
+    private void RequireLatencyProtocol(string vendor, int result, string operation) =>
+        LatencyController.RequireLatencyProtocol(vendor, result, operation);
+    internal uint PclWindowMessage => LatencyController.PclWindowMessage;
+    internal void MarkPclLatencyPing() => LatencyController.MarkPclLatencyPing();
+    private void MarkAsyncPclPresent(ulong frameId, nint token, LatencyMarker marker) =>
+        LatencyController.MarkAsyncPclPresent(frameId, token, marker);
     /// <summary>Current monotonic renderer latency-frame identity.</summary>
     internal ulong LatencyFrameId => _latencyFrameId;
     private ulong _latencyFrameId;
@@ -755,6 +559,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             !(options.EnableValidation && !string.IsNullOrWhiteSpace(options.ValidationFeatures)) &&
             Environment.GetEnvironmentVariable("VULKANSTORY_STREAMLINE")?.Trim() != "0")
         {
+            StreamlineRuntime.LifetimeTrace = VulkanContext.TraceLifetime;
             if (StreamlineRuntime.TryCreate(options.PreferredDeviceIndex,
                 out StreamlineRuntime? streamline, out string streamlineReason, options.PreferredVendorId))
                 options.Streamline = streamline;
@@ -772,41 +577,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         }
 
         _context = context!;
-        if (_context.Streamline != null)
-        {
-            int reflexBind = _context.Streamline.BindReflex();
-            int fgBind = _context.Streamline.BindFrameGeneration();
-            int pclResult = _context.Streamline.BindPcl();
-            _streamlinePclReady = pclResult == 0;
-            if (!_streamlinePclReady)
-                MirrorValidationMessage("Streamline PCL unavailable: bind=" + pclResult);
-            int reflexResult = reflexBind == 0 ? _context.Streamline.SetReflex(DesiredLatencyMode, 0) : -1;
-            _streamlineReflexReady = reflexBind == 0 && reflexResult == 0;
-            if (!_streamlineReflexReady)
-                MirrorValidationMessage("Streamline Reflex unavailable: bind=" + reflexBind + ", options=" + reflexResult);
-            else
-            {
-                int stateResult = _context.Streamline.GetReflexState(out bool available, out bool reports);
-                MirrorValidationMessage("Streamline Reflex state: query=" + stateResult +
-                    ", lowLatencyAvailable=" + available + ", latencyReportAvailable=" + reports);
-                Console.Error.WriteLine("[VulkanStory] Streamline Reflex: mode=" + DesiredLatencyMode +
-                    ", state=" + stateResult + ", available=" + available +
-                    ", latencyReports=" + reports);
-            }
-            _streamlineFrameGenerationReady = fgBind == 0;
-            if (!_streamlineFrameGenerationReady)
-                MirrorValidationMessage("Streamline DLSS-G unavailable: bind=" + fgBind);
-            if (_streamlineFrameGenerationReady)
-            {
-                int supportResult = _context.Streamline.IsFrameGenerationSupported(_context.PhysicalDevice);
-                _streamlineFrameGenerationSupported = supportResult == 0;
-                if (!_streamlineFrameGenerationSupported)
-                    MirrorValidationMessage("Streamline DLSS-G unsupported on selected Vulkan adapter: " + supportResult);
-            }
-        }
-        _vendorLatency = vendorLatencyRequirements.Kind == VendorLatencyKind.Reflex && _streamlineReflexReady
-            ? null : VendorLatency.TryCreate(_context, vendorLatencyRequirements.Kind);
-        if (_vendorLatency != null) _vendorLatency.Failure = MirrorValidationMessage;
+        LatencyController.BringUp(_context, vendorLatencyRequirements.Kind);
         // Any hard Vulkan failure now reaches the client's error channel and the
         // validation log instead of turning into a silent stall.
         VulkanResult.OnFailure = message =>

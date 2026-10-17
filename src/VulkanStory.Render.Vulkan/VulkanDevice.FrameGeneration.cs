@@ -1,6 +1,5 @@
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
-using VulkanStory.Render.Vulkan.Present;
 using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan;
@@ -63,10 +62,10 @@ public sealed unsafe partial class VulkanDevice
         _textures.Require(_barriers, commands, uprightUi, ResourceUsage.SampleExternal);
         _barriers.Flush(commands);
 
-        StreamlineTaggedImage d = StreamlineTaggedImage.From(uprightDepth);
-        StreamlineTaggedImage m = StreamlineTaggedImage.From(uprightMotion);
-        StreamlineTaggedImage h = StreamlineTaggedImage.From(uprightHudless);
-        StreamlineTaggedImage u = StreamlineTaggedImage.From(uprightUi);
+        StreamlineTaggedImage d = ProviderImages.Streamline(uprightDepth);
+        StreamlineTaggedImage m = ProviderImages.Streamline(uprightMotion);
+        StreamlineTaggedImage h = ProviderImages.Streamline(uprightHudless);
+        StreamlineTaggedImage u = ProviderImages.Streamline(uprightUi);
         fixed (float* viewToClip = camera.ViewToClip)
         fixed (float* clipToView = camera.ClipToView)
         fixed (float* clipToPrevious = camera.ClipToPreviousClip)
@@ -213,13 +212,7 @@ public sealed unsafe partial class VulkanDevice
         if (provider != XessProvider) StopXessPresenter();
         _frameGenerationProvider = provider;
         _xessFailure = null;
-        if (XessSelected)
-        {
-            _vendorLatency?.SetMode(0);
-            if (_streamlineReflexReady && _context.Streamline is { } streamline)
-                RequireLatencyProtocol("Streamline", streamline.SetReflex(0, 0), "Reflex off for XeSS pacing handoff");
-        }
-        _appliedLatencyMode = -1;
+        LatencyController.PresentationProviderChanged();
         _swapchain?.SetFrameGenerationProvider(SwapchainFrameGenerationProvider);
     }
 

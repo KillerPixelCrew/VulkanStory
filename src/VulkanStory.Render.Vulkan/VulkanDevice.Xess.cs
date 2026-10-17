@@ -54,8 +54,8 @@ public sealed unsafe partial class VulkanDevice
         _barriers.Flush(commands);
         var args = new XessExecute
         {
-            Color = XessImage.From(color), Depth = XessImage.From(depth), Velocity = XessImage.From(motion),
-            Output = XessImage.From(output), Width = color.Width, Height = color.Height,
+            Color = ProviderImages.Xess(color), Depth = ProviderImages.Xess(depth), Velocity = ProviderImages.Xess(motion),
+            Output = ProviderImages.Xess(output), Width = color.Width, Height = color.Height,
             // All XeSS resources are upright. Submit their measured pixel
             // displacement; flipping rows reverses both jitter and motion Y.
             JitterX = frame.Temporal.JitterX,

@@ -45,8 +45,8 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
         // Early-loaded assemblies do not participate in the game's dependency
         // manifest. A deployed payload must select its own compiler explicitly.
         string name = OperatingSystem.IsWindows() ? "shaderc_shared.dll" : "libshaderc_shared.so";
-        string path = Path.Combine(Core.NativeRuntimePaths.DirectoryContaining(name), name);
-        if (Core.NativeRuntimePaths.IsDeployedPayload && !File.Exists(path))
+        string path = Path.Combine(ReScaleFrame.Vulkan.NativeRuntimePaths.DirectoryContaining(name), name);
+        if (ReScaleFrame.Vulkan.NativeRuntimePaths.IsDeployedPayload && !File.Exists(path))
             throw new DllNotFoundException($"VulkanStory shader compiler is missing: {path}");
         _api = File.Exists(path) ? new Shaderc(new DefaultNativeContext(path)) : Shaderc.GetApi();
         _compiler = _api.CompilerInitialize();
@@ -124,7 +124,7 @@ internal sealed unsafe partial class ShaderCompiler : IDisposable
 
         foreach (string? directory in new[]
                  {
-                     Core.NativeRuntimePaths.DirectoryContaining(name),
+                     ReScaleFrame.Vulkan.NativeRuntimePaths.DirectoryContaining(name),
                      AppContext.BaseDirectory,
                      System.IO.Path.GetDirectoryName(typeof(ShaderCompiler).Assembly.Location),
                  })

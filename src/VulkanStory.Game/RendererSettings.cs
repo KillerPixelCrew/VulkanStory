@@ -256,6 +256,9 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     internal bool UpscalerReplacesTaa => EffectiveUpscaler != "off";
     internal bool EffectiveTaa => !StereoRendering && Settings.Taa && !TaaDisabled && !UpscalerReplacesTaa;
     internal bool EffectiveTemporalPipeline => !StereoRendering && (EffectiveTaa || UpscalerReplacesTaa || Settings.FrameGeneration != "off");
+    string IUpscalerRuntimeState.RequestedUpscaler => Settings.Upscaler;
+    string IUpscalerRuntimeState.EffectiveUpscaler => EffectiveUpscaler;
+    bool IUpscalerRuntimeState.IsDisabled(string provider) => IsDisabled(provider);
     public bool DlssRequested => EffectiveUpscaler == "dlss";
     public string Quality => Settings.UpscalerQuality;
     public string DlssPreset => Settings.DlssPreset;

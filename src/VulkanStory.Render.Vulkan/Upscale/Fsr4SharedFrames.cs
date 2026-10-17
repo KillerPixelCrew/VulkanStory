@@ -6,7 +6,7 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 namespace VulkanStory.Render.Vulkan.Core;
 
 /// <summary>Three independent image sets for Vulkan-to-DX12 FSR 4 dispatches.</summary>
-internal sealed class Fsr4SharedFrames : IDisposable
+internal sealed class Fsr4SharedFrames : IFsr4SharedFrames
 {
     /// <summary>One shared color, depth, motion and output set with its most recent DX12 completion value.</summary>
     internal sealed class ImageSet : IDisposable

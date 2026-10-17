@@ -40,10 +40,14 @@ public sealed unsafe partial class VulkanDevice
         in UpscalerFrame frame, bool firstFrame) => EvaluateXess(api, context, color, depth, motion, output, frame, firstFrame);
     /// <inheritdoc/>
     bool IUpscalerDevice.TryCreateFsr4SharedFrames(Fsr4Runtime runtime, in UpscalerPlan plan,
-        out Fsr4SharedFrames? shared, out string reason) =>
-        TryCreateFsr4SharedFrames(runtime, plan, out shared, out reason);
+        out IFsr4SharedFrames? shared, out string reason)
+    {
+        bool created = TryCreateFsr4SharedFrames(runtime, plan, out Fsr4SharedFrames? resources, out reason);
+        shared = resources;
+        return created;
+    }
     /// <inheritdoc/>
-    int IUpscalerDevice.EvaluateFsr4(Fsr4Runtime runtime, Fsr4SharedFrames shared, int motion,
+    int IUpscalerDevice.EvaluateFsr4(Fsr4Runtime runtime, IFsr4SharedFrames shared, int motion,
         in UpscalerPlan plan, in UpscalerFrame frame, bool firstFrame) =>
-        EvaluateFsr4(runtime, shared, motion, plan, frame, firstFrame);
+        EvaluateFsr4(runtime, (Fsr4SharedFrames)shared, motion, plan, frame, firstFrame);
 }

@@ -22,7 +22,7 @@ param(
     [string]$Fsr4SdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/fidelityfx'),
     [string]$XessSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/xess'),
     [string]$StreamlineSdkRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'sdk/streamline'),
-    [string]$CorrectedStreamlineRuntimeDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native-streamline/Release/win-x64/runtime'),
+    [string]$CorrectedStreamlineRuntimeDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/rescaleframe/streamline/Release/win-x64/runtime'),
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$VulkanSdkRoot = $env:VULKAN_SDK
 )
@@ -54,7 +54,7 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Choose a fresh bridge output directory; stale binaries are not merged.' }
 New-Item -ItemType Directory -Path $output | Out-Null
 & (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $output 'VulkanStoryVma.dll') -VulkanSdkRoot $vulkanRoot
-& (Join-Path $projectRoot 'native/ngx/build.ps1') -OutputDirectory $output
+& (Join-Path $projectRoot 'sdk/rescaleframe/runtime/vulkan/ngx/build.ps1') -OutputDirectory $output
 & (Join-Path $projectRoot 'native/aux-present/build.ps1') -Output (Join-Path $output 'VulkanStoryAuxPresent.dll')
 & (Join-Path $projectRoot 'native/wsi/build.ps1') -Output (Join-Path $output 'VulkanStoryWsi.dll') -VulkanSdkRoot $vulkanRoot
 $builds = @(
@@ -65,8 +65,9 @@ $builds = @(
 )
 foreach ($build in $builds) {
     $additional = @{}
+    if ($build.Directory -eq 'fsr4') { $additional.MinHookRoot = Join-Path $projectRoot 'sdk/minhook' }
     if ($build.Directory -eq 'streamline') { $additional.CorrectedRuntimeDirectory = $CorrectedStreamlineRuntimeDirectory }
-    & (Join-Path $projectRoot "native/$($build.Directory)/build.ps1") -SdkRoot $build.Sdk `
+    & (Join-Path $projectRoot "sdk/rescaleframe/runtime/vulkan/$($build.Directory)/build.ps1") -SdkRoot $build.Sdk `
         -VulkanSdkRoot $vulkanRoot -Output (Join-Path $output $build.Binary) @additional
 }
 Write-Host "Built provider bridges at $output. Vendor runtimes/notices are separate redistributable inputs. No tests, staging, installation or game launch ran."

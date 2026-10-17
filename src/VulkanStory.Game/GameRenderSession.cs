@@ -277,7 +277,7 @@ internal sealed partial class GameRenderSession : IDisposable
             // Fractional, high-resolution wait: Thread.Sleep(int) truncates and can
             // overshoot by a whole ~15.6 ms timer tick without 1 ms resolution.
             double delay = 1000.0 / settings.MaxFps - frameClock.Elapsed.TotalMilliseconds;
-            if (delay > 0) VulkanStory.Render.Vulkan.Present.PreciseSleep.For(delay);
+            if (delay > 0) ReScaleFrame.Vulkan.PreciseSleep.For(delay);
         }
         pendingFrameSettings = settings;
         inputFrameId = Device.BeginLatencyFrame();

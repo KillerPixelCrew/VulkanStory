@@ -26,8 +26,8 @@ public sealed unsafe partial class VulkanDevice
     private ulong _xessPresentedFrames;
     private uint _xessEffectiveGeneratedFrames;
     /// <summary>Whether the active presenter's XeLL options were applied at a pre-input sleep boundary.</summary>
-    private bool _xessProtocolReady;
-    private int _xellAppliedFrameCap = -1;
+    private bool _xessProtocolReady { get => LatencyController._xessProtocolReady; set => LatencyController._xessProtocolReady = value; }
+    private int _xellAppliedFrameCap { get => LatencyController._xellAppliedFrameCap; set => LatencyController._xellAppliedFrameCap = value; }
     /// <summary>Whether interpolation is currently enabled in the active presenter.</summary>
     private bool _xessGenerationEnabled;
     /// <summary>Set by <see cref="PauseXessFrameGeneration" />; cleared once a frame prepares complete inputs again.</summary>
@@ -148,12 +148,9 @@ public sealed unsafe partial class VulkanDevice
         _xessRenderedFrames = 0;
         _xessPresentedFrames = 0;
         _xessEffectiveGeneratedFrames = 0;
-        _xessProtocolReady = false;
-        _xellAppliedFrameCap = -1;
         _xessGenerationEnabled = false;
         _xessHistoryResetPending = false;
-        RequireLatencyProtocol("XeLL", _xessPresenter!.Runtime.SetLatencyMode(0, false), "initial pass-through options");
-        _appliedLatencyMode = -1;
+        LatencyController.XessPresenterCreated();
         MirrorValidationMessage("--- XeSS-FG DX12 proxy active on the Vulkan window");
         return true;
     }

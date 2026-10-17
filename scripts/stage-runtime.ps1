@@ -98,6 +98,14 @@ foreach ($project in @('Bootstrap','Contracts','Game','Input','Platform.Sdl','Re
     }
 }
 # Explicit dependency inventory matches BootstrapDependencies; game/Harmony assemblies are excluded.
+foreach ($name in @('ReScaleFrame.Contracts', 'ReScaleFrame.Vulkan')) {
+    $shared = Join-Path $projectRoot "sdk/rescaleframe/runtime/managed/$name/bin/$Configuration/$managedSuffix"
+    Add-Payload "VulkanStory/managed/$name.dll" (Join-Path $shared "$name.dll")
+    Add-Payload "VulkanStory/managed/$name.xml" (Join-Path $shared "$name.xml")
+    if ($Configuration -eq 'Debug') {
+        Add-Payload "VulkanStory/managed/$name.pdb" (Join-Path $shared "$name.pdb")
+    }
+}
 $backend = Join-Path $projectRoot "src/VulkanStory.Render.Vulkan/bin/$Configuration/$managedSuffix"
 foreach ($name in @('SDL3-CS','Silk.NET.Core','Silk.NET.Shaderc','Silk.NET.Vulkan',
     'Silk.NET.Vulkan.Extensions.EXT','Silk.NET.Vulkan.Extensions.KHR',

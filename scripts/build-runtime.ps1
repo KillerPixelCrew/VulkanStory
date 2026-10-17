@@ -35,8 +35,8 @@ if ($RuntimeIdentifier -eq 'linux-x64') {
 } else {
     & (Join-Path $projectRoot 'native/vma/build.ps1') -Output (Join-Path $vmaBuild 'VulkanStoryVma.dll') `
         -VulkanSdkRoot $VulkanSdkRoot -Configuration $Configuration
-    & (Join-Path $projectRoot 'native/fsr3/build-sdk.ps1') -VulkanSdkRoot $VulkanSdkRoot
-    & (Join-Path $projectRoot 'native/streamline/build-sdk.ps1')
+    & (Join-Path $projectRoot 'sdk/rescaleframe/runtime/vulkan/fsr3/build-sdk.ps1') -HostRoot $projectRoot -VulkanSdkRoot $VulkanSdkRoot
+    & (Join-Path $projectRoot 'sdk/rescaleframe/runtime/vulkan/streamline/build-sdk.ps1') -HostRoot $projectRoot
     & (Join-Path $projectRoot 'native/openxr/build.ps1') -Configuration $Configuration
 }
 # Bootstrap uses reflection to load Game; build it explicitly, without a test project.
@@ -58,7 +58,7 @@ if (-not $SkipShaders) {
     if ($LASTEXITCODE -ne 0) { throw 'Full native shader compilation failed.' }
 }
 if ($RuntimeIdentifier -eq 'linux-x64') {
-    Write-Host "Built Linux managed runtime, required VMA bridge at $vmaBuild, and requested shaders; Windows activation proxy was skipped. Build native/ngx/build.sh separately if supplying the optional NGX shim. No installation or game launch ran."
+    Write-Host "Built Linux managed runtime, required VMA bridge at $vmaBuild, and requested shaders; Windows activation proxy was skipped. Build sdk/rescaleframe/runtime/vulkan/ngx/build.sh separately if supplying the optional NGX shim. No installation or game launch ran."
     return
 }
 $nativeBuild = Join-Path $projectRoot 'artifacts/native-bootstrap'

@@ -279,10 +279,10 @@ public sealed unsafe partial class VulkanDevice
         _lastUpscalerInputTextures = (LatencyFrameId, motionTexture, 0);
         NgxResult result = feature.Evaluate(
             commandBuffer,
-            NgxResourceVk.Texture(color, readWrite: false),
-            NgxResourceVk.Texture(output, readWrite: true),
-            NgxResourceVk.Texture(depth, readWrite: false),
-            NgxResourceVk.Texture(motion, readWrite: false),
+            ProviderImages.Ngx(color, readWrite: false),
+            ProviderImages.Ngx(output, readWrite: true),
+            ProviderImages.Ngx(depth, readWrite: false),
+            ProviderImages.Ngx(motion, readWrite: false),
             frame);
 
         // Seam D2's restore: see the class comment for what NGX leaves behind.

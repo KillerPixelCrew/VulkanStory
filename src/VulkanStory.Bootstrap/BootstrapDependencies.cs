@@ -17,6 +17,8 @@ internal sealed class BootstrapDependencies(string managedDirectory, string game
         ["VulkanStory.Input"] = Path.Combine(managedDirectory, "VulkanStory.Input.dll"),
         ["VulkanStory.Platform.Sdl"] = Path.Combine(managedDirectory, "VulkanStory.Platform.Sdl.dll"),
         ["VulkanStory.Render.Vulkan"] = Path.Combine(managedDirectory, "VulkanStory.Render.Vulkan.dll"),
+        ["ReScaleFrame.Contracts"] = Path.Combine(managedDirectory, "ReScaleFrame.Contracts.dll"),
+        ["ReScaleFrame.Vulkan"] = Path.Combine(managedDirectory, "ReScaleFrame.Vulkan.dll"),
         ["0Harmony"] = Path.Combine(gameDirectory, "Lib", "0Harmony.dll"),
         ["VintagestoryLib"] = Path.Combine(gameDirectory, "VintagestoryLib.dll"),
         ["VintagestoryAPI"] = Path.Combine(gameDirectory, "VintagestoryAPI.dll")

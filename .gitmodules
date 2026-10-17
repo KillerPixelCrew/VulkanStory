@@ -23,3 +23,6 @@
 [submodule "sdk/openxr"]
 	path = sdk/openxr
 	url = https://github.com/KhronosGroup/OpenXR-SDK.git
+[submodule "sdk/rescaleframe"]
+	path = sdk/rescaleframe
+	url = https://github.com/KillerPixelCrew/ReScaleFrame.git

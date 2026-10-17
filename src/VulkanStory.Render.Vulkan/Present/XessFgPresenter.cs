@@ -15,7 +15,7 @@ internal readonly record struct XessSourceImages(
 /// while DX12 may still be reading a different set. One D3D12 fence timeline
 /// carries the release/acquire values for all sets.
 /// </summary>
-internal sealed unsafe class XessFgPresenter : IDisposable
+internal sealed unsafe class XessFgPresenter : IDisposable, IXessLatencyPresenter
 {
     /// <summary>Extent and format fingerprint used to detect incompatible source-image replacement.</summary>
     private readonly record struct SourceImageLayout(uint Width, uint Height, Format Format)

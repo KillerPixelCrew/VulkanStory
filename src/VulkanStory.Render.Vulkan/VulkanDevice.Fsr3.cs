@@ -169,10 +169,10 @@ public sealed unsafe partial class VulkanDevice
         var args = new Fsr3Frame
         {
             Commands = (nint)commands.Handle,
-            Color = Fsr3Image.From(color), Depth = Fsr3Image.From(depth),
-            Motion = Fsr3Image.From(motion), Output = Fsr3Image.From(output),
-            Reactive = Fsr3Image.From(reactive),
-            Composition = Fsr3Image.From(composition),
+            Color = ProviderImages.Fsr3(color), Depth = ProviderImages.Fsr3(depth),
+            Motion = ProviderImages.Fsr3(motion), Output = ProviderImages.Fsr3(output),
+            Reactive = ProviderImages.Fsr3(reactive),
+            Composition = ProviderImages.Fsr3(composition),
             JitterX = frame.Temporal.JitterX, JitterY = frame.Temporal.JitterY,
             DeltaMs = frame.Temporal.DeltaTimeMs,
             NearPlane = frame.Temporal.NearPlane, FarPlane = frame.Temporal.FarPlane,
@@ -240,10 +240,10 @@ public sealed unsafe partial class VulkanDevice
         var frame = new Fsr3FgFrame
         {
             Commands = (nint)commands.Handle,
-            Color = Fsr3Image.From(direct ? uprightScene : backbuffer), Depth = Fsr3Image.From(uprightDepth),
-            Motion = Fsr3Image.From(uprightMotion), Ui = Fsr3Image.From(uprightUi),
-            Hudless = Fsr3Image.From(uprightScene),
-            Output = direct ? Fsr3Image.From(uprightOutput!) : default,
+            Color = ProviderImages.Fsr3(direct ? uprightScene : backbuffer), Depth = ProviderImages.Fsr3(uprightDepth),
+            Motion = ProviderImages.Fsr3(uprightMotion), Ui = ProviderImages.Fsr3(uprightUi),
+            Hudless = ProviderImages.Fsr3(uprightScene),
+            Output = direct ? ProviderImages.Fsr3(uprightOutput!) : default,
             SwapchainContext = Fsr3ProxyContext,
             JitterX = temporal.JitterX, JitterY = -temporal.JitterY,
             DeltaMs = temporal.DeltaTimeMs, NearPlane = temporal.NearPlane,

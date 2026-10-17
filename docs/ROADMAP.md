@@ -73,6 +73,17 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 
 ## Planned
 
+### ReScaleFrame integration (in progress)
+
+- Native Vulkan provider bridges and SDK corrections live in the pinned
+  ReScaleFrame dependency, with one shared FSR4 compatibility implementation.
+- SR selection/evaluation, FG lifecycle and latency control are routed through
+  ReScaleFrame's managed Vulkan module. The corresponding VulkanStory controllers
+  are adapters; provider choices, live transitions and temporal-reset behavior
+  retain their existing paths.
+- Keep scene, camera, motion/depth and HUD input production in VulkanStory;
+  package the ReScaleFrame dependency with the runtime.
+
 ### 1. Shared compute foundation
 
 - **PERF-08: Shared GPU geometry and draw preparation**

@@ -149,7 +149,7 @@ internal sealed class VulkanCapabilities
 /// OpenGL with a logged reason rather than failing, so every check reports
 /// instead of throwing.
 /// </summary>
-internal sealed unsafe class VulkanContext : IDisposable
+internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
 {
     /// <summary>
     /// The floor. 1.3 makes dynamic rendering and synchronization2 core, which
@@ -276,6 +276,11 @@ internal sealed unsafe class VulkanContext : IDisposable
     private bool _disposed;
     /// <summary>Optional owned Streamline session used for Vulkan proxy dispatch and vendor features.</summary>
     internal StreamlineRuntime? Streamline { get; private set; }
+    StreamlineRuntime? IVulkanProviderContext.Streamline => Streamline;
+    string IVulkanProviderContext.Fsr3QueueTopology => Fsr3QueueTopology;
+    Result IVulkanProviderContext.WaitDeviceIdle() => WaitDeviceIdle();
+    void IVulkanProviderContext.CheckResult(Result result, string operation) => VulkanResult.Check(result, operation);
+
 
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
 

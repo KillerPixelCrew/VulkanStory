@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
-using VulkanStory.Render.Vulkan.Present;
 using Silk.NET.Vulkan;
 using Xunit;
 
