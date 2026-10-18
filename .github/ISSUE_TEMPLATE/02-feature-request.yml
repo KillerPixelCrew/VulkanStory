@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a feature or improvement. Use Bug report for something that is broken.
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/KillerPixelCrew/VulkanStory/blob/rewrite/docs/ROADMAP.md) and existing issues first. For crashes, startup failures, visual bugs or performance regressions, use **Bug report** so the required logs are included.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you are trying to do and what is missing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe how you would expect it to work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and extra context
+      description: Include relevant hardware, mods, examples or screenshots if they help explain the request.

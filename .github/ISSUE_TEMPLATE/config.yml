@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installation and troubleshooting
+    url: https://github.com/KillerPixelCrew/VulkanStory/blob/rewrite/docs/player-guide.md
+    about: Installation steps, settings, commands and troubleshooting for VulkanStory.
+  - name: Downloads
+    url: https://github.com/KillerPixelCrew/VulkanStory/releases/latest
+    about: Get the current VulkanStory release and its installation instructions.

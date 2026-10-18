@@ -1,0 +1,138 @@
+name: Bug report
+description: Report a crash, startup failure, rendering problem, performance issue or mod conflict.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Collect the logs from the launch where the problem happened
+
+        **VulkanStory needs both its bootstrap log and the game's client log.** A screenshot of an error, `client-crash.log`, `server-main.log` or a copied stack trace alone is not enough.
+
+        On Windows, press **Win+R**, paste each folder path below and press Enter:
+
+        | File | Folder to open | What to attach |
+        | --- | --- | --- |
+        | VulkanStory bootstrap log | `%LOCALAPPDATA%\VulkanStory\Logs` | The `bootstrap-*.jsonl` file from the affected launch. Sort by **Date modified** to find it. |
+        | Game client log | `%APPDATA%\VintagestoryData\Logs` | The complete `client-main.log` from that same launch. If you use a custom data directory or launcher instance, use its `Logs` folder instead. |
+        | Crash report, if generated | `%LOCALAPPDATA%\VulkanStory\Crashes` | The report **ZIP** matching the crash time, not just a screenshot or `.dmp` file. |
+
+        **Copy the logs before launching the game again**, since the client log can be overwritten. Attach the full files, not selected lines or an AI summary. ZIP the bootstrap `.jsonl` file if GitHub rejects that extension; renaming a copy to `.txt` also works.
+
+        A crash ZIP can replace the two separate attachments **if it contains both** `bootstrap.jsonl` and `game-logs/client-main.log`. Otherwise attach the missing log separately. Review files for private information before sharing.
+
+        If startup failed before a file was created, say which file is missing and which folder you checked in its field below. Do not substitute a log from an older or vanilla launch.
+
+  - type: textarea
+    id: crash-report
+    attributes:
+      label: Crash report ZIP (if generated)
+      description: Attach the matching ZIP from the Crashes folder above. For a freeze or a failure without a ZIP, describe that here and attach the two logs below.
+
+  - type: textarea
+    id: bootstrap-log
+    attributes:
+      label: VulkanStory bootstrap log (required)
+      description: Attach the full bootstrap-*.jsonl as a ZIP or TXT file. If it is already in the crash ZIP, write "Included in crash ZIP". If no file was created, give the folder checked and the time of the failed launch.
+    validations:
+      required: true
+
+  - type: textarea
+    id: client-log
+    attributes:
+      label: Game client-main.log (required)
+      description: Attach the full client-main.log from the same launch. If it is already in the crash ZIP, write "Included in crash ZIP". If no file was created, give the actual game data directory checked and explain how far startup got.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: log-check
+    attributes:
+      label: Log confirmation
+      options:
+        - label: I attached both full logs from the affected launch (separately or in the crash ZIP), or explained which files were not created and where I checked.
+          required: true
+
+  - type: dropdown
+    id: problem-type
+    attributes:
+      label: Problem type
+      options:
+        - Installation or VulkanStory not loading
+        - Crash or freeze
+        - Rendering or visual problem
+        - Performance or stutter
+        - Mod compatibility
+        - Input or controller
+        - Other bug
+    validations:
+      required: true
+
+  - type: input
+    id: vulkanstory-version
+    attributes:
+      label: VulkanStory version
+      description: Give the installed version, not "latest". Check the mod manager or VulkanStory/package.json in the game folder. For a source build, include the commit.
+    validations:
+      required: true
+
+  - type: input
+    id: game-version
+    attributes:
+      label: Vintage Story version
+      description: Give the complete version, including any pre-release suffix. It is also near the top of client-main.log.
+    validations:
+      required: true
+
+  - type: textarea
+    id: system
+    attributes:
+      label: System and graphics driver
+      description: Include your OS version, GPU model, graphics driver version, CPU and RAM. On a system with multiple GPUs, say which one the game uses.
+      placeholder: "Windows 11; GPU: ...; driver: ...; CPU: ...; RAM: ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened, and what should have happened?
+      description: Include the exact error text if shown. For a visual problem, attach a screenshot or short video as well as the logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Describe what you did, when the problem occurs, and how often. If you cannot reproduce it reliably, say so and describe the last occurrence.
+      placeholder: |
+        1. Start the game using ...
+        2. Load ...
+        3. Change ...
+        4. The problem occurs ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Relevant settings and installation method
+      description: Include resolution, fullscreen mode, anti-aliasing/upscaler and quality, frame generation and multiplier, and relevant effects. Say whether you used the installer mod, manual ZIP or a source build. For startup failures, give the game and data folder paths and how you launch the game. Write "default settings" if unchanged.
+    validations:
+      required: true
+
+  - type: textarea
+    id: mods
+    attributes:
+      label: Other mods and overlays
+      description: List mods with versions, shader packs and overlays (for example RTSS or Lossless Scaling). Write "none" if there are none. If already checked, say whether it happens with only VulkanStory enabled or with VulkanStory disabled; do not risk a modded save just to check this.
+    validations:
+      required: true
+
+  - type: textarea
+    id: performance-capture
+    attributes:
+      label: Performance capture (for stutter or CPU problems, if available)
+      description: Run .vulkanstory profile start 30 while the problem is occurring, then use .vulkanstory profile status to find the capture under %LOCALAPPDATA%\VulkanStory\Performance. Attach a ZIP of that capture folder or link it if too large. This supplements the required logs.
