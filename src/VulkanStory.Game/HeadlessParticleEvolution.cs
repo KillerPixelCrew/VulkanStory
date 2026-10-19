@@ -8,6 +8,31 @@ namespace VulkanStory.Game;
 /// <summary>Emits real stock particles covering visual evolution functions in an isolated harness world.</summary>
 internal static class HeadlessParticleEvolution
 {
+    internal static void EmitSteps(ICoreClientAPI api, bool worker)
+    {
+        if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Particle integration fixture requires the hidden harness.");
+        void Spawn(Action<IParticlePropertiesProvider> emit)
+        {
+            foreach (var model in new[] { EnumParticleModel.Cube, EnumParticleModel.Quad })
+                for (int variant = 0; variant < 3; variant++)
+                    emit(new AdvancedParticleProperties
+                    {
+                        Quantity = NatFloat.createUniform(256, 0), LifeLength = NatFloat.createUniform(variant == 2 ? 0.08f : 2, 0),
+                        Size = NatFloat.createUniform(0.6f, 0), GravityEffect = NatFloat.createUniform(0.05f, 0),
+                        basePos = api.World.Player.Entity.Pos.XYZ.Add(variant * 0.3, 1.5, 3), baseVelocity = new Vec3f(0.08f, 0.5f, 0.03f),
+                        ParticleModel = model, TerrainCollision = variant == 1, Bounciness = 0.2f,
+                        VertexFlags = Performance.GpuParticleSimulation.BenchmarkMarker,
+                        HsvaColor = null!, Color = ColorUtil.ToRgba(255, 170, 100, 50),
+                        ParentVelocity = new Vec3f(0.02f, 0.01f, 0.03f), ParentVelocityWeight = 0.25f,
+                        VelocityEvolve = variant == 0 ? null! : new[] {
+                            EvolvingNatFloat.create((EnumTransformFunction)1, 1), EvolvingNatFloat.create((EnumTransformFunction)7, 1),
+                            EvolvingNatFloat.create((EnumTransformFunction)8, 1) },
+                    });
+        }
+        if (worker) api.Event.RegisterAsyncParticleSpawner((_, manager) => { Spawn(properties => manager.Spawn(properties)); return false; });
+        else Spawn(properties => api.World.SpawnParticles(properties));
+    }
+
     internal static void Emit(ICoreClientAPI api)
     {
         if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Particle evolution fixture requires the hidden harness.");

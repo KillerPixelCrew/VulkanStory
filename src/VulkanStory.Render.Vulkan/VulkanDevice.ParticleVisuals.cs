@@ -125,7 +125,7 @@ public sealed unsafe partial class VulkanDevice
         MemoryMarshal.AsBytes(source.Properties.AsSpan(0, count * 5)).CopyTo(new Span<byte>((void*)properties.Pointer, propertyBytes));
         var old = new Span<byte>((void*)previous.Pointer, historyBytes); old.Clear();
         if (withHistory) MemoryMarshal.AsBytes(source.PreviousSizes.AsSpan()).CopyTo(old);
-        if (particleVisualProgram == 0) particleVisualProgram = CreateComputeProgram(ReadWorldShader("geometry/particle-visuals.comp"), "particle-visuals",
+        if (particleVisualProgram == 0) particleVisualProgram = CreateComputeProgram(ParticleEvolutionShader("particle-visuals.comp"), "particle-visuals",
             [new ComputeSlot(0, ComputeSlotKind.Buffer), new ComputeSlot(1, ComputeSlotKind.Buffer), new ComputeSlot(2, ComputeSlotKind.Buffer),
                 new ComputeSlot(3, ComputeSlotKind.Buffer), new ComputeSlot(4, ComputeSlotKind.Buffer), new ComputeSlot(5, ComputeSlotKind.Buffer),
                 new ComputeSlot(6, ComputeSlotKind.Buffer)], 8, 64, 1);
@@ -171,6 +171,9 @@ public sealed unsafe partial class VulkanDevice
 
     private void SelectParticleVisuals(int meshId, int count, VulkanBuffer buffer)
     { drawParticleVisualMesh = meshId; drawParticleVisualCount = count; drawParticleVisuals = buffer; }
+    private static string ParticleEvolutionShader(string file) => ReadWorldShader("geometry/" + file).Replace(
+        "#include \"../include/evolution.glsl\"", ReadWorldShader("include/evolution.glsl"), StringComparison.Ordinal).Replace(
+        "#include \"particle-physics.glsl\"", ReadWorldShader("geometry/particle-physics.glsl"), StringComparison.Ordinal);
     private ParticleInput VisualParticleInput(int meshId, uint location, ParticleInput original) => drawParticleVisualMesh == meshId && drawParticleVisuals is { } buffer
         ? location == 4 ? new ParticleInput(buffer, 16, 0) : location == 9 ? new ParticleInput(buffer, 44, (uint)drawParticleVisualCount * 28) : original : original;
     private void BindParticleVisuals(CommandBuffer command, int meshId)
@@ -187,6 +190,7 @@ public sealed unsafe partial class VulkanDevice
     }
     private void RetireParticleVisuals(bool all = false)
     {
+        RetireParticleSimulationCenters(all);
         oldParticleVisualResults.Clear();
         foreach (var pair in particleVisualResults)
             if (all || unchecked(_frameCounter - pair.Value.Frame) > 2)

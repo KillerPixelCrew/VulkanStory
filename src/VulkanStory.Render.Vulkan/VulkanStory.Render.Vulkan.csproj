@@ -45,6 +45,9 @@
     <Compile Include="VulkanDevice.ParticleGeometry.cs" />
     <Compile Include="VulkanDevice.QuadGeometry.cs" />
     <Compile Include="VulkanDevice.ParticleVisuals.cs" />
+    <Compile Include="VulkanDevice.ParticleSimulation.cs" />
+    <Compile Include="VulkanDevice.ParticleCenters.cs" />
+    <Compile Include="VulkanDevice.TerrainNoise.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilTransfers.cs" />
@@ -163,10 +166,13 @@
     <EmbeddedResource Include="../../shaders/native/occlusion/*.comp">
       <LogicalName>shaders-vk/occlusion/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/geometry/*.comp">
+    <EmbeddedResource Include="../../shaders/native/geometry/*.comp;../../shaders/native/geometry/particle-physics.glsl">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl">
+    <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl">
+      <LogicalName>shaders-vk/worldgen/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl;../../shaders/native/include/evolution.glsl">
       <LogicalName>shaders-vk/include/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

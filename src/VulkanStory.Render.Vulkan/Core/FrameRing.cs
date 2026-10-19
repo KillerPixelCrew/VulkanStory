@@ -51,6 +51,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     private int _commandBuffersUsed;
     private ulong _cursor;
     private bool _disposed;
+    private bool _frameCommands;
 
     /// <summary>The slot's position in the ring.</summary>
     public int Index { get; }
@@ -165,6 +166,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
             "vkBeginCommandBuffer for a frame slot");
         CommandBuffer = commandBuffer;
+        _frameCommands = frameCommands;
         // The frame's first buffer is marked by the caller once the slot is its own.
         if (_commandBuffersUsed > 1) CommandsStarted?.Invoke(Index, commandBuffer, frameCommands);
         // The present command buffer is not the frame's: an upload recorded while
@@ -298,19 +300,22 @@ internal sealed unsafe class FrameSlot : IDisposable
         CommandsEnding?.Invoke(Index, commandBuffer);
         VulkanResult.Check(api.EndCommandBuffer(commandBuffer), "vkEndCommandBuffer for a frame submission");
 
-        Semaphore* waits = stackalloc Semaphore[4];
-        ulong* waitValues = stackalloc ulong[4];
-        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[4];
+        int waitCapacity = (_frameCommands ? Gate?.Count ?? 0 : 0) + 3;
+        Semaphore* waits = stackalloc Semaphore[waitCapacity];
+        ulong* waitValues = stackalloc ulong[waitCapacity];
+        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[waitCapacity];
         uint waitCount = 0;
         // A present submission is not frame work: the gate waits for the frame's own
         // first submission, which the present copies already follow on this queue.
-        if (externalSignalValue == 0 && signalSemaphore.Handle == 0 && Gate is { } gate &&
-            gate.TryTake(out Semaphore gateSemaphore, out ulong gateValue))
+        if (_frameCommands && Gate is { } gate)
         {
-            waits[waitCount] = gateSemaphore;
-            waitValues[waitCount] = gateValue;
-            waitStages[waitCount] = PipelineStageFlags.AllCommandsBit;
-            waitCount++;
+            while (gate.TryTake(out Semaphore gateSemaphore, out ulong gateValue))
+            {
+                waits[waitCount] = gateSemaphore;
+                waitValues[waitCount] = gateValue;
+                waitStages[waitCount] = PipelineStageFlags.AllCommandsBit;
+                waitCount++;
+            }
         }
         if (waitSemaphore.Handle != 0)
         {
@@ -602,12 +607,16 @@ internal sealed class FrameRing : IDisposable
     /// Makes the next frame submission wait on the GPU until <paramref name="semaphore" />
     /// reaches <paramref name="value" />. Used to keep another API's work on this GPU from
     /// running concurrently with the next frame (XeSS-FG's DX12 interpolation). The value
-    /// must be signalled eventually, or the queue stalls.
+    /// must be signalled eventually, or the queue stalls. Distinct timelines accumulate;
+    /// repeated waits on the same timeline retain its highest requested value.
     /// </summary>
     public void GateNextFrameSubmit(Semaphore semaphore, ulong value) => _gate.Set(semaphore, value);
 
     /// <summary>Drops a gate no submission has taken yet.</summary>
     public void ClearSubmitGate() => _gate.Clear();
+
+    /// <summary>Drops only the unsubmitted wait belonging to this timeline.</summary>
+    public void ClearSubmitGate(Semaphore semaphore) => _gate.Clear(semaphore);
 
     /// <summary>Installs command-buffer start and end hooks on every slot (GPU timestamps).</summary>
     public void SetCommandHooks(Action<int, CommandBuffer, bool>? started, Action<int, CommandBuffer>? ending)
@@ -749,28 +758,38 @@ internal sealed class FrameRing : IDisposable
     }
 }
 
-/// <summary>One pending external wait for the next frame submission (FrameRing.GateNextFrameSubmit).</summary>
+/// <summary>Pending timeline waits for the next frame submission (FrameRing.GateNextFrameSubmit).</summary>
 internal sealed class SubmitGate
 {
-    private Semaphore _semaphore;
-    private ulong _value;
+    private readonly List<(Semaphore Semaphore, ulong Value)> _waits = new();
+    internal int Count => _waits.Count;
 
-    /// <summary>Sets the pending external timeline-semaphore gate for the next submission.</summary>
+    /// <summary>Adds a timeline wait, retaining the highest value for that semaphore.</summary>
     public void Set(Semaphore semaphore, ulong value)
     {
-        _semaphore = semaphore;
-        _value = value;
+        if (value == 0) { Clear(semaphore); return; }
+        if (semaphore.Handle == 0) throw new ArgumentException("A submit gate requires a live timeline semaphore.", nameof(semaphore));
+        for (int i = 0; i < _waits.Count; i++)
+            if (_waits[i].Semaphore.Handle == semaphore.Handle)
+            {
+                _waits[i] = (semaphore, Math.Max(_waits[i].Value, value));
+                return;
+            }
+        _waits.Add((semaphore, value));
     }
 
-    /// <summary>Clears the pending external submission-gate value.</summary>
-    public void Clear() => _value = 0;
+    /// <summary>Clears all unsubmitted timeline waits.</summary>
+    public void Clear() => _waits.Clear();
 
-    /// <summary>Consumes a pending external submission gate if its value is nonzero.</summary>
+    /// <summary>Clears only this timeline's unsubmitted wait.</summary>
+    public void Clear(Semaphore semaphore) => _waits.RemoveAll(wait => wait.Semaphore.Handle == semaphore.Handle);
+
+    /// <summary>Consumes one pending timeline wait.</summary>
     public bool TryTake(out Semaphore semaphore, out ulong value)
     {
-        semaphore = _semaphore;
-        value = _value;
-        _value = 0;
-        return value != 0;
+        if (_waits.Count == 0) { semaphore = default; value = 0; return false; }
+        (semaphore, value) = _waits[^1];
+        _waits.RemoveAt(_waits.Count - 1);
+        return true;
     }
 }

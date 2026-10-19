@@ -215,6 +215,8 @@ internal sealed partial class GameRenderSession
 
     private void AdvanceHeadlessScenarioBeforeInput()
     {
+        if (HeadlessTerrainComparison.Pending) { scenarioTerrainFrameHeld = true; return; }
+        if (scenarioTerrainFrameHeld) { scenarioTerrainFrameHeld = false; return; }
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;
         if (scenario == null || scenarioTerminal || headlessDone) return;
         if (ScenarioWorldCyclePending)
@@ -402,6 +404,8 @@ internal sealed partial class GameRenderSession
     /// <summary>Writes requested scenario attachment readbacks at the scheduled post-render seam and records their file identities.</summary>
     private void CaptureScenarioReadbacks()
     {
+        if (HeadlessTerrainComparison.Pending) { scenarioTerrainFrameHeld = true; return; }
+        if (scenarioTerrainFrameHeld) return;
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;
         if (scenario == null || scenarioTerminal || headlessDone || scenarioTick == null) return;
         scenarioFailurePhase = "preGenerateReadback";
@@ -563,6 +567,10 @@ internal sealed partial class GameRenderSession
     private void CompleteHeadlessScenarioFrame()
     {
         if (headlessDone) return;
+        if (HeadlessTerrainComparison.Failure is { } terrainError)
+        { FailHeadlessRun(terrainError, "terrainProbe"); return; }
+        if (HeadlessTerrainComparison.Pending) { scenarioTerrainFrameHeld = true; return; }
+        if (scenarioTerrainFrameHeld) return;
         if (HeadlessHarnessOptions.Enabled && headlessDeadline.Elapsed.TotalSeconds >= headlessTimeout)
         {
             FailHeadlessRun("timeout", "completedFrame");
@@ -752,6 +760,38 @@ internal sealed partial class GameRenderSession
         Aggregate("cpuParticlePropertiesDeferred", Performance.GpuParticleVisuals.DeferredProperties);
         Aggregate("cpuParticleFacadeChecks", Performance.GpuParticleVisuals.CpuFacadeChecks);
         Aggregate("cpuParticleFacadeValid", Performance.GpuParticleVisuals.CpuFacadeValid);
+        Aggregate("terrainNoiseAvailable", Device.TerrainNoiseAvailable);
+        Aggregate("terrainNoiseDispatchesRecorded", Device.TerrainNoiseDispatchesRecorded);
+        Aggregate("terrainNoiseAppliedSamples", Performance.GpuTerrainNoise.AppliedSamples);
+        Current("terrainComparisonComplete", HeadlessTerrainComparison.Complete);
+        Current("terrainComparisonOutputEqual", HeadlessTerrainComparison.Equal);
+        Current("terrainComparisonGpuEquivalent", HeadlessTerrainComparison.GpuEquivalent);
+        Current("terrainComparisonWrittenColumns", HeadlessTerrainComparison.Written);
+        Aggregate("particleSimulationAvailable", Device.ParticleSimulationAvailable);
+        Aggregate("particleSimulationSeparateQueue", Device.ParticleSimulationSeparateQueue);
+        Aggregate("particleSimulationDispatchesRecorded", Device.ParticleSimulationDispatchesRecorded);
+        Aggregate("particleSimulationStepsRecorded", Device.ParticleSimulationStepsRecorded);
+        Aggregate("particleSimulationStepsApplied", Performance.GpuParticleSimulation.StepsApplied);
+        Aggregate("particleSimulationCenterDispatchesRecorded", Device.ParticleSimulationCenterDispatchesRecorded);
+        Aggregate("particleSimulationCentersRecorded", Device.ParticleSimulationCentersRecorded);
+        Aggregate("particleSimulationRetainedBytes", Device.ParticleSimulationRetainedBytes);
+        Aggregate("particleSimulationCapacityFallbacks", Device.ParticleSimulationCapacityFallbacks);
+        Aggregate("particleSimulationChecks", Performance.GpuParticleSimulation.Checks);
+        Aggregate("particleSimulationChecksPassed", Performance.GpuParticleSimulation.ChecksPassed);
+        Aggregate("particleSimulationFloatError", Performance.GpuParticleSimulation.MaximumFloatError);
+        Aggregate("particleSimulationPositionError", Performance.GpuParticleSimulation.MaximumPositionError);
+        Aggregate("particleSimulationSubmitMilliseconds", Device.ParticleSimulationSubmitMilliseconds);
+        Aggregate("particleSimulationGpuMilliseconds", Device.ParticleSimulationGpuMilliseconds);
+        Aggregate("particleSimulationCpuBenchmarkSteps", Performance.GpuParticleSimulation.CpuBenchmarkSteps);
+        Aggregate("particleSimulationGpuBenchmarkSteps", Performance.GpuParticleSimulation.GpuBenchmarkSteps);
+        Aggregate("particleSimulationFallbackBenchmarkSteps", Performance.GpuParticleSimulation.FallbackBenchmarkSteps);
+        Aggregate("particleSimulationCpuBenchmarkMilliseconds", Performance.GpuParticleSimulation.CpuBenchmarkMilliseconds);
+        Aggregate("particleSimulationGpuBenchmarkMilliseconds", Performance.GpuParticleSimulation.GpuBenchmarkMilliseconds);
+        Aggregate("particleSimulationFallbackBenchmarkMilliseconds", Performance.GpuParticleSimulation.FallbackBenchmarkMilliseconds);
+        Aggregate("particleSimulationCpuBenchmarkPools", Performance.GpuParticleSimulation.CpuBenchmarkPools);
+        Aggregate("particleSimulationGpuBenchmarkPools", Performance.GpuParticleSimulation.GpuBenchmarkPools);
+        Aggregate("particleSimulationCpuBenchmarkPoolMilliseconds", Performance.GpuParticleSimulation.CpuBenchmarkPoolMilliseconds);
+        Aggregate("particleSimulationGpuBenchmarkPoolMilliseconds", Performance.GpuParticleSimulation.GpuBenchmarkPoolMilliseconds);
         Aggregate("jointPoseDispatchesRecorded", Device.JointPoseDispatchesRecorded);
         Aggregate("jointPoseCacheReuses", Device.JointPoseCacheReuses);
         Aggregate("jointPoseChecks", Device.JointPoseChecks);
@@ -919,6 +959,7 @@ internal sealed partial class GameRenderSession
 
     private void FailHeadlessRun(string reason, string failedPhase)
     {
+        HeadlessTerrainComparison.Cancel(reason);
         ClearScenarioWorldCycle();
         try
         {
@@ -1006,7 +1047,11 @@ internal sealed partial class GameRenderSession
             hidden,
             focused,
             stagedModLoaded,
-            worldReady
+            worldReady,
+            terrainComparisonComplete = HeadlessTerrainComparison.Complete,
+            terrainComparisonOutputEqual = HeadlessTerrainComparison.Equal,
+            terrainComparisonGpuEquivalent = HeadlessTerrainComparison.GpuEquivalent,
+            terrainComparisonWrittenColumns = HeadlessTerrainComparison.Written
         };
         WriteJsonAtomically(Path.Combine(ScenarioOutputDirectory, "scenario-result.json"), result);
     }
@@ -1031,7 +1076,11 @@ internal sealed partial class GameRenderSession
             pid = Environment.ProcessId,
             worldFrame = headlessWorldFrame,
             requested = HeadlessHarnessOptions.Frames.Length,
-            written = headlessWritten
+            written = headlessWritten,
+            terrainComparisonComplete = HeadlessTerrainComparison.Complete,
+            terrainComparisonOutputEqual = HeadlessTerrainComparison.Equal,
+            terrainComparisonGpuEquivalent = HeadlessTerrainComparison.GpuEquivalent,
+            terrainComparisonWrittenColumns = HeadlessTerrainComparison.Written
         };
         WriteJsonAtomically(Path.Combine(directory, "headless-result.json"), result);
     }

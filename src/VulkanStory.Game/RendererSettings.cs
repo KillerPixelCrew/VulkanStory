@@ -95,12 +95,16 @@ internal sealed record RendererSettings
     public bool TerrainOcclusionCull { get; init; } = true;
     /// <summary>Tests terrain occlusion and compacts ordered indirect draws in Vulkan compute.</summary>
     public bool GpuTerrainDrawPreparation { get; init; } = true;
+    /// <summary>Computes stock singleplayer terrain raw octaves while retaining the original density and block decisions.</summary>
+    public bool GpuTerrainNoise { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
     public bool GpuSharedDeformation { get; init; } = true;
     /// <summary>Produces supported cube-particle current/previous geometry in compute.</summary>
     public bool GpuParticleGeometry { get; init; } = true;
     /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
     public bool GpuParticleVisualSimulation { get; init; } = true;
+    /// <summary>Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling.</summary>
+    public bool GpuParticleSimulation { get; init; } = true;
     /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
     public bool GpuJointPosePreparation { get; init; } = true;
     /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
@@ -183,9 +187,11 @@ internal sealed record RendererSettings
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
+        GpuTerrainNoise = source.GpuTerrainNoise,
         GpuSharedDeformation = source.GpuSharedDeformation,
         GpuParticleGeometry = source.GpuParticleGeometry,
         GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
+        GpuParticleSimulation = source.GpuParticleSimulation,
         GpuJointPosePreparation = source.GpuJointPosePreparation,
         GpuEntityDrawPreparation = source.GpuEntityDrawPreparation,
         EntityOcclusionCull = source.EntityOcclusionCull,

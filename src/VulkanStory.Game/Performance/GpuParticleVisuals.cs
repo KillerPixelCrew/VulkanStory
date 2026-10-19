@@ -42,6 +42,8 @@ internal static class GpuParticleVisuals
     private static float[]? trigonometry;
     internal static float[] Trigonometry => trigonometry ??= ReadTrigonometry();
     private static bool Unset(EvolvingNatFloat value) => value.Transform == EvolvingNatFloat.NoValueSet.Transform && value.Factor == EvolvingNatFloat.NoValueSet.Factor;
+    internal static bool CaptureVelocity(EvolvingNatFloat value, float phase, out ParticleEvolution result) =>
+        Capture(value, 0, phase, false, false, out result);
 
     internal static PerformanceFeature Create() => new("gpu-particle-visuals", settings => settings.GpuParticleVisualSimulation,
         () => { _ = Trigonometry; }, harmony =>

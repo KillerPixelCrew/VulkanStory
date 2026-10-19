@@ -262,6 +262,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Shared compute deformation", "GpuSharedDeformation");
                 Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute particle visual evolution", "GpuParticleVisualSimulation");
+                Switch("Compute particle fixed steps", "GpuParticleSimulation");
                 Switch("Compute visual joint poses", "GpuJointPosePreparation");
                 Switch("Compute entity draw preparation", "GpuEntityDrawPreparation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
@@ -281,6 +282,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Reuse chunk mesh buffers", "MeshPartPool");
                 Switch("Parallel chunk reads (next world)", "ParallelChunkReads");
                 DefinedChoice("Worldgen workers", "WorldgenWorkers");
+                Switch("Compute terrain noise (singleplayer)", "GpuTerrainNoise");
                 Switch("Allocation-free animation checks", "AnimationLinqFree");
                 Switch("Falling block mesh fix", "FallingBlockMeshFix");
                 Switch("Villager outfit cache", "OutfitShapeCache");

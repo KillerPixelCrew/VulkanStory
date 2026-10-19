@@ -66,10 +66,13 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     {
     }
 
-    /// <summary>A buffer in an explicit pool class; see <see cref="MemoryPoolClass" />.</summary>
+    /// <summary>A buffer in an explicit pool class; two distinct queue families opt into concurrent sharing.</summary>
     public VulkanBuffer(VulkanContext context, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties,
-        MemoryPoolClass poolClass)
+        MemoryPoolClass poolClass, ReadOnlySpan<uint> queueFamilies = default)
     {
+        if (queueFamilies.Length > 2)
+            throw new ArgumentException("Buffer sharing accepts at most the compute and graphics queue families.", nameof(queueFamilies));
+        bool concurrent = queueFamilies.Length == 2 && queueFamilies[0] != queueFamilies[1];
         _context = context;
         Size = size;
         Usage = usage;
@@ -79,12 +82,18 @@ internal sealed unsafe class VulkanBuffer : IDisposable
             SType = StructureType.BufferCreateInfo,
             Size = size,
             Usage = usage,
-            SharingMode = SharingMode.Exclusive,
+            SharingMode = concurrent ? SharingMode.Concurrent : SharingMode.Exclusive,
         };
 
         Vk api = context.Api;
-        VulkanResult.Check(api.CreateBuffer(context.Device, &createInfo, null, out Buffer buffer),
-            "vkCreateBuffer");
+        Buffer buffer;
+        fixed (uint* families = queueFamilies)
+        {
+            createInfo.QueueFamilyIndexCount = concurrent ? 2u : 0u;
+            createInfo.PQueueFamilyIndices = concurrent ? families : null;
+            VulkanResult.Check(api.CreateBuffer(context.Device, &createInfo, null, out buffer),
+                "vkCreateBuffer");
+        }
         Handle = buffer;
 
         // A buffer is linear, so it shares blocks only with other buffers.

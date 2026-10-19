@@ -1,0 +1,109 @@
+#version 450
+#extension GL_ARB_gpu_shader_fp64 : require
+#extension GL_GOOGLE_include_directive : require
+layout(local_size_x = 64) in;
+struct Evolution { vec4 values; ivec4 control; };
+struct Input {
+    dvec4 position;
+    vec4 velocityGravity; vec4 timing; vec4 parent; vec4 startingVelocity; vec4 control; vec4 physics;
+    Evolution velocityX; Evolution velocityY; Evolution velocityZ;
+};
+struct Output { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
+struct Command { uint slot; float age; float lifeDelta; float physicsDelta; vec4 control; };
+struct World { vec4 liquid; vec4 flow; uint boxStart; uint boxCount; float motionCap; uint initialPopulatedSize; };
+struct Box { vec4 minimum; vec4 maximum; ivec4 cell; };
+// minimum.w = selected count with custom-callback high bit;
+// maximum.w = exclusive prefix cache size.
+struct Query { ivec4 minimum; ivec4 maximum; };
+layout(binding = 0, std430) readonly buffer Commands { Command values[]; } commands;
+layout(binding = 1, std430) buffer Outputs { Output values[]; } result;
+layout(binding = 2, std430) readonly buffer Trigonometry { float values[]; } table;
+layout(binding = 3, std430) readonly buffer Configurations { Input values[]; } configurations;
+layout(binding = 4, std430) buffer Residents { Output values[]; } residents;
+layout(binding = 5, std430) readonly buffer Worlds { World values[]; } worlds;
+layout(binding = 6, std430) readonly buffer Boxes { Box values[]; } boxes;
+layout(binding = 7, std430) buffer Queries { Query values[]; } queries;
+layout(push_constant) uniform Parameters { uint count; uint phase; uint initialPopulatedSize; } p;
+#include "../include/evolution.glsl"
+#include "particle-physics.glsl"
+shared uint chunkMaximum[64];
+void cachePrefix() {
+    uint lane = gl_LocalInvocationID.x;
+    uint width = (p.count + 63u) / 64u;
+    uint first = lane * width, end = min(first + width, p.count);
+    uint maximum = 0;
+    for (uint i = first; i < end; ++i) maximum = max(maximum, uint(queries.values[i].minimum.w) & 0x7fffffffu);
+    chunkMaximum[lane] = maximum;
+    barrier();
+    for (uint stride = 1; stride < 64; stride *= 2) {
+        uint previous = lane >= stride ? chunkMaximum[lane - stride] : 0;
+        barrier();
+        chunkMaximum[lane] = max(chunkMaximum[lane], previous);
+        barrier();
+    }
+    maximum = max(p.initialPopulatedSize, lane > 0 ? chunkMaximum[lane - 1] : 0);
+    for (uint i = first; i < end; ++i) {
+        queries.values[i].maximum.w = int(maximum);
+        maximum = max(maximum, uint(queries.values[i].minimum.w) & 0x7fffffffu);
+    }
+}
+void main() {
+    if (p.phase == 1) { cachePrefix(); return; }
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= p.count) return;
+    Command step = commands.values[index];
+    Input state = configurations.values[step.slot];
+    World world = worlds.values[index];
+    if (p.phase == 2) {
+        Output value = result.values[index];
+        precise dvec3 position = value.position.xyz;
+        precise vec3 motion = value.motionAlive.xyz;
+        uvec2 metadata = unpackDouble2x32(value.position.w);
+        if (queries.values[index].minimum.w < 0) {
+            // Never approximate or invoke the custom callback. Later actors
+            // are speculative until this ordered CPU boundary is resolved.
+            metadata.x = 0x80000000u;
+            value.position.w = packDouble2x32(metadata);
+            residents.values[step.slot] = value;
+            result.values[index] = value;
+            return;
+        }
+        if (state.control.w > 0.5) {
+            metadata.x = collide(position, motion, state.physics.x, world, queries.values[index]);
+            position += dvec3(motion) * 0.999LF;
+        } else position += dvec3(motion);
+        value.position = dvec4(position, packDouble2x32(metadata));
+        value.motionAlive.xyz = motion;
+        residents.values[step.slot] = value;
+        result.values[index] = value;
+        return;
+    }
+    precise float dt = step.physicsDelta;
+    precise vec3 velocity = residents.values[step.slot].velocityAge.xyz;
+    precise float age = step.age + step.lifeDelta;
+    precise dvec3 position = residents.values[step.slot].position.xyz;
+    precise float drag = step.control.x;
+    precise vec3 motion;
+    if (state.startingVelocity.w > 0.5) velocity += (state.startingVelocity.xyz - velocity) * 0.02;
+    velocity.y -= state.velocityGravity.w * dt;
+    buoyancy(position, velocity, state.velocityGravity.w, dt, state.physics.x, world);
+    if (state.control.z > 0.5) {
+        state.velocityX.values.z = state.velocityY.values.z = state.velocityZ.values.z = age / state.timing.y;
+        motion = velocity * vec3(evaluate(state.velocityX), evaluate(state.velocityY), evaluate(state.velocityZ));
+        motion *= dt;
+    } else motion = velocity * dt;
+    if (state.control.y > 0.5) motion += ((state.parent.xyz * state.parent.w) * dt) * drag;
+    uint queryBounds = 0;
+    Query query = Query(ivec4(0), ivec4(0));
+    if (state.control.w > 0.5) {
+        query = prepareQuery(position, motion, state.physics.x, world, queryBounds);
+    }
+    queries.values[index] = query;
+    Output value;
+    value.position = dvec4(position, packDouble2x32(uvec2(0, queryBounds)));
+    value.velocityAge = vec4(velocity, age);
+    value.motionAlive = vec4(motion, age < state.timing.y ? 1.0 : 0.0);
+    // Mutable simulation storage is compute-only. Graphics leases immutable
+    // per-submission results, including previous frames and the second eye.
+    result.values[index] = value;
+}

@@ -33,6 +33,7 @@ internal sealed partial class GameGraphicsAdapter
             renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame, deferSize));
             renderer.SetParticleVisualHistory(handle, ParticleMotionHistory.PreviousVisualSizes(mesh));
         }
+        Performance.GpuParticleSimulation.PrepareRender(renderer, mesh, handle);
         if (quad && frame.JitterActive && renderer.ProgramComputeWarpCompatible(program.ProgramId))
         {
             program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);

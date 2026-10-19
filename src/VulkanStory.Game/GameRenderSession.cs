@@ -192,6 +192,13 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.ComputeDeformationEnabled = services.RendererSettings.Settings.GpuSharedDeformation;
             Device.ComputeParticleGeometryEnabled = services.RendererSettings.Settings.GpuParticleGeometry;
             Device.ComputeParticleVisualsEnabled = services.RendererSettings.Settings.GpuParticleVisualSimulation;
+            bool particleSimulation = services.RendererSettings.Settings.GpuParticleSimulation;
+            Device.PrepareParticleSimulation(particleSimulation, Performance.GpuParticleVisuals.Trigonometry);
+            Performance.GpuParticleSimulation.Configure(Device, particleSimulation);
+            bool terrainNoise = services.RendererSettings.Settings.GpuTerrainNoise &&
+                Performance.PerformancePatchSet.IsInstalled("gpu-terrain-noise");
+            Device.PrepareTerrainNoise(terrainNoise, terrainNoise ? Performance.GpuTerrainNoise.Gradients : []);
+            Performance.GpuTerrainNoise.Configure(Device, terrainNoise);
             Device.ComputeJointPosesEnabled = services.RendererSettings.Settings.GpuJointPosePreparation;
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
             pendingFrameSettings = null;

@@ -19,6 +19,7 @@ internal sealed partial class GameRenderSession
     private bool headlessLegacyReady;
     private string? headlessCompletionReason;
     private bool headlessParityDone;
+    private bool headlessTerrainFrameHeld, scenarioTerrainFrameHeld;
     private readonly Stopwatch headlessDeadline = Stopwatch.StartNew();
     private readonly int headlessTimeout = int.TryParse(Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_TIMEOUT"), out var seconds)
         ? Math.Clamp(seconds, 10, 3600) : 300;
@@ -29,6 +30,7 @@ internal sealed partial class GameRenderSession
         if (HeadlessHarnessOptions.Enabled && headlessDeadline.Elapsed.TotalSeconds >= headlessTimeout)
         { FailHeadlessRun("timeout", "renderCycle"); return; }
         if (ScenarioWorldCyclePending) return;
+        if (HeadlessTerrainComparison.Pending) { headlessTerrainFrameHeld = true; return; }
         if (HeadlessHarnessOptions.MainMenuContext)
         {
             if (HeadlessHarnessOptions.LegacyMainOptionsDiagnostic) PrepareMainOptionsDiagnostic();
@@ -38,7 +40,8 @@ internal sealed partial class GameRenderSession
         if (HeadlessGameBindings.CurrentRunningClient() is not { BlocksReceivedAndLoaded: true } game) return;
         if (HeadlessHarnessOptions.FixedDeltaTime > 0)
         { delta = HeadlessHarnessOptions.FixedDeltaTime; game.DeltaTimeLimiter = delta; }
-        headlessWorldFrame++;
+        if (headlessTerrainFrameHeld) headlessTerrainFrameHeld = false;
+        else headlessWorldFrame++;
         if (headlessCommandsDone || headlessWorldFrame < HeadlessHarnessOptions.CommandFrame) return;
         // "@<frame> <line>" runs a line at that world frame; other lines run at the command frame.
         headlessTimedCommands ??= HeadlessHarnessOptions.ReadCommands().Select(HeadlessTimedCommand.Parse).ToList();
@@ -59,7 +62,12 @@ internal sealed partial class GameRenderSession
                 }
                 else game.api.SendChatMessage(line, game.currentGroupid, null);
             }
-            catch (Exception error) { platform.Logger.Error("VulkanStory headless command failed: {0}: {1}", line, error.Message); }
+            catch (Exception error)
+            {
+                platform.Logger.Error("VulkanStory headless command failed: {0}: {1}", line, error.Message);
+                if (line.StartsWith("!terrain-peek", StringComparison.Ordinal))
+                { FailHeadlessRun(error.GetBaseException().Message, "terrainProbe"); return; }
+            }
         }
         headlessCommandsDone = headlessTimedCommands.Count == 0;
     }
@@ -67,6 +75,13 @@ internal sealed partial class GameRenderSession
     /// <summary>Reads and writes configured headless frame output only after the harness readiness/warmup boundaries are satisfied.</summary>
     private void CaptureHeadlessFrame()
     {
+        if (HeadlessTerrainComparison.Failure is { } terrainError)
+        { FailHeadlessRun(terrainError, "terrainProbe"); return; }
+        if (HeadlessTerrainComparison.Complete && !HeadlessTerrainComparison.Equal)
+        { FailHeadlessRun("CPU/GPU Terrain output differs; inspect terrain-comparison/result.json.", "terrainProbe"); return; }
+        if (HeadlessTerrainComparison.Pending)
+        { headlessTerrainFrameHeld = scenarioTerrainFrameHeld = true; return; }
+        if (headlessTerrainFrameHeld) return;
         if (ScenarioWorldCyclePending) return;
         if (HeadlessHarnessOptions.LegacyMainOptionsDiagnostic)
         { CaptureMainOptionsDiagnostic(); return; }

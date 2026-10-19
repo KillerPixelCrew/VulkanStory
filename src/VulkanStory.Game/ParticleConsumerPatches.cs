@@ -95,5 +95,9 @@ internal static class ParticleConsumerPatches
         finally { if (motion) session.Graphics.EndMotionWrite(); }
     }
     private static void Spawned(ParticleGeneric __instance) => ParticleMotionHistory.Spawned(__instance);
-    private static void Produced(ParticleGeneric __instance, MeshData __0, ref int __2) => ParticleMotionHistory.Produced(__instance, __0, __2);
+    private static void Produced(ParticleGeneric __instance, MeshData __0, Vec3d __1, ref int __2)
+    {
+        ParticleMotionHistory.Produced(__instance, __0, __2);
+        Performance.GpuParticleSimulation.Produced(__instance, __0, __1, __2);
+    }
 }

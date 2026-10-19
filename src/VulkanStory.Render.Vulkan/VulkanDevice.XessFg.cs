@@ -117,7 +117,7 @@ public sealed unsafe partial class VulkanDevice
         {
             if (active.MatchesSources(sources))
                 return true;
-            _frames.ClearSubmitGate();
+            _frames.ClearSubmitGate(active.SharedSemaphore);
             active.Dispose();
             _xessPresenter = null;
         }
@@ -203,10 +203,10 @@ public sealed unsafe partial class VulkanDevice
     private void StopXessPresenter()
     {
         _xessSources = null;
-        _frames.ClearSubmitGate();
         XessFgPresenter? active = _xessPresenter;
         if (active != null)
         {
+            _frames.ClearSubmitGate(active.SharedSemaphore);
             active.Dispose();
             _xessPresenter = null;
             _xessGenerationEnabled = false;
