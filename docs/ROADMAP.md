@@ -73,7 +73,7 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
-- **PERF-09:** GPU particle simulation still adds substantial CPU and synchronization overhead compared with the stock CPU path. Synchronous state readback and CPU gameplay integration remain on the critical path.
+- **PERF-09:** GPU particle simulation waits for synchronous state readback and CPU gameplay integration on the critical path.
 
 ## Planned
 
@@ -86,7 +86,7 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
   2. GPU geometry buffers: provide shared raster/compute/ray-tracing inputs with explicit synchronization, bounded allocation and safe retirement across mesh edits, world changes and runtime settings transitions.
   3. GPU visibility and draw preparation: move terrain/entity frustum and depth-pyramid occlusion tests into compute, compact visible draws and generate indirect commands without CPU readback per object. Support separate eye visibility, conservative camera-motion handling and separate shadow rules. Keep geometry needed by off-screen reflections, shadows and indirect lighting available to ray tracing.
      - Terrain frustum/occlusion tests and ordered indirect-command compaction use a GPU max-depth mip chain, bounded per-frame uploads and a live Performance-page switch. Desktop and each stereo eye retain separate depth/camera histories; head movement contributes to conservative visibility margins. Stock range/LOD selection remains on the CPU, and third-party visibility policies retain their CPU plane tests. Shadow and mini-dimension draws keep their existing visibility rules.
-     - Supported stock animated entity bodies use batched GPU occlusion/current-view frustum masks and indirect commands, with a live control and bounded input regions that remain immutable after submission. Player handling, callbacks and CPU admission rules are retained; custom renderer policies keep their original path. Cross-mesh entity compaction and broader entity producers remain planned.
+     - Supported stock animated entity bodies and unwarped dropped-item meshes use batched GPU occlusion/current-view frustum masks and indirect commands, with a live control and bounded input regions that remain immutable after submission. Dropped-item bounds follow the uploaded mesh and final model transform; native and translated draws retain material order and rigid motion history. Player handling, callbacks and CPU admission rules are retained; custom renderers, shaders and unsupported mesh writes keep their original draw path. Cross-mesh entity compaction, falling-block draws and broader entity producers remain planned.
   - Vendor-neutral Vulkan compute, live controls and safe CPU/GPU transitions. Measure CPU/GPU time and frame-time spikes including transfer and synchronization costs.
 
 ### 2. Complete VR

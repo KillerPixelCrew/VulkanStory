@@ -140,8 +140,17 @@ internal static class EntityConsumerPatches
         if (platform is not ClientPlatformWindows windows || !runtime.TrySession(windows, out var session))
             throw new InvalidOperationException("Active entity routing lost its session.");
         int program = ShaderProgramBase.CurrentShaderProgram?.ProgramId ?? 0;
-        bool motion = session.Graphics.BeginAnimatedMotionWrite() || session.Graphics.BeginRigidEntityMotionWrite(shape);
-        try { session.Graphics.RenderEntityMesh(mesh, sampler, session.Graphics.DeclaredProgramTexture(program, sampler)); }
-        finally { if (motion) session.Graphics.EndMotionWrite(); }
+        var visibility = session.Graphics.EnterEntityMeshVisibility();
+        bool motion = false;
+        try
+        {
+            motion = session.Graphics.BeginAnimatedMotionWrite() || session.Graphics.BeginRigidEntityMotionWrite(shape);
+            session.Graphics.RenderEntityMesh(mesh, sampler, session.Graphics.DeclaredProgramTexture(program, sampler));
+        }
+        finally
+        {
+            try { if (motion) session.Graphics.EndMotionWrite(); }
+            finally { session.Graphics.ExitEntityVisibilityScope(visibility); }
+        }
     }
 }

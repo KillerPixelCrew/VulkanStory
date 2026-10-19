@@ -18,7 +18,7 @@ internal sealed partial class GameGraphicsAdapter
         AccessTools.FieldRefAccess<ClientMain, FrustumCulling>("frustumCuller");
     private static readonly AccessTools.FieldRef<FrustumCulling, Vintagestory.API.Client.Plane[]> CullEntityPlanes =
         AccessTools.FieldRefAccess<FrustumCulling, Vintagestory.API.Client.Plane[]>("frustum");
-    private readonly Dictionary<Type, (long Frame, bool Supported)> entityCullPolicies = new();
+    private readonly Dictionary<Type, (ulong Frame, bool Supported)> entityCullPolicies = new();
     private TerrainFrustumPlane[] entityCullPlaneSnapshot = [];
 
     internal static void ValidateEntityVisibilityBindings()
@@ -26,15 +26,19 @@ internal sealed partial class GameGraphicsAdapter
         _ = CullEntityRenderers; _ = CullEntityFrustum; _ = CullEntityPlanes;
         if (AccessTools.Method(typeof(EntityShapeRenderer), nameof(EntityRenderer.BeforeRender), [typeof(float)]) == null)
             throw new MissingMethodException("Stock entity visibility callback changed.");
+        if (AccessTools.Method(typeof(EntityItemRenderer), "LoadModelMatrix",
+                [typeof(ItemRenderInfo), typeof(bool), typeof(float)]) == null)
+            throw new MissingMethodException("Stock dropped-item model transform changed.");
     }
 
     private bool SupportedEntityRenderer(EntityRenderer renderer)
     {
         var type = renderer.GetType();
-        if (renderer.entity is EntityPlayer || renderer is not EntityShapeRenderer ||
+        if (renderer.entity is EntityPlayer || (renderer is not EntityShapeRenderer && type != typeof(EntityItemRenderer)) ||
             !Performance.GpuEntityDraws.OwnsRenderer(type)) return false;
-        long frame = aoTemporal?.State.FrameIndex ?? -1;
-        if (entityCullPolicies.TryGetValue(type, out var saved) && saved.Frame == frame) return saved.Supported;
+        // Device identity advances even when temporal reconstruction is disabled.
+        ulong frame = device?.LatencyFrameId ?? 0;
+        if (frame != 0 && entityCullPolicies.TryGetValue(type, out var saved) && saved.Frame == frame) return saved.Supported;
         bool supported = true;
         foreach (string name in new[] { nameof(EntityRenderer.BeforeRender), nameof(EntityRenderer.DoRender3DOpaque),
                      nameof(EntityRenderer.DoRender3DOpaqueBatched), nameof(EntityRenderer.DoRender3DAfterOIT) })
@@ -45,6 +49,11 @@ internal sealed partial class GameGraphicsAdapter
         }
         var before = AccessTools.Method(typeof(SystemRenderEntities), "OnBeforeRender", [typeof(float)]);
         supported &= before != null && !ForeignEntityHooks(before);
+        if (type == typeof(EntityItemRenderer))
+        {
+            var model = AccessTools.Method(type, "LoadModelMatrix");
+            supported &= model != null && !ForeignEntityHooks(model);
+        }
         entityCullPolicies[type] = (frame, supported);
         return supported;
     }
@@ -86,6 +95,16 @@ internal sealed partial class GameGraphicsAdapter
             entityCullPlaneSnapshot = snapshot;
         }
         var entity = renderer.entity;
+        if (renderer.GetType() == typeof(EntityItemRenderer))
+        {
+            // Item mesh and final model transform are only known at the real draw seam.
+            // Any unsupported draw keeps its original direct submission, unclipped.
+            if (client.EntityPlayer?.CameraPos is not { } modelOrigin ||
+                !double.IsFinite(modelOrigin.X) || !double.IsFinite(modelOrigin.Y) || !double.IsFinite(modelOrigin.Z)) return previous;
+            device.EntityVisibility = new EntityVisibilityInput(default, entityCullPlaneSnapshot,
+                modelOrigin.X, modelOrigin.Y, modelOrigin.Z, -1);
+            return previous;
+        }
         double x = entity.Pos.X, y = entity.Pos.InternalY, z = entity.Pos.Z;
         // Enclose both the original float frustum centre and the actual world centre,
         // plus movement/interpolation between preparation and rendering.
@@ -98,4 +117,20 @@ internal sealed partial class GameGraphicsAdapter
     }
 
     internal void ExitEntityVisibilityScope(EntityVisibilityScope previous) => RequireDevice().EntityVisibility = previous.Previous;
+
+    internal EntityVisibilityScope EnterEntityMeshVisibility()
+    {
+        var renderer = RequireDevice();
+        var previous = new EntityVisibilityScope(renderer.EntityVisibility);
+        if (renderer.EntityVisibility is not { RigidProgram: -1 } visibility) return previous;
+        // Exact stock program identity and unmodified selected assets, for native and
+        // translated standard alike. Missing uniforms never identify a rigid shader.
+        var program = ShaderProgramBase.CurrentShaderProgram;
+        renderer.EntityVisibility = program != null && ReferenceEquals(program, ShaderPrograms.Standard) &&
+            !ShaderOverrides.IsOverridden("standard") &&
+            aoTemporal?.CurrentClient?.EntityPlayer?.CameraPos is { } origin &&
+            origin.X == visibility.CameraX && origin.Y == visibility.CameraY && origin.Z == visibility.CameraZ
+            ? visibility with { RigidProgram = program.ProgramId } : null;
+        return previous;
+    }
 }

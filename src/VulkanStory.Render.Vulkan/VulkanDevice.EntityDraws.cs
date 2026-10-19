@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Contracts;
 using VulkanStory.Render.Vulkan.Core;
@@ -7,7 +8,7 @@ using VulkanStory.Render.Vulkan.Graph;
 namespace VulkanStory.Render.Vulkan;
 
 internal readonly record struct EntityVisibilityInput(TerrainDrawBounds Bounds, TerrainFrustumPlane[] Planes,
-    double CameraX, double CameraY, double CameraZ);
+    double CameraX, double CameraY, double CameraZ, int RigidProgram = 0);
 
 public sealed unsafe partial class VulkanDevice
 {
@@ -30,13 +31,92 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityVisibilityDispatchesRecorded { get; private set; }
     internal long EntityIndirectDrawsRecorded { get; private set; }
 
+    private bool TryRigidEntityBounds(ShaderProgramResources program, VulkanMesh mesh,
+        EntityVisibilityInput visibility, out TerrainDrawBounds result)
+    {
+        result = default;
+        if (mesh.EntityLocalBounds is not { } local || mesh.Ssbo) return false;
+        bool position = false, flags = false;
+        foreach (var attribute in mesh.Layout.Attributes)
+        {
+            if (attribute.Binding >= mesh.BindingOrder.Count || attribute.Offset != 0) continue;
+            foreach (var binding in mesh.Layout.Bindings)
+            {
+                if (binding.Binding != attribute.Binding || binding.PerInstance) continue;
+                position |= attribute.Location == 0 && attribute.Format == Format.R32G32B32Sfloat &&
+                    binding.Stride == 12 && mesh.BindingOrder[(int)attribute.Binding] == MeshManager.BufferXyz;
+                flags |= attribute.Location == 3 && attribute.Format == Format.R32Sint &&
+                    binding.Stride == 4 && mesh.BindingOrder[(int)attribute.Binding] == MeshManager.BufferFlags;
+            }
+        }
+        if (!position || !flags) return false;
+        Span<byte> matrixBytes = stackalloc byte[64];
+        Span<byte> scalar = stackalloc byte[4];
+        if (!CopyWorldUniform(program, "modelMatrix", "mat4", matrixBytes) ||
+            !CopyWorldUniform(program, "extraZOffset", "float", scalar) ||
+            MemoryMarshal.Read<float>(scalar) != 0 ||
+            !CopyWorldUniform(program, "dontWarpVertices", "int", scalar)) return false;
+        int warp = MemoryMarshal.Read<int>(scalar);
+        if (warp != 1)
+        {
+            // Stock dropped items use mode zero. Wind/water meshes and active
+            // perception/global deformation retain the original unculled draw.
+            if (warp is not (0 or 2) || !mesh.EntityFlagsWithoutWind ||
+                !CopyWorldUniform(program, "addRenderFlags", "int", scalar) ||
+                (MemoryMarshal.Read<int>(scalar) & (0xf << 25)) != 0 ||
+                !TryReadClientFloatUniform(program.ProgramId, "globalWarpIntensity", out float global) ||
+                !float.IsFinite(global) || global != 0 ||
+                !TryReadClientFloatUniform(program.ProgramId, "glitchWaviness", out float glitch) ||
+                !float.IsFinite(glitch) || glitch > 0.1f ||
+                !CopyWorldUniform(program, "perceptionEffectId", "int", scalar)) return false;
+            if (MemoryMarshal.Read<int>(scalar) == 2 &&
+                (!TryReadClientFloatUniform(program.ProgramId, "perceptionEffectIntensity", out float perception) ||
+                    !float.IsFinite(perception) || perception > 0)) return false;
+        }
+        var model = MemoryMarshal.Cast<byte, float>(matrixBytes);
+        foreach (float value in model) if (!float.IsFinite(value)) return false;
+        if (model[3] != 0 || model[7] != 0 || model[11] != 0 || model[15] != 1) return false;
+        double minX = double.PositiveInfinity, minY = minX, minZ = minX;
+        double maxX = double.NegativeInfinity, maxY = maxX, maxZ = maxX;
+        double margin = 0.001;
+        // Transform all eight corners using the exact model shadow consumed by
+        // this draw, including item origin, scale, rotation, bobbing and offsets.
+        for (int corner = 0; corner < 8; corner++)
+        {
+            double x = (corner & 1) == 0 ? local.MinX : local.MaxX;
+            double y = (corner & 2) == 0 ? local.MinY : local.MaxY;
+            double z = (corner & 4) == 0 ? local.MinZ : local.MaxZ;
+            double tx = model[0] * x + model[4] * y + model[8] * z + model[12];
+            double ty = model[1] * x + model[5] * y + model[9] * z + model[13];
+            double tz = model[2] * x + model[6] * y + model[10] * z + model[14];
+            double magnitude = 0;
+            for (int row = 0; row < 3; row++)
+                magnitude = Math.Max(magnitude, Math.Abs(model[row] * x) + Math.Abs(model[row + 4] * y) +
+                    Math.Abs(model[row + 8] * z) + Math.Abs(model[row + 12]));
+            if (!double.IsFinite(magnitude) || magnitude > 1e6) return false;
+            margin = Math.Max(margin, magnitude * 1e-5);
+            minX = Math.Min(minX, tx); minY = Math.Min(minY, ty); minZ = Math.Min(minZ, tz);
+            maxX = Math.Max(maxX, tx); maxY = Math.Max(maxY, ty); maxZ = Math.Max(maxZ, tz);
+        }
+        result = new(minX + visibility.CameraX - margin, minY + visibility.CameraY - margin,
+            minZ + visibility.CameraZ - margin, maxX + visibility.CameraX + margin,
+            maxY + visibility.CameraY + margin, maxZ + visibility.CameraZ + margin, true);
+        return true;
+    }
+
     private bool PrepareEntityDraw(ShaderProgramResources program, VulkanMesh mesh,
         out VulkanBuffer? commands, out ulong offset)
     {
         commands = null; offset = 0;
         if (EntityVisibility is not { } visibility || !CanPrepareTerrainDraws ||
-            _nativeTarget?.DepthTextureId != OcclusionDepth.SourceDepthTexture ||
-            program.LocationOf("vsComputeDeformation") < 0) return false;
+            _nativeTarget?.DepthTextureId != OcclusionDepth.SourceDepthTexture) return false;
+        var box = visibility.Bounds;
+        if (visibility.RigidProgram != 0)
+        {
+            if (visibility.RigidProgram != program.ProgramId ||
+                !TryRigidEntityBounds(program, mesh, visibility, out box)) return false;
+        }
+        else if (program.LocationOf("vsComputeDeformation") < 0) return false;
         var camera = OcclusionDepth.GpuCamera!;
         var batch = _entityDrawBatch;
         // Inputs may be appended after recording the dispatch, but never after submitting it.
@@ -51,7 +131,6 @@ public sealed unsafe partial class VulkanDevice
         }
         float* header = (float*)((byte*)batch.Input.Mapped + batch.InputOffset);
         float* record = header + 64 + batch.Count * 12;
-        var box = visibility.Bounds;
         double dx = visibility.CameraX - camera.CameraX, dy = visibility.CameraY - camera.CameraY,
             dz = visibility.CameraZ - camera.CameraZ;
         double grow = Math.Sqrt(dx * dx + dy * dy + dz * dz) + 0.5;
