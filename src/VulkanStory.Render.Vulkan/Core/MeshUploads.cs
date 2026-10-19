@@ -31,7 +31,7 @@ internal sealed unsafe class MeshUploads(MeshManager meshes)
             data.Flags != null ? data.Flags.Length * sizeof(int) : 0,
             data.IndicesCount * sizeof(int),
             data.CustomFloats?.Layout, data.CustomShorts?.Layout, data.CustomBytes?.Layout, data.CustomInts?.Layout,
-            data.mode, staticDraw, ssbo: false, signedCustomShorts: true);
+            data.mode, staticDraw, ssbo: false, signedCustomShorts: true, flagsInstanced: data.FlagsInstanced);
 
         UpdateMesh(id, data);
         return id;
@@ -107,6 +107,7 @@ internal sealed unsafe class MeshUploads(MeshManager meshes)
         }
         if (data.Flags != null && data.FlagsCount > 0 && !ssbo)
         {
+            _meshes.SetFlagsInstanced(meshId, data.FlagsInstanced);
             fixed (int* source = data.Flags)
             {
                 _meshes.Write(meshId, MeshManager.BufferFlags, data.FlagsOffset,

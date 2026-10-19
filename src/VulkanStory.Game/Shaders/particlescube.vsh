@@ -1,5 +1,8 @@
 #version 330 core
 #extension GL_ARB_explicit_attrib_location: enable
+#extension GL_ARB_shader_storage_buffer_object: enable
+uniform int vsComputeParticleGeometry = 0;
+layout(std430) readonly buffer VulkanParticleGeometry { vec4 values[]; } vsParticleGeometry;
 
 // Optimum override of the vanilla particlescube.vsh (TAA P4).
 //
@@ -115,6 +118,8 @@ vec4 taaParticleWorldPos(WarpState st, vec3 taaParticlePosition)
 
 void main()
 {
+    if (vsComputeParticleGeometry > 0) worldPos = vsParticleGeometry.values[(gl_InstanceID * vsComputeParticleGeometry + gl_VertexID) * 2];
+    else {
 #if defined(VEC3SCALE)
 	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(particleDir.z, particleDir.x) + particleDir.w);
 	worldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(scale,1.0)) + vec4(particlePosition, 1.0);
@@ -125,6 +130,7 @@ void main()
 
 	worldPos = applyVertexWarping(renderFlags, worldPos);
 	worldPos = applyGlobalWarping(worldPos);
+    }
 	vec4 cameraPos = modelViewMatrix * worldPos;
 
 	gl_Position = projectionMatrix * cameraPos;
@@ -150,7 +156,7 @@ void main()
 	// unjittered projection and CameraMatrixOrigin.
 	{
 		WarpState taaPrev = previousWarpState();
-		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, previousParticlePosition);
+		vec4 taaPrevPos = vsComputeParticleGeometry > 0 ? vsParticleGeometry.values[(gl_InstanceID * vsComputeParticleGeometry + gl_VertexID) * 2 + 1] : taaParticleWorldPos(taaPrev, previousParticlePosition);
 		taaPrevClip = particleHistoryValid > 0.5 ? prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos) : vec4(0.0);
 	}
 #endif

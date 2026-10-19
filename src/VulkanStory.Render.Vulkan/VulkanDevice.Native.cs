@@ -578,7 +578,7 @@ public sealed unsafe partial class VulkanDevice
     /// tracker, a texture unit or a draw-buffer mask.
     /// </summary>
     private bool BeginNativeDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures, int meshId,
-        out CommandBuffer commandBuffer, out VulkanFramebuffer? target, bool requirePipeline = false)
+        out CommandBuffer commandBuffer, out VulkanFramebuffer? target, bool requirePipeline = false, int instanceCount = 1)
     {
         commandBuffer = default;
         target = null;
@@ -661,6 +661,7 @@ public sealed unsafe partial class VulkanDevice
         // Decided before the scope opens, since it decides the depth attachment's layout.
         PrepareProgramJointPoses(program);
         PrepareSharedDeformation(program, meshId);
+        PrepareParticleGeometry(program, meshId, instanceCount);
         bool stencilWritable = pipeline.Description.StencilTest && bound.Stencil.TextureId != 0 &&
             (WritesStencil(pipeline.Description.StencilFront) || WritesStencil(pipeline.Description.StencilBack));
         _targets.SetDepthReadOnly(depthReadOnly, stencilWritable);

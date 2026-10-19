@@ -260,6 +260,7 @@ internal sealed class RendererSettingsPanel
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
                 Switch("Compute terrain draw preparation", "GpuTerrainDrawPreparation");
                 Switch("Shared compute deformation", "GpuSharedDeformation");
+                Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute visual joint poses", "GpuJointPosePreparation");
                 Switch("Compute entity draw preparation", "GpuEntityDrawPreparation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");

@@ -35,6 +35,7 @@ internal sealed class VulkanMesh : IDisposable
     public bool Persistent { get; set; }
     public bool Ssbo { get; set; }
     internal ulong GeometryRevision { get; set; }
+    internal float[] ParticleHistoryShadow = [];
 
     public VertexLayoutDescription Layout { get; set; } = VertexLayoutDescription.Empty;
     public int LayoutId { get; set; } = -1;
@@ -315,7 +316,7 @@ internal sealed unsafe class MeshManager : IDisposable
         int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize,
         CustomMeshDataPartFloat? customFloats, CustomMeshDataPartShort? customShorts,
         CustomMeshDataPartByte? customBytes, CustomMeshDataPartInt? customInts,
-        EnumDrawMode drawMode, bool staticDraw, bool ssbo, bool signedCustomShorts = false)
+        EnumDrawMode drawMode, bool staticDraw, bool ssbo, bool signedCustomShorts = false, bool flagsInstanced = false)
     {
         var mesh = new VulkanMesh
         {
@@ -347,7 +348,7 @@ internal sealed unsafe class MeshManager : IDisposable
         AddDedicated(mesh, builder, BufferNormals, ssbo ? 0 : normalsSize, 4, GlInt2101010Rev, normalized: true, integer: false, ssbo);
         AddDedicated(mesh, builder, BufferUv, ssbo ? 0 : uvSize, 2, GlFloat, normalized: false, integer: false, ssbo);
         AddDedicated(mesh, builder, BufferRgba, rgbaSize, 4, GlUnsignedByte, normalized: true, integer: false, ssbo);
-        AddDedicated(mesh, builder, BufferFlags, ssbo ? 0 : flagsSize, 1, GlInt, normalized: false, integer: true, ssbo);
+        AddDedicated(mesh, builder, BufferFlags, ssbo ? 0 : flagsSize, 1, GlInt, normalized: false, integer: true, ssbo, flagsInstanced);
 
         AddCustom(mesh, builder, BufferCustomFloat, customFloats?.AllocationSize * 4 ?? 0,
             customFloats?.InterleaveSizes, customFloats?.InterleaveOffsets,
@@ -434,7 +435,7 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private void AddDedicated(
         VulkanMesh mesh, VertexLayoutBuilder builder, int slot, int byteSize,
-        int components, int glType, bool normalized, bool integer, bool ssbo)
+        int components, int glType, bool normalized, bool integer, bool ssbo, bool perInstance = false)
     {
         if (byteSize <= 0) return;
 
@@ -451,7 +452,7 @@ internal sealed unsafe class MeshManager : IDisposable
         mesh.BindingOrder.Add(slot);
         builder.AddDedicated(
             VertexLayoutBuilder.FormatFor(components, glType, normalized, integer),
-            VertexLayoutBuilder.SizeOf(components, glType));
+            VertexLayoutBuilder.SizeOf(components, glType), perInstance);
     }
 
     private void AddCustom(
@@ -539,6 +540,7 @@ internal sealed unsafe class MeshManager : IDisposable
         VulkanMesh mesh = Get(meshId) ?? throw new InvalidOperationException("Particle history lost its mesh.");
         int bytes = checked(values.Length * sizeof(float));
         if (bytes == 0) return;
+        if (values.AsSpan().SequenceEqual(mesh.ParticleHistoryShadow)) return;
         VulkanBuffer? existing = mesh.Buffers[BufferParticleHistory];
         if (existing == null || existing.Size < (ulong)bytes)
         {
@@ -566,6 +568,25 @@ internal sealed unsafe class MeshManager : IDisposable
             }
         }
         fixed (float* source = values) Write(meshId, BufferParticleHistory, 0, (IntPtr)source, bytes);
+        if (mesh.ParticleHistoryShadow.Length != values.Length) mesh.ParticleHistoryShadow = new float[values.Length];
+        values.CopyTo(mesh.ParticleHistoryShadow, 0);
+    }
+
+    internal void SetFlagsInstanced(int meshId, bool instanced)
+    {
+        if (Get(meshId) is not { } mesh || mesh.Ssbo) return;
+        int binding = mesh.BindingOrder.IndexOf(BufferFlags);
+        if (binding < 0) return;
+        var bindings = mesh.Layout.Bindings;
+        for (int i = 0; i < bindings.Length; i++)
+            if (bindings[i].Binding == binding && bindings[i].PerInstance != instanced)
+            {
+                var changed = (VertexBinding[])bindings.Clone();
+                changed[i] = new VertexBinding(bindings[i].Binding, bindings[i].Stride, instanced);
+                mesh.Layout = new VertexLayoutDescription(changed, mesh.Layout.Attributes);
+                mesh.LayoutId = _layouts.Intern(mesh.Layout); mesh.GeometryRevision++;
+                return;
+            }
     }
 
     private int Register(VulkanMesh mesh)

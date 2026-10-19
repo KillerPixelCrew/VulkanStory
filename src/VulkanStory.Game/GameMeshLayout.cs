@@ -13,7 +13,7 @@ internal static class GameMeshLayout
     {
         VerticesCount = data.VerticesCount, IndicesCount = data.IndicesCount,
         xyz = data.xyz, Normals = data.Normals, Uv = data.Uv, Rgba = data.Rgba,
-        Flags = data.Flags, Indices = data.Indices,
+        Flags = data.Flags, FlagsInstanced = data.FlagsInstanced, Indices = data.Indices,
         XyzOffset = data.XyzOffset, NormalsOffset = data.NormalsOffset, UvOffset = data.UvOffset,
         RgbaOffset = data.RgbaOffset, FlagsOffset = data.FlagsOffset, IndicesOffset = data.IndicesOffset,
         mode = DrawMode(data.mode),

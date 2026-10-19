@@ -77,6 +77,7 @@ public sealed unsafe partial class VulkanDevice
         RetireDeformationGeometry(all: true);
         RetireJointPoses(all: true);
         RetireWorldGeometry(all: true);
+        RetireParticleGeometry(all: true);
     }
 
     private bool TryDeformationInputs(VulkanMesh mesh, out VulkanBuffer? positions, out VulkanBuffer? ids,

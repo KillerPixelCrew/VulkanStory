@@ -29,6 +29,8 @@ public sealed class MeshUploadData
     public byte[]? Rgba { get; init; }
     /// <summary>Packed game vertex flags, one value per vertex.</summary>
     public int[]? Flags { get; init; }
+    /// <summary>Whether the flag stream advances per instance rather than per vertex.</summary>
+    public bool FlagsInstanced { get; init; }
     /// <summary>Element indices in the retained mesh topology.</summary>
     public int[]? Indices { get; init; }
     /// <summary>Destination byte offset in the position buffer.</summary>

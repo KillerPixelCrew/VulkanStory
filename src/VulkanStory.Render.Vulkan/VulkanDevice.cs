@@ -1608,6 +1608,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         DisposeDeformationGeometryIdle();
         DisposeJointPosesIdle();
         DisposeWorldGeometryIdle();
+        DisposeParticleGeometryIdle();
         DisposeEntityDrawsIdle();
         _occlusionDepth = null;
         _compute?.Dispose();

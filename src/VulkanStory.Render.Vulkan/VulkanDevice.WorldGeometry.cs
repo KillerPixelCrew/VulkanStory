@@ -76,17 +76,26 @@ public sealed unsafe partial class VulkanDevice
         output.Clear();
         if (!CopyWorldUniform(program, previous ? "prevModelMatrix" : "modelMatrix", "mat4", output[..64]) ||
             !CopyWorldUniform(program, "addRenderFlags", "int", output.Slice(140, 4))) return false;
+        if (!ReadGeometryWarpState(program, previous, output.Slice(64, 64))) return false;
+        var words = MemoryMarshal.Cast<byte, uint>(output);
+        words[32] = count; words[33] = stride / 4; words[34] = offset / 4; words[36] = (uint)program.WorldWarpWaving!.Value;
+        var matrix = MemoryMarshal.Cast<byte, float>(output[..64]);
+        foreach (float value in matrix) if (!float.IsFinite(value)) return false;
+        return true;
+    }
+
+    private bool ReadGeometryWarpState(ShaderProgramResources program, bool previous, Span<byte> output)
+    {
+        output.Clear();
         string[] names = previous ? PreviousWorldWarpNames : WorldWarpNames;
         for (int i = 0; i < names.Length; i++)
         {
-            if (!CopyWorldUniform(program, names[i], "float", output.Slice(64 + i * 4, 4))) return false;
+            if (!CopyWorldUniform(program, names[i], "float", output.Slice(i * 4, 4))) return false;
         }
-        if (!CopyWorldUniform(program, previous ? "prevPlayerpos" : "playerpos", "vec3", output.Slice(112, 12)) ||
-            !CopyWorldUniform(program, previous ? "prevPerceptionEffectId" : "perceptionEffectId", "int", output.Slice(124, 4))) return false;
-        var words = MemoryMarshal.Cast<byte, uint>(output);
-        words[32] = count; words[33] = stride / 4; words[34] = offset / 4; words[36] = (uint)program.WorldWarpWaving!.Value;
+        if (!CopyWorldUniform(program, previous ? "prevPlayerpos" : "playerpos", "vec3", output.Slice(48, 12)) ||
+            !CopyWorldUniform(program, previous ? "prevPerceptionEffectId" : "perceptionEffectId", "int", output.Slice(60, 4))) return false;
         // Nonfinite state must keep the original shader path, never poison a retained buffer.
-        var floats = MemoryMarshal.Cast<byte, float>(output[..124]);
+        var floats = MemoryMarshal.Cast<byte, float>(output[..60]);
         foreach (float value in floats) if (!float.IsFinite(value)) return false;
         return true;
     }

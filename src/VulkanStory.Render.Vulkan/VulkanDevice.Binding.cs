@@ -440,6 +440,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 DeformationBlock => _drawDeformation,
                 PreviousDeformationBlock => _drawPreviousDeformation,
+                "VulkanParticleGeometry" => drawParticleGeometry,
                 _ => meshId > 0 ? _meshes.BufferOf(meshId, MeshManager.BufferXyz) : null,
             };
             if (buffer != null)

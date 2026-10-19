@@ -599,7 +599,7 @@ public sealed unsafe partial class VulkanDevice
         VulkanBuffer? entityCommands = null;
         ulong entityOffset = 0;
         bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset);
-        if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
+        if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target, instanceCount: instanceCount))
         {
             return false;
         }

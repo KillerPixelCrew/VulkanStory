@@ -458,7 +458,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','deformationDispatchesRecorded','deformationCacheReuses','entityVisibilityDispatchesRecorded','entityIndirectDrawsRecorded','jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','jointPoseChecks','cpuJointProductsDeferred','cpuJointFacadeChecks')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','deformationDispatchesRecorded','deformationCacheReuses','entityVisibilityDispatchesRecorded','entityIndirectDrawsRecorded','jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','particleGeometryDispatchesRecorded','particleGeometryCacheReuses','jointPoseChecks','cpuJointProductsDeferred','cpuJointFacadeChecks')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -484,7 +484,7 @@ function Test-ScenarioDocument($Root) {
 }
 
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('GpuTerrainDrawPreparation','GpuSharedDeformation','GpuEntityDrawPreparation','GpuJointPosePreparation')) { $script:settingTypes.Add($name, 'bool') }
+foreach ($name in @('GpuTerrainDrawPreparation','GpuSharedDeformation','GpuEntityDrawPreparation','GpuJointPosePreparation','GpuParticleGeometry')) { $script:settingTypes.Add($name, 'bool') }
 foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
     $script:settingTypes.Add($name, 'bool')
 }
@@ -495,7 +495,7 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
 foreach ($name in @('jointPoseChecksPassed','cpuJointFacadeValid')) { $script:assertionKinds.Add($name, 'bool') }
-foreach ($name in @('jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','jointPoseChecks','jointPoseMaximumRelativeError','cpuJointProductsDeferred','cpuJointFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
+foreach ($name in @('jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','particleGeometryDispatchesRecorded','particleGeometryCacheReuses','jointPoseChecks','jointPoseMaximumRelativeError','cpuJointProductsDeferred','cpuJointFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
 foreach ($name in @('deformationDispatchesRecorded','deformationCacheReuses','entityVisibilityDispatchesRecorded','entityIndirectDrawsRecorded')) { $script:assertionKinds.Add($name, 'number') }
 foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive','managedDependencyResolutionVerified')) {
     $script:assertionKinds.Add($name, 'bool')

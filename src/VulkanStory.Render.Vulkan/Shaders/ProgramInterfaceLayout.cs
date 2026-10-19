@@ -846,7 +846,8 @@ internal sealed partial class ProgramInterfaceLayout
             switch (binding.Binding)
             {
                 case SetConvention.FaceDataBinding:
-                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name == "vsGeometry" ? "VulkanDeformation" : binding.Name,
+                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name == "vsGeometry" ? "VulkanDeformation" :
+                        binding.Name == "vsParticleGeometry" ? "VulkanParticleGeometry" : binding.Name,
                         Binding = binding.Binding });
                     break;
                 case SetConvention.AnimationBinding:
