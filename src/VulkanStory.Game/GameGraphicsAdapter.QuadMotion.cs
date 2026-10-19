@@ -19,6 +19,16 @@ internal sealed partial class GameGraphicsAdapter
     internal long QuadMotionDrawsRecorded { get; private set; }
     internal long QuadMotionCompositesRecorded { get; private set; }
     internal long QuadMotionValidInstances { get; private set; }
+    private bool quadMotionInputCaptureRequested;
+    internal (ulong FrameId, int Eye, TextureCaptureData Depth)? QuadMotionCompositionInput { get; private set; }
+    internal bool QuadMotionCompositionCaptureDrawn { get; private set; }
+
+    internal void PrepareQuadMotionInputCapture(bool requested)
+    {
+        quadMotionInputCaptureRequested = requested;
+        QuadMotionCompositionInput = null;
+        QuadMotionCompositionCaptureDrawn = false;
+    }
 
     private FrameBufferRef CreateQuadMotionTarget(int width, int height)
     {
@@ -69,7 +79,10 @@ internal sealed partial class GameGraphicsAdapter
     }
 
     private void ResetQuadMotionPublication()
-    { quadMotionFrame = ulong.MaxValue; quadMotionEye = -1; quadMotionFrameFailed = false; }
+    {
+        quadMotionFrame = ulong.MaxValue; quadMotionEye = -1; quadMotionFrameFailed = false;
+        QuadMotionCompositionInput = null; QuadMotionCompositionCaptureDrawn = false;
+    }
 
     private void RenderQuadParticleMotion(MeshRef mesh, int count, ShaderProgramBase source, TemporalFrameState frame)
     {
@@ -127,6 +140,10 @@ internal sealed partial class GameGraphicsAdapter
         var pipeline = NativePostPipeline(nativeQuadMotionCompose, program, primary.FboId, slots, NativeOpaqueBlend(slots), true, true, CompareOp.Less);
         if (pipeline == null || !pipeline.Program.Interface.WrittenFragmentOutputs.Contains(motion)) return false;
         int[] inputs = [source.ColorTextureIds[0], source.DepthTextureId, primary.ColorTextureIds[motion]];
+        // Opt-in scheduled diagnostic only: post-compose depth equality cannot
+        // distinguish a quad write from an equal-depth tie rejected by LESS.
+        if (quadMotionInputCaptureRequested && renderer.ReadTextureForParity(primary.DepthTextureId) is { } sceneDepth)
+            QuadMotionCompositionInput = (renderer.LatencyFrameId, renderer.TerrainEyeIndex, sceneDepth);
         try
         {
             if (!BeginNativeTargetPass("QuadMotionCompose/" + primary.FboId, primary.FboId, slots, primary.Width, primary.Height, inputs)) return false;
@@ -134,6 +151,7 @@ internal sealed partial class GameGraphicsAdapter
                 [new NativeTexture(nativeQuadMotionCompose.Samplers[0], inputs[0]), new NativeTexture(nativeQuadMotionCompose.Samplers[1], inputs[1]),
                     new NativeTexture(nativeQuadMotionCompose.Samplers[2], inputs[2])], requirePipeline: true);
             if (drawn) QuadMotionCompositesRecorded++;
+            if (quadMotionInputCaptureRequested) QuadMotionCompositionCaptureDrawn = drawn;
             return drawn;
         }
         finally { renderer.EndNativePass(); }

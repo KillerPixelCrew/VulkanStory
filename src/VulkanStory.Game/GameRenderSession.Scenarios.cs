@@ -66,29 +66,93 @@ internal sealed partial class GameRenderSession
         if (quad?.Floats is not { } vectors || quadDepth?.Floats is not { } sourceDepth || motion?.Floats is not { } scene || depth?.Floats is not { } sceneDepth)
             throw new InvalidOperationException("Quad particle motion readback is unavailable.");
         int pixels = quad.Width * quad.Height;
-        if (vectors.Length < pixels * 4 || scene.Length < pixels * 4 || sourceDepth.Length < pixels || sceneDepth.Length < pixels)
+        if (quadDepth.Width != quad.Width || quadDepth.Height != quad.Height || motion.Width != quad.Width || motion.Height != quad.Height ||
+            depth.Width != quad.Width || depth.Height != quad.Height ||
+            vectors.Length < pixels * 4 || scene.Length < pixels * 4 || sourceDepth.Length < pixels || sceneDepth.Length < pixels)
             throw new InvalidOperationException("Quad particle motion readback size differs from the scene.");
         int sourceStride = sourceDepth.Length >= pixels * 4 ? 4 : 1, sceneStride = sceneDepth.Length >= pixels * 4 ? 4 : 1;
-        long writers = 0, matched = 0; double maximumError = 0;
+        var before = Graphics.QuadMotionCompositionInput;
+        float[]? beforeDepth = before?.Depth.Floats;
+        bool inclusionAvailable = before is { } input && input.FrameId == Device.LatencyFrameId &&
+            input.Eye == Device.TerrainEyeIndex && input.Depth.Width == quad.Width && input.Depth.Height == quad.Height &&
+            beforeDepth != null && beforeDepth.Length >= pixels;
+        int beforeStride = beforeDepth?.Length >= pixels * 4 ? 4 : 1;
+        long writers = 0, compared = 0, matched = 0, mismatched = 0;
+        long shaderRejected = 0, depthRejected = 0, equalDepthRejected = 0;
+        long eligible = 0, eligibleMatched = 0, eligibleMismatched = 0, eligibleDepthMismatched = 0;
+        double maximumError = 0, eligibleMaximumError = 0;
+        int maximumErrorIndex = -1, eligibleMaximumErrorIndex = -1;
+        string maximumErrorInclusion = "unknown";
+        var mismatchPixels = new List<object>();
+        object Pixel(int i, string inclusion, double error) => new
+        {
+            x = i % quad.Width, y = i / quad.Width, inclusion, error,
+            quad = vectors.AsSpan(i * 4, 4).ToArray(), quadDepth = sourceDepth[i * sourceStride],
+            sceneDepthBeforeCompose = inclusionAvailable ? (float?)beforeDepth![i * beforeStride] : null,
+            scene = scene.AsSpan(i * 4, 4).ToArray(), sceneDepth = sceneDepth[i * sceneStride]
+        };
         for (int i = 0; i < pixels; i++)
         {
             int at = i * 4;
             if (vectors[at + 2] <= 0 || vectors[at + 3] <= 0) continue;
             writers++;
             float actualDepth = sourceDepth[i * sourceStride];
-            if (sceneDepth[i * sceneStride] != actualDepth ||
-                Math.Abs(scene[at + 3] - actualDepth) > Math.Max(0.0002f, 0.0008f * actualDepth)) continue;
             double error = Math.Max(Math.Abs((double)vectors[at] - scene[at]), Math.Abs((double)vectors[at + 1] - scene[at + 1]));
-            maximumError = Math.Max(maximumError, double.IsFinite(error) ? error : double.MaxValue);
-            if (error <= 0.01) matched++;
+            if (!double.IsFinite(error)) error = double.MaxValue;
+            bool depthMatches = !(sceneDepth[i * sceneStride] != actualDepth ||
+                Math.Abs(scene[at + 3] - actualDepth) > Math.Max(0.0002f, 0.0008f * actualDepth));
+            // Match particle-motion-compose.fsh's discard and the pipeline's
+            // strict LESS against its input depth, not its overwritten output.
+            bool shaderAccepts = !(vectors[at + 2] <= 0 || vectors[at + 3] <= 0 || actualDepth >= 1 ||
+                MathF.Abs(vectors[at + 3] - actualDepth) > MathF.Max(0.0002f, 0.0008f * actualDepth));
+            bool included = inclusionAvailable && shaderAccepts && actualDepth < beforeDepth![i * beforeStride];
+            string inclusion = !inclusionAvailable ? "unknown" : !shaderAccepts ? "shader-discard" : included ? "eligible" :
+                actualDepth == beforeDepth![i * beforeStride] ? "equal-depth-rejected" : "depth-rejected";
+            // Preserve the original population and maximum for r24 comparison.
+            if (depthMatches)
+            {
+                compared++;
+                if (error > maximumError) { maximumError = error; maximumErrorIndex = i; maximumErrorInclusion = inclusion; }
+                if (error <= 0.01) matched++; else mismatched++;
+            }
+            if (inclusionAvailable)
+            {
+                if (!shaderAccepts) shaderRejected++;
+                else if (!included)
+                {
+                    depthRejected++;
+                    if (actualDepth == beforeDepth![i * beforeStride]) equalDepthRejected++;
+                }
+                else
+                {
+                    eligible++;
+                    if (error > eligibleMaximumError) { eligibleMaximumError = error; eligibleMaximumErrorIndex = i; }
+                    if (!depthMatches) eligibleDepthMismatched++;
+                    // Composition copies stored RG values without arithmetic;
+                    // any difference on a required write is unexpected.
+                    if (depthMatches && error == 0) eligibleMatched++; else eligibleMismatched++;
+                }
+            }
+            if (mismatchPixels.Count < 16 && ((depthMatches && error > 0.01) || (included && (!depthMatches || error > 0))))
+                mismatchPixels.Add(Pixel(i, inclusion, error));
         }
+        object? maximumErrorPixel = maximumErrorIndex >= 0 ? Pixel(maximumErrorIndex, maximumErrorInclusion, maximumError) : null;
+        object? eligibleMaximumErrorPixel = eligibleMaximumErrorIndex >= 0 ? Pixel(eligibleMaximumErrorIndex, "eligible", eligibleMaximumError) : null;
         foreach (var action in captures)
         {
             string directory = Path.Combine(ScenarioOutputDirectory, "scenario-captures", action.Name!);
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, "quad-motion.json"), JsonSerializer.Serialize(new
-            { frameId = Device.LatencyFrameId, writers, matched, maximumError, width = quad.Width, height = quad.Height,
-                meaning = "Tracked quad vectors and matching depth present at the actual TAA input seam." }));
+            {
+                frameId = Device.LatencyFrameId, eye = Device.TerrainEyeIndex,
+                writers, compared, matched, mismatched, maximumError, maximumErrorPixel,
+                inclusionAvailable, compositionInputFrameId = before?.FrameId, compositionInputEye = before?.Eye,
+                compositionDrawn = Graphics.QuadMotionCompositionCaptureDrawn,
+                shaderRejected, depthRejected, equalDepthRejected,
+                eligible, eligibleMatched, eligibleMismatched, eligibleDepthMismatched, eligibleMaximumError, eligibleMaximumErrorPixel,
+                mismatchPixels, width = quad.Width, height = quad.Height,
+                meaning = "Original depth-equality/0.01 comparison retained; eligible uses compose shader predicates and pre-compose strict LESS, requiring exact RG copy and matching depth. Pixel y is GL row order."
+            }, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
         }
     }
 
@@ -215,6 +279,7 @@ internal sealed partial class GameRenderSession
 
     private void AdvanceHeadlessScenarioBeforeInput()
     {
+        Graphics.PrepareQuadMotionInputCapture(false);
         if (HeadlessTerrainComparison.Pending) { scenarioTerrainFrameHeld = true; return; }
         if (scenarioTerrainFrameHeld) { scenarioTerrainFrameHeld = false; return; }
         HeadlessScenario? scenario = HeadlessHarnessOptions.Scenario;
@@ -256,6 +321,9 @@ internal sealed partial class GameRenderSession
             scenarioTick = 0;
         }
         else scenarioTick++;
+
+        Graphics.PrepareQuadMotionInputCapture(QuadMotionInputCapture && HeadlessHarnessOptions.Enabled &&
+            scenario.Actions.Any(action => action.Tick == scenarioTick && action.Kind == HeadlessScenarioActionKind.Capture));
 
         try { RequireScenarioContext(); }
         catch (Exception error) { FailHeadlessRun(error.GetBaseException().Message, "beforeInput"); return; }
