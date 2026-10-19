@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.Client.NoObf;
 

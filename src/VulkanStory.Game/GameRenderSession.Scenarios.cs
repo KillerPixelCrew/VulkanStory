@@ -779,6 +779,9 @@ internal sealed partial class GameRenderSession
         Aggregate("particleSimulationStepsApplied", Performance.GpuParticleSimulation.StepsApplied);
         Aggregate("particleSimulationCenterDispatchesRecorded", Device.ParticleSimulationCenterDispatchesRecorded);
         Aggregate("particleSimulationCentersRecorded", Device.ParticleSimulationCentersRecorded);
+        Aggregate("particleInstanceDispatchesRecorded", Device.ParticleInstanceDispatchesRecorded);
+        Aggregate("particleInstancesRecorded", Device.ParticleInstancesRecorded);
+        Aggregate("particleInstanceHistoriesRecorded", Device.ParticleInstanceHistoriesRecorded);
         Aggregate("particleSimulationRetainedBytes", Device.ParticleSimulationRetainedBytes);
         Aggregate("particleSimulationCapacityFallbacks", Device.ParticleSimulationCapacityFallbacks);
         Aggregate("particleSimulationChecks", Performance.GpuParticleSimulation.Checks);
