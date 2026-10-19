@@ -20,8 +20,6 @@ layout(push_constant) uniform Count { uint count; } pc;
 #include "terrain-noise-kernel.glsl"
 
 struct Octave { uvec2 seed; double x,fy,z,amplitude,threshold,smoothing,stop; };
-precise double pastY[32],pastValue[32];
-bool valid;
 double ReadDouble(uint word) { return packDouble2x32(uvec2(data[word],data[word+1u])); }
 Octave ReadOctave(uint index) {
     uint p=data[1]+index*16u;
@@ -115,7 +113,7 @@ uvec2 Prime(int i,uvec2 p) {
     high+=uint(i)*p.y+(i<0?0xffffffffu:0u)*p.x;
     return uvec2(low,high);
 }
-double Evaluate(Octave o,double y) {
+double Evaluate(Octave o,double y,inout bool valid) {
     precise double xz=o.x+o.z;
     precise double s2=xz*(-0.211324865405187lf),yy=y*0.577350269189626lf;
     precise double xr=o.x+s2,zr=o.z+s2,yr=xz*(-0.577350269189626lf);
@@ -129,7 +127,8 @@ double Evaluate(Octave o,double y) {
     xp=Prime(ix,PX); yp=Prime(iy,PY); zp=Prime(iz,PZ);
     return FromB32(Noise(o.seed,ToB32(fx),ToB32(fy),ToB32(fz)));
 }
-double Sign(uint start,uint count,double y,double inverse) {
+double Sign(uint start,uint count,double y,double inverse,
+    precise inout double pastY[32],precise inout double pastValue[32],inout bool valid) {
     precise double value=inverse,lo=inverse,hi=inverse;
     for(uint j=0u;j<count;j++) {
         if(!(hi<=0.0lf)&&!(lo>=0.0lf)) break;
@@ -148,7 +147,7 @@ double Sign(uint start,uint count,double y,double inverse) {
         Octave o=ReadOctave(start+j);
         if(value>=o.stop||value<=-o.stop) break;
         precise double ey=y*o.fy;
-        precise double noise=Evaluate(o,ey);
+        precise double noise=Evaluate(o,ey,valid);
         pastValue[j]=noise; pastY[j]=ey;
         precise double scaled=noise*o.amplitude;
         value=value+Threshold(scaled,o.threshold,o.smoothing);
@@ -159,11 +158,13 @@ void main() {
     uint column=gl_GlobalInvocationID.x; if(column>=data[0]) return;
     uint p=4u+column*4u;
     uint start=data[p],count=data[p+1u],first=data[p+2u],length=data[p+3u];
-    for(uint j=0u;j<count;j++) { pastY[j]=packDouble2x32(uvec2(0u,0x7ff80000u)); pastValue[j]=0.0lf; }
-    valid=true;
+    // Own the complete cache here, including inactive entries copied by inout.
+    precise double pastY[32],pastValue[32];
+    for(uint j=0u;j<32u;j++) { pastY[j]=packDouble2x32(uvec2(0u,0x7ff80000u)); pastValue[j]=0.0lf; }
+    bool valid=true;
     for(uint i=first;i<first+length;i++) {
         uint r=data[2]+i*4u;
-        precise double sign=Sign(start,count,ReadDouble(r),ReadDouble(r+2u));
+        precise double sign=Sign(start,count,ReadDouble(r),ReadDouble(r+2u),pastY,pastValue,valid);
         // A sentinel causes the adapter to replay this entire column through the
         // untouched stock ColumnNoise, including its original past-evaluation order.
         results[i]=valid ? uint(sign>0.0lf) : 0xffffffffu;
