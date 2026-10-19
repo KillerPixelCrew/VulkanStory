@@ -6,6 +6,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.MathTools;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
+using Vintagestory.GameContent;
 
 namespace VulkanStory.Game;
 
@@ -137,8 +138,19 @@ internal static class DroppedFallingMotionConsumerPatches
     }
     private static void DrawFalling(IRenderAPI render, MultiTextureMeshRef mesh, string sampler, int unit, object renderer, object entity)
     {
-        var session = Session(); bool motion = session != null && Begin(session, entity, mesh, fallingMatrix!(renderer));
-        try { render.RenderMultiTextureMesh(mesh, sampler, unit); }
-        finally { if (motion) session!.Graphics.EndMotionWrite(); }
+        var session = Session(); bool motion = false;
+        var visibility = session != null && entity is EntityBlockFalling falling
+            ? session.Graphics.EnterFallingVisibilityScope(renderer, falling) : default;
+        try
+        {
+            // Motion is independent of visibility support and its live switch.
+            motion = session != null && Begin(session, entity, mesh, fallingMatrix!(renderer));
+            render.RenderMultiTextureMesh(mesh, sampler, unit);
+        }
+        finally
+        {
+            try { if (motion) session!.Graphics.EndMotionWrite(); }
+            finally { session?.Graphics.ExitEntityVisibilityScope(visibility); }
+        }
     }
 }

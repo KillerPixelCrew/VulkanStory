@@ -70,23 +70,69 @@ internal sealed partial class GameGraphicsAdapter
         return ReferenceEquals(renderer.entity, entity) && SupportedEntityRenderer(renderer);
     }
 
-    internal EntityVisibilityScope EnterEntityVisibilityScope(EntityRenderer renderer, bool shadow)
+    internal bool CanGpuCullFalling(EntityBlockFalling entity, FrustumCulling culler)
     {
-        var device = RequireDevice();
-        var previous = new EntityVisibilityScope(device.EntityVisibility);
-        device.EntityVisibility = null;
-        if (shadow || !CanGpuCullEntity(renderer.entity) || aoTemporal?.CurrentClient is not ClientMain client ||
-            Performance.TerrainOcclusionCull.CameraNow() is not { } camera) return previous;
+        // This gate runs BEFORE removing the CPU sphere test. A depth source
+        // alone cannot identify the caller's stage, target or coordinate space.
+        if (!Performance.GpuEntityDraws.Armed || Performance.PerformancePatchSet.Current is not
+            { EntityOcclusionCull: true, GpuEntityDrawPreparation: true } || device?.CanPrepareTerrainDraws != true ||
+            modRenderStage != EnumRenderStage.Opaque || CurrentModPass != null ||
+            currentFramebuffer == null || platform?.FrameBuffers is not { Count: > 0 } buffers ||
+            !ReferenceEquals(currentFramebuffer, buffers[0]) ||
+            currentFramebuffer.DepthTextureId != device.OcclusionDepth.SourceDepthTexture ||
+            aoTemporal?.CurrentClient is not ClientMain client || !ReferenceEquals(CullEntityFrustum(client), culler) ||
+            client.EntityPlayer is not { } player || player.Pos.Dimension != 0 || entity.Pos.Dimension != 0 ||
+            entity.Pos.Y != entity.Pos.InternalY || player.CameraPos is not { } origin ||
+            Performance.TerrainOcclusionCull.CameraNow() is not { } camera ||
+            camera.X != (device.TerrainEyeIndex >= 0 ? client.MainCamera.CameraEyePos.X : origin.X) ||
+            camera.Y != (device.TerrainEyeIndex >= 0 ? client.MainCamera.CameraEyePos.Y : origin.Y) ||
+            camera.Z != (device.TerrainEyeIndex >= 0 ? client.MainCamera.CameraEyePos.Z : origin.Z) ||
+            !double.IsFinite(origin.X) || !double.IsFinite(origin.Y) || !double.IsFinite(origin.Z) ||
+            !double.IsFinite(camera.X) || !double.IsFinite(camera.Y) || !double.IsFinite(camera.Z) ||
+            !double.IsFinite(entity.Pos.X) || !double.IsFinite(entity.Pos.Y) || !double.IsFinite(entity.Pos.Z) ||
+            !double.IsFinite(entity.FrustumSphereRadius) || entity.FrustumSphereRadius < 0 ||
+            entity.GetType() != typeof(EntityBlockFalling) ||
+            ShaderProgramBase.CurrentShaderProgram is not { } program || !ReferenceEquals(program, ShaderPrograms.Standard) ||
+            ShaderOverrides.IsOverridden("standard") || entity.meshRef is not { Disposed: false } mesh ||
+            mesh.meshrefs is not { Length: > 0 } parts) return false;
+        foreach (var part in parts)
+            if (part is not VAO { Disposed: false, VaoId: > 0 } vao ||
+                !Meshes.TryGetValue(vao, out var owner) || !ReferenceEquals(owner.Adapter, this) ||
+                !device.CanPrepareRigidEntityMesh(owner.Handle, program.ProgramId)) return false;
+        return true;
+    }
+
+    internal EntityVisibilityScope EnterFallingVisibilityScope(object renderer, EntityBlockFalling entity)
+    {
+        var gpu = RequireDevice();
+        var previous = new EntityVisibilityScope(gpu.EntityVisibility);
+        gpu.EntityVisibility = null;
+        if (!Performance.GpuEntityDraws.OwnsFallingFrame(renderer) ||
+            aoTemporal?.CurrentClient is not ClientMain client || !CanGpuCullFalling(entity, CullEntityFrustum(client)) ||
+            !CaptureEntityCullPlanes(client)) return previous;
+        var origin = client.EntityPlayer.CameraPos;
+        // ModelMat uses Pos.Y, not InternalY. Admission above refuses dimensions
+        // where these origins differ; the final per-mesh shader shadow supplies
+        // selection-box translation, bobbing and rotation without reconstruction.
+        // Stereo view translation is already in the stock view matrix; bounds
+        // keep the model's centre origin while the batch retains physical-eye depth.
+        gpu.EntityVisibility = new EntityVisibilityInput(default, entityCullPlaneSnapshot,
+            origin.X, origin.Y, origin.Z, -1);
+        return previous;
+    }
+
+    private bool CaptureEntityCullPlanes(ClientMain client)
+    {
         var source = CullEntityPlanes(CullEntityFrustum(client));
-        if (source.Length != 6) return previous;
+        if (source.Length != 6) return false;
         bool changed = entityCullPlaneSnapshot.Length != 6;
         for (int i = 0; i < 6; i++)
         {
-            var plane = source[i];
-            if (!double.IsFinite(plane.normalX) || !double.IsFinite(plane.normalY) ||
-                !double.IsFinite(plane.normalZ) || !double.IsFinite(plane.D)) return previous;
+            var p = source[i];
+            if (!double.IsFinite(p.normalX) || !double.IsFinite(p.normalY) ||
+                !double.IsFinite(p.normalZ) || !double.IsFinite(p.D)) return false;
             changed |= entityCullPlaneSnapshot.Length != 6 ||
-                entityCullPlaneSnapshot[i] != new TerrainFrustumPlane(plane.normalX, plane.normalY, plane.normalZ, plane.D);
+                entityCullPlaneSnapshot[i] != new TerrainFrustumPlane(p.normalX, p.normalY, p.normalZ, p.D);
         }
         if (changed)
         {
@@ -94,6 +140,17 @@ internal sealed partial class GameGraphicsAdapter
             for (int i = 0; i < 6; i++) snapshot[i] = new(source[i].normalX, source[i].normalY, source[i].normalZ, source[i].D);
             entityCullPlaneSnapshot = snapshot;
         }
+        return true;
+    }
+
+    internal EntityVisibilityScope EnterEntityVisibilityScope(EntityRenderer renderer, bool shadow)
+    {
+        var device = RequireDevice();
+        var previous = new EntityVisibilityScope(device.EntityVisibility);
+        device.EntityVisibility = null;
+        if (shadow || !CanGpuCullEntity(renderer.entity) || aoTemporal?.CurrentClient is not ClientMain client ||
+            Performance.TerrainOcclusionCull.CameraNow() is not { } camera) return previous;
+        if (!CaptureEntityCullPlanes(client)) return previous;
         var entity = renderer.entity;
         if (renderer.GetType() == typeof(EntityItemRenderer))
         {

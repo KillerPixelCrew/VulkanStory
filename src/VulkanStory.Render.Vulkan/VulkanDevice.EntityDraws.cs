@@ -31,11 +31,16 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityVisibilityDispatchesRecorded { get; private set; }
     internal long EntityIndirectDrawsRecorded { get; private set; }
 
-    private bool TryRigidEntityBounds(ShaderProgramResources program, VulkanMesh mesh,
-        EntityVisibilityInput visibility, out TerrainDrawBounds result)
+    // Admission before the producer writes its final model matrix. This only
+    // certifies retained streams/current warp state; the real draw repeats these
+    // checks with its final model shadow. No commands or GPU work are produced.
+    internal bool CanPrepareRigidEntityMesh(int meshId, int programId) => _meshes.Get(meshId) is { } mesh &&
+        _programs.TryGetValue(programId, out var program) && mesh.EntityFlagsWithoutWind &&
+        HasRigidEntityStreams(mesh) && HasRigidEntityShaderState(program, mesh);
+
+    private static bool HasRigidEntityStreams(VulkanMesh mesh)
     {
-        result = default;
-        if (mesh.EntityLocalBounds is not { } local || mesh.Ssbo) return false;
+        if (mesh.EntityLocalBounds == null || mesh.Ssbo) return false;
         bool position = false, flags = false;
         foreach (var attribute in mesh.Layout.Attributes)
         {
@@ -49,11 +54,13 @@ public sealed unsafe partial class VulkanDevice
                     binding.Stride == 4 && mesh.BindingOrder[(int)attribute.Binding] == MeshManager.BufferFlags;
             }
         }
-        if (!position || !flags) return false;
-        Span<byte> matrixBytes = stackalloc byte[64];
+        return position && flags;
+    }
+
+    private bool HasRigidEntityShaderState(ShaderProgramResources program, VulkanMesh mesh)
+    {
         Span<byte> scalar = stackalloc byte[4];
-        if (!CopyWorldUniform(program, "modelMatrix", "mat4", matrixBytes) ||
-            !CopyWorldUniform(program, "extraZOffset", "float", scalar) ||
+        if (!CopyWorldUniform(program, "extraZOffset", "float", scalar) ||
             MemoryMarshal.Read<float>(scalar) != 0 ||
             !CopyWorldUniform(program, "dontWarpVertices", "int", scalar)) return false;
         int warp = MemoryMarshal.Read<int>(scalar);
@@ -73,6 +80,17 @@ public sealed unsafe partial class VulkanDevice
                 (!TryReadClientFloatUniform(program.ProgramId, "perceptionEffectIntensity", out float perception) ||
                     !float.IsFinite(perception) || perception > 0)) return false;
         }
+        return true;
+    }
+
+    private bool TryRigidEntityBounds(ShaderProgramResources program, VulkanMesh mesh,
+        EntityVisibilityInput visibility, out TerrainDrawBounds result)
+    {
+        result = default;
+        if (!HasRigidEntityStreams(mesh) || mesh.EntityLocalBounds is not { } local ||
+            !HasRigidEntityShaderState(program, mesh)) return false;
+        Span<byte> matrixBytes = stackalloc byte[64];
+        if (!CopyWorldUniform(program, "modelMatrix", "mat4", matrixBytes)) return false;
         var model = MemoryMarshal.Cast<byte, float>(matrixBytes);
         foreach (float value in model) if (!float.IsFinite(value)) return false;
         if (model[3] != 0 || model[7] != 0 || model[11] != 0 || model[15] != 1) return false;
