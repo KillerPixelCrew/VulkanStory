@@ -38,6 +38,7 @@
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
     <Compile Include="VulkanDevice.TerrainDraws.cs" />
+    <Compile Include="VulkanDevice.Deformation.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilTransfers.cs" />
@@ -155,6 +156,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/occlusion/*.comp">
       <LogicalName>shaders-vk/occlusion/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="../../shaders/native/geometry/*.comp">
+      <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 </Project>

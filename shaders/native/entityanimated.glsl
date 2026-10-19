@@ -62,6 +62,7 @@ layout(push_constant, scalar) uniform OptimumDraw
     float taaReactive;
     int entityId;
     int glitchFlicker;
+    int vsComputeDeformation;
 };
 
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
@@ -121,6 +122,8 @@ layout(std140, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_ANIMATION) r
     mat4 values[];
 } ElementTransforms;
 
+#include "deformation.glsl"
+
 #if TAAMOTION == 1
 #if USEOIT == 0
 // UBO:AnimationPrev,1,4800
@@ -128,6 +131,8 @@ layout(std140, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_ANIMATION_PR
 {
     mat4 values[];
 } PrevElementTransforms;
+layout(std430, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PREVIOUS_DEFORMATION) readonly buffer VulkanPreviousDeformation
+{ vec4 values[]; } vsPreviousGeometry;
 #endif
 
 layout(location = 14) out vec4 taaPrevClip;
@@ -161,8 +166,12 @@ layout(location = 13) out vec4 gnormal;
 void main(void)
 {
 	damageEffect = damageEffectIn;
-	mat4 animModelMat = modelMatrix * ElementTransforms.values[jointId];
-	worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
+	mat4 animModelMat = modelMatrix;
+	if (vsComputeDeformation != 0) worldPos = modelMatrix * vsDeformedPosition();
+	else {
+		animModelMat = modelMatrix * ElementTransforms.values[jointId];
+		worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
+	}
 
 	renderFlags = flags | addRenderFlags;
 
@@ -187,8 +196,11 @@ void main(void)
 	{
 		vec4 taaPrevWorld;
 		if (taaHistoryValid != 0) {
-			mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
-			taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			if (vsComputeDeformation != 0) taaPrevWorld = prevModelMatrix * vsPreviousGeometry.values[gl_VertexIndex * 4];
+			else {
+				mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
+				taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			}
 			WarpState taaPrev = previousWarpState();
 			if ((renderFlags & WindModeWaterMask) > 0) {
 				taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
@@ -228,7 +240,8 @@ void main(void)
 	fogAmount = getFogLevel(worldPos, fogMinIn, fogDensityIn);
 
 	normal = unpackNormal(renderFlags);
-	normal = (animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
+	normal = vsComputeDeformation != 0 ? (modelMatrix * vsDeformedNormal(normal)).xyz :
+		(animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
 
 	#if GBUFFER == 1
 		fragPosition = cameraPos;

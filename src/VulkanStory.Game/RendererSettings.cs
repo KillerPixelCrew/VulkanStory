@@ -95,6 +95,8 @@ internal sealed record RendererSettings
     public bool TerrainOcclusionCull { get; init; } = true;
     /// <summary>Tests terrain occlusion and compacts ordered indirect draws in Vulkan compute.</summary>
     public bool GpuTerrainDrawPreparation { get; init; } = true;
+    /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
+    public bool GpuSharedDeformation { get; init; } = true;
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
@@ -173,6 +175,7 @@ internal sealed record RendererSettings
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
+        GpuSharedDeformation = source.GpuSharedDeformation,
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,

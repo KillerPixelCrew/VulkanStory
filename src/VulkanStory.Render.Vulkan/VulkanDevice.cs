@@ -1605,6 +1605,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         foreach (var depth in _stereoOcclusionDepths) depth?.DisposeIdle();
         Array.Clear(_stereoOcclusionDepths);
         DisposeTerrainInputsIdle();
+        DisposeDeformationGeometryIdle();
         _occlusionDepth = null;
         _compute?.Dispose();
         // The shared pipeline layout before the table's set layout it names; the

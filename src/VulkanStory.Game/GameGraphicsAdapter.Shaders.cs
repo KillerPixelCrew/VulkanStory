@@ -21,7 +21,7 @@ internal sealed partial class GameGraphicsAdapter
     /// them from the embedded shaders, so the two paths cannot disagree on the list.
     /// </summary>
     internal static readonly IReadOnlySet<string> OwnedShaderIncludes =
-        new HashSet<string>(StringComparer.Ordinal) { "vertexwarp.vsh", "vulkanstory-motion.ash" };
+        new HashSet<string>(StringComparer.Ordinal) { "vertexwarp.vsh", "vulkanstory-motion.ash", "vulkanstory-deformation.ash" };
 
     /// <summary>An embedded shader file of this assembly by its file name, or null when it has none.</summary>
     /// <param name="name">File name, such as <c>chunkliquidmotion.vsh</c> or <c>vertexwarp.vsh</c>.</param>

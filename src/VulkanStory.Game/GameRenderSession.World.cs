@@ -35,6 +35,7 @@ internal sealed partial class GameRenderSession
         AnalogClientConsumerPatches.ClientLeaving(client);
         diagnosticWorldReady = false;
         Temporal.DetachClient(client);
+        Device.ResetWorldComputeGeometry();
         composition!.Disarm(client);
         frameGeneration!.Reset();
         Graphics.ReleaseTaaSampleTargets();

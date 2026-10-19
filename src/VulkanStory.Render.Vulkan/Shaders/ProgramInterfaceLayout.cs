@@ -846,7 +846,8 @@ internal sealed partial class ProgramInterfaceLayout
             switch (binding.Binding)
             {
                 case SetConvention.FaceDataBinding:
-                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name, Binding = binding.Binding });
+                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name == "vsGeometry" ? "VulkanDeformation" : binding.Name,
+                        Binding = binding.Binding });
                     break;
                 case SetConvention.AnimationBinding:
                     layout.UniformBlocks.Add(new BlockBinding { BlockName = "Animation", Binding = binding.Binding });
@@ -854,9 +855,12 @@ internal sealed partial class ProgramInterfaceLayout
                 case SetConvention.AnimationPrevBinding:
                     layout.UniformBlocks.Add(new BlockBinding { BlockName = "AnimationPrev", Binding = binding.Binding });
                     break;
+                case SetConvention.PreviousDeformationBinding when binding.Name == "vsPreviousGeometry":
+                    layout.StorageBlocks.Add(new BlockBinding { BlockName = "VulkanPreviousDeformation", Binding = binding.Binding });
+                    break;
                 default:
                     layout.Errors.Add("storage binding '" + binding.Name + "' at binding " + binding.Binding +
-                                      " has no native feed (the named-block range is the rewriter's)");
+                                      " has no native feed");
                     break;
             }
         }

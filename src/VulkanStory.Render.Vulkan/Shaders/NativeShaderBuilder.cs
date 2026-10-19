@@ -444,7 +444,9 @@ internal sealed class NativeShaderBuilder
                     if (binding.Kind != SpirvDescriptorKind.UniformBuffer) errors.Add(where + " must be the program record, a uniform block");
                     return;
                 }
-                if (Array.FindIndex(SetConvention.StorageBuffers, b => b.Value == binding.Binding) < 0)
+                bool deformationHistory = binding.Binding == SetConvention.PreviousDeformationBinding &&
+                    binding.Block?.TypeName == "VulkanPreviousDeformation";
+                if (!deformationHistory && Array.FindIndex(SetConvention.StorageBuffers, b => b.Value == binding.Binding) < 0)
                 {
                     errors.Add(where + " is not a binding of set 2 (bindings.glsl)");
                 }

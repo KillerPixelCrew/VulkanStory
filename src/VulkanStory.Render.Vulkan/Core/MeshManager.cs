@@ -34,6 +34,7 @@ internal sealed class VulkanMesh : IDisposable
     public EnumDrawMode DrawMode { get; set; } = EnumDrawMode.Triangles;
     public bool Persistent { get; set; }
     public bool Ssbo { get; set; }
+    internal ulong GeometryRevision { get; set; }
 
     public VertexLayoutDescription Layout { get; set; } = VertexLayoutDescription.Empty;
     public int LayoutId { get; set; } = -1;
@@ -489,6 +490,8 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private VulkanBuffer CreateBuffer(int byteSize, BufferUsageFlags usage, bool persistent)
     {
+        // Shared deformation consumes the same uploaded vertex streams as raster draws.
+        if ((usage & BufferUsageFlags.VertexBufferBit) != 0) usage |= BufferUsageFlags.StorageBufferBit;
         // Phase 1B step 5: a static mesh lives in device-local memory (a type
         // that is not host visible, when the device has one), filled through the
         // upload manager's staging. It never takes ReBAR, which holds only
@@ -719,6 +722,7 @@ internal sealed unsafe class MeshManager : IDisposable
         if (slot < 0 && mesh.SharedIndices) return IntPtr.Zero;
         VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
         if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
+        mesh.GeometryRevision++;
         return WritableBuffer(mesh, slot, buffer).Mapped;
     }
 
@@ -760,6 +764,7 @@ internal sealed unsafe class MeshManager : IDisposable
             return;
         }
 
+        mesh!.GeometryRevision++;
         if (buffer!.Mapped == IntPtr.Zero || (buffer.FrameUse != 0 && _uploads != null))
         {
             // Recorded/submitted readers need an ordered GPU range update, even

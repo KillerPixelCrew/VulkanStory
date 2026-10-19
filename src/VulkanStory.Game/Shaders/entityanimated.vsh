@@ -1,6 +1,6 @@
 #version 330 core
-// Optimum override of the vanilla entityanimated.vsh: adds the TAA motion-vector
-// writer for skinned entities (P3). Everything else is vanilla, line for line.
+// Optimum override of the vanilla entityanimated.vsh, extended with shared joint
+// deformation and retaining the TAA motion-vector writer for skinned entities (P3).
 //
 // The previous position is the same skinning run twice: previous model matrix x
 // previous bone matrix from the AnimationPrev block, then the SAME warp branch
@@ -11,6 +11,7 @@
 // first and third person - the vertex falls back to camera-only motion and C#
 // raises taaReactive so the resolve leans on this frame instead.
 #extension GL_ARB_explicit_attrib_location: enable
+#extension GL_ARB_shader_storage_buffer_object: enable
 
 layout(location = 0) in vec3 vertexPositionIn;
 layout(location = 1) in vec2 uvIn;
@@ -42,6 +43,8 @@ layout (std140) uniform Animation
     mat4 values[MAXANIMATEDELEMENTS];	// MAXANIMATEDELEMENTS constant is defined during game engine shader loading.
 } ElementTransforms;
 
+#include vulkanstory-deformation.ash
+
 // TAA motion vectors (Optimum P3). TAAMOTION is stamped by
 // ShaderRegistry.registerDefaultShaderCodePrefixes and is 1 only while TAA is
 // on, so with TAA off this shader preprocesses back to vanilla.
@@ -57,6 +60,7 @@ layout (std140) uniform AnimationPrev
 {
     mat4 values[MAXANIMATEDELEMENTS];
 } PrevElementTransforms;
+layout(std430) readonly buffer VulkanPreviousDeformation { vec4 values[]; } vsPreviousGeometry;
 
 out vec4 taaPrevClip;
 #endif
@@ -89,8 +93,12 @@ out vec4 gnormal;
 void main(void)
 {
 	damageEffect = damageEffectIn;
-	mat4 animModelMat = modelMatrix * ElementTransforms.values[jointId];
-	worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
+	mat4 animModelMat = modelMatrix;
+	if (vsComputeDeformation != 0) worldPos = modelMatrix * vsDeformedPosition();
+	else {
+		animModelMat = modelMatrix * ElementTransforms.values[jointId];
+		worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
+	}
 
 	renderFlags = flags | addRenderFlags;
 	
@@ -114,8 +122,11 @@ void main(void)
 	{
 		vec4 taaPrevWorld;
 		if (taaHistoryValid != 0) {
-			mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
-			taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			if (vsComputeDeformation != 0) taaPrevWorld = prevModelMatrix * vsPreviousGeometry.values[gl_VertexID * 4];
+			else {
+				mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
+				taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			}
 			WarpState taaPrev = previousWarpState();
 			if ((renderFlags & WindModeWaterMask) > 0) {
 				taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
@@ -151,7 +162,8 @@ void main(void)
 	fogAmount = getFogLevel(worldPos, fogMinIn, fogDensityIn);
 	
 	normal = unpackNormal(renderFlags);
-	normal = (animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
+	normal = vsComputeDeformation != 0 ? (modelMatrix * vsDeformedNormal(normal)).xyz :
+		(animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
 	
 	#if SSAOLEVEL > 0
 		fragPosition = cameraPos;
