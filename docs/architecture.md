@@ -1,9 +1,11 @@
 # VulkanStory architecture
 
 VulkanStory replaces Vintage Story's OpenGL client renderer with Vulkan and its GLFW
-window with SDL3. It runs inside the official game's own .NET 10 process, started
-from the normal shortcut, against the unmodified official game assemblies (profile
-`vs-1.22.7`). Feature status is tracked in the [roadmap](ROADMAP.md); activation and
+window with SDL3. It runs inside the game's own .NET 10 process, started
+from the normal shortcut, and builds against the unmodified official game assemblies
+(profile `vs-1.22.7`). The Windows profile additionally accepts one exact compatible
+game-library variant; file identities and startup checks remain enforced. Feature
+status is tracked in the [roadmap](ROADMAP.md); activation and
 packaging are described in [bootstrap and installation](bootstrap-and-installation.md).
 
 Start with the [documentation index](README.md) for the player guide and detailed

@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/VulkanStory.Bootstrap/GameProfile.cs" Link="GameProfile.cs" />
     <ProjectReference Include="../../src/VulkanStory.Game/VulkanStory.Game.csproj" />
     <Reference Include="0Harmony">
       <HintPath>$(VintageStoryPath)/Lib/0Harmony.dll</HintPath>

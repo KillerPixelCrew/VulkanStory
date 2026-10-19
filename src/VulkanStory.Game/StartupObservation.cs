@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Security.Cryptography;
 using HarmonyLib;
 
 namespace VulkanStory.Game;
@@ -31,7 +32,9 @@ public static class StartupObservation
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new InvalidOperationException("Game assembly was loaded from an unexpected location.");
 
-            StartupIlProfile.VerifyProfile1227(StartupIlInventory.CaptureProfile1227(game));
+            using (FileStream file = File.OpenRead(game.Location))
+                StartupIlProfile.VerifyProfile1227(StartupIlInventory.CaptureProfile1227(game),
+                    Convert.ToHexString(SHA256.HashData(file)));
 
             // Bind everything before modifying any method. Never accept a parameter-count-only match.
             foreach (StartupTarget target in StartupTargets.Profile1227)

@@ -123,8 +123,15 @@ bootstrap payloads never restart.
 3. Reads `VulkanStory/loader.ini`. `Enabled=0` bypasses activation. A missing file
    means enabled on Windows and bypass on Linux.
 4. Loads `managed/profiles/vs-1.22.7-<rid>.json`, requires .NET 10, and checks the
-   SHA256 of the official game files listed there (executable, game assemblies,
-   runtimeconfig/deps, `Lib/0Harmony.dll`, …).
+   SHA256 of every required game file listed there (executable, game assemblies,
+   runtimeconfig/deps, `Lib/0Harmony.dll`, …). The Windows profile also accepts
+   Serpih's supplied 1.22.7 `VintagestoryLib.dll` with SHA256
+   `5633179A6AC6FDF3CAF6688DC250BF4A655893729CCA137C3500DD44CAEFC2A9`
+   through `fileAlternatives`. All other file identities stay pinned. Unknown
+   variants are rejected. Each accepted library hash selects its own embedded
+   startup IL profile, including exact metadata tokens; binding signatures and
+   transpiler input checks still run before routing activates. No game DLL is distributed
+   or modified by VulkanStory.
 5. Registers an `AssemblyLoadContext.Default.Resolving` handler. VulkanStory
    assemblies and their private dependencies (SDL3-CS, Silk.NET, DependencyModel)
    resolve from `VulkanStory/managed`. Game assemblies and Harmony resolve from the

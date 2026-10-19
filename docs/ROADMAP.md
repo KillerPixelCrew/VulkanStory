@@ -17,6 +17,7 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - Render-pass extension points for other mods
 - Core mod API resilience: selected shader stages/includes, compiled motion-output checks, camera/depth SDK motion, shader-certified animated pose/model history, rigid entity and inventory-slot transforms with stable identities, managed dependency filenames, repeated priority hotkey registration, metadata-only outfit discovery, owner-scoped legacy Harmony cleanup, and map renderer recreation on shader reload.
 - Windows install, update and removal
+- Exact-hash support for Serpih's 1.22.7 Windows game-library variant, retaining required file identities and startup compatibility checks.
 - **REN-11: AMD startup compatibility:** process-only relaxed continuation validation prevents the Windows CET rejection of legacy AMD context restores; hardware shadow stacks and official game files are preserved.
 - Automatic Windows crash reports from the early loader: managed exceptions, native fast-fail parameters, thread stacks and bundled logs/settings.
 - Loading screen stays up until the first world frame is complete

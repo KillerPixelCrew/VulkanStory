@@ -3,6 +3,11 @@
   "id": "vs-1.22.7-win-x64",
   "gameVersion": "1.22.7",
   "runtimeMajor": 10,
+  "fileAlternatives": {
+    "VintagestoryLib.dll": [
+      "5633179A6AC6FDF3CAF6688DC250BF4A655893729CCA137C3500DD44CAEFC2A9"
+    ]
+  },
   "files": {
     "Vintagestory.exe": "42DC9BCD10EE6CC7283FF140A6D478B94581A522A061F05367C799942EBFD23B",
     "Vintagestory.dll": "540EABA4F9D9810EB68C0FFEA9D462EF8F56E7B04ED58468EF6FD455CC94F80B",

@@ -1,0 +1,2563 @@
+{
+  "profileId": "vs-1.22.7-win-x64",
+  "gameAssemblySha256": "5633179A6AC6FDF3CAF6688DC250BF4A655893729CCA137C3500DD44CAEFC2A9",
+  "methods": [
+    {
+      "Event": "game.client.main",
+      "Target": "Vintagestory.Client.ClientProgram.Main(System.String[])",
+      "IlLength": 51,
+      "Uses": [
+        {
+          "Offset": 0,
+          "Opcode": "call",
+          "Token": 167774238,
+          "Member": "System.AppDomain::get_CurrentDomain()"
+        },
+        {
+          "Offset": 5,
+          "Opcode": "ldsfld",
+          "Token": 67113906,
+          "Member": "Vintagestory.Client.ClientProgram+<>O::<0>__AssemblyResolve:System.ResolveEventHandler"
+        },
+        {
+          "Offset": 15,
+          "Opcode": "ldftn",
+          "Token": 100670144,
+          "Member": "Vintagestory.Common.AssemblyResolver::AssemblyResolve(System.Object,System.ResolveEventArgs)"
+        },
+        {
+          "Offset": 21,
+          "Opcode": "newobj",
+          "Token": 167774239,
+          "Member": "System.ResolveEventHandler::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 27,
+          "Opcode": "stsfld",
+          "Token": 67113906,
+          "Member": "Vintagestory.Client.ClientProgram+<>O::<0>__AssemblyResolve:System.ResolveEventHandler"
+        },
+        {
+          "Offset": 32,
+          "Opcode": "callvirt",
+          "Token": 167774240,
+          "Member": "System.AppDomain::add_AssemblyResolve(System.ResolveEventHandler)"
+        },
+        {
+          "Offset": 38,
+          "Opcode": "stsfld",
+          "Token": 67113902,
+          "Member": "Vintagestory.Client.ClientProgram::rawArgs:System.String[]"
+        },
+        {
+          "Offset": 44,
+          "Opcode": "newobj",
+          "Token": 100672179,
+          "Member": "Vintagestory.Client.ClientProgram::.ctor(System.String[])"
+        }
+      ]
+    },
+    {
+      "Event": "game.client.start",
+      "Target": "Vintagestory.Client.ClientProgram.Start(Vintagestory.Client.ClientProgramArgs,System.String[])",
+      "IlLength": 1363,
+      "Uses": [
+        {
+          "Offset": 0,
+          "Opcode": "call",
+          "Token": 167777668,
+          "Member": "System.Reflection.Assembly::GetExecutingAssembly()"
+        },
+        {
+          "Offset": 5,
+          "Opcode": "callvirt",
+          "Token": 167776158,
+          "Member": "System.Reflection.Assembly::get_Location()"
+        },
+        {
+          "Offset": 10,
+          "Opcode": "call",
+          "Token": 167776159,
+          "Member": "System.IO.Path::GetDirectoryName(System.String)"
+        },
+        {
+          "Offset": 16,
+          "Opcode": "call",
+          "Token": 167777677,
+          "Member": "System.Diagnostics.Debugger::get_IsAttached()"
+        },
+        {
+          "Offset": 24,
+          "Opcode": "call",
+          "Token": 167777844,
+          "Member": "System.Environment::set_CurrentDirectory(System.String)"
+        },
+        {
+          "Offset": 29,
+          "Opcode": "call",
+          "Token": 167774251,
+          "Member": "Vintagestory.API.Config.GamePaths::EnsurePathsExist()"
+        },
+        {
+          "Offset": 34,
+          "Opcode": "newobj",
+          "Token": 100666263,
+          "Member": "Vintagestory.ClientLogger::.ctor()"
+        },
+        {
+          "Offset": 39,
+          "Opcode": "stsfld",
+          "Token": 67113900,
+          "Member": "Vintagestory.Client.ClientProgram::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 44,
+          "Opcode": "ldsfld",
+          "Token": 67113900,
+          "Member": "Vintagestory.Client.ClientProgram::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 50,
+          "Opcode": "callvirt",
+          "Token": 100672795,
+          "Member": "Vintagestory.Client.ClientProgramArgs::get_TraceLog()"
+        },
+        {
+          "Offset": 55,
+          "Opcode": "callvirt",
+          "Token": 167773843,
+          "Member": "Vintagestory.API.Common.LoggerBase::set_TraceLog(System.Boolean)"
+        },
+        {
+          "Offset": 60,
+          "Opcode": "ldsfld",
+          "Token": 67113900,
+          "Member": "Vintagestory.Client.ClientProgram::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 65,
+          "Opcode": "newobj",
+          "Token": 100674245,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::.ctor(Vintagestory.Logger)"
+        },
+        {
+          "Offset": 72,
+          "Opcode": "callvirt",
+          "Token": 100674604,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_ShaderUniforms()"
+        },
+        {
+          "Offset": 77,
+          "Opcode": "call",
+          "Token": 100675084,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_SepiaLevel()"
+        },
+        {
+          "Offset": 82,
+          "Opcode": "stfld",
+          "Token": 167777845,
+          "Member": "Vintagestory.API.Client.DefaultShaderUniforms::SepiaLevel:System.Single"
+        },
+        {
+          "Offset": 88,
+          "Opcode": "callvirt",
+          "Token": 100674604,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_ShaderUniforms()"
+        },
+        {
+          "Offset": 93,
+          "Opcode": "call",
+          "Token": 100675056,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_ExtraContrastLevel()"
+        },
+        {
+          "Offset": 98,
+          "Opcode": "stfld",
+          "Token": 167777846,
+          "Member": "Vintagestory.API.Client.DefaultShaderUniforms::ExtraContrastLevel:System.Single"
+        },
+        {
+          "Offset": 104,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 109,
+          "Opcode": "castclass",
+          "Token": 33554747,
+          "Member": "Vintagestory.Logger"
+        },
+        {
+          "Offset": 114,
+          "Opcode": "call",
+          "Token": 100671957,
+          "Member": "Vintagestory.ClientNative.CrashReporter::SetLogger(Vintagestory.Logger)"
+        },
+        {
+          "Offset": 120,
+          "Opcode": "callvirt",
+          "Token": 100674250,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::LogAndTestHardwareInfosStage1()"
+        },
+        {
+          "Offset": 126,
+          "Opcode": "newobj",
+          "Token": 100672894,
+          "Member": "Vintagestory.Client.ScreenManager::.ctor(Vintagestory.Client.NoObf.ClientPlatformAbstract)"
+        },
+        {
+          "Offset": 131,
+          "Opcode": "stsfld",
+          "Token": 67113905,
+          "Member": "Vintagestory.Client.ClientProgram::screenManager:Vintagestory.Client.ScreenManager"
+        },
+        {
+          "Offset": 136,
+          "Opcode": "call",
+          "Token": 100675010,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_DecorativeFontName()"
+        },
+        {
+          "Offset": 141,
+          "Opcode": "stsfld",
+          "Token": 167777729,
+          "Member": "Vintagestory.API.Client.GuiStyle::DecorativeFontName:System.String"
+        },
+        {
+          "Offset": 146,
+          "Opcode": "call",
+          "Token": 100675008,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_DefaultFontName()"
+        },
+        {
+          "Offset": 151,
+          "Opcode": "stsfld",
+          "Token": 167777730,
+          "Member": "Vintagestory.API.Client.GuiStyle::StandardFontName:System.String"
+        },
+        {
+          "Offset": 156,
+          "Opcode": "call",
+          "Token": 167773868,
+          "Member": "Vintagestory.API.Config.GamePaths::get_AssetsPath()"
+        },
+        {
+          "Offset": 161,
+          "Opcode": "call",
+          "Token": 167772662,
+          "Member": "System.IO.Directory::Exists(System.String)"
+        },
+        {
+          "Offset": 169,
+          "Opcode": "callvirt",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 184,
+          "Opcode": "callvirt",
+          "Token": 167777843,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::ShowMessageBox(System.String,System.String)"
+        },
+        {
+          "Offset": 190,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 195,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 200,
+          "Opcode": "call",
+          "Token": 167773868,
+          "Member": "Vintagestory.API.Config.GamePaths::get_AssetsPath()"
+        },
+        {
+          "Offset": 205,
+          "Opcode": "call",
+          "Token": 100675006,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_Language()"
+        },
+        {
+          "Offset": 210,
+          "Opcode": "call",
+          "Token": 167774257,
+          "Member": "Vintagestory.API.Config.Lang::PreLoad(Vintagestory.API.Common.ILogger,System.String,System.String)"
+        },
+        {
+          "Offset": 215,
+          "Opcode": "ldsfld",
+          "Token": 167773075,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::OS:Vintagestory.API.Config.OS"
+        },
+        {
+          "Offset": 222,
+          "Opcode": "call",
+          "Token": 100675052,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_SkipNvidiaProfileCheck()"
+        },
+        {
+          "Offset": 234,
+          "Opcode": "call",
+          "Token": 100672186,
+          "Member": "Vintagestory.Client.ClientProgram::GetExecutableName()"
+        },
+        {
+          "Offset": 239,
+          "Opcode": "call",
+          "Token": 100666214,
+          "Member": "Vintagestory.NvidiaGPUFix64::SOP_SetProfile(System.String,System.String)"
+        },
+        {
+          "Offset": 248,
+          "Opcode": "callvirt",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 263,
+          "Opcode": "call",
+          "Token": 721420289,
+          "Member": "System.Array::Empty()"
+        },
+        {
+          "Offset": 268,
+          "Opcode": "call",
+          "Token": 167772440,
+          "Member": "Vintagestory.API.Config.Lang::Get(System.String,System.Object[])"
+        },
+        {
+          "Offset": 273,
+          "Opcode": "callvirt",
+          "Token": 167777843,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::ShowMessageBox(System.String,System.String)"
+        },
+        {
+          "Offset": 279,
+          "Opcode": "call",
+          "Token": 100670205,
+          "Member": "Vintagestory.Common.CleanInstallCheck::IsCleanInstall()"
+        },
+        {
+          "Offset": 287,
+          "Opcode": "callvirt",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 302,
+          "Opcode": "call",
+          "Token": 721420289,
+          "Member": "System.Array::Empty()"
+        },
+        {
+          "Offset": 307,
+          "Opcode": "call",
+          "Token": 167772440,
+          "Member": "Vintagestory.API.Config.Lang::Get(System.String,System.Object[])"
+        },
+        {
+          "Offset": 312,
+          "Opcode": "callvirt",
+          "Token": 167777843,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::ShowMessageBox(System.String,System.String)"
+        },
+        {
+          "Offset": 318,
+          "Opcode": "ldsfld",
+          "Token": 167773075,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::OS:Vintagestory.API.Config.OS"
+        },
+        {
+          "Offset": 325,
+          "Opcode": "call",
+          "Token": 100674898,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_MultipleInstances()"
+        },
+        {
+          "Offset": 340,
+          "Opcode": "newobj",
+          "Token": 167777847,
+          "Member": "System.Threading.Mutex::.ctor(System.Boolean,System.String,System.Boolean&)"
+        },
+        {
+          "Offset": 351,
+          "Opcode": "callvirt",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 361,
+          "Opcode": "call",
+          "Token": 721420289,
+          "Member": "System.Array::Empty()"
+        },
+        {
+          "Offset": 366,
+          "Opcode": "call",
+          "Token": 167772440,
+          "Member": "Vintagestory.API.Config.Lang::Get(System.String,System.Object[])"
+        },
+        {
+          "Offset": 376,
+          "Opcode": "call",
+          "Token": 721420289,
+          "Member": "System.Array::Empty()"
+        },
+        {
+          "Offset": 381,
+          "Opcode": "call",
+          "Token": 167772440,
+          "Member": "Vintagestory.API.Config.Lang::Get(System.String,System.Object[])"
+        },
+        {
+          "Offset": 386,
+          "Opcode": "callvirt",
+          "Token": 167777843,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::ShowMessageBox(System.String,System.String)"
+        },
+        {
+          "Offset": 392,
+          "Opcode": "ldsfld",
+          "Token": 67113904,
+          "Member": "Vintagestory.Client.ClientProgram::Signals:System.Runtime.InteropServices.PosixSignalRegistration[]"
+        },
+        {
+          "Offset": 401,
+          "Opcode": "ldftn",
+          "Token": 100672184,
+          "Member": "Vintagestory.Client.ClientProgram::OnExit(System.Runtime.InteropServices.PosixSignalContext)"
+        },
+        {
+          "Offset": 407,
+          "Opcode": "newobj",
+          "Token": 167774252,
+          "Member": "System.Action`1[[System.Runtime.InteropServices.PosixSignalContext, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 412,
+          "Opcode": "call",
+          "Token": 167774253,
+          "Member": "System.Runtime.InteropServices.PosixSignalRegistration::Create(System.Runtime.InteropServices.PosixSignal,System.Action`1[[System.Runtime.InteropServices.PosixSignalContext, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]])"
+        },
+        {
+          "Offset": 418,
+          "Opcode": "ldsfld",
+          "Token": 67113904,
+          "Member": "Vintagestory.Client.ClientProgram::Signals:System.Runtime.InteropServices.PosixSignalRegistration[]"
+        },
+        {
+          "Offset": 427,
+          "Opcode": "ldftn",
+          "Token": 100672184,
+          "Member": "Vintagestory.Client.ClientProgram::OnExit(System.Runtime.InteropServices.PosixSignalContext)"
+        },
+        {
+          "Offset": 433,
+          "Opcode": "newobj",
+          "Token": 167774252,
+          "Member": "System.Action`1[[System.Runtime.InteropServices.PosixSignalContext, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 438,
+          "Opcode": "call",
+          "Token": 167774253,
+          "Member": "System.Runtime.InteropServices.PosixSignalRegistration::Create(System.Runtime.InteropServices.PosixSignal,System.Action`1[[System.Runtime.InteropServices.PosixSignalContext, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]])"
+        },
+        {
+          "Offset": 446,
+          "Opcode": "ldfld",
+          "Token": 67114932,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::ServerExitState:GameExitState"
+        },
+        {
+          "Offset": 451,
+          "Opcode": "callvirt",
+          "Token": 100674267,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::SetServerExitInterface(GameExitState)"
+        },
+        {
+          "Offset": 458,
+          "Opcode": "ldfld",
+          "Token": 67113896,
+          "Member": "Vintagestory.Client.ClientProgram::crashreporter:Vintagestory.ClientNative.CrashReporter"
+        },
+        {
+          "Offset": 463,
+          "Opcode": "stfld",
+          "Token": 67114940,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::crashreporter:Vintagestory.ClientNative.CrashReporter"
+        },
+        {
+          "Offset": 470,
+          "Opcode": "newarr",
+          "Token": 33555281,
+          "Member": "Vintagestory.Common.DummyNetwork"
+        },
+        {
+          "Offset": 475,
+          "Opcode": "stfld",
+          "Token": 67114934,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::singlePlayerServerDummyNetwork:Vintagestory.Common.DummyNetwork[]"
+        },
+        {
+          "Offset": 481,
+          "Opcode": "ldfld",
+          "Token": 67114934,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::singlePlayerServerDummyNetwork:Vintagestory.Common.DummyNetwork[]"
+        },
+        {
+          "Offset": 488,
+          "Opcode": "ldfld",
+          "Token": 67113897,
+          "Member": "Vintagestory.Client.ClientProgram::dummyNetwork:Vintagestory.Common.DummyNetwork"
+        },
+        {
+          "Offset": 495,
+          "Opcode": "ldfld",
+          "Token": 67114934,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::singlePlayerServerDummyNetwork:Vintagestory.Common.DummyNetwork[]"
+        },
+        {
+          "Offset": 502,
+          "Opcode": "ldfld",
+          "Token": 67113898,
+          "Member": "Vintagestory.Client.ClientProgram::dummyNetworkUdp:Vintagestory.Common.DummyNetwork"
+        },
+        {
+          "Offset": 510,
+          "Opcode": "stfld",
+          "Token": 67113901,
+          "Member": "Vintagestory.Client.ClientProgram::platform:Vintagestory.Client.NoObf.ClientPlatformWindows"
+        },
+        {
+          "Offset": 517,
+          "Opcode": "ldftn",
+          "Token": 100672188,
+          "Member": "Vintagestory.Client.ClientProgram::<Start>b__13_0(Vintagestory.Common.StartServerArgs)"
+        },
+        {
+          "Offset": 523,
+          "Opcode": "newobj",
+          "Token": 167777848,
+          "Member": "System.Action`1[[Vintagestory.Common.StartServerArgs, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 528,
+          "Opcode": "stfld",
+          "Token": 67114931,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::OnStartSinglePlayerServer:System.Action`1[[Vintagestory.Common.StartServerArgs, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]"
+        },
+        {
+          "Offset": 533,
+          "Opcode": "call",
+          "Token": 100674990,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_GameWindowMode()"
+        },
+        {
+          "Offset": 584,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 589,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 601,
+          "Opcode": "constrained.",
+          "Token": 16777825,
+          "Member": "OpenTK.Windowing.Common.WindowState"
+        },
+        {
+          "Offset": 607,
+          "Opcode": "callvirt",
+          "Token": 167772534,
+          "Member": "System.Object::ToString()"
+        },
+        {
+          "Offset": 612,
+          "Opcode": "call",
+          "Token": 167772474,
+          "Member": "System.String::Concat(System.String,System.String)"
+        },
+        {
+          "Offset": 617,
+          "Opcode": "callvirt",
+          "Token": 167775151,
+          "Member": "Vintagestory.API.Common.ILogger::Debug(System.String)"
+        },
+        {
+          "Offset": 622,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 627,
+          "Opcode": "callvirt",
+          "Token": 100674471,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_ScreenSize()"
+        },
+        {
+          "Offset": 633,
+          "Opcode": "call",
+          "Token": 100675168,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_IsNewSettingsFile()"
+        },
+        {
+          "Offset": 665,
+          "Opcode": "ldfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 678,
+          "Opcode": "ldfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 698,
+          "Opcode": "ldfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 708,
+          "Opcode": "call",
+          "Token": 167772516,
+          "Member": "System.Math::Min(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 716,
+          "Opcode": "ldfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 726,
+          "Opcode": "call",
+          "Token": 167772516,
+          "Member": "System.Math::Min(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 750,
+          "Opcode": "ldfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 770,
+          "Opcode": "ldfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 797,
+          "Opcode": "ldfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 817,
+          "Opcode": "ldfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 835,
+          "Opcode": "stfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 842,
+          "Opcode": "call",
+          "Token": 100675015,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_ScreenWidth(System.Int32)"
+        },
+        {
+          "Offset": 849,
+          "Opcode": "call",
+          "Token": 100675017,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_ScreenHeight(System.Int32)"
+        },
+        {
+          "Offset": 856,
+          "Opcode": "call",
+          "Token": 100674951,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_GUIScale(System.Single)"
+        },
+        {
+          "Offset": 861,
+          "Opcode": "call",
+          "Token": 100675014,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_ScreenWidth()"
+        },
+        {
+          "Offset": 872,
+          "Opcode": "call",
+          "Token": 100675015,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_ScreenWidth(System.Int32)"
+        },
+        {
+          "Offset": 877,
+          "Opcode": "call",
+          "Token": 100675016,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_ScreenHeight()"
+        },
+        {
+          "Offset": 888,
+          "Opcode": "call",
+          "Token": 100675017,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_ScreenHeight(System.Int32)"
+        },
+        {
+          "Offset": 893,
+          "Opcode": "call",
+          "Token": 100675132,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_GlContextVersion()"
+        },
+        {
+          "Offset": 901,
+          "Opcode": "callvirt",
+          "Token": 167772692,
+          "Member": "System.String::Split(System.Char,System.StringSplitOptions)"
+        },
+        {
+          "Offset": 910,
+          "Opcode": "call",
+          "Token": 167772552,
+          "Member": "Vintagestory.API.Util.StringUtil::ToInt(System.String,System.Int32)"
+        },
+        {
+          "Offset": 920,
+          "Opcode": "call",
+          "Token": 167772552,
+          "Member": "Vintagestory.API.Util.StringUtil::ToInt(System.String,System.Int32)"
+        },
+        {
+          "Offset": 927,
+          "Opcode": "ldsfld",
+          "Token": 167777849,
+          "Member": "OpenTK.Windowing.Desktop.GameWindowSettings::Default:OpenTK.Windowing.Desktop.GameWindowSettings"
+        },
+        {
+          "Offset": 934,
+          "Opcode": "newobj",
+          "Token": 167777850,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::.ctor()"
+        },
+        {
+          "Offset": 945,
+          "Opcode": "callvirt",
+          "Token": 167777851,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_Title(System.String)"
+        },
+        {
+          "Offset": 955,
+          "Opcode": "newobj",
+          "Token": 167777852,
+          "Member": "System.Version::.ctor(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 960,
+          "Opcode": "callvirt",
+          "Token": 167777853,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_APIVersion(System.Version)"
+        },
+        {
+          "Offset": 966,
+          "Opcode": "call",
+          "Token": 100675014,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_ScreenWidth()"
+        },
+        {
+          "Offset": 971,
+          "Opcode": "call",
+          "Token": 100675016,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_ScreenHeight()"
+        },
+        {
+          "Offset": 976,
+          "Opcode": "newobj",
+          "Token": 167777854,
+          "Member": "OpenTK.Mathematics.Vector2i::.ctor(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 981,
+          "Opcode": "callvirt",
+          "Token": 167777855,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_ClientSize(OpenTK.Mathematics.Vector2i)"
+        },
+        {
+          "Offset": 988,
+          "Opcode": "callvirt",
+          "Token": 167777856,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_Flags(OpenTK.Windowing.Common.ContextFlags)"
+        },
+        {
+          "Offset": 994,
+          "Opcode": "call",
+          "Token": 100675038,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_VsyncMode()"
+        },
+        {
+          "Offset": 1002,
+          "Opcode": "callvirt",
+          "Token": 167777857,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_Vsync(OpenTK.Windowing.Common.VSyncMode)"
+        },
+        {
+          "Offset": 1009,
+          "Opcode": "callvirt",
+          "Token": 167777858,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_WindowState(OpenTK.Windowing.Common.WindowState)"
+        },
+        {
+          "Offset": 1015,
+          "Opcode": "call",
+          "Token": 100675150,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_WindowBorder()"
+        },
+        {
+          "Offset": 1020,
+          "Opcode": "callvirt",
+          "Token": 167777859,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_WindowBorder(OpenTK.Windowing.Common.WindowBorder)"
+        },
+        {
+          "Offset": 1027,
+          "Opcode": "ldsfld",
+          "Token": 167773075,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::OS:Vintagestory.API.Config.OS"
+        },
+        {
+          "Offset": 1038,
+          "Opcode": "callvirt",
+          "Token": 167777856,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_Flags(OpenTK.Windowing.Common.ContextFlags)"
+        },
+        {
+          "Offset": 1044,
+          "Opcode": "ldftn",
+          "Token": 100672183,
+          "Member": "Vintagestory.Client.ClientProgram::GlfwErrorCallback(OpenTK.Windowing.GraphicsLibraryFramework.ErrorCode,System.String)"
+        },
+        {
+          "Offset": 1050,
+          "Opcode": "newobj",
+          "Token": 167777860,
+          "Member": "OpenTK.Windowing.GraphicsLibraryFramework.GLFWCallbacks+ErrorCallback::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 1055,
+          "Opcode": "call",
+          "Token": 167777861,
+          "Member": "OpenTK.Windowing.GraphicsLibraryFramework.GLFW::SetErrorCallback(OpenTK.Windowing.GraphicsLibraryFramework.GLFWCallbacks+ErrorCallback)"
+        },
+        {
+          "Offset": 1071,
+          "Opcode": "call",
+          "Token": 100672182,
+          "Member": "Vintagestory.Client.ClientProgram::AttemptToOpenWindow(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings,System.Int32,System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 1081,
+          "Opcode": "ldsfld",
+          "Token": 167777862,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::IsWaylandSession:System.Boolean"
+        },
+        {
+          "Offset": 1090,
+          "Opcode": "callvirt",
+          "Token": 167777863,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::CenterWindow()"
+        },
+        {
+          "Offset": 1099,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 1104,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 1114,
+          "Opcode": "callvirt",
+          "Token": 167775308,
+          "Member": "Vintagestory.API.Common.ILogger::Warning(System.String)"
+        },
+        {
+          "Offset": 1119,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 1124,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 1131,
+          "Opcode": "callvirt",
+          "Token": 167775702,
+          "Member": "Vintagestory.API.Common.ILogger::Warning(System.Exception)"
+        },
+        {
+          "Offset": 1139,
+          "Opcode": "callvirt",
+          "Token": 100674233,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::StartAudio()"
+        },
+        {
+          "Offset": 1145,
+          "Opcode": "callvirt",
+          "Token": 100674252,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::LogAndTestHardwareInfosStage2()"
+        },
+        {
+          "Offset": 1153,
+          "Opcode": "stfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 1159,
+          "Opcode": "callvirt",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 1166,
+          "Opcode": "callvirt",
+          "Token": 167777864,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::set_Window(OpenTK.Windowing.Desktop.GameWindow)"
+        },
+        {
+          "Offset": 1172,
+          "Opcode": "call",
+          "Token": 100675136,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_DirectMouseMode()"
+        },
+        {
+          "Offset": 1177,
+          "Opcode": "callvirt",
+          "Token": 100674516,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetDirectMouseMode(System.Boolean)"
+        },
+        {
+          "Offset": 1183,
+          "Opcode": "callvirt",
+          "Token": 100674472,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_WindowSize()"
+        },
+        {
+          "Offset": 1190,
+          "Opcode": "callvirt",
+          "Token": 167777710,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_ClientSize()"
+        },
+        {
+          "Offset": 1195,
+          "Opcode": "ldfld",
+          "Token": 167777711,
+          "Member": "OpenTK.Mathematics.Vector2i::X:System.Int32"
+        },
+        {
+          "Offset": 1200,
+          "Opcode": "stfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 1206,
+          "Opcode": "callvirt",
+          "Token": 100674472,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_WindowSize()"
+        },
+        {
+          "Offset": 1213,
+          "Opcode": "callvirt",
+          "Token": 167777710,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_ClientSize()"
+        },
+        {
+          "Offset": 1218,
+          "Opcode": "ldfld",
+          "Token": 167777712,
+          "Member": "OpenTK.Mathematics.Vector2i::Y:System.Int32"
+        },
+        {
+          "Offset": 1223,
+          "Opcode": "stfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 1228,
+          "Opcode": "call",
+          "Token": 100674990,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_GameWindowMode()"
+        },
+        {
+          "Offset": 1243,
+          "Opcode": "callvirt",
+          "Token": 100674528,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetWindowAttribute(OpenTK.Windowing.GraphicsLibraryFramework.WindowAttribute,System.Boolean)"
+        },
+        {
+          "Offset": 1248,
+          "Opcode": "ldsfld",
+          "Token": 67113905,
+          "Member": "Vintagestory.Client.ClientProgram::screenManager:Vintagestory.Client.ScreenManager"
+        },
+        {
+          "Offset": 1255,
+          "Opcode": "callvirt",
+          "Token": 100672895,
+          "Member": "Vintagestory.Client.ScreenManager::Start(Vintagestory.Client.ClientProgramArgs,System.String[])"
+        },
+        {
+          "Offset": 1261,
+          "Opcode": "callvirt",
+          "Token": 100674274,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Start()"
+        },
+        {
+          "Offset": 1266,
+          "Opcode": "call",
+          "Token": 167773484,
+          "Member": "System.Threading.Thread::get_CurrentThread()"
+        },
+        {
+          "Offset": 1272,
+          "Opcode": "callvirt",
+          "Token": 167773486,
+          "Member": "System.Threading.Thread::set_Priority(System.Threading.ThreadPriority)"
+        },
+        {
+          "Offset": 1279,
+          "Opcode": "callvirt",
+          "Token": 167777865,
+          "Member": "OpenTK.Windowing.Desktop.GameWindow::Run()"
+        },
+        {
+          "Offset": 1286,
+          "Opcode": "ldsfld",
+          "Token": 167773075,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::OS:Vintagestory.API.Config.OS"
+        },
+        {
+          "Offset": 1295,
+          "Opcode": "callvirt",
+          "Token": 167777866,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_WindowPtr()"
+        },
+        {
+          "Offset": 1300,
+          "Opcode": "call",
+          "Token": 167777867,
+          "Member": "OpenTK.Windowing.GraphicsLibraryFramework.GLFW::IconifyWindow(OpenTK.Windowing.GraphicsLibraryFramework.Window*)"
+        },
+        {
+          "Offset": 1305,
+          "Opcode": "call",
+          "Token": 167773484,
+          "Member": "System.Threading.Thread::get_CurrentThread()"
+        },
+        {
+          "Offset": 1311,
+          "Opcode": "callvirt",
+          "Token": 167773486,
+          "Member": "System.Threading.Thread::set_Priority(System.Threading.ThreadPriority)"
+        },
+        {
+          "Offset": 1316,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 1321,
+          "Opcode": "callvirt",
+          "Token": 100674487,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_Logger()"
+        },
+        {
+          "Offset": 1331,
+          "Opcode": "callvirt",
+          "Token": 167775151,
+          "Member": "Vintagestory.API.Common.ILogger::Debug(System.String)"
+        },
+        {
+          "Offset": 1338,
+          "Opcode": "callvirt",
+          "Token": 100674623,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_FrameBuffers()"
+        },
+        {
+          "Offset": 1343,
+          "Opcode": "callvirt",
+          "Token": 100674329,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::DisposeFrameBuffers(System.Collections.Generic.List`1[[Vintagestory.API.Client.FrameBufferRef, VintagestoryAPI, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]])"
+        },
+        {
+          "Offset": 1349,
+          "Opcode": "callvirt",
+          "Token": 100674235,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::StopAudio()"
+        },
+        {
+          "Offset": 1356,
+          "Opcode": "callvirt",
+          "Token": 167777868,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::Dispose()"
+        }
+      ]
+    },
+    {
+      "Event": "game.platform.construct",
+      "Target": "Vintagestory.Client.NoObf.ClientPlatformWindows..ctor(Vintagestory.Logger)",
+      "IlLength": 311,
+      "Uses": [
+        {
+          "Offset": 2,
+          "Opcode": "stfld",
+          "Token": 67114921,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::cpuCoreCount:System.Int32"
+        },
+        {
+          "Offset": 8,
+          "Opcode": "newobj",
+          "Token": 167773190,
+          "Member": "System.Diagnostics.Stopwatch::.ctor()"
+        },
+        {
+          "Offset": 13,
+          "Opcode": "stfld",
+          "Token": 67114924,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::uptimeStopWatch:System.Diagnostics.Stopwatch"
+        },
+        {
+          "Offset": 19,
+          "Opcode": "newobj",
+          "Token": 100671974,
+          "Member": "Vintagestory.ClientNative.Screenshot::.ctor()"
+        },
+        {
+          "Offset": 24,
+          "Opcode": "stfld",
+          "Token": 67114930,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::screenshot:Vintagestory.ClientNative.Screenshot"
+        },
+        {
+          "Offset": 30,
+          "Opcode": "newobj",
+          "Token": 100663347,
+          "Member": "GameExitState::.ctor()"
+        },
+        {
+          "Offset": 35,
+          "Opcode": "stfld",
+          "Token": 67114932,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::ServerExitState:GameExitState"
+        },
+        {
+          "Offset": 41,
+          "Opcode": "newobj",
+          "Token": 167778911,
+          "Member": "Vintagestory.API.MathTools.Size2i::.ctor()"
+        },
+        {
+          "Offset": 46,
+          "Opcode": "stfld",
+          "Token": 67114935,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::windowsize:Vintagestory.API.MathTools.Size2i"
+        },
+        {
+          "Offset": 52,
+          "Opcode": "newobj",
+          "Token": 167778911,
+          "Member": "Vintagestory.API.MathTools.Size2i::.ctor()"
+        },
+        {
+          "Offset": 57,
+          "Opcode": "stfld",
+          "Token": 67114936,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::screensize:Vintagestory.API.MathTools.Size2i"
+        },
+        {
+          "Offset": 63,
+          "Opcode": "newobj",
+          "Token": 167778912,
+          "Member": "System.Collections.Generic.List`1[[Vintagestory.Client.NoObf.ClientPlatformAbstract+OnFocusChanged, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]::.ctor()"
+        },
+        {
+          "Offset": 68,
+          "Opcode": "stfld",
+          "Token": 67114937,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::focusChangedDelegates:System.Collections.Generic.List`1[[Vintagestory.Client.NoObf.ClientPlatformAbstract+OnFocusChanged, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]"
+        },
+        {
+          "Offset": 74,
+          "Opcode": "newobj",
+          "Token": 167778913,
+          "Member": "System.Collections.Generic.List`1[[Vintagestory.Client.KeyEventHandler, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]::.ctor()"
+        },
+        {
+          "Offset": 79,
+          "Opcode": "stfld",
+          "Token": 67114942,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::keyEventHandlers:System.Collections.Generic.List`1[[Vintagestory.Client.KeyEventHandler, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]"
+        },
+        {
+          "Offset": 85,
+          "Opcode": "newobj",
+          "Token": 167778914,
+          "Member": "System.Collections.Generic.List`1[[Vintagestory.Client.MouseEventHandler, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]::.ctor()"
+        },
+        {
+          "Offset": 90,
+          "Opcode": "stfld",
+          "Token": 67114943,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::mouseEventHandlers:System.Collections.Generic.List`1[[Vintagestory.Client.MouseEventHandler, VintagestoryLib, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]"
+        },
+        {
+          "Offset": 96,
+          "Opcode": "newobj",
+          "Token": 167772472,
+          "Member": "System.Collections.Generic.List`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]::.ctor()"
+        },
+        {
+          "Offset": 101,
+          "Opcode": "stfld",
+          "Token": 67114946,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::drawCallStacks:System.Collections.Generic.List`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+        },
+        {
+          "Offset": 108,
+          "Opcode": "stfld",
+          "Token": 67114951,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::OffscreenBuffer:System.Boolean"
+        },
+        {
+          "Offset": 116,
+          "Opcode": "stfld",
+          "Token": 67114960,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::sampleCount:System.Int32"
+        },
+        {
+          "Offset": 122,
+          "Opcode": "newobj",
+          "Token": 167772477,
+          "Member": "System.Random::.ctor()"
+        },
+        {
+          "Offset": 127,
+          "Opcode": "stfld",
+          "Token": 67114962,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::rand:System.Random"
+        },
+        {
+          "Offset": 138,
+          "Opcode": "newarr",
+          "Token": 16778077,
+          "Member": "System.Single"
+        },
+        {
+          "Offset": 143,
+          "Opcode": "stfld",
+          "Token": 67114963,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::ssaoKernel:System.Single[]"
+        },
+        {
+          "Offset": 150,
+          "Opcode": "newarr",
+          "Token": 16778077,
+          "Member": "System.Single"
+        },
+        {
+          "Offset": 163,
+          "Opcode": "stfld",
+          "Token": 67114965,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::clearColor:System.Single[]"
+        },
+        {
+          "Offset": 170,
+          "Opcode": "stfld",
+          "Token": 67114970,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::ENABLE_MIPMAPS:System.Boolean"
+        },
+        {
+          "Offset": 177,
+          "Opcode": "stfld",
+          "Token": 67114972,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::ENABLE_TRANSPARENCY:System.Boolean"
+        },
+        {
+          "Offset": 183,
+          "Opcode": "newobj",
+          "Token": 167778915,
+          "Member": "System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[OpenTK.Windowing.Common.Input.MouseCursor, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor()"
+        },
+        {
+          "Offset": 188,
+          "Opcode": "stfld",
+          "Token": 67114982,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::preLoadedCursors:System.Collections.Generic.Dictionary`2[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e],[OpenTK.Windowing.Common.Input.MouseCursor, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]"
+        },
+        {
+          "Offset": 194,
+          "Opcode": "newobj",
+          "Token": 167778756,
+          "Member": "Vintagestory.API.Client.DefaultShaderUniforms::.ctor()"
+        },
+        {
+          "Offset": 199,
+          "Opcode": "stfld",
+          "Token": 67114990,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::<ShaderUniforms>k__BackingField:Vintagestory.API.Client.DefaultShaderUniforms"
+        },
+        {
+          "Offset": 205,
+          "Opcode": "call",
+          "Token": 100674638,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::.ctor()"
+        },
+        {
+          "Offset": 214,
+          "Opcode": "newobj",
+          "Token": 100670665,
+          "Member": "Vintagestory.Common.NullLogger::.ctor()"
+        },
+        {
+          "Offset": 219,
+          "Opcode": "stfld",
+          "Token": 67114925,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 227,
+          "Opcode": "call",
+          "Token": 167773866,
+          "Member": "VSPlatform.XPlatformInterfaces::GetInterface()"
+        },
+        {
+          "Offset": 232,
+          "Opcode": "call",
+          "Token": 100674489,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::set_XPlatInterface(Vintagestory.API.Common.IXPlatformInterface)"
+        },
+        {
+          "Offset": 239,
+          "Opcode": "call",
+          "Token": 100674488,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::get_XPlatInterface()"
+        },
+        {
+          "Offset": 244,
+          "Opcode": "callvirt",
+          "Token": 167778916,
+          "Member": "Vintagestory.API.Common.IXPlatformInterface::GetScreenSize()"
+        },
+        {
+          "Offset": 249,
+          "Opcode": "stfld",
+          "Token": 67114936,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::screensize:Vintagestory.API.MathTools.Size2i"
+        },
+        {
+          "Offset": 256,
+          "Opcode": "stfld",
+          "Token": 67114925,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 261,
+          "Opcode": "ldsfld",
+          "Token": 167773924,
+          "Member": "Vintagestory.API.Common.TyronThreadPool::Inst:Vintagestory.API.Common.TyronThreadPool"
+        },
+        {
+          "Offset": 267,
+          "Opcode": "ldfld",
+          "Token": 67114925,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::logger:Vintagestory.Logger"
+        },
+        {
+          "Offset": 272,
+          "Opcode": "stfld",
+          "Token": 167774254,
+          "Member": "Vintagestory.API.Common.TyronThreadPool::Logger:Vintagestory.API.Common.ILogger"
+        },
+        {
+          "Offset": 278,
+          "Opcode": "ldfld",
+          "Token": 67114924,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::uptimeStopWatch:System.Diagnostics.Stopwatch"
+        },
+        {
+          "Offset": 283,
+          "Opcode": "callvirt",
+          "Token": 167773191,
+          "Member": "System.Diagnostics.Stopwatch::Start()"
+        },
+        {
+          "Offset": 289,
+          "Opcode": "newobj",
+          "Token": 167773190,
+          "Member": "System.Diagnostics.Stopwatch::.ctor()"
+        },
+        {
+          "Offset": 294,
+          "Opcode": "stfld",
+          "Token": 67114923,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::frameStopWatch:System.Diagnostics.Stopwatch"
+        },
+        {
+          "Offset": 300,
+          "Opcode": "ldfld",
+          "Token": 67114923,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::frameStopWatch:System.Diagnostics.Stopwatch"
+        },
+        {
+          "Offset": 305,
+          "Opcode": "callvirt",
+          "Token": 167773191,
+          "Member": "System.Diagnostics.Stopwatch::Start()"
+        }
+      ]
+    },
+    {
+      "Event": "game.window.request",
+      "Target": "Vintagestory.Client.ClientProgram.AttemptToOpenWindow(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings,System.Int32,System.Int32,System.Int32)",
+      "IlLength": 322,
+      "Uses": [
+        {
+          "Offset": 4,
+          "Opcode": "newobj",
+          "Token": 167777852,
+          "Member": "System.Version::.ctor(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 9,
+          "Opcode": "callvirt",
+          "Token": 167777853,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindowSettings::set_APIVersion(System.Version)"
+        },
+        {
+          "Offset": 16,
+          "Opcode": "newobj",
+          "Token": 100674672,
+          "Member": "Vintagestory.Client.NoObf.GameWindowNative::.ctor(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings)"
+        },
+        {
+          "Offset": 43,
+          "Opcode": "isinst",
+          "Token": 16778424,
+          "Member": "OpenTK.Windowing.GraphicsLibraryFramework.GLFWException"
+        },
+        {
+          "Offset": 56,
+          "Opcode": "callvirt",
+          "Token": 167773626,
+          "Member": "System.Exception::get_Message()"
+        },
+        {
+          "Offset": 63,
+          "Opcode": "call",
+          "Token": 167772473,
+          "Member": "System.Int32::ToString()"
+        },
+        {
+          "Offset": 73,
+          "Opcode": "call",
+          "Token": 167772474,
+          "Member": "System.String::Concat(System.String,System.String)"
+        },
+        {
+          "Offset": 78,
+          "Opcode": "callvirt",
+          "Token": 167777869,
+          "Member": "System.String::IndexOf(System.String)"
+        },
+        {
+          "Offset": 91,
+          "Opcode": "callvirt",
+          "Token": 167773626,
+          "Member": "System.Exception::get_Message()"
+        },
+        {
+          "Offset": 101,
+          "Opcode": "callvirt",
+          "Token": 167772595,
+          "Member": "System.String::get_Chars(System.Int32)"
+        },
+        {
+          "Offset": 112,
+          "Opcode": "callvirt",
+          "Token": 167773626,
+          "Member": "System.Exception::get_Message()"
+        },
+        {
+          "Offset": 122,
+          "Opcode": "callvirt",
+          "Token": 167772595,
+          "Member": "System.String::get_Chars(System.Int32)"
+        },
+        {
+          "Offset": 134,
+          "Opcode": "call",
+          "Token": 167772842,
+          "Member": "System.Threading.Thread::Sleep(System.Int32)"
+        },
+        {
+          "Offset": 149,
+          "Opcode": "call",
+          "Token": 100672182,
+          "Member": "Vintagestory.Client.ClientProgram::AttemptToOpenWindow(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings,System.Int32,System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 162,
+          "Opcode": "callvirt",
+          "Token": 167773626,
+          "Member": "System.Exception::get_Message()"
+        },
+        {
+          "Offset": 174,
+          "Opcode": "call",
+          "Token": 167772473,
+          "Member": "System.Int32::ToString()"
+        },
+        {
+          "Offset": 186,
+          "Opcode": "call",
+          "Token": 167772473,
+          "Member": "System.Int32::ToString()"
+        },
+        {
+          "Offset": 191,
+          "Opcode": "call",
+          "Token": 167772511,
+          "Member": "System.String::Concat(System.String,System.String,System.String,System.String)"
+        },
+        {
+          "Offset": 196,
+          "Opcode": "callvirt",
+          "Token": 167777869,
+          "Member": "System.String::IndexOf(System.String)"
+        },
+        {
+          "Offset": 234,
+          "Opcode": "newobj",
+          "Token": 167773919,
+          "Member": "System.Exception::.ctor(System.String,System.Exception)"
+        },
+        {
+          "Offset": 274,
+          "Opcode": "call",
+          "Token": 167772842,
+          "Member": "System.Threading.Thread::Sleep(System.Int32)"
+        },
+        {
+          "Offset": 289,
+          "Opcode": "call",
+          "Token": 100672182,
+          "Member": "Vintagestory.Client.ClientProgram::AttemptToOpenWindow(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings,System.Int32,System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 312,
+          "Opcode": "call",
+          "Token": 100674889,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::set_AllowSSBOs(System.Boolean)"
+        }
+      ]
+    },
+    {
+      "Event": "game.window.construct",
+      "Target": "Vintagestory.Client.NoObf.GameWindowNative..ctor(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings)",
+      "IlLength": 224,
+      "Uses": [
+        {
+          "Offset": 3,
+          "Opcode": "call",
+          "Token": 167779281,
+          "Member": "OpenTK.Windowing.Desktop.GameWindow::.ctor(OpenTK.Windowing.Desktop.GameWindowSettings,OpenTK.Windowing.Desktop.NativeWindowSettings)"
+        },
+        {
+          "Offset": 28,
+          "Opcode": "call",
+          "Token": 167779077,
+          "Member": "OpenTK.Graphics.OpenGL.GL::ClearColor(System.Single,System.Single,System.Single,System.Single)"
+        },
+        {
+          "Offset": 38,
+          "Opcode": "call",
+          "Token": 167779044,
+          "Member": "OpenTK.Graphics.OpenGL.GL::Clear(OpenTK.Graphics.OpenGL.ClearBufferMask)"
+        },
+        {
+          "Offset": 44,
+          "Opcode": "call",
+          "Token": 167779282,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_Context()"
+        },
+        {
+          "Offset": 49,
+          "Opcode": "callvirt",
+          "Token": 167779283,
+          "Member": "OpenTK.Windowing.Common.IGraphicsContext::SwapBuffers()"
+        },
+        {
+          "Offset": 54,
+          "Opcode": "ldsfld",
+          "Token": 167773075,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::OS:Vintagestory.API.Config.OS"
+        },
+        {
+          "Offset": 65,
+          "Opcode": "ldsfld",
+          "Token": 167777862,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::IsWaylandSession:System.Boolean"
+        },
+        {
+          "Offset": 75,
+          "Opcode": "call",
+          "Token": 167773868,
+          "Member": "Vintagestory.API.Config.GamePaths::get_AssetsPath()"
+        },
+        {
+          "Offset": 85,
+          "Opcode": "call",
+          "Token": 167772630,
+          "Member": "System.IO.Path::Combine(System.String,System.String)"
+        },
+        {
+          "Offset": 90,
+          "Opcode": "call",
+          "Token": 167779284,
+          "Member": "SkiaSharp.SKCodec::Create(System.String)"
+        },
+        {
+          "Offset": 97,
+          "Opcode": "callvirt",
+          "Token": 167779285,
+          "Member": "SkiaSharp.SKCodec::get_Pixels()"
+        },
+        {
+          "Offset": 106,
+          "Opcode": "newarr",
+          "Token": 16777997,
+          "Member": "System.Byte"
+        },
+        {
+          "Offset": 164,
+          "Opcode": "newarr",
+          "Token": 16778574,
+          "Member": "OpenTK.Windowing.Common.Input.Image"
+        },
+        {
+          "Offset": 172,
+          "Opcode": "callvirt",
+          "Token": 167779286,
+          "Member": "SkiaSharp.SKCodec::get_Info()"
+        },
+        {
+          "Offset": 181,
+          "Opcode": "call",
+          "Token": 167779287,
+          "Member": "SkiaSharp.SKImageInfo::get_Height()"
+        },
+        {
+          "Offset": 187,
+          "Opcode": "callvirt",
+          "Token": 167779286,
+          "Member": "SkiaSharp.SKCodec::get_Info()"
+        },
+        {
+          "Offset": 196,
+          "Opcode": "call",
+          "Token": 167779288,
+          "Member": "SkiaSharp.SKImageInfo::get_Width()"
+        },
+        {
+          "Offset": 202,
+          "Opcode": "newobj",
+          "Token": 167779289,
+          "Member": "OpenTK.Windowing.Common.Input.Image::.ctor(System.Int32,System.Int32,System.Byte[])"
+        },
+        {
+          "Offset": 208,
+          "Opcode": "newobj",
+          "Token": 167779290,
+          "Member": "OpenTK.Windowing.Common.Input.WindowIcon::.ctor(OpenTK.Windowing.Common.Input.Image[])"
+        },
+        {
+          "Offset": 213,
+          "Opcode": "call",
+          "Token": 167779291,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::set_Icon(OpenTK.Windowing.Common.Input.WindowIcon)"
+        }
+      ]
+    },
+    {
+      "Event": "game.screens.start",
+      "Target": "Vintagestory.Client.ScreenManager.Start(Vintagestory.Client.ClientProgramArgs,System.String[])",
+      "IlLength": 382,
+      "Uses": [
+        {
+          "Offset": 2,
+          "Opcode": "newobj",
+          "Token": 100673154,
+          "Member": "Vintagestory.Client.Gui.MainMenuAPI::.ctor(Vintagestory.Client.ScreenManager)"
+        },
+        {
+          "Offset": 7,
+          "Opcode": "stfld",
+          "Token": 67114342,
+          "Member": "Vintagestory.Client.ScreenManager::api:Vintagestory.Client.Gui.MainMenuAPI"
+        },
+        {
+          "Offset": 13,
+          "Opcode": "ldfld",
+          "Token": 67114342,
+          "Member": "Vintagestory.Client.ScreenManager::api:Vintagestory.Client.Gui.MainMenuAPI"
+        },
+        {
+          "Offset": 18,
+          "Opcode": "newobj",
+          "Token": 100675186,
+          "Member": "Vintagestory.Client.NoObf.GuiComposerManager::.ctor(Vintagestory.API.Client.ICoreClientAPI)"
+        },
+        {
+          "Offset": 23,
+          "Opcode": "stsfld",
+          "Token": 67114314,
+          "Member": "Vintagestory.Client.ScreenManager::GuiComposers:Vintagestory.Client.NoObf.GuiComposerManager"
+        },
+        {
+          "Offset": 29,
+          "Opcode": "stsfld",
+          "Token": 67114346,
+          "Member": "Vintagestory.Client.ScreenManager::ParsedArgs:Vintagestory.Client.ClientProgramArgs"
+        },
+        {
+          "Offset": 35,
+          "Opcode": "stsfld",
+          "Token": 67114347,
+          "Member": "Vintagestory.Client.ScreenManager::RawCmdLineArgs:System.String[]"
+        },
+        {
+          "Offset": 40,
+          "Opcode": "call",
+          "Token": 167772730,
+          "Member": "System.Environment::get_CurrentManagedThreadId()"
+        },
+        {
+          "Offset": 45,
+          "Opcode": "stsfld",
+          "Token": 67114313,
+          "Member": "Vintagestory.Client.ScreenManager::MainThreadId:System.Int32"
+        },
+        {
+          "Offset": 50,
+          "Opcode": "ldsfld",
+          "Token": 67114313,
+          "Member": "Vintagestory.Client.ScreenManager::MainThreadId:System.Int32"
+        },
+        {
+          "Offset": 55,
+          "Opcode": "stsfld",
+          "Token": 167773905,
+          "Member": "Vintagestory.API.Config.RuntimeEnv::MainThreadId:System.Int32"
+        },
+        {
+          "Offset": 60,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 70,
+          "Opcode": "callvirt",
+          "Token": 100674523,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetTitle(System.String)"
+        },
+        {
+          "Offset": 78,
+          "Opcode": "newobj",
+          "Token": 100663298,
+          "Member": "GuiScreenMainRight::.ctor(Vintagestory.Client.ScreenManager,GuiScreen)"
+        },
+        {
+          "Offset": 83,
+          "Opcode": "stfld",
+          "Token": 67114329,
+          "Member": "Vintagestory.Client.ScreenManager::mainScreen:GuiScreenMainRight"
+        },
+        {
+          "Offset": 88,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 94,
+          "Opcode": "ldftn",
+          "Token": 100672938,
+          "Member": "Vintagestory.Client.ScreenManager::onWindowClosed()"
+        },
+        {
+          "Offset": 100,
+          "Opcode": "newobj",
+          "Token": 167778428,
+          "Member": "Vintagestory.API.Common.ActionBoolReturn::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 105,
+          "Opcode": "callvirt",
+          "Token": 100674494,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetWindowClosedHandler(Vintagestory.API.Common.ActionBoolReturn)"
+        },
+        {
+          "Offset": 110,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 116,
+          "Opcode": "callvirt",
+          "Token": 100674495,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetFrameHandler(NewFrameHandler)"
+        },
+        {
+          "Offset": 121,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 127,
+          "Opcode": "callvirt",
+          "Token": 100674497,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::RegisterKeyboardEvent(Vintagestory.Client.KeyEventHandler)"
+        },
+        {
+          "Offset": 132,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 138,
+          "Opcode": "callvirt",
+          "Token": 100674498,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::RegisterMouseEvent(Vintagestory.Client.MouseEventHandler)"
+        },
+        {
+          "Offset": 143,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 149,
+          "Opcode": "ldftn",
+          "Token": 100672961,
+          "Member": "Vintagestory.Client.ScreenManager::onFocusChanged(System.Boolean)"
+        },
+        {
+          "Offset": 155,
+          "Opcode": "newobj",
+          "Token": 100674639,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract+OnFocusChanged::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 160,
+          "Opcode": "callvirt",
+          "Token": 100674478,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::RegisterOnFocusChange(Vintagestory.Client.NoObf.ClientPlatformAbstract+OnFocusChanged)"
+        },
+        {
+          "Offset": 165,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 171,
+          "Opcode": "ldftn",
+          "Token": 100672962,
+          "Member": "Vintagestory.Client.ScreenManager::onFileDrop(System.String)"
+        },
+        {
+          "Offset": 177,
+          "Opcode": "newobj",
+          "Token": 167773854,
+          "Member": "System.Action`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 182,
+          "Opcode": "callvirt",
+          "Token": 100674496,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::SetFileDropHandler(System.Action`1[[System.String, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]])"
+        },
+        {
+          "Offset": 188,
+          "Opcode": "ldtoken",
+          "Token": 33555408,
+          "Member": "Vintagestory.Client.GuiScreenLoadingGame"
+        },
+        {
+          "Offset": 193,
+          "Opcode": "call",
+          "Token": 167772504,
+          "Member": "System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)"
+        },
+        {
+          "Offset": 198,
+          "Opcode": "call",
+          "Token": 100672946,
+          "Member": "Vintagestory.Client.ScreenManager::LoadAndCacheScreen(System.Type)"
+        },
+        {
+          "Offset": 205,
+          "Opcode": "ldfld",
+          "Token": 67114342,
+          "Member": "Vintagestory.Client.ScreenManager::api:Vintagestory.Client.Gui.MainMenuAPI"
+        },
+        {
+          "Offset": 210,
+          "Opcode": "callvirt",
+          "Token": 100673157,
+          "Member": "Vintagestory.Client.Gui.MainMenuAPI::get_Gui()"
+        },
+        {
+          "Offset": 215,
+          "Opcode": "callvirt",
+          "Token": 167772445,
+          "Member": "Vintagestory.API.Client.IGuiAPI::get_TextTexture()"
+        },
+        {
+          "Offset": 220,
+          "Opcode": "ldsfld",
+          "Token": 167772654,
+          "Member": "Vintagestory.API.Config.GameVersion::LongGameVersion:System.String"
+        },
+        {
+          "Offset": 225,
+          "Opcode": "call",
+          "Token": 167772431,
+          "Member": "Vintagestory.API.Client.CairoFont::WhiteDetailText()"
+        },
+        {
+          "Offset": 231,
+          "Opcode": "callvirt",
+          "Token": 167772448,
+          "Member": "Vintagestory.API.Client.TextTextureUtil::GenUnscaledTextTexture(System.String,Vintagestory.API.Client.CairoFont,Vintagestory.API.Client.TextBackground)"
+        },
+        {
+          "Offset": 236,
+          "Opcode": "stfld",
+          "Token": 67114348,
+          "Member": "Vintagestory.Client.ScreenManager::versionNumberTexture:Vintagestory.API.Client.LoadedTexture"
+        },
+        {
+          "Offset": 242,
+          "Opcode": "ldftn",
+          "Token": 100672900,
+          "Member": "Vintagestory.Client.ScreenManager::DoGameInitStage1()"
+        },
+        {
+          "Offset": 248,
+          "Opcode": "newobj",
+          "Token": 167773481,
+          "Member": "System.Threading.ThreadStart::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 253,
+          "Opcode": "newobj",
+          "Token": 167773863,
+          "Member": "System.Threading.Thread::.ctor(System.Threading.ThreadStart)"
+        },
+        {
+          "Offset": 259,
+          "Opcode": "callvirt",
+          "Token": 167773860,
+          "Member": "System.Threading.Thread::Start()"
+        },
+        {
+          "Offset": 265,
+          "Opcode": "callvirt",
+          "Token": 167773483,
+          "Member": "System.Threading.Thread::set_IsBackground(System.Boolean)"
+        },
+        {
+          "Offset": 271,
+          "Opcode": "call",
+          "Token": 100672897,
+          "Member": "Vintagestory.Client.ScreenManager::registerSettingsWatchers()"
+        },
+        {
+          "Offset": 276,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 281,
+          "Opcode": "call",
+          "Token": 100674894,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_GlDebugMode()"
+        },
+        {
+          "Offset": 286,
+          "Opcode": "callvirt",
+          "Token": 100674480,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::set_GlDebugMode(System.Boolean)"
+        },
+        {
+          "Offset": 291,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 296,
+          "Opcode": "call",
+          "Token": 100674896,
+          "Member": "Vintagestory.Client.NoObf.ClientSettings::get_GlErrorChecking()"
+        },
+        {
+          "Offset": 301,
+          "Opcode": "callvirt",
+          "Token": 100674482,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::set_GlErrorChecking(System.Boolean)"
+        },
+        {
+          "Offset": 306,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 312,
+          "Opcode": "ldftn",
+          "Token": 100672896,
+          "Member": "Vintagestory.Client.ScreenManager::OnWindowResized(System.Int32,System.Int32)"
+        },
+        {
+          "Offset": 318,
+          "Opcode": "newobj",
+          "Token": 100674463,
+          "Member": "Vintagestory.Client.NoObf.WindowResizedDelegate::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 323,
+          "Opcode": "callvirt",
+          "Token": 100674519,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::add_WindowResized(Vintagestory.Client.NoObf.WindowResizedDelegate)"
+        },
+        {
+          "Offset": 328,
+          "Opcode": "ldsfld",
+          "Token": 67114315,
+          "Member": "Vintagestory.Client.ScreenManager::Platform:Vintagestory.Client.NoObf.ClientPlatformAbstract"
+        },
+        {
+          "Offset": 335,
+          "Opcode": "callvirt",
+          "Token": 100674566,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformAbstract::GlToggleBlend(System.Boolean,Vintagestory.API.Client.EnumBlendMode)"
+        },
+        {
+          "Offset": 340,
+          "Opcode": "ldsfld",
+          "Token": 67114359,
+          "Member": "Vintagestory.Client.ScreenManager+<>c::<>9__43_0:System.Func`1[[System.Threading.Tasks.Task, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+        },
+        {
+          "Offset": 349,
+          "Opcode": "ldsfld",
+          "Token": 67114358,
+          "Member": "Vintagestory.Client.ScreenManager+<>c::<>9:Vintagestory.Client.ScreenManager+<>c"
+        },
+        {
+          "Offset": 354,
+          "Opcode": "ldftn",
+          "Token": 100672975,
+          "Member": "Vintagestory.Client.ScreenManager+<>c::<Start>b__43_0()"
+        },
+        {
+          "Offset": 360,
+          "Opcode": "newobj",
+          "Token": 167773176,
+          "Member": "System.Func`1[[System.Threading.Tasks.Task, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 366,
+          "Opcode": "stsfld",
+          "Token": 67114359,
+          "Member": "Vintagestory.Client.ScreenManager+<>c::<>9__43_0:System.Func`1[[System.Threading.Tasks.Task, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]]"
+        },
+        {
+          "Offset": 376,
+          "Opcode": "call",
+          "Token": 167773177,
+          "Member": "Vintagestory.API.Common.TyronThreadPool::QueueTask(System.Func`1[[System.Threading.Tasks.Task, System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]],System.String)"
+        }
+      ]
+    },
+    {
+      "Event": "game.platform.start",
+      "Target": "Vintagestory.Client.NoObf.ClientPlatformWindows.Start()",
+      "IlLength": 426,
+      "Uses": [
+        {
+          "Offset": 1,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 7,
+          "Opcode": "ldftn",
+          "Token": 100674299,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window_FocusChanged(OpenTK.Windowing.Common.FocusedChangedEventArgs)"
+        },
+        {
+          "Offset": 13,
+          "Opcode": "newobj",
+          "Token": 167778943,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.FocusedChangedEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 18,
+          "Opcode": "callvirt",
+          "Token": 167778944,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_FocusedChanged(System.Action`1[[OpenTK.Windowing.Common.FocusedChangedEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 24,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 30,
+          "Opcode": "ldftn",
+          "Token": 100674426,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::game_KeyDown(OpenTK.Windowing.Common.KeyboardKeyEventArgs)"
+        },
+        {
+          "Offset": 36,
+          "Opcode": "newobj",
+          "Token": 167778945,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.KeyboardKeyEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 41,
+          "Opcode": "callvirt",
+          "Token": 167778946,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_KeyDown(System.Action`1[[OpenTK.Windowing.Common.KeyboardKeyEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 47,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 53,
+          "Opcode": "ldftn",
+          "Token": 100674427,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::game_KeyUp(OpenTK.Windowing.Common.KeyboardKeyEventArgs)"
+        },
+        {
+          "Offset": 59,
+          "Opcode": "newobj",
+          "Token": 167778945,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.KeyboardKeyEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 64,
+          "Opcode": "callvirt",
+          "Token": 167778947,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_KeyUp(System.Action`1[[OpenTK.Windowing.Common.KeyboardKeyEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 70,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 76,
+          "Opcode": "ldftn",
+          "Token": 100674425,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::game_KeyPress(OpenTK.Windowing.Common.TextInputEventArgs)"
+        },
+        {
+          "Offset": 82,
+          "Opcode": "newobj",
+          "Token": 167778948,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.TextInputEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 87,
+          "Opcode": "callvirt",
+          "Token": 167778949,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_TextInput(System.Action`1[[OpenTK.Windowing.Common.TextInputEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 93,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 99,
+          "Opcode": "ldftn",
+          "Token": 100674423,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Mouse_ButtonDown(OpenTK.Windowing.Common.MouseButtonEventArgs)"
+        },
+        {
+          "Offset": 105,
+          "Opcode": "newobj",
+          "Token": 167778950,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.MouseButtonEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 110,
+          "Opcode": "callvirt",
+          "Token": 167778951,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_MouseDown(System.Action`1[[OpenTK.Windowing.Common.MouseButtonEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 116,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 122,
+          "Opcode": "ldftn",
+          "Token": 100674424,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Mouse_ButtonUp(OpenTK.Windowing.Common.MouseButtonEventArgs)"
+        },
+        {
+          "Offset": 128,
+          "Opcode": "newobj",
+          "Token": 167778950,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.MouseButtonEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 133,
+          "Opcode": "callvirt",
+          "Token": 167778952,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_MouseUp(System.Action`1[[OpenTK.Windowing.Common.MouseButtonEventArgs, OpenTK.Windowing.Desktop, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 139,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 145,
+          "Opcode": "ldftn",
+          "Token": 100674420,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Mouse_Move(OpenTK.Windowing.Common.MouseMoveEventArgs)"
+        },
+        {
+          "Offset": 151,
+          "Opcode": "newobj",
+          "Token": 167778953,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.MouseMoveEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 156,
+          "Opcode": "callvirt",
+          "Token": 167778954,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_MouseMove(System.Action`1[[OpenTK.Windowing.Common.MouseMoveEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 162,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 168,
+          "Opcode": "ldftn",
+          "Token": 100674422,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Mouse_WheelChanged(OpenTK.Windowing.Common.MouseWheelEventArgs)"
+        },
+        {
+          "Offset": 174,
+          "Opcode": "newobj",
+          "Token": 167778955,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.MouseWheelEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 179,
+          "Opcode": "callvirt",
+          "Token": 167778956,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_MouseWheel(System.Action`1[[OpenTK.Windowing.Common.MouseWheelEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 185,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 191,
+          "Opcode": "ldftn",
+          "Token": 100674246,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window_RenderFrame(OpenTK.Windowing.Common.FrameEventArgs)"
+        },
+        {
+          "Offset": 197,
+          "Opcode": "newobj",
+          "Token": 167778957,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.FrameEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 202,
+          "Opcode": "callvirt",
+          "Token": 167778958,
+          "Member": "OpenTK.Windowing.Desktop.GameWindow::add_RenderFrame(System.Action`1[[OpenTK.Windowing.Common.FrameEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 208,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 214,
+          "Opcode": "ldftn",
+          "Token": 100674281,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window_Closing(System.ComponentModel.CancelEventArgs)"
+        },
+        {
+          "Offset": 220,
+          "Opcode": "newobj",
+          "Token": 167778959,
+          "Member": "System.Action`1[[System.ComponentModel.CancelEventArgs, System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 225,
+          "Opcode": "callvirt",
+          "Token": 167778960,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_Closing(System.Action`1[[System.ComponentModel.CancelEventArgs, System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]])"
+        },
+        {
+          "Offset": 231,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 237,
+          "Opcode": "ldftn",
+          "Token": 100674278,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::OnWindowResize(OpenTK.Windowing.Common.ResizeEventArgs)"
+        },
+        {
+          "Offset": 243,
+          "Opcode": "newobj",
+          "Token": 167778961,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.ResizeEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 248,
+          "Opcode": "callvirt",
+          "Token": 167778962,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_Resize(System.Action`1[[OpenTK.Windowing.Common.ResizeEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 254,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 264,
+          "Opcode": "callvirt",
+          "Token": 167778963,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::set_Title(System.String)"
+        },
+        {
+          "Offset": 270,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 276,
+          "Opcode": "ldftn",
+          "Token": 100674277,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::Window_FileDrop(OpenTK.Windowing.Common.FileDropEventArgs)"
+        },
+        {
+          "Offset": 282,
+          "Opcode": "newobj",
+          "Token": 167778964,
+          "Member": "System.Action`1[[OpenTK.Windowing.Common.FileDropEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]]::.ctor(System.Object,System.IntPtr)"
+        },
+        {
+          "Offset": 287,
+          "Opcode": "callvirt",
+          "Token": 167778965,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::add_FileDrop(System.Action`1[[OpenTK.Windowing.Common.FileDropEventArgs, OpenTK.Windowing.Common, Version=4.9.4.0, Culture=neutral, PublicKeyToken=f7bd7a612b58d73b]])"
+        },
+        {
+          "Offset": 294,
+          "Opcode": "call",
+          "Token": 100674327,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::SetupDefaultFrameBuffers()"
+        },
+        {
+          "Offset": 299,
+          "Opcode": "stfld",
+          "Token": 67114947,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::frameBuffers:System.Collections.Generic.List`1[[Vintagestory.API.Client.FrameBufferRef, VintagestoryAPI, Version=1.22.7.0, Culture=neutral, PublicKeyToken=null]]"
+        },
+        {
+          "Offset": 305,
+          "Opcode": "newobj",
+          "Token": 100674691,
+          "Member": "Vintagestory.Client.NoObf.ShaderProgramMinimalGui::.ctor()"
+        },
+        {
+          "Offset": 310,
+          "Opcode": "stfld",
+          "Token": 67114989,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::minimalGuiShaderProgram:Vintagestory.Client.NoObf.ShaderProgramMinimalGui"
+        },
+        {
+          "Offset": 316,
+          "Opcode": "ldfld",
+          "Token": 67114989,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::minimalGuiShaderProgram:Vintagestory.Client.NoObf.ShaderProgramMinimalGui"
+        },
+        {
+          "Offset": 321,
+          "Opcode": "callvirt",
+          "Token": 100674741,
+          "Member": "Vintagestory.Client.NoObf.ShaderProgramBase::Compile()"
+        },
+        {
+          "Offset": 328,
+          "Opcode": "ldfld",
+          "Token": 67114935,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::windowsize:Vintagestory.API.MathTools.Size2i"
+        },
+        {
+          "Offset": 334,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 339,
+          "Opcode": "callvirt",
+          "Token": 167777710,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_ClientSize()"
+        },
+        {
+          "Offset": 344,
+          "Opcode": "ldfld",
+          "Token": 167777711,
+          "Member": "OpenTK.Mathematics.Vector2i::X:System.Int32"
+        },
+        {
+          "Offset": 349,
+          "Opcode": "stfld",
+          "Token": 167772457,
+          "Member": "Vintagestory.API.MathTools.Size2i::Width:System.Int32"
+        },
+        {
+          "Offset": 355,
+          "Opcode": "ldfld",
+          "Token": 67114935,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::windowsize:Vintagestory.API.MathTools.Size2i"
+        },
+        {
+          "Offset": 361,
+          "Opcode": "ldfld",
+          "Token": 67114929,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::window:Vintagestory.Client.NoObf.GameWindowNative"
+        },
+        {
+          "Offset": 366,
+          "Opcode": "callvirt",
+          "Token": 167777710,
+          "Member": "OpenTK.Windowing.Desktop.NativeWindow::get_ClientSize()"
+        },
+        {
+          "Offset": 371,
+          "Opcode": "ldfld",
+          "Token": 167777712,
+          "Member": "OpenTK.Mathematics.Vector2i::Y:System.Int32"
+        },
+        {
+          "Offset": 376,
+          "Opcode": "stfld",
+          "Token": 167772458,
+          "Member": "Vintagestory.API.MathTools.Size2i::Height:System.Int32"
+        },
+        {
+          "Offset": 386,
+          "Opcode": "call",
+          "Token": 167778966,
+          "Member": "OpenTK.Graphics.OpenGL.GL::LineWidth(System.Single)"
+        },
+        {
+          "Offset": 391,
+          "Opcode": "call",
+          "Token": 167778967,
+          "Member": "OpenTK.Graphics.OpenGL.GL::GetError()"
+        },
+        {
+          "Offset": 409,
+          "Opcode": "stfld",
+          "Token": 67114920,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::SupportsThickLines:System.Boolean"
+        },
+        {
+          "Offset": 415,
+          "Opcode": "call",
+          "Token": 167774259,
+          "Member": "System.Environment::get_ProcessorCount()"
+        },
+        {
+          "Offset": 420,
+          "Opcode": "stfld",
+          "Token": 67114921,
+          "Member": "Vintagestory.Client.NoObf.ClientPlatformWindows::cpuCoreCount:System.Int32"
+        }
+      ]
+    }
+  ]
+}

@@ -80,8 +80,10 @@ foreach ($required in @('hostfxr.dll','VulkanStory/native/win-x64/VulkanStory.Cr
 $sources['VulkanStory/package.json'] = Join-Path $packageRoot 'VulkanStory/package.json'
 $profile = Get-Content -LiteralPath $sources['VulkanStory/managed/profiles/vs-1.22.7-win-x64.json'] -Raw | ConvertFrom-Json
 foreach ($entry in $profile.files.PSObject.Properties) {
-    if ((Get-FileHash -LiteralPath (Resolve-Child $gameRoot $entry.Name) -Algorithm SHA256).Hash -ine $entry.Value) {
-        throw "Official game reference mismatch: $($entry.Name)"
+    $accepted = @($entry.Value)
+    if ($profile.fileAlternatives) { $accepted += @($profile.fileAlternatives.PSObject.Properties[$entry.Name].Value) }
+    if ($accepted -inotcontains (Get-FileHash -LiteralPath (Resolve-Child $gameRoot $entry.Name) -Algorithm SHA256).Hash) {
+        throw "Game profile reference mismatch: $($entry.Name)"
     }
 }
 if (Get-Process -Name 'Vintagestory','VintagestoryServer','VSCrashReporter' -ErrorAction SilentlyContinue) { throw 'Close game, server and crash reporter before deployment.' }

@@ -2,11 +2,14 @@ using System.Text.Json;
 
 namespace VulkanStory.Game;
 
-/// <summary>The original startup member operands pinned to the official 1.22.7 assembly.</summary>
+/// <summary>Startup member operands pinned separately to each accepted 1.22.7 assembly.</summary>
 public static class StartupIlProfile
 {
     private sealed record Document(string ProfileId, string GameAssemblySha256, StartupMethodInventory[] Methods);
-    private static readonly Document Expected = Load();
+    private static readonly Document Expected = Load("Startup1227.json",
+        "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0");
+    private static readonly Document Serpih = Load("Startup1227Serpih.json",
+        "5633179A6AC6FDF3CAF6688DC250BF4A655893729CCA137C3500DD44CAEFC2A9");
 
     /// <summary>The selected OS profile; both official 1.22.7 packages contain the identical pinned game library.</summary>
     public static string Id => OperatingSystem.IsLinux() ? "vs-1.22.7-linux-x64" : Expected.ProfileId;
@@ -17,9 +20,18 @@ public static class StartupIlProfile
     /// also check its incoming instructions, since another Harmony owner may alter them.
     /// </summary>
     /// <param name="actual">Original-body inventory captured before patch installation.</param>
+    /// <param name="gameAssemblySha256">Exact library identity selecting its pinned operands; null selects the official profile.</param>
     /// <remarks>Target identity, IL lengths and ordered member uses must match. Incoming Harmony instructions still require separate transpiler checks.</remarks>
-    public static void VerifyProfile1227(IReadOnlyList<StartupMethodInventory> actual) =>
-        Verify(Expected.Methods, actual);
+    public static void VerifyProfile1227(IReadOnlyList<StartupMethodInventory> actual, string? gameAssemblySha256 = null)
+    {
+        Document expected = gameAssemblySha256 is null ||
+            string.Equals(gameAssemblySha256, Expected.GameAssemblySha256, StringComparison.OrdinalIgnoreCase)
+            ? Expected
+            : string.Equals(gameAssemblySha256, Serpih.GameAssemblySha256, StringComparison.OrdinalIgnoreCase)
+                ? Serpih
+                : throw new InvalidOperationException("No startup IL profile for game assembly " + gameAssemblySha256);
+        Verify(expected.Methods, actual);
+    }
 
     internal static void Verify(IReadOnlyList<StartupMethodInventory> expected,
         IReadOnlyList<StartupMethodInventory> actual)
@@ -54,20 +66,18 @@ public static class StartupIlProfile
         }
     }
 
-    private static Document Load()
+    private static Document Load(string resource, string sha256)
     {
         using Stream stream = typeof(StartupIlProfile).Assembly.GetManifestResourceStream(
-            "VulkanStory.Game.Profiles.Startup1227.json") ??
+            "VulkanStory.Game.Profiles." + resource) ??
             throw new InvalidOperationException("Embedded startup IL profile is missing.");
         Document document = JsonSerializer.Deserialize<Document>(stream,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ??
             throw new InvalidDataException("Embedded startup IL profile is empty.");
         if (document.ProfileId != "vs-1.22.7-win-x64" || document.Methods.Length != StartupTargets.Profile1227.Length)
             throw new InvalidDataException("Embedded startup IL profile identity is invalid.");
-        // Static archive inspection verified the complete library hash on both
-        // platforms, which also proves every recorded IL operand is shared.
-        if (document.GameAssemblySha256 != "E08F22B493B92FEAF0AAEB79D22437EA0F7EFC38AA7F72A04A47F98BC0E40DF0")
-            throw new InvalidDataException("Shared Windows/Linux startup IL library identity is invalid.");
+        if (document.GameAssemblySha256 != sha256)
+            throw new InvalidDataException("Embedded startup IL library identity is invalid.");
         return document;
     }
 }
