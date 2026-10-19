@@ -258,6 +258,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Flood-fill chunk visibility", "BfsChunkVisibility");
                 Switch("Indexed flood-fill visibility", "IndexedChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
+                Switch("Compute terrain draw preparation", "GpuTerrainDrawPreparation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");
                 Switch("Cull distant entity shadows", "EntityShadowCull");

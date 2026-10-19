@@ -37,6 +37,7 @@
     <Compile Include="VulkanDevice.Programs.cs" />
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
+    <Compile Include="VulkanDevice.TerrainDraws.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilTransfers.cs" />

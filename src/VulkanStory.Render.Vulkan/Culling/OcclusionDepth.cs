@@ -32,6 +32,11 @@ internal sealed class OcclusionDepth : IDisposable
     private int _program, _target;
     private Format _programFormat;
     private int _width, _height;
+    private int _mipProgram;
+    internal int GpuTexture => GpuCamera == null ? 0 : _target;
+    internal OcclusionCamera? GpuCamera { get; private set; }
+    internal int GpuWidth { get; private set; }
+    internal int GpuHeight { get; private set; }
     private OcclusionPyramid? _latest;
     private OcclusionPyramid? _spare;
     private readonly object _publicationGate = new();
@@ -60,9 +65,10 @@ internal sealed class OcclusionDepth : IDisposable
     /// Records the reduction of <paramref name="depthTexture" /> and its copy to the host into the open frame. The caller has
     /// finished drawing the occluders; the device closes any open rendering scope for the compute pass.
     /// </summary>
-    public bool Capture(int depthTexture, OcclusionCamera camera)
+    public bool Capture(int depthTexture, OcclusionCamera camera, bool prepareGpuDraws = false)
     {
         LastError = null;
+        GpuCamera = null;
         if (OcclusionProjection.From(camera.Projection) is not { } projection) return Fail("the projection is not a GL perspective matrix");
         if (camera.View is not { Length: >= 16 }) return Fail("the view matrix is missing");
         VulkanTexture? depth = _device.TextureOf(depthTexture);
@@ -85,6 +91,25 @@ internal sealed class OcclusionDepth : IDisposable
             },
             Dispatches = new[] { ComputeDispatch.Covering(1, (byte[])_push.Clone()) },
         })) return Fail(_device.GetError());
+
+        if (prepareGpuDraws)
+        {
+            if (_mipProgram == 0)
+                _mipProgram = _device.CreateComputeProgram(Source("pyramid.comp"), "occlusion-pyramid",
+                    [new ComputeSlot(0, ComputeSlotKind.Sampled), new ComputeSlot(1, ComputeSlotKind.Storage)], 0);
+            if (_mipProgram == 0) return Fail(_device.GetError());
+            uint levels = _device.TextureOf(_target)!.MipLevels;
+            for (uint level = 1; level < levels; level++)
+                if (!_device.RecordComputePass(new ComputePassDeclaration
+                {
+                    Name = "occlusion-pyramid", ProgramId = _mipProgram,
+                    Bindings = [new ComputeBinding(0, _target, ComputeAccess.Sampled, level - 1),
+                        new ComputeBinding(1, _target, ComputeAccess.StorageWrite, level)],
+                    Dispatches = [ComputeDispatch.Covering(1)],
+                })) return Fail(_device.GetError());
+            GpuCamera = camera;
+            GpuWidth = (int)depth.Width; GpuHeight = (int)depth.Height;
+        }
 
         int slot = _device.CurrentFrameSlot;
         ulong bytes = (ulong)width * (ulong)height * sizeof(float);
@@ -123,6 +148,7 @@ internal sealed class OcclusionDepth : IDisposable
     /// <summary>Drops pending captures and the published pyramid (a world change or a target rebuild).</summary>
     public void Reset()
     {
+        GpuCamera = null;
         Array.Clear(_pending);
         lock (_publicationGate) { _latest = null; _spare = null; }
     }
@@ -138,7 +164,9 @@ internal sealed class OcclusionDepth : IDisposable
         if (_target != 0 && _width == width && _height == height) return true;
         if (_target != 0) _device.DeleteTexture(_target);
         // Captures still in flight name the old target's bytes in the arena, not the texture, so they stay valid.
-        _target = _device.CreateStorageTexture(width, height, Format.R32Sfloat);
+        int levels = 1;
+        for (int extent = Math.Max(width, height); extent > 1; extent >>= 1) levels++;
+        _target = _device.CreateStorageTexture(width, height, Format.R32Sfloat, levels);
         _width = width; _height = height;
         return _target != 0 && _device.TextureOf(_target)?.Format == Format.R32Sfloat;
     }
@@ -157,7 +185,7 @@ internal sealed class OcclusionDepth : IDisposable
         return _program != 0 || Fail("occlusion reduce shader failed to compile: " + _device.GetError());
     }
 
-    private static string Source(string fileName)
+    internal static string Source(string fileName)
     {
         using Stream? stream = typeof(OcclusionDepth).Assembly.GetManifestResourceStream(ResourcePrefix + fileName);
         if (stream == null) throw new FileNotFoundException("embedded occlusion shader missing: " + ResourcePrefix + fileName);
@@ -178,7 +206,8 @@ internal sealed class OcclusionDepth : IDisposable
         for (int i = 0; i < _readbacks.Length; i++) { if (_readbacks[i] is { } buffer) _device.DeferBufferDeletion(buffer); _readbacks[i] = null; }
         if (_target != 0) _device.DeleteTexture(_target);
         if (_program != 0) _device.DeleteComputeProgram(_program);
-        _target = _program = 0;
+        if (_mipProgram != 0) _device.DeleteComputeProgram(_mipProgram);
+        _target = _program = _mipProgram = 0;
     }
 
     /// <summary>Forwards to the newest published pyramid; undecided (visible) while none exists.</summary>

@@ -287,6 +287,26 @@ internal sealed unsafe class ComputeDescriptorArena : IDisposable
         return set;
     }
 
+    /// <summary>Allocates image bindings followed by explicitly numbered storage-buffer bindings.</summary>
+    public DescriptorSet GetMixed(DescriptorSetLayout layout, ReadOnlySpan<ComputeImageWrite> images,
+        uint firstBufferBinding, ReadOnlySpan<DescriptorBufferInfo> buffers)
+    {
+        DescriptorSet set = Get(layout, images);
+        Span<WriteDescriptorSet> writes = buffers.Length <= MaxStackWrites
+            ? stackalloc WriteDescriptorSet[buffers.Length] : new WriteDescriptorSet[buffers.Length];
+        fixed (DescriptorBufferInfo* bufferPtr = buffers)
+        fixed (WriteDescriptorSet* writePtr = writes)
+        {
+            for (int i = 0; i < buffers.Length; i++) writes[i] = new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet, DstSet = set, DstBinding = firstBufferBinding + (uint)i,
+                DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = bufferPtr + i,
+            };
+            _context.Api.UpdateDescriptorSets(_context.Device, (uint)writes.Length, writePtr, 0, null);
+        }
+        return set;
+    }
+
     private DescriptorPool CreatePool()
     {
         var sizes = stackalloc DescriptorPoolSize[3]

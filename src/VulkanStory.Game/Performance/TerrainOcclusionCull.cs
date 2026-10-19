@@ -34,6 +34,7 @@ internal static class TerrainOcclusionCull
 
     /// <summary>The current camera position, or null without a world.</summary>
     internal static (double X, double Y, double Z)? CameraNow() => camera?.Invoke();
+    internal static void InvalidateDepth() => reset?.Invoke();
 
     /// <summary>The session's occlusion source, current camera position, depth capture and reset; nulls when no session renders.</summary>
     internal static void Attach(IOcclusionTest? test, Func<(double X, double Y, double Z)?>? currentCamera, Action? captureDepth, Action? resetDepth)
@@ -69,6 +70,7 @@ internal static class TerrainOcclusionCull
     private static void Postfix(ModelDataPoolLocation __instance, EnumFrustumCullMode mode, ref bool __result)
     {
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
+        if (GpuTerrainDraws.Collecting) return;
         if (PerformancePatchSet.Current?.TerrainOcclusionCull != true || source is not { Source: { } captured } test) return;
         if (camera?.Invoke() is not { } now) return;
         Interlocked.Increment(ref PerformanceCounters.OcclusionTests);

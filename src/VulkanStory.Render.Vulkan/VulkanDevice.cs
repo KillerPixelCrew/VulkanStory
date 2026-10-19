@@ -1602,6 +1602,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _programs.Clear();
         // Its texture and program go with the texture manager and the compute cache below.
         _occlusionDepth?.DisposeIdle();
+        DisposeTerrainInputsIdle();
         _occlusionDepth = null;
         _compute?.Dispose();
         // The shared pipeline layout before the table's set layout it names; the

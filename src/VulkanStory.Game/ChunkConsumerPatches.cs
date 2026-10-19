@@ -111,7 +111,7 @@ internal static class ChunkConsumerPatches
         bool motion = graphics.BeginCameraMotionWrite();
         try
         {
-            graphics.BeginChunkPool(name);
+            graphics.BeginChunkPool(name, mode);
             try { pool.Render(position, uniform, mode); }
             finally { graphics.EndChunkPool(); }
         }

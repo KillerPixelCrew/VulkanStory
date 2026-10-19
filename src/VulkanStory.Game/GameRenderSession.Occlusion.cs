@@ -21,7 +21,8 @@ internal sealed partial class GameRenderSession
         if (platform.FrameBuffers is not { Count: > 0 } buffers || buffers[0] is not { Disposed: false, DepthTextureId: > 0 } primary) return;
         float[] view = (float[])client.api.Render.CameraMatrixOriginf.Clone();
         float[] projection = (float[])client.api.Render.CurrentProjectionMatrix.Clone();
-        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, camera.X, camera.Y, camera.Z)))
+        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, camera.X, camera.Y, camera.Z),
+            Performance.PerformancePatchSet.Current is { TerrainOcclusionCull: true, GpuTerrainDrawPreparation: true }))
         {
             occlusionCaptureRefusal = null;
             return;

@@ -1,0 +1,19 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D sourceDepth;
+layout(binding = 1, r32f) uniform writeonly image2D farthestDepth;
+void main()
+{
+    ivec2 tile = ivec2(gl_GlobalInvocationID.xy), size = imageSize(farthestDepth);
+    if (any(greaterThanEqual(tile, size))) return;
+    ivec2 sourceSize = textureSize(sourceDepth, 0);
+    ivec2 first = tile * 2, last = min(first + 2, sourceSize);
+    // Vulkan mip extents round down. The last parent must also cover an odd trailing child.
+    if (tile.x == size.x - 1) last.x = sourceSize.x;
+    if (tile.y == size.y - 1) last.y = sourceSize.y;
+    float farthest = 0.0;
+    for (int y = first.y; y < last.y; y++)
+        for (int x = first.x; x < last.x; x++)
+            farthest = max(farthest, texelFetch(sourceDepth, ivec2(x, y), 0).r);
+    imageStore(farthestDepth, tile, vec4(farthest));
+}

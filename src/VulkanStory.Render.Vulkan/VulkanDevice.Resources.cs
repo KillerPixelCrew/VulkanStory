@@ -470,8 +470,11 @@ public sealed unsafe partial class VulkanDevice
     public int CreateRawMesh(VulkanStory.Contracts.RawMeshDefinition data) =>
         _meshUploads.CreateRawMesh(data);
     /// <summary>Updates each supplied mesh stream using its declared destination byte offset.</summary>
-    public void UpdateMesh(int meshId, VulkanStory.Contracts.MeshUploadData data) =>
+    public void UpdateMesh(int meshId, VulkanStory.Contracts.MeshUploadData data)
+    {
+        InvalidateTerrainGeometry(meshId);
         _meshUploads.UpdateMesh(meshId, data);
+    }
     /// <summary>Allocates mesh stream capacities and custom layouts without initial data.</summary>
     /// <remarks>All stream size arguments are bytes; the SSBO flag selects packed-face storage and the retained quad-index pattern.</remarks>
     public int CreateEmptyMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize,
@@ -481,13 +484,20 @@ public sealed unsafe partial class VulkanDevice
         _meshUploads.CreateEmptyMesh(xyzSize, normalsSize, uvSize, rgbaSize, flagsSize, indicesSize,
             customFloats, customShorts, customBytes, customInts, drawMode, staticDraw, ssbo);
     /// <summary>Writes packed face-record bytes into a mesh's SSBO-backed position slot.</summary>
-    public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize) =>
+    public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize)
+    {
+        InvalidateTerrainGeometry(meshId);
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
+    }
     /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
     internal void UpdateParticleHistory(int meshId, float[] values) => _meshes.UpdateParticleHistory(meshId, values);
 
     /// <summary>Removes the mesh and schedules its GPU-owned buffers for frame-safe deletion.</summary>
-    public void DeleteMesh(int meshId) => _meshes.Delete(meshId, _frames);
+    public void DeleteMesh(int meshId)
+    {
+        InvalidateTerrainGeometry(meshId, deleted: true);
+        _meshes.Delete(meshId, _frames);
+    }
 }
 
 /// <summary>Which draw command a native draw recorded, so the stats separate the kinds.</summary>
@@ -616,10 +626,16 @@ public sealed unsafe partial class VulkanDevice
     /// one place that converts them.
     /// </summary>
     internal bool DrawNativeMeshMulti(NativePipeline pipeline, int meshId, int[] indicesStarts, int[] indicesSizes,
-        int groupCount, ReadOnlySpan<NativeTexture> textures)
+        int groupCount, ReadOnlySpan<NativeTexture> textures, ReadOnlySpan<TerrainDrawBounds> terrainBounds = default,
+        double cameraX = 0, double cameraY = 0, double cameraZ = 0)
     {
         if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
+        VulkanBuffer? preparedBuffer = null;
+        if (!terrainBounds.IsEmpty) _terrainOccluderMeshes.Add(meshId);
+        ulong preparedOffset = 0;
+        bool prepared = !terrainBounds.IsEmpty && PrepareTerrainDraws(terrainBounds, indicesStarts, indicesSizes,
+            groupCount, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -628,7 +644,8 @@ public sealed unsafe partial class VulkanDevice
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.DrawMulti, pipeline.ProgramId, target!.Id, meshId));
 
-        VulkanBuffer indirect = AllocateIndirect(groupCount, out ulong indirectOffset);
+        ulong indirectOffset = preparedOffset;
+        VulkanBuffer indirect = prepared ? preparedBuffer! : AllocateIndirect(groupCount, out indirectOffset);
         if (RenderTrace.Enabled)
         {
             RenderTrace.Write("native multidraw mesh=" + meshId + " program=" + pipeline.ProgramId + " pass='" +
@@ -636,7 +653,12 @@ public sealed unsafe partial class VulkanDevice
                 " indirectOffset=" + indirectOffset);
         }
 
-        _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
+        if (prepared)
+        {
+            _meshes.Bind(commandBuffer, mesh!);
+            _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirect.Handle, indirectOffset, (uint)groupCount, 20);
+        }
+        else _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
         if (_gpuTimestamps != null)
         {
             long indices = 0;

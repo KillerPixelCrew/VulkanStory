@@ -688,6 +688,7 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     private void BeginIndirectFrame(int slot)
     {
+        if (_terrainInputOffsets.Length > slot) _terrainInputOffsets[slot] = 0;
         foreach (VulkanBuffer overflow in _indirectOverflow) _frames.DeferDeletion(overflow);
         _indirectOverflow.Clear();
         _indirectOverflowCursor = 0;
@@ -706,7 +707,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Per-frame dynamic data, so the ReBAR class (a miss falls through, counted).</summary>
     private VulkanBuffer CreateIndirectBuffer(ulong size) =>
         new(_context, size,
-            BufferUsageFlags.IndirectBufferBit,
+            BufferUsageFlags.IndirectBufferBit | BufferUsageFlags.StorageBufferBit,
             MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
             MemoryPoolClass.ReBar);
 
@@ -726,9 +727,11 @@ public sealed unsafe partial class VulkanDevice
     /// its slot's buffer continues in an overflow buffer, counted, and the slot
     /// grows at its next frame boundary.
     /// </summary>
-    private VulkanBuffer AllocateIndirect(int groupCount, out ulong offset)
+    private VulkanBuffer AllocateIndirect(int groupCount, out ulong offset, ulong alignment = 4)
     {
-        ulong needed = (ulong)Math.Max(groupCount, 1) * (ulong)sizeof(DrawIndexedIndirectCommand);
+        // Reserve padding inside this allocation; a compute descriptor may require a
+        // larger alignment than the four bytes required by vkCmdDrawIndexedIndirect.
+        ulong needed = (ulong)Math.Max(groupCount, 1) * (ulong)sizeof(DrawIndexedIndirectCommand) + alignment - 4;
         int slot = _indirectRing.Current;
 
         if (_indirectRing.NeedsBuffer(needed, out ulong capacity))
@@ -738,7 +741,11 @@ public sealed unsafe partial class VulkanDevice
             _indirectRing.Attach(capacity);
         }
 
-        if (_indirectRing.TryAllocate(needed, out offset)) return _indirectBuffers[slot]!;
+        if (_indirectRing.TryAllocate(needed, out offset))
+        {
+            offset = (offset + alignment - 1) / alignment * alignment;
+            return _indirectBuffers[slot]!;
+        }
 
         _indirectOverflows++;
         VulkanStats.NoteIndirectOverflow();
@@ -757,6 +764,7 @@ public sealed unsafe partial class VulkanDevice
 
         offset = _indirectOverflowCursor;
         _indirectOverflowCursor += needed;
+        offset = (offset + alignment - 1) / alignment * alignment;
         return current;
     }
 }
