@@ -20,8 +20,10 @@ internal static partial class GpuParticleSimulation
     private static readonly MethodInfo StockBoxes = AccessTools.Method(typeof(Block), nameof(Block.GetParticleCollisionBoxes),
         [typeof(IBlockAccessor), typeof(BlockPos)])!;
     private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid), Type.EmptyTypes)!;
+    private static readonly MethodInfo StockFlowStill = AccessTools.PropertyGetter(typeof(Vintagestory.GameContent.BlockForFluidsLayer), nameof(IBlockFlowing.IsStill))!;
+    private static readonly MethodInfo StockFlowPush = AccessTools.Method(typeof(Vintagestory.GameContent.BlockForFluidsLayer), nameof(IBlockFlowing.GetPushVector), [typeof(BlockPos)])!;
     private static readonly Dictionary<Type, bool> stockBoxTypes = new();
-    private static readonly Dictionary<Type, bool> stockFlowTypes = new();
+    private static readonly Dictionary<Type, MethodInfo[]?> stockFlowTypes = new();
     private static readonly Dictionary<Type, bool> stockLiquidTypes = new();
     internal static bool HasStockLiquid(Block block)
     {
@@ -40,18 +42,54 @@ internal static partial class GpuParticleSimulation
         lock (stockFlowTypes)
         {
             var type = block.GetType();
-            if (stockFlowTypes.TryGetValue(type, out bool supported)) return supported;
-            var map = type.GetInterfaceMap(typeof(IBlockFlowing));
-            supported = true;
-            for (int i = 0; i < map.InterfaceMethods.Length; i++)
+            if (!stockFlowTypes.TryGetValue(type, out var methods))
             {
-                if (map.InterfaceMethods[i].Name is not ("get_IsStill" or "GetPushVector")) continue;
-                var method = map.TargetMethods[i];
-                supported &= method.DeclaringType == typeof(Vintagestory.GameContent.BlockForFluidsLayer) &&
-                    Harmony.GetPatchInfo(method)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) != true;
+                var map = type.GetInterfaceMap(typeof(IBlockFlowing));
+                int still = Array.FindIndex(map.InterfaceMethods, method => method.Name == "get_IsStill");
+                int push = Array.FindIndex(map.InterfaceMethods, method => method.Name == nameof(IBlockFlowing.GetPushVector));
+                methods = still >= 0 && push >= 0 &&
+                    IsStockFlowTarget(map.TargetMethods[still], StockFlowStill) &&
+                    IsStockFlowTarget(map.TargetMethods[push], StockFlowPush)
+                    ? [map.TargetMethods[still], map.TargetMethods[push]] : null;
+                stockFlowTypes[type] = methods;
             }
-            return stockFlowTypes[type] = supported;
+            // Cache only structural identity. Patches installed after admission
+            // must still refuse both the interface stub and its stock callee.
+            return methods != null && !HasForeignFlowPatch(methods[0]) && !HasForeignFlowPatch(methods[1]) &&
+                !HasForeignFlowPatch(StockFlowStill) && !HasForeignFlowPatch(StockFlowPush);
         }
+    }
+    private static bool HasForeignFlowPatch(MethodInfo method) =>
+        Harmony.GetPatchInfo(method)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) == true;
+
+    private static bool IsStockFlowTarget(MethodInfo method, MethodInfo stock)
+    {
+        if (method.Module == stock.Module && method.MetadataToken == stock.MetadataToken && method.DeclaringType == stock.DeclaringType) return true;
+        if (method.IsStatic || method.IsGenericMethod || method.ContainsGenericParameters ||
+            method.CallingConvention != stock.CallingConvention || method.ReturnType != stock.ReturnType ||
+            method.DeclaringType == null || !stock.DeclaringType!.IsAssignableFrom(method.DeclaringType)) return false;
+        var parameters = method.GetParameters(); var stockParameters = stock.GetParameters();
+        if (parameters.Length != stockParameters.Length) return false;
+        for (int i = 0; i < parameters.Length; i++)
+            if (parameters[i].ParameterType != stockParameters[i].ParameterType) return false;
+        try
+        {
+            // Official 1.22.7 water classes explicitly implement IsStill with
+            // ldarg.0; call BlockForFluidsLayer.get_IsStill; ret. Accept only
+            // an exact argument-forwarding nonvirtual call to the named base.
+            var body = method.GetMethodBody(); var il = body?.GetILAsByteArray();
+            int call = parameters.Length + 1;
+            if (body == null || body.LocalVariables.Count != 0 || body.ExceptionHandlingClauses.Count != 0 ||
+                il == null || il.Length != call + 6) return false;
+            for (int i = 0; i < call; i++)
+                if (il[i] != 0x02 + i) return false; // ldarg.0, then ldarg.1 for GetPushVector
+            if (il[call] != 0x28 || il[^1] != 0x2a) return false; // call, ret; never callvirt or extra work
+            var callee = method.Module.ResolveMethod(BitConverter.ToInt32(il, call + 1));
+            return callee is MethodInfo target && target.Module == stock.Module &&
+                target.MetadataToken == stock.MetadataToken && target.DeclaringType == stock.DeclaringType;
+        }
+        catch (Exception exception) when (exception is ArgumentException or BadImageFormatException or InvalidOperationException or NotSupportedException)
+        { return false; }
     }
     private static bool HasStockBoxes(Block block)
     {
