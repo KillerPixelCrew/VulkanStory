@@ -28,7 +28,12 @@ internal sealed partial class GameGraphicsAdapter
         if (quad && !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[1]))
         { RenderMeshInstanced(mesh, quantity); return; }
         int handle = MeshHandle(vao);
-        if (!quad) renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame));
+        if (!quad)
+        {
+            bool deferSize = renderer.CanPrepareParticleVisuals(handle, quantity);
+            renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame, deferSize));
+            renderer.SetParticleVisualHistory(handle, ParticleMotionHistory.PreviousVisualSizes(mesh));
+        }
         int layout = renderer.NativeMeshLayoutId(handle);
         RenderTargetFormats? all = renderer.NativeTargetFormats(CurrentTargetId, uint.MaxValue);
         if (layout < 0 || all == null) { RenderMeshInstanced(mesh, quantity); return; }

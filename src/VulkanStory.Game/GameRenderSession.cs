@@ -191,6 +191,7 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.OcclusionDepth.ReuseStorage = services.RendererSettings.Settings.OcclusionStorageReuse;
             Device.ComputeDeformationEnabled = services.RendererSettings.Settings.GpuSharedDeformation;
             Device.ComputeParticleGeometryEnabled = services.RendererSettings.Settings.GpuParticleGeometry;
+            Device.ComputeParticleVisualsEnabled = services.RendererSettings.Settings.GpuParticleVisualSimulation;
             Device.ComputeJointPosesEnabled = services.RendererSettings.Settings.GpuJointPosePreparation;
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
             pendingFrameSettings = null;

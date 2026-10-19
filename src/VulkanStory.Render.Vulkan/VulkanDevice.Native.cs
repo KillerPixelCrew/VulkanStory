@@ -660,6 +660,7 @@ public sealed unsafe partial class VulkanDevice
 
         // Decided before the scope opens, since it decides the depth attachment's layout.
         PrepareProgramJointPoses(program);
+        PrepareParticleVisuals(meshId, instanceCount);
         PrepareSharedDeformation(program, meshId);
         PrepareParticleGeometry(program, meshId, instanceCount);
         bool stencilWritable = pipeline.Description.StencilTest && bound.Stencil.TextureId != 0 &&

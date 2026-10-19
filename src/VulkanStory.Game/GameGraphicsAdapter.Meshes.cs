@@ -68,9 +68,14 @@ internal sealed partial class GameGraphicsAdapter
             GameMeshLayout.DrawMode(mode), staticDraw, false), indices, mode, !staticDraw);
     internal void UpdateMesh(MeshRef mesh, MeshData data)
     {
-        ParticleMotionHistory.Uploaded(mesh, data);
         var renderer = RequireDevice();
         int handle = MeshHandle((VAO)mesh);
+        var visuals = Performance.GpuParticleVisuals.Pending(data);
+        if (visuals is not { Deferred: > 0 } || data.CustomFloats?.BaseOffset != 0 || data.CustomBytes?.BaseOffset != 0 ||
+            data.CustomFloats?.Values is not { } floats || data.CustomBytes?.Values is not { } bytes ||
+            !renderer.SetParticleVisuals(handle, visuals.Values, floats, bytes, visuals.Count, Performance.GpuParticleVisuals.Trigonometry))
+        { renderer.ClearParticleVisuals(handle); Performance.GpuParticleVisuals.Materialize(data); }
+        ParticleMotionHistory.Uploaded(mesh, data);
         var layout = GameMeshLayout.Capture(data);
         // A partially failed upload must not leave previous geometry certified.
         Meshes.GetValue((VAO)mesh, _ => throw new InvalidOperationException("Updated mesh lost its owner.")).GeometryRevision++;

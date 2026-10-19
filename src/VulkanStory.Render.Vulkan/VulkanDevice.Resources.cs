@@ -614,6 +614,7 @@ public sealed unsafe partial class VulkanDevice
         }
 
         _meshes.Bind(commandBuffer, mesh!);
+        BindParticleVisuals(commandBuffer, meshId);
         if (entityDraw)
         {
             _context.Api.CmdDrawIndexedIndirect(commandBuffer, entityCommands!.Handle, entityOffset, 1, 20);

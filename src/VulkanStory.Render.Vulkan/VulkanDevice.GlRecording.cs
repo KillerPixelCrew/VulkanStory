@@ -64,7 +64,9 @@ public sealed unsafe partial class VulkanDevice
         RetireJointPoses(all: !ComputeJointPosesEnabled);
         RetireWorldGeometry(all: !ComputeDeformationEnabled);
         RetireParticleGeometry(all: !ComputeParticleGeometryEnabled);
+        RetireParticleVisuals();
         CollectJointCheck(slot.Index);
+        CollectParticleVisualCheck(slot.Index);
         _descriptorArenas[slot.Index].Reset();
         _computeArenas[slot.Index].Reset();
         _resourceAge.NoteFrame(ResourceIds.Highest);

@@ -111,6 +111,15 @@ internal sealed class HeadlessScenario
             ["worldGeometryCacheReuses"] = (JsonValueKind.Number, false),
             ["particleGeometryDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["particleGeometryCacheReuses"] = (JsonValueKind.Number, false),
+            ["particleVisualDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["particleVisualChecks"] = (JsonValueKind.Number, false),
+            ["particleVisualChecksPassed"] = (JsonValueKind.True, false),
+            ["particleVisualMaximumError"] = (JsonValueKind.Number, false),
+            ["particleVisualMaximumColorError"] = (JsonValueKind.Number, false),
+            ["particleVisualFunctionCoverage"] = (JsonValueKind.Number, false),
+            ["cpuParticlePropertiesDeferred"] = (JsonValueKind.Number, false),
+            ["cpuParticleFacadeChecks"] = (JsonValueKind.Number, false),
+            ["cpuParticleFacadeValid"] = (JsonValueKind.True, false),
             ["jointPoseChecks"] = (JsonValueKind.Number, false),
             ["jointPoseChecksPassed"] = (JsonValueKind.True, false),
             ["jointPoseMaximumRelativeError"] = (JsonValueKind.Number, false),
@@ -142,6 +151,7 @@ internal sealed class HeadlessScenario
         "jointPoseDispatchesRecorded", "jointPoseCacheReuses", "jointPoseChecks", "cpuJointProductsDeferred", "cpuJointFacadeChecks",
         "worldGeometryDispatchesRecorded", "worldGeometryCacheReuses",
         "particleGeometryDispatchesRecorded", "particleGeometryCacheReuses",
+        "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
         "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded"
     };
 

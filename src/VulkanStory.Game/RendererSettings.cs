@@ -99,6 +99,8 @@ internal sealed record RendererSettings
     public bool GpuSharedDeformation { get; init; } = true;
     /// <summary>Produces supported cube-particle current/previous geometry in compute.</summary>
     public bool GpuParticleGeometry { get; init; } = true;
+    /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
+    public bool GpuParticleVisualSimulation { get; init; } = true;
     /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
     public bool GpuJointPosePreparation { get; init; } = true;
     /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
@@ -183,6 +185,7 @@ internal sealed record RendererSettings
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
         GpuSharedDeformation = source.GpuSharedDeformation,
         GpuParticleGeometry = source.GpuParticleGeometry,
+        GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
         GpuJointPosePreparation = source.GpuJointPosePreparation,
         GpuEntityDrawPreparation = source.GpuEntityDrawPreparation,
         EntityOcclusionCull = source.EntityOcclusionCull,

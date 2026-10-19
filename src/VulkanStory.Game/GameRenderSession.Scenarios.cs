@@ -697,6 +697,15 @@ internal sealed partial class GameRenderSession
         Aggregate("worldGeometryCacheReuses", Device.WorldGeometryCacheReuses);
         Aggregate("particleGeometryDispatchesRecorded", Device.ParticleGeometryDispatchesRecorded);
         Aggregate("particleGeometryCacheReuses", Device.ParticleGeometryCacheReuses);
+        Aggregate("particleVisualDispatchesRecorded", Device.ParticleVisualDispatchesRecorded);
+        Aggregate("particleVisualChecks", Device.ParticleVisualChecks);
+        Aggregate("particleVisualChecksPassed", Device.ParticleVisualChecksPassed);
+        Aggregate("particleVisualMaximumError", Device.ParticleVisualMaximumError);
+        Aggregate("particleVisualMaximumColorError", Device.ParticleVisualMaximumColorError);
+        Aggregate("particleVisualFunctionCoverage", Device.ParticleVisualFunctionCoverage);
+        Aggregate("cpuParticlePropertiesDeferred", Performance.GpuParticleVisuals.DeferredProperties);
+        Aggregate("cpuParticleFacadeChecks", Performance.GpuParticleVisuals.CpuFacadeChecks);
+        Aggregate("cpuParticleFacadeValid", Performance.GpuParticleVisuals.CpuFacadeValid);
         Aggregate("jointPoseDispatchesRecorded", Device.JointPoseDispatchesRecorded);
         Aggregate("jointPoseCacheReuses", Device.JointPoseCacheReuses);
         Aggregate("jointPoseChecks", Device.JointPoseChecks);

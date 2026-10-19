@@ -72,6 +72,8 @@ public sealed unsafe partial class VulkanDevice
             history.Buffer.Size < history.Offset + (ulong)(instances - 1) * history.Stride + 44) return 0;
         uint vertexCount = (uint)((vertices.Buffer.Size - vertices.Offset - 12) / vertices.Stride + 1);
         if (vertexCount is 0 or > 128 || (ulong)vertexCount * (uint)instances > 1048576) return 0;
+        current = VisualParticleInput(meshId, 4, current);
+        history = VisualParticleInput(meshId, 9, history);
         Span<byte> parameters = stackalloc byte[172]; parameters.Clear();
         if (!ReadGeometryWarpState(program, false, parameters[..64]) || !ReadGeometryWarpState(program, true, parameters.Slice(64, 64))) return 0;
         var push = MemoryMarshal.Cast<byte, uint>(parameters[128..]);
