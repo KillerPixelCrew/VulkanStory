@@ -40,7 +40,7 @@ internal sealed partial class GameGraphicsAdapter
             ulong ssaoTargets = ssao ? checked(3 * Image(width / 2, height / 2, Format.R8G8B8A8Unorm)) : 0;
             // Separate full-resolution SDK motion resolve; never aliases the
             // Primary motion guide that the resolve samples.
-            commonWorkspaceBaseBytes = checked(primary + transparent + liquidDepth + ssaoTargets + half);
+            commonWorkspaceBaseBytes = checked(primary + transparent + liquidDepth + ssaoTargets + 3 * half + Image(width, height, Format.D32Sfloat));
             commonWorkspaceOitBytes = checked(unorm + Image(width, height, Format.R16G16B16A16Sfloat, 3));
             commonWorkspaceWidth = width;
             commonWorkspaceHeight = height;
@@ -77,6 +77,8 @@ internal sealed partial class GameGraphicsAdapter
             foreach (int index in new[] { NativeSsaoTargetIndex, NativeSsaoBlurVerticalIndex, NativeSsaoBlurHorizontalIndex })
                 if (Live(index) is { ColorTextureIds.Length: > 0 } target) Credit(target.ColorTextureIds[0]);
             if (Live(SdkMotionIndex) is { ColorTextureIds.Length: > 0 } sdkMotion) Credit(sdkMotion.ColorTextureIds[0]);
+            if (Live(QuadMotionIndex) is { ColorTextureIds.Length: > 0 } quadMotion)
+            { Credit(quadMotion.ColorTextureIds[0]); Credit(quadMotion.DepthTextureId); }
 
             FrameBufferRef? Live(int index) => index >= 0 && index < targets.Count &&
                 targets[index] is { Disposed: false } target ? target : null;

@@ -42,6 +42,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
     float fogDensityIn;
     mat4 projectionMatrix;
     mat4 modelViewMatrix;
+    mat4 prevModelViewMatrix;
     int vsComputeQuadGeometry;
 
     float prevTimeCounter;
@@ -112,7 +113,7 @@ void main()
 
 	vec4 cameraPos, shadowPosition;
 	if (vsComputeQuadGeometry > 0) {
-		int record = (gl_InstanceIndex * vsComputeQuadGeometry + gl_VertexIndex) * 6;
+		int record = (gl_InstanceIndex * vsComputeQuadGeometry + gl_VertexIndex) * 7;
 		cameraPos = vsParticleGeometry.values[record];
 		shadowPosition = vsParticleGeometry.values[record + 1];
 		mvmat = mat4(vsParticleGeometry.values[record + 2], vsParticleGeometry.values[record + 3], vsParticleGeometry.values[record + 4], vsParticleGeometry.values[record + 5]);

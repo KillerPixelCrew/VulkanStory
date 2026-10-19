@@ -457,6 +457,7 @@ internal sealed partial class GameRenderSession : IDisposable
             graphics?.ReleaseTaaSampleTargets();
             graphics?.ReleasePreviousAnimations();
             graphics?.ReleaseLiquidMotionProgram();
+            graphics?.ReleaseQuadMotionProgram();
             graphics?.ReloadSceneGodRaysProgram();
             upscalers?.Dispose(); upscalers = null;
             // Device disposal waits owned GPU work/presentation while SDL lives.

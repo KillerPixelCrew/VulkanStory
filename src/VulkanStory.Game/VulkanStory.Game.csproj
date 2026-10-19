@@ -8,6 +8,7 @@
     <ProjectReference Include="../VulkanStory.Contracts/VulkanStory.Contracts.csproj" />
     <ProjectReference Include="../VulkanStory.Input/VulkanStory.Input.csproj" />
     <ProjectReference Include="../VulkanStory.Render.Vulkan/VulkanStory.Render.Vulkan.csproj" />
+    <EmbeddedResource Include="../../shaders/native/include/quad.glsl" LogicalName="VulkanStory.Game.Shaders.vulkanstory-quad.ash" />
     <EmbeddedResource Include="../../profiles/vs-1.22.7-startup-il.json" LogicalName="VulkanStory.Game.Profiles.Startup1227.json" />
     <EmbeddedResource Include="../../profiles/vs-1.22.7-startup-il-serpih.json" LogicalName="VulkanStory.Game.Profiles.Startup1227Serpih.json" />
     <EmbeddedResource Include="Shaders/*.vsh;Shaders/*.fsh;Shaders/*.ash" LogicalName="VulkanStory.Game.Shaders.%(Filename)%(Extension)" />

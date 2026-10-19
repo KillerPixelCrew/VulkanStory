@@ -26,7 +26,7 @@ internal static class HeadlessParticleEvolution
                     MinQuantity = 8, AddQuantity = 0, ParticleModel = model,
                     MinPos = api.World.Player.Entity.Pos.XYZ.Add((function % 4 - 1.5) * 0.35, 1.3 + function / 4 * 0.2, 3),
                     AddPos = new Vec3d(0.1, 0.1, 0.1), MinVelocity = new Vec3f(0, 0.2f, 0), AddVelocity = new Vec3f(0.05f, 0.1f, 0.05f),
-                    MinSize = 2, MaxSize = 2, Color = ColorUtil.ToRgba(192, 88, 68, 48), LifeLength = 4,
+                    MinSize = 2, MaxSize = 2, Color = ColorUtil.ToRgba(model == EnumParticleModel.Quad ? 255 : 192, 88, 68, 48), LifeLength = 4,
                     GravityEffect = 0.02f, LightEmission = int.MaxValue, WithTerrainCollision = true,
                     VertexFlags = model == EnumParticleModel.Quad && function % 2 == 0 ? int.MinValue : 0,
                     SizeEvolve = Evolution(function, factor, 2.05f), OpacityEvolve = Evolution(function, factor, 210),

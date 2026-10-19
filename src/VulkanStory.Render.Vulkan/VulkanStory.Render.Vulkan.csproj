@@ -166,7 +166,7 @@
     <EmbeddedResource Include="../../shaders/native/geometry/*.comp">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl">
+    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl">
       <LogicalName>shaders-vk/include/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>

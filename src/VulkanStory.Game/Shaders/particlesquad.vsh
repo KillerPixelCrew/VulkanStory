@@ -22,6 +22,16 @@ uniform float fogMinIn;
 uniform float fogDensityIn;
 uniform mat4 projectionMatrix;
 uniform mat4 modelViewMatrix;
+uniform mat4 prevModelViewMatrix;
+#if defined(VULKANSTORY_QUAD_MOTION)
+uniform mat4 prevProjectionMatrix;
+layout(location = 9) in vec3 previousParticlePosition;
+layout(location = 10) in vec3 previousParticleScale;
+layout(location = 11) in vec4 previousParticleDirection;
+layout(location = 12) in float particleHistoryValid;
+out vec4 quadPreviousClip;
+flat out float quadHistoryValid;
+#endif
 
 out vec4 color;
 out vec4 rgbaFog;
@@ -34,6 +44,7 @@ out vec2 uv;
 #include shadowcoords.vsh
 #include fogandlight.vsh
 #include vertexwarp.vsh
+#include vulkanstory-quad.ash
 
 mat4 rotationZ( in float angle ) {
     return mat4(    cos(angle),        -sin(angle),    0,    0,
@@ -60,7 +71,7 @@ void main()
 
     vec4 cameraPos, shadowPosition;
     if (vsComputeQuadGeometry > 0) {
-        int record = (gl_InstanceID * vsComputeQuadGeometry + gl_VertexID) * 6;
+        int record = (gl_InstanceID * vsComputeQuadGeometry + gl_VertexID) * 7;
         cameraPos = vsParticleGeometry.values[record];
         shadowPosition = vsParticleGeometry.values[record + 1];
         mvmat = mat4(vsParticleGeometry.values[record + 2], vsParticleGeometry.values[record + 3], vsParticleGeometry.values[record + 4], vsParticleGeometry.values[record + 5]);
@@ -113,6 +124,14 @@ void main()
     }
 
     calcShadowMapCoords(mvmat, shadowPosition);
+#if defined(VULKANSTORY_QUAD_MOTION)
+    quadHistoryValid = particleHistoryValid;
+    vec4 previousCamera;
+    if (vsComputeQuadGeometry > 0) previousCamera = vsParticleGeometry.values[(gl_InstanceID * vsComputeQuadGeometry + gl_VertexID) * 7 + 6];
+    else previousCamera = vsQuadBillboard(prevModelViewMatrix, previousParticlePosition, previousParticleDirection.xyz, rainParticle) *
+        vsQuadWarp(previousWarpState(), vertexPosition * previousParticleScale, rainParticle, renderFlags);
+    quadPreviousClip = prevProjectionMatrix * previousCamera;
+#endif
 
     // 4. Done.
     gl_Position = projectionMatrix * cameraPos;

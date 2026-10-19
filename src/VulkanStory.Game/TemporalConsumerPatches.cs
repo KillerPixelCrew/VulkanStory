@@ -107,11 +107,12 @@ internal static class TemporalConsumerPatches
         {
             bool transparentRendered = __instance.doTransparentRenderPass;
             bool liquid = !transparentRendered || graphics.RenderLiquidMotion(__instance, owner);
-            if (liquid && graphics.UsesFsr3Inputs)
+            bool quad = !transparentRendered || graphics.ComposeQuadParticleMotion(owner);
+            if (liquid && quad && graphics.UsesFsr3Inputs)
                 graphics.CaptureFsr3MaterialInputs(transparentRendered);
             bool sky = graphics.RenderSkyMotion(owner, transparentRendered);
-            complete = liquid && sky;
-            tailFailure = !liquid && !sky ? "liquid and sky motion passes declined" :
+            complete = liquid && quad && sky;
+            tailFailure = !quad ? "quad particle motion pass declined" : !liquid && !sky ? "liquid and sky motion passes declined" :
                 !liquid ? "liquid motion pass declined" : !sky ? "sky motion pass declined" : null;
         }
         else if (tailFailure == null) tailFailure = graphics.CompiledMotionStatus;

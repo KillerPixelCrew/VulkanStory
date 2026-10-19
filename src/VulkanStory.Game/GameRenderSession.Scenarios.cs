@@ -24,6 +24,7 @@ internal sealed partial class GameRenderSession
         ?? throw new InvalidOperationException("Scenario output directory is not configured.");
     private static readonly bool NativeTaaInputCapture =
         Environment.GetEnvironmentVariable("VULKANSTORY_NATIVE_TAA_INPUTS") == "1";
+    private static readonly bool QuadMotionInputCapture = Environment.GetEnvironmentVariable("VULKANSTORY_QUAD_MOTION_INPUTS") == "1";
     private static readonly bool SrInputCapture =
         Environment.GetEnvironmentVariable("VULKANSTORY_SR_INPUTS") == "1";
     private bool SrInputCaptureScheduled => SrInputCapture && HeadlessHarnessOptions.Enabled &&
@@ -35,6 +36,7 @@ internal sealed partial class GameRenderSession
     // later, so its ordinary post-frame dump cannot represent the TAA input.
     private void CaptureNativeTaaInputs()
     {
+        CaptureQuadMotionInputs();
         if (!NativeTaaInputCapture || !HeadlessHarnessOptions.Enabled ||
             !services.RendererSettings.EffectiveTaa || scenarioTick == null ||
             HeadlessHarnessOptions.Scenario is not { } scenario || PrimaryTarget is not { } primary) return;
@@ -47,6 +49,46 @@ internal sealed partial class GameRenderSession
             if (platform.FrameBuffers.Count > readIndex && platform.FrameBuffers[readIndex] is { } read)
                 DumpNativeTaaTarget(directory, readIndex, "TaaRead", read, false);
             DumpNativeTaaWindowProbes(Path.Combine(directory, "window"), Graphics.TaaSampleReadTargets);
+        }
+    }
+
+    private void CaptureQuadMotionInputs()
+    {
+        if (!QuadMotionInputCapture || !HeadlessHarnessOptions.Enabled || scenarioTick == null || PrimaryTarget is not { } primary ||
+            Graphics.FrameState.MotionAttachment < 0 || platform.FrameBuffers.Count <= GameGraphicsAdapter.QuadMotionIndex ||
+            platform.FrameBuffers[GameGraphicsAdapter.QuadMotionIndex] is not { } layer || HeadlessHarnessOptions.Scenario is not { } scenario) return;
+        var captures = scenario.Actions.Where(action => action.Tick == scenarioTick && action.Kind == HeadlessScenarioActionKind.Capture).ToArray();
+        if (captures.Length == 0) return;
+        var quad = Device.ReadTextureForParity(layer.ColorTextureIds[0]);
+        var quadDepth = Device.ReadTextureForParity(layer.DepthTextureId);
+        var motion = Device.ReadTextureForParity(primary.ColorTextureIds[Graphics.FrameState.MotionAttachment]);
+        var depth = Device.ReadTextureForParity(primary.DepthTextureId);
+        if (quad?.Floats is not { } vectors || quadDepth?.Floats is not { } sourceDepth || motion?.Floats is not { } scene || depth?.Floats is not { } sceneDepth)
+            throw new InvalidOperationException("Quad particle motion readback is unavailable.");
+        int pixels = quad.Width * quad.Height;
+        if (vectors.Length < pixels * 4 || scene.Length < pixels * 4 || sourceDepth.Length < pixels || sceneDepth.Length < pixels)
+            throw new InvalidOperationException("Quad particle motion readback size differs from the scene.");
+        int sourceStride = sourceDepth.Length >= pixels * 4 ? 4 : 1, sceneStride = sceneDepth.Length >= pixels * 4 ? 4 : 1;
+        long writers = 0, matched = 0; double maximumError = 0;
+        for (int i = 0; i < pixels; i++)
+        {
+            int at = i * 4;
+            if (vectors[at + 2] <= 0 || vectors[at + 3] <= 0) continue;
+            writers++;
+            float actualDepth = sourceDepth[i * sourceStride];
+            if (sceneDepth[i * sceneStride] != actualDepth ||
+                Math.Abs(scene[at + 3] - actualDepth) > Math.Max(0.0002f, 0.0008f * actualDepth)) continue;
+            double error = Math.Max(Math.Abs((double)vectors[at] - scene[at]), Math.Abs((double)vectors[at + 1] - scene[at + 1]));
+            maximumError = Math.Max(maximumError, double.IsFinite(error) ? error : double.MaxValue);
+            if (error <= 0.01) matched++;
+        }
+        foreach (var action in captures)
+        {
+            string directory = Path.Combine(ScenarioOutputDirectory, "scenario-captures", action.Name!);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "quad-motion.json"), JsonSerializer.Serialize(new
+            { frameId = Device.LatencyFrameId, writers, matched, maximumError, width = quad.Width, height = quad.Height,
+                meaning = "Tracked quad vectors and matching depth present at the actual TAA input seam." }));
         }
     }
 
@@ -697,6 +739,9 @@ internal sealed partial class GameRenderSession
         Aggregate("worldGeometryCacheReuses", Device.WorldGeometryCacheReuses);
         Aggregate("particleGeometryDispatchesRecorded", Device.ParticleGeometryDispatchesRecorded);
         Aggregate("quadGeometryDispatchesRecorded", Device.QuadGeometryDispatchesRecorded);
+        Aggregate("quadMotionDrawsRecorded", Graphics.QuadMotionDrawsRecorded);
+        Aggregate("quadMotionCompositesRecorded", Graphics.QuadMotionCompositesRecorded);
+        Aggregate("quadMotionValidInstances", Graphics.QuadMotionValidInstances);
         Aggregate("particleGeometryCacheReuses", Device.ParticleGeometryCacheReuses);
         Aggregate("particleVisualDispatchesRecorded", Device.ParticleVisualDispatchesRecorded);
         Aggregate("particleVisualChecks", Device.ParticleVisualChecks);

@@ -10,6 +10,18 @@ public sealed unsafe partial class VulkanDevice
 {
     private int quadGeometryProgram;
     internal long QuadGeometryDispatchesRecorded { get; private set; }
+    internal bool ProgramComputeWarpCompatible(int programId) => _programs.TryGetValue(programId, out var program) && program.ComputeWarpCompatible;
+    internal void CopyQuadMotionUniforms(int sourceId, int targetId)
+    {
+        if (!_programs.TryGetValue(sourceId, out var source) || !_programs.TryGetValue(targetId, out var target)) return;
+        Span<byte> values = stackalloc byte[64];
+        foreach (var member in target.Interface.Members)
+            if (member.ArrayLength == 0 && member.Size <= values.Length && CopyWorldUniform(source, member.Name, member.Type.Name, values[..member.Size]))
+                Write(targetId, target.ApiLocationOf(member.Name), values[..member.Size]);
+        foreach (var member in target.Interface.PushMembers)
+            if (member.ArrayLength == 0 && member.Size <= values.Length && CopyWorldUniform(source, member.Name, member.Type.Name, values[..member.Size]))
+                Write(targetId, target.ApiLocationOf(member.Name), values[..member.Size]);
+    }
 
     private int TryPrepareQuadGeometry(ShaderProgramResources program, int meshId, int instances)
     {
@@ -28,53 +40,61 @@ public sealed unsafe partial class VulkanDevice
         uint vertexCount = (uint)((vertices.Buffer.Size - vertices.Offset - 12) / vertices.Stride + 1);
         if (vertexCount is 0 or > 128 || (ulong)vertexCount * (uint)instances > 1048576) return 0;
         current = VisualParticleInput(meshId, 4, current);
-        Span<byte> parameters = stackalloc byte[172]; parameters.Clear();
+        Span<byte> parameters = stackalloc byte[312]; parameters.Clear();
         if (!CopyWorldUniform(program, "modelViewMatrix", "mat4", parameters[..64]) ||
             !ReadGeometryWarpState(program, false, parameters.Slice(64, 64))) return 0;
         foreach (float value in MemoryMarshal.Cast<byte, float>(parameters[..64])) if (!float.IsFinite(value)) return 0;
-        var push = MemoryMarshal.Cast<byte, uint>(parameters[128..]);
+        bool hasHistory = TryParticleInput(mesh, 9, Format.R32G32B32Sfloat, true, out var history) &&
+            history.Buffer.Size >= history.Offset + (ulong)(instances - 1) * history.Stride + 44 &&
+            CopyWorldUniform(program, "prevModelViewMatrix", "mat4", parameters.Slice(128, 64)) &&
+            ReadGeometryWarpState(program, true, parameters.Slice(192, 64)) && BitConverter.ToSingle(parameters.Slice(188, 4)) != 0;
+        if (hasHistory) history = VisualParticleInput(meshId, 9, history); else history = current;
+        var push = MemoryMarshal.Cast<byte, uint>(parameters[256..]);
         push[0] = vertexCount; push[1] = (uint)instances; push[2] = vertices.Stride / 4; push[3] = vertices.Offset / 4;
         push[4] = current.Stride / 4; push[5] = current.Offset / 4; push[6] = flags.Stride / 4; push[7] = flags.Offset / 4;
         push[8] = direction.Stride / 4; push[9] = direction.Offset / 4; push[10] = (uint)program.WorldWarpWaving!.Value;
+        push[11] = history.Stride / 4; push[12] = history.Offset / 4; push[13] = hasHistory ? 1u : 0u;
         var hash = new HashCode(); hash.AddBytes(parameters);
         var key = new ParticleGeometryKey(mesh, mesh.GeometryRevision, instances, hash.ToHashCode(), true);
         if (particleGeometry.TryGetValue(key, out var versions))
             foreach (var geometry in versions)
                 if (parameters.SequenceEqual(geometry.Parameters))
                 { geometry.Frame = _frameCounter; ParticleGeometryCacheReuses++; drawParticleGeometry = geometry.Buffer; return (int)vertexCount; }
-        ulong size = (ulong)vertexCount * (uint)instances * 96;
+        ulong size = (ulong)vertexCount * (uint)instances * 112;
         var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
         if (particleGeometryBytes + size + (ulong)parameters.Length > 32UL << 20 || size > limits.MaxStorageBufferRange ||
             vertices.Buffer.Size > limits.MaxStorageBufferRange || current.Buffer.Size > limits.MaxStorageBufferRange ||
             flags.Buffer.Size > limits.MaxStorageBufferRange || direction.Buffer.Size > limits.MaxStorageBufferRange ||
-            !_frames.Current.TryAllocateUniforms(128, out var state)) return 0;
+            history.Buffer.Size > limits.MaxStorageBufferRange || !_frames.Current.TryAllocateUniforms(256, out var state)) return 0;
         if (quadGeometryProgram == 0)
         {
             string source = ReadWorldShader("geometry/quads.comp");
-            foreach (string include in new[] { "vertexflagbits.glsl", "noise3d.glsl", "warpstate.glsl" })
+            foreach (string include in new[] { "vertexflagbits.glsl", "noise3d.glsl", "warpstate.glsl", "quad.glsl" })
                 source = source.Replace("#include \"../include/" + include + "\"", ReadWorldShader("include/" + include), StringComparison.Ordinal);
             quadGeometryProgram = CreateComputeProgram(source, "quad-geometry",
                 [new ComputeSlot(0, ComputeSlotKind.Buffer), new ComputeSlot(1, ComputeSlotKind.Buffer), new ComputeSlot(2, ComputeSlotKind.Buffer),
-                    new ComputeSlot(3, ComputeSlotKind.Buffer), new ComputeSlot(4, ComputeSlotKind.Buffer), new ComputeSlot(5, ComputeSlotKind.Buffer)], 44, 64, 1);
+                    new ComputeSlot(3, ComputeSlotKind.Buffer), new ComputeSlot(4, ComputeSlotKind.Buffer), new ComputeSlot(5, ComputeSlotKind.Buffer),
+                    new ComputeSlot(6, ComputeSlotKind.Buffer)], 56, 64, 1);
         }
         var compute = _compute.Get(quadGeometryProgram);
         if (compute == null) return 0;
-        parameters[..128].CopyTo(new Span<byte>((void*)state.Pointer, 128));
+        parameters[..256].CopyTo(new Span<byte>((void*)state.Pointer, 256));
         var output = new VulkanBuffer(_context, size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit,
             MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         try
         {
             var command = Commands; using GpuSection section = BeginGpuSection("quad-geometry"); _targets.EndRendering(command);
-            foreach (var input in new[] { vertices, current, flags, direction }) _uploads.NoteUse(command, input.Buffer);
+            foreach (var input in new[] { vertices, current, flags, direction, history }) _uploads.NoteUse(command, input.Buffer);
             _graph.OpenComputePass(new PassSignature { NameId = _graph.NameId("compute:quad-geometry"), Width = (int)vertexCount * instances,
                 Height = 1, FormatsId = -1, Reads = [], Attachments = [] });
             var set = _computeArenas[CurrentFrameSlot].GetBuffers(compute.SetLayout,
                 [new DescriptorBufferInfo(vertices.Buffer.Handle, 0, vertices.Buffer.Size), new DescriptorBufferInfo(current.Buffer.Handle, 0, current.Buffer.Size),
                     new DescriptorBufferInfo(flags.Buffer.Handle, 0, flags.Buffer.Size), new DescriptorBufferInfo(direction.Buffer.Handle, 0, direction.Buffer.Size),
-                    new DescriptorBufferInfo(_frames.UniformBuffer, state.Offset, 128), new DescriptorBufferInfo(output.Handle, 0, size)]);
+                    new DescriptorBufferInfo(_frames.UniformBuffer, state.Offset, 256), new DescriptorBufferInfo(output.Handle, 0, size),
+                    new DescriptorBufferInfo(history.Buffer.Handle, 0, history.Buffer.Size)]);
             _context.Api.CmdBindPipeline(command, PipelineBindPoint.Compute, _compute.PipelineFor(compute, []));
             _context.Api.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, compute.Layout, 0, 1, &set, 0, null);
-            fixed (byte* data = parameters) _context.Api.CmdPushConstants(command, compute.Layout, ShaderStageFlags.ComputeBit, 0, 44, data + 128);
+            fixed (byte* data = parameters) _context.Api.CmdPushConstants(command, compute.Layout, ShaderStageFlags.ComputeBit, 0, 56, data + 256);
             _context.Api.CmdDispatch(command, (vertexCount * (uint)instances + 63) / 64, 1, 1); _graph.NoteDispatch();
             QuadGeometryDispatchesRecorded++; ParticleGeometryDispatchesRecorded++;
             var barrier = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,

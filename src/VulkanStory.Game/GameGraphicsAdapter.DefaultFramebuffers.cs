@@ -20,6 +20,7 @@ internal sealed partial class GameGraphicsAdapter
     internal const int TaaSharpenIndex = 21, UpscaledSceneIndex = 22;
     internal const int SceneNoHudIndex = 23, UiTargetIndex = 24, GeneratedFrameIndex = 25;
     internal const int SdkMotionIndex = 26;
+    internal const int QuadMotionIndex = 27;
     private const int GlR32f = 0x822E;
     private List<FrameBufferRef>? allocatedFramebuffers;
     private bool taaDisabled;
@@ -48,6 +49,7 @@ internal sealed partial class GameGraphicsAdapter
         UpscaledThisFrame = UpscaledCompositeReady = false;
         GodRaysInScene = false;
         ResetSdkMotionPublication();
+        ResetQuadMotionPublication();
         ResetFsr3InputPublication();
         AllocatedUpscalerPlan = null;
         FrameState = FrameState with { MotionAttachment = -1, MotionWriteActive = false };
@@ -151,8 +153,8 @@ internal sealed partial class GameGraphicsAdapter
         GameFramebufferBindings.AdoptSettings(platform!, settings);
         ResetFramebufferPublication();
         bool setupSsao = settings.SsaoQuality > 0;
-        List<FrameBufferRef> list = new List<FrameBufferRef>(27);
-        for (int i = 0; i <= SdkMotionIndex; i++)
+        List<FrameBufferRef> list = new List<FrameBufferRef>(28);
+        for (int i = 0; i <= QuadMotionIndex; i++)
         {
             list.Add(null!);
         }
@@ -251,6 +253,11 @@ internal sealed partial class GameGraphicsAdapter
                 if (upscaling) DisableUpscaler("complete SDK motion image: " + error.Message);
                 FramebufferError("VulkanStory: SDK motion image unavailable: {0}", error.Message);
             }
+        }
+        if (motionAttachmentIndex >= 0)
+        {
+            try { list[QuadMotionIndex] = CreateQuadMotionTarget(width, height); }
+            catch (Exception error) { FramebufferError("VulkanStory: quad motion image unavailable: {0}", error.Message); }
         }
 
         // Transparent: OIT accumulation, revealage, glow. Shares Primary's depth.

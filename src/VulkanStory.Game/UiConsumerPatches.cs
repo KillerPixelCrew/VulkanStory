@@ -118,6 +118,7 @@ internal static class UiConsumerPatches
         graphics.ReloadBlitPrograms();
         graphics.ReloadSkyMotionProgram();
         graphics.ReloadLiquidMotionProgram();
+        graphics.ReleaseQuadMotionProgram();
         runtime!.Session.Temporal.State.RequestReset(EnumTemporalResetReason.ShaderReload);
     }
     private static Exception? ScreenFailure(Exception? __exception)
