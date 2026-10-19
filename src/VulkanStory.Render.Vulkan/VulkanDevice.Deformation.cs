@@ -73,6 +73,7 @@ public sealed unsafe partial class VulkanDevice
         ResetTerrainOcclusion();
         _entityDrawBatch = null; EntityVisibility = null;
         RetireDeformationGeometry(all: true);
+        RetireJointPoses(all: true);
     }
 
     private bool TryDeformationInputs(VulkanMesh mesh, out VulkanBuffer? positions, out VulkanBuffer? ids,
@@ -108,11 +109,14 @@ public sealed unsafe partial class VulkanDevice
         VertexAttribute position, VertexAttribute joint, uint positionStride, uint jointStride, uint count)
     {
         if (bones.Shadow.Length < 64 || bones.Shadow.Length % 64 != 0) return null;
-        var hash = new HashCode(); hash.AddBytes(bones.Shadow);
+        var gpuBones = PrepareJointPose(bones);
+        if (gpuBones == null) bones.MaterializeJointPose();
+        ReadOnlySpan<byte> poseData = bones.SourceJointPose is { } sourcePose ? sourcePose.Bytes : bones.Shadow;
+        var hash = new HashCode(); hash.AddBytes(poseData);
         var key = new DeformationKey(mesh, mesh.GeometryRevision, hash.ToHashCode());
         if (_deformedGeometry.TryGetValue(key, out var versions))
             foreach (var geometry in versions)
-                if (bones.Shadow.AsSpan().SequenceEqual(geometry.Pose))
+                if (poseData.SequenceEqual(geometry.Pose))
                 {
                     geometry.Frame = _frameCounter;
                     DeformationCacheReuses++;
@@ -120,11 +124,12 @@ public sealed unsafe partial class VulkanDevice
                 }
         ulong bytes = (ulong)count * 64;
         var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
-        ulong retainedBytes = bytes + (ulong)bones.Shadow.Length;
+        ulong retainedBytes = bytes + (ulong)poseData.Length;
+        uint boneOffset = 0;
         if (_deformationBytes + retainedBytes > DeformationBudget || bytes > limits.MaxStorageBufferRange ||
             positions.Size > limits.MaxStorageBufferRange || ids.Size > limits.MaxStorageBufferRange ||
             bones.Shadow.Length > limits.MaxStorageBufferRange ||
-            !bones.TrySnapshot(_frameCounter, _frames.Current, out uint boneOffset)) return null;
+            (gpuBones == null && !bones.TrySnapshot(_frameCounter, _frames.Current, out boneOffset))) return null;
         if (_deformationProgram == 0)
         {
             using Stream stream = typeof(VulkanDevice).Assembly.GetManifestResourceStream("shaders-vk/geometry/deform.comp")!;
@@ -150,7 +155,8 @@ public sealed unsafe partial class VulkanDevice
             });
             var set = _computeArenas[CurrentFrameSlot].GetBuffers(program.SetLayout,
                 [new DescriptorBufferInfo(positions.Handle, 0, positions.Size), new DescriptorBufferInfo(ids.Handle, 0, ids.Size),
-                    new DescriptorBufferInfo(_frames.UniformBuffer, boneOffset, (ulong)bones.Shadow.Length),
+                    gpuBones != null ? new DescriptorBufferInfo(gpuBones.Handle, 0, gpuBones.Size) :
+                        new DescriptorBufferInfo(_frames.UniformBuffer, boneOffset, (ulong)bones.Shadow.Length),
                     new DescriptorBufferInfo(output.Handle, 0, bytes)]);
             _context.Api.CmdBindPipeline(command, PipelineBindPoint.Compute, _compute.PipelineFor(program, Array.Empty<uint>()));
             _context.Api.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
@@ -172,7 +178,7 @@ public sealed unsafe partial class VulkanDevice
                 BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
             _context.Api.CmdPipelineBarrier2(command, &dependency);
             if (versions == null) _deformedGeometry.Add(key, versions = new());
-            versions.Add(new DeformationGeometry(output, (byte[])bones.Shadow.Clone(), _frameCounter));
+            versions.Add(new DeformationGeometry(output, poseData.ToArray(), _frameCounter));
             _deformationBytes += retainedBytes;
             return output;
         }

@@ -105,6 +105,14 @@ internal sealed class HeadlessScenario
             ["validInventoryHistoryWrites"] = (JsonValueKind.Number, false),
             ["inventorySharedGeometryDraws"] = (JsonValueKind.Number, false),
             ["deformationDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["jointPoseDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["jointPoseCacheReuses"] = (JsonValueKind.Number, false),
+            ["jointPoseChecks"] = (JsonValueKind.Number, false),
+            ["jointPoseChecksPassed"] = (JsonValueKind.True, false),
+            ["jointPoseMaximumRelativeError"] = (JsonValueKind.Number, false),
+            ["cpuJointProductsDeferred"] = (JsonValueKind.Number, false),
+            ["cpuJointFacadeChecks"] = (JsonValueKind.Number, false),
+            ["cpuJointFacadeValid"] = (JsonValueKind.True, false),
             ["deformationCacheReuses"] = (JsonValueKind.Number, false),
             ["entityVisibilityDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["entityIndirectDrawsRecorded"] = (JsonValueKind.Number, false),
@@ -127,6 +135,7 @@ internal sealed class HeadlessScenario
         "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
         "rigidEntityMotionWindows", "validRigidEntityHistoryWrites", "inventoryMotionWindows", "validInventoryHistoryWrites",
         "inventorySharedGeometryDraws", "deformationDispatchesRecorded", "deformationCacheReuses",
+        "jointPoseDispatchesRecorded", "jointPoseCacheReuses", "jointPoseChecks", "cpuJointProductsDeferred", "cpuJointFacadeChecks",
         "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded"
     };
 

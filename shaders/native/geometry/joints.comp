@@ -1,0 +1,14 @@
+#version 450
+layout(local_size_x = 64) in;
+struct JointSource { mat4 model; mat4 inverseBind; uvec4 mode; };
+layout(binding = 0, std430) readonly buffer Pairs { JointSource values[]; } pose;
+layout(binding = 1, std140) writeonly buffer Joints { mat4 values[]; } joints;
+layout(push_constant) uniform Parameters { uint count; } p;
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= p.count) return;
+    precise mat4 result = pose.values[index].model;
+    if (pose.values[index].mode.x != 0u) result = pose.values[index].model * pose.values[index].inverseBind;
+    joints.values[index] = result;
+}

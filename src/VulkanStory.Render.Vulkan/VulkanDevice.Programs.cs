@@ -633,6 +633,10 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Removes the client uniform-buffer shadow and its current named-block association.</summary>
     public void DeleteUniformBuffer(int handle) => _clientUniformBuffers.DeleteUniformBuffer(handle);
     // Observation for changed game/renderer boundary fixtures; never exposes mutable storage.
-    internal byte[]? UniformBufferShadowForTests(int handle) =>
-        _clientUniformBuffers.Buffers.TryGetValue(handle, out var buffer) ? (byte[])buffer.Shadow.Clone() : null;
+    internal byte[]? UniformBufferShadowForTests(int handle)
+    {
+        if (!_clientUniformBuffers.Buffers.TryGetValue(handle, out var buffer)) return null;
+        buffer.MaterializeJointPose();
+        return (byte[])buffer.Shadow.Clone();
+    }
 }

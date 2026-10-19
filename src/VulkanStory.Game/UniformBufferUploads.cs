@@ -98,9 +98,13 @@ internal static class UniformBufferUploads
             // from that helper is converted; arbitrary native pointers are never decoded.
             object payload = observation.Provider.Handle.Target ??
                 throw new InvalidOperationException("Generic UBO helper has no payload.");
-            GCHandle pin = GCHandle.Alloc(payload, GCHandleType.Pinned);
-            try { owner.UploadUniformBuffer(buffer, pin.AddrOfPinnedObject(), byteOffset, byteSize); }
-            finally { pin.Free(); }
+            if (!owner.TryUploadGpuJointPose(buffer, payload, byteOffset, byteSize))
+            {
+                Performance.GpuJointPoses.MaterializePayload(payload);
+                GCHandle pin = GCHandle.Alloc(payload, GCHandleType.Pinned);
+                try { owner.UploadUniformBuffer(buffer, pin.AddrOfPinnedObject(), byteOffset, byteSize); }
+                finally { pin.Free(); }
+            }
             owner.ObserveAnimationPayload(buffer, payload, byteOffset, byteSize);
         }
         else owner.UploadUniformBuffer(buffer, data, byteOffset, byteSize);

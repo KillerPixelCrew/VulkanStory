@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Vintagestory.API.Client;
+using VulkanStory.Contracts;
 
 namespace VulkanStory.Game;
 
@@ -22,6 +23,7 @@ namespace VulkanStory.Game;
         {
             public float[] PrevBones = new float[0];
             public float[] CurBones = new float[0];
+            public JointPoseSnapshot CurGpuPose, PrevGpuPose;
             public int PrevFloatCount = -1;
             public int CurFloatCount = -1;
 
@@ -125,7 +127,8 @@ namespace VulkanStory.Game;
         /// <param name="boneMatrices">The array being uploaded into "Animation".</param>
         /// <param name="byteCount">How many bytes of it the draw uses.</param>
         public void OnAnimationUpload(IShaderProgram program, int bufferHandle, int previousBufferHandle,
-            Action<float[], int> uploadPrevious, object boneMatrices, int byteCount)
+            Action<float[], int> uploadPrevious, object boneMatrices, int byteCount,
+            JointPoseSnapshot gpuPose = null, Action<JointPoseSnapshot> uploadPreviousGpu = null)
         {
             if (!Enabled || program == null || uploadPrevious == null) return;
             if (!program.HasUniform("taaHistoryValid")) return;
@@ -155,6 +158,7 @@ namespace VulkanStory.Game;
                 float[] swap = history.PrevBones;
                 history.PrevBones = history.CurBones;
                 history.CurBones = swap;
+                history.PrevGpuPose = history.CurGpuPose; history.CurGpuPose = null;
                 history.PrevFloatCount = history.CurFloatCount;
                 Array.Copy(history.CurModelMatrix, history.PrevModelMatrix, 16);
                 history.PrevWindWaveIntensity = history.CurWindWaveIntensity;
@@ -171,10 +175,15 @@ namespace VulkanStory.Game;
             if (repeated && (history.CurFloatCount != floats ||
                 !state.Model.AsSpan().SequenceEqual(history.CurModelMatrix) ||
                 history.CurWindWaveIntensity != warp.Wind || history.CurWaterWaveCounter != warp.Water ||
-                !bones.AsSpan(0, floats).SequenceEqual(history.CurBones.AsSpan(0, floats)))) history.CurAmbiguous = true;
+                (gpuPose != null ? !gpuPose.Equals(history.CurGpuPose) : history.CurGpuPose != null ||
+                    !bones.AsSpan(0, floats).SequenceEqual(history.CurBones.AsSpan(0, floats))))) history.CurAmbiguous = true;
 
-            if (history.CurBones.Length < floats) history.CurBones = new float[floats];
-            Array.Copy(bones, history.CurBones, floats);
+            history.CurGpuPose = gpuPose;
+            if (gpuPose == null)
+            {
+                if (history.CurBones.Length < floats) history.CurBones = new float[floats];
+                Array.Copy(bones, history.CurBones, floats);
+            }
             history.CurFloatCount = floats;
             Array.Copy(state.Model, history.CurModelMatrix, 16);
             history.CurWindWaveIntensity = warp.Wind;
@@ -192,7 +201,9 @@ namespace VulkanStory.Game;
                 history.PrevView == view &&
                 frame.WasViewCaptured(view);
 
-            uploadPrevious(valid ? history.PrevBones : history.CurBones, byteCount);
+            var previousGpuPose = valid ? history.PrevGpuPose : history.CurGpuPose;
+            if (previousGpuPose != null && uploadPreviousGpu != null) uploadPreviousGpu(previousGpuPose);
+            else uploadPrevious(valid ? history.PrevBones : history.CurBones, byteCount);
 
             // Per-frame, per-program half: the previous camera and the previous warp
             // state are the same for every entity in the pass.

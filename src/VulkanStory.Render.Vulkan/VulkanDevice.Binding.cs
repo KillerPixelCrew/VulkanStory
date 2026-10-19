@@ -399,6 +399,14 @@ public sealed unsafe partial class VulkanDevice
             if (_clientUniformBuffers.BoundBlocks.TryGetValue(block.BlockName, out int handle)) _clientUniformBuffers.Buffers.TryGetValue(handle, out ubo);
             if (ubo == null) continue;
 
+            VulkanBuffer? jointPose = block.BlockName == "Animation" ? drawCurrentJointPose :
+                block.BlockName == "AnimationPrev" ? drawPreviousJointPose : null;
+            if (jointPose != null)
+            {
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, jointPose.Handle, 0, jointPose.Size, jointPose.Id);
+                continue;
+            }
+
             if (TrySnapshotClientBlock(ubo, program, out uint blockOffset))
             {
                 buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, _frames.UniformBuffer,
