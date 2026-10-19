@@ -61,7 +61,16 @@ internal static class WorldgenPipeline
     private static volatile bool managed, serial;
     private static int poolCapacity, originalWorkerCount;
     private static System.Func<object, object>? supplyOfThread;
+    private static System.Func<object, ServerMain>? serverOfSupply;
+    private static System.Func<object, ChunkServerThread>? threadOfUnload;
     private static MethodInfo? pauseWorkers, resumeWorkers;
+    private sealed class WorkerPause(ServerMain owner)
+    {
+        internal readonly ServerMain Server = owner;
+        internal int Owner, Depth;
+        internal readonly HashSet<Thread> Workers = new(), Parked = new();
+    }
+    private static readonly ConditionalWeakTable<object, WorkerPause> WorkerPauses = new();
 
     private static ConstructorInfo Constructor() => AccessTools.Constructor(typeof(ChunkServerThread),
         [typeof(ServerMain), typeof(string), typeof(CancellationToken)]) ?? throw new MissingMethodException(typeof(ChunkServerThread).FullName, ".ctor");
@@ -79,11 +88,25 @@ internal static class WorldgenPipeline
         _ = ServerTypes.Method(ServerTypes.Unload, "UnloadGeneratingChunkColumns", typeof(long));
         pauseWorkers = ServerTypes.Method(ServerTypes.Supply, "PauseAllWorldgenThreads", typeof(int));
         resumeWorkers = ServerTypes.Method(ServerTypes.Supply, "ResumeAllWorldgenThreads");
+        _ = ServerTypes.Method(ServerTypes.Supply, "PauseWorldgenThreadIfRequired", typeof(bool));
+        _ = ServerTypes.Method(ServerTypes.Supply, "CreateAdditionalWorldGenThread", typeof(int), typeof(int), typeof(int));
+        _ = ServerTypes.Method(ServerTypes.Supply, "OnSeparateThreadTick");
         supplyOfThread = ServerTypes.Getter<object>(typeof(ChunkServerThread), "loadsavechunks");
+        serverOfSupply = ServerTypes.Getter<ServerMain>(ServerTypes.Supply, "server");
+        threadOfUnload = ServerTypes.Getter<ChunkServerThread>(ServerTypes.Unload, "chunkthread");
         if (EntityIdSpan(PatchProcessor.GetOriginalInstructions(ServerTypes.Method(typeof(BlockAccessorWorldGen), nameof(BlockAccessorWorldGen.AddEntity),
             typeof(Entity)))).Start < 0) throw new InvalidOperationException("Worldgen entity id anchor changed.");
     }, harmony =>
     {
+        harmony.Patch(pauseWorkers!, prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(PauseWorkers)));
+        harmony.Patch(resumeWorkers!, prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(ResumeWorkers)));
+        harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "PauseWorldgenThreadIfRequired", typeof(bool)),
+            prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(ParkWorker)));
+        harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "CreateAdditionalWorldGenThread", typeof(int), typeof(int), typeof(int)),
+            postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(WorkerCreated)));
+        harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "OnSeparateThreadTick"),
+            prefix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(BeginSupplyTick)),
+            finalizer: new HarmonyMethod(typeof(WorldgenPipeline), nameof(EndSupplyTick)));
         harmony.Patch(Constructor(), postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(Configure)));
         harmony.Patch(ServerTypes.Method(ServerTypes.Supply, "OnBeginGameReady", typeof(SaveGame)),
             postfix: new HarmonyMethod(typeof(WorldgenPipeline), nameof(ApplyPolicy)));
@@ -153,6 +176,114 @@ internal static class WorldgenPipeline
     }
     private static void EndWorkerStep((int Start, int End) __state)
     { expectedStart = __state.Start; expectedEnd = __state.End; }
+
+    private static bool OwnsPool(object supply) => Active && ReferenceEquals(supplyOfThread!(chunkThread!), supply);
+
+    private static WorkerPause? PauseOf(object supply)
+    {
+        if (WorkerPauses.TryGetValue(supply, out var pause)) return pause;
+        return OwnsPool(supply) ? WorkerPauses.GetValue(supply, _ => new(serverOfSupply!(supply))) : null;
+    }
+
+    private static void WorkerCreated(object __instance, Thread __result)
+    {
+        if (PauseOf(__instance) is not { } pause) return;
+        lock (pause) { pause.Workers.Add(__result); Monitor.PulseAll(pause); }
+    }
+
+    private static void BeginSupplyTick(object __instance, out (WorkerPause? Pause, int Depth) __state)
+    {
+        WorkerPause? pause = PauseOf(__instance);
+        __state = (pause, 0);
+        if (pause == null) return;
+        lock (pause)
+            if (pause.Owner == Environment.CurrentManagedThreadId) __state = (pause, pause.Depth);
+    }
+
+    private static Exception? EndSupplyTick(Exception? __exception, (WorkerPause? Pause, int Depth) __state)
+    {
+        // Stock PeekChunkAreaLocking has no finally around its pause. An exception must
+        // unwind this tick's acquisitions without releasing a caller's outer lease.
+        if (__exception != null && __state.Pause is { } pause)
+            lock (pause)
+                if (pause.Owner == Environment.CurrentManagedThreadId && pause.Depth > __state.Depth)
+                {
+                    pause.Depth = __state.Depth;
+                    if (pause.Depth == 0) { pause.Owner = 0; Monitor.PulseAll(pause); }
+                }
+        return __exception;
+    }
+
+    // The stock flag has no owner, and its target count follows live pass admission rather than
+    // the reusable pool. Keep pause ownership and worker acknowledgements together instead.
+    private static bool PauseWorkers(object __instance, int timeoutms, ref bool __result)
+    {
+        if (PauseOf(__instance) is not { } pause) return true;
+        __result = false;
+        long deadline = Environment.TickCount64 + Math.Max(0, timeoutms);
+        int owner = Environment.CurrentManagedThreadId;
+        lock (pause)
+        {
+            if (pause.Owner == owner) { pause.Depth++; __result = true; return false; }
+            while (pause.Owner != 0 && !Stopped(pause.Server))
+            {
+                long remaining = deadline - Environment.TickCount64;
+                if (remaining <= 0) return false;
+                Monitor.Wait(pause, (int)Math.Min(remaining, 15));
+            }
+            if (Stopped(pause.Server)) return false;
+            pause.Owner = owner;
+            pause.Depth = 1;
+            // Even workers denied a pass by the current setting still exist and must park.
+            while (pause.Parked.Count < pause.Workers.Count && !Stopped(pause.Server))
+            {
+                long remaining = deadline - Environment.TickCount64;
+                if (remaining <= 0) break;
+                Monitor.Wait(pause, (int)Math.Min(remaining, 15));
+            }
+            if (!Stopped(pause.Server) && pause.Parked.Count == pause.Workers.Count) __result = true;
+            else
+            {
+                pause.Owner = pause.Depth = 0;
+                Monitor.PulseAll(pause);
+            }
+        }
+        return false;
+    }
+
+    private static bool ResumeWorkers(object __instance)
+    {
+        if (PauseOf(__instance) is not { } pause) return true;
+        lock (pause)
+        {
+            // A failed acquisition, including another thread's timeout, grants no release.
+            if (pause.Owner == Environment.CurrentManagedThreadId && --pause.Depth == 0)
+            {
+                pause.Owner = 0;
+                Monitor.PulseAll(pause);
+            }
+        }
+        return false;
+    }
+
+    private static bool ParkWorker(object __instance, bool onChunkthread)
+    {
+        if (PauseOf(__instance) is not { } pause) return true;
+        Thread worker = Thread.CurrentThread;
+        lock (pause)
+        {
+            if (onChunkthread || !pause.Workers.Contains(worker) || pause.Owner == 0) return false;
+            pause.Parked.Add(worker);
+            Monitor.PulseAll(pause);
+            try
+            {
+                // Never resume generation merely because the stock five-second wait elapsed.
+                while (pause.Owner != 0 && !Stopped(pause.Server)) Monitor.Wait(pause, 15);
+            }
+            finally { pause.Parked.Remove(worker); }
+        }
+        return false;
+    }
 
     /// <summary>Runs once the world type's handlers are known and before spawn chunks load; repeated by <c>/wgen regen</c>.</summary>
     private static void Prepare(object __result)
@@ -272,22 +403,22 @@ internal static class WorldgenPipeline
     }
 
     // Writing half-generated columns must not overlap a population that writes into them.
-    private static bool BeginUnload(out bool __state)
+    private static bool BeginUnload(object __instance, out object? __state)
     {
-        __state = false;
-        if (!Active || chunkThread == null || supplyOfThread!(chunkThread) is not { } supply) return true;
+        __state = null;
+        object supply = supplyOfThread!(threadOfUnload!(__instance));
+        if (PauseOf(supply) == null) return true;
         if (!(bool)pauseWorkers!.Invoke(supply, [2000])!)
         {
-            resumeWorkers!.Invoke(supply, null);
             return false;
         }
-        __state = true;
+        __state = supply;
         return true;
     }
 
-    private static Exception? EndUnload(Exception? __exception, bool __state)
+    private static Exception? EndUnload(Exception? __exception, object? __state)
     {
-        if (__state && chunkThread != null && supplyOfThread!(chunkThread) is { } supply) resumeWorkers!.Invoke(supply, null);
+        if (__state != null) resumeWorkers!.Invoke(__state, null);
         return __exception;
     }
 

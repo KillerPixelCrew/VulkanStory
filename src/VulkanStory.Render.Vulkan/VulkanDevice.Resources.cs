@@ -621,6 +621,7 @@ public sealed unsafe partial class VulkanDevice
             EntityIndirectDrawsRecorded++;
         }
         else _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, 0, 0, 0);
+        ParticleInstancesDrawn(meshId);
         NoteNativeDraw(entityDraw ? NativeDrawKind.Indirect : instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
         return true;
     }

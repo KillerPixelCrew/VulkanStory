@@ -541,16 +541,28 @@ internal sealed unsafe class MeshManager : IDisposable
         int bytes = checked(values.Length * sizeof(float));
         if (bytes == 0) return;
         if (values.AsSpan().SequenceEqual(mesh.ParticleHistoryShadow)) return;
+        EnsureParticleHistoryStorage(meshId, bytes);
+        fixed (float* source = values) Write(meshId, BufferParticleHistory, 0, (IntPtr)source, bytes);
+        if (mesh.ParticleHistoryShadow.Length != values.Length) mesh.ParticleHistoryShadow = new float[values.Length];
+        values.CopyTo(mesh.ParticleHistoryShadow, 0);
+    }
+
+    /// <summary>Ensures the standard previous-particle binding without producing or uploading CPU history.</summary>
+    internal VulkanBuffer EnsureParticleHistoryStorage(int meshId, int bytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bytes);
+        VulkanMesh mesh = Get(meshId) ?? throw new InvalidOperationException("Particle history lost its mesh.");
         VulkanBuffer? existing = mesh.Buffers[BufferParticleHistory];
         if (existing == null || existing.Size < (ulong)bytes)
         {
+            if (existing != null && _frames == null) throw new InvalidOperationException("Particle history requires a frame retirement owner.");
+            var replacement = CreateBuffer(bytes, BufferUsageFlags.VertexBufferBit, persistent: false);
             if (existing != null)
             {
                 BufferRetired?.Invoke(existing.Id);
-                if (_frames == null) throw new InvalidOperationException("Particle history requires a frame retirement owner.");
-                _frames.DeferDeletion(existing);
+                _frames!.DeferDeletion(existing);
             }
-            mesh.Buffers[BufferParticleHistory] = CreateBuffer(bytes, BufferUsageFlags.VertexBufferBit, persistent: false);
+            mesh.Buffers[BufferParticleHistory] = replacement;
             if (existing == null)
             {
                 uint binding = (uint)mesh.Layout.Bindings.Length;
@@ -567,9 +579,7 @@ internal sealed unsafe class MeshManager : IDisposable
                 mesh.BindingOrder.Add(BufferParticleHistory);
             }
         }
-        fixed (float* source = values) Write(meshId, BufferParticleHistory, 0, (IntPtr)source, bytes);
-        if (mesh.ParticleHistoryShadow.Length != values.Length) mesh.ParticleHistoryShadow = new float[values.Length];
-        values.CopyTo(mesh.ParticleHistoryShadow, 0);
+        return mesh.Buffers[BufferParticleHistory]!;
     }
 
     internal void SetFlagsInstanced(int meshId, bool instanced)

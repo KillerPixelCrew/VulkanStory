@@ -47,6 +47,7 @@
     <Compile Include="VulkanDevice.ParticleVisuals.cs" />
     <Compile Include="VulkanDevice.ParticleSimulation.cs" />
     <Compile Include="VulkanDevice.ParticleCenters.cs" />
+    <Compile Include="VulkanDevice.ParticleInstances.cs" />
     <Compile Include="VulkanDevice.TerrainNoise.cs" />
     <Compile Include="VulkanDevice.TerrainDensity.cs" />
     <Compile Include="VulkanDevice.ChunkMeshing.cs" />

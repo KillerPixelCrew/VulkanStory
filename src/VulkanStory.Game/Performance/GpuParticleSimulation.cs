@@ -89,7 +89,8 @@ internal static partial class GpuParticleSimulation
                 pending.Batch.Clear();
         }
     }
-    private sealed record Scope(ParticlePoolQuads Pool, PoolState State, float Delta, float GameSpeed, bool Worker, long Epoch);
+    private sealed record Scope(ParticlePoolQuads Pool, PoolState State, float Delta, float GameSpeed, bool Worker, long Epoch, bool InstanceCallbacksSafe)
+    { internal bool InstanceProductionStarted; }
     private delegate void CollisionStep(ParticleBase particle, float dt, ICoreClientAPI api, ParticlePhysics physics, float height);
     private static readonly ConditionalWeakTable<ParticlePoolQuads, PoolState> pools = new();
     private static readonly object poolRegistryGate = new();
@@ -162,6 +163,8 @@ internal static partial class GpuParticleSimulation
                 finalizer: new HarmonyMethod(typeof(GpuParticleSimulation), nameof(AfterPool)));
             harmony.Patch(Tick, prefix: new HarmonyMethod(typeof(GpuParticleSimulation), nameof(BeforeTick)),
                 postfix: new HarmonyMethod(typeof(GpuParticleSimulation), nameof(AfterTick)));
+            harmony.Patch(AccessTools.Method(typeof(ParticlePoolQuads), "ProcessParticlesFromOffThread"),
+                prefix: new HarmonyMethod(typeof(GpuParticleSimulation), nameof(BeforeWorkerRender)));
             armed = true;
         }, Uninstall: () => { armed = ready = false; ResetPools(detach: true); backendDevice = null; }, WorldReady: _ =>
         {
@@ -170,6 +173,7 @@ internal static partial class GpuParticleSimulation
             lock (stockFlowTypes) stockFlowTypes.Clear();
             lock (stockLiquidTypes) stockLiquidTypes.Clear();
             foreach (var method in new[] { Main, Worker, Tick, Collision,
+                AccessTools.Method(typeof(ParticlePoolQuads), "ProcessParticlesFromOffThread")!,
                 AccessTools.Method(typeof(ParticleBase), nameof(ParticleBase.TickFixedStep))!,
                 AccessTools.Method(typeof(ParticleGeneric), nameof(ParticleGeneric.UpdateBuffers))!,
                 AccessTools.Method(typeof(Cuboidd), nameof(Cuboidd.pushOutX))!,
@@ -229,7 +233,7 @@ internal static partial class GpuParticleSimulation
         var state = pools.GetValue(__instance, NewPool);
         Monitor.Enter(state.Gate);
         long generation = Interlocked.Read(ref epoch);
-        current = new Scope(__instance, state, __0, Game(__instance).Calendar.SpeedOfTime / 60f, worker, generation);
+        current = new Scope(__instance, state, __0, Game(__instance).Calendar.SpeedOfTime / 60f, worker, generation, InstanceUploadBoundarySafe(__instance));
         if (state.Epoch != generation) { state.Clear(); state.Epoch = generation; }
         state.CpuOnly.Clear();
         if (!worker && __instance.ParticlesPool.FirstAlive is { } first)

@@ -53,6 +53,7 @@ internal static partial class GpuParticleSimulation
 
     private static void ClearRenderRecords()
     {
+        ClearInstanceHandoffs();
         foreach (var value in producedCenters) value.Value.Clear();
         foreach (var value in uploadedCenters) value.Value.Clear();
         producedCenters.Clear(); uploadedCenters.Clear();

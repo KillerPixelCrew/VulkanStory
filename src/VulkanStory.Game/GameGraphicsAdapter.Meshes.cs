@@ -70,6 +70,13 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         int handle = MeshHandle((VAO)mesh);
+        if (TryUpdateGpuParticleInstances(renderer, mesh, handle, data))
+        {
+            Meshes.GetValue((VAO)mesh, _ => throw new InvalidOperationException("Updated mesh lost its owner.")).GeometryRevision++;
+            return;
+        }
+        renderer.ClearParticleInstances(handle);
+        Performance.GpuParticleSimulation.CpuInstanceUpload(mesh);
         var visuals = Performance.GpuParticleVisuals.Pending(data);
         if (visuals is not { Deferred: > 0 } || data.CustomFloats?.BaseOffset != 0 || data.CustomBytes?.BaseOffset != 0 ||
             data.CustomFloats?.Values is not { } floats || data.CustomBytes?.Values is not { } bytes ||

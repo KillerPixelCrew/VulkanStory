@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -7,6 +8,7 @@ using System.Text.Json;
 using HarmonyLib;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
+using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 using Vintagestory.Common;
 using Vintagestory.Server;
@@ -23,12 +25,14 @@ internal static class HeadlessTerrainComparison
     private static readonly Harmony Hooks = new("vulkanstory.headless.terrain-probe");
     private static readonly AccessTools.FieldRef<WorldChunk, object> StorageLock =
         AccessTools.FieldRefAccess<WorldChunk, object>("packUnpackLock");
+    private static readonly MethodInfo PauseWorkers = ServerTypes.Method(ServerTypes.Supply, "PauseAllWorldgenThreads", typeof(int));
     private static bool installed, started;
     private static Run? run;
     private static string? failure;
     private static bool complete, equal, gpuEquivalent;
     private static int written;
     [ThreadStatic] private static Probe? generating;
+    [ThreadStatic] private static string? dequeuedToken;
 
     internal sealed class Probe(int x, int z, bool gpu)
     {
@@ -155,6 +159,9 @@ internal static class HeadlessTerrainComparison
             ?? throw new MissingMethodException("GenTerra.generate");
         try
         {
+            Hooks.Patch(ServerTypes.Method(ServerTypes.Supply, "OnSeparateThreadTick"),
+                transpiler: new(typeof(HeadlessTerrainComparison), nameof(GuardHandoff)),
+                finalizer: new(typeof(HeadlessTerrainComparison), nameof(EndHandoff)));
             Hooks.Patch(runner, transpiler: new(typeof(HeadlessTerrainComparison), nameof(GuardGenerators)));
             Hooks.Patch(generate, prefix: new(typeof(HeadlessTerrainComparison), nameof(BeginGenerate)),
                 finalizer: new(typeof(HeadlessTerrainComparison), nameof(EndGenerate)));
@@ -167,6 +174,64 @@ internal static class HeadlessTerrainComparison
             installed = true;
         }
         catch { Hooks.UnpatchAll(Hooks.Id); throw; }
+    }
+
+    // Observe the real public peek queue and the stock pause/generation/callback path.
+    // No replacement columns or duplicate submissions: a failed acquisition is a failed probe.
+    private static IEnumerable<CodeInstruction> GuardHandoff(IEnumerable<CodeInstruction> instructions)
+    {
+        MethodInfo dequeue = AccessTools.Method(typeof(ConcurrentQueue<KeyValuePair<Vec2i, ChunkPeekOptions>>), "TryDequeue");
+        int dequeues = 0, pauses = 0;
+        foreach (var instruction in instructions)
+        {
+            string? replacement = null;
+            if (instruction.Calls(dequeue)) { replacement = nameof(DequeuePeek); dequeues++; }
+            else if (instruction.Calls(PauseWorkers)) { replacement = nameof(PauseForPeek); pauses++; }
+            if (replacement != null)
+            {
+                instruction.opcode = OpCodes.Call;
+                instruction.operand = AccessTools.Method(typeof(HeadlessTerrainComparison), replacement);
+            }
+            yield return instruction;
+        }
+        if (dequeues != 1 || pauses != 1)
+            throw new InvalidOperationException("Terrain public peek handoff binding changed.");
+    }
+
+    private static bool DequeuePeek(ConcurrentQueue<KeyValuePair<Vec2i, ChunkPeekOptions>> queue,
+        out KeyValuePair<Vec2i, ChunkPeekOptions> request)
+    {
+        bool found = queue.TryDequeue(out request);
+        dequeuedToken = found ? request.Value.ChunkGenParams?.GetString(Marker) : null;
+        return found;
+    }
+
+    private static bool PauseForPeek(object supply, int timeoutms)
+    {
+        bool acquired = (bool)PauseWorkers.Invoke(supply, [timeoutms])!;
+        if (!acquired) FailHandoff("Terrain peek could not acquire worldgen worker exclusion within the stock pause budget.");
+        return acquired;
+    }
+
+    private static Exception? EndHandoff(Exception? __exception)
+    {
+        try
+        {
+            if (__exception != null) FailHandoff("Terrain public peek handoff failed: " + __exception);
+        }
+        finally
+        {
+            // Production pause-scope cleanup belongs to WorldgenPipeline, independently
+            // of this diagnostic hook. Preserve the stock exception/shutdown behavior.
+            dequeuedToken = null;
+        }
+        return __exception;
+    }
+
+    private static void FailHandoff(string reason)
+    {
+        lock (Gate)
+            if (run is { Active: { } probe } current && probe.Token == dequeuedToken) Abort(current, reason);
     }
 
     private static IEnumerable<CodeInstruction> GuardGenerators(IEnumerable<CodeInstruction> instructions)

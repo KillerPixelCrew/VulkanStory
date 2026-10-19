@@ -190,6 +190,7 @@ public sealed unsafe partial class VulkanDevice
     }
     private void RetireParticleVisuals(bool all = false)
     {
+        RetireParticleInstances(all);
         RetireParticleSimulationCenters(all);
         oldParticleVisualResults.Clear();
         foreach (var pair in particleVisualResults)
@@ -203,8 +204,10 @@ public sealed unsafe partial class VulkanDevice
     }
     private void DisposeParticleVisualsIdle()
     {
+        RetireParticleInstances(all: true);
         foreach (var result in particleVisualResults.Values) result.Buffer.Dispose(); particleVisualResults.Clear(); particleVisualSources.Clear();
         particleTrigonometryBuffer?.Dispose(); particleTrigonometryBuffer = null; particleVisualBytes = 0;
+        particleInstanceBytes -= particleInstanceTableCharge; particleInstanceTableCharge = 0;
         foreach (var readback in particleVisualReadbacks) readback?.Dispose();
         particleVisualReadbacks = []; pendingParticleVisualChecks = [];
     }

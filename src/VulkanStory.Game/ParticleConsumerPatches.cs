@@ -22,6 +22,9 @@ internal static class ParticleConsumerPatches
     private static readonly MethodInfo Spawn = AccessTools.Method(typeof(ParticleGeneric), "Spawned", [typeof(ParticlePhysics)])!;
     private static readonly MethodInfo Produce = AccessTools.Method(typeof(ParticleGeneric), "UpdateBuffers",
         [typeof(MeshData), typeof(Vintagestory.API.MathTools.Vec3d), typeof(int).MakeByRefType(), typeof(int).MakeByRefType(), typeof(int).MakeByRefType()])!;
+    private static readonly MethodInfo BaseProduce = AccessTools.Method(typeof(ParticleBase), nameof(ParticleBase.UpdateBuffers))!;
+    private static readonly MethodInfo[] Producers = [AccessTools.Method(typeof(ParticlePoolQuads), nameof(ParticlePoolQuads.OnNewFrame))!,
+        AccessTools.Method(typeof(ParticlePoolQuads), nameof(ParticlePoolQuads.OnNewFrameOffThread))!];
     private static void Check(IReadOnlyList<CodeInstruction> body)
     {
         if (body.Count(instruction => instruction.Calls(Draw)) != 2)
@@ -42,13 +45,18 @@ internal static class ParticleConsumerPatches
                 throw new MissingMethodException("Original particle renderer changed.");
             Check(PatchProcessor.GetOriginalInstructions(Render));
             if (Spawn == null || Produce == null) throw new MissingMethodException("Original particle instance producers changed.");
+            foreach (var producer in Producers)
+                if (PatchProcessor.GetOriginalInstructions(producer).Count(instruction => instruction.Calls(BaseProduce)) != 1)
+                    throw new InvalidOperationException("Original virtual particle producer anchor changed.");
         }, () =>
         {
             if (runtime != null) throw new InvalidOperationException("Particle routing already has an owner.");
             runtime = owner; attempted = true;
             harmony.Patch(Render, transpiler: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
             harmony.Patch(Spawn, postfix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Spawned)));
-            harmony.Patch(Produce, postfix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Produced)));
+            harmony.Patch(Produce, prefix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(BeforeProduce)) { priority = Priority.First },
+                postfix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(Produced)));
+            foreach (var producer in Producers) harmony.Patch(producer, transpiler: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(ProducerTranspiler)));
             harmony.Patch(Fountain, prefix: new HarmonyMethod(typeof(ParticleConsumerPatches), nameof(BeforeFountain)));
         }, () =>
         {
@@ -95,8 +103,26 @@ internal static class ParticleConsumerPatches
         finally { if (motion) session.Graphics.EndMotionWrite(); }
     }
     private static void Spawned(ParticleGeneric __instance) => ParticleMotionHistory.Spawned(__instance);
+    private static IEnumerable<CodeInstruction> ProducerTranspiler(IEnumerable<CodeInstruction> instructions)
+    {
+        var body = instructions.ToList();
+        if (body.Count(instruction => instruction.Calls(BaseProduce)) != 1) throw new InvalidOperationException("Original virtual particle producer anchor changed.");
+        foreach (var instruction in body)
+        {
+            if (instruction.Calls(BaseProduce)) { instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(ParticleConsumerPatches), nameof(ProduceParticle)); }
+            yield return instruction;
+        }
+    }
+    private static void ProduceParticle(ParticleBase particle, MeshData data, Vec3d camera, ref int position, ref int rgba, ref int flags)
+    {
+        Performance.GpuParticleSimulation.BeginInstanceProduction(particle, data, position);
+        particle.UpdateBuffers(data, camera, ref position, ref rgba, ref flags);
+    }
+    private static bool BeforeProduce(ParticleGeneric __instance, MeshData __0, Vec3d __1, ref int __2, ref int __3, ref int __4) =>
+        !Performance.GpuParticleSimulation.TryProduceInstance(__instance, __0, __1, ref __2, ref __3, ref __4);
     private static void Produced(ParticleGeneric __instance, MeshData __0, Vec3d __1, ref int __2)
     {
+        if (Performance.GpuParticleSimulation.InstanceDeferred(__0, __2 / 4 - 1)) return;
         ParticleMotionHistory.Produced(__instance, __0, __2);
         Performance.GpuParticleSimulation.Produced(__instance, __0, __1, __2);
     }

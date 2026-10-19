@@ -13,6 +13,15 @@ internal sealed partial class GameGraphicsAdapter
 {
     private readonly NativeMeshPass nativeParticlesCube = new("particlescube", [], []);
     private readonly NativeMeshPass nativeParticlesQuad = new("particlesquad", [], []);
+    private bool TryUpdateGpuParticleInstances(VulkanDevice renderer, MeshRef mesh, int handle, MeshData data)
+    {
+        var program = ShaderProgramBase.CurrentShaderProgram;
+        bool ownedShader = ReferenceEquals(program, ShaderPrograms.Particlescube) || ReferenceEquals(program, ShaderPrograms.Particlesquad);
+        if (ownedShader && program != null && !ShaderOverrides.IsOverridden(program.PassName) && aoTemporal != null &&
+            Performance.GpuParticleSimulation.TryUploadInstances(renderer, mesh, handle, data, aoTemporal.State)) return true;
+        Performance.GpuParticleSimulation.MaterializeInstances(data);
+        return false;
+    }
     /// <summary>Draws particle instances through the compatible native particle pass, otherwise retaining ordinary adapter drawing.</summary>
     /// <param name="mesh">Owned particle instance mesh.</param>
     /// <param name="quantity">Requested particle instance count.</param>
@@ -20,6 +29,9 @@ internal sealed partial class GameGraphicsAdapter
     internal void RenderParticles(MeshRef mesh, int quantity, TemporalFrameState frame)
     {
         var renderer = RequireDevice(); renderer.GpuMark("particles");
+        if (Performance.GpuParticleSimulation.TryMaterializeUploadedInstances(mesh, out var materialized)) UpdateMesh(mesh, materialized);
+        if (quantity > 0 && mesh is VAO { Disposed: false, VaoId: > 0 } owned)
+            renderer.PrepareParticleInstanceFrame(MeshHandle(owned), frame.FrameIndex, frame.Reset);
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
         bool quad = ReferenceEquals(program, ShaderPrograms.Particlesquad);
         if (quantity <= 0 || program == null || (!quad && !ReferenceEquals(program, ShaderPrograms.Particlescube)) ||
@@ -28,12 +40,13 @@ internal sealed partial class GameGraphicsAdapter
         if (quad && !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[1]))
         { RenderMeshInstanced(mesh, quantity); return; }
         int handle = MeshHandle(vao);
+        if (!renderer.HasParticleInstances(handle))
         {
             bool deferSize = renderer.CanPrepareParticleVisuals(handle, quantity);
             renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame, deferSize));
             renderer.SetParticleVisualHistory(handle, ParticleMotionHistory.PreviousVisualSizes(mesh));
         }
-        Performance.GpuParticleSimulation.PrepareRender(renderer, mesh, handle);
+        if (!renderer.HasParticleInstances(handle)) Performance.GpuParticleSimulation.PrepareRender(renderer, mesh, handle);
         if (quad && frame.JitterActive && renderer.ProgramComputeWarpCompatible(program.ProgramId))
         {
             program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);

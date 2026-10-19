@@ -1,0 +1,72 @@
+#version 450
+#extension GL_ARB_gpu_shader_fp64 : require
+#extension GL_GOOGLE_include_directive : require
+layout(local_size_x = 64) in;
+struct Evolution { vec4 values; ivec4 control; };
+struct State { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
+struct Input { dvec2 cameraXY; double cameraZ; uint source; uint target; vec4 interpolation; vec4 velocityPhase; uvec4 attributes; };
+struct Snapshot { vec4 center; uvec4 attributes; };
+layout(binding=0, std430) readonly buffer States { State values[]; } states;
+layout(binding=1, std430) readonly buffer Inputs { Input values[]; } inputs;
+layout(binding=2, std430) readonly buffer Properties { Evolution values[]; } properties;
+layout(binding=3, std430) readonly buffer Trigonometry { float values[]; } table;
+layout(binding=4, std430) readonly buffer OldHandoff { Snapshot values[]; } oldHandoff;
+layout(binding=5, std430) readonly buffer OldRendered { Snapshot values[]; } oldRendered;
+layout(binding=6, std430) readonly buffer OldIndices { uint values[]; } oldIndices;
+layout(binding=7, std430) readonly buffer Steps { vec4 values[]; } steps;
+layout(binding=8, std430) writeonly buffer Centers { vec4 values[]; } centers;
+layout(binding=9, std430) writeonly buffer Attributes { uint values[]; } attributes;
+layout(binding=10, std430) writeonly buffer Flags { uint values[]; } flags;
+layout(binding=11, std430) writeonly buffer History { float values[]; } history;
+layout(binding=12, std430) writeonly buffer Result { Snapshot values[]; } result;
+layout(push_constant) uniform Parameters { uint first; uint count; uint resume; uint stepCount; } p;
+#include "../include/evolution.glsl"
+float property(uint index, uint component, float phase) {
+    Evolution curve = properties.values[index*5+component]; curve.values.z = phase; return evaluate(curve);
+}
+uint component(float value) { return uint(int(value)) & 255u; }
+void writeHistory(uint i, Snapshot previous, bool valid) {
+    uint h = i*11;
+    history.values[h] = previous.center.x; history.values[h+1] = previous.center.y; history.values[h+2] = previous.center.z;
+    history.values[h+3] = history.values[h+4] = history.values[h+5] = previous.center.w;
+    uint direction = previous.attributes.x;
+    history.values[h+6] = float(direction&255u)/255.0; history.values[h+7] = float((direction>>8)&255u)/255.0;
+    history.values[h+8] = float((direction>>16)&255u)/255.0; history.values[h+9] = float(direction>>24)/255.0;
+    history.values[h+10] = valid ? 1.0 : 0.0;
+}
+void main() {
+    uint local = gl_GlobalInvocationID.x;
+    if (local >= p.count) return;
+    Input actor = inputs.values[p.first + local]; uint i = actor.target;
+    if (p.resume >= 2u) { writeHistory(i, oldHandoff.values[i], p.resume == 2u); return; }
+    precise vec3 center;
+    if (p.resume != 0u) center = oldHandoff.values[i].center.xyz;
+    else {
+        precise float remainder = 1.0 - actor.interpolation.w;
+        precise vec3 correction = actor.interpolation.xyz * remainder;
+        precise dvec3 interpolated = states.values[actor.source].position.xyz - dvec3(correction);
+        precise dvec3 relative = interpolated - dvec3(actor.cameraXY, actor.cameraZ);
+        center = vec3(relative);
+    }
+    for (uint step=0; step<p.stepCount; step++) {
+        precise vec3 movement = actor.velocityPhase.xyz * steps.values[step].w;
+        precise vec3 delta = steps.values[step].xyz + movement;
+        center = center + delta;
+    }
+    vec4 current = vec4(center, property(i, 0, actor.velocityPhase.w));
+    uint color = actor.attributes.z;
+    uint b = component(float(color & 255u) + property(i, 4, actor.velocityPhase.w));
+    uint g = component(float((color>>8)&255u) + property(i, 3, actor.velocityPhase.w));
+    uint r = component(float((color>>16)&255u) + property(i, 2, actor.velocityPhase.w));
+    uint a = component(clamp(property(i, 1, actor.velocityPhase.w), 0.0, 255.0));
+    uvec4 packed = uvec4(actor.attributes.xy, b | (g<<8) | (r<<16) | (a<<24), actor.attributes.w);
+    centers.values[i] = current;
+    attributes.values[i*3] = packed.x; attributes.values[i*3+1] = packed.y; attributes.values[i*3+2] = packed.z;
+    flags.values[i] = packed.w;
+    result.values[i].center = current; result.values[i].attributes = packed;
+    uint old = oldIndices.values[i]; bool valid = old != 0xffffffffu;
+    Snapshot previous;
+    if (valid) { previous = oldRendered.values[old]; valid = previous.attributes.w == packed.w; }
+    if (!valid) { previous.center = current; previous.attributes = packed; }
+    writeHistory(i, previous, valid);
+}

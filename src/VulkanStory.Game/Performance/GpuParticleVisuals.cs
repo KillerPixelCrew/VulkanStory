@@ -33,6 +33,7 @@ internal static class GpuParticleVisuals
         AccessTools.Method(typeof(ParticlePoolQuads), nameof(ParticlePoolQuads.OnNewFrameOffThread))!];
     [ThreadStatic] private static bool scope;
     private static bool armed, ready;
+    internal static bool InstanceRenderingEnabled => armed && ready && PerformancePatchSet.Current?.GpuParticleVisualSimulation == true;
     private static long deferredProperties, cpuFacadeChecks;
     private static int cpuFacadeValid = 1;
     internal static long DeferredProperties => Interlocked.Read(ref deferredProperties);
@@ -44,6 +45,19 @@ internal static class GpuParticleVisuals
     private static bool Unset(EvolvingNatFloat value) => value.Transform == EvolvingNatFloat.NoValueSet.Transform && value.Factor == EvolvingNatFloat.NoValueSet.Factor;
     internal static bool CaptureVelocity(EvolvingNatFloat value, float phase, out ParticleEvolution result) =>
         Capture(value, 0, phase, false, false, out result);
+
+    internal static bool CaptureInstance(ParticleGeneric particle, Span<ParticleEvolution> properties)
+    {
+        if (!scope) return false;
+        // Preserve the stock colour-evolution first values, including curves
+        // whose output is subsequently added to the initial colour component.
+        float phase = particle.SecondsAlive / particle.LifeLength;
+        return Capture(particle.SizeEvolve, particle.SizeMultiplier, phase, true, false, out properties[0]) &&
+            Capture(particle.OpacityEvolve, particle.ColorAlpha, phase, true, true, out properties[1]) &&
+            Capture(particle.RedEvolve, particle.ColorRed, phase, false, true, out properties[2]) &&
+            Capture(particle.GreenEvolve, particle.ColorGreen, phase, false, true, out properties[3]) &&
+            Capture(particle.BlueEvolve, particle.ColorBlue, phase, false, true, out properties[4]);
+    }
 
     internal static PerformanceFeature Create() => new("gpu-particle-visuals", settings => settings.GpuParticleVisualSimulation,
         () => { _ = Trigonometry; }, harmony =>
@@ -68,7 +82,8 @@ internal static class GpuParticleVisuals
     {
         __state = scope;
         scope = armed && ready && PerformancePatchSet.Current?.GpuParticleVisualSimulation == true &&
-            (__instance.GetType() == typeof(ParticlePoolQuads) || __instance.GetType() == typeof(ParticlePoolCubes));
+            (__instance.GetType() == typeof(ParticlePoolQuads) || __instance.GetType() == typeof(ParticlePoolCubes)) &&
+            GpuParticleSimulation.InstanceUploadBoundarySafe(__instance);
     }
     private static Exception? AfterPool(bool __state, Exception? __exception) { scope = __state; return __exception; }
 
@@ -100,6 +115,7 @@ internal static class GpuParticleVisuals
         ref int __2, ref int __3, ref int __4, out bool __state)
     {
         __state = false;
+        if (GpuParticleSimulation.InstanceDeferred(__0, __2 / 4 - 1)) return false;
         if (!scope) { Materialize(__0); return true; }
         int index = __2 / 4;
         if (index >= 65536 || __2 < 0 || __2 % 4 != 0 || __3 != index * 12 || __4 != index ||
@@ -136,6 +152,7 @@ internal static class GpuParticleVisuals
 
     private static void AfterParticle(MeshData __0, int __2, bool __state)
     {
+        if (GpuParticleSimulation.InstanceDeferred(__0, __2 / 4 - 1)) return;
         if (__state || !scope || __2 < 4 || __2 % 4 != 0 || __0.CustomFloats?.Values is not { } floats ||
             __0.CustomBytes?.Values is not { } bytes || __2 > floats.Length) return;
         int index = __2 / 4 - 1;
@@ -152,6 +169,7 @@ internal static class GpuParticleVisuals
 
     internal static Batch? Pending(MeshData data) => batches.TryGetValue(data, out var batch) && batch.Pending &&
         batch.Count == data.CustomFloats?.Count / 4 ? batch : null;
+    internal static void Forget(MeshData data) { if (batches.TryGetValue(data, out var batch)) batch.Pending = false; }
     internal static ParticleEvolution SizeFor(MeshData data, int index, float fallback) =>
         Pending(data) is { } batch && index < batch.Count ? batch.Properties[index * 5] : ParticleEvolution.Constant(fallback);
     internal static float Evaluate(ParticleEvolution value)
