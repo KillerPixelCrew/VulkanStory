@@ -40,6 +40,7 @@ internal static class HeadlessTerrainComparison
         internal bool Generated, SmoothingRequested, SmoothingPrevented, SmoothingObserved;
         internal bool NoiseHook, Admitted;
         internal long RequestedRaw, AppliedRaw;
+        internal long RequestedDensity, AppliedDensity, CheckedDensity;
         internal string? Error, Hash;
         internal readonly Dictionary<string, long> Fallback = new(StringComparer.Ordinal);
         internal void Reason(string reason)
@@ -234,7 +235,9 @@ internal static class HeadlessTerrainComparison
                 if (current.Next == current.Probes.Count)
                 {
                     equal = current.Probes.Chunk(2).All(pair => pair[0].Hash == pair[1].Hash);
-                    gpuEquivalent = equal && current.Probes.Where(p => p.Gpu).All(p => p.Admitted && p.RequestedRaw > 0 && p.AppliedRaw > 0);
+                    gpuEquivalent = equal && current.Probes.Where(p => p.Gpu).All(p => p.Admitted &&
+                        ((p.RequestedRaw > 0 && p.AppliedRaw > 0) ||
+                         (p.RequestedDensity > 0 && p.AppliedDensity > 0 && p.CheckedDensity == p.AppliedDensity)));
                     complete = true;
                     WriteResult(current);
                     current.Server = null;
@@ -367,8 +370,11 @@ internal static class HeadlessTerrainComparison
                 smoothingRequested = p.SmoothingRequested, smoothingPolicyObserved = p.SmoothingObserved,
                 smoothingPrevented = p.SmoothingPrevented, noiseHook = p.NoiseHook, admitted = p.Admitted,
                 requestedRaw = p.RequestedRaw, appliedRaw = p.AppliedRaw,
-                rawCoverage = !p.Gpu ? "cpu-reference" : p.AppliedRaw == 0 ? "all-fallback" :
+                rawCoverage = !p.Gpu ? "cpu-reference" : p.RequestedRaw == 0 ? "not-used" : p.AppliedRaw == 0 ? "all-fallback" :
                     p.AppliedRaw == p.RequestedRaw ? "all-gpu" : "mixed-gpu-cpu",
+                requestedDensity = p.RequestedDensity, appliedDensity = p.AppliedDensity, checkedDensity = p.CheckedDensity,
+                densityCoverage = !p.Gpu ? "cpu-reference" : p.RequestedDensity == 0 ? "not-used" :
+                    p.AppliedDensity == 0 ? "all-fallback" : p.AppliedDensity == p.RequestedDensity ? "all-gpu" : "mixed-gpu-cpu",
                 fallbackReasons = p.Reasons()
             })
         }));

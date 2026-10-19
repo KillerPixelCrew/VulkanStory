@@ -95,7 +95,9 @@ internal sealed record RendererSettings
     public bool TerrainOcclusionCull { get; init; } = true;
     /// <summary>Tests terrain occlusion and compacts ordered indirect draws in Vulkan compute.</summary>
     public bool GpuTerrainDrawPreparation { get; init; } = true;
-    /// <summary>Computes stock singleplayer terrain raw octaves while retaining the original density and block decisions.</summary>
+    /// <summary>Builds supported stock cube terrain faces in compute while retaining custom tessellators.</summary>
+    public bool GpuChunkMeshing { get; init; } = true;
+    /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
     public bool GpuTerrainNoise { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
     public bool GpuSharedDeformation { get; init; } = true;
@@ -187,6 +189,7 @@ internal sealed record RendererSettings
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
+        GpuChunkMeshing = source.GpuChunkMeshing,
         GpuTerrainNoise = source.GpuTerrainNoise,
         GpuSharedDeformation = source.GpuSharedDeformation,
         GpuParticleGeometry = source.GpuParticleGeometry,

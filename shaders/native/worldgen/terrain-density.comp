@@ -1,0 +1,171 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_ARB_gpu_shader_fp64 : require
+// ColumnNoise.NoiseSign and threshold arithmetic adapted from Vintage Story,
+// Anego Studios. Proprietary software owned by Anego Studios. All rights reserved.
+// You may NOT sell this software in any way, shape or form.
+// You may NOT copy, compile or distribute this software in its unmodified form.
+// You may read it, learn from it, and use it as a basis for mods of the game
+// Vintage Story, but your mod should be made of at least 50% of your original
+// work, measured by lines of code.
+// In other words, please don't distribute just slightly modified versions of this as your own mod.
+// One invocation consumes one original column's ordered sign requests. Cached
+// octave evaluations persist across Y, exactly as in the official ColumnNoise.
+#include "terrain-binary32.glsl"
+layout(local_size_x=64) in;
+layout(std430,set=0,binding=0) readonly buffer Inputs { uint data[]; };
+layout(std430,set=0,binding=1) writeonly buffer Outputs { uint results[]; };
+layout(std430,set=0,binding=2) readonly buffer Gradients { uint gradients[]; };
+layout(push_constant) uniform Count { uint count; } pc;
+#include "terrain-noise-kernel.glsl"
+
+struct Octave { uvec2 seed; double x,fy,z,amplitude,threshold,smoothing,stop; };
+precise double pastY[32],pastValue[32];
+bool valid;
+double ReadDouble(uint word) { return packDouble2x32(uvec2(data[word],data[word+1u])); }
+Octave ReadOctave(uint index) {
+    uint p=data[1]+index*16u;
+    return Octave(uvec2(data[p],data[p+1u]),ReadDouble(p+2u),ReadDouble(p+4u),ReadDouble(p+6u),
+        ReadDouble(p+8u),ReadDouble(p+10u),ReadDouble(p+12u),ReadDouble(p+14u));
+}
+// Math.Min/Max propagate NaN, unlike GLSL min/max. Match .NET's signed-zero ties too.
+double DMin(double a,double b) {
+    if(isnan(a)) return a; if(isnan(b)) return b;
+    if(a==0.0lf && b==0.0lf) return packDouble2x32(uvec2(0u,(unpackDouble2x32(a).y|unpackDouble2x32(b).y)&0x80000000u));
+    return a<b?a:b;
+}
+double DMax(double a,double b) {
+    if(isnan(a)) return a; if(isnan(b)) return b;
+    if(a==0.0lf && b==0.0lf) return packDouble2x32(uvec2(0u,(unpackDouble2x32(a).y&unpackDouble2x32(b).y)&0x80000000u));
+    return a>b?a:b;
+}
+void DUnpack(uvec2 bits,out int exponent,out uvec2 sig) {
+    exponent=int((bits.y>>20)&2047u);
+    sig=uvec2(bits.x,bits.y&0xfffffu);
+    if(exponent!=0) { sig.y|=0x100000u; return; }
+    exponent=1;
+    while((sig.y&0x100000u)==0u) { sig=uvec2(sig.x<<1,(sig.y<<1)|(sig.x>>31)); exponent--; }
+}
+// Vulkan permits an error bound for native floating-point division. The stock
+// smoothing expression needs a single IEEE RNE division, including underflow.
+// Long division uses only exact power-of-two scales and Sterbenz subtractions.
+double DDiv(double a,double b) {
+    if(isnan(a)||isnan(b)||isinf(a)||isinf(b)||a==0.0lf||b==0.0lf) return a/b;
+    uvec2 ab=unpackDouble2x32(a),bb=unpackDouble2x32(b),asig,bsig;
+    uint sign=(ab.y^bb.y)&0x80000000u;
+    int ae,be; DUnpack(ab,ae,asig); DUnpack(bb,be,bsig);
+    precise double numerator=packDouble2x32(uvec2(asig.x,0x3ff00000u|(asig.y&0xfffffu)));
+    precise double denominator=packDouble2x32(uvec2(bsig.x,0x3ff00000u|(bsig.y&0xfffffu)));
+    int exponent=ae-be+1023;
+    if(numerator<denominator) { numerator=numerator*2.0lf; exponent--; }
+    if(exponent< -52) return packDouble2x32(uvec2(0u,sign));
+    if(exponent== -52) return packDouble2x32(uvec2(uint(numerator>denominator),sign));
+    if(exponent>2046) return packDouble2x32(uvec2(0u,sign|0x7ff00000u));
+    int digits=exponent>0?53:52+exponent;
+    uvec2 quotient=uvec2(1u,0u);
+    precise double remainder=numerator-denominator;
+    for(int i=1;i<digits;i++) {
+        remainder=remainder*2.0lf;
+        bool bit=remainder>=denominator;
+        if(bit) remainder=remainder-denominator;
+        quotient=uvec2((quotient.x<<1)|uint(bit),(quotient.y<<1)|(quotient.x>>31));
+    }
+    remainder=remainder*2.0lf;
+    bool guard=remainder>=denominator;
+    if(guard) remainder=remainder-denominator;
+    if(guard&&(remainder!=0.0lf||(quotient.x&1u)!=0u)) quotient=add64(quotient,uvec2(1u,0u));
+    if(exponent>0) {
+        if((quotient.y&0x200000u)!=0u) {
+            quotient=uvec2((quotient.x>>1)|(quotient.y<<31),quotient.y>>1); exponent++;
+        }
+        if(exponent>2046) return packDouble2x32(uvec2(0u,sign|0x7ff00000u));
+        return packDouble2x32(uvec2(quotient.x,sign|(uint(exponent)<<20)|(quotient.y&0xfffffu)));
+    }
+    return packDouble2x32(uvec2(quotient.x,sign|quotient.y));
+}
+double Threshold(double value,double threshold,double smoothing) {
+    precise double b1=value-threshold,b2=value+threshold;
+    precise double d1=0.0lf-b1,d2=0.0lf-b2;
+    precise double n1=smoothing-abs(d1),n2=smoothing-abs(d2);
+    precise double h1=DDiv(DMax(n1,0.0lf),smoothing),h2=DDiv(DMax(n2,0.0lf),smoothing);
+    precise double c1=h1*h1,c2=h2*h2;
+    c1=c1*smoothing; c2=c2*smoothing;
+    c1=c1*0.25lf; c2=c2*0.25lf;
+    precise double high=DMax(0.0lf,b1)+c1,low=DMin(0.0lf,b2)-c2;
+    precise double result=high+low;
+    return result;
+}
+// Exact binary64 -> binary32 conversion, without native binary32 denormal behavior.
+uint ToB32(double value) {
+    uvec2 bits=unpackDouble2x32(value);
+    uint sign=bits.y&0x80000000u;
+    int exponent=int((bits.y>>20)&2047u);
+    if(exponent==0) return sign;
+    uint sig=((bits.y&0xfffffu)|0x100000u)<<6 | (bits.x>>26);
+    sig|=uint((bits.x&0x03ffffffu)!=0u);
+    return B32RoundPack(sign,exponent-1023+127,sig);
+}
+double FromB32(uint bits) {
+    if((bits&0x7fffffffu)==0u) return packDouble2x32(uvec2(0u,bits&0x80000000u));
+    int exponent; uint sig; B32Unpack(bits,exponent,sig);
+    return packDouble2x32(uvec2(sig<<29, (bits&0x80000000u)|(uint(exponent-127+1023)<<20)|((sig>>3)&0xfffffu)));
+}
+uvec2 Prime(int i,uvec2 p) {
+    uint high,low; umulExtended(uint(i),p.x,high,low);
+    high+=uint(i)*p.y+(i<0?0xffffffffu:0u)*p.x;
+    return uvec2(low,high);
+}
+double Evaluate(Octave o,double y) {
+    precise double xz=o.x+o.z;
+    precise double s2=xz*(-0.211324865405187lf),yy=y*0.577350269189626lf;
+    precise double xr=o.x+s2,zr=o.z+s2,yr=xz*(-0.577350269189626lf);
+    xr=xr+yy; zr=zr+yy; yr=yr+yy;
+    if(isnan(xr)||isnan(yr)||isnan(zr)||isinf(xr)||isinf(yr)||isinf(zr)||
+        xr<(-2147483648.0lf)||xr>=2147483647.0lf||yr<(-2147483648.0lf)||yr>=2147483647.0lf||zr<(-2147483648.0lf)||zr>=2147483647.0lf) {
+        valid=false; return 0.0lf;
+    }
+    int ix=int(floor(xr)),iy=int(floor(yr)),iz=int(floor(zr));
+    precise double fx=xr-double(ix),fy=yr-double(iy),fz=zr-double(iz);
+    xp=Prime(ix,PX); yp=Prime(iy,PY); zp=Prime(iz,PZ);
+    return FromB32(Noise(o.seed,ToB32(fx),ToB32(fy),ToB32(fz)));
+}
+double Sign(uint start,uint count,double y,double inverse) {
+    precise double value=inverse,lo=inverse,hi=inverse;
+    for(uint j=0u;j<count;j++) {
+        if(!(hi<=0.0lf)&&!(lo>=0.0lf)) break;
+        Octave o=ReadOctave(start+j);
+        if(lo>=o.stop) return lo;
+        if(hi<=-o.stop) return hi;
+        precise double ey=y*o.fy;
+        precise double delta=pastY[j]-ey;
+        precise double slope=abs(delta)*5.0lf;
+        precise double lower=pastValue[j]-slope,upper=pastValue[j]+slope;
+        precise double v1=DMax(-1.0lf,lower)*o.amplitude,v2=DMin(1.0lf,upper)*o.amplitude;
+        lo=lo+Threshold(v1,o.threshold,o.smoothing);
+        hi=hi+Threshold(v2,o.threshold,o.smoothing);
+    }
+    for(uint j=0u;j<count;j++) {
+        Octave o=ReadOctave(start+j);
+        if(value>=o.stop||value<=-o.stop) break;
+        precise double ey=y*o.fy;
+        precise double noise=Evaluate(o,ey);
+        pastValue[j]=noise; pastY[j]=ey;
+        precise double scaled=noise*o.amplitude;
+        value=value+Threshold(scaled,o.threshold,o.smoothing);
+    }
+    return value;
+}
+void main() {
+    uint column=gl_GlobalInvocationID.x; if(column>=data[0]) return;
+    uint p=4u+column*4u;
+    uint start=data[p],count=data[p+1u],first=data[p+2u],length=data[p+3u];
+    for(uint j=0u;j<count;j++) { pastY[j]=packDouble2x32(uvec2(0u,0x7ff80000u)); pastValue[j]=0.0lf; }
+    valid=true;
+    for(uint i=first;i<first+length;i++) {
+        uint r=data[2]+i*4u;
+        precise double sign=Sign(start,count,ReadDouble(r),ReadDouble(r+2u));
+        // A sentinel causes the adapter to replay this entire column through the
+        // untouched stock ColumnNoise, including its original past-evaluation order.
+        results[i]=valid ? uint(sign>0.0lf) : 0xffffffffu;
+    }
+}

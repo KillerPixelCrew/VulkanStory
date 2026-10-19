@@ -17,6 +17,7 @@ public sealed unsafe partial class VulkanDevice
 
     internal void PrepareTerrainNoise(bool enabled, float[] gradients)
     {
+        PrepareTerrainDensity(enabled, gradients);
         if (!enabled || terrainNoise != null || terrainNoiseUnavailable || _disposed) return;
         int id = 0;
         try
@@ -24,6 +25,7 @@ public sealed unsafe partial class VulkanDevice
             // The raw kernel rounds binary32 using uint operations, including subnormals
             // and signed zero. No optional native float-control capability is required.
             string source = ReadWorldShader("worldgen/terrain-noise.comp").Replace(
+                "#include \"terrain-noise-kernel.glsl\"", ReadWorldShader("worldgen/terrain-noise-kernel.glsl"), StringComparison.Ordinal).Replace(
                 "#include \"terrain-binary32.glsl\"", ReadWorldShader("worldgen/terrain-binary32.glsl"), StringComparison.Ordinal);
             var compiled = _shaderCompiler.CompileCompute(source, "terrain-noise");
             if (!compiled.Success) throw new InvalidOperationException(compiled.Error);
@@ -53,6 +55,7 @@ public sealed unsafe partial class VulkanDevice
         private readonly VulkanContext context;
         private readonly ComputeProgram program;
         private readonly Pipeline pipeline;
+        private readonly bool density;
         private readonly Tile[] tiles = new Tile[2];
         private VulkanBuffer? gradients;
         private bool disposed;
@@ -71,9 +74,10 @@ public sealed unsafe partial class VulkanDevice
             internal bool Leased, InFlight;
             internal int Count;
         }
-        private sealed class Batch(TerrainNoiseRunner owner, Tile tile) : ITerrainNoiseBatch
+        private sealed class Batch(TerrainNoiseRunner owner, Tile tile) : ITerrainNoiseBatch, ITerrainDensityBatch
         {
             private bool released;
+            public bool Complete(Span<uint> results) => Complete(MemoryMarshal.Cast<uint, float>(results));
             public bool Complete(Span<float> results)
             {
                 lock (owner.gate)
@@ -102,9 +106,9 @@ public sealed unsafe partial class VulkanDevice
             }
         }
 
-        internal TerrainNoiseRunner(VulkanContext context, ComputeProgram program, Pipeline pipeline, float[] table)
+        internal TerrainNoiseRunner(VulkanContext context, ComputeProgram program, Pipeline pipeline, float[] table, bool density = false)
         {
-            this.context = context; this.program = program; this.pipeline = pipeline;
+            this.context = context; this.program = program; this.pipeline = pipeline; this.density = density;
             if (table.Length != 1024) throw new ArgumentException("Stock terrain gradient table changed.");
             try
             {
@@ -114,8 +118,8 @@ public sealed unsafe partial class VulkanDevice
                 for (int index = 0; index < tiles.Length; index++)
                 {
                     var tile = tiles[index] = new Tile();
-                    tile.Input = new VulkanBuffer(context, Capacity * 48UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.DeviceBuffers);
-                    tile.Output = new VulkanBuffer(context, Capacity * 4UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.DeviceBuffers);
+                    tile.Input = new VulkanBuffer(context, density ? 2 * 1024 * 1024UL : Capacity * 48UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.DeviceBuffers);
+                    tile.Output = new VulkanBuffer(context, density ? 65536 * 4UL : Capacity * 4UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.DeviceBuffers);
                     var poolInfo = new CommandPoolCreateInfo { SType = StructureType.CommandPoolCreateInfo,
                         QueueFamilyIndex = context.ParticleComputeQueueFamily, Flags = CommandPoolCreateFlags.ResetCommandBufferBit };
                     CommandPool pool;
@@ -152,26 +156,52 @@ public sealed unsafe partial class VulkanDevice
         internal ITerrainNoiseBatch? Submit(ReadOnlySpan<TerrainNoiseInput> input)
         {
             if (input.Length == 0 || input.Length > Capacity) return null;
+            return SubmitBytes(MemoryMarshal.AsBytes(input), input.Length, (uint)((input.Length + 63) / 64));
+        }
+
+        internal ITerrainDensityBatch? SubmitDensity(ReadOnlySpan<TerrainDensityColumn> columns,
+            ReadOnlySpan<TerrainDensityOctave> octaves, ReadOnlySpan<TerrainDensityRequest> requests)
+        {
+            if (!density || columns.Length is < 1 or > 32 || octaves.Length > 1024 || requests.Length is < 1 or > 65536) return null;
+            foreach (TerrainDensityColumn column in columns)
+                if (column.OctaveCount > 32 || (ulong)column.OctaveStart + column.OctaveCount > (ulong)octaves.Length ||
+                    (ulong)column.RequestStart + column.RequestCount > (ulong)requests.Length) return null;
+            int columnBytes = columns.Length * 16, octaveBytes = octaves.Length * 64;
+            byte[] packed = new byte[16 + columnBytes + octaveBytes + requests.Length * 16];
+            Span<uint> header = MemoryMarshal.Cast<byte, uint>(packed.AsSpan(0, 16));
+            header[0] = (uint)columns.Length;
+            header[1] = (uint)((16 + columnBytes) / 4);
+            header[2] = (uint)((16 + columnBytes + octaveBytes) / 4);
+            MemoryMarshal.AsBytes(columns).CopyTo(packed.AsSpan(16));
+            MemoryMarshal.AsBytes(octaves).CopyTo(packed.AsSpan(16 + columnBytes));
+            MemoryMarshal.AsBytes(requests).CopyTo(packed.AsSpan(16 + columnBytes + octaveBytes));
+            return SubmitBytes(packed, requests.Length, (uint)((columns.Length + 63) / 64));
+        }
+
+        private Batch? SubmitBytes(ReadOnlySpan<byte> input, int resultCount, uint groups)
+        {
             lock (gate)
             {
                 if (disposed) return null;
                 Tile? tile = tiles.FirstOrDefault(t => !t.Leased);
                 if (tile == null) return null;
                 // No queue of CPU requests: full tiles retain the original producer immediately.
-                tile.Leased = true; tile.Count = input.Length;
+                tile.Leased = true; tile.Count = resultCount;
                 try
                 {
                     var api = context.Api;
-                    MemoryMarshal.AsBytes(input).CopyTo(new Span<byte>((void*)tile.Input!.Mapped, input.Length * 48));
+                    if ((ulong)input.Length > tile.Input!.Size || (ulong)resultCount * 4 > tile.Output!.Size)
+                    { tile.Leased = false; return null; }
+                    input.CopyTo(new Span<byte>((void*)tile.Input.Mapped, input.Length));
                     VulkanResult.Check(api.ResetCommandPool(context.Device, tile.Pool, 0), "terrain command reset");
                     var begin = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = CommandBufferUsageFlags.OneTimeSubmitBit };
                     VulkanResult.Check(api.BeginCommandBuffer(tile.Command, &begin), "terrain command begin");
                     api.CmdBindPipeline(tile.Command, PipelineBindPoint.Compute, pipeline);
                     var set = tile.Set;
                     api.CmdBindDescriptorSets(tile.Command, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
-                    uint count = (uint)input.Length;
+                    uint count = (uint)resultCount;
                     api.CmdPushConstants(tile.Command, program.Layout, ShaderStageFlags.ComputeBit, 0, 4, &count);
-                    api.CmdDispatch(tile.Command, (count + 63) / 64, 1, 1);
+                    api.CmdDispatch(tile.Command, groups, 1, 1);
                     var barrier = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,
                         SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
                         DstStageMask = PipelineStageFlags2.HostBit, DstAccessMask = AccessFlags2.HostReadBit,

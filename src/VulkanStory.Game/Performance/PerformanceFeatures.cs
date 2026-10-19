@@ -10,6 +10,7 @@ internal static class PerformanceFeatures
         ChunkVisibilityWalk.Create(),
         TerrainOcclusionCull.Create(),
         GpuTerrainDraws.Create(),
+        GpuChunkMeshing.Create(),
         EntityOcclusionCull.Create(),
         GpuEntityDraws.Create(essentials, survival),
         GpuJointPoses.Create(essentials, survival),

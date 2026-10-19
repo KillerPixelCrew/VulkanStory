@@ -1,0 +1,118 @@
+#version 450
+layout(local_size_x=64) in;
+struct Voxel { int identity; int material; uint opaque; uint solid; uint emitAo; int absorption; int fluidAbsorption; uint light; };
+struct Face { vec4 positionHeight; vec4 uv; uvec4 location; uvec4 settings; };
+struct Neighbour { int offset; int facing; int opposite; int upper; int lower; };
+layout(std430,binding=0) readonly buffer Voxels { Voxel voxels[]; };
+layout(std430,binding=1) readonly buffer Faces { Face faces[]; };
+layout(std430,binding=2) readonly buffer Neighbours { Neighbour neighbours[]; };
+layout(std430,binding=3) buffer Bins { uint bins[]; };
+layout(std430,binding=4) buffer Geometry { uint geometry[]; };
+layout(push_constant) uniform Push { uint count; uint mode; } pc;
+const int moveIndex[6]=int[6](-34,1,34,-1,1156,-1156);
+const uint opposite[6]=uint[6](2,3,0,1,5,4);
+bool visible(Face f) {
+    uint s=f.location.y; Voxel a=voxels[f.location.x], b=voxels[int(f.location.x)+moveIndex[s]];
+    bool opaque=(a.opaque&(1u<<s))!=0, other=(b.opaque&(1u<<opposite[s]))!=0;
+    switch(f.settings.y) {
+        case 0u: return !other||!opaque;
+        case 1u: return true;
+        case 2u: return a.identity!=b.identity&&(!opaque||!other);
+        case 3u: return (a.identity==b.identity&&(s==4u||s==0u||s==3u))||(a.identity!=b.identity&&(!opaque||!other));
+        case 4u: return (a.solid&(1u<<s))==0||(a.material!=b.material&&(!opaque||!other))||(b.solid&(1u<<opposite[s]))==0;
+        case 5u: return a.material==b.material ? (s==0u||s==3u) : (!other||(s<4u&&!opaque));
+    }
+    return false;
+}
+uvec4 channels(uint c) { return uvec4(c>>24,(c>>16)&255u,(c>>8)&255u,c&255u); }
+// Stock float32 quotients, rounded before multiplying the summed channels.
+// Native shader FDiv permits extra error that can cross an integer truncation.
+const uint occludedQuotients[4]=uint[4](0x3f2b851fu,0x3eab851fu,0x3e64b17fu,0x3e2b851fu);
+const uint openQuotients[4]=uint[4](0x3f800000u,0x3f000000u,0x3eaaaaabu,0x3e800000u);
+uint corner(int d1,int d2,int between,int front,float ao,uint light[9],int absorption) {
+    uvec4 sum=channels(light[0]); precise float factor;
+    if(d1+d2==0||front+between==0) {
+        precise float dark=0.0196875*float(clamp(absorption,0,32));
+        factor=min(0.67,1.0-dark);
+    } else {
+        factor=d1*d2*between==0 ? 0.67 : ao;
+        int n=1;
+        if(d1>0){sum+=channels(light[d1]);n++;}
+        if(d2>0){sum+=channels(light[d2]);n++;}
+        if(between>0){sum+=channels(light[between]);n++;}
+        factor=uintBitsToFloat(factor==0.67 ? occludedQuotients[n-1] : openQuotients[n-1]);
+    }
+    uvec4 c=uvec4(vec4(sum)*factor);
+    return (c.x<<24)|(c.y<<16)|(c.z<<8)|c.w;
+}
+uvec4 lighting(Face f) {
+    int ix=int(f.location.x), side=int(f.location.y), near=ix+moveIndex[side];
+    Voxel self=voxels[ix], front=voxels[near]; uint light[9]; light[0]=front.light;
+    if(f.settings.z==0u) return uvec4(front.light);
+    bool leaves=self.material==int(f.settings.w);
+    bool occluded=front.fluidAbsorption>0 || (front.emitAo&uint(neighbours[side*9+8].facing))!=0;
+    float frontAo[4]; for(int i=0;i<4;i++) frontAo[i]=occluded?0.67:1.0;
+    // Absorbing-fluid neighborhoods retain the original producer. The neutral
+    // grid still carries fluid absorption explicitly for admission/ABI clarity.
+    int bits=0, frontBits=0;
+    for(int i=0;i<8;i++) {
+        bits<<=1; Neighbour n=neighbours[side*9+i]; Voxel b=voxels[ix+n.offset];
+        bool blocked;
+        if(b.fluidAbsorption>0) {
+            blocked=false; bits|=1;
+            if(i<=3){bits=(bits<<1)|1;}
+            else {frontBits<<=1; if((front.emitAo&uint(n.facing))==0)frontBits|=1;}
+        } else if(i<=3) {
+            blocked=(b.emitAo&uint(n.upper))!=0||(leaves&&b.material==self.material);
+            if(!blocked)bits|=1;
+            bits<<=1;
+            if((b.emitAo&uint(n.lower))==0&&(!leaves||b.material!=self.material)){bits|=1;blocked=false;}
+        } else {
+            frontBits<<=1;
+            blocked=(b.emitAo&uint(n.opposite))!=0||(leaves&&b.material==self.material);
+            if(!blocked)bits|=1;
+            bool frontBlocked=(front.emitAo&uint(n.facing))!=0;
+            if(!frontBlocked){frontBits|=1;frontAo[i-4]=1.0;}
+        }
+        light[i+1]=blocked?front.light:b.light;
+    }
+    int between3=8*(bits&1); int between2=7*((bits>>=1)&1);
+    int between1=6*((bits>>=1)&1); int between0=5*((bits>>=1)&1);
+    int d31=4*((bits>>=1)&1); int d11=4*((bits>>=1)&1);
+    int d21=3*((bits>>=1)&1); int d01=3*((bits>>=1)&1);
+    int d20=2*((bits>>=1)&1); int d30=2*((bits>>=1)&1);
+    int d00=(bits>>=1)&1; int d10=bits>>1;
+    if(side>=4){int t=d10;d10=d00;d00=t;t=d30;d30=d20;d20=t;}
+    return uvec4(corner(d00,d01,between0,frontBits&1,frontAo[0],light,self.absorption),
+        corner(d10,d11,between1,(frontBits>>1)&1,frontAo[1],light,self.absorption),
+        corner(d20,d21,between2,(frontBits>>2)&1,frontAo[2],light,self.absorption),
+        corner(d30,d31,between3,(frontBits>>3)&1,frontAo[3],light,self.absorption));
+}
+const vec3 starts[6]=vec3[6](vec3(0,0,0),vec3(1,0,0),vec3(1,0,1),vec3(0,0,1),vec3(0,1,0),vec3(0,0,1));
+const vec3 firstEdges[6]=vec3[6](vec3(0,1,0),vec3(0,1,0),vec3(0,1,0),vec3(0,1,0),vec3(0,0,1),vec3(0,0,-1));
+const vec3 lastEdges[6]=vec3[6](vec3(1,0,0),vec3(0,0,1),vec3(-1,0,0),vec3(0,0,-1),vec3(1,0,0),vec3(1,0,0));
+void main(){
+    uint i=gl_GlobalInvocationID.x;if(i>=pc.count)return;Face f=faces[i];if(!visible(f))return;
+    uint bin=f.location.z;
+    if(pc.mode==0u){atomicAdd(bins[bin*3],1u);return;}
+    uint face=bins[bin*3+1]+atomicAdd(bins[bin*3+2],1u), p=face*20u, side=f.location.y;
+    vec3 scale=vec3(1,f.positionHeight.w,1);
+    precise vec3 origin=f.positionHeight.xyz+starts[side]*scale;
+    precise vec3 vertex1=f.positionHeight.xyz+(starts[side]+firstEdges[side])*scale;
+    precise vec3 vertex3=f.positionHeight.xyz+(starts[side]+lastEdges[side])*scale;
+    precise vec3 e1=(vertex1-origin)/2.0,e2=(vertex3-origin)/2.0;
+    precise float v=f.uv.w+(f.uv.y-f.uv.w)*(side<4u?f.positionHeight.w:1.0);
+    vec2 uv=vec2(f.uv.z,f.uv.w),delta=vec2(f.uv.x-f.uv.z,v-f.uv.w);
+    if(any(lessThan(uv,vec2(-0.000015)))||any(greaterThan(uv,vec2(1.000015))))uv=vec2(0);
+    vec2 oppositeUv=vec2(f.uv.x,v);
+    if(any(lessThan(oppositeUv,vec2(-0.000015)))||any(greaterThan(oppositeUv,vec2(1.000015))))oppositeUv=vec2(0);
+    delta=oppositeUv-uv;
+    if(delta.x<0)delta.x+=1;if(delta.y<0)delta.y+=1;
+    geometry[p]=floatBitsToUint(origin.x);geometry[p+1]=floatBitsToUint(origin.y);geometry[p+2]=floatBitsToUint(origin.z);
+    geometry[p+3]=uint(int(uv.x*32768.0+0.5))+(uint(int(uv.y*32768.0+0.5))<<16);
+    geometry[p+4]=floatBitsToUint(e1.x);geometry[p+5]=floatBitsToUint(e1.y);geometry[p+6]=floatBitsToUint(e1.z);
+    geometry[p+7]=uint(int(delta.x*32768.0+0.5))+(uint(int(delta.y*32768.0+0.5))<<16);
+    for(uint k=8u;k<12u;k++)geometry[p+k]=f.location.w;
+    geometry[p+12]=floatBitsToUint(e2.x);geometry[p+13]=floatBitsToUint(e2.y);geometry[p+14]=floatBitsToUint(e2.z);geometry[p+15]=f.settings.x;
+    uvec4 light=lighting(f);geometry[p+16]=light.w;geometry[p+17]=light.y;geometry[p+18]=light.x;geometry[p+19]=light.z;
+}

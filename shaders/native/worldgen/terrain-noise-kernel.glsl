@@ -1,0 +1,136 @@
+// Raw-noise arithmetic adapted from Vintage Story NewSimplexNoiseLayer, Anego Studios.
+// Proprietary software owned by Anego Studios. All rights reserved.
+// You may NOT sell this software in any way, shape or form.
+// You may NOT copy, compile or distribute this software in its unmodified form.
+// You may read it, learn from it, and use it as a basis for mods of the game
+// Vintage Story, but your mod should be made of at least 50% of your original
+// work, measured by lines of code.
+// In other words, please don't distribute just slightly modified versions of this as your own mod.
+const uvec2 PX=uvec2(0x9270c86fu,0x5205402bu);
+const uvec2 PY=uvec2(0x003817b5u,0x598cd327u);
+const uvec2 PZ=uvec2(0x9fa0bacbu,0x5bcc226eu);
+uvec2 xp,yp,zp;
+uvec2 add64(uvec2 a,uvec2 b) { uint lo=a.x+b.x; return uvec2(lo,a.y+b.y+uint(lo<a.x)); }
+uvec2 offsetPrime(uvec2 a,uvec2 p,int n) { if(n!=0) a=add64(a,p); if(n==2) a=add64(a,p); return a; }
+uvec2 HashPrimes(uvec2 seed,int x,int y,int z) {
+    return seed ^ offsetPrime(xp,PX,x) ^ offsetPrime(yp,PY,y) ^ offsetPrime(zp,PZ,z);
+}
+uint Grad(uvec2 hash,uint dx,uint dy,uint dz) {
+    uint hi,lo; umulExtended(hash.x,0xeec546f5u,hi,lo);
+    hi += hash.x*0x53a3f72du + hash.y*0xeec546f5u;
+    uint shifted=(hi>>26) | ((hi & 0x80000000u)!=0u ? 0xffffffc0u : 0u);
+    uint gi=(lo^shifted)&1020u;
+    return B32Add(B32Add(B32Mul(gradients[gi],dx),B32Mul(gradients[gi|1u],dy)),B32Mul(gradients[gi|2u],dz));
+}
+uint Falloff(uint x,uint y,uint z) {
+    return B32Sub(B32Sub(B32Sub(B32_THREE_QUARTERS,B32Mul(x,x)),B32Mul(y,y)),B32Mul(z,z));
+}
+uint Contribution(uint a,uvec2 hash,uint x,uint y,uint z) {
+    uint square=B32Mul(a,a);
+    return B32Mul(B32Mul(square,square),Grad(hash,x,y,z));
+}
+uint Noise(uvec2 seed,uint xi,uint yi,uint zi) {
+    uvec2 seed2=seed^uvec2(0x169129d7u,0xad2ab84du);
+    int xNMask=B32NoiseMask(xi), yNMask=B32NoiseMask(yi), zNMask=B32NoiseMask(zi);
+    uint xSign=B32MaskOrOne(xNMask), ySign=B32MaskOrOne(yNMask), zSign=B32MaskOrOne(zNMask);
+
+    // First vertex. Every nested call follows the stock expression's grouping.
+    uint x0=B32Add(xi,B32MaskValue(xNMask));
+    uint y0=B32Add(yi,B32MaskValue(yNMask));
+    uint z0=B32Add(zi,B32MaskValue(zNMask));
+    uint a0=Falloff(x0,y0,z0);
+    uint value=Contribution(a0,HashPrimes(seed,-xNMask,-yNMask,-zNMask),x0,y0,z0);
+
+    // Second vertex.
+    uint x1=B32Sub(xi,B32_HALF), y1=B32Sub(yi,B32_HALF), z1=B32Sub(zi,B32_HALF);
+    uint a1=Falloff(x1,y1,z1);
+    value=B32Add(value,Contribution(a1,HashPrimes(seed2,1,1,1),x1,y1,z1));
+
+    // ((mask | 1) << 1) and (-2 - (mask << 2)) are exactly +/-2.
+    uint xAFlipMask0=B32Mul(B32Flip0(xNMask),x1);
+    uint yAFlipMask0=B32Mul(B32Flip0(yNMask),y1);
+    uint zAFlipMask0=B32Mul(B32Flip0(zNMask),z1);
+    uint xAFlipMask1=B32Sub(B32Mul(B32Flip1(xNMask),x1),B32_ONE);
+    uint yAFlipMask1=B32Sub(B32Mul(B32Flip1(yNMask),y1),B32_ONE);
+    uint zAFlipMask1=B32Sub(B32Mul(B32Flip1(zNMask),z1),B32_ONE);
+
+    bool skip5=false;
+    uint a2=B32Add(xAFlipMask0,a0);
+    if(B32Positive(a2)) {
+        value=B32Add(value,Contribution(a2,HashPrimes(seed,xNMask+1,-yNMask,-zNMask),
+            B32Sub(x0,xSign),y0,z0));
+    } else {
+        uint a3=B32Add(B32Add(yAFlipMask0,zAFlipMask0),a0);
+        if(B32Positive(a3)) {
+            value=B32Add(value,Contribution(a3,HashPrimes(seed,-xNMask,yNMask+1,zNMask+1),
+                x0,B32Sub(y0,ySign),B32Sub(z0,zSign)));
+        }
+        uint a4=B32Add(xAFlipMask1,a1);
+        if(B32Positive(a4)) {
+            value=B32Add(value,Contribution(a4,HashPrimes(seed2,-xNMask*2,1,1),
+                B32Add(xSign,x1),y1,z1));
+            skip5=true;
+        }
+    }
+
+    bool skip9=false;
+    uint a6=B32Add(yAFlipMask0,a0);
+    if(B32Positive(a6)) {
+        value=B32Add(value,Contribution(a6,HashPrimes(seed,-xNMask,yNMask+1,-zNMask),
+            x0,B32Sub(y0,ySign),z0));
+    } else {
+        uint a7=B32Add(B32Add(xAFlipMask0,zAFlipMask0),a0);
+        if(B32Positive(a7)) {
+            value=B32Add(value,Contribution(a7,HashPrimes(seed,xNMask+1,-yNMask,zNMask+1),
+                B32Sub(x0,xSign),y0,B32Sub(z0,zSign)));
+        }
+        uint a8=B32Add(yAFlipMask1,a1);
+        if(B32Positive(a8)) {
+            value=B32Add(value,Contribution(a8,HashPrimes(seed2,1,-yNMask*2,1),
+                x1,B32Add(ySign,y1),z1));
+            skip9=true;
+        }
+    }
+
+    bool skipD=false;
+    uint aA=B32Add(zAFlipMask0,a0);
+    if(B32Positive(aA)) {
+        value=B32Add(value,Contribution(aA,HashPrimes(seed,-xNMask,-yNMask,zNMask+1),
+            x0,y0,B32Sub(z0,zSign)));
+    } else {
+        uint aB=B32Add(B32Add(xAFlipMask0,yAFlipMask0),a0);
+        if(B32Positive(aB)) {
+            value=B32Add(value,Contribution(aB,HashPrimes(seed,xNMask+1,yNMask+1,-zNMask),
+                B32Sub(x0,xSign),B32Sub(y0,ySign),z0));
+        }
+        uint aC=B32Add(zAFlipMask1,a1);
+        if(B32Positive(aC)) {
+            value=B32Add(value,Contribution(aC,HashPrimes(seed2,1,1,-zNMask*2),
+                x1,y1,B32Add(zSign,z1)));
+            skipD=true;
+        }
+    }
+
+    if(!skip5) {
+        uint a5=B32Add(B32Add(yAFlipMask1,zAFlipMask1),a1);
+        if(B32Positive(a5)) {
+            value=B32Add(value,Contribution(a5,HashPrimes(seed2,1,-yNMask*2,-zNMask*2),
+                x1,B32Add(ySign,y1),B32Add(zSign,z1)));
+        }
+    }
+    if(!skip9) {
+        uint a9=B32Add(B32Add(xAFlipMask1,zAFlipMask1),a1);
+        if(B32Positive(a9)) {
+            value=B32Add(value,Contribution(a9,HashPrimes(seed2,-xNMask*2,1,-zNMask*2),
+                B32Add(xSign,x1),y1,B32Add(zSign,z1)));
+        }
+    }
+    if(!skipD) {
+        uint aD=B32Add(B32Add(xAFlipMask1,yAFlipMask1),a1);
+        if(B32Positive(aD)) {
+            value=B32Add(value,Contribution(aD,HashPrimes(seed2,-xNMask*2,-yNMask*2,1),
+                B32Add(xSign,x1),B32Add(ySign,y1),z1));
+        }
+    }
+    return value;
+}

@@ -259,6 +259,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Indexed flood-fill visibility", "IndexedChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
                 Switch("Compute terrain draw preparation", "GpuTerrainDrawPreparation");
+                Switch("Compute stock block meshes", "GpuChunkMeshing");
                 Switch("Shared compute deformation", "GpuSharedDeformation");
                 Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute particle visual evolution", "GpuParticleVisualSimulation");
@@ -282,7 +283,7 @@ internal sealed class RendererSettingsPanel
                 Switch("Reuse chunk mesh buffers", "MeshPartPool");
                 Switch("Parallel chunk reads (next world)", "ParallelChunkReads");
                 DefinedChoice("Worldgen workers", "WorldgenWorkers");
-                Switch("Compute terrain noise (singleplayer)", "GpuTerrainNoise");
+                Switch("Compute terrain noise and density (singleplayer)", "GpuTerrainNoise");
                 Switch("Allocation-free animation checks", "AnimationLinqFree");
                 Switch("Falling block mesh fix", "FallingBlockMeshFix");
                 Switch("Villager outfit cache", "OutfitShapeCache");

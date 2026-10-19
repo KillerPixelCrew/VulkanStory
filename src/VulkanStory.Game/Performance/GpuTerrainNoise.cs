@@ -9,14 +9,14 @@ using VulkanStory.Render.Vulkan;
 
 namespace VulkanStory.Game.Performance;
 
-/// <summary>Only the raw stock octave evaluation moves to compute. Density, octave skipping, cached evaluations,
-/// smoothing, solidity, callbacks and block writes execute in the original generator.</summary>
-internal static class GpuTerrainNoise
+/// <summary>Groups stock column sign requests for compute, retaining the original threshold producer,
+/// smoothing and block consumers. Raw-octave assistance remains available when density is unsupported.</summary>
+internal static partial class GpuTerrainNoise
 {
     private const int Capacity = 32768;
     private const int MaximumSnapshots = 8;
     private readonly record struct Key(long Seed, long X, long Y, long Z);
-    private sealed record Root(NewNormalizedSimplexFractalNoise Noise, int Height,
+    private sealed record Root(NewNormalizedSimplexFractalNoise Noise, int Height, GenTerra Generator,
         HeadlessTerrainComparison.Probe? Probe = null, bool Allowed = true, string? Denied = null);
     private sealed class Workspace
     {
@@ -101,6 +101,7 @@ internal static class GpuTerrainNoise
     internal static float[] Gradients => StockGradients.Value!;
     internal static void Configure(VulkanDevice device, bool enabled)
     {
+        ConfigureDensity(device, enabled);
         Volatile.Write(ref backendAvailability, enabled ? device.TerrainNoiseAvailabilityReason : "setting-disabled");
         Volatile.Write(ref backend, enabled && device.TerrainNoiseAvailable ? device.SubmitTerrainNoise : null);
     }
@@ -122,6 +123,7 @@ internal static class GpuTerrainNoise
             PatchProcessor.GetOriginalInstructions(Sign).Count(i => i.Calls(Evaluate)) != 1)
             throw new InvalidOperationException("Stock terrain noise call sites changed.");
         unsafeHandlers = AccessTools.Method(typeof(WorldgenPipeline), "Unsafe").CreateDelegate<Func<IWorldGenHandler, string?>>();
+        ValidateDensity();
         _ = ServerTypes.Method(ServerTypes.EventApi, "TriggerInitWorldGen");
     }, harmony =>
     {
@@ -132,8 +134,8 @@ internal static class GpuTerrainNoise
         harmony.Patch(Sign, transpiler: new HarmonyMethod(typeof(GpuTerrainNoise), nameof(SignTranspiler)));
         harmony.Patch(ServerTypes.Method(ServerTypes.EventApi, "TriggerInitWorldGen"),
             postfix: new HarmonyMethod(typeof(GpuTerrainNoise), nameof(Admit)));
-    }, Uninstall: () => { admitted = false; Volatile.Write(ref backend, null); },
-        WorldLeft: () => { admitted = false; Volatile.Write(ref backend, null); });
+    }, Uninstall: () => { admitted = false; Volatile.Write(ref backend, null); Volatile.Write(ref densityBackend, null); },
+        WorldLeft: () => { admitted = false; Volatile.Write(ref backend, null); Volatile.Write(ref densityBackend, null); });
 
     private static void Admit(object __result) => admitted = __result is IWorldGenHandler handlers && unsafeHandlers!(handlers) == null;
 
@@ -161,7 +163,7 @@ internal static class GpuTerrainNoise
         var noise = (NewNormalizedSimplexFractalNoise)Terrain.GetValue(__instance)!;
         if (noise.GetType() != typeof(NewNormalizedSimplexFractalNoise)) denied ??= "non-stock-noise";
         if (probe != null) { probe.Admitted = denied == null; if (denied != null) probe.Reason(denied); }
-        if (denied == null || probe != null) root = new Root(noise, height, probe, denied == null, denied);
+        if (denied == null || probe != null) root = new Root(noise, height, __instance, probe, denied == null, denied);
     }
     private static Exception? End(Root? __state, Exception? __exception) { root = __state; return __exception; }
 
@@ -169,6 +171,11 @@ internal static class GpuTerrainNoise
     {
         Root? capture = root;
         if (capture == null) return Parallel.For(from, to, options, action);
+        if (capture.Allowed && Volatile.Read(ref densityBackend) != null && from == 0 && to == 1024 && DensitySlots.Wait(0))
+        {
+            try { return RunDensityColumns(capture, options, action); }
+            finally { DensitySlots.Release(); }
+        }
         return Parallel.For(from, to, options, index =>
         {
             Column? previous = column;
@@ -182,6 +189,7 @@ internal static class GpuTerrainNoise
         double relative, double[] amplitudes, double[] thresholds, double nx, double nz)
     {
         var result = noise.ForColumn(relative, amplitudes, thresholds, nx, nz);
+        if (densityCapture != null) { densityCapture.Noise = result; return result; }
         Column? state = column;
         TerrainNoiseBackend? submit = Volatile.Read(ref backend);
         if (state == null) return result;
@@ -256,6 +264,7 @@ internal static class GpuTerrainNoise
 
     private static float Raw(long seed, double x, double y, double z)
     {
+        if (densityCpuEvaluation) return NewSimplexNoiseLayer.Evaluate_ImprovedXZ(seed, x, y, z);
         Column? state = column;
         HeadlessTerrainComparison.Probe? probe = state?.Root.Probe;
         if (probe != null) Interlocked.Increment(ref probe.RequestedRaw);
@@ -316,6 +325,7 @@ internal static class GpuTerrainNoise
         if (count != 1) throw new InvalidOperationException("Stock terrain call site changed: " + original.Name);
     }
     private static IEnumerable<CodeInstruction> GenerateTranspiler(IEnumerable<CodeInstruction> body) => Replace(body, ParallelFor, nameof(RunColumns));
-    private static IEnumerable<CodeInstruction> ColumnTranspiler(IEnumerable<CodeInstruction> body) => Replace(body, ForColumn, nameof(Prepare));
+    private static IEnumerable<CodeInstruction> ColumnTranspiler(IEnumerable<CodeInstruction> body) =>
+        Replace(Replace(body, ForColumn, nameof(Prepare)), Sign, nameof(CaptureDensitySign));
     private static IEnumerable<CodeInstruction> SignTranspiler(IEnumerable<CodeInstruction> body) => Replace(body, Evaluate, nameof(Raw));
 }

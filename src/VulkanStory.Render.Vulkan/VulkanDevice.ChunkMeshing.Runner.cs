@@ -1,0 +1,218 @@
+using System.Runtime.InteropServices;
+using Silk.NET.Vulkan;
+using VulkanStory.Contracts;
+using VulkanStory.Render.Vulkan.Core;
+
+namespace VulkanStory.Render.Vulkan;
+
+public sealed unsafe partial class VulkanDevice
+{
+    /// <summary>Two whole-chunk leases, with no pending CPU request queue.</summary>
+    private sealed class ChunkMeshingRunner : IDisposable
+    {
+        private const int Capacity = 6 * 32 * 32 * 32, BinCapacity = 128;
+        private readonly object gate = new();
+        private readonly VulkanContext context;
+        private readonly ComputeProgram program;
+        private readonly Pipeline pipeline;
+        private readonly Tile?[] tiles = new Tile?[2];
+        private bool disposed;
+        private long jobsCompleted;
+        internal bool Available => !Volatile.Read(ref disposed);
+        internal long JobsCompleted => Interlocked.Read(ref jobsCompleted);
+
+        internal sealed class Tile
+        {
+            internal VulkanBuffer? Voxels, Input, Neighbours, Bins, Output;
+            internal CommandPool Pool;
+            internal CommandBuffer Command;
+            internal DescriptorPool Descriptors;
+            internal DescriptorSet Set;
+            internal Fence Fence;
+            internal bool Leased, InFlight;
+        }
+        internal sealed class Batch : IChunkMeshBatch
+        {
+            internal readonly ChunkMeshingRunner Owner;
+            private readonly Tile tile;
+            private int references = 1;
+            private ChunkMeshRange[]? ranges;
+            internal VulkanBuffer Output => tile.Output!;
+            public int FaceCapacity => Capacity;
+            internal Batch(ChunkMeshingRunner owner, Tile tile) { Owner = owner; this.tile = tile; }
+            public void Retain()
+            {
+                lock (Owner.gate)
+                {
+                    if (references == 0 || Owner.disposed) throw new ObjectDisposedException(nameof(Batch));
+                    references++;
+                }
+            }
+            public ChunkMeshRange[] Generate(ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
+                ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount)
+            {
+                lock (Owner.gate)
+                {
+                    if (references == 0 || Owner.disposed || ranges != null) throw new InvalidOperationException("Invalid chunk mesh lease.");
+                    ranges = Owner.Generate(tile, voxels, faces, neighbours, binCount);
+                    Interlocked.Increment(ref Owner.jobsCompleted);
+                    return ranges;
+                }
+            }
+            internal void RequireRange(ChunkMeshRange range)
+            {
+                lock (Owner.gate)
+                    if (references == 0 || Owner.disposed || ranges == null || !ranges.Contains(range))
+                        throw new InvalidOperationException("Uncompleted chunk mesh range.");
+            }
+            public void Dispose()
+            {
+                lock (Owner.gate)
+                {
+                    if (references == 0) return;
+                    if (--references != 0) return;
+                    if (!Owner.disposed) Owner.Wait(tile);
+                    tile.Leased = false;
+                }
+            }
+        }
+        internal ChunkMeshingRunner(VulkanContext context, ComputeProgram program, Pipeline pipeline)
+        { this.context = context; this.program = program; this.pipeline = pipeline; }
+        internal IChunkMeshBatch? Lease()
+        {
+            lock (gate)
+            {
+                if (disposed) return null;
+                for (int i = 0; i < tiles.Length; i++)
+                {
+                    if (tiles[i]?.Leased == true) continue;
+                    Tile tile = tiles[i] ??= Allocate();
+                    tile.Leased = true;
+                    return new Batch(this, tile);
+                }
+                return null;
+            }
+        }
+        private Tile Allocate()
+        {
+            var tile = new Tile();
+            try
+            {
+                var memory = MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit;
+                tile.Voxels = new VulkanBuffer(context, 39304UL * 32, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                tile.Input = new VulkanBuffer(context, Capacity * 64UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                tile.Neighbours = new VulkanBuffer(context, 54UL * 20, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                tile.Bins = new VulkanBuffer(context, BinCapacity * 12UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                // Graphics queue ownership is retained throughout production/publication.
+                // No optional async queue capability or queue-family transfers are needed.
+                tile.Output = new VulkanBuffer(context, Capacity * 80UL, BufferUsageFlags.StorageBufferBit,
+                    MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+                var poolInfo = new CommandPoolCreateInfo { SType = StructureType.CommandPoolCreateInfo,
+                    QueueFamilyIndex = context.GraphicsQueueFamily, Flags = CommandPoolCreateFlags.ResetCommandBufferBit };
+                CommandPool pool;
+                VulkanResult.Check(context.Api.CreateCommandPool(context.Device, &poolInfo, null, &pool), "chunk mesh pool"); tile.Pool = pool;
+                var allocate = new CommandBufferAllocateInfo { SType = StructureType.CommandBufferAllocateInfo,
+                    CommandPool = pool, Level = CommandBufferLevel.Primary, CommandBufferCount = 1 };
+                CommandBuffer command;
+                VulkanResult.Check(context.Api.AllocateCommandBuffers(context.Device, &allocate, &command), "chunk mesh command"); tile.Command = command;
+                var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
+                Fence fence;
+                VulkanResult.Check(context.Api.CreateFence(context.Device, &fenceInfo, null, &fence), "chunk mesh fence"); tile.Fence = fence;
+                var size = new DescriptorPoolSize(DescriptorType.StorageBuffer, 5);
+                var descriptorInfo = new DescriptorPoolCreateInfo { SType = StructureType.DescriptorPoolCreateInfo,
+                    MaxSets = 1, PoolSizeCount = 1, PPoolSizes = &size };
+                DescriptorPool descriptors;
+                VulkanResult.Check(context.Api.CreateDescriptorPool(context.Device, &descriptorInfo, null, &descriptors), "chunk mesh descriptors"); tile.Descriptors = descriptors;
+                var layout = program.SetLayout;
+                var setInfo = new DescriptorSetAllocateInfo { SType = StructureType.DescriptorSetAllocateInfo,
+                    DescriptorPool = descriptors, DescriptorSetCount = 1, PSetLayouts = &layout };
+                DescriptorSet set;
+                VulkanResult.Check(context.Api.AllocateDescriptorSets(context.Device, &setInfo, &set), "chunk mesh set"); tile.Set = set;
+                DescriptorBufferInfo* buffers = stackalloc DescriptorBufferInfo[5]
+                { new(tile.Voxels.Handle,0,tile.Voxels.Size),new(tile.Input.Handle,0,tile.Input.Size),
+                  new(tile.Neighbours.Handle,0,tile.Neighbours.Size),new(tile.Bins.Handle,0,tile.Bins.Size),new(tile.Output.Handle,0,tile.Output.Size) };
+                WriteDescriptorSet* writes = stackalloc WriteDescriptorSet[5];
+                for (uint i = 0; i < 5; i++) writes[i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet,
+                    DstSet = set, DstBinding = i, DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = buffers + i };
+                context.Api.UpdateDescriptorSets(context.Device, 5, writes, 0, null);
+                return tile;
+            }
+            catch { Destroy(tile); throw; }
+        }
+        private ChunkMeshRange[] Generate(Tile tile, ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
+            ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount)
+        {
+            if (voxels.Length != 39304 || faces.Length > Capacity || neighbours.Length != 54 || binCount > BinCapacity || binCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(faces));
+            foreach (var face in faces) if (face.Bin >= binCount || face.Side > 5 || face.Index < 1191 || face.Index > 38112)
+                throw new ArgumentException("Invalid chunk mesh input.");
+            Copy(voxels, tile.Voxels!); Copy(faces, tile.Input!); Copy(neighbours, tile.Neighbours!);
+            var bins = new Span<uint>((void*)tile.Bins!.Mapped, BinCapacity * 3); bins.Clear();
+            if (faces.Length == 0) return [];
+            Dispatch(tile, faces.Length, 0); Wait(tile);
+            var ranges = new List<ChunkMeshRange>(); int first = 0;
+            for (int i = 0; i < binCount; i++)
+            {
+                int count = checked((int)bins[i * 3]);
+                if (count > faces.Length - first) throw new InvalidOperationException("GPU chunk mesh count exceeds capacity.");
+                bins[i * 3 + 1] = (uint)first;
+                if (count > 0) ranges.Add(new(i, first, count));
+                first += count;
+            }
+            Dispatch(tile, faces.Length, 1); Wait(tile);
+            return ranges.ToArray();
+        }
+        private static void Copy<T>(ReadOnlySpan<T> source, VulkanBuffer buffer) where T : unmanaged =>
+            MemoryMarshal.AsBytes(source).CopyTo(new Span<byte>((void*)buffer.Mapped, checked((int)buffer.Size)));
+        private void Dispatch(Tile tile, int count, uint mode)
+        {
+            var api = context.Api;
+            VulkanResult.Check(api.ResetCommandPool(context.Device, tile.Pool, 0), "chunk mesh reset");
+            var begin = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = CommandBufferUsageFlags.OneTimeSubmitBit };
+            VulkanResult.Check(api.BeginCommandBuffer(tile.Command, &begin), "chunk mesh begin");
+            api.CmdBindPipeline(tile.Command, PipelineBindPoint.Compute, pipeline);
+            var set = tile.Set;
+            api.CmdBindDescriptorSets(tile.Command, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
+            uint* push = stackalloc uint[2] { (uint)count, mode };
+            api.CmdPushConstants(tile.Command, program.Layout, ShaderStageFlags.ComputeBit, 0, 8, push);
+            api.CmdDispatch(tile.Command, ((uint)count + 63) / 64, 1, 1);
+            var barrier = new MemoryBarrier2 { SType = StructureType.MemoryBarrier2,
+                SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+                DstStageMask = PipelineStageFlags2.HostBit | PipelineStageFlags2.ComputeShaderBit,
+                DstAccessMask = AccessFlags2.HostReadBit | AccessFlags2.ShaderStorageReadBit };
+            var dependency = new DependencyInfo { SType = StructureType.DependencyInfo, MemoryBarrierCount = 1, PMemoryBarriers = &barrier };
+            api.CmdPipelineBarrier2(tile.Command, &dependency);
+            VulkanResult.Check(api.EndCommandBuffer(tile.Command), "chunk mesh end");
+            var fence = tile.Fence;
+            VulkanResult.Check(api.ResetFences(context.Device, 1, &fence), "chunk mesh fence reset");
+            var command = new CommandBufferSubmitInfo { SType = StructureType.CommandBufferSubmitInfo, CommandBuffer = tile.Command };
+            var submit = new SubmitInfo2 { SType = StructureType.SubmitInfo2, CommandBufferInfoCount = 1, PCommandBufferInfos = &command };
+            lock (context.QueueLock) VulkanResult.Check(api.QueueSubmit2(context.GraphicsQueue, 1, &submit, fence), "chunk mesh submit");
+            tile.InFlight = true;
+        }
+        private void Wait(Tile tile)
+        {
+            if (!tile.InFlight) return;
+            var fence = tile.Fence;
+            VulkanResult.Check(context.Api.WaitForFences(context.Device, 1, &fence, true, ulong.MaxValue), "chunk mesh result");
+            tile.InFlight = false;
+        }
+        private void Destroy(Tile tile)
+        {
+            if (tile.Descriptors.Handle != 0) context.Api.DestroyDescriptorPool(context.Device, tile.Descriptors, null);
+            if (tile.Fence.Handle != 0) context.Api.DestroyFence(context.Device, tile.Fence, null);
+            if (tile.Pool.Handle != 0) context.Api.DestroyCommandPool(context.Device, tile.Pool, null);
+            tile.Voxels?.Dispose(); tile.Input?.Dispose(); tile.Neighbours?.Dispose(); tile.Bins?.Dispose(); tile.Output?.Dispose();
+        }
+        public void Dispose()
+        {
+            lock (gate)
+            {
+                if (disposed) return;
+                foreach (Tile? tile in tiles) if (tile != null) Wait(tile);
+                disposed = true;
+                foreach (Tile? tile in tiles) if (tile != null) Destroy(tile);
+            }
+        }
+    }
+}
