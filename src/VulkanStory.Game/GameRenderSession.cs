@@ -102,7 +102,7 @@ internal sealed partial class GameRenderSession : IDisposable
             else if (windowState == 2) session.window.Maximize();
             else if (windowState == 1) session.window.Minimize();
             session.window.Sync();
-            session.device = new VulkanDevice();
+            session.device = new VulkanDevice { RenderLogger = new GameRenderLogger(platform.Logger) };
             session.ConfigureDevice();
             session.device.OpenXrEnabled = services.RendererSettings.Settings.OpenXr && !HeadlessHarnessOptions.Enabled;
             services.RendererSettings.StereoRendering = session.device.OpenXrEnabled;

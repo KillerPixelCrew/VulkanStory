@@ -764,6 +764,7 @@ internal sealed partial class GameRenderSession
         Aggregate("terrainNoiseDispatchesRecorded", Device.TerrainNoiseDispatchesRecorded);
         Aggregate("terrainNoiseAppliedSamples", Performance.GpuTerrainNoise.AppliedSamples);
         Aggregate("terrainDensityAvailable", Device.TerrainDensityAvailable);
+        Aggregate("terrainDensityAvailabilityReason", Device.TerrainDensityAvailabilityReason);
         Aggregate("terrainDensityDispatchesRecorded", Device.TerrainDensityDispatchesRecorded);
         Aggregate("chunkMeshingAvailable", Device.ChunkMeshingAvailable);
         Aggregate("chunkMeshingJobsCompleted", Device.ChunkMeshingJobsCompleted);

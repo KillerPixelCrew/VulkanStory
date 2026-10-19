@@ -9,7 +9,9 @@ public sealed unsafe partial class VulkanDevice
 {
     private TerrainNoiseRunner? terrainDensity;
     private bool terrainDensityUnavailable;
+    private string terrainDensityAvailabilityReason = "not-prepared";
     internal bool TerrainDensityAvailable => terrainDensity?.Available == true;
+    internal string TerrainDensityAvailabilityReason => TerrainDensityAvailable ? "available" : terrainDensityAvailabilityReason;
     internal long TerrainDensityDispatchesRecorded => terrainDensity?.Dispatches ?? 0;
     internal ITerrainDensityBatch? SubmitTerrainDensity(ReadOnlySpan<TerrainDensityColumn> columns,
         ReadOnlySpan<TerrainDensityOctave> octaves, ReadOnlySpan<TerrainDensityRequest> requests) =>
@@ -19,6 +21,7 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!enabled || terrainDensity != null || terrainDensityUnavailable || _disposed) return;
         int id = 0;
+        string stage = "float-control query";
         try
         {
             // Density is binary64 in the stock game. Gate this optional kernel on the
@@ -26,24 +29,38 @@ public sealed unsafe partial class VulkanDevice
             PhysicalDeviceFloatControlsProperties controls = new() { SType = StructureType.PhysicalDeviceFloatControlsProperties };
             PhysicalDeviceProperties2 properties = new() { SType = StructureType.PhysicalDeviceProperties2, PNext = &controls };
             _context.Api.GetPhysicalDeviceProperties2(_context.PhysicalDevice, &properties);
+            stage = "float-control requirements";
             if (!_context.ShaderFloat64Enabled || !controls.ShaderSignedZeroInfNanPreserveFloat64 ||
                 !controls.ShaderDenormPreserveFloat64 || !controls.ShaderRoundingModeRtefloat64)
-                throw new NotSupportedException("Stock terrain density requires binary64 RTE, denormal and signed-zero/NaN preservation.");
+                throw new NotSupportedException("Stock terrain density requires binary64 RTE, denormal and signed-zero/NaN preservation. " +
+                    $"ShaderFloat64Enabled={_context.ShaderFloat64Enabled}, " +
+                    $"ShaderSignedZeroInfNanPreserveFloat64={(bool)controls.ShaderSignedZeroInfNanPreserveFloat64}, " +
+                    $"ShaderDenormPreserveFloat64={(bool)controls.ShaderDenormPreserveFloat64}, " +
+                    $"ShaderRoundingModeRTEFloat64={(bool)controls.ShaderRoundingModeRtefloat64}.");
+            stage = "shader source";
             string source = ReadWorldShader("worldgen/terrain-density.comp")
                 .Replace("#include \"terrain-noise-kernel.glsl\"", ReadWorldShader("worldgen/terrain-noise-kernel.glsl"), StringComparison.Ordinal)
                 .Replace("#include \"terrain-binary32.glsl\"", ReadWorldShader("worldgen/terrain-binary32.glsl"), StringComparison.Ordinal);
+            stage = "shader compile";
             var compiled = _shaderCompiler.CompileCompute(source, "terrain-density");
             if (!compiled.Success) throw new InvalidOperationException(compiled.Error);
-            id = CreateComputeProgram(new ComputeProgramDescription { Name = "terrain-density", Spirv = DensityFloatControls(compiled.Spirv), PushConstantBytes = 4,
+            stage = "SPIR-V patch";
+            byte[] spirv = DensityFloatControls(compiled.Spirv);
+            stage = "compute program allocation";
+            id = CreateComputeProgram(new ComputeProgramDescription { Name = "terrain-density", Spirv = spirv, PushConstantBytes = 4,
                 Slots = [new(0, ComputeSlotKind.Buffer), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer)], LocalSizeX = 64, LocalSizeY = 1 });
             var program = _compute.Get(id)!;
-            terrainDensity = new TerrainNoiseRunner(_context, program, _compute.PipelineFor(program, []), gradients, density: true);
+            stage = "pipeline allocation";
+            var pipeline = _compute.PipelineFor(program, []);
+            stage = "runner allocation";
+            terrainDensity = new TerrainNoiseRunner(_context, program, pipeline, gradients, density: true);
         }
         catch (Exception error)
         {
-            if (id != 0) _compute.Remove(id)?.Dispose();
             terrainDensityUnavailable = true;
-            RenderLogger?.Warning("VulkanStory: GPU terrain density unavailable: {0}", error.Message);
+            terrainDensityAvailabilityReason = $"{stage}: {error}";
+            if (id != 0) _compute.Remove(id)?.Dispose();
+            RenderLogger?.Warning("VulkanStory: GPU terrain density unavailable: {0}", terrainDensityAvailabilityReason);
         }
     }
 
