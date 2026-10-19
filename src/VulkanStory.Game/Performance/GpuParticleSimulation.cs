@@ -56,7 +56,9 @@ internal static partial class GpuParticleSimulation
         internal readonly object Gate = new();
         internal readonly List<Batch> Batches = new();
         internal readonly Dictionary<ParticleGeneric, PendingStep> Pending = new(ReferenceEqualityComparer.Instance);
-        internal readonly HashSet<ParticleGeneric> CpuOnly = new(ReferenceEqualityComparer.Instance);
+        // A callback can kill and revive the same pooled object before its next
+        // tick. Advice belongs to the observed spawn, never its next occupant.
+        internal readonly HashSet<object> CpuOnly = new(ReferenceEqualityComparer.Instance);
         internal readonly Dictionary<ParticleGeneric, RenderState> Rendered = new(ReferenceEqualityComparer.Instance);
         internal readonly BlockPos Position = new(0);
         internal readonly BlockPos WorldMinimum = new(0), WorldMaximum = new(0);
@@ -344,7 +346,7 @@ internal static partial class GpuParticleSimulation
         if (Benchmark && __instance.VertexFlags != BenchmarkMarker) return true;
         var state = scope.State;
         if (state.Rendered.Remove(__instance, out var lastRender)) lastRender.Dispose();
-        if (state.CpuOnly.Contains(__instance)) { state.InvalidatePending(); return true; }
+        if (state.CpuOnly.Contains(ParticleMotionHistory.SpawnToken(__instance))) { state.InvalidatePending(); return true; }
         if (!state.Pending.TryGetValue(__instance, out var pending))
         {
             // A repeated due step or CPU callback changes the cache prefix before
@@ -359,6 +361,15 @@ internal static partial class GpuParticleSimulation
         {
             batch.Buffer = batch.Backend!.Complete(batch.Ticket, batch.Output.AsSpan(0, batch.Particles.Count));
             batch.Ticket = 0; batch.Ready = true;
+            // Remember every actual custom-query boundary before consuming the
+            // first one. Otherwise each CPU callback discards the same suffix,
+            // and the next actor submits that entire suffix again. Advice lives
+            // only for this pool call; a callback may still change later inputs,
+            // which keep their stock CPU tick at its original position.
+            for (int i = 0; i < batch.Particles.Count; i++)
+                if ((batch.Output[i].CollisionFlags & ParticleSimulationOutput.RequiresCpuCollision) != 0 &&
+                    ReferenceEquals(batch.Spawns[i], ParticleMotionHistory.SpawnToken(batch.Particles[i])))
+                    state.CpuOnly.Add(batch.Spawns[i]);
             if (HeadlessHarnessOptions.Enabled && !Benchmark)
                 Check(batch.Input.AsSpan(0, batch.Particles.Count), batch.World.AsSpan(0, batch.Particles.Count),
                     CollectionsMarshal.AsSpan(batch.Boxes), batch.Output.AsSpan(0, batch.Particles.Count));
@@ -402,17 +413,23 @@ internal static partial class GpuParticleSimulation
             for (; node != null && visited++ < MaximumBatch; node = node.Next)
             {
                 if (node is not ParticleGeneric particle || (Benchmark && particle.VertexFlags != BenchmarkMarker)) break;
-                if (state.Pending.ContainsKey(particle) || state.CpuOnly.Contains(particle)) continue;
+                if (state.Pending.ContainsKey(particle)) continue;
                 if ((!ReferenceEquals(particle, first) || lookahead) && !scope.Worker &&
                     particle.accum + scope.Delta * scope.GameSpeed < physics.PhysicsTickTime) continue;
-                if (!Input(particle, lifeDt, dt, physics, state, out var snapshot)) break;
-                if (!CaptureWorld(particle, physics, state, batch, out var world)) break;
+                // A known due CPU tick is an ordering barrier, not a hole that
+                // speculative GPU work can cross and later discard again.
+                if (state.CpuOnly.Contains(ParticleMotionHistory.SpawnToken(particle))) break;
+                if (!Input(particle, lifeDt, dt, physics, state, out var snapshot) ||
+                    !CaptureWorld(particle, physics, state, batch, out var world))
+                { state.CpuOnly.Add(ParticleMotionHistory.SpawnToken(particle)); break; }
                 int index = batch.Particles.Count;
                 if (batch.Input.Length <= index) Array.Resize(ref batch.Input, Math.Min(MaximumBatch, Math.Max(1, batch.Input.Length * 2)));
                 if (batch.World.Length <= index) Array.Resize(ref batch.World, batch.Input.Length);
                 if (batch.Spawns.Length <= index) Array.Resize(ref batch.Spawns, batch.Input.Length);
-                batch.World[index] = world; batch.Spawns[index] = ParticleMotionHistory.SpawnToken(particle);
-                batch.Input[index] = snapshot; batch.Particles.Add(particle);
+                object spawn = ParticleMotionHistory.SpawnToken(particle);
+                batch.Particles.Add(particle);
+                batch.World[index] = world; batch.Spawns[index] = spawn;
+                batch.Input[index] = snapshot;
             }
             // Do not speculate across an unsupported producer: its callbacks own the
             // order of spawn/death events and may mutate subsequent particles.
@@ -431,8 +448,8 @@ internal static partial class GpuParticleSimulation
             }
             // No speculative retry or waiting when both backend tiles are occupied.
             // Stock work continues and admission can try again at the next pool boundary.
-            foreach (var particle in batch.Particles) state.CpuOnly.Add(particle);
-            if (first is ParticleGeneric unsupported) state.CpuOnly.Add(unsupported);
+            for (int i = 0; i < batch.Particles.Count; i++) state.CpuOnly.Add(batch.Spawns[i]);
+            if (first is ParticleGeneric unsupported) state.CpuOnly.Add(ParticleMotionHistory.SpawnToken(unsupported));
             batch.Clear();
             return false;
         }
