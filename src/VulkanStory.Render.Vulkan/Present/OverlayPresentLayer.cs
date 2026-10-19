@@ -20,11 +20,24 @@ internal static class OverlayPresentLayer
         }
         // VK_LAYER_PATH overrides VK_ADD_LAYER_PATH. Preserve the caller's
         // search directories and add only this process's private bundle.
-        string variable = string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VK_LAYER_PATH"))
+        // The loader treats even a whitespace override as present and ignores
+        // VK_ADD_LAYER_PATH in that case.
+        string variable = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("VK_LAYER_PATH"))
             ? "VK_ADD_LAYER_PATH" : "VK_LAYER_PATH";
         string existing = Environment.GetEnvironmentVariable(variable) ?? "";
         foreach (string path in existing.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            if (string.Equals(Path.GetFullPath(path), directory, StringComparison.OrdinalIgnoreCase)) return true;
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            try
+            {
+                if (string.Equals(Path.GetFullPath(path), directory, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                // Caller entries remain unchanged; a failed duplicate check
+                // must not prevent adding our required private directory.
+            }
+        }
         Environment.SetEnvironmentVariable(variable,
             existing.Length == 0 ? directory : directory + Path.PathSeparator + existing,
             EnvironmentVariableTarget.Process);
