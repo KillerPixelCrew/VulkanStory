@@ -783,6 +783,16 @@ internal sealed partial class GameRenderSession
         Aggregate("particleSimulationCapacityFallbacks", Device.ParticleSimulationCapacityFallbacks);
         Aggregate("particleSimulationChecks", Performance.GpuParticleSimulation.Checks);
         Aggregate("particleSimulationChecksPassed", Performance.GpuParticleSimulation.ChecksPassed);
+        Aggregate("particleLiquidPolicyChecks", Performance.GpuParticleSimulation.LiquidPolicyChecks);
+        Aggregate("particleLiquidAirChecks", Performance.GpuParticleSimulation.AirPolicyChecks);
+        Aggregate("particleLiquidDeathChecks", Performance.GpuParticleSimulation.LiquidDeathPolicyChecks);
+        Aggregate("particleLiquidWetChecks", Performance.GpuParticleSimulation.WetPolicyChecks);
+        Aggregate("particleLiquidPolicyApplied", Performance.GpuParticleSimulation.LiquidPolicyApplied);
+        Aggregate("particleLiquidAirApplied", Performance.GpuParticleSimulation.AirPolicyApplied);
+        Aggregate("particleLiquidDeathApplied", Performance.GpuParticleSimulation.LiquidDeathPolicyApplied);
+        Aggregate("particleLiquidWetApplied", Performance.GpuParticleSimulation.WetPolicyApplied);
+        Current("particleLiquidPolicyCoveragePassed", HeadlessParticleEvolution.LiquidPolicyCoveragePassed);
+        Current("particleLiquidWetAvailable", HeadlessParticleEvolution.LiquidPolicyFixtureWetExpected);
         Aggregate("particleSimulationFloatError", Performance.GpuParticleSimulation.MaximumFloatError);
         Aggregate("particleSimulationPositionError", Performance.GpuParticleSimulation.MaximumPositionError);
         Aggregate("particleSimulationSubmitMilliseconds", Device.ParticleSimulationSubmitMilliseconds);

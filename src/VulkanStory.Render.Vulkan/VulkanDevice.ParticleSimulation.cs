@@ -24,7 +24,7 @@ public sealed unsafe partial class VulkanDevice
         try
         {
             id = CreateComputeProgram(ParticleEvolutionShader("particle-simulation.comp"), "particle-simulation",
-                Enumerable.Range(0, 8).Select(i => new ComputeSlot((uint)i, ComputeSlotKind.Buffer)).ToArray(), 12, 64, 1);
+                Enumerable.Range(0, 9).Select(i => new ComputeSlot((uint)i, ComputeSlotKind.Buffer)).ToArray(), 12, 64, 1);
             var program = _compute.Get(id);
             if (program != null) particleSimulation = new ParticleSimulationRunner(_context, program, _compute.PipelineFor(program, []), table);
             else particleSimulationUnavailable = true;
@@ -60,10 +60,11 @@ public sealed unsafe partial class VulkanDevice
         private readonly List<VulkanBuffer> reusable = new();
         private const int ResidentCapacity = 65536;
         private const int BoxCapacity = 262144;
+        private const int LiquidCapacity = 262144;
         // Device inputs plus mapped uploads, per-slot seeds/readback/query scratch,
         // and shared device residents all count against the same 128 MiB budget.
         private const ulong WorkspaceBytes = ResidentCapacity * (224UL + 64) +
-            2 * (2 * (4096UL * (32 + 48) + BoxCapacity * 48UL + 8193UL * 4) + 4096UL * (224 + 64 + 64 + 32));
+            2 * (2 * (4096UL * (32 + 64) + BoxCapacity * 48UL + LiquidCapacity * 4UL + 8193UL * 4) + 4096UL * (224 + 64 + 64 + 32));
         private readonly VulkanBuffer configurations, simulationState;
         internal readonly Semaphore Timeline;
         private readonly ConditionalWeakTable<object, Resident> residents = new();
@@ -139,18 +140,19 @@ public sealed unsafe partial class VulkanDevice
         private static ParticleSimulationInput Configuration(in ParticleSimulationInput input) => new()
         {
             VelocityGravity = new(0, 0, 0, input.VelocityGravity.W), Timing = new(0, input.Timing.Y, 0, 0),
-            Parent = input.Parent, StartingVelocity = input.StartingVelocity, Physics = input.Physics,
+            Parent = input.Parent, StartingVelocity = input.StartingVelocity,
+            Physics = new(input.Physics.X, input.Physics.Y, input.Physics.Z, 0),
             Control = new(0, input.Control.Y, input.Control.Z, input.Control.W),
             VelocityX = ConfigurationEvolution(input.VelocityX), VelocityY = ConfigurationEvolution(input.VelocityY),
             VelocityZ = ConfigurationEvolution(input.VelocityZ),
         };
         public long Submit(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<object> spawns,
-            ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes)
+            ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells)
         {
             lock (gate)
             {
                 if (disposed || failed || input.IsEmpty || input.Length > 4096 || spawns.Length != input.Length ||
-                    world.Length != input.Length || boxes.Length > BoxCapacity) return 0;
+                    world.Length != input.Length || boxes.Length > BoxCapacity || liquidCells.Length > LiquidCapacity) return 0;
                 ulong bytes = (ulong)input.Length * 64;
                 for (int i = 0; i < slots.Length; i++)
                 {
@@ -215,7 +217,7 @@ public sealed unsafe partial class VulkanDevice
                             LifeDelta = value.Timing.Z, PhysicsDelta = value.Timing.W, Control = value.Control };
                     }
                     Interlocked.Add(ref admissionTicks, Stopwatch.GetTimestamp() - admissionStart);
-                    try { if (!slots[i].Submit(commands.AsSpan(0, input.Length), world, boxes, target, Timeline, (ulong)ticket)) { Recycle(target); return 0; } }
+                    try { if (!slots[i].Submit(commands.AsSpan(0, input.Length), world, boxes, liquidCells, target, Timeline, (ulong)ticket)) { Recycle(target); return 0; } }
                     catch { failed = true; throw; }
                     pendingResidents[i] = active;
                     foreach (var resident in active) resident.Pending = true;
@@ -352,8 +354,8 @@ public sealed unsafe partial class VulkanDevice
         private readonly VulkanContext context;
         private readonly ComputeProgram program;
         private readonly Pipeline pipeline;
-        private VulkanBuffer? input, output, table, world, boxes, queries, readback;
-        private VulkanBuffer? inputUpload, worldUpload, boxUpload, tableUpload, configurationUpload, stateUpload;
+        private VulkanBuffer? input, output, table, world, boxes, liquid, queries, readback;
+        private VulkanBuffer? inputUpload, worldUpload, boxUpload, liquidUpload, tableUpload, configurationUpload, stateUpload;
         private readonly List<BufferCopy> configurationCopies = new(), stateCopies = new();
         private readonly VulkanBuffer configurations, simulationState;
         private CommandPool pool;
@@ -387,8 +389,9 @@ public sealed unsafe partial class VulkanDevice
                 VulkanBuffer Upload(ulong bytes) => new(context, bytes, BufferUsageFlags.TransferSrcBit,
                     MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
                 input = Device(Capacity * 32UL); inputUpload = Upload(input.Size);
-                world = Device(Capacity * 48UL); worldUpload = Upload(world.Size);
+                world = Device(Capacity * 64UL); worldUpload = Upload(world.Size);
                 boxes = Device(262144 * 48UL); boxUpload = Upload(boxes.Size);
+                liquid = Device(262144 * 4UL); liquidUpload = Upload(liquid.Size);
                 table = Device((ulong)values.Length * 4); tableUpload = Upload(table.Size);
                 queries = Device(Capacity * 32UL);
                 configurationUpload = Upload(Capacity * 224UL); stateUpload = Upload(Capacity * 64UL);
@@ -406,7 +409,7 @@ public sealed unsafe partial class VulkanDevice
                 var createFence = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
                 Fence madeFence;
                 VulkanResult.Check(context.Api.CreateFence(context.Device, &createFence, null, &madeFence), "particle simulation fence"); fence = madeFence;
-                var size = new DescriptorPoolSize(DescriptorType.StorageBuffer, 8);
+                var size = new DescriptorPoolSize(DescriptorType.StorageBuffer, 9);
                 var createDescriptors = new DescriptorPoolCreateInfo { SType = StructureType.DescriptorPoolCreateInfo,
                     MaxSets = 1, PoolSizeCount = 1, PPoolSizes = &size };
                 DescriptorPool madeDescriptors;
@@ -416,14 +419,14 @@ public sealed unsafe partial class VulkanDevice
                     DescriptorPool = descriptors, DescriptorSetCount = 1, PSetLayouts = &layout };
                 DescriptorSet madeSet;
                 VulkanResult.Check(context.Api.AllocateDescriptorSets(context.Device, &allocateSet, &madeSet), "particle simulation descriptor set"); set = madeSet;
-                DescriptorBufferInfo* buffers = stackalloc DescriptorBufferInfo[8]
+                DescriptorBufferInfo* buffers = stackalloc DescriptorBufferInfo[9]
                 { new(input.Handle, 0, input.Size), new(input.Handle, 0, input.Size), new(table.Handle, 0, table.Size),
                     new(configurations.Handle, 0, configurations.Size), new(simulationState.Handle, 0, simulationState.Size),
-                    new(world.Handle, 0, world.Size), new(boxes.Handle, 0, boxes.Size), new(queries.Handle, 0, queries.Size) };
-                WriteDescriptorSet* writes = stackalloc WriteDescriptorSet[8];
-                for (uint i = 0; i < 8; i++) writes[i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet,
+                    new(world.Handle, 0, world.Size), new(boxes.Handle, 0, boxes.Size), new(queries.Handle, 0, queries.Size), new(liquid.Handle, 0, liquid.Size) };
+                WriteDescriptorSet* writes = stackalloc WriteDescriptorSet[9];
+                for (uint i = 0; i < 9; i++) writes[i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet,
                     DstSet = set, DstBinding = i, DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = buffers + i };
-                context.Api.UpdateDescriptorSets(context.Device, 8, writes, 0, null);
+                context.Api.UpdateDescriptorSets(context.Device, 9, writes, 0, null);
                 uint count = 0; context.Api.GetPhysicalDeviceQueueFamilyProperties(context.PhysicalDevice, &count, null);
                 var families = new QueueFamilyProperties[count];
                 fixed (QueueFamilyProperties* data = families) context.Api.GetPhysicalDeviceQueueFamilyProperties(context.PhysicalDevice, &count, data);
@@ -459,7 +462,7 @@ public sealed unsafe partial class VulkanDevice
         }
 
         internal bool Submit(ReadOnlySpan<ParticleSimulationCommand> source, ReadOnlySpan<ParticleSimulationWorldInput> worldInput,
-            ReadOnlySpan<ParticleSimulationBox> worldBoxes, VulkanBuffer target, Semaphore timeline, ulong timelineValue)
+            ReadOnlySpan<ParticleSimulationBox> worldBoxes, ReadOnlySpan<uint> liquidCells, VulkanBuffer target, Semaphore timeline, ulong timelineValue)
         {
             if (source.Length == 0 || source.Length > Capacity) return false;
             long start = Stopwatch.GetTimestamp();
@@ -476,8 +479,9 @@ public sealed unsafe partial class VulkanDevice
                     DstBinding = 1, DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = &outputInfo };
                 api.UpdateDescriptorSets(context.Device, 1, &outputWrite, 0, null);
                 MemoryMarshal.AsBytes(source).CopyTo(new Span<byte>((void*)inputUpload!.Mapped, source.Length * 32));
-                MemoryMarshal.AsBytes(worldInput).CopyTo(new Span<byte>((void*)worldUpload!.Mapped, worldInput.Length * 48));
+                MemoryMarshal.AsBytes(worldInput).CopyTo(new Span<byte>((void*)worldUpload!.Mapped, worldInput.Length * 64));
                 MemoryMarshal.AsBytes(worldBoxes).CopyTo(new Span<byte>((void*)boxUpload!.Mapped, worldBoxes.Length * 48));
+                MemoryMarshal.AsBytes(liquidCells).CopyTo(new Span<byte>((void*)liquidUpload!.Mapped, liquidCells.Length * 4));
                 VulkanResult.Check(api.ResetCommandPool(context.Device, pool, 0), "particle simulation command reset");
                 var begin = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = CommandBufferUsageFlags.OneTimeSubmitBit };
                 VulkanResult.Check(api.BeginCommandBuffer(command, &begin), "particle simulation command begin");
@@ -510,8 +514,9 @@ public sealed unsafe partial class VulkanDevice
                     AccessFlags2.TransferWriteBit | AccessFlags2.HostWriteBit,
                     PipelineStageFlags2.CopyBit, AccessFlags2.TransferReadBit | AccessFlags2.TransferWriteBit);
                 Copy(inputUpload!, input!, (ulong)source.Length * 32);
-                Copy(worldUpload!, world!, (ulong)worldInput.Length * 48);
+                Copy(worldUpload!, world!, (ulong)worldInput.Length * 64);
                 Copy(boxUpload!, boxes!, (ulong)worldBoxes.Length * 48);
+                Copy(liquidUpload!, liquid!, (ulong)liquidCells.Length * 4);
                 if (!tableUploaded) Copy(tableUpload!, table!, table!.Size);
                 CopySeeds(configurationUpload!, configurations, configurationCopies);
                 CopySeeds(stateUpload!, simulationState, stateCopies);
@@ -631,7 +636,7 @@ public sealed unsafe partial class VulkanDevice
                 if (descriptors.Handle != 0) context.Api.DestroyDescriptorPool(context.Device, descriptors, null);
                 if (fence.Handle != 0) context.Api.DestroyFence(context.Device, fence, null);
                 if (pool.Handle != 0) context.Api.DestroyCommandPool(context.Device, pool, null);
-                input?.Dispose(); output?.Dispose(); table?.Dispose(); world?.Dispose(); boxes?.Dispose();
+                input?.Dispose(); output?.Dispose(); table?.Dispose(); world?.Dispose(); boxes?.Dispose(); liquid?.Dispose(); liquidUpload?.Dispose();
                 queries?.Dispose(); readback?.Dispose(); inputUpload?.Dispose(); worldUpload?.Dispose(); boxUpload?.Dispose();
                 tableUpload?.Dispose(); configurationUpload?.Dispose(); stateUpload?.Dispose();
             }

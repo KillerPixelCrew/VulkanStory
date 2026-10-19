@@ -29,6 +29,7 @@ internal sealed record HeadlessTimedCommand(long Frame, string Line)
 /// <c>!occluder distance</c> builds a granite wall across the camera's view at that distance, spawns four traders behind it
 /// and two in front of it.
 /// <c>!fallingsource</c> arms <see cref="HeadlessFallingMeshSource" /> on the client.
+/// <c>!meshing-cube dx dy dz</c> edits an exposed granite cube near the player and records its real meshing path.
 /// Only the headless harness reads command scripts; the server comes from the worldgen feature's constructor hook.
 /// </remarks>
 internal static class HeadlessServerDirective
@@ -41,11 +42,16 @@ internal static class HeadlessServerDirective
         if (parts.Length == 1 && parts[0] == "evolution-particles") { HeadlessParticleEvolution.Emit(client); return; }
         if (parts.Length == 1 && parts[0] == "step-particles") { HeadlessParticleEvolution.EmitSteps(client, false); return; }
         if (parts.Length == 1 && parts[0] == "step-particles-async") { HeadlessParticleEvolution.EmitSteps(client, true); return; }
+        if (parts.Length == 1 && parts[0] == "liquid-particles" && HeadlessHarnessOptions.Enabled)
+        { HeadlessParticleEvolution.EmitLiquidPolicies(client); return; }
         ServerMain server = Performance.WorldgenPipeline.IntegratedServer ??
             throw new InvalidOperationException("No integrated server is known to the harness.");
         int Arg(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
         switch (parts[0])
         {
+            case "meshing-cube" when parts.Length == 4:
+                HeadlessChunkMeshingProbe.Start(server, client, Arg(1), Arg(2), Arg(3));
+                break;
             case "terrain-peek":
                 HeadlessTerrainComparison.Start(server, parts);
                 break;

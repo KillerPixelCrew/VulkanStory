@@ -10,7 +10,8 @@ struct Input {
 };
 struct Output { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
 struct Command { uint slot; float age; float lifeDelta; float physicsDelta; vec4 control; };
-struct World { vec4 liquid; vec4 flow; uint boxStart; uint boxCount; float motionCap; uint initialPopulatedSize; };
+struct World { vec4 liquid; vec4 flow; uint boxStart; uint boxCount; float motionCap; uint initialPopulatedSize;
+    uint liquidStart; uint liquidBounds; uint liquidPolicy; uint reserved; };
 struct Box { vec4 minimum; vec4 maximum; ivec4 cell; };
 // minimum.w = selected count with custom-callback high bit;
 // maximum.w = exclusive prefix cache size.
@@ -23,6 +24,7 @@ layout(binding = 4, std430) buffer Residents { Output values[]; } residents;
 layout(binding = 5, std430) readonly buffer Worlds { World values[]; } worlds;
 layout(binding = 6, std430) readonly buffer Boxes { Box values[]; } boxes;
 layout(binding = 7, std430) buffer Queries { Query values[]; } queries;
+layout(binding = 8, std430) readonly buffer LiquidCells { uint values[]; } liquidCells;
 layout(push_constant) uniform Parameters { uint count; uint phase; uint initialPopulatedSize; } p;
 #include "../include/evolution.glsl"
 #include "particle-physics.glsl"
@@ -72,6 +74,40 @@ void main() {
             metadata.x = collide(position, motion, state.physics.x, world, queries.values[index]);
             position += dvec3(motion) * 0.999LF;
         } else position += dvec3(motion);
+        if (world.liquidPolicy != 0u) {
+            // The pre-step position remains in value until the final write.
+            ivec3 origin = ivec3(value.position.xyz);
+            ivec3 lo, hi;
+            for (uint axis = 0; axis < 3; ++axis) {
+                lo[axis] = origin[axis] + int((world.liquidBounds >> (axis * 4)) & 15u) - 8;
+                hi[axis] = origin[axis] + int((world.liquidBounds >> ((axis + 3) * 4)) & 15u) - 8;
+            }
+            precise double policyY = position.y + 0.15000000596046448LF;
+            ivec3 cell = ivec3(int(position.x), int(policyY), int(position.z));
+            if (any(lessThan(cell, lo)) || any(greaterThan(cell, hi))) {
+                // A missing snapshot is an ordered CPU boundary, never air.
+                metadata.x = 0x80000000u;
+                value.position.w = packDouble2x32(metadata);
+                result.values[index] = value;
+                return;
+            }
+            uvec3 size = uvec3(hi - lo + 1), offset = uvec3(cell - lo);
+            uint address = world.liquidStart + (offset.z * size.y + offset.y) * size.x + offset.x;
+            uint observed = liquidCells.values[address];
+            bool needsCell = (world.liquidPolicy & 2u) != 0u || ((world.liquidPolicy & 1u) != 0u && value.motionAlive.w > 0.5);
+            if (needsCell && observed == 2u) {
+                metadata.x = 0x80000000u;
+                value.position.w = packDouble2x32(metadata);
+                result.values[index] = value;
+                return;
+            }
+            bool liquid = observed == 1u;
+            metadata.y |= 0x01000000u | (liquid ? 0x02000000u : 0u);
+            if ((world.liquidPolicy & 2u) != 0u && liquid) metadata.y |= 0x04000000u;
+            // Air death is before the third-tick light/rain/liquid policies.
+            // The adapter consumes the selected cell for DieInLiquid after rain.
+            if ((world.liquidPolicy & 1u) != 0u && value.motionAlive.w > 0.5 && !liquid) value.motionAlive.w = 0.0;
+        }
         value.position = dvec4(position, packDouble2x32(metadata));
         value.motionAlive.xyz = motion;
         residents.values[step.slot] = value;

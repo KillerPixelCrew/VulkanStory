@@ -8,6 +8,65 @@ namespace VulkanStory.Game;
 /// <summary>Emits real stock particles covering visual evolution functions in an isolated harness world.</summary>
 internal static class HeadlessParticleEvolution
 {
+    private static long liquidChecksAtEmit, airChecksAtEmit, deathChecksAtEmit, wetChecksAtEmit, dryChecksAtEmit;
+    private static long liquidAppliedAtEmit, airAppliedAtEmit, deathAppliedAtEmit, wetAppliedAtEmit, dryAppliedAtEmit;
+    private static bool liquidFixtureStarted;
+    internal static bool LiquidPolicyFixtureWetExpected { get; private set; }
+    internal static bool LiquidPolicyCoveragePassed => liquidFixtureStarted && LiquidPolicyFixtureWetExpected && Performance.GpuParticleSimulation.ChecksPassed &&
+        Performance.GpuParticleSimulation.LiquidPolicyChecks > liquidChecksAtEmit &&
+        Performance.GpuParticleSimulation.AirPolicyChecks > airChecksAtEmit &&
+        Performance.GpuParticleSimulation.LiquidDeathPolicyChecks > deathChecksAtEmit &&
+        Performance.GpuParticleSimulation.LiquidPolicyChecks - Performance.GpuParticleSimulation.WetPolicyChecks > dryChecksAtEmit &&
+        Performance.GpuParticleSimulation.WetPolicyChecks > wetChecksAtEmit &&
+        Performance.GpuParticleSimulation.LiquidPolicyApplied > liquidAppliedAtEmit &&
+        Performance.GpuParticleSimulation.AirPolicyApplied > airAppliedAtEmit &&
+        Performance.GpuParticleSimulation.LiquidDeathPolicyApplied > deathAppliedAtEmit &&
+        Performance.GpuParticleSimulation.WetPolicyApplied > wetAppliedAtEmit &&
+        Performance.GpuParticleSimulation.LiquidPolicyApplied - Performance.GpuParticleSimulation.WetPolicyApplied > dryAppliedAtEmit;
+
+    internal static void EmitLiquidPolicies(ICoreClientAPI api)
+    {
+        if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Liquid particle fixture requires the hidden harness.");
+        liquidChecksAtEmit = Performance.GpuParticleSimulation.LiquidPolicyChecks;
+        airChecksAtEmit = Performance.GpuParticleSimulation.AirPolicyChecks;
+        deathChecksAtEmit = Performance.GpuParticleSimulation.LiquidDeathPolicyChecks;
+        wetChecksAtEmit = Performance.GpuParticleSimulation.WetPolicyChecks;
+        dryChecksAtEmit = liquidChecksAtEmit - wetChecksAtEmit;
+        liquidAppliedAtEmit = Performance.GpuParticleSimulation.LiquidPolicyApplied;
+        airAppliedAtEmit = Performance.GpuParticleSimulation.AirPolicyApplied;
+        deathAppliedAtEmit = Performance.GpuParticleSimulation.LiquidDeathPolicyApplied;
+        wetAppliedAtEmit = Performance.GpuParticleSimulation.WetPolicyApplied;
+        dryAppliedAtEmit = liquidAppliedAtEmit - wetAppliedAtEmit;
+        liquidFixtureStarted = true;
+        Vec3d? wet = null, dry = null;
+        var player = api.World.Player.Entity.Pos;
+        for (int z = (int)player.Z - 8; z <= (int)player.Z + 8; z++)
+            for (int y = (int)player.Y - 4; y <= (int)player.Y + 4; y++)
+                for (int x = (int)player.X - 8; x <= (int)player.X + 8; x++)
+                {
+                    var fluid = api.World.BlockAccessor.GetBlockRaw(x, y, z, 2);
+                    if (!Performance.GpuParticleSimulation.HasStockLiquid(fluid)) continue;
+                    bool liquid = fluid.IsLiquid();
+                    if (liquid) wet ??= new Vec3d(x + 0.5, y + 0.3, z + 0.5);
+                    else if (api.World.BlockAccessor.GetBlockRaw(x, y, z, 1).Id == 0) dry ??= new Vec3d(x + 0.5, y + 0.3, z + 0.5);
+                }
+        LiquidPolicyFixtureWetExpected = wet != null;
+        if (wet == null) api.Logger.Warning("VulkanStory liquid particle fixture: no real fluid cell within 8 horizontal / 4 vertical blocks; wet coverage requires a water location.");
+        if (dry == null) throw new InvalidOperationException("Liquid particle fixture found no real dry air cell near the player.");
+        foreach (var position in new[] { dry, wet }.OfType<Vec3d>())
+            foreach (var model in new[] { EnumParticleModel.Cube, EnumParticleModel.Quad })
+                for (int policy = 1; policy <= 3; policy++)
+                    api.World.SpawnParticles(new AdvancedParticleProperties
+                    {
+                        Quantity = NatFloat.createUniform(8, 0), LifeLength = NatFloat.createUniform(4, 0),
+                        Size = NatFloat.createUniform(0.1f, 0), GravityEffect = NatFloat.createUniform(0, 0),
+                        basePos = position.Clone(), baseVelocity = new Vec3f(), ParticleModel = model,
+                        TerrainCollision = true, DieInAir = (policy & 1) != 0, DieInLiquid = (policy & 2) != 0,
+                        HsvaColor = null!, Color = ColorUtil.ToRgba(255, 60, 120, 220), LightEmission = int.MaxValue,
+                        VertexFlags = 0,
+                    });
+    }
+
     internal static void EmitSteps(ICoreClientAPI api, bool worker)
     {
         if (!HeadlessHarnessOptions.Enabled) throw new InvalidOperationException("Particle integration fixture requires the hidden harness.");

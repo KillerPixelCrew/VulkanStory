@@ -13,12 +13,26 @@ namespace VulkanStory.Game.Performance;
 internal static partial class GpuParticleSimulation
 {
     private const int MaximumWorldBoxes = 262144;
+    private const int MaximumLiquidCells = 262144, MaximumLiquidRegions = 512;
     private static readonly AccessTools.FieldRef<Vintagestory.API.Datastructures.CachedCuboidList, int> PopulatedSize =
         AccessTools.FieldRefAccess<Vintagestory.API.Datastructures.CachedCuboidList, int>("populatedSize");
     private readonly record struct WorldRegion(IBlockAccessor Accessor, int Dimension, int MinX, int MinY, int MinZ, int MaxX, int MaxY, int MaxZ);
     private static readonly MethodInfo StockBoxes = AccessTools.Method(typeof(Block), nameof(Block.GetParticleCollisionBoxes))!;
+    private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid))!;
     private static readonly Dictionary<Type, bool> stockBoxTypes = new();
     private static readonly Dictionary<Type, bool> stockFlowTypes = new();
+    private static readonly Dictionary<Type, bool> stockLiquidTypes = new();
+    internal static bool HasStockLiquid(Block block)
+    {
+        lock (stockLiquidTypes)
+        {
+            var type = block.GetType();
+            if (!stockLiquidTypes.TryGetValue(type, out bool stock))
+                stockLiquidTypes[type] = stock = AccessTools.Method(type, nameof(Block.IsLiquid)) == StockLiquid &&
+                    Harmony.GetPatchInfo(StockLiquid)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) != true;
+            return stock;
+        }
+    }
     private static bool HasStockFlow(Block block)
     {
         lock (stockFlowTypes)
@@ -61,9 +75,17 @@ internal static partial class GpuParticleSimulation
         var pos = particle.Position;
         state.Position.SetAndCorrectDimension((int)pos.X, (int)pos.Y, (int)pos.Z);
         var fluid = physics.BlockAccess.GetBlock(state.Position, 2);
+        if (!HasStockLiquid(fluid)) return false;
         bool liquid = fluid.IsLiquid();
+        bool aboveLiquid = false;
+        if (particle.SwimOnLiquid && liquid)
+        {
+            var above = physics.BlockAccess.GetBlockAbove(state.Position, 2);
+            if (!HasStockLiquid(above)) return false;
+            aboveLiquid = above.IsLiquid();
+        }
         world.Liquid = new Vector4(liquid ? 1 : 0,
-            particle.SwimOnLiquid && liquid && physics.BlockAccess.GetBlockAbove(state.Position, 2).IsLiquid() ? 1 : 0,
+            aboveLiquid ? 1 : 0,
             fluid.LiquidLevel, particle.SwimOnLiquid ? 1 : 0);
         if (fluid is IBlockFlowing flowing)
         {
@@ -80,6 +102,11 @@ internal static partial class GpuParticleSimulation
         if (!particle.TerrainCollision) return true;
         float half = particle.ParticleHeight * particle.SizeMultiplier / 2f, cap = physics.MotionCap;
         if (!float.IsFinite(cap) || cap < 0 || cap > 2 || half < 0 || half > 2) return false;
+        // Only collision-clipped motion has a proven cap here. Unclipped stock
+        // particles keep their original post-step CPU liquid policy.
+        world.LiquidPolicy = (particle.DieInAir ? ParticleSimulationWorldInput.DieInAir : 0) |
+            (particle.DieInLiquid && unchecked((byte)(TickCount(particle) + 1)) > 2 ? ParticleSimulationWorldInput.DieInLiquid : 0);
+        if (world.LiquidPolicy != 0 && !CaptureLiquidCells(particle, physics, batch, ref world)) return false;
         var min = state.WorldMinimum; var max = state.WorldMaximum;
         min.SetAndCorrectDimension((int)(pos.X - half - cap), (int)(pos.Y - cap - 1), (int)(pos.Z - half - cap));
         max.SetAndCorrectDimension((int)(pos.X + half + cap), (int)(pos.Y + half + cap), (int)(pos.Z + half + cap));
@@ -122,6 +149,40 @@ internal static partial class GpuParticleSimulation
         { boxes.RemoveRange(start, boxes.Count - start); batch.BoxBlocks.RemoveRange(start, batch.BoxBlocks.Count - start); return false; }
         world.BoxStart = (uint)start; world.BoxCount = (uint)(boxes.Count - start);
         batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
+        return true;
+    }
+    private static bool CaptureLiquidCells(ParticleGeneric particle, ParticlePhysics physics, Batch batch,
+        ref ParticleSimulationWorldInput world)
+    {
+        var p = particle.Position;
+        // Use raw integer Y exactly like GetBlockRaw, including dimension bits
+        // and truncation toward zero on either side of zero. 0.999 only shrinks
+        // the collision-clipped displacement, so the inclusive cap encloses it.
+        double cap = world.MotionCap;
+        int minX = (int)(p.X - cap), maxX = (int)(p.X + cap),
+            minY = (int)(p.Y - cap + 0.15000000596046448), maxY = (int)(p.Y + cap + 0.15000000596046448),
+            minZ = (int)(p.Z - cap), maxZ = (int)(p.Z + cap);
+        var region = new WorldRegion(physics.BlockAccess, 0, minX, minY, minZ, maxX, maxY, maxZ);
+        if (!batch.LiquidRegions.TryGetValue(region, out uint start))
+        {
+            int count = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+            if (batch.LiquidRegions.Count == MaximumLiquidRegions || count > MaximumLiquidCells - batch.LiquidCells.Count) return false;
+            start = (uint)batch.LiquidCells.Count;
+            for (int z = minZ; z <= maxZ; z++)
+                for (int y = minY; y <= maxY; y++)
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        var block = physics.BlockAccess.GetBlockRaw(x, y, z, 2);
+                        // Mark opaque callbacks without invoking them. Only the
+                        // actual selected cell becomes an ordered CPU boundary.
+                        batch.LiquidCells.Add(!HasStockLiquid(block) ? 2u : block.IsLiquid() ? 1u : 0u);
+                    }
+            batch.LiquidRegions.Add(region, start);
+        }
+        int x0 = (int)p.X, y0 = (int)p.Y, z0 = (int)p.Z;
+        world.LiquidStart = start;
+        world.LiquidBounds = (uint)(minX - x0 + 8) | (uint)(minY - y0 + 8) << 4 | (uint)(minZ - z0 + 8) << 8 |
+            (uint)(maxX - x0 + 8) << 12 | (uint)(maxY - y0 + 8) << 16 | (uint)(maxZ - z0 + 8) << 20;
         return true;
     }
     private static void MaterializeCollisionList(ParticlePhysics physics, Batch batch, int index,

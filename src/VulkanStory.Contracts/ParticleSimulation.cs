@@ -26,6 +26,9 @@ public struct ParticleSimulationInput
 [StructLayout(LayoutKind.Explicit, Size = 64)]
 public struct ParticleSimulationOutput
 {
+    public const uint LiquidPolicyApplied = 1u << 24;
+    public const uint LiquidCell = 1u << 25;
+    public const uint LiquidDeath = 1u << 26;
     // A custom collision callback intersects the actual stock motion query.
     // The adapter must run that ordered CPU tick and rebase later speculation.
     public const uint RequiresCpuCollision = 0x80000000;
@@ -33,21 +36,28 @@ public struct ParticleSimulationOutput
     [FieldOffset(8)] public double Y;
     [FieldOffset(16)] public double Z;
     [FieldOffset(24)] public uint CollisionFlags;
+    // Low 24 bits retain collision bounds; high bits carry liquid decisions.
     [FieldOffset(28)] public uint QueryBounds;
     [FieldOffset(32)] public Vector4 VelocityAge;
     [FieldOffset(48)] public Vector4 MotionAlive;
 }
 
 /// <summary>Fresh world observations for one due step; never reused across world updates.</summary>
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential, Size = 64)]
 public struct ParticleSimulationWorldInput
 {
+    public const uint DieInAir = 1;
+    public const uint DieInLiquid = 2;
     public Vector4 Liquid;
     public Vector4 Flow;
     public uint BoxStart, BoxCount;
     public float MotionCap;
     // Actual monotonic CachedCuboidList allocation count at batch admission.
     public uint InitialPopulatedSize;
+    // Dense fresh fluid cells (0 air, 1 liquid, 2 opaque callback), X fastest
+    // then Y then Z. Bounds are six
+    // four-bit signed offsets (+8) from the truncated admission position.
+    public uint LiquidStart, LiquidBounds, LiquidPolicy, Reserved;
 }
 
 /// <summary>One stock collision box in WalkBlocks and collision-array order; Minimum.W marks a custom callback cell.</summary>
@@ -95,7 +105,7 @@ public interface IParticleSimulationBackend
 {
     /// <summary>Copies inputs and submits without waiting. Returns zero when the bounded slot or retained-buffer budget is exhausted.</summary>
     long Submit(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<object> spawns,
-        ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes);
+        ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells);
     /// <summary>Completes accepted work once, copies the CPU facade and transfers ownership of its immutable GPU buffer.</summary>
     ParticleSimulationBuffer Complete(long ticket, Span<ParticleSimulationOutput> output);
     /// <summary>Relinquishes a ticket immediately. Its buffers remain owned by the backend until GPU completion.</summary>

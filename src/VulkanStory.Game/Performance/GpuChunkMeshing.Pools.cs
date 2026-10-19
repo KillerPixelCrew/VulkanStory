@@ -31,10 +31,22 @@ internal static partial class GpuChunkMeshing
         if (!Payloads.TryGetValue(modeldata, out var payload)) return true;
         Vec3i origin = Origin(__instance);
         var vao = (VAO)PoolMesh(__instance);
-        GameGraphicsAdapter.MeshAdapter(vao).PublishChunkMeshing(vao, payload.Batch, payload.Range, vertexPosition,
-            origin == null ? 0 : modelOrigin.X - origin.X,
-            origin == null ? 0 : modelOrigin.Y - origin.Y,
-            origin == null ? 0 : modelOrigin.Z - origin.Z);
+        try
+        {
+            GameGraphicsAdapter.MeshAdapter(vao).PublishChunkMeshing(vao, payload.Batch, payload.Range, vertexPosition,
+                origin == null ? 0 : modelOrigin.X - origin.X,
+                origin == null ? 0 : modelOrigin.Y - origin.Y,
+                origin == null ? 0 : modelOrigin.Z - origin.Z);
+        }
+        catch (Exception error)
+        {
+            if (payload.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(payload.ProbeBatch, "pool-publication-failed",
+                new { payload.Range, pool = PoolId(__instance), error = error.Message });
+            throw;
+        }
+        if (payload.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(payload.ProbeBatch, "pool-publication-recorded",
+            new { payload.Range, pool = PoolId(__instance), vertexPosition, indexPosition,
+                x = modelOrigin.X, y = modelOrigin.Y, z = modelOrigin.Z, gpuExecutionProven = false });
         var location = new ModelDataPoolLocation { IndicesStart = indexPosition, IndicesEnd = indexPosition + modeldata.IndicesCount,
             VerticesStart = vertexPosition, VerticesEnd = vertexPosition + modeldata.VerticesCount,
             PoolId = PoolId(__instance), FrustumCullSphere = frustumCullSphere };

@@ -32,6 +32,8 @@ internal static partial class GpuParticleSimulation
         internal readonly List<ParticleSimulationBox> Boxes = new();
         internal readonly List<Block> BoxBlocks = new();
         internal readonly Dictionary<WorldRegion, (uint Start, uint Count)> Regions = new();
+        internal readonly List<uint> LiquidCells = new();
+        internal readonly Dictionary<WorldRegion, uint> LiquidRegions = new();
         internal IParticleSimulationBackend? Backend;
         internal long Ticket;
         internal ParticleSimulationBuffer? Buffer;
@@ -42,7 +44,7 @@ internal static partial class GpuParticleSimulation
             if (Ticket != 0) { Backend!.Release(Ticket); Ticket = 0; }
             Buffer?.Dispose(); Buffer = null;
             Array.Clear(Spawns, 0, Particles.Count);
-            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); Backend = null; Remaining = 0; Ready = false;
+            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Backend = null; Remaining = 0; Ready = false;
         }
     }
     private sealed class PendingStep(Batch batch, int index, object spawn)
@@ -113,6 +115,16 @@ internal static partial class GpuParticleSimulation
     private static bool backendEnabled;
     private static long epoch;
     private static long stepsApplied, checks;
+    private static long liquidPolicyChecks, airPolicyChecks, liquidDeathPolicyChecks, wetPolicyChecks;
+    private static long liquidPolicyApplied, airPolicyApplied, liquidDeathPolicyApplied, wetPolicyApplied;
+    internal static long LiquidPolicyChecks => Interlocked.Read(ref liquidPolicyChecks);
+    internal static long AirPolicyChecks => Interlocked.Read(ref airPolicyChecks);
+    internal static long LiquidDeathPolicyChecks => Interlocked.Read(ref liquidDeathPolicyChecks);
+    internal static long WetPolicyChecks => Interlocked.Read(ref wetPolicyChecks);
+    internal static long LiquidPolicyApplied => Interlocked.Read(ref liquidPolicyApplied);
+    internal static long AirPolicyApplied => Interlocked.Read(ref airPolicyApplied);
+    internal static long LiquidDeathPolicyApplied => Interlocked.Read(ref liquidDeathPolicyApplied);
+    internal static long WetPolicyApplied => Interlocked.Read(ref wetPolicyApplied);
     private static long cpuBenchmarkSteps, cpuBenchmarkTicks, gpuBenchmarkSteps, gpuBenchmarkTicks, fallbackBenchmarkSteps, fallbackBenchmarkTicks;
     private static long cpuBenchmarkPools, cpuBenchmarkPoolTicks, gpuBenchmarkPools, gpuBenchmarkPoolTicks;
     internal static long CpuBenchmarkPools => Interlocked.Read(ref cpuBenchmarkPools);
@@ -156,6 +168,7 @@ internal static partial class GpuParticleSimulation
             ready = false;
             lock (stockBoxTypes) stockBoxTypes.Clear();
             lock (stockFlowTypes) stockFlowTypes.Clear();
+            lock (stockLiquidTypes) stockLiquidTypes.Clear();
             foreach (var method in new[] { Main, Worker, Tick, Collision,
                 AccessTools.Method(typeof(ParticleBase), nameof(ParticleBase.TickFixedStep))!,
                 AccessTools.Method(typeof(ParticleGeneric), nameof(ParticleGeneric.UpdateBuffers))!,
@@ -168,6 +181,8 @@ internal static partial class GpuParticleSimulation
                 AccessTools.Method(typeof(Vintagestory.API.Datastructures.CachedCuboidList), "Add",
                     [typeof(Cuboidf), typeof(int), typeof(int), typeof(int), typeof(Block)])!,
                 StockBoxes, AccessTools.Method(typeof(ParticlePhysics), nameof(ParticlePhysics.UpdateMotion))!,
+                AccessTools.Method(typeof(Block), nameof(Block.IsLiquid))!,
+                AccessTools.Method(typeof(Vintagestory.Common.BlockAccessorReadLockfree), nameof(IBlockAccessor.GetBlockRaw))!,
                 AccessTools.Method(typeof(ParticlePhysics), nameof(ParticlePhysics.HandleBoyancy))!,
                 AccessTools.Method(typeof(EvolvingNatFloat), nameof(EvolvingNatFloat.nextFloat))!,
                 AccessTools.Method(typeof(GameMath), nameof(GameMath.FastSin))!, AccessTools.Method(typeof(GameMath), nameof(GameMath.FastCos))! })
@@ -267,7 +282,8 @@ internal static partial class GpuParticleSimulation
         input.StartingVelocity = new Vector4(particle.StartingVelocity.X, particle.StartingVelocity.Y, particle.StartingVelocity.Z,
             particle.TerrainCollision && particle.SelfPropelled ? 1 : 0);
         input.Control = new Vector4(Drag(particle), parent ? 1 : 0, particle.VelocityEvolve != null ? 1 : 0, particle.TerrainCollision ? 1 : 0);
-        input.Physics = new Vector4(particle.ParticleHeight * particle.SizeMultiplier, particle.SwimOnLiquid ? 1 : 0, 0, 0);
+        input.Physics = new Vector4(particle.ParticleHeight * particle.SizeMultiplier, particle.SwimOnLiquid ? 1 : 0,
+            (particle.DieInAir ? 1 : 0) | (particle.DieInLiquid ? 2 : 0), TickCount(particle));
         foreach (float value in MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref input, 1))[32..128]))
             if (!float.IsFinite(value) || Math.Abs(value) > 1000000) return false;
         if (particle.VelocityEvolve is { } evolution)
@@ -299,6 +315,7 @@ internal static partial class GpuParticleSimulation
             Drag(particle) != expected.Control.X ||
             particle.ParticleHeight * particle.SizeMultiplier != expected.Physics.X ||
             particle.SwimOnLiquid != (expected.Physics.Y > 0.5f) ||
+            ((particle.DieInAir ? 1 : 0) | (particle.DieInLiquid ? 2 : 0)) != (int)expected.Physics.Z || TickCount(particle) != expected.Physics.W ||
             !float.IsFinite(particle.SizeMultiplier) || !float.IsFinite(particle.ParticleHeight)) return false;
         var parent = particle.ParentVelocity;
         bool inherited = parent is { } && (parent.X != 0 || parent.Y != 0 || parent.Z != 0);
@@ -372,7 +389,7 @@ internal static partial class GpuParticleSimulation
                     state.CpuOnly.Add(batch.Spawns[i]);
             if (HeadlessHarnessOptions.Enabled && !Benchmark)
                 Check(batch.Input.AsSpan(0, batch.Particles.Count), batch.World.AsSpan(0, batch.Particles.Count),
-                    CollectionsMarshal.AsSpan(batch.Boxes), batch.Output.AsSpan(0, batch.Particles.Count));
+                    CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells), batch.Output.AsSpan(0, batch.Particles.Count));
         }
         ref readonly var expected = ref batch.Input[pending.Index];
         int resultIndex = pending.Index;
@@ -438,7 +455,7 @@ internal static partial class GpuParticleSimulation
             if (batch.Output.Length < count) Array.Resize(ref batch.Output, count);
             if (count > 0 && batch.Backend != null)
                 batch.Ticket = batch.Backend.Submit(batch.Input.AsSpan(0, count), batch.Spawns.AsSpan(0, count),
-                    batch.World.AsSpan(0, count), CollectionsMarshal.AsSpan(batch.Boxes));
+                    batch.World.AsSpan(0, count), CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells));
             if (batch.Ticket != 0)
             {
                 batch.Remaining = count;
@@ -475,7 +492,16 @@ internal static partial class GpuParticleSimulation
             MaterializeCollisionList(physics, batch, index, in result, state.CollisionBox);
             ApplyCollisionResponse(particle, dt, api, result.CollisionFlags);
         }
-        particle.Alive = result.MotionAlive.W > 0.5f && (!particle.DieInAir || physics.BlockAccess.GetBlockRaw((int)particle.Position.X,
+        bool liquidPolicy = (result.QueryBounds & ParticleSimulationOutput.LiquidPolicyApplied) != 0;
+        if (liquidPolicy)
+        {
+            uint policy = batch.World[index].LiquidPolicy;
+            Interlocked.Increment(ref liquidPolicyApplied);
+            if ((policy & ParticleSimulationWorldInput.DieInAir) != 0) Interlocked.Increment(ref airPolicyApplied);
+            if ((policy & ParticleSimulationWorldInput.DieInLiquid) != 0) Interlocked.Increment(ref liquidDeathPolicyApplied);
+            if ((result.QueryBounds & ParticleSimulationOutput.LiquidCell) != 0) Interlocked.Increment(ref wetPolicyApplied);
+        }
+        particle.Alive = result.MotionAlive.W > 0.5f && (liquidPolicy || !particle.DieInAir || physics.BlockAccess.GetBlockRaw((int)particle.Position.X,
             (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
         byte ticks = unchecked((byte)(TickCount(particle) + 1)); TickCount(particle) = ticks;
         if (ticks <= 2) return;
@@ -490,8 +516,8 @@ internal static partial class GpuParticleSimulation
                 z = particle.prevPosDeltaZ * remainder * dt * 8f;
             particle.Alive &= physics.BlockAccess.GetRainMapHeightAt((int)(particle.Position.X + x), (int)(particle.Position.Z + z)) - y < particle.Position.Y;
         }
-        particle.Alive &= !particle.DieInLiquid || !physics.BlockAccess.GetBlockRaw((int)particle.Position.X,
-            (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid();
+        particle.Alive &= !particle.DieInLiquid || (liquidPolicy ? (result.QueryBounds & ParticleSimulationOutput.LiquidDeath) == 0 :
+            !physics.BlockAccess.GetBlockRaw((int)particle.Position.X, (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
         TickCount(particle) = 0;
         float length = particle.Velocity.Length();
         Direction(particle) = (uint)(unchecked((byte)(particle.Velocity.X / length * 128f)) |
@@ -499,7 +525,7 @@ internal static partial class GpuParticleSimulation
     }
 
     private static void Check(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<ParticleSimulationWorldInput> world,
-        ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<ParticleSimulationOutput> output)
+        ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells, ReadOnlySpan<ParticleSimulationOutput> output)
     {
         double floatError = 0, positionError = 0;
         int checkedCount = 0;
@@ -530,8 +556,40 @@ internal static partial class GpuParticleSimulation
                 break;
             }
             double factor = state.Control.W > 0.5f ? 0.999 : 1;
+            double x = state.X + (double)motion.X * factor, y = state.Y + (double)motion.Y * factor, z = state.Z + (double)motion.Z * factor;
+            bool alive = age < state.Timing.Y;
+            if (world[i].LiquidPolicy != 0)
+            {
+                var snapshot = world[i];
+                int Offset(int shift) => (int)((snapshot.LiquidBounds >> shift) & 15) - 8;
+                int minX = (int)state.X + Offset(0), minY = (int)state.Y + Offset(4), minZ = (int)state.Z + Offset(8),
+                    maxX = (int)state.X + Offset(12), maxY = (int)state.Y + Offset(16), maxZ = (int)state.Z + Offset(20);
+                int cellX = (int)x, cellY = (int)(y + 0.15000000596046448), cellZ = (int)z;
+                if (cellX < minX || cellX > maxX || cellY < minY || cellY > maxY || cellZ < minZ || cellZ > maxZ)
+                { floatError = double.MaxValue; break; }
+                int address = (int)snapshot.LiquidStart + ((cellZ - minZ) * (maxY - minY + 1) + cellY - minY) * (maxX - minX + 1) + cellX - minX;
+                if ((uint)address >= liquidCells.Length) { floatError = double.MaxValue; break; }
+                // Stock short circuit avoids the IsLiquid callback after age
+                // expiry unless the third-tick liquid policy also requires it.
+                bool needsCell = (snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInLiquid) != 0 ||
+                    ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInAir) != 0 && alive);
+                if (needsCell && liquidCells[address] == 2)
+                {
+                    if (result.CollisionFlags != ParticleSimulationOutput.RequiresCpuCollision || result.QueryBounds != queryBounds)
+                        floatError = double.MaxValue;
+                    break;
+                }
+                bool liquid = liquidCells[address] == 1;
+                queryBounds |= ParticleSimulationOutput.LiquidPolicyApplied | (liquid ? ParticleSimulationOutput.LiquidCell : 0);
+                if ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInLiquid) != 0 && liquid) queryBounds |= ParticleSimulationOutput.LiquidDeath;
+                if ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInAir) != 0) alive = alive && liquid;
+                Interlocked.Increment(ref liquidPolicyChecks);
+                if ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInAir) != 0) Interlocked.Increment(ref airPolicyChecks);
+                if ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInLiquid) != 0) Interlocked.Increment(ref liquidDeathPolicyChecks);
+                if (liquid) Interlocked.Increment(ref wetPolicyChecks);
+            }
             var delta = Vector4.Abs(result.VelocityAge - new Vector4(velocity, age));
-            var motionDelta = Vector4.Abs(result.MotionAlive - new Vector4(motion, age < state.Timing.Y ? 1 : 0));
+            var motionDelta = Vector4.Abs(result.MotionAlive - new Vector4(motion, alive ? 1 : 0));
             double error = Math.Max(Math.Max(delta.X, delta.Y), Math.Max(delta.Z, delta.W));
             error = Math.Max(error, Math.Max(Math.Max(motionDelta.X, motionDelta.Y), Math.Max(motionDelta.Z, motionDelta.W)));
             if (flags != result.CollisionFlags || queryBounds != result.QueryBounds) error = double.MaxValue;

@@ -70,6 +70,7 @@ internal static partial class GpuChunkMeshing
         internal readonly List<ChunkMeshBin> Bins = new();
         internal readonly HashSet<Block> CpuOnly = new(ReferenceEqualityComparer.Instance);
         internal ChunkMeshVoxel[]? Voxels;
+        internal long ProbeBatch;
         internal bool Active;
     }
     internal sealed class Payload(IChunkMeshBatch batch, ChunkMeshRange range, int epoch, int atlasEpoch) : IDisposable
@@ -78,10 +79,12 @@ internal static partial class GpuChunkMeshing
         internal readonly ChunkMeshRange Range = range;
         internal readonly int Generation = epoch;
         internal readonly int AtlasGeneration = atlasEpoch;
+        internal long ProbeBatch;
         private int disposed;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            if (ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(ProbeBatch, "payload-disposed", new { Range });
             lock (Gate) Pending.Remove(this);
             Batch.Dispose();
             GC.SuppressFinalize(this);
@@ -110,6 +113,7 @@ internal static partial class GpuChunkMeshing
             pending = Pending.ToArray();
         }
         foreach (var payload in pending) payload.Dispose();
+        if (HeadlessChunkMeshingProbe.Active) HeadlessChunkMeshingProbe.WorldLeft();
     }
     internal static bool TryPayload(MeshData data, out Payload payload) => Payloads.TryGetValue(data, out payload!);
 
@@ -209,9 +213,16 @@ internal static partial class GpuChunkMeshing
             current = new Work(__instance, lease, generation);
         }
     }
-    private static void Snapshot(ChunkTesselator __instance, bool __result)
+    private static void Snapshot(ChunkTesselator __instance, int __0, int __1, int __2, ClientChunk __3, bool __4, bool __result)
     {
         Work? work = current;
+        if (HeadlessChunkMeshingProbe.Active)
+        {
+            long probe = HeadlessChunkMeshingProbe.Snapshot(Game(__instance), __0, __1, __2, __3,
+                __result, work != null && ReferenceEquals(work.Producer, __instance) ? work.Batch : null,
+                __4, Solid(__instance), Fluid(__instance));
+            if (work != null && ReferenceEquals(work.Producer, __instance)) work.ProbeBatch = probe;
+        }
         if (!__result || work == null || !ReferenceEquals(work.Producer, __instance)) return;
         Block[] solids = Solid(__instance), fluids = Fluid(__instance); int[] light = Lights(__instance);
         if (solids.Length != 39304 || fluids.Length != solids.Length || light.Length != solids.Length) return;
@@ -373,6 +384,8 @@ internal static partial class GpuChunkMeshing
         }
         vars.UpdateChunkMinMax(vars.finalX, vars.finalY, vars.finalZ);
         vars.UpdateChunkMinMax(vars.finalX + 1, vars.finalY + height, vars.finalZ + 1);
+        if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Candidates(work.ProbeBatch, vars.posX, vars.posY, vars.posZ,
+            CollectionsMarshal.AsSpan(work.Faces)[rollback..]);
         return false;
     }
 
@@ -417,17 +430,24 @@ internal static partial class GpuChunkMeshing
         if (work?.Active != true || !ReferenceEquals(work.Producer, __instance) || work.Faces.Count == 0) return;
         lock (Gate)
         {
-            if (work.Generation != generation) { UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed."); }
+            if (work.Generation != generation)
+            {
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-rejected",
+                    new { captured = work.Generation, current = generation });
+                UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed.");
+            }
             ChunkMeshRange[] ranges;
             try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
             catch (Exception error)
             {
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-failed", new { error = error.Message });
                 // No partial chunk can reach callbacks/publication. Requeue once
                 // with the original CPU producers if backend generation failed.
                 enabled = false; faulted = true; generation++; UnusedDispose.Invoke(tessChunk, null);
                 Game(__instance).Logger.Warning("VulkanStory: GPU chunk meshing generation failed: {0}", error.Message);
                 throw new RetryTesselationException("GPU chunk generation failed; retry with stock producers.");
             }
+            if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Generated(work.ProbeBatch, ranges, work.Bins.ToArray());
             var center = new List<TesselatedChunkPart>(); var edge = new List<TesselatedChunkPart>();
             foreach (var range in ranges)
             {
@@ -435,8 +455,10 @@ internal static partial class GpuChunkMeshing
                 var data = new MeshData(false) { VerticesCount = range.FaceCount * 4, IndicesCount = range.FaceCount * 6,
                     CustomInts = new CustomMeshDataPartInt() };
                 work.Batch.Retain();
-                var payload = new Payload(work.Batch, range, generation, work.AtlasGeneration);
+                var payload = new Payload(work.Batch, range, generation, work.AtlasGeneration) { ProbeBatch = work.ProbeBatch };
                 Payloads.Add(data, payload); Pending.Add(payload);
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "payload-created",
+                    new { range, generation, atlas = work.AtlasGeneration });
                 var part = new TesselatedChunkPart();
                 PartAtlas.SetValue(part, bin.Atlas); PartPass.SetValue(part, (EnumChunkRenderPass)bin.Pass); PartLod.SetValue(part, data);
                 (bin.Edge ? edge : center).Add(part);
@@ -449,6 +471,8 @@ internal static partial class GpuChunkMeshing
     private static Exception? End(Exception? __exception, Work? __state)
     {
         Work? work = current; current = __state;
+        if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
+            new { candidates = work.Faces.Count, error = __exception?.Message });
         work?.Batch.Dispose();
         return __exception;
     }
@@ -480,6 +504,9 @@ internal static partial class GpuChunkMeshing
                 if (PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out var payload) &&
                     (payload.AtlasGeneration != atlasGeneration || !ReferenceEquals(SourceChunk(tesschunk), hostChunk)))
                 {
+                    if (payload.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(payload.ProbeBatch, "publication-rejected",
+                        new { payload.Range, staleAtlas = payload.AtlasGeneration != atlasGeneration,
+                            differentChunkOwner = !ReferenceEquals(SourceChunk(tesschunk), hostChunk) });
                     UnusedDispose.Invoke(tesschunk, null);
                     Centers(tesschunk) = null!; Edges(tesschunk) = null!;
                     // A reloaded chunk at these coordinates is a different owner.
