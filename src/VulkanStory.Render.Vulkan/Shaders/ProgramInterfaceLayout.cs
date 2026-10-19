@@ -157,7 +157,18 @@ internal sealed partial class ProgramInterfaceLayout
     public bool UsesStorageSet => HasUniformBlock || UniformBlocks.Count > 0 || StorageBlocks.Count > 0;
 
     public List<BlockBinding> UniformBlocks { get; } = new();
-    public List<BlockBinding> StorageBlocks { get; } = new();
+    public List<BlockBinding> StorageBlocks { get; private set; } = new();
+
+    // The original interface remains the authority for packing, uniforms and motion.
+    internal ProgramInterfaceLayout WithEntityRecords()
+    {
+        var copy = (ProgramInterfaceLayout)MemberwiseClone();
+        copy.StorageBlocks = new List<BlockBinding>(StorageBlocks)
+        {
+            new() { BlockName = EntityRecordShader.BlockName, Binding = SetConvention.FaceDataBinding },
+        };
+        return copy;
+    }
 
     /// <summary>Stage-to-stage varying locations, keyed by variable name.</summary>
     public Dictionary<string, int> VaryingLocations { get; } = new(StringComparer.Ordinal);

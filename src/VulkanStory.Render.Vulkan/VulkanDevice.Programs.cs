@@ -337,6 +337,7 @@ public sealed unsafe partial class VulkanDevice
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
+        RetireEntityRecordProgram(program);
         ProgramDeleted?.Invoke(programId);
         _programNames.Remove(programId);
         _activeVertexInputLocations.Remove(programId);

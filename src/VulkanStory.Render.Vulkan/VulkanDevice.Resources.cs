@@ -601,10 +601,23 @@ public sealed unsafe partial class VulkanDevice
         EntityGeometryArena? entityGeometry = null;
         uint firstIndex = 0;
         bool packed = instanceCount == 1 && TryPrepareEntityGeometry(pipeline.Program, mesh!, out entityGeometry, out firstIndex);
-        bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset, firstIndex);
+        EntityRecordDraw recordDraw = default;
+        bool records = packed && TryPrepareEntityRecord(pipeline, out recordDraw);
+        uint firstInstance = records ? recordDraw.Row : 0;
+        bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset,
+            firstIndex, firstInstance);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target, instanceCount: instanceCount))
         {
             return false;
+        }
+
+        if (records && !BindEntityRecord(commandBuffer, meshId, recordDraw))
+        {
+            // The indirect command already carries the reserved row. Leave it
+            // unused and draw the original program directly with zero base instance.
+            // Never rewrite visibility input which may already have been submitted.
+            firstInstance = 0; entityDraw = false;
+            if (!BindProgramSets(commandBuffer, pipeline.Program, meshId)) return false;
         }
 
         Checkpoint(commandBuffer,
@@ -624,7 +637,7 @@ public sealed unsafe partial class VulkanDevice
             _context.Api.CmdDrawIndexedIndirect(commandBuffer, entityCommands!.Handle, entityOffset, 1, 20);
             EntityIndirectDrawsRecorded++;
         }
-        else _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, 0);
+        else _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, firstInstance);
         ParticleInstancesDrawn(meshId);
         NoteNativeDraw(entityDraw ? NativeDrawKind.Indirect : instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
         return true;

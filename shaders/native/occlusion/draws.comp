@@ -15,7 +15,8 @@ bool hidden(uint index)
     vec3 lo = v(record).xyz, hi = v(record + 4u).xyz;
     if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
     if (inputData.words[p.inputWord + 36u] != 0u) {
-        uint planeCount = inputData.words[p.inputWord + record + 10u];
+        // Low byte is plane count; upper bits carry the immutable shader-record row.
+        uint planeCount = inputData.words[p.inputWord + record + 10u] & 255u;
         for (uint i = 0u; i < planeCount; i++) {
             vec4 plane = v(40u + i * 4u);
             if (any(isnan(plane)) || any(isinf(plane))) continue;
@@ -69,7 +70,7 @@ void main()
         outputData.words[dst] = inputData.words[src];
         outputData.words[dst + 1u] = hidden(index) ? 0u : inputData.words[src + 3u];
         outputData.words[dst + 2u] = inputData.words[src + 1u];
-        outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = 0u;
+        outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = inputData.words[src + 2u] >> 8u;
         return;
     }
     uint lane = gl_LocalInvocationID.x;
@@ -90,7 +91,7 @@ void main()
             outputData.words[dst] = inputData.words[src];
             outputData.words[dst+1u] = 1u;
             outputData.words[dst+2u] = inputData.words[src+1u];
-            outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = 0u;
+            outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
         }
         barrier();
         if (lane == 0u) for (uint i = 0u; i < 64u; i++) written += visible[i];

@@ -212,6 +212,8 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
     public bool MemoryBudgetAvailable { get; private set; }
     /// <summary>Whether the device was created with bufferDeviceAddress enabled.</summary>
     public bool BufferDeviceAddressEnabled { get; private set; }
+    /// <summary>Whether the device was created with drawIndirectFirstInstance enabled.</summary>
+    public bool DrawIndirectFirstInstanceEnabled { get; private set; }
     /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
     internal bool GeometryShadersEnabled { get; private set; }
@@ -1107,6 +1109,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         {
             IndependentBlend = true,
             MultiDrawIndirect = true,
+            DrawIndirectFirstInstance = available.DrawIndirectFirstInstance,
             // Decision 9: per-draw bindless indices come from push constants.
             ShaderSampledImageArrayDynamicIndexing = true,
             // Optional. Wireframe debug and thick lines degrade rather than fail.
@@ -1361,6 +1364,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         Capabilities.PresentIdEnabled = enablePresentId;
         Capabilities.PresentFencesEnabled = enablePresentFences;
         Allocator = new VulkanAllocator(this);
+        DrawIndirectFirstInstanceEnabled = enabledFeatures.DrawIndirectFirstInstance;
         return true;
     }
 

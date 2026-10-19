@@ -365,22 +365,23 @@ public sealed unsafe partial class VulkanDevice
         uint recordOffset = 0;
         const int record = SetConvention.ProgramRecordBinding;
 
+        ShaderProgramResources snapshotProgram = _drawEntityRecords?.Source ?? program;
         if (program.Interface.HasUniformBlock)
         {
-            if (program.HasSnapshotFor(_frameCounter))
+            if (snapshotProgram.HasSnapshotFor(_frameCounter))
             {
                 // Nothing written since this program's last draw this frame took its snapshot.
-                recordOffset = program.SnapshotOffset;
+                recordOffset = snapshotProgram.SnapshotOffset;
             }
-            else if (_frames.Current.TryAllocateUniforms(program.UniformShadow.Length, out RingAllocation allocation))
+            else if (_frames.Current.TryAllocateUniforms(snapshotProgram.UniformShadow.Length, out RingAllocation allocation))
             {
-                fixed (byte* source = program.UniformShadow)
+                fixed (byte* source = snapshotProgram.UniformShadow)
                 {
                     System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
-                        program.UniformShadow.Length, program.UniformShadow.Length);
+                        snapshotProgram.UniformShadow.Length, snapshotProgram.UniformShadow.Length);
                 }
                 recordOffset = allocation.Offset;
-                program.NoteSnapshot(_frameCounter, allocation.Offset);
+                snapshotProgram.NoteSnapshot(_frameCounter, allocation.Offset);
             }
             else
             {
@@ -388,7 +389,7 @@ public sealed unsafe partial class VulkanDevice
                 ReportUniformExhaustion(program, "its program record");
                 return false;
             }
-            buffers[record] = new BufferBindingValue(record, _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length);
+            buffers[record] = new BufferBindingValue(record, _frames.UniformBuffer, 0, (ulong)snapshotProgram.UniformShadow.Length);
         }
 
         // A block the shader declares is fed by whichever UBO the client created under
@@ -436,6 +437,13 @@ public sealed unsafe partial class VulkanDevice
         // The SSBO chunk path reads its vertices from the mesh's xyz buffer by gl_VertexIndex.
         foreach (BlockBinding block in program.Interface.StorageBlocks)
         {
+            if (block.BlockName == EntityRecordShader.BlockName)
+            {
+                if (_drawEntityRecords is not { } segment) return false;
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, segment.Buffer.Handle,
+                    segment.Offset, segment.Range, segment.Buffer.Id);
+                continue;
+            }
             VulkanBuffer? buffer = block.BlockName switch
             {
                 DeformationBlock => _drawDeformation,
