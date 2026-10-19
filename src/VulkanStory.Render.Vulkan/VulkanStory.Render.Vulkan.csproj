@@ -173,7 +173,7 @@
     <EmbeddedResource Include="../../shaders/native/geometry/*.comp;../../shaders/native/geometry/particle-physics.glsl">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl;../../shaders/native/worldgen/terrain-noise-kernel.glsl">
+    <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl;../../shaders/native/worldgen/terrain-binary64.glsl;../../shaders/native/worldgen/terrain-noise-kernel.glsl">
       <LogicalName>shaders-vk/worldgen/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/terrain-meshing/*.comp">

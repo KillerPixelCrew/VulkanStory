@@ -1,6 +1,5 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
-#extension GL_ARB_gpu_shader_fp64 : require
 // ColumnNoise.NoiseSign and threshold arithmetic adapted from Vintage Story,
 // Anego Studios. Proprietary software owned by Anego Studios. All rights reserved.
 // You may NOT sell this software in any way, shape or form.
@@ -12,6 +11,7 @@
 // One invocation consumes one original column's ordered sign requests. Cached
 // octave evaluations persist across Y, exactly as in the official ColumnNoise.
 #include "terrain-binary32.glsl"
+#include "terrain-binary64.glsl"
 layout(local_size_x=64) in;
 layout(std430,set=0,binding=0) readonly buffer Inputs { uint data[]; };
 layout(std430,set=0,binding=1) writeonly buffer Outputs { uint results[]; };
@@ -19,138 +19,80 @@ layout(std430,set=0,binding=2) readonly buffer Gradients { uint gradients[]; };
 layout(push_constant) uniform Count { uint count; } pc;
 #include "terrain-noise-kernel.glsl"
 
-struct Octave { uvec2 seed; double x,fy,z,amplitude,threshold,smoothing,stop; };
-double ReadDouble(uint word) { return packDouble2x32(uvec2(data[word],data[word+1u])); }
+// Original decimal literals rounded to binary64, stored as (low32, high32).
+// Generated with Python struct.pack('<d', float(literal)), not recomputed in GLSL.
+const uvec2 DENSITY_SKEW = uvec2(0x74df99c3u,0xbfcb0cb1u); // -0.211324865405187
+const uvec2 DENSITY_ROTATE = uvec2(0x4590331eu,0x3fe279a7u); // 0.577350269189626
+const uvec2 DENSITY_NEG_ROTATE = uvec2(0x4590331eu,0xbfe279a7u); // -0.577350269189626
+const uvec2 DENSITY_INT_MIN = uvec2(0x00000000u,0xc1e00000u); // -2147483648.0
+const uvec2 DENSITY_INT_MAX = uvec2(0xffc00000u,0x41dfffffu); // 2147483647.0 (exclusive)
+
+struct Octave { uvec2 seed; uvec2 x,fy,z,amplitude,threshold,smoothing,stop; };
+uvec2 ReadBinary64(uint word) { return uvec2(data[word],data[word+1u]); }
 Octave ReadOctave(uint index) {
     uint p=data[1]+index*16u;
-    return Octave(uvec2(data[p],data[p+1u]),ReadDouble(p+2u),ReadDouble(p+4u),ReadDouble(p+6u),
-        ReadDouble(p+8u),ReadDouble(p+10u),ReadDouble(p+12u),ReadDouble(p+14u));
+    return Octave(uvec2(data[p],data[p+1u]),ReadBinary64(p+2u),ReadBinary64(p+4u),ReadBinary64(p+6u),
+        ReadBinary64(p+8u),ReadBinary64(p+10u),ReadBinary64(p+12u),ReadBinary64(p+14u));
 }
-// Math.Min/Max propagate NaN, unlike GLSL min/max. Match .NET's signed-zero ties too.
-double DMin(double a,double b) {
-    if(isnan(a)) return a; if(isnan(b)) return b;
-    if(a==0.0lf && b==0.0lf) return packDouble2x32(uvec2(0u,(unpackDouble2x32(a).y|unpackDouble2x32(b).y)&0x80000000u));
-    return a<b?a:b;
-}
-double DMax(double a,double b) {
-    if(isnan(a)) return a; if(isnan(b)) return b;
-    if(a==0.0lf && b==0.0lf) return packDouble2x32(uvec2(0u,(unpackDouble2x32(a).y&unpackDouble2x32(b).y)&0x80000000u));
-    return a>b?a:b;
-}
-void DUnpack(uvec2 bits,out int exponent,out uvec2 sig) {
-    exponent=int((bits.y>>20)&2047u);
-    sig=uvec2(bits.x,bits.y&0xfffffu);
-    if(exponent!=0) { sig.y|=0x100000u; return; }
-    exponent=1;
-    while((sig.y&0x100000u)==0u) { sig=uvec2(sig.x<<1,(sig.y<<1)|(sig.x>>31)); exponent--; }
-}
-// Vulkan permits an error bound for native floating-point division. The stock
-// smoothing expression needs a single IEEE RNE division, including underflow.
-// Long division uses only exact power-of-two scales and Sterbenz subtractions.
-double DDiv(double a,double b) {
-    if(isnan(a)||isnan(b)||isinf(a)||isinf(b)||a==0.0lf||b==0.0lf) return a/b;
-    uvec2 ab=unpackDouble2x32(a),bb=unpackDouble2x32(b),asig,bsig;
-    uint sign=(ab.y^bb.y)&0x80000000u;
-    int ae,be; DUnpack(ab,ae,asig); DUnpack(bb,be,bsig);
-    precise double numerator=packDouble2x32(uvec2(asig.x,0x3ff00000u|(asig.y&0xfffffu)));
-    precise double denominator=packDouble2x32(uvec2(bsig.x,0x3ff00000u|(bsig.y&0xfffffu)));
-    int exponent=ae-be+1023;
-    if(numerator<denominator) { numerator=numerator*2.0lf; exponent--; }
-    if(exponent< -52) return packDouble2x32(uvec2(0u,sign));
-    if(exponent== -52) return packDouble2x32(uvec2(uint(numerator>denominator),sign));
-    if(exponent>2046) return packDouble2x32(uvec2(0u,sign|0x7ff00000u));
-    int digits=exponent>0?53:52+exponent;
-    uvec2 quotient=uvec2(1u,0u);
-    precise double remainder=numerator-denominator;
-    for(int i=1;i<digits;i++) {
-        remainder=remainder*2.0lf;
-        bool bit=remainder>=denominator;
-        if(bit) remainder=remainder-denominator;
-        quotient=uvec2((quotient.x<<1)|uint(bit),(quotient.y<<1)|(quotient.x>>31));
-    }
-    remainder=remainder*2.0lf;
-    bool guard=remainder>=denominator;
-    if(guard) remainder=remainder-denominator;
-    if(guard&&(remainder!=0.0lf||(quotient.x&1u)!=0u)) quotient=add64(quotient,uvec2(1u,0u));
-    if(exponent>0) {
-        if((quotient.y&0x200000u)!=0u) {
-            quotient=uvec2((quotient.x>>1)|(quotient.y<<31),quotient.y>>1); exponent++;
-        }
-        if(exponent>2046) return packDouble2x32(uvec2(0u,sign|0x7ff00000u));
-        return packDouble2x32(uvec2(quotient.x,sign|(uint(exponent)<<20)|(quotient.y&0xfffffu)));
-    }
-    return packDouble2x32(uvec2(quotient.x,sign|quotient.y));
-}
-double Threshold(double value,double threshold,double smoothing) {
-    precise double b1=value-threshold,b2=value+threshold;
-    precise double d1=0.0lf-b1,d2=0.0lf-b2;
-    precise double n1=smoothing-abs(d1),n2=smoothing-abs(d2);
-    precise double h1=DDiv(DMax(n1,0.0lf),smoothing),h2=DDiv(DMax(n2,0.0lf),smoothing);
-    precise double c1=h1*h1,c2=h2*h2;
-    c1=c1*smoothing; c2=c2*smoothing;
-    c1=c1*0.25lf; c2=c2*0.25lf;
-    precise double high=DMax(0.0lf,b1)+c1,low=DMin(0.0lf,b2)-c2;
-    precise double result=high+low;
+uvec2 Threshold(uvec2 value,uvec2 threshold,uvec2 smoothing) {
+    uvec2 b1=B64Sub(value,threshold),b2=B64Add(value,threshold);
+    uvec2 d1=B64Sub(B64_ZERO,b1),d2=B64Sub(B64_ZERO,b2);
+    uvec2 n1=B64Sub(smoothing,B64Abs(d1)),n2=B64Sub(smoothing,B64Abs(d2));
+    uvec2 h1=B64Div(B64Max(n1,B64_ZERO),smoothing),h2=B64Div(B64Max(n2,B64_ZERO),smoothing);
+    uvec2 c1=B64Mul(h1,h1),c2=B64Mul(h2,h2);
+    c1=B64Mul(c1,smoothing); c2=B64Mul(c2,smoothing);
+    c1=B64Mul(c1,B64_QUARTER); c2=B64Mul(c2,B64_QUARTER);
+    uvec2 high=B64Add(B64Max(B64_ZERO,b1),c1),low=B64Sub(B64Min(B64_ZERO,b2),c2);
+    uvec2 result=B64Add(high,low);
     return result;
-}
-// Exact binary64 -> binary32 conversion, without native binary32 denormal behavior.
-uint ToB32(double value) {
-    uvec2 bits=unpackDouble2x32(value);
-    uint sign=bits.y&0x80000000u;
-    int exponent=int((bits.y>>20)&2047u);
-    if(exponent==0) return sign;
-    uint sig=((bits.y&0xfffffu)|0x100000u)<<6 | (bits.x>>26);
-    sig|=uint((bits.x&0x03ffffffu)!=0u);
-    return B32RoundPack(sign,exponent-1023+127,sig);
-}
-double FromB32(uint bits) {
-    if((bits&0x7fffffffu)==0u) return packDouble2x32(uvec2(0u,bits&0x80000000u));
-    int exponent; uint sig; B32Unpack(bits,exponent,sig);
-    return packDouble2x32(uvec2(sig<<29, (bits&0x80000000u)|(uint(exponent-127+1023)<<20)|((sig>>3)&0xfffffu)));
 }
 uvec2 Prime(int i,uvec2 p) {
     uint high,low; umulExtended(uint(i),p.x,high,low);
     high+=uint(i)*p.y+(i<0?0xffffffffu:0u)*p.x;
     return uvec2(low,high);
 }
-double Evaluate(Octave o,double y,inout bool valid) {
-    precise double xz=o.x+o.z;
-    precise double s2=xz*(-0.211324865405187lf),yy=y*0.577350269189626lf;
-    precise double xr=o.x+s2,zr=o.z+s2,yr=xz*(-0.577350269189626lf);
-    xr=xr+yy; zr=zr+yy; yr=yr+yy;
-    if(isnan(xr)||isnan(yr)||isnan(zr)||isinf(xr)||isinf(yr)||isinf(zr)||
-        xr<(-2147483648.0lf)||xr>=2147483647.0lf||yr<(-2147483648.0lf)||yr>=2147483647.0lf||zr<(-2147483648.0lf)||zr>=2147483647.0lf) {
-        valid=false; return 0.0lf;
+uvec2 Evaluate(Octave o,uvec2 y,inout bool valid) {
+    uvec2 xz=B64Add(o.x,o.z);
+    uvec2 s2=B64Mul(xz,DENSITY_SKEW),yy=B64Mul(y,DENSITY_ROTATE);
+    uvec2 xr=B64Add(o.x,s2),zr=B64Add(o.z,s2),yr=B64Mul(xz,DENSITY_NEG_ROTATE);
+    xr=B64Add(xr,yy); zr=B64Add(zr,yy); yr=B64Add(yr,yy);
+    if(B64IsNaN(xr)||B64IsNaN(yr)||B64IsNaN(zr)||B64IsInf(xr)||B64IsInf(yr)||B64IsInf(zr)||
+        B64Lt(xr,DENSITY_INT_MIN)||B64Ge(xr,DENSITY_INT_MAX)||
+        B64Lt(yr,DENSITY_INT_MIN)||B64Ge(yr,DENSITY_INT_MAX)||
+        B64Lt(zr,DENSITY_INT_MIN)||B64Ge(zr,DENSITY_INT_MAX)) {
+        valid=false; return B64_ZERO;
     }
-    int ix=int(floor(xr)),iy=int(floor(yr)),iz=int(floor(zr));
-    precise double fx=xr-double(ix),fy=yr-double(iy),fz=zr-double(iz);
+    // Floor before conversion, including negative fractions. The checks above
+    // retain the original finite int32-range precondition of B64ToI32.
+    int ix=B64ToI32(B64Floor(xr)),iy=B64ToI32(B64Floor(yr)),iz=B64ToI32(B64Floor(zr));
+    uvec2 fx=B64Sub(xr,B64FromI32(ix)),fy=B64Sub(yr,B64FromI32(iy)),fz=B64Sub(zr,B64FromI32(iz));
     xp=Prime(ix,PX); yp=Prime(iy,PY); zp=Prime(iz,PZ);
-    return FromB32(Noise(o.seed,ToB32(fx),ToB32(fy),ToB32(fz)));
+    return B64FromB32(Noise(o.seed,B64ToB32(fx),B64ToB32(fy),B64ToB32(fz)));
 }
-double Sign(uint start,uint count,double y,double inverse,
-    precise inout double pastY[32],precise inout double pastValue[32],inout bool valid) {
-    precise double value=inverse,lo=inverse,hi=inverse;
+uvec2 Sign(uint start,uint count,uvec2 y,uvec2 inverse,
+    inout uvec2 pastY[32],inout uvec2 pastValue[32],inout bool valid) {
+    uvec2 value=inverse,lo=inverse,hi=inverse;
     for(uint j=0u;j<count;j++) {
-        if(!(hi<=0.0lf)&&!(lo>=0.0lf)) break;
+        if(!B64Le(hi,B64_ZERO)&&!B64Ge(lo,B64_ZERO)) break;
         Octave o=ReadOctave(start+j);
-        if(lo>=o.stop) return lo;
-        if(hi<=-o.stop) return hi;
-        precise double ey=y*o.fy;
-        precise double delta=pastY[j]-ey;
-        precise double slope=abs(delta)*5.0lf;
-        precise double lower=pastValue[j]-slope,upper=pastValue[j]+slope;
-        precise double v1=DMax(-1.0lf,lower)*o.amplitude,v2=DMin(1.0lf,upper)*o.amplitude;
-        lo=lo+Threshold(v1,o.threshold,o.smoothing);
-        hi=hi+Threshold(v2,o.threshold,o.smoothing);
+        if(B64Ge(lo,o.stop)) return lo;
+        if(B64Le(hi,B64Neg(o.stop))) return hi;
+        uvec2 ey=B64Mul(y,o.fy);
+        uvec2 delta=B64Sub(pastY[j],ey);
+        uvec2 slope=B64Mul(B64Abs(delta),B64_FIVE);
+        uvec2 lower=B64Sub(pastValue[j],slope),upper=B64Add(pastValue[j],slope);
+        uvec2 v1=B64Mul(B64Max(B64_NEG_ONE,lower),o.amplitude),v2=B64Mul(B64Min(B64_ONE,upper),o.amplitude);
+        lo=B64Add(lo,Threshold(v1,o.threshold,o.smoothing));
+        hi=B64Add(hi,Threshold(v2,o.threshold,o.smoothing));
     }
     for(uint j=0u;j<count;j++) {
         Octave o=ReadOctave(start+j);
-        if(value>=o.stop||value<=-o.stop) break;
-        precise double ey=y*o.fy;
-        precise double noise=Evaluate(o,ey,valid);
+        if(B64Ge(value,o.stop)||B64Le(value,B64Neg(o.stop))) break;
+        uvec2 ey=B64Mul(y,o.fy);
+        uvec2 noise=Evaluate(o,ey,valid);
         pastValue[j]=noise; pastY[j]=ey;
-        precise double scaled=noise*o.amplitude;
-        value=value+Threshold(scaled,o.threshold,o.smoothing);
+        uvec2 scaled=B64Mul(noise,o.amplitude);
+        value=B64Add(value,Threshold(scaled,o.threshold,o.smoothing));
     }
     return value;
 }
@@ -159,14 +101,14 @@ void main() {
     uint p=4u+column*4u;
     uint start=data[p],count=data[p+1u],first=data[p+2u],length=data[p+3u];
     // Own the complete cache here, including inactive entries copied by inout.
-    precise double pastY[32],pastValue[32];
-    for(uint j=0u;j<32u;j++) { pastY[j]=packDouble2x32(uvec2(0u,0x7ff80000u)); pastValue[j]=0.0lf; }
+    uvec2 pastY[32],pastValue[32];
+    for(uint j=0u;j<32u;j++) { pastY[j]=B64_QNAN; pastValue[j]=B64_ZERO; }
     bool valid=true;
     for(uint i=first;i<first+length;i++) {
         uint r=data[2]+i*4u;
-        precise double sign=Sign(start,count,ReadDouble(r),ReadDouble(r+2u),pastY,pastValue,valid);
+        uvec2 sign=Sign(start,count,ReadBinary64(r),ReadBinary64(r+2u),pastY,pastValue,valid);
         // A sentinel causes the adapter to replay this entire column through the
         // untouched stock ColumnNoise, including its original past-evaluation order.
-        results[i]=valid ? uint(sign>0.0lf) : 0xffffffffu;
+        results[i]=valid ? uint(B64Gt(sign,B64_ZERO)) : 0xffffffffu;
     }
 }

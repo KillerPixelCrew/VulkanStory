@@ -1,5 +1,10 @@
 [
   {
+    "file": "source-provenance/LICENSE-BERKELEY-SOFTFLOAT.txt",
+    "source": "https://raw.githubusercontent.com/ucb-bar/berkeley-softfloat-3/a0c6494cdc11865811dec815d5c0049fba9d82a8/COPYING.txt",
+    "sha256": "145EA96B4A4A04A1A7738D2A2BF9E830F861971E69606187B018D9E8FC0B95C7"
+  },
+  {
     "file": "native/SDL-LICENSE.txt",
     "source": "https://raw.githubusercontent.com/libsdl-org/SDL/a8591d943b7079b17fdd018dc04ec9c71dc94ae4/LICENSE.txt",
     "sha256": "1C040B8271B37E5076359F8FD54240E371114112924D2DF81EF87C7D6A1DFDFD"
