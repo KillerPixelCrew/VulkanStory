@@ -260,6 +260,7 @@ internal sealed class RendererSettingsPanel
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
                 Switch("Compute terrain draw preparation", "GpuTerrainDrawPreparation");
                 Switch("Shared compute deformation", "GpuSharedDeformation");
+                Switch("Compute entity draw preparation", "GpuEntityDrawPreparation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");
                 Switch("Cull distant entity shadows", "EntityShadowCull");

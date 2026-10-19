@@ -1,5 +1,6 @@
 #version 450
 layout(local_size_x = 64) in;
+layout(constant_id = 0) const bool compactDraws = true;
 layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
 layout(binding = 2, std430) writeonly buffer Output { uint words[]; } outputData;
@@ -59,6 +60,18 @@ bool hidden(uint index)
 }
 void main()
 {
+    if (!compactDraws) {
+        uint index = gl_GlobalInvocationID.x;
+        uint count = min(p.count, inputData.words[p.inputWord + 37u]);
+        if (index >= count) return;
+        uint src = p.inputWord + 64u + index * 12u + 8u;
+        uint dst = p.outputWord + index * 5u;
+        outputData.words[dst] = inputData.words[src];
+        outputData.words[dst + 1u] = hidden(index) ? 0u : inputData.words[src + 3u];
+        outputData.words[dst + 2u] = inputData.words[src + 1u];
+        outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = 0u;
+        return;
+    }
     uint lane = gl_LocalInvocationID.x;
     // Clear every output before compaction; trailing commands have zero instances.
     for (uint i = lane; i < p.count * 5u; i += 64u) outputData.words[p.outputWord + i] = 0u;

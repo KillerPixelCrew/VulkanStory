@@ -30,6 +30,36 @@ public sealed unsafe partial class VulkanDevice
     internal bool CanPrepareTerrainDraws => _frameActive &&
         OcclusionDepth is { GpuTexture: > 0, GpuCamera: not null };
 
+    private ComputeProgram? DrawPreparationProgram()
+    {
+        if (_terrainDrawProgram == 0)
+            _terrainDrawProgram = CreateComputeProgram(Culling.OcclusionDepth.Source("draws.comp"), "visibility-draws",
+                [new ComputeSlot(0, ComputeSlotKind.Sampled), new ComputeSlot(1, ComputeSlotKind.Buffer),
+                    new ComputeSlot(2, ComputeSlotKind.Buffer)], 12, 64, 1);
+        return _compute.Get(_terrainDrawProgram);
+    }
+
+    private static void FillVisibilityHeader(float* values, Culling.OcclusionDepth occlusion,
+        ReadOnlySpan<TerrainFrustumPlane> planes)
+    {
+        new Span<float>(values, 64).Clear();
+        var camera = occlusion.GpuCamera!;
+        var projection = OcclusionProjection.From(camera.Projection)!.Value;
+        camera.View.AsSpan(0, 16).CopyTo(new Span<float>(values, 16));
+        camera.Projection.AsSpan(0, 16).CopyTo(new Span<float>(values + 16, 16));
+        values[32] = occlusion.GpuWidth; values[33] = occlusion.GpuHeight;
+        values[34] = projection.DepthUnpackMul; values[35] = projection.DepthUnpackAdd;
+        ((uint*)values)[36] = planes.Length == 6 ? 1u : 0u;
+        for (int i = 0; i < Math.Min(planes.Length, 6); i++)
+        {
+            var plane = planes[i];
+            values[40 + i * 4] = (float)plane.X; values[41 + i * 4] = (float)plane.Y;
+            values[42 + i * 4] = (float)plane.Z;
+            values[43 + i * 4] = (float)((plane.X * camera.CameraX + plane.Y * camera.CameraY) +
+                plane.Z * camera.CameraZ + plane.D);
+        }
+    }
+
     /// <summary>Produces a compact, ordered indirect list without reading visibility back to the CPU.</summary>
     private bool PrepareTerrainDraws(ReadOnlySpan<TerrainDrawBounds> bounds, int[] starts, int[] sizes,
         int count, ReadOnlySpan<TerrainFrustumPlane> planes, double cameraX, double cameraY, double cameraZ,
@@ -43,11 +73,7 @@ public sealed unsafe partial class VulkanDevice
         OcclusionCamera captured = occlusion.GpuCamera!;
         if (OcclusionProjection.From(captured.Projection) is not { } projection) return false;
         if (!double.IsFinite(cameraX) || !double.IsFinite(cameraY) || !double.IsFinite(cameraZ)) return false;
-        if (_terrainDrawProgram == 0)
-            _terrainDrawProgram = CreateComputeProgram(Culling.OcclusionDepth.Source("draws.comp"), "terrain-draws",
-                [new ComputeSlot(0, ComputeSlotKind.Sampled), new ComputeSlot(1, ComputeSlotKind.Buffer),
-                    new ComputeSlot(2, ComputeSlotKind.Buffer)], 12, 64, 1);
-        ComputeProgram? program = _compute.Get(_terrainDrawProgram);
+        ComputeProgram? program = DrawPreparationProgram();
         if (program == null) return false;
         if (_terrainInputs.Length == 0)
         {
@@ -69,20 +95,7 @@ public sealed unsafe partial class VulkanDevice
 
         float* values = (float*)((byte*)input.Mapped + inputOffset);
         new Span<byte>(values, (int)bytes).Clear();
-        captured.View.AsSpan(0, 16).CopyTo(new Span<float>(values, 16));
-        captured.Projection.AsSpan(0, 16).CopyTo(new Span<float>(values + 16, 16));
-        values[32] = occlusion.GpuWidth; values[33] = occlusion.GpuHeight;
-        values[34] = projection.DepthUnpackMul; values[35] = projection.DepthUnpackAdd;
-        ((uint*)values)[36] = planes.Length == 6 ? 1u : 0u;
-        for (int i = 0; i < Math.Min(planes.Length, 6); i++)
-        {
-            TerrainFrustumPlane plane = planes[i];
-            values[40 + i * 4] = (float)plane.X;
-            values[41 + i * 4] = (float)plane.Y;
-            values[42 + i * 4] = (float)plane.Z;
-            values[43 + i * 4] = (float)((plane.X * captured.CameraX + plane.Y * captured.CameraY) +
-                plane.Z * captured.CameraZ + plane.D);
-        }
+        FillVisibilityHeader(values, occlusion, planes);
         double dx = cameraX - captured.CameraX, dy = cameraY - captured.CameraY, dz = cameraZ - captured.CameraZ;
         double grow = Math.Sqrt(dx * dx + dy * dy + dz * dz) + 0.5;
         for (int i = 0; i < count; i++)

@@ -59,6 +59,7 @@ public sealed unsafe partial class VulkanDevice
     private void PrepareGraphicsSlot(FrameSlot slot)
     {
         BeginIndirectFrame(slot.Index);
+        BeginEntityDrawFrame(slot.Index);
         RetireDeformationGeometry(all: !ComputeDeformationEnabled);
         _descriptorArenas[slot.Index].Reset();
         _computeArenas[slot.Index].Reset();

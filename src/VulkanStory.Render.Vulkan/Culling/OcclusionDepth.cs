@@ -37,6 +37,7 @@ internal sealed class OcclusionDepth : IDisposable
     internal OcclusionCamera? GpuCamera { get; private set; }
     internal int GpuWidth { get; private set; }
     internal int GpuHeight { get; private set; }
+    internal int SourceDepthTexture { get; private set; }
     private OcclusionPyramid? _latest;
     private OcclusionPyramid? _spare;
     private readonly object _publicationGate = new();
@@ -108,6 +109,7 @@ internal sealed class OcclusionDepth : IDisposable
                     Dispatches = [ComputeDispatch.Covering(1)],
                 })) return Fail(_device.GetError());
             GpuCamera = camera;
+            SourceDepthTexture = depthTexture;
             GpuWidth = (int)depth.Width; GpuHeight = (int)depth.Height;
         }
 

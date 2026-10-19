@@ -157,6 +157,7 @@ internal static class EntityOcclusionCull
     private static bool Hidden(Entity entity)
     {
         if (PerformancePatchSet.Current?.EntityOcclusionCull != true || entity is EntityPlayer) return false;
+        if (GpuEntityDraws.Handles(entity)) return false;
         if (TerrainOcclusionCull.Source is not { Source: { } captured } test || TerrainOcclusionCull.CameraNow() is not { } now) return false;
         Interlocked.Increment(ref PerformanceCounters.EntityOcclusionTests);
         // The game's own frustum sphere for this entity, as a box, grown by camera and entity movement since the capture.

@@ -104,6 +104,10 @@ internal sealed class HeadlessScenario
             ["inventoryMotionWindows"] = (JsonValueKind.Number, false),
             ["validInventoryHistoryWrites"] = (JsonValueKind.Number, false),
             ["inventorySharedGeometryDraws"] = (JsonValueKind.Number, false),
+            ["deformationDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["deformationCacheReuses"] = (JsonValueKind.Number, false),
+            ["entityVisibilityDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["entityIndirectDrawsRecorded"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -122,7 +126,8 @@ internal sealed class HeadlessScenario
         "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
         "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
         "rigidEntityMotionWindows", "validRigidEntityHistoryWrites", "inventoryMotionWindows", "validInventoryHistoryWrites",
-        "inventorySharedGeometryDraws"
+        "inventorySharedGeometryDraws", "deformationDispatchesRecorded", "deformationCacheReuses",
+        "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

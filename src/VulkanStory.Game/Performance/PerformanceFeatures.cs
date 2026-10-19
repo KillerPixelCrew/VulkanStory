@@ -11,6 +11,7 @@ internal static class PerformanceFeatures
         TerrainOcclusionCull.Create(),
         GpuTerrainDraws.Create(),
         EntityOcclusionCull.Create(),
+        GpuEntityDraws.Create(essentials, survival),
         ShadowFarFoliage.Create(),
         EntityShadowCull.Create(),
         ParticleDistanceGate.Create(),

@@ -38,8 +38,10 @@ internal sealed partial class GameRenderSession
             // same displacement margin as ordinary camera movement.
             view[12] = view[13] = view[14] = 0;
         }
-        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, x, y, z),
-            Performance.PerformancePatchSet.Current is { TerrainOcclusionCull: true, GpuTerrainDrawPreparation: true }))
+        var settings = Performance.PerformancePatchSet.Current;
+        bool gpu = settings != null && ((settings.TerrainOcclusionCull && settings.GpuTerrainDrawPreparation) ||
+            (settings.EntityOcclusionCull && settings.GpuEntityDrawPreparation));
+        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, x, y, z), gpu))
         {
             occlusionCaptureRefusal = null;
             return;

@@ -109,12 +109,14 @@ internal static class EntityConsumerPatches
     {
         GameGraphicsAdapter? graphics = null;
         GameGraphicsAdapter.RigidEntityScope previous = default;
+        GameGraphicsAdapter.EntityVisibilityScope previousVisibility = default;
         if (runtime?.Routing.RoutingEnabled == true)
         {
             if (ScreenManager.Platform is not ClientPlatformWindows platform || !runtime.TrySession(platform, out var session))
                 throw new InvalidOperationException("Active entity dispatch lost its session.");
             graphics = session.Graphics;
             previous = graphics.EnterRigidEntityMotionScope(shadow ? null : renderer.entity);
+            previousVisibility = graphics.EnterEntityVisibilityScope(renderer, shadow);
         }
         try
         {
@@ -126,7 +128,11 @@ internal static class EntityConsumerPatches
                 default: throw new ArgumentOutOfRangeException(nameof(kind));
             }
         }
-        finally { graphics?.ExitRigidEntityMotionScope(previous); }
+        finally
+        {
+            graphics?.ExitEntityVisibilityScope(previousVisibility);
+            graphics?.ExitRigidEntityMotionScope(previous);
+        }
     }
     private static void DrawEntity(ClientPlatformAbstract platform, MeshRef mesh, string sampler, MultiTextureMeshRef shape)
     {

@@ -238,6 +238,9 @@
                 "TerrainOcclusionCull": {
                   "type": "boolean"
                 },
+                "GpuTerrainDrawPreparation": { "type": "boolean" },
+                "GpuSharedDeformation": { "type": "boolean" },
+                "GpuEntityDrawPreparation": { "type": "boolean" },
                 "EntityOcclusionCull": {
                   "type": "boolean"
                 },
@@ -392,6 +395,10 @@
                 "inventoryMotionWindows",
                 "validInventoryHistoryWrites",
                 "inventorySharedGeometryDraws",
+                "deformationDispatchesRecorded",
+                "deformationCacheReuses",
+                "entityVisibilityDispatchesRecorded",
+                "entityIndirectDrawsRecorded",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -519,6 +526,10 @@
                         "inventoryMotionWindows",
                         "validInventoryHistoryWrites",
                         "inventorySharedGeometryDraws",
+                        "deformationDispatchesRecorded",
+                        "deformationCacheReuses",
+                        "entityVisibilityDispatchesRecorded",
+                        "entityIndirectDrawsRecorded",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -713,7 +724,11 @@
                         "validRigidEntityHistoryWrites",
                         "inventoryMotionWindows",
                         "validInventoryHistoryWrites",
-                        "inventorySharedGeometryDraws"
+                        "inventorySharedGeometryDraws",
+                        "deformationDispatchesRecorded",
+                        "deformationCacheReuses",
+                        "entityVisibilityDispatchesRecorded",
+                        "entityIndirectDrawsRecorded"
                       ]
                     },
                     "op": {
@@ -739,7 +754,11 @@
                         "validRigidEntityHistoryWrites",
                         "inventoryMotionWindows",
                         "validInventoryHistoryWrites",
-                        "inventorySharedGeometryDraws"
+                        "inventorySharedGeometryDraws",
+                        "deformationDispatchesRecorded",
+                        "deformationCacheReuses",
+                        "entityVisibilityDispatchesRecorded",
+                        "entityIndirectDrawsRecorded"
                       ]
                     },
                     "op": {

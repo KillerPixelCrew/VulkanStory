@@ -25,6 +25,8 @@ public sealed unsafe partial class VulkanDevice
     private int _deformationProgram;
     private VulkanBuffer? _drawDeformation, _drawPreviousDeformation;
     internal bool ComputeDeformationEnabled { get; set; }
+    internal long DeformationDispatchesRecorded { get; private set; }
+    internal long DeformationCacheReuses { get; private set; }
 
     private void SetDeformationMode(ShaderProgramResources program, bool enabled)
     {
@@ -69,6 +71,7 @@ public sealed unsafe partial class VulkanDevice
     internal void ResetWorldComputeGeometry()
     {
         ResetTerrainOcclusion();
+        _entityDrawBatch = null; EntityVisibility = null;
         RetireDeformationGeometry(all: true);
     }
 
@@ -112,6 +115,7 @@ public sealed unsafe partial class VulkanDevice
                 if (bones.Shadow.AsSpan().SequenceEqual(geometry.Pose))
                 {
                     geometry.Frame = _frameCounter;
+                    DeformationCacheReuses++;
                     return geometry.Buffer;
                 }
         ulong bytes = (ulong)count * 64;
@@ -154,6 +158,7 @@ public sealed unsafe partial class VulkanDevice
                 (uint)bones.Shadow.Length / 64 };
             _context.Api.CmdPushConstants(command, program.Layout, ShaderStageFlags.ComputeBit, 0, 24, push);
             _context.Api.CmdDispatch(command, (count + 63) / 64, 1, 1); _graph.NoteDispatch();
+            DeformationDispatchesRecorded++;
             var barrier = new BufferMemoryBarrier2
             {
                 SType = StructureType.BufferMemoryBarrier2, SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
@@ -183,8 +188,11 @@ public sealed unsafe partial class VulkanDevice
             for (int i = versions.Count - 1; i >= 0; i--)
                 if (all || unchecked(_frameCounter - versions[i].Frame) > 2)
                 {
-                    var geometry = versions[i]; _deformationBytes -= geometry.Buffer.Size + (ulong)geometry.Pose.Length;
-                    _frames.DeferDeletion(geometry.Buffer); versions.RemoveAt(i);
+                    var geometry = versions[i];
+                    _descriptors.Release(geometry.Buffer.Id);
+                    _frames.DeferDeletion(geometry.Buffer);
+                    _deformationBytes -= geometry.Buffer.Size + (ulong)geometry.Pose.Length;
+                    versions.RemoveAt(i);
                 }
             if (versions.Count == 0) _deformationRetire.Add(pair.Key);
         }

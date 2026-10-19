@@ -596,6 +596,9 @@ public sealed unsafe partial class VulkanDevice
     {
         if (instanceCount <= 0) return false;
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
+        VulkanBuffer? entityCommands = null;
+        ulong entityOffset = 0;
+        bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -611,8 +614,13 @@ public sealed unsafe partial class VulkanDevice
         }
 
         _meshes.Bind(commandBuffer, mesh!);
-        _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, 0, 0, 0);
-        NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
+        if (entityDraw)
+        {
+            _context.Api.CmdDrawIndexedIndirect(commandBuffer, entityCommands!.Handle, entityOffset, 1, 20);
+            EntityIndirectDrawsRecorded++;
+        }
+        else _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, 0, 0, 0);
+        NoteNativeDraw(entityDraw ? NativeDrawKind.Indirect : instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
         return true;
     }
 

@@ -150,6 +150,7 @@ internal sealed partial class GameRenderSession : IDisposable
             session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
             Performance.TerrainOcclusionCull.Attach(session.device.OcclusionDepth.Test, session.OcclusionCameraPosition,
                 session.CaptureOcclusionDepth, () => session.device?.ResetTerrainOcclusion());
+            Performance.GpuEntityDraws.Attach(session.graphics);
             var renderExtent = session.RenderExtent;
             platform.WindowSize.Width = renderExtent.Width;
             platform.WindowSize.Height = renderExtent.Height;
@@ -473,6 +474,7 @@ internal sealed partial class GameRenderSession : IDisposable
     {
         RequireOwner();
         Performance.TerrainOcclusionCull.Attach(null, null, null, null);
+        Performance.GpuEntityDraws.Attach(null);
         var failures = new List<Exception>();
         try { StopAndDrain(); } catch (Exception error) { failures.Add(error); }
         // A failed GPU drain retains SDL. Other cleanup failures must not prevent

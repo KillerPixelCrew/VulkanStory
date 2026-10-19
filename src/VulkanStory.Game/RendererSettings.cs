@@ -97,6 +97,8 @@ internal sealed record RendererSettings
     public bool GpuTerrainDrawPreparation { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
     public bool GpuSharedDeformation { get; init; } = true;
+    /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
+    public bool GpuEntityDrawPreparation { get; init; } = true;
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
@@ -176,6 +178,7 @@ internal sealed record RendererSettings
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
         GpuSharedDeformation = source.GpuSharedDeformation,
+        GpuEntityDrawPreparation = source.GpuEntityDrawPreparation,
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,
