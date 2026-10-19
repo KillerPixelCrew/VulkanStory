@@ -239,6 +239,7 @@
                   "type": "boolean"
                 },
                 "GpuTerrainDrawPreparation": { "type": "boolean" },
+                "GpuChunkMeshing": { "type": "boolean" },
                 "GpuSharedDeformation": { "type": "boolean" },
                 "GpuParticleGeometry": { "type": "boolean" },
                 "GpuParticleVisualSimulation": { "type": "boolean" },
