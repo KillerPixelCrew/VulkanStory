@@ -110,6 +110,7 @@ internal sealed class HeadlessScenario
             ["worldGeometryDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["worldGeometryCacheReuses"] = (JsonValueKind.Number, false),
             ["particleGeometryDispatchesRecorded"] = (JsonValueKind.Number, false),
+            ["quadGeometryDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["particleGeometryCacheReuses"] = (JsonValueKind.Number, false),
             ["particleVisualDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["particleVisualChecks"] = (JsonValueKind.Number, false),
@@ -151,6 +152,7 @@ internal sealed class HeadlessScenario
         "jointPoseDispatchesRecorded", "jointPoseCacheReuses", "jointPoseChecks", "cpuJointProductsDeferred", "cpuJointFacadeChecks",
         "worldGeometryDispatchesRecorded", "worldGeometryCacheReuses",
         "particleGeometryDispatchesRecorded", "particleGeometryCacheReuses",
+        "quadGeometryDispatchesRecorded",
         "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
         "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded"
     };

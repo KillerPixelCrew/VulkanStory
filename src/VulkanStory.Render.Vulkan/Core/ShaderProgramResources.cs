@@ -59,6 +59,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     /// <summary>Whether the program was linked from the native manifest.</summary>
     public bool IsNative { get; }
     internal int? WorldWarpWaving { get; }
+    internal bool ComputeWarpCompatible { get; set; }
 
     /// <summary>Animation/motion eligibility reflected once from this link's immutable interface and binaries.</summary>
     internal AnimatedMotionContract AnimatedMotion { get; }

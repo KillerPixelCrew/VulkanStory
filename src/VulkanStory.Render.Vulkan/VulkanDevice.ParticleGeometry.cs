@@ -10,7 +10,7 @@ namespace VulkanStory.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     private readonly record struct ParticleInput(VulkanBuffer Buffer, uint Stride, uint Offset);
-    private readonly record struct ParticleGeometryKey(VulkanMesh Mesh, ulong Revision, int Instances, int Hash);
+    private readonly record struct ParticleGeometryKey(VulkanMesh Mesh, ulong Revision, int Instances, int Hash, bool Quad);
     private sealed class ParticleGeometry(VulkanBuffer buffer, byte[] parameters, uint frame)
     {
         internal readonly VulkanBuffer Buffer = buffer;
@@ -29,9 +29,10 @@ public sealed unsafe partial class VulkanDevice
     private void PrepareParticleGeometry(ShaderProgramResources program, int meshId, int instances)
     {
         drawParticleGeometry = null;
-        int location = program.LocationOf("vsComputeParticleGeometry");
+        bool quad = program.LocationOf("vsComputeQuadGeometry") >= 0;
+        int location = program.LocationOf(quad ? "vsComputeQuadGeometry" : "vsComputeParticleGeometry");
         if (location < 0) return;
-        int count = TryPrepareParticleGeometry(program, meshId, instances);
+        int count = quad ? TryPrepareQuadGeometry(program, meshId, instances) : TryPrepareParticleGeometry(program, meshId, instances);
         ReadOnlySpan<byte> bytes = new(&count, 4);
         if (ShaderProgramResources.IsPushLocation(location)) program.SetPushUniform(location, bytes);
         else program.SetUniform(location, bytes);
@@ -54,7 +55,7 @@ public sealed unsafe partial class VulkanDevice
 
     private int TryPrepareParticleGeometry(ShaderProgramResources program, int meshId, int instances)
     {
-        if (!ComputeParticleGeometryEnabled || instances <= 0 || program.WorldWarpWaving is not (0 or 1) ||
+        if (!ComputeParticleGeometryEnabled || !program.ComputeWarpCompatible || instances <= 0 || program.WorldWarpWaving is not (0 or 1) ||
             _meshes.Get(meshId) is not { } mesh || !program.Interface.StorageBlocks.Exists(block => block.BlockName == "VulkanParticleGeometry") ||
             !TryParticleInput(mesh, 0, Format.R32G32B32Sfloat, false, out var vertices) ||
             !TryParticleInput(mesh, 4, Format.R32G32B32Sfloat, true, out var current) ||
@@ -81,7 +82,7 @@ public sealed unsafe partial class VulkanDevice
         push[4] = current.Stride / 4; push[5] = current.Offset / 4; push[6] = flags.Stride / 4; push[7] = flags.Offset / 4;
         push[8] = history.Stride / 4; push[9] = history.Offset / 4; push[10] = (uint)program.WorldWarpWaving!.Value;
         var hash = new HashCode(); hash.AddBytes(parameters);
-        var key = new ParticleGeometryKey(mesh, mesh.GeometryRevision, instances, hash.ToHashCode());
+        var key = new ParticleGeometryKey(mesh, mesh.GeometryRevision, instances, hash.ToHashCode(), false);
         if (particleGeometry.TryGetValue(key, out var versions))
             foreach (var geometry in versions)
                 if (parameters.SequenceEqual(geometry.Parameters))

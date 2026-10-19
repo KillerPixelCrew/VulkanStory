@@ -42,6 +42,7 @@ layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scal
     float fogDensityIn;
     mat4 projectionMatrix;
     mat4 modelViewMatrix;
+    int vsComputeQuadGeometry;
 
     float prevTimeCounter;
     float prevWindWaveCounter;
@@ -81,6 +82,7 @@ layout(location = 4) out float extraWeight;
 layout(location = 5) out vec2 uv;
 
 #include "vertexflagbits.glsl"
+layout(std430, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_FACE_DATA) readonly buffer VulkanParticleGeometry { vec4 values[]; } vsParticleGeometry;
 #include "shadowcoords.glsl"
 #include "fogandlight.vert.glsl"
 #include "vertexwarp.glsl"
@@ -108,6 +110,13 @@ void main()
 	uv = uvIn;
 	if (rainParticle) uv = vec2(0.5, 0.5);
 
+	vec4 cameraPos, shadowPosition;
+	if (vsComputeQuadGeometry > 0) {
+		int record = (gl_InstanceIndex * vsComputeQuadGeometry + gl_VertexIndex) * 6;
+		cameraPos = vsParticleGeometry.values[record];
+		shadowPosition = vsParticleGeometry.values[record + 1];
+		mvmat = mat4(vsParticleGeometry.values[record + 2], vsParticleGeometry.values[record + 3], vsParticleGeometry.values[record + 4], vsParticleGeometry.values[record + 5]);
+	} else {
 	// 1. Translate the particle
 	mvmat[3] = mvmat * vec4(particlePosition, 1.0);
 
@@ -144,7 +153,9 @@ void main()
 	worldPos = applyVertexWarping(renderFlags, worldPos);
 	worldPos = applyGlobalWarping(worldPos);
 
-	vec4 cameraPos = mvmat * worldPos;
+	cameraPos = mvmat * worldPos;
+	shadowPosition = vec4(worldPos.xyz + particlePosition, worldPos.w);
+	}
 	color = baseColor * applyLight(rgbaAmbientIn, rgbaLightIn, renderFlags, cameraPos) * rgbaBlockIn;
 	color.a = rgbaBlockIn.a;
 	rgbaFog = rgbaFogIn;
@@ -153,7 +164,7 @@ void main()
 		color.a = min(1, 1.05*color.a * (1.2 - clamp(1 - 7*vexPos.y, 0, 1)));
 	}
 
-	calcShadowMapCoords(mvmat, vec4(worldPos.x + particlePosition.x, worldPos.y + particlePosition.y, worldPos.z + particlePosition.z, worldPos.w));
+	calcShadowMapCoords(mvmat, shadowPosition);
 
 	// 4. Done.
 	gl_Position = projectionMatrix * cameraPos;

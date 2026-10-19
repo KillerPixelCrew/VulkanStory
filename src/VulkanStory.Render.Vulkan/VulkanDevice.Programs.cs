@@ -175,6 +175,7 @@ public sealed unsafe partial class VulkanDevice
             }
         }
         resources ??= new ShaderProgramResources(_context, programId, translated, _sharedLayout!.Layout);
+        resources.ComputeWarpCompatible = resources.IsNative || ShaderProgramOverriddenByMods?.Invoke(program.PassName ?? "") == false;
         _programs[programId] = resources;
         var activeInputs = new HashSet<int>();
         if (translated.Spirv.TryGetValue(EnumShaderType.VertexShader, out byte[]? vertexSpirv))

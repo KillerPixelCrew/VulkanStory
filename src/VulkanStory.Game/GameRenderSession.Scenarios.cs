@@ -696,6 +696,7 @@ internal sealed partial class GameRenderSession
         Aggregate("worldGeometryDispatchesRecorded", Device.WorldGeometryDispatchesRecorded);
         Aggregate("worldGeometryCacheReuses", Device.WorldGeometryCacheReuses);
         Aggregate("particleGeometryDispatchesRecorded", Device.ParticleGeometryDispatchesRecorded);
+        Aggregate("quadGeometryDispatchesRecorded", Device.QuadGeometryDispatchesRecorded);
         Aggregate("particleGeometryCacheReuses", Device.ParticleGeometryCacheReuses);
         Aggregate("particleVisualDispatchesRecorded", Device.ParticleVisualDispatchesRecorded);
         Aggregate("particleVisualChecks", Device.ParticleVisualChecks);

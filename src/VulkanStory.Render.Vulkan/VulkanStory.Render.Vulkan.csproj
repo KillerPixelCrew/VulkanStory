@@ -43,6 +43,7 @@
     <Compile Include="VulkanDevice.JointPoses.cs" />
     <Compile Include="VulkanDevice.WorldGeometry.cs" />
     <Compile Include="VulkanDevice.ParticleGeometry.cs" />
+    <Compile Include="VulkanDevice.QuadGeometry.cs" />
     <Compile Include="VulkanDevice.ParticleVisuals.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />

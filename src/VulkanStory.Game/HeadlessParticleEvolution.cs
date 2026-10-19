@@ -28,6 +28,7 @@ internal static class HeadlessParticleEvolution
                     AddPos = new Vec3d(0.1, 0.1, 0.1), MinVelocity = new Vec3f(0, 0.2f, 0), AddVelocity = new Vec3f(0.05f, 0.1f, 0.05f),
                     MinSize = 2, MaxSize = 2, Color = ColorUtil.ToRgba(192, 88, 68, 48), LifeLength = 4,
                     GravityEffect = 0.02f, LightEmission = int.MaxValue, WithTerrainCollision = true,
+                    VertexFlags = model == EnumParticleModel.Quad && function % 2 == 0 ? int.MinValue : 0,
                     SizeEvolve = Evolution(function, factor, 2.05f), OpacityEvolve = Evolution(function, factor, 210),
                     RedEvolve = Evolution(function, factor, 100), GreenEvolve = Evolution(function, factor, 100), BlueEvolve = Evolution(function, factor, 100),
                 };

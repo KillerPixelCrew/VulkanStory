@@ -42,7 +42,7 @@ public sealed unsafe partial class VulkanDevice
     {
         // The shadow program deliberately has no world-warp contract: stock shadows
         // consume local joint geometry with their original model-view transform.
-        if (program.LocationOf("vsComputeWorldDeformation") < 0 || program.WorldWarpWaving is not (0 or 1) ||
+        if (!program.ComputeWarpCompatible || program.LocationOf("vsComputeWorldDeformation") < 0 || program.WorldWarpWaving is not (0 or 1) ||
             _drawDeformation is not { } local || _meshes.Get(meshId) is not { } mesh) return false;
         VertexAttribute flags = default;
         foreach (var attribute in mesh.Layout.Attributes)
