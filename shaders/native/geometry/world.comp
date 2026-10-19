@@ -1,0 +1,38 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+layout(local_size_x = 64) in;
+layout(binding = 0, std430) readonly buffer LocalGeometry { vec4 values[]; } localGeometry;
+layout(binding = 1, std430) readonly buffer Flags { int values[]; } vertexFlags;
+layout(binding = 2, std430) readonly buffer State {
+    mat4 model;
+    vec4 counters;
+    vec4 wind;
+    vec4 effects;
+    vec4 eye;
+} state;
+layout(binding = 3, std430) writeonly buffer WorldGeometry { vec4 values[]; } worldGeometry;
+layout(push_constant) uniform Parameters {
+    uint count; uint flagsStride; uint flagsOffset; int addFlags; int waving;
+} p;
+#define OPTIMUM_WAVINGSTUFF p.waving
+#include "../include/vertexflagbits.glsl"
+#include "../include/noise3d.glsl"
+#include "../include/warpstate.glsl"
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= p.count) return;
+    uint at = index * 4;
+    int flags = vertexFlags.values[p.flagsOffset + index * p.flagsStride] | p.addFlags;
+    if ((flags & WindModeFruitMask) > 0) flags &= ~WindModeFruitMask;
+    WarpState warp = WarpState(state.counters.x, state.counters.y, state.counters.z, state.counters.w,
+        state.wind.x, state.eye.xyz, state.wind.y, state.wind.z, state.wind.w, state.effects.x,
+        floatBitsToInt(state.eye.w), state.effects.y);
+    vec4 position = state.model * localGeometry.values[at];
+    if ((flags & WindModeWaterMask) > 0) position = applyLiquidWarpingState(warp, true, position, 5);
+    else position = applyVertexWarpingState(warp, flags, position);
+    worldGeometry.values[at] = applyGlobalWarpingState(warp, position);
+    worldGeometry.values[at + 1] = state.model * localGeometry.values[at + 1];
+    worldGeometry.values[at + 2] = state.model * localGeometry.values[at + 2];
+    worldGeometry.values[at + 3] = state.model * localGeometry.values[at + 3];
+}

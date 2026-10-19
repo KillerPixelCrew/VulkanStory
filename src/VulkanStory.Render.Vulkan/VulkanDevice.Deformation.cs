@@ -41,7 +41,9 @@ public sealed unsafe partial class VulkanDevice
     private void PrepareSharedDeformation(ShaderProgramResources program, int meshId)
     {
         _drawDeformation = _drawPreviousDeformation = null;
-        SetDeformationMode(program, TryPrepareSharedDeformation(program, meshId));
+        bool prepared = TryPrepareSharedDeformation(program, meshId);
+        SetDeformationMode(program, prepared);
+        SetWorldDeformationMode(program, prepared && TryPrepareWorldGeometry(program, meshId));
     }
 
     private bool TryPrepareSharedDeformation(ShaderProgramResources program, int meshId)
@@ -74,6 +76,7 @@ public sealed unsafe partial class VulkanDevice
         _entityDrawBatch = null; EntityVisibility = null;
         RetireDeformationGeometry(all: true);
         RetireJointPoses(all: true);
+        RetireWorldGeometry(all: true);
     }
 
     private bool TryDeformationInputs(VulkanMesh mesh, out VulkanBuffer? positions, out VulkanBuffer? ids,
@@ -126,7 +129,7 @@ public sealed unsafe partial class VulkanDevice
         var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
         ulong retainedBytes = bytes + (ulong)poseData.Length;
         uint boneOffset = 0;
-        if (_deformationBytes + retainedBytes > DeformationBudget || bytes > limits.MaxStorageBufferRange ||
+        if (_deformationBytes + worldGeometryBytes + retainedBytes > DeformationBudget || bytes > limits.MaxStorageBufferRange ||
             positions.Size > limits.MaxStorageBufferRange || ids.Size > limits.MaxStorageBufferRange ||
             bones.Shadow.Length > limits.MaxStorageBufferRange ||
             (gpuBones == null && !bones.TrySnapshot(_frameCounter, _frames.Current, out boneOffset))) return null;

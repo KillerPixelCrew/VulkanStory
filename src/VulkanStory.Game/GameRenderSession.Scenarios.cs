@@ -693,6 +693,8 @@ internal sealed partial class GameRenderSession
         Aggregate("managedDependencyResolutionVerified", ModCompatibilityConsumerPatches.ManagedDependencyResolutionVerified);
         Aggregate("validAnimatedHistoryUploads", Temporal.EntityMotion.ValidAnimationUploads);
         Aggregate("deformationDispatchesRecorded", Device.DeformationDispatchesRecorded);
+        Aggregate("worldGeometryDispatchesRecorded", Device.WorldGeometryDispatchesRecorded);
+        Aggregate("worldGeometryCacheReuses", Device.WorldGeometryCacheReuses);
         Aggregate("jointPoseDispatchesRecorded", Device.JointPoseDispatchesRecorded);
         Aggregate("jointPoseCacheReuses", Device.JointPoseCacheReuses);
         Aggregate("jointPoseChecks", Device.JointPoseChecks);

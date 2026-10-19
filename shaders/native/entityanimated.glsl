@@ -63,6 +63,7 @@ layout(push_constant, scalar) uniform OptimumDraw
     int entityId;
     int glitchFlicker;
     int vsComputeDeformation;
+    int vsComputeWorldDeformation;
 };
 
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
@@ -167,7 +168,8 @@ void main(void)
 {
 	damageEffect = damageEffectIn;
 	mat4 animModelMat = modelMatrix;
-	if (vsComputeDeformation != 0) worldPos = modelMatrix * vsDeformedPosition();
+	if (vsComputeWorldDeformation != 0) worldPos = vsDeformedPosition();
+	else if (vsComputeDeformation != 0) worldPos = modelMatrix * vsDeformedPosition();
 	else {
 		animModelMat = modelMatrix * ElementTransforms.values[jointId];
 		worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
@@ -180,12 +182,14 @@ void main(void)
 		renderFlags &= ~WindModeFruitMask;
 	} else fragFrostAlpha = frostAlpha;
 
-	if ((renderFlags & WindModeWaterMask) > 0) {
-		worldPos = applyLiquidWarping(true, worldPos, 5);
-	} else {
-		worldPos = applyVertexWarping(renderFlags, worldPos);
+	if (vsComputeWorldDeformation == 0) {
+		if ((renderFlags & WindModeWaterMask) > 0) {
+			worldPos = applyLiquidWarping(true, worldPos, 5);
+		} else {
+			worldPos = applyVertexWarping(renderFlags, worldPos);
+		}
+		worldPos = applyGlobalWarping(worldPos);
 	}
-	worldPos = applyGlobalWarping(worldPos);
 
 
 #if TAAMOTION == 1
@@ -196,18 +200,21 @@ void main(void)
 	{
 		vec4 taaPrevWorld;
 		if (taaHistoryValid != 0) {
-			if (vsComputeDeformation != 0) taaPrevWorld = prevModelMatrix * vsPreviousGeometry.values[gl_VertexIndex * 4];
+			if (vsComputeWorldDeformation != 0) taaPrevWorld = vsPreviousGeometry.values[gl_VertexIndex * 4];
+			else if (vsComputeDeformation != 0) taaPrevWorld = prevModelMatrix * vsPreviousGeometry.values[gl_VertexIndex * 4];
 			else {
 				mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
 				taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
 			}
-			WarpState taaPrev = previousWarpState();
-			if ((renderFlags & WindModeWaterMask) > 0) {
-				taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
-			} else {
-				taaPrevWorld = applyVertexWarpingState(taaPrev, renderFlags, taaPrevWorld);
+			if (vsComputeWorldDeformation == 0) {
+				WarpState taaPrev = previousWarpState();
+				if ((renderFlags & WindModeWaterMask) > 0) {
+					taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
+				} else {
+					taaPrevWorld = applyVertexWarpingState(taaPrev, renderFlags, taaPrevWorld);
+				}
+				taaPrevWorld = applyGlobalWarpingState(taaPrev, taaPrevWorld);
 			}
-			taaPrevWorld = applyGlobalWarpingState(taaPrev, taaPrevWorld);
 		} else {
 			// Treat the surface as static in the world: its camera-relative position
 			// a frame ago differed by the camera's own movement only (accuracy rule 4).
@@ -240,7 +247,7 @@ void main(void)
 	fogAmount = getFogLevel(worldPos, fogMinIn, fogDensityIn);
 
 	normal = unpackNormal(renderFlags);
-	normal = vsComputeDeformation != 0 ? (modelMatrix * vsDeformedNormal(normal)).xyz :
+	normal = vsComputeWorldDeformation != 0 ? vsDeformedNormal(normal).xyz : vsComputeDeformation != 0 ? (modelMatrix * vsDeformedNormal(normal)).xyz :
 		(animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
 
 	#if GBUFFER == 1
