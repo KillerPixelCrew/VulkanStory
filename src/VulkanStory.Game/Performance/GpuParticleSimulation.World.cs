@@ -17,8 +17,9 @@ internal static partial class GpuParticleSimulation
     private static readonly AccessTools.FieldRef<Vintagestory.API.Datastructures.CachedCuboidList, int> PopulatedSize =
         AccessTools.FieldRefAccess<Vintagestory.API.Datastructures.CachedCuboidList, int>("populatedSize");
     private readonly record struct WorldRegion(IBlockAccessor Accessor, int Dimension, int MinX, int MinY, int MinZ, int MaxX, int MaxY, int MaxZ);
-    private static readonly MethodInfo StockBoxes = AccessTools.Method(typeof(Block), nameof(Block.GetParticleCollisionBoxes))!;
-    private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid))!;
+    private static readonly MethodInfo StockBoxes = AccessTools.Method(typeof(Block), nameof(Block.GetParticleCollisionBoxes),
+        [typeof(IBlockAccessor), typeof(BlockPos)])!;
+    private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid), Type.EmptyTypes)!;
     private static readonly Dictionary<Type, bool> stockBoxTypes = new();
     private static readonly Dictionary<Type, bool> stockFlowTypes = new();
     private static readonly Dictionary<Type, bool> stockLiquidTypes = new();
@@ -28,7 +29,8 @@ internal static partial class GpuParticleSimulation
         {
             var type = block.GetType();
             if (!stockLiquidTypes.TryGetValue(type, out bool stock))
-                stockLiquidTypes[type] = stock = AccessTools.Method(type, nameof(Block.IsLiquid)) == StockLiquid &&
+                // Inherited methods can have different ReflectedType values; compare the actual declaration.
+                stockLiquidTypes[type] = stock = AccessTools.Method(type, nameof(Block.IsLiquid), Type.EmptyTypes)?.DeclaringType == StockLiquid.DeclaringType &&
                     Harmony.GetPatchInfo(StockLiquid)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) != true;
             return stock;
         }
@@ -57,7 +59,8 @@ internal static partial class GpuParticleSimulation
         {
             var type = block.GetType();
             if (!stockBoxTypes.TryGetValue(type, out bool stock))
-                stockBoxTypes[type] = stock = AccessTools.Method(type, nameof(Block.GetParticleCollisionBoxes)) == StockBoxes;
+                stockBoxTypes[type] = stock = AccessTools.Method(type, nameof(Block.GetParticleCollisionBoxes),
+                    [typeof(IBlockAccessor), typeof(BlockPos)])?.DeclaringType == StockBoxes.DeclaringType;
             return stock;
         }
     }
