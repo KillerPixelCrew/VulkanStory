@@ -123,7 +123,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     private bool PrepareEntityDraw(ShaderProgramResources program, VulkanMesh mesh,
-        out VulkanBuffer? commands, out ulong offset)
+        out VulkanBuffer? commands, out ulong offset, uint firstIndex = 0)
     {
         commands = null; offset = 0;
         if (EntityVisibility is not { } visibility || !CanPrepareTerrainDraws ||
@@ -158,7 +158,7 @@ public sealed unsafe partial class VulkanDevice
         record[4] = (float)(box.MaxX - camera.CameraX + grow);
         record[5] = (float)(box.MaxY - camera.CameraY + grow);
         record[6] = (float)(box.MaxZ - camera.CameraZ + grow); record[7] = 0;
-        ((uint*)record)[8] = (uint)mesh.IndexCount; ((uint*)record)[9] = 0;
+        ((uint*)record)[8] = (uint)mesh.IndexCount; ((uint*)record)[9] = firstIndex;
         ((uint*)record)[10] = 6; ((uint*)record)[11] = 1;
         commands = batch.Commands;
         offset = batch.CommandOffset + (ulong)batch.Count * 20;
@@ -227,11 +227,13 @@ public sealed unsafe partial class VulkanDevice
     private void BeginEntityDrawFrame(int slot)
     {
         _entityDrawBatch = null; EntityVisibility = null;
+        BeginEntityGeometryFrame(slot);
         if (_entityInputOffsets.Length > slot) _entityInputOffsets[slot] = 0;
     }
 
     private void DisposeEntityDrawsIdle()
     {
+        DisposeEntityGeometryIdle();
         foreach (var input in _entityInputs) input?.Dispose();
         _entityInputs = Array.Empty<VulkanBuffer?>();
         _entityInputOffsets = Array.Empty<ulong>();

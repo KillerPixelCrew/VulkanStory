@@ -37,6 +37,11 @@ internal sealed class VulkanMesh : IDisposable
     internal ulong GeometryRevision { get; set; }
     internal TerrainDrawBounds? EntityLocalBounds { get; set; }
     internal bool EntityFlagsWithoutWind { get; set; }
+    // CPU-upload certificates, never inferred from spare allocation capacity.
+    internal int EntityIndexPrefixCount { get; set; }
+    internal uint EntityMaxIndex { get; set; }
+    internal int[] EntityStreamPrefixBytes { get; } = new int[MeshManager.MaxBuffers];
+    internal bool EntityGeometryMappingExposed { get; set; }
     internal float[] ParticleHistoryShadow = [];
 
     public VertexLayoutDescription Layout { get; set; } = VertexLayoutDescription.Empty;
@@ -493,8 +498,9 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private VulkanBuffer CreateBuffer(int byteSize, BufferUsageFlags usage, bool persistent)
     {
-        // Shared deformation consumes the same uploaded vertex streams as raster draws.
-        if ((usage & BufferUsageFlags.VertexBufferBit) != 0) usage |= BufferUsageFlags.StorageBufferBit;
+        // Shared compute stages consume the original uploaded raster geometry.
+        if ((usage & (BufferUsageFlags.VertexBufferBit | BufferUsageFlags.IndexBufferBit)) != 0)
+            usage |= BufferUsageFlags.StorageBufferBit;
         // Phase 1B step 5: a static mesh lives in device-local memory (a type
         // that is not host visible, when the device has one), filled through the
         // upload manager's staging. It never takes ReBAR, which holds only
@@ -768,6 +774,8 @@ internal sealed unsafe class MeshManager : IDisposable
         if (slot < 0 && mesh.SharedIndices) return IntPtr.Zero;
         VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
         if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
+        // A borrowed pointer can be written again without another API notification.
+        mesh.EntityGeometryMappingExposed = true;
         mesh.GeometryRevision++;
         InvalidateEntityBounds(mesh, slot);
         return WritableBuffer(mesh, slot, buffer).Mapped;
@@ -831,6 +839,8 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private static void InvalidateEntityBounds(VulkanMesh mesh, int slot)
     {
+        if (slot < 0) mesh.EntityIndexPrefixCount = 0;
+        else mesh.EntityStreamPrefixBytes[slot] = 0;
         if (slot == BufferXyz) mesh.EntityLocalBounds = null;
         if (slot == BufferFlags) mesh.EntityFlagsWithoutWind = false;
     }
@@ -841,6 +851,20 @@ internal sealed unsafe class MeshManager : IDisposable
         // Certify complete ordinary streams only. Partial updates and borrowed
         // writable mappings must never reuse an older, smaller envelope.
         if (mesh.Ssbo || offset != 0) return;
+        if (slot < 0)
+        {
+            if (bytes % 4 != 0) return;
+            uint max = 0;
+            foreach (int index in new ReadOnlySpan<int>((void*)source, bytes / 4))
+            {
+                if (index < 0) return;
+                max = Math.Max(max, (uint)index);
+            }
+            mesh.EntityMaxIndex = max;
+            mesh.EntityIndexPrefixCount = bytes / 4;
+            return;
+        }
+        mesh.EntityStreamPrefixBytes[slot] = bytes;
         // Stock uploads reserve Flags.Length but write only FlagsCount. The
         // complete position stream defines the non-instanced active flag domain;
         // unused allocation tail has no vertices and need not be initialized.
