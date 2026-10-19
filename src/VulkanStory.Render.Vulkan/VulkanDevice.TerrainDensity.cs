@@ -1,6 +1,7 @@
 using Silk.NET.Vulkan;
 using System.Runtime.InteropServices;
 using VulkanStory.Contracts;
+using VulkanStory.Render.Vulkan.Core;
 
 namespace VulkanStory.Render.Vulkan;
 
@@ -26,7 +27,7 @@ public sealed unsafe partial class VulkanDevice
             PhysicalDeviceProperties2 properties = new() { SType = StructureType.PhysicalDeviceProperties2, PNext = &controls };
             _context.Api.GetPhysicalDeviceProperties2(_context.PhysicalDevice, &properties);
             if (!_context.ShaderFloat64Enabled || !controls.ShaderSignedZeroInfNanPreserveFloat64 ||
-                !controls.ShaderDenormPreserveFloat64 || !controls.ShaderRoundingModeRTEFloat64)
+                !controls.ShaderDenormPreserveFloat64 || !controls.ShaderRoundingModeRtefloat64)
                 throw new NotSupportedException("Stock terrain density requires binary64 RTE, denormal and signed-zero/NaN preservation.");
             string source = ReadWorldShader("worldgen/terrain-density.comp")
                 .Replace("#include \"terrain-noise-kernel.glsl\"", ReadWorldShader("worldgen/terrain-noise-kernel.glsl"), StringComparison.Ordinal)
