@@ -149,7 +149,7 @@ internal sealed partial class GameRenderSession : IDisposable
             session.graphics.ConfigureFramebufferHost(session.CreateFramebufferHost());
             session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
             Performance.TerrainOcclusionCull.Attach(session.device.OcclusionDepth.Test, session.OcclusionCameraPosition,
-                session.CaptureOcclusionDepth, () => session.device?.OcclusionDepth.Reset());
+                session.CaptureOcclusionDepth, () => session.device?.ResetTerrainOcclusion());
             var renderExtent = session.RenderExtent;
             platform.WindowSize.Width = renderExtent.Width;
             platform.WindowSize.Height = renderExtent.Height;

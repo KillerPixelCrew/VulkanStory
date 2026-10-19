@@ -10,9 +10,22 @@ float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word])
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
 bool hidden(uint index)
 {
-    uint record = 40u + index * 12u;
+    uint record = 64u + index * 12u;
     vec3 lo = v(record).xyz, hi = v(record + 4u).xyz;
     if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
+    if (inputData.words[p.inputWord + 36u] != 0u) {
+        uint planeCount = inputData.words[p.inputWord + record + 10u];
+        for (uint i = 0u; i < planeCount; i++) {
+            vec4 plane = v(40u + i * 4u);
+            if (any(isnan(plane)) || any(isinf(plane))) continue;
+            vec3 positive = mix(lo, hi, greaterThan(plane.xyz, vec3(0)));
+            // Camera-relative coordinates plus an outward error bound keep float rounding
+            // conservative against the game's double-precision CPU plane tests.
+            precise float distance = dot(plane.xyz, positive) + plane.w;
+            float error = 64.0 * 1.1920929e-7 * (dot(abs(plane.xyz), abs(positive)) + abs(plane.w)) + 0.001;
+            if (distance < -error) return true;
+        }
+    }
     mat4 view = mat4(v(0), v(4), v(8), v(12));
     mat4 projection = mat4(v(16), v(20), v(24), v(28));
     vec2 lower = vec2(1e30), upper = vec2(-1e30);
@@ -60,7 +73,7 @@ void main()
         for (uint i = 0u; i < lane; i++) prefix += visible[i];
         if (visible[lane] != 0u) {
             uint dst = p.outputWord + (written + prefix) * 5u;
-            uint src = p.inputWord + 40u + index * 12u + 8u;
+            uint src = p.inputWord + 64u + index * 12u + 8u;
             outputData.words[dst] = inputData.words[src];
             outputData.words[dst+1u] = 1u;
             outputData.words[dst+2u] = inputData.words[src+1u];

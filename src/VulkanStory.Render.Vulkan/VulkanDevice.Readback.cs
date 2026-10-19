@@ -29,9 +29,19 @@ public sealed unsafe partial class VulkanDevice
     // ---------------------------------------------------------- occlusion depth (PERF-03)
 
     private Culling.OcclusionDepth? _occlusionDepth;
+    private readonly Culling.OcclusionDepth?[] _stereoOcclusionDepths = new Culling.OcclusionDepth?[2];
+    internal int TerrainEyeIndex { get; set; } = -1;
 
     /// <summary>The terrain occlusion depth pyramid owner, created on first use.</summary>
-    internal Culling.OcclusionDepth OcclusionDepth => _occlusionDepth ??= new Culling.OcclusionDepth(this, _frames.FramesInFlight);
+    internal Culling.OcclusionDepth OcclusionDepth => TerrainEyeIndex is >= 0 and < 2
+        ? _stereoOcclusionDepths[TerrainEyeIndex] ??= new Culling.OcclusionDepth(this, _frames.FramesInFlight)
+        : _occlusionDepth ??= new Culling.OcclusionDepth(this, _frames.FramesInFlight);
+
+    internal void ResetTerrainOcclusion()
+    {
+        _occlusionDepth?.Reset();
+        foreach (var depth in _stereoOcclusionDepths) depth?.Reset();
+    }
 
     /// <summary>A persistently mapped host buffer a caller owns for its own readbacks (the shared arena can be replaced mid-frame).</summary>
     internal VulkanBuffer CreateReadbackBuffer(ulong size) => new(_context, size, BufferUsageFlags.TransferDstBit,

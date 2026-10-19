@@ -66,6 +66,7 @@ public sealed unsafe partial class VulkanDevice
         _queryRing.BeginSlot(slot.Index, slot.CommandBuffer);
         _gpuTimestamps?.BeginSlot(slot.Index, slot.CommandBuffer);
         _occlusionDepth?.Collect(slot.Index);
+        foreach (var depth in _stereoOcclusionDepths) depth?.Collect(slot.Index);
         _readbacks.BeginSlot(slot.Index);
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);

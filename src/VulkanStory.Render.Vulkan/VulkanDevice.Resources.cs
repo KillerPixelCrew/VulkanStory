@@ -627,7 +627,7 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     internal bool DrawNativeMeshMulti(NativePipeline pipeline, int meshId, int[] indicesStarts, int[] indicesSizes,
         int groupCount, ReadOnlySpan<NativeTexture> textures, ReadOnlySpan<TerrainDrawBounds> terrainBounds = default,
-        double cameraX = 0, double cameraY = 0, double cameraZ = 0)
+        ReadOnlySpan<TerrainFrustumPlane> terrainPlanes = default, double cameraX = 0, double cameraY = 0, double cameraZ = 0)
     {
         if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
@@ -635,7 +635,7 @@ public sealed unsafe partial class VulkanDevice
         if (!terrainBounds.IsEmpty) _terrainOccluderMeshes.Add(meshId);
         ulong preparedOffset = 0;
         bool prepared = !terrainBounds.IsEmpty && PrepareTerrainDraws(terrainBounds, indicesStarts, indicesSizes,
-            groupCount, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset);
+            groupCount, terrainPlanes, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;

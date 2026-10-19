@@ -26,6 +26,7 @@ internal sealed partial class GameGraphicsAdapter
 
     /// <summary>Captures target/write-mask and fixed draw state for a named terrain pool; native pass opening is deferred to its first draw.</summary>
     /// <param name="name">Retained terrain pool/pass name.</param>
+    /// <param name="mode">Stock visibility policy for this pool.</param>
     internal void BeginChunkPool(string name, EnumFrustumCullMode mode = EnumFrustumCullMode.NoCull)
     {
         RequireDevice();
@@ -94,7 +95,8 @@ internal sealed partial class GameGraphicsAdapter
         var camera = Performance.TerrainOcclusionCull.CameraNow();
         var bounds = camera.HasValue ? Performance.GpuTerrainDraws.BoundsFor(starts, sizes, groups) : default;
         if (renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups, chunkTextures.AsSpan(0, names.Length),
-                bounds, camera?.X ?? 0, camera?.Y ?? 0, camera?.Z ?? 0))
+                bounds, bounds.IsEmpty ? default : Performance.GpuTerrainDraws.Planes,
+                camera?.X ?? 0, camera?.Y ?? 0, camera?.Z ?? 0))
             RuntimeStats.drawCallsCount++;
         else RejectSceneDraw("chunk native multi-draw rejected");
         // Once opened, this scope owns the pool even if a later pipeline/draw is skipped.

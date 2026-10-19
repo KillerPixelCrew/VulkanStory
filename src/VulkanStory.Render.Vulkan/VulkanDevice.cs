@@ -1602,6 +1602,8 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         _programs.Clear();
         // Its texture and program go with the texture manager and the compute cache below.
         _occlusionDepth?.DisposeIdle();
+        foreach (var depth in _stereoOcclusionDepths) depth?.DisposeIdle();
+        Array.Clear(_stereoOcclusionDepths);
         DisposeTerrainInputsIdle();
         _occlusionDepth = null;
         _compute?.Dispose();

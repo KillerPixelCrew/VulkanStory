@@ -30,6 +30,7 @@ internal sealed partial class GameRenderSession
             for (int eye = 0; eye < 2; eye++)
             {
                 OpenXrEye = eye;
+                Device.TerrainEyeIndex = eye;
                 Graphics.Stated.UiImageFramebuffer = 0;
                 Device.RedirectDefaultFramebuffer(0);
                 Graphics.SceneNoHudCaptured = Graphics.UpscaledThisFrame = Graphics.UpscaledCompositeReady = false;
@@ -49,7 +50,7 @@ internal sealed partial class GameRenderSession
                 }
             }
         }
-        finally { RestoreEyeCamera(); OpenXrEye = -1; }
+        finally { RestoreEyeCamera(); OpenXrEye = -1; Device.TerrainEyeIndex = -1; }
         // TODO(VR-01): replace the per-eye draw replay with multiview after terrain,
         // entities, post effects and mod passes all expose eye-indexed inputs.
     }

@@ -8,8 +8,15 @@ internal sealed partial class GameRenderSession
     private string? occlusionCaptureRefusal;
 
     /// <summary>The attached world's current camera position, which terrain draws are relative to; null without a world.</summary>
-    internal (double X, double Y, double Z)? OcclusionCameraPosition() =>
-        Temporal.CurrentClient?.EntityPlayer?.CameraPos is { } camera ? (camera.X, camera.Y, camera.Z) : null;
+    internal (double X, double Y, double Z)? OcclusionCameraPosition()
+    {
+        if (device?.OpenXr != null && OpenXrEye >= 0 && Temporal.CurrentClient is ClientMain client)
+        {
+            var eye = client.MainCamera.CameraEyePos;
+            return (eye.X, eye.Y, eye.Z);
+        }
+        return Temporal.CurrentClient?.EntityPlayer?.CameraPos is { } camera ? (camera.X, camera.Y, camera.Z) : null;
+    }
 
     /// <summary>
     /// Captures Primary depth right after the opaque terrain pass, with the camera the terrain was drawn with, as the next
@@ -17,11 +24,21 @@ internal sealed partial class GameRenderSession
     /// </summary>
     internal void CaptureOcclusionDepth()
     {
-        if (stopping || device == null || device.OpenXr != null || Temporal.CurrentClient is not ClientMain client || client.EntityPlayer?.CameraPos is not { } camera) return;
+        if (stopping || device == null || (device.OpenXr != null && OpenXrEye < 0) ||
+            Temporal.CurrentClient is not ClientMain client || client.EntityPlayer?.CameraPos is not { } camera) return;
         if (platform.FrameBuffers is not { Count: > 0 } buffers || buffers[0] is not { Disposed: false, DepthTextureId: > 0 } primary) return;
         float[] view = (float[])client.api.Render.CameraMatrixOriginf.Clone();
         float[] projection = (float[])client.api.Render.CurrentProjectionMatrix.Clone();
-        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, camera.X, camera.Y, camera.Z),
+        double x = camera.X, y = camera.Y, z = camera.Z;
+        if (device.OpenXr != null)
+        {
+            var eye = client.MainCamera.CameraEyePos;
+            (x, y, z) = (eye.X, eye.Y, eye.Z);
+            // Rebase to this physical eye. Head movement then participates in the
+            // same displacement margin as ordinary camera movement.
+            view[12] = view[13] = view[14] = 0;
+        }
+        if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, x, y, z),
             Performance.PerformancePatchSet.Current is { TerrainOcclusionCull: true, GpuTerrainDrawPreparation: true }))
         {
             occlusionCaptureRefusal = null;
