@@ -62,7 +62,7 @@ internal static class HeadlessParticleEvolution
                         Size = NatFloat.createUniform(0.1f, 0), GravityEffect = NatFloat.createUniform(0, 0),
                         basePos = position.Clone(), baseVelocity = new Vec3f(), ParticleModel = model,
                         TerrainCollision = true, DieInAir = (policy & 1) != 0, DieInLiquid = (policy & 2) != 0,
-                        HsvaColor = null!, Color = ColorUtil.ToRgba(255, 60, 120, 220), LightEmission = int.MaxValue,
+                        HsvaColor = null!, Color = ColorUtil.ToRgba(255, 60, 120, 220),
                         VertexFlags = 0,
                     });
     }
