@@ -109,7 +109,7 @@ internal sealed partial class GameGraphicsAdapter
     /// <param name="mesh">Owned entity mesh.</param>
     /// <param name="samplerName">Original program sampler receiving the supplied texture.</param>
     /// <param name="textureId">Adapter-owned texture identifier.</param>
-    internal void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)
+    internal void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId, MultiTextureMeshRef? shape = null, int subMesh = -1)
     {
         if (!NativeEntitiesEnabled || device == null || mesh == null)
         {
@@ -146,6 +146,7 @@ internal sealed partial class GameGraphicsAdapter
         // Every sampler the program declares, resolved from what the client declared for it, with
         // this draw's own texture for the sampler the seam names.
         ResolveNativeEntityTextures(pipeline, program.ProgramId, samplerName, textureId);
+        if (CaptureResidentEntityMesh(pipeline, vao, shape, subMesh)) return;
 
         NativePassDescription pass = NativeEntityPassFor(target.FboId);
         pass.Reads = nativeEntityReads;

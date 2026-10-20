@@ -50,9 +50,11 @@ internal sealed partial class GameGraphicsAdapter
         aoTemporal?.EntityMotion.InvalidateBuffer(handle);
         RequireDevice().DeleteUniformBuffer(handle);
     }
-    internal void UploadUniformBuffer(UBO buffer, IntPtr data, int offset, int size)
+    internal unsafe void UploadUniformBuffer(UBO buffer, IntPtr data, int offset, int size)
     {
         InvalidateAnimationPayload(buffer);
+        if (data != IntPtr.Zero && size > 0 && size % sizeof(float) == 0)
+            CaptureResidentEntityPose(buffer, new ReadOnlySpan<float>((void*)data, size / sizeof(float)), offset, size);
         RequireDevice().UpdateUniformBuffer(UniformBufferHandle(buffer), data, offset, size);
     }
     internal byte[]? UniformBufferShadowForTests(UBO buffer) =>
@@ -82,6 +84,7 @@ internal sealed partial class GameGraphicsAdapter
     }
     internal bool TryUploadGpuJointPose(UBO buffer, object data, int offset, int size)
     {
+        if (TryUploadResidentEntityPose(buffer, data, offset, size)) return true;
         if (offset != 0 || size <= 0 || size > buffer.Size ||
             Performance.GpuJointPoses.PoseFor(data) is not { } pose || pose.JointCount * 64 != size ||
             ShaderProgramBase.CurrentShaderProgram?.HasUniform("vsComputeDeformation") != true) return false;
@@ -94,6 +97,13 @@ internal sealed partial class GameGraphicsAdapter
 
     private void UploadPreviousGpuPose(UBO buffer, JointPoseSnapshot pose)
     {
+        if (residentEntityScope.PoseOffset >= 0 && ResidentEntityProgram(out _))
+        {
+            var bones = new float[pose.JointCount * 16];
+            pose.CopyMatrices(bones);
+            UpdateUniformBuffer(buffer, bones, 0, bones.Length * sizeof(float));
+            return;
+        }
         var renderer = RequireDevice();
         int handle = UniformBufferHandle(buffer);
         InvalidateAnimationPayload(buffer); renderer.BindUniformBuffer(handle);

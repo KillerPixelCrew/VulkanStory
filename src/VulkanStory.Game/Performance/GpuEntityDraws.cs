@@ -108,5 +108,5 @@ internal static class GpuEntityDraws
             stockRendererAssemblies.Add(essentials); stockRendererAssemblies.Add(survival);
             Armed = true;
         }, Uninstall: () => { Armed = false; fallingFrame = null; stockRendererAssemblies.Clear(); },
-        WorldLeft: () => fallingFrame = null);
+        WorldLeft: () => { fallingFrame = null; graphics?.ResetResidentEntities(); });
 }
