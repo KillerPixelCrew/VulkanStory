@@ -216,6 +216,8 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
     public bool DrawIndirectFirstInstanceEnabled { get; private set; }
     /// <summary>Whether the device was created with drawIndirectCount enabled.</summary>
     public bool DrawIndirectCountEnabled { get; private set; }
+    /// <summary>Per-instance material indices may select different sampled images.</summary>
+    internal bool SampledImageArrayNonUniformIndexingEnabled { get; private set; }
     /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
     internal bool GeometryShadersEnabled { get; private set; }
@@ -1212,6 +1214,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
             RuntimeDescriptorArray = true,
             DescriptorBindingPartiallyBound = true,
             DescriptorBindingSampledImageUpdateAfterBind = true,
+            ShaderSampledImageArrayNonUniformIndexing = vulkan12Query.ShaderSampledImageArrayNonUniformIndexing,
             DrawIndirectCount = vulkan12Query.DrawIndirectCount,
         };
         var features2 = new PhysicalDeviceFeatures2
@@ -1378,6 +1381,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         Allocator = new VulkanAllocator(this);
         DrawIndirectFirstInstanceEnabled = enabledFeatures.DrawIndirectFirstInstance;
         DrawIndirectCountEnabled = vulkan12.DrawIndirectCount;
+        SampledImageArrayNonUniformIndexingEnabled = vulkan12.ShaderSampledImageArrayNonUniformIndexing;
         return true;
     }
 
