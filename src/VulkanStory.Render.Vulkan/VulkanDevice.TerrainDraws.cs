@@ -51,6 +51,7 @@ public sealed unsafe partial class VulkanDevice
     // Called only after this slot's fence completed, before its indirect buffers are reused.
     private void CollectTerrainDraws(int slot)
     {
+        BeginTerrainSceneFrame();
         if (!_terrainResults.TryGetValue(slot, out var results)) return;
         foreach (var result in results)
         {
@@ -247,6 +248,7 @@ public sealed unsafe partial class VulkanDevice
 
     private void DisposeTerrainInputsIdle()
     {
+        DisposeTerrainSceneIdle();
         foreach (VulkanBuffer? buffer in _terrainInputs) buffer?.Dispose();
         _terrainInputs = Array.Empty<VulkanBuffer?>();
         _terrainInputOffsets = Array.Empty<ulong>();

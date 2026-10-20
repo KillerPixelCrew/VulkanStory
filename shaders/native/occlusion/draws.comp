@@ -7,12 +7,93 @@ layout(constant_id = 3) const bool countedPools = false;
 layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
 layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
-layout(push_constant) uniform Parameters { uint inputWord; uint outputWord; uint count; } p;
+layout(push_constant) uniform Parameters {
+    uint inputWord; uint outputWord; uint count;
+#ifdef RESIDENT_TERRAIN
+    uint firstPart;
+#endif
+} p;
 shared uint visible[64];
 float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word]); }
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
+#ifdef RESIDENT_TERRAIN
+// Persistent 64-byte rows: float xyz/radii xyz; first/count; lod; chunk slot;
+// Hide; pool mesh; render pass; atlas; two spare words. The view header ends at word 144,
+// followed by the stock ChunkCuller visibility bitset (low uint first).
+layout(binding = 3, std430) readonly buffer ResidentParts { uint words[]; } resident;
+double d(uint word) {
+    return packDouble2x32(uvec2(inputData.words[p.inputWord + word], inputData.words[p.inputWord + word + 1u]));
+}
+float outward(float value, bool up) {
+    if (value == 0.0) return uintBitsToFloat(up ? 1u : 0x80000001u);
+    uint bits = floatBitsToUint(value);
+    return uintBitsToFloat((value > 0.0) == up ? bits + 1u : bits - 1u);
+}
+bool residentHidden(uint index, out vec3 lo, out vec3 hi)
+{
+    uint row = (p.firstPart + index) * 16u;
+    lo = hi = vec3(0);
+    if (resident.words[row + 10u] != 0u) return true;
+    uint mode = inputData.words[p.inputWord + 79u];
+    // NoCull ignores the chunk flood fill, frustum and LOD, as IsVisible does.
+    if (mode >= 1u && mode <= 4u) {
+        uint chunk = resident.words[row + 9u], word = chunk >> 5u;
+        if (word >= inputData.words[p.inputWord + 86u] ||
+            (inputData.words[p.inputWord + 144u + word] & (1u << (chunk & 31u))) == 0u) return true;
+    }
+    dvec3 center = dvec3(uintBitsToFloat(resident.words[row]), uintBitsToFloat(resident.words[row + 1u]),
+        uintBitsToFloat(resident.words[row + 2u]));
+    vec3 radii = vec3(uintBitsToFloat(resident.words[row + 3u]), uintBitsToFloat(resident.words[row + 4u]),
+        uintBitsToFloat(resident.words[row + 5u]));
+    int lod = int(resident.words[row + 8u]);
+    if (mode == 3u || mode == 4u) {
+        // Player cast, subtraction and Abs are all float before promotion.
+        precise float shadowX = float(d(70u)) - float(center.x), shadowZ = float(d(72u)) - float(center.z);
+        if (double(abs(shadowX)) >= d(80u) || double(abs(shadowZ)) >= d(82u) || (mode == 4u && lod < 1)) return true;
+    }
+    if (mode >= 1u && mode <= 4u) {
+        uint planes = mode == 1u ? 5u : 6u;
+        for (uint i = 0u; i < planes; i++) {
+            uint plane = 88u + i * 8u;
+            dvec3 normal = dvec3(d(plane), d(plane + 2u), d(plane + 4u));
+            // Preserve Plane.AABBisOutside's float sign * radius / SQRT3,
+            // then double coordinate and double multiply/add operation order.
+            precise vec3 extent = vec3(normal.x > 0.0 ? 1.0 : -1.0, normal.y > 0.0 ? 1.0 : -1.0,
+                normal.z > 0.0 ? 1.0 : -1.0) * radii / 1.7320508;
+            precise dvec3 positive = center + dvec3(extent);
+            precise double distance = ((positive.x * normal.x + positive.y * normal.y) + positive.z * normal.z) + d(plane + 6u);
+            if (distance < 0.0) return true;
+        }
+        if (mode == 1u) {
+            precise double dx = center.x - d(70u), dz = center.z - d(72u);
+            precise double squaredDouble = dx * dx + dz * dz;
+            // BlockPos.HorDistanceSqTo returns float, then the culler widens it.
+            double squared = double(float(squaredDouble));
+            double lod0 = d(74u), lod2 = d(76u), range = double(int(inputData.words[p.inputWord + 78u]));
+            // lod0BiasSq and its +1024 are floats in the original culler.
+            if (lod == 0) { if (!(lod0 > 0.0 && squared < double(float(lod0) + 1024.0))) return true; }
+            else if (lod == 1) { if (!(squared < range)) return true; }
+            else if (lod == 2) { if (!(squared <= lod2)) return true; }
+            else if (lod == 3) { if (!(squared > lod2 && squared < range)) return true; }
+            else return true;
+        }
+    }
+    if (inputData.words[p.inputWord + 85u] == 0u) return false;
+    vec3 extent = radii / 1.7320508;
+    dvec3 captured = dvec3(d(136u), d(138u), d(140u));
+    lo = vec3((center - dvec3(extent)) - captured);
+    hi = vec3((center + dvec3(extent)) - captured);
+    for (uint axis = 0u; axis < 3u; axis++) { lo[axis] = outward(lo[axis], false); hi[axis] = outward(hi[axis], true); }
+    return false;
+}
+#endif
 bool hidden(uint index)
 {
+#ifdef RESIDENT_TERRAIN
+    vec3 lo, hi;
+    if (residentHidden(index, lo, hi)) return true;
+    if (inputData.words[p.inputWord + 85u] == 0u) return false;
+#else
     uint record = 64u + index * 12u;
     vec3 lo = v(record).xyz, hi = v(record + 4u).xyz;
     if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
@@ -30,8 +111,12 @@ bool hidden(uint index)
             if (distance < -error) return true;
         }
     }
+#endif
     // Terrain uploads tight current-view bounds; motion padding belongs only to
     // the historical-depth test. Entity records already include their padding.
+#ifdef RESIDENT_TERRAIN
+    if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
+#endif
     lo -= vec3(f(38)); hi += vec3(f(38));
     mat4 view = mat4(v(0), v(4), v(8), v(12));
     mat4 projection = mat4(v(16), v(20), v(24), v(28));
@@ -66,11 +151,19 @@ bool hidden(uint index)
 void writePoolCommand(uint index, uint rank, uint outputWord)
 {
     uint dst = outputWord + rank * 5u;
+#ifdef RESIDENT_TERRAIN
+    uint row = (p.firstPart + index) * 16u;
+    outputData.words[dst] = resident.words[row + 7u];
+    outputData.words[dst + 1u] = 1u;
+    outputData.words[dst + 2u] = resident.words[row + 6u];
+    outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = 0u;
+#else
     uint src = p.inputWord + 64u + index * 12u + 8u;
     outputData.words[dst] = inputData.words[src];
     outputData.words[dst+1u] = 1u;
     outputData.words[dst+2u] = inputData.words[src+1u];
     outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
+#endif
 }
 void writeCommand(uint index, uint rank) { writePoolCommand(index, rank, p.outputWord); }
 void main()
@@ -164,11 +257,21 @@ void main()
         if (p.count <= 64u) {
             memoryBarrierBuffer(); barrier();
             if (keep != 0u) writeCommand(index, visible[lane] - keep);
+#ifdef RESIDENT_TERRAIN
+            if (lane == 63u) outputData.words[totals + 1u] = visible[lane];
+#endif
         }
         return;
     }
     // The second dispatch sees every group total. Prefixing groups in input order
     // preserves pool order across workgroups, including translucent parts.
+#ifdef RESIDENT_TERRAIN
+    if (index == 0u) {
+        uint total = 0u, groups = (p.count + 63u) / 64u;
+        for (uint group = 0u; group < groups; group++) total += outputData.words[totals + group];
+        outputData.words[totals + groups] = total;
+    }
+#endif
     if (index >= p.count || outputData.words[scratch + index * 2u] == 0u) return;
     uint rank = outputData.words[scratch + index * 2u + 1u];
     for (uint group = 0u; group < gl_WorkGroupID.x; group++) rank += outputData.words[totals + group];
