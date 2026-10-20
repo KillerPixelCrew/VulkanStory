@@ -5,13 +5,32 @@ namespace VulkanStory.Render.Vulkan;
 
 internal readonly record struct TerrainPartDesc(int PoolMesh, int RenderPass, int Atlas,
     uint FirstIndex, uint IndexCount, double CenterX, double CenterY, double CenterZ,
-    float Radius, float RadiusY, float RadiusZ, int LodLevel, int ChunkSlot);
+    float Radius, float RadiusY, float RadiusZ, int LodLevel, int ChunkSlot)
+{
+    public bool Hidden { get; init; }
+    public double PoolOriginX { get; init; }
+    public double PoolOriginY { get; init; }
+    public double PoolOriginZ { get; init; }
+}
 
 internal readonly record struct TerrainView(int Eye, double CameraX, double CameraY, double CameraZ,
     double PlayerX, double PlayerY, double PlayerZ,
     System.Numerics.Matrix4x4 ViewProjection /* camera-relative */, float ViewDistance,
     float Lod0BiasSq, float Lod2BiasSq,
-    int CullMode /* stock EnumFrustumCullMode */, bool Shadow);
+    int CullMode /* stock EnumFrustumCullMode */, bool Shadow)
+{
+    public float ViewDistanceSq { get; init; }
+    public int PlayerBlockX { get; init; }
+    public int PlayerBlockZ { get; init; }
+    public float ShadowRangeX { get; init; }
+    public float ShadowRangeZ { get; init; }
+    public System.Numerics.Vector4 Plane0 { get; init; }
+    public System.Numerics.Vector4 Plane1 { get; init; }
+    public System.Numerics.Vector4 Plane2 { get; init; }
+    public System.Numerics.Vector4 Plane3 { get; init; }
+    public System.Numerics.Vector4 Plane4 { get; init; }
+    public System.Numerics.Vector4 Plane5 { get; init; }
+}
 
 public sealed unsafe partial class VulkanDevice
 {
