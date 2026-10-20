@@ -606,6 +606,8 @@ public sealed unsafe partial class VulkanDevice
         bool packed = instanceCount == 1 && TryPrepareEntityGeometry(pipeline.Program, meshId, mesh!, out entityGeometry, out firstIndex);
         EntityRecordDraw recordDraw = default;
         bool records = packed && TryPrepareEntityRecord(pipeline, out recordDraw);
+        // An animated slice is addressed only through its record variant.
+        if (packed && !records && entityGeometry!.Animated) { packed = false; firstIndex = 0; }
         uint firstInstance = records ? recordDraw.Row : 0;
         bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset,
             firstIndex, firstInstance);
@@ -627,8 +629,10 @@ public sealed unsafe partial class VulkanDevice
             return false;
         }
         if (animatedEntityDraw) NoteAnimatedEntityDraw(entityProducers);
+        // Its producers have run: an animated row's inputs move to the slot heaps if they can.
+        if (records) PlaceEntityRecordInputs(ref recordDraw);
 
-        if (records && entityDraw &&
+        if (records && recordDraw.Combinable && entityDraw &&
             TryCombineEntityDraw(commandBuffer, recordDraw, entityGeometry, entityCommands!, entityOffset))
         {
             if (RenderTrace.Enabled) RenderTrace.Write("native mesh=" + meshId + " combined into the open entity draw");
@@ -641,6 +645,8 @@ public sealed unsafe partial class VulkanDevice
             // unused and draw the original program directly with zero base instance.
             // Never rewrite visibility input which may already have been submitted.
             firstInstance = 0; entityDraw = false;
+            // The original program reads its deformation by local vertex index.
+            if (entityGeometry!.Animated) { packed = false; firstIndex = 0; }
             if (!BindProgramSets(commandBuffer, pipeline.Program, meshId)) return false;
         }
 
@@ -658,7 +664,7 @@ public sealed unsafe partial class VulkanDevice
         BindParticleVisuals(commandBuffer, meshId);
         if (entityDraw)
         {
-            RecordEntityDraw(commandBuffer, entityCommands!, entityOffset, records ? recordDraw.Segment : null,
+            RecordEntityDraw(commandBuffer, entityCommands!, entityOffset, records && recordDraw.Combinable ? recordDraw.Segment : null,
                 recordDraw.Pipeline, entityGeometry);
             ParticleInstancesDrawn(meshId);
             return true;
