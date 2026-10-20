@@ -173,7 +173,7 @@
     <EmbeddedResource Include="../../shaders/native/occlusion/*.comp">
       <LogicalName>shaders-vk/occlusion/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/geometry/*.comp;../../shaders/native/geometry/particle-physics.glsl">
+    <EmbeddedResource Include="../../shaders/native/geometry/*.comp;../../shaders/native/geometry/particle-physics.glsl;../../shaders/native/geometry/particle-arithmetic.glsl">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl;../../shaders/native/worldgen/terrain-binary64.glsl;../../shaders/native/worldgen/terrain-noise-kernel.glsl">

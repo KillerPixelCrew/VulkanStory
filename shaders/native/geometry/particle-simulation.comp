@@ -27,14 +27,9 @@ layout(binding = 6, std430) readonly buffer Boxes { Box values[]; } boxes;
 layout(binding = 7, std430) buffer Queries { Query values[]; } queries;
 layout(binding = 8, std430) readonly buffer LiquidCells { uint values[]; } liquidCells;
 layout(push_constant) uniform Parameters { uint count; uint phase; uint initialPopulatedSize; } p;
+#include "particle-arithmetic.glsl"
+#define PARTICLE_CHECKED_ARITHMETIC
 #include "../include/evolution.glsl"
-// Float division may use an approximate reciprocal even with precise. Widen
-// these stock divisions before rounding to float: a one-ulp velocity error can
-// change a truncated direction byte, which is an exact part of the output.
-float stockDivide(float numerator, float denominator) {
-    precise double quotient = double(numerator) / double(denominator);
-    return float(quotient);
-}
 #include "particle-physics.glsl"
 // .NET 10 x64 conv.u1: CVTTSS2SI (indefinite INT_MIN for NaN or
 // outside [-2^31,2^31)), then narrow the low byte. Never clamp to [0,255].
@@ -43,14 +38,14 @@ uint directionByte(float value) {
     return uint(int(value)) & 255u;
 }
 uint directionBytes(vec3 velocity) {
-    precise float xx = velocity.x * velocity.x, yy = velocity.y * velocity.y, zz = velocity.z * velocity.z;
-    precise float sum = (xx + yy) + zz;
+    precise float xx = stockMul(velocity.x, velocity.x), yy = stockMul(velocity.y, velocity.y), zz = stockMul(velocity.z, velocity.z);
+    precise float sum = stockAdd(stockAdd(xx, yy), zz);
     // GameMath.RootSumOfSquares widens the float sum for Math.Sqrt.
-    precise float magnitude = float(sqrt(double(sum)));
+    precise float magnitude = stockSqrt(sum);
     if (!(magnitude > 0.0) || isinf(magnitude)) return 0u;
     precise vec3 normalized = vec3(stockDivide(velocity.x, magnitude),
         stockDivide(velocity.y, magnitude), stockDivide(velocity.z, magnitude));
-    precise vec3 scaled = normalized * 128.0;
+    precise vec3 scaled = stockMul(normalized, 128.0);
     return directionByte(scaled.x) | (directionByte(scaled.y) << 8) | (directionByte(scaled.z) << 16);
 }
 bool observedCell(uint start, uint bounds, ivec3 origin, ivec3 cell, out uint observed) {
@@ -95,16 +90,19 @@ void main() {
     World world = worlds.values[index];
     if (p.phase == 2) {
         Output value = result.values[index];
-        precise dvec3 position = value.position.xyz;
+        precise dvec3 position = stockPosition(value.position.xyz);
         precise vec3 motion = value.motionAlive.xyz;
         uvec2 metadata = unpackDouble2x32(value.position.w);
+        // Phase zero may already have rejected its arithmetic. Do not mutate
+        // device residents; the next submission rebases from the stock tick.
+        if ((metadata.x & 0x40000000u) != 0u) return;
         value.policy = uvec4(0u, 0u, floatBitsToUint(step.control.x), world.visualPolicy);
         if (queries.values[index].minimum.w < 0) {
             // Never approximate or invoke the custom callback. Later actors
             // are speculative until this ordered CPU boundary is resolved.
-            metadata.x = 0x80000000u;
+            metadata.x = arithmeticUnsafe ? 0x40000000u : 0x80000000u;
             value.position.w = packDouble2x32(metadata);
-            residents.values[step.slot] = value;
+            if (!arithmeticUnsafe) residents.values[step.slot] = value;
             result.values[index] = value;
             return;
         }
@@ -115,7 +113,7 @@ void main() {
             // The stock velocity response follows the clipped position. Its
             // shared random draw stays at the ordered CPU tick; the command
             // carries the random drag that draw left for this step.
-            precise float drag = metadata.x == 0u ? 1.0 : (1.0 - clamp(6.060606 * step.physicsDelta, 0.001, 1.0)) * step.control.y;
+            precise float drag = metadata.x == 0u ? 1.0 : stockMul(stockSub(1.0, clamp(stockMul(6.060606, step.physicsDelta), 0.001, 1.0)), step.control.y);
             value.policy.z = floatBitsToUint(drag);
             if (metadata.x != 0u) value.velocityAge.xyz = respond(value.velocityAge.xyz, metadata.x, drag, state.bounciness);
             // Selected boxes that used reused cache rounding, so the consumer can
@@ -134,7 +132,7 @@ void main() {
             ivec3 cell = ivec3(int(position.x), int(policyY), int(position.z));
             if (any(lessThan(cell, lo)) || any(greaterThan(cell, hi))) {
                 // A missing snapshot is an ordered CPU boundary, never air.
-                metadata.x = 0x80000000u;
+                metadata.x = arithmeticUnsafe ? 0x40000000u : 0x80000000u;
                 value.position.w = packDouble2x32(metadata);
                 result.values[index] = value;
                 return;
@@ -144,7 +142,7 @@ void main() {
             uint observed = liquidCells.values[address];
             bool needsCell = (world.liquidPolicy & 2u) != 0u || ((world.liquidPolicy & 1u) != 0u && value.motionAlive.w > 0.5);
             if (needsCell && observed == 2u) {
-                metadata.x = 0x80000000u;
+                metadata.x = arithmeticUnsafe ? 0x40000000u : 0x80000000u;
                 value.position.w = packDouble2x32(metadata);
                 result.values[index] = value;
                 return;
@@ -170,8 +168,8 @@ void main() {
                 }
                 value.policy.y = light;
                 if ((world.visualPolicy & 2u) != 0u) {
-                    precise float remainder = 1.0 - world.rainInterpolation.w;
-                    precise vec3 offset = ((world.rainInterpolation.xyz * remainder) * step.physicsDelta) * vec3(8.0, 12.0, 8.0);
+                    precise float remainder = stockSub(1.0, world.rainInterpolation.w);
+                    precise vec3 offset = stockMul(stockMul(stockMul(world.rainInterpolation.xyz, remainder), step.physicsDelta), vec3(8.0, 12.0, 8.0));
                     precise dvec3 rainPosition = position + dvec3(offset);
                     uint rain;
                     available = observedCell(world.environmentCells.z, world.environmentCells.w, origin,
@@ -184,27 +182,33 @@ void main() {
                 if (!available) metadata.x = 0x80000000u;
             }
         }
-        value.position = dvec4(position, packDouble2x32(metadata));
+        value.position = dvec4(stockPosition(position), packDouble2x32(metadata));
         value.motionAlive.xyz = motion;
+        if (arithmeticUnsafe) {
+            metadata.x = 0x40000000u;
+            value.position.w = packDouble2x32(metadata);
+            result.values[index] = value;
+            return;
+        }
         residents.values[step.slot] = value;
         result.values[index] = value;
         return;
     }
-    precise float dt = step.physicsDelta;
-    precise vec3 velocity = residents.values[step.slot].velocityAge.xyz;
-    precise float age = step.age + step.lifeDelta;
-    precise dvec3 position = residents.values[step.slot].position.xyz;
-    precise float drag = step.control.x;
+    precise float dt = stockValue(step.physicsDelta);
+    precise vec3 velocity = stockValue(residents.values[step.slot].velocityAge.xyz);
+    precise float age = stockAdd(step.age, step.lifeDelta);
+    precise dvec3 position = stockPosition(residents.values[step.slot].position.xyz);
+    precise float drag = stockValue(step.control.x);
     precise vec3 motion;
-    if (state.startingVelocity.w > 0.5) velocity += (state.startingVelocity.xyz - velocity) * 0.02;
-    velocity.y -= state.velocityGravity.w * dt;
+    if (state.startingVelocity.w > 0.5) velocity = stockAdd(velocity, stockMul(stockSub(state.startingVelocity.xyz, velocity), 0.02));
+    velocity.y = stockSub(velocity.y, stockMul(state.velocityGravity.w, dt));
     buoyancy(position, velocity, state.velocityGravity.w, dt, state.physics.x, world);
     if (state.control.z > 0.5) {
-        state.velocityX.values.z = state.velocityY.values.z = state.velocityZ.values.z = age / state.timing.y;
-        motion = velocity * vec3(evaluate(state.velocityX), evaluate(state.velocityY), evaluate(state.velocityZ));
-        motion *= dt;
-    } else motion = velocity * dt;
-    if (state.control.y > 0.5) motion += ((state.parent.xyz * state.parent.w) * dt) * drag;
+        state.velocityX.values.z = state.velocityY.values.z = state.velocityZ.values.z = stockDivide(age, state.timing.y);
+        motion = stockMul(velocity, vec3(evaluate(state.velocityX), evaluate(state.velocityY), evaluate(state.velocityZ)));
+        motion = stockMul(motion, dt);
+    } else motion = stockMul(velocity, dt);
+    if (state.control.y > 0.5) motion = stockAdd(motion, stockMul(stockMul(stockMul(state.parent.xyz, state.parent.w), dt), drag));
     uint queryBounds = 0;
     Query query = Query(ivec4(0), ivec4(0));
     if (state.control.w > 0.5) {
@@ -212,9 +216,10 @@ void main() {
     }
     queries.values[index] = query;
     Output value;
-    value.position = dvec4(position, packDouble2x32(uvec2(0, queryBounds)));
+    float lifeLength = stockValue(state.timing.y);
+    value.position = dvec4(position, packDouble2x32(uvec2(arithmeticUnsafe ? 0x40000000u : 0u, queryBounds)));
     value.velocityAge = vec4(velocity, age);
-    value.motionAlive = vec4(motion, age < state.timing.y ? 1.0 : 0.0);
+    value.motionAlive = vec4(motion, age < lifeLength ? 1.0 : 0.0);
     value.policy = uvec4(0u); value.padding = uvec4(0u);
     // Mutable simulation storage is compute-only. Graphics leases immutable
     // per-submission results, including previous frames and the second eye.

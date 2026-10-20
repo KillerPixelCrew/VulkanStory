@@ -87,6 +87,22 @@ internal static class HeadlessParticleEvolution
                             EvolvingNatFloat.create((EnumTransformFunction)1, 1), EvolvingNatFloat.create((EnumTransformFunction)7, 1),
                             EvolvingNatFloat.create((EnumTransformFunction)8, 1) },
                     });
+            // Direction squares can underflow while velocity itself is normal.
+            // Include actual subnormal operands and signed zero on both pool
+            // threads, alongside the existing ordinary GPU integration cases.
+            foreach (var model in new[] { EnumParticleModel.Cube, EnumParticleModel.Quad })
+                foreach (bool collision in new[] { false, true })
+                    foreach (var velocity in new[] { new Vec3f(-6.145007e-19f, -0f, -1.1475099e-19f),
+                        new Vec3f(1e-30f, 0, -1e-30f), new Vec3f(1e-40f, -0f, -1e-40f), new Vec3f(0, -0f, 0) })
+                        emit(new AdvancedParticleProperties
+                        {
+                            Quantity = NatFloat.createUniform(8, 0), LifeLength = NatFloat.createUniform(2, 0),
+                            Size = NatFloat.createUniform(0.1f, 0), GravityEffect = NatFloat.createUniform(0, 0),
+                            basePos = api.World.Player.Entity.Pos.XYZ.Add(0, 1.5, 3), baseVelocity = velocity,
+                            ParticleModel = model, TerrainCollision = collision, Bounciness = 0.2f,
+                            VertexFlags = Performance.GpuParticleSimulation.BenchmarkMarker,
+                            HsvaColor = null!, Color = ColorUtil.ToRgba(255, 170, 100, 50),
+                        });
         }
         if (worker) api.Event.RegisterAsyncParticleSpawner((_, manager) => { Spawn(properties => manager.Spawn(properties)); return false; });
         else Spawn(properties => api.World.SpawnParticles(properties));

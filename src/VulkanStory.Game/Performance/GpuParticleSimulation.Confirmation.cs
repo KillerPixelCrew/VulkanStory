@@ -35,8 +35,9 @@ internal static partial class GpuParticleSimulation
     {
         var world = batch.World[index];
         if ((world.VisualPolicy & ParticleSimulationWorldInput.ThirdTick) == 0) return true;
-        // Shader division/sqrt precision is implementation dependent. Compare
-        // the three packed bytes before accepting a trajectory, including the
+        // The shader's checked arithmetic produced the stock trajectory; risky
+        // intermediates reject the whole step before reaching this confirmation.
+        // Compare the three packed bytes before accepting it, including the
         // x64 .NET 10 NaN/overflow conversion; a mismatch runs the stock tick.
         var v = result.VelocityAge;
         float length = GameMath.RootSumOfSquares(v.X, v.Y, v.Z);
@@ -45,16 +46,23 @@ internal static partial class GpuParticleSimulation
         if (direction != result.Direction) return false;
         if ((world.VisualPolicy & ParticleSimulationWorldInput.Environment) == 0) return true;
         var input = batch.Input[index];
-        if (world.LightEmission != int.MaxValue && (!Observed(world.LightStart, world.LightBounds, (int)result.X, (int)result.Y, (int)result.Z, out int light) ||
+        int light = world.LightEmission;
+        if (world.LightEmission != int.MaxValue && (!Observed(world.LightStart, world.LightBounds, (int)result.X, (int)result.Y, (int)result.Z, out light) ||
             physics.BlockAccess.GetLightRGBsAsInt((int)result.X, (int)result.Y, (int)result.Z) != light)) return false;
+        int emission = world.LightEmission;
+        if (emission != 0) light = Math.Max(light & 255, emission & 255) |
+            Math.Max(light & 65280, emission & 65280) | Math.Max(light & 16711680, emission & 16711680);
+        if (result.Light != light) return false;
         if ((world.VisualPolicy & ParticleSimulationWorldInput.Rain) == 0) return true;
         var interpolation = world.RainInterpolation;
         if (!Same(interpolation, new Vector4(particle.prevPosDeltaX, particle.prevPosDeltaY, particle.prevPosDeltaZ, particle.prevPosAdvance))) return false;
         float remainder = 1 - interpolation.W, dt = input.Timing.W;
-        double dx = interpolation.X * remainder * dt * 8f, dz = interpolation.Z * remainder * dt * 8f;
+        double dx = interpolation.X * remainder * dt * 8f, dy = interpolation.Y * remainder * dt * 12f,
+            dz = interpolation.Z * remainder * dt * 8f;
         int x = (int)(result.X + dx), z = (int)(result.Z + dz);
         return Observed(world.RainStart, world.RainBounds, x, (int)input.Y, z, out int rain) &&
-            physics.BlockAccess.GetRainMapHeightAt(x, z) == rain;
+            physics.BlockAccess.GetRainMapHeightAt(x, z) == rain &&
+            ((result.VisualPolicy & ParticleSimulationWorldInput.RainSurvived) != 0) == (rain - dy < result.Y);
 
         bool Observed(uint start, uint bounds, int x, int y, int z, out int observed)
         {

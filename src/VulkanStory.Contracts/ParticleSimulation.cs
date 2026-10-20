@@ -36,6 +36,9 @@ public struct ParticleSimulationOutput
     // A custom collision callback intersects the actual stock motion query.
     // The adapter must run that ordered CPU tick and rebase later speculation.
     public const uint RequiresCpuCollision = 0x80000000;
+    // An operand/intermediate is outside the shader's proven normal-float
+    // arithmetic range, or division/sqrt rounding could not be certified.
+    public const uint RequiresCpuArithmetic = 0x40000000;
     // Stock EnumCollideFlags occupy the low bits. The number of selected boxes
     // that used reused CachedCuboidList rounding follows, so a later consumer
     // can confirm the cache prefix it actually observes at the stock tick.

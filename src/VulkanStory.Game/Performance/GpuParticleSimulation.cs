@@ -412,11 +412,15 @@ internal static partial class GpuParticleSimulation
             var result = batch.Output[index];
             // Only the actual stock query needs this custom callback. Keep its
             // original tick and event order.
-            if ((result.CollisionFlags & ParticleSimulationOutput.RequiresCpuCollision) != 0) return true;
+            if ((result.CollisionFlags & (ParticleSimulationOutput.RequiresCpuCollision | ParticleSimulationOutput.RequiresCpuArithmetic)) != 0) return true;
             ref readonly var expected = ref batch.Input[index];
+            uint populatedSize = (uint)PopulatedSize(__3.CollisionBoxList);
             if (!Matches(__instance, __0, __1, in expected, AgeSensitive(in expected, in batch.World[index])) ||
                 !Confirm(__instance, __3, state, batch, index, in result)) return true;
             if (!Enabled || scope.Epoch != Interlocked.Read(ref epoch)) return true;
+            // Check only the trajectory that passed the production publication
+            // gate, using the cache prefix observed before confirmation grew it.
+            if (HeadlessHarnessOptions.Enabled && !Benchmark) Check(batch, index, populatedSize);
             Apply(__instance, in result, __0, __1, __2, __3, batch, index); Interlocked.Increment(ref stepsApplied);
             state.Rendered[__instance] = new RenderState(__instance, batch.Buffer!, index, in result);
             return false;
@@ -520,8 +524,6 @@ internal static partial class GpuParticleSimulation
         batch.Polled = state.Call;
         if (batch.Backend!.TryComplete(batch.Ticket) is not { } buffer) { state.Backlogged = true; return false; }
         batch.Buffer = buffer; batch.Ticket = 0; batch.Ready = true;
-        if (HeadlessHarnessOptions.Enabled && !Benchmark)
-            Check(batch);
         return true;
     }
     private static void RetireStale(PoolState state)
@@ -591,7 +593,7 @@ internal static partial class GpuParticleSimulation
         Interlocked.Increment(ref gpuDirectionSteps);
     }
 
-    private static void Check(Batch batch)
+    private static void Check(Batch batch, int index, uint populatedSize)
     {
         var input = batch.Input.AsSpan(0, batch.Particles.Count);
         var world = batch.World.AsSpan(0, batch.Particles.Count);
@@ -600,8 +602,7 @@ internal static partial class GpuParticleSimulation
         var output = batch.Output.AsSpan(0, batch.Particles.Count);
         double floatError = 0, positionError = 0;
         int checkedCount = 0;
-        uint populatedSize = world.IsEmpty ? 0 : world[0].InitialPopulatedSize;
-        for (int i = 0; i < input.Length; i++)
+        for (int i = index, end = index + 1; i < end; i++)
         {
             var state = input[i];
             var result = output[i];

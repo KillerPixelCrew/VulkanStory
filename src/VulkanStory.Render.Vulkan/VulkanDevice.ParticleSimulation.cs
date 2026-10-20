@@ -274,7 +274,13 @@ public sealed unsafe partial class VulkanDevice
                 catch { failed = true; throw; }
                 var result = new SimulationBuffer(this, buffer!, (ulong)tickets[i]);
                 var active = pendingResidents[i];
-                for (int j = 0; j < pendingResidentCounts[i]; j++) { active[j].Last = destination[j]; active[j].Pending = false; }
+                for (int j = 0; j < pendingResidentCounts[i]; j++)
+                {
+                    active[j].Last = destination[j]; active[j].Pending = false;
+                    // An arithmetic rejection never committed the speculative
+                    // device state. Rebase it from the ensuing stock CPU tick.
+                    if ((destination[j].CollisionFlags & ParticleSimulationOutput.RequiresCpuArithmetic) != 0) active[j].Initialized = false;
+                }
                 Array.Clear(active, 0, pendingResidentCounts[i]); pendingResidentCounts[i] = 0;
                 retained.Add(result); completed.Add(tickets[i], result);
                 tickets[i] = 0; destinations[i] = null;

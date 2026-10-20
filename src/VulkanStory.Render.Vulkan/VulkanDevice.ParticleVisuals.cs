@@ -173,7 +173,9 @@ public sealed unsafe partial class VulkanDevice
     { drawParticleVisualMesh = meshId; drawParticleVisualCount = count; drawParticleVisuals = buffer; }
     private static string ParticleEvolutionShader(string file) => ReadWorldShader("geometry/" + file).Replace(
         "#include \"../include/evolution.glsl\"", ReadWorldShader("include/evolution.glsl"), StringComparison.Ordinal).Replace(
-        "#include \"particle-physics.glsl\"", ReadWorldShader("geometry/particle-physics.glsl"), StringComparison.Ordinal);
+        "#include \"particle-physics.glsl\"", ReadWorldShader("geometry/particle-physics.glsl"), StringComparison.Ordinal).Replace(
+        "#include \"particle-arithmetic.glsl\"", ReadWorldShader("geometry/particle-arithmetic.glsl"), StringComparison.Ordinal).Replace(
+        "#include \"../worldgen/terrain-binary32.glsl\"", ReadWorldShader("worldgen/terrain-binary32.glsl"), StringComparison.Ordinal);
     private ParticleInput VisualParticleInput(int meshId, uint location, ParticleInput original) => drawParticleVisualMesh == meshId && drawParticleVisuals is { } buffer
         ? location == 4 ? new ParticleInput(buffer, 16, 0) : location == 9 ? new ParticleInput(buffer, 44, (uint)drawParticleVisualCount * 28) : original : original;
     private void BindParticleVisuals(CommandBuffer command, int meshId)
