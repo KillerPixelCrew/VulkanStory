@@ -165,7 +165,7 @@ internal static class HeadlessChunkMeshingProbe
         Run? run = For(batch);
         if (run == null || x != run.X || y != run.Y || z != run.Z) return;
         run.Record("target-candidates", new { x, y, z, count = faces.Length,
-            faces = faces.ToArray().Select(f => new { index = f.Index, side = f.Side, bin = f.Bin }).ToArray() }, batch);
+            faces = faces.ToArray().Select(f => new { index = f.Index, side = f.Side, bin = f.Bin, cull = f.CullMode }).ToArray() }, batch);
     }
     internal static void Generated(long batch, ChunkMeshRange[] ranges, ChunkMeshBin[] bins) =>
         For(batch)?.Record("generated-ranges", new { ranges, bins, faces = ranges.Sum(r => r.FaceCount) }, batch);

@@ -9,6 +9,7 @@ using Vintagestory.API.Client.Tesselation;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.Client.NoObf;
+using Vintagestory.GameContent;
 using VulkanStory.Contracts;
 using VulkanStory.Render.Vulkan;
 
@@ -28,10 +29,18 @@ internal static partial class GpuChunkMeshing
     [ThreadStatic] private static bool skippedPublication;
     private static readonly ConcurrentDictionary<Type, bool> AoTypes = new();
     private static readonly ConditionalWeakTable<MeshData, Payload> Payloads = new();
+    // Chunks whose blended pass/atlas meshes mix GPU and CPU producers. Their
+    // blended producers stay on the CPU, retaining one stock-ordered mesh.
+    private static readonly ConditionalWeakTable<ClientChunk, object> OrderedCpu = new();
     private static readonly HashSet<Payload> Pending = new();
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Solid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkBlocksExt");
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Fluid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkFluidBlocksExt");
     private static readonly AccessTools.FieldRef<ChunkTesselator, int[]> Lights = AccessTools.FieldRefAccess<ChunkTesselator, int[]>("currentChunkRgbsExt");
+    private static readonly AccessTools.FieldRef<ChunkTesselator, byte[]> Draw = AccessTools.FieldRefAccess<ChunkTesselator, byte[]>("currentChunkDraw32");
+    private static readonly AccessTools.FieldRef<ChunkTesselator, MeshData[][][]> CenterPools =
+        AccessTools.FieldRefAccess<ChunkTesselator, MeshData[][][]>("centerModeldataByRenderPassByLodLevel");
+    private static readonly AccessTools.FieldRef<ChunkTesselator, MeshData[][][]> EdgePools =
+        AccessTools.FieldRefAccess<ChunkTesselator, MeshData[][][]>("edgeModeldataByRenderPassByLodLevel");
     private static readonly AccessTools.FieldRef<ChunkTesselator, ClientMain> Game = AccessTools.FieldRefAccess<ChunkTesselator, ClientMain>("game");
     private static readonly AccessTools.FieldRef<TesselatedChunk, TesselatedChunkPart[]> Centers = AccessTools.FieldRefAccess<TesselatedChunk, TesselatedChunkPart[]>("centerParts");
     private static readonly AccessTools.FieldRef<TesselatedChunk, TesselatedChunkPart[]> Edges = AccessTools.FieldRefAccess<TesselatedChunk, TesselatedChunkPart[]>("edgeParts");
@@ -47,6 +56,8 @@ internal static partial class GpuChunkMeshing
     private static readonly MethodInfo Visible = AccessTools.Method(typeof(ChunkTesselator), "CalculateVisibleFaces",
         [typeof(bool), typeof(int), typeof(int), typeof(int)]);
     private static readonly FieldInfo CullField = AccessTools.Field(typeof(Block), nameof(Block.FaceCullMode));
+    private static readonly MethodInfo DecorCull = AccessTools.Method(typeof(ChunkTesselator), "CullVisibleFacesWithDecor",
+        [typeof(Dictionary<int, Block>), typeof(Dictionary<int, Block>)]);
     private static readonly MethodInfo BeforeFrame = AccessTools.Method(typeof(ChunkTesselatorManager), nameof(ChunkTesselatorManager.OnBeforeFrame), [typeof(float)]);
     private static readonly ConstructorInfo ManagerStart = AccessTools.Constructor(typeof(ChunkTesselatorManager), [typeof(ClientMain)]);
     private static readonly MethodInfo ManagerDispose = AccessTools.Method(typeof(ChunkTesselatorManager), nameof(ChunkTesselatorManager.Dispose), [typeof(ClientMain)]);
@@ -58,17 +69,25 @@ internal static partial class GpuChunkMeshing
     [AccessTools.Method(typeof(Block), nameof(Block.DoEmitSideAo)), AccessTools.Method(typeof(Block), nameof(Block.DoEmitSideAoByFlag)),
      AccessTools.Method(typeof(CubeTesselator), nameof(CubeTesselator.DrawBlockFace)),
      AccessTools.Method(typeof(BleedingTextureHelper), nameof(BleedingTextureHelper.GetFaceTextureSubId)),
-     AccessTools.Method(typeof(BleedingTextureHelper), nameof(BleedingTextureHelper.ComputeBleedForFace))];
+     AccessTools.Method(typeof(BleedingTextureHelper), nameof(BleedingTextureHelper.ComputeBleedForFace)),
+     AccessTools.PropertyGetter(typeof(Block), nameof(Block.ForFluidsLayer)),
+     AccessTools.PropertyGetter(typeof(BlockForFluidsLayer), nameof(Block.ForFluidsLayer))];
 
-    private sealed class Work(ChunkTesselator producer, IChunkMeshBatch batch, int epoch)
+    private sealed class Work(ChunkTesselator producer, IChunkMeshBatch batch, int epoch, ClientChunk chunk,
+        int x, int y, int z, bool edgeOnly, bool orderedCpu)
     {
         internal readonly ChunkTesselator Producer = producer;
         internal readonly IChunkMeshBatch Batch = batch;
         internal readonly int Generation = epoch;
         internal readonly int AtlasGeneration = atlasGeneration;
+        internal readonly ClientChunk Chunk = chunk;
+        internal readonly int X = x, Y = y, Z = z;
+        internal readonly bool EdgeOnly = edgeOnly, OrderedCpu = orderedCpu;
         internal readonly List<ChunkMeshFace> Faces = new();
         internal readonly List<ChunkMeshBin> Bins = new();
-        internal readonly HashSet<Block> CpuOnly = new(ReferenceEqualityComparer.Instance);
+        // Identities whose original CPU face culling is retained. Their faces
+        // can still be lit and packed in compute with that stock mask.
+        internal readonly HashSet<Block> CpuCulled = new(ReferenceEqualityComparer.Instance);
         internal ChunkMeshVoxel[]? Voxels;
         internal long ProbeBatch;
         internal bool Active;
@@ -129,6 +148,7 @@ internal static partial class GpuChunkMeshing
         harmony.Patch(BeginProcess, postfix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Snapshot)));
         harmony.Patch(Visible, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(PrepareVisibility)),
             transpiler: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(VisibilityTranspiler)));
+        harmony.Patch(DecorCull, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(DecorVisibility)));
         harmony.Patch(Cube, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(CaptureCube)));
         harmony.Patch(Bleeding, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(CaptureCube)));
         harmony.Patch(Insert, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Reserve)));
@@ -172,9 +192,10 @@ internal static partial class GpuChunkMeshing
         if (Process?.ReturnType != typeof(int) || BeginProcess?.ReturnType != typeof(bool) || Cube?.ReturnType != typeof(void) ||
             Bleeding?.ReturnType != typeof(void) || CubeHeight?.FieldType != typeof(float) || BleedingHeight?.FieldType != typeof(float) ||
             UnusedDispose == null || Visible?.ReturnType != typeof(bool) || Insert?.ReturnType != typeof(ModelDataPoolLocation) ||
-            ManagerStart == null || ManagerDispose?.ReturnType != typeof(void))
+            ManagerStart == null || ManagerDispose?.ReturnType != typeof(void) || DecorCull?.ReturnType != typeof(void) ||
+            StockPolicies.Any(m => m == null))
             throw new InvalidOperationException("Official chunk meshing signatures changed.");
-        foreach (var method in new[] { Process, BeginProcess, Cube, Bleeding, Insert, Visible })
+        foreach (var method in new[] { Process, BeginProcess, Cube, Bleeding, Insert, Visible, DecorCull })
             if (method.GetMethodBody() == null || Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
                 throw new InvalidOperationException("Chunk producer/pool has an external replacement.");
         // Validate the physical ABI used by the unchanged SSBO terrain shaders.
@@ -188,7 +209,7 @@ internal static partial class GpuChunkMeshing
             throw new InvalidOperationException("Stock chunk publication callbacks changed.");
     }
 
-    private static void Start(ChunkTesselator __instance, out Work? __state)
+    private static void Start(ChunkTesselator __instance, int __0, int __1, int __2, TesselatedChunk __3, bool __4, out Work? __state)
     {
         __state = current; current = null;
         lock (Gate)
@@ -197,7 +218,7 @@ internal static partial class GpuChunkMeshing
             if (!ReferenceEquals(world, game) || !enabled || backend == null || !game.Platform.UseSSBOs ||
                 PerformancePatchSet.Current?.GpuChunkMeshing != true) return;
             // A late foreign producer patch keeps its original path.
-            foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible })
+            foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible, DecorCull })
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
             foreach (MethodInfo method in StockPolicies)
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
@@ -210,7 +231,9 @@ internal static partial class GpuChunkMeshing
                 return;
             }
             if (lease == null) return;
-            current = new Work(__instance, lease, generation);
+            ClientChunk chunk = SourceChunk(__3);
+            current = new Work(__instance, lease, generation, chunk, __0 * 32, __1 * 32 % 32768, __2 * 32, __4,
+                OrderedCpu.TryGetValue(chunk, out _));
         }
     }
     private static void Snapshot(ChunkTesselator __instance, int __0, int __1, int __2, ClientChunk __3, bool __4, bool __result)
@@ -231,8 +254,13 @@ internal static partial class GpuChunkMeshing
         {
             Block b = solids[i], f = fluids[i];
             if (b == null || f == null) return;
+            // The stock face-light pass treats an absorbing fluid as the front
+            // block, otherwise the solid. Pack that front block's policies too.
+            Block front = f.LightAbsorption > 0 ? f : b;
+            uint emit = b.EmitSideAo | (uint)front.EmitSideAo << 8;
+            if (front.LightAbsorption > 0 && StockAo(front.GetType()) && front.ForFluidsLayer) emit |= 1u << 16;
             voxels[i] = new ChunkMeshVoxel { Identity = b.Id, Material = (int)b.BlockMaterial,
-                Opaque = Bits(b.SideOpaque), Solid = Bits(b.SideSolid), EmitAo = (uint)b.EmitSideAo,
+                Opaque = Bits(b.SideOpaque), Solid = Bits(b.SideSolid), EmitAo = emit,
                 Absorption = b.LightAbsorption, FluidAbsorption = f.LightAbsorption, Light = (uint)light[i] };
         }
         work.Voxels = voxels; work.Active = true;
@@ -243,20 +271,32 @@ internal static partial class GpuChunkMeshing
         for (int side = 0; side < 6; side++) if (bits[side]) value |= 1u << side;
         return value;
     }
+    // Face lighting calls these policies on neighbouring and front blocks.
+    // Only the stock declarations are known to be side-effect-free; the stock
+    // ForFluidsLayer getters are constants. Other overrides stay on the CPU.
     private static bool StockAo(Type type) => AoTypes.GetOrAdd(type, t =>
         AccessTools.Method(t, nameof(Block.DoEmitSideAo))?.DeclaringType == typeof(Block) &&
-        AccessTools.Method(t, nameof(Block.DoEmitSideAoByFlag))?.DeclaringType == typeof(Block));
+        AccessTools.Method(t, nameof(Block.DoEmitSideAoByFlag))?.DeclaringType == typeof(Block) &&
+        AccessTools.PropertyGetter(t, nameof(Block.ForFluidsLayer))?.DeclaringType is { } owner &&
+        (owner == typeof(Block) || owner == typeof(BlockForFluidsLayer)));
 
-    private static bool SupportedProducer(ChunkTesselator producer, Block block)
+    private static bool SupportedProducer(Work work, Block block)
     {
         int draw = (int)block.DrawType;
-        // Atomic bin compaction is safe for depth-writing opaque passes. Blended
-        // and OIT producers retain their original per-face emission order.
-        if (draw is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 10 or 12) || (uint)block.FaceCullMode > 5 ||
-            block.RenderPass is not (EnumChunkRenderPass.Opaque or EnumChunkRenderPass.OpaqueNoCull)) return false;
-        Type type = Producers(producer)[draw].GetType();
+        if (draw is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 10 or 12) || !SupportedPass(work, block.RenderPass)) return false;
+        Type type = Producers(work.Producer)[draw].GetType();
         return type == typeof(CubeTesselator) || type == typeof(BleedingCubeTesselator);
     }
+    // Depth-writing opaque passes can publish GPU faces as their own part.
+    // Blended/OIT passes depend on emission order: compute keeps the stock
+    // order, and a GPU bin must own the entire stock mesh of its pass/atlas.
+    private static bool Ordered(EnumChunkRenderPass pass) =>
+        pass is EnumChunkRenderPass.BlendNoCull or EnumChunkRenderPass.Transparent or EnumChunkRenderPass.Meta;
+    private static bool SupportedPass(Work work, EnumChunkRenderPass pass) =>
+        pass is EnumChunkRenderPass.Opaque or EnumChunkRenderPass.OpaqueNoCull || Ordered(pass) && !work.OrderedCpu;
+    // Compute owns the pair test only for solid-layer stock cull policies.
+    private static bool GpuCulled(Work work, Block block) =>
+        (uint)block.FaceCullMode <= 5 && !work.CpuCulled.Contains(block) && SupportedProducer(work, block);
 
     private static IEnumerable<CodeInstruction> VisibilityTranspiler(IEnumerable<CodeInstruction> instructions)
     {
@@ -272,38 +312,61 @@ internal static partial class GpuChunkMeshing
         }
     }
     private static EnumFaceCullMode VisibilityPolicy(Block block, ChunkTesselator producer) =>
-        current is { } work && ReferenceEquals(work.Producer, producer) && !work.CpuOnly.Contains(block) && SupportedProducer(producer, block)
+        current is { } work && ReferenceEquals(work.Producer, producer) && GpuCulled(work, block)
             ? EnumFaceCullMode.NeverCull : block.FaceCullMode;
 
     private static void PrepareVisibility(ChunkTesselator __instance)
     {
         Work? work = current;
         if (work == null || !ReferenceEquals(work.Producer, __instance)) return;
-        Block[] blocks = Solid(__instance);
+        Block[] blocks = Solid(__instance), fluids = Fluid(__instance);
         // Never duplicate a virtual AllowSnowCoverage callback. If any cell of
-        // this block identity needs that policy, its original producer retains
-        // CPU culling throughout this chunk; other stock identities can offload.
+        // this block identity needs that policy, the original pass culls it
+        // throughout this chunk, invoking it once. The same applies when one
+        // identity occupies both layers of a cell, which would make its CPU
+        // fallback ambiguous. Compute still lights and packs those faces.
         for (int y = 1; y <= 32; y++)
             for (int z = 1; z <= 32; z++)
                 for (int x = 1; x <= 32; x++)
                 {
                     int i = (y * 34 + z) * 34 + x;
-                    if (blocks[i + 1156]?.DrawType == EnumDrawType.JSONAndSnowLayer && blocks[i] is { } block)
-                        work.CpuOnly.Add(block);
+                    if (blocks[i] is not { } block) continue;
+                    if (blocks[i + 1156]?.DrawType == EnumDrawType.JSONAndSnowLayer ||
+                        ReferenceEquals(fluids[i], block) && block.DrawType != EnumDrawType.Empty) work.CpuCulled.Add(block);
                 }
     }
 
-    // Used only when an admitted producer cannot fit or its particular cell has
-    // custom AO/fluid/shape policy. GPU-admitted cells never run these CPU tests.
-    private static int CpuFaces(TCTCache vars)
+    // Stock decor admission reads the culled face bits of the attached cell.
+    // Restore the original solid mask there; compute repeats the same pair
+    // test on that subset, so only faces visible in the stock mask remain.
+    private static void DecorVisibility(ChunkTesselator __instance, Dictionary<int, Block> __0)
     {
-        int mask = 0; Block a = vars.block; Block[] blocks = Solid(vars.tct);
+        if (current is not { } work || !ReferenceEquals(work.Producer, __instance)) return;
+        byte[] draw = Draw(__instance); Block[] blocks = Solid(__instance);
+        foreach (var (key, decor) in __0)
+        {
+            if (decor == null || ((decor.IsMissing ? 1 : decor.decorBehaviorFlags) & 1) == 0) continue;
+            int index = DecorBits.Index3dFromIndex(key), x = index % 32, z = index / 32 % 32, y = index / 1024;
+            // Edge-only passes leave the interior's previous bits unused.
+            if (draw[index] == 0 || work.EdgeOnly && x % 31 != 0 && y % 31 != 0 && z % 31 != 0) continue;
+            int ext = ((y + 1) * 34 + z + 1) * 34 + x + 1;
+            if (blocks[ext] is { } block && GpuCulled(work, block))
+                draw[index] = (byte)(draw[index] & ~63 | CpuFaces(__instance, block, ext, work.X + x, work.Y + y, work.Z + z));
+        }
+    }
+
+    // Used only when an admitted producer cannot fit or its particular cell has
+    // custom AO/fluid/shape policy, and for decor-bearing cells. Other
+    // GPU-culled cells never run these CPU tests.
+    private static int CpuFaces(ChunkTesselator producer, Block a, int index, int x, int y, int z)
+    {
+        int mask = 0; Block[] blocks = Solid(producer);
         for (int side = 0; side < 6; side++)
         {
-            Block b = blocks[vars.extIndex3d + TileSideEnum.MoveIndex[side]];
+            Block b = blocks[index + TileSideEnum.MoveIndex[side]];
             bool opaque = a.SideOpaque[side], other = b.SideOpaque[TileSideEnum.GetOpposite(side)];
             if (side == 4 && b.DrawType == EnumDrawType.JSONAndSnowLayer && other &&
-                !a.AllowSnowCoverage(Game(vars.tct), new BlockPos(vars.posX, vars.posY, vars.posZ))) other = false;
+                !a.AllowSnowCoverage(Game(producer), new BlockPos(x, y, z))) other = false;
             bool visible = a.FaceCullMode switch
             {
                 EnumFaceCullMode.Default => !other || !opaque,
@@ -321,8 +384,8 @@ internal static partial class GpuChunkMeshing
     private static bool Cpu(TCTCache vars)
     {
         if (current is { } work && ReferenceEquals(work.Producer, vars.tct) && !vars.isDecorTesselate &&
-            !work.CpuOnly.Contains(vars.block) && ReferenceEquals(vars.block, Solid(vars.tct)[vars.extIndex3d]) &&
-            SupportedProducer(vars.tct, vars.block)) vars.drawFaceFlags &= CpuFaces(vars);
+            ReferenceEquals(vars.block, Solid(vars.tct)[vars.extIndex3d]) && GpuCulled(work, vars.block))
+            vars.drawFaceFlags &= CpuFaces(vars.tct, vars.block, vars.extIndex3d, vars.posX, vars.posY, vars.posZ);
         return true;
     }
 
@@ -332,24 +395,29 @@ internal static partial class GpuChunkMeshing
         if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer) || vars.isDecorTesselate ||
             vars.occ != 0.67f || vars.halfoccInverted != 0.0196875f ||
             vars.IsDecorOnJson || !ReferenceEquals(vars.blockFaceVertices, CubeFaceVertices.blockFaceVertices) ||
-            work.CpuOnly.Contains(vars.block) || !ReferenceEquals(vars.block, Solid(vars.tct)[vars.extIndex3d]) || !SupportedProducer(vars.tct, vars.block) ||
+            !SupportedProducer(work, vars.block) || !SupportedPass(work, vars.RenderPass) ||
             __instance.GetType() != typeof(CubeTesselator) && __instance.GetType() != typeof(BleedingCubeTesselator) ||
-            vars.RenderPass == EnumChunkRenderPass.Liquid || vars.RenderPass == EnumChunkRenderPass.TopSoil ||
-            (uint)vars.block.FaceCullMode > 5 || work.Faces.Count + 6 > work.Batch.FaceCapacity ||
-            (int)vars.block.DrawType is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 10 or 12)) return Cpu(vars);
+            work.Faces.Count + 6 > work.Batch.FaceCapacity) return Cpu(vars);
         Block[] blocks = Solid(vars.tct), fluids = Fluid(vars.tct);
+        // Fluid-layer cubes (lake ice) keep their stock fluid-layer culling.
+        bool solid = ReferenceEquals(vars.block, blocks[vars.extIndex3d]);
+        if (!solid && !ReferenceEquals(vars.block, fluids[vars.extIndex3d])) return Cpu(vars);
         // Position-dependent/custom AO remains CPU. The full 3x3x3 producer
-        // neighborhood must use stock AO; absorbing liquids keep the stock path.
+        // neighborhood, and each absorbing fluid that stock lighting can treat
+        // as the front block, must use the stock AO and fluid-layer policies.
         for (int y = -1; y <= 1; y++)
             for (int z = -1; z <= 1; z++)
                 for (int x = -1; x <= 1; x++)
                 {
                     int i = vars.extIndex3d + y * 1156 + z * 34 + x;
-                    if (!StockAo(blocks[i].GetType()) || fluids[i].LightAbsorption > 0) return Cpu(vars);
+                    if (!StockAo(blocks[i].GetType()) || fluids[i].LightAbsorption > 0 && !StockAo(fluids[i].GetType())) return Cpu(vars);
                 }
-        // The source game invokes a virtual snow-coverage policy for this pair.
-        // Keep it entirely on the CPU, including its already-applied decor mask.
-        if (blocks[vars.extIndex3d + 1156].DrawType == EnumDrawType.JSONAndSnowLayer) return Cpu(vars);
+        // Retained CPU culling already produced the stock face mask; compute
+        // keeps it with NeverCull and only performs lighting and packing.
+        uint cull = (uint)(solid && GpuCulled(work, vars.block) ? vars.block.FaceCullMode : EnumFaceCullMode.NeverCull);
+        Block self = vars.block;
+        uint policy = (uint)EnumBlockMaterial.Leaves | (self.BlockMaterial == EnumBlockMaterial.Leaves ? 256u : 0u) |
+            (uint)GameMath.Clamp(self.LightAbsorption, 0, 32) << 16;
         float height = (float)(__instance is BleedingCubeTesselator ? BleedingHeight : CubeHeight).GetValue(__instance)!;
         bool edge = vars.lx is 0 or 31 || vars.ly is 0 or 31 || vars.lz is 0 or 31;
         int rollback = work.Faces.Count;
@@ -372,9 +440,9 @@ internal static partial class GpuChunkMeshing
                     U1 = texture.x1, V1 = texture.y1, U2 = texture.x2, V2 = texture.y2,
                     Index = (uint)vars.extIndex3d, Side = (uint)side, Bin = (uint)bin,
                     Flags = (uint)(vars.VertexFlags | BlockFacing.ALLFACES[side].NormalPackedFlags),
-                    ColorMap = (uint)vars.ColorMapData.Value, CullMode = (uint)vars.block.FaceCullMode,
+                    ColorMap = (uint)vars.ColorMapData.Value, CullMode = cull,
                     Smooth = vars.aoAndSmoothShadows && vars.block.SideAo[side] ? 1u : 0u,
-                    Padding = (uint)EnumBlockMaterial.Leaves });
+                    Padding = policy });
             }
         }
         catch
@@ -436,6 +504,14 @@ internal static partial class GpuChunkMeshing
                     new { captured = work.Generation, current = generation });
                 UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed.");
             }
+            if (MixedOrderedBin(work) is { } mixed)
+            {
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "ordered-bin-mixed", new { mixed });
+                // A blended mesh shared with CPU producers cannot keep the stock
+                // face order across two parts. Retry with original producers.
+                OrderedCpu.AddOrUpdate(work.Chunk, Gate);
+                UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("Blended GPU chunk faces share a CPU mesh.");
+            }
             ChunkMeshRange[] ranges;
             try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
             catch (Exception error)
@@ -467,6 +543,14 @@ internal static partial class GpuChunkMeshing
             if (center.Count != 0) Centers(tessChunk) = (Centers(tessChunk) ?? []).Concat(center).ToArray();
             if (edge.Count != 0) Edges(tessChunk) = (Edges(tessChunk) ?? []).Concat(edge).ToArray();
         }
+    }
+    private static ChunkMeshBin? MixedOrderedBin(Work work)
+    {
+        if (work.OrderedCpu) return null;
+        foreach (var bin in work.Bins)
+            if (Ordered((EnumChunkRenderPass)bin.Pass) &&
+                (bin.Edge ? EdgePools(work.Producer) : CenterPools(work.Producer))[1][bin.Pass][bin.Atlas].VerticesCount != 0) return bin;
+        return null;
     }
     private static Exception? End(Exception? __exception, Work? __state)
     {

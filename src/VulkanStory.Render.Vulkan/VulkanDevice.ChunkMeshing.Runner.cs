@@ -23,7 +23,7 @@ public sealed unsafe partial class VulkanDevice
 
         internal sealed class Tile
         {
-            internal VulkanBuffer? Voxels, Input, Neighbours, Bins, Output;
+            internal VulkanBuffer? Voxels, Input, Neighbours, Bins, Order, Output;
             internal CommandPool Pool;
             internal CommandBuffer Command;
             internal DescriptorPool Descriptors;
@@ -103,6 +103,7 @@ public sealed unsafe partial class VulkanDevice
                 tile.Input = new VulkanBuffer(context, Capacity * 64UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
                 tile.Neighbours = new VulkanBuffer(context, 54UL * 20, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
                 tile.Bins = new VulkanBuffer(context, BinCapacity * 12UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                tile.Order = new VulkanBuffer(context, Capacity * 4UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
                 // Graphics queue ownership is retained throughout production/publication.
                 // No optional async queue capability or queue-family transfers are needed.
                 tile.Output = new VulkanBuffer(context, Capacity * 80UL, BufferUsageFlags.StorageBufferBit,
@@ -118,7 +119,7 @@ public sealed unsafe partial class VulkanDevice
                 var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
                 Fence fence;
                 VulkanResult.Check(context.Api.CreateFence(context.Device, &fenceInfo, null, &fence), "chunk mesh fence"); tile.Fence = fence;
-                var size = new DescriptorPoolSize(DescriptorType.StorageBuffer, 5);
+                var size = new DescriptorPoolSize(DescriptorType.StorageBuffer, 6);
                 var descriptorInfo = new DescriptorPoolCreateInfo { SType = StructureType.DescriptorPoolCreateInfo,
                     MaxSets = 1, PoolSizeCount = 1, PPoolSizes = &size };
                 DescriptorPool descriptors;
@@ -128,13 +129,14 @@ public sealed unsafe partial class VulkanDevice
                     DescriptorPool = descriptors, DescriptorSetCount = 1, PSetLayouts = &layout };
                 DescriptorSet set;
                 VulkanResult.Check(context.Api.AllocateDescriptorSets(context.Device, &setInfo, &set), "chunk mesh set"); tile.Set = set;
-                DescriptorBufferInfo* buffers = stackalloc DescriptorBufferInfo[5]
+                DescriptorBufferInfo* buffers = stackalloc DescriptorBufferInfo[6]
                 { new(tile.Voxels.Handle,0,tile.Voxels.Size),new(tile.Input.Handle,0,tile.Input.Size),
-                  new(tile.Neighbours.Handle,0,tile.Neighbours.Size),new(tile.Bins.Handle,0,tile.Bins.Size),new(tile.Output.Handle,0,tile.Output.Size) };
-                WriteDescriptorSet* writes = stackalloc WriteDescriptorSet[5];
-                for (uint i = 0; i < 5; i++) writes[i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet,
+                  new(tile.Neighbours.Handle,0,tile.Neighbours.Size),new(tile.Bins.Handle,0,tile.Bins.Size),new(tile.Output.Handle,0,tile.Output.Size),
+                  new(tile.Order.Handle,0,tile.Order.Size) };
+                WriteDescriptorSet* writes = stackalloc WriteDescriptorSet[6];
+                for (uint i = 0; i < 6; i++) writes[i] = new WriteDescriptorSet { SType = StructureType.WriteDescriptorSet,
                     DstSet = set, DstBinding = i, DescriptorCount = 1, DescriptorType = DescriptorType.StorageBuffer, PBufferInfo = buffers + i };
-                context.Api.UpdateDescriptorSets(context.Device, 5, writes, 0, null);
+                context.Api.UpdateDescriptorSets(context.Device, 6, writes, 0, null);
                 return tile;
             }
             catch { Destroy(tile); throw; }
@@ -150,6 +152,16 @@ public sealed unsafe partial class VulkanDevice
             var bins = new Span<uint>((void*)tile.Bins!.Mapped, BinCapacity * 3); bins.Clear();
             if (faces.Length == 0) return [];
             Dispatch(tile, faces.Length, 0); Wait(tile);
+            // Rank visible faces within their bin in input order. Inputs arrive
+            // in the stock producer's emission order, so every bin, including
+            // blended passes, keeps the order of the original CPU mesh.
+            var order = new Span<uint>((void*)tile.Order!.Mapped, faces.Length);
+            for (int i = 0; i < faces.Length; i++)
+            {
+                uint bin = faces[i].Bin;
+                order[i] = order[i] switch { 0 => uint.MaxValue, 1 => bins[(int)bin * 3]++,
+                    _ => throw new InvalidOperationException("Invalid GPU chunk face visibility.") };
+            }
             var ranges = new List<ChunkMeshRange>(); int first = 0;
             for (int i = 0; i < binCount; i++)
             {
@@ -202,7 +214,7 @@ public sealed unsafe partial class VulkanDevice
             if (tile.Descriptors.Handle != 0) context.Api.DestroyDescriptorPool(context.Device, tile.Descriptors, null);
             if (tile.Fence.Handle != 0) context.Api.DestroyFence(context.Device, tile.Fence, null);
             if (tile.Pool.Handle != 0) context.Api.DestroyCommandPool(context.Device, tile.Pool, null);
-            tile.Voxels?.Dispose(); tile.Input?.Dispose(); tile.Neighbours?.Dispose(); tile.Bins?.Dispose(); tile.Output?.Dispose();
+            tile.Voxels?.Dispose(); tile.Input?.Dispose(); tile.Neighbours?.Dispose(); tile.Bins?.Dispose(); tile.Order?.Dispose(); tile.Output?.Dispose();
         }
         public void Dispose()
         {

@@ -28,7 +28,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 Name = "terrain-meshing", Spirv = compiled.Spirv, PushConstantBytes = 8,
                 Slots = [new(0, ComputeSlotKind.Buffer), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer),
-                    new(3, ComputeSlotKind.Buffer), new(4, ComputeSlotKind.Buffer)], LocalSizeX = 64, LocalSizeY = 1,
+                    new(3, ComputeSlotKind.Buffer), new(4, ComputeSlotKind.Buffer), new(5, ComputeSlotKind.Buffer)], LocalSizeX = 64, LocalSizeY = 1,
             });
             chunkPublishProgram = CreateComputeProgram(ReadWorldShader("terrain-meshing/publish.comp"), "terrain-mesh-publish",
                 [new(0, ComputeSlotKind.Buffer), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer)], 32, 64, 1);
