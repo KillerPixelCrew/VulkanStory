@@ -257,6 +257,8 @@ internal static partial class GpuChunkMeshing
     private static void Start(ChunkTesselator __instance, int __0, int __1, int __2, TesselatedChunk __3, bool __4, out ProducerState __state)
     {
         __state = new(current, admission); current = null; admission = new Admission();
+        bool backlog = PerformancePatchSet.Current?.GpuChunkMeshing == true && Volatile.Read(ref enabled) &&
+            FirstTessellationsQueued(Game(__instance));
         lock (Gate)
         {
             ClientMain game = Game(__instance);
@@ -273,6 +275,8 @@ internal static partial class GpuChunkMeshing
             if (!LightingReady(__instance))
             { admission.Refuse(Refusal.Snapshot, "current-world-lighting-not-ready"); return; }
             if (!game.Platform.UseSSBOs) { admission.Refuse(Refusal.Backend, "ssbo-disabled"); return; }
+            // Stock entity admission waits for each chunk's first tessellation.
+            if (backlog) { admission.Refuse(Refusal.Backlog, "first-tessellations-queued"); return; }
             // A late foreign producer patch keeps its original path.
             foreach (MethodInfo method in new[] { Cube, Bleeding, ProducerStart, LightLevels, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
@@ -645,17 +649,7 @@ internal static partial class GpuChunkMeshing
         }
         lock (Gate)
         {
-            bool lightingReady = LightingReady(__instance);
-            if (work.Generation != generation || SourceChunk(tessChunk).Disposed || !lightingReady)
-            {
-                work.Admission.Refuse(lightingReady ? Refusal.World : Refusal.Snapshot,
-                    lightingReady ? "generation-changed" : "current-world-lighting-changed",
-                    new { captured = work.Generation, current = generation, lightingReady });
-                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
-                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-rejected",
-                    new { captured = work.Generation, current = generation });
-                UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed.");
-            }
+            RejectChanged(work, __instance, tessChunk);
             if (MixedOrderedBin(work) is { } mixed)
             {
                 work.Admission.Refuse(Refusal.OrderedFallback, "mixed-blended-bin-retry", new { mixed, work.Revision, work.EdgeOnly });
@@ -666,9 +660,15 @@ internal static partial class GpuChunkMeshing
                 RememberOrdered(work);
                 UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("Blended GPU chunk faces share a CPU mesh.");
             }
-            ChunkMeshRange[] ranges;
-            try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
-            catch (Exception error)
+        }
+        // Both compute passes wait on their fences. Gate stays released there:
+        // the main thread takes it for each frame's publication and unload checks.
+        ChunkMeshRange[] ranges;
+        long waitStarted = Stopwatch.GetTimestamp();
+        try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
+        catch (Exception error)
+        {
+            lock (Gate)
             {
                 work.Admission.Refuse(Refusal.Backend, "generation-failed", new { error = error.ToString() });
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
@@ -679,6 +679,12 @@ internal static partial class GpuChunkMeshing
                 Game(__instance).Logger.Warning("VulkanStory: GPU chunk meshing generation failed: {0}", error.Message);
                 throw new RetryTesselationException("GPU chunk generation failed; retry with stock producers.");
             }
+        }
+        finally { Interlocked.Add(ref generationWaitTicks, Stopwatch.GetTimestamp() - waitStarted); }
+        lock (Gate)
+        {
+            // Unload, lighting, atlas and live/world/dimension changes during generation.
+            RejectChanged(work, __instance, tessChunk);
             if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Generated(work.ProbeBatch, ranges, work.Bins.ToArray());
             if (work.ProbeBatch != 0) CompareReference(work, ranges);
             var center = new List<TesselatedChunkPart>(); var edge = new List<TesselatedChunkPart>();
@@ -701,6 +707,19 @@ internal static partial class GpuChunkMeshing
             if (center.Count != 0) Centers(tessChunk) = (Centers(tessChunk) ?? []).Concat(center).ToArray();
             if (edge.Count != 0) Edges(tessChunk) = (Edges(tessChunk) ?? []).Concat(edge).ToArray();
         }
+    }
+    // Gate is held by every caller.
+    private static void RejectChanged(Work work, ChunkTesselator producer, TesselatedChunk tessChunk)
+    {
+        bool lightingReady = LightingReady(producer);
+        if (work.Generation == generation && !SourceChunk(tessChunk).Disposed && lightingReady) return;
+        work.Admission.Refuse(lightingReady ? Refusal.World : Refusal.Snapshot,
+            lightingReady ? "generation-changed" : "current-world-lighting-changed",
+            new { captured = work.Generation, current = generation, lightingReady });
+        if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
+        if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-rejected",
+            new { captured = work.Generation, current = generation });
+        UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed.");
     }
     private static ChunkMeshBin? MixedOrderedBin(Work work)
     {

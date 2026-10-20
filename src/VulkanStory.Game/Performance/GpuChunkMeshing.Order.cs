@@ -8,7 +8,7 @@ internal static partial class GpuChunkMeshing
 {
     // Counts refusal events: once per category per producer batch, rather than
     // once per cube. Counters are process cumulative like the backend totals.
-    private enum Refusal { Control, World, Backend, ForeignPatch, Capacity, Allocation, Snapshot, UnsupportedProducer, OrderedFallback }
+    private enum Refusal { Control, World, Backend, ForeignPatch, Capacity, Allocation, Snapshot, UnsupportedProducer, OrderedFallback, Backlog }
     private static readonly long[] AdmissionRefusals = new long[Enum.GetValues<Refusal>().Length];
     private static long admissionRefusals;
     internal static IEnumerable<KeyValuePair<string, long>> AdmissionCounters()
