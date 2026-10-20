@@ -451,6 +451,7 @@
                 "deformationCacheReuses",
                 "entityVisibilityDispatchesRecorded",
                 "entityIndirectDrawsRecorded",
+                "entityCombinedDrawsRecorded",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -628,6 +629,7 @@
                         "deformationCacheReuses",
                         "entityVisibilityDispatchesRecorded",
                         "entityIndirectDrawsRecorded",
+                        "entityCombinedDrawsRecorded",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -869,7 +871,8 @@
                         "cpuJointFacadeChecks",
                         "deformationCacheReuses",
                         "entityVisibilityDispatchesRecorded",
-                        "entityIndirectDrawsRecorded"
+                        "entityIndirectDrawsRecorded",
+                        "entityCombinedDrawsRecorded"
                       ]
                     },
                     "op": {
@@ -942,7 +945,8 @@
                         "cpuJointFacadeChecks",
                         "deformationCacheReuses",
                         "entityVisibilityDispatchesRecorded",
-                        "entityIndirectDrawsRecorded"
+                        "entityIndirectDrawsRecorded",
+                        "entityCombinedDrawsRecorded"
                       ]
                     },
                     "op": {
