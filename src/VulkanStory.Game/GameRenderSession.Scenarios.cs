@@ -834,6 +834,8 @@ internal sealed partial class GameRenderSession
         Aggregate("terrainDensityAvailable", Device.TerrainDensityAvailable);
         Aggregate("terrainDensityAvailabilityReason", Device.TerrainDensityAvailabilityReason);
         Aggregate("terrainDensityDispatchesRecorded", Device.TerrainDensityDispatchesRecorded);
+        Aggregate("terrainGpuPartsTested", Device.TerrainGpuPartsTested);
+        Aggregate("terrainGpuPartsVisible", Device.TerrainGpuPartsVisible);
         Aggregate("chunkMeshingAvailable", Device.ChunkMeshingAvailable);
         Aggregate("chunkMeshingJobsCompleted", Device.ChunkMeshingJobsCompleted);
         Aggregate("chunkMeshingEqualityChecks", Performance.GpuChunkMeshing.EqualityChecks);
