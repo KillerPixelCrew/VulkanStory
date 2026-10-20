@@ -490,6 +490,7 @@
                 "entityAnimatedDrawsRecorded",
                 "entityAnimatedProducerDraws",
                 "entityAnimatedWorldOnlyProducerDraws",
+                "entityAnimatedHoistedProducerDraws",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -706,6 +707,7 @@
                         "entityAnimatedDrawsRecorded",
                         "entityAnimatedProducerDraws",
                         "entityAnimatedWorldOnlyProducerDraws",
+                        "entityAnimatedHoistedProducerDraws",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -986,7 +988,8 @@
                         "entityRunBreakReplaced",
                         "entityAnimatedDrawsRecorded",
                         "entityAnimatedProducerDraws",
-                        "entityAnimatedWorldOnlyProducerDraws"
+                        "entityAnimatedWorldOnlyProducerDraws",
+                        "entityAnimatedHoistedProducerDraws"
                       ]
                     },
                     "op": {
@@ -1094,7 +1097,8 @@
                         "entityRunBreakReplaced",
                         "entityAnimatedDrawsRecorded",
                         "entityAnimatedProducerDraws",
-                        "entityAnimatedWorldOnlyProducerDraws"
+                        "entityAnimatedWorldOnlyProducerDraws",
+                        "entityAnimatedHoistedProducerDraws"
                       ]
                     },
                     "op": {
