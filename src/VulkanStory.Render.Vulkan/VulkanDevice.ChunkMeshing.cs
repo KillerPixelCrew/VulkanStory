@@ -14,6 +14,16 @@ public sealed unsafe partial class VulkanDevice
     internal long ChunkMeshingJobsCompleted => chunkMeshing?.JobsCompleted ?? 0;
     internal long ChunkMeshingPayloadsDetached => chunkMeshing?.PayloadsDetached ?? 0;
     internal long ChunkMeshingPayloadStorageBytes => chunkMeshing?.PayloadStorageBytes ?? 0;
+    internal void EnableChunkMeshingEquality(IChunkMeshBatch batch)
+    {
+        if (batch is ChunkMeshingRunner.Batch job && ReferenceEquals(job.Owner, chunkMeshing)) job.ProbeRequested = true;
+    }
+    internal uint[]? ChunkMeshingEqualityOutput(IChunkMeshBatch batch)
+    {
+        if (batch is not ChunkMeshingRunner.Batch job || !ReferenceEquals(job.Owner, chunkMeshing)) return null;
+        uint[]? words = job.ProbeWords; job.ProbeWords = null;
+        return words;
+    }
     /// <summary>Generated faces whose real pool publication commands were recorded (not GPU execution proof).</summary>
     internal long ChunkMeshingFacesPublished => Interlocked.Read(ref chunkMeshingFacesPublished);
     internal IChunkMeshBatch? LeaseChunkMeshing(int x, int y, int z, int chunkIdentity, long revision,

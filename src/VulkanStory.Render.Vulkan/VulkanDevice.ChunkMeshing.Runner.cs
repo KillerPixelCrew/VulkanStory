@@ -54,6 +54,8 @@ public sealed unsafe partial class VulkanDevice
             internal readonly long Revision;
             internal readonly bool EdgeOnly;
             private ChunkMeshRange[]? ranges;
+            internal bool ProbeRequested;
+            internal uint[]? ProbeWords;
             internal VulkanBuffer Output => storage ?? tile!.Output!;
             public int FaceCapacity => Capacity;
             internal Batch(ChunkMeshingRunner owner, Tile tile, int x, int y, int z, int chunkIdentity,
@@ -163,7 +165,7 @@ public sealed unsafe partial class VulkanDevice
                 }
                 // Graphics queue ownership is retained throughout production/publication.
                 // No optional async queue capability or queue-family transfers are needed.
-                tile.Output = new VulkanBuffer(context, Capacity * 80UL, BufferUsageFlags.StorageBufferBit,
+                tile.Output = new VulkanBuffer(context, Capacity * 80UL, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit,
                     MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
                 var poolInfo = new CommandPoolCreateInfo { SType = StructureType.CommandPoolCreateInfo,
                     QueueFamilyIndex = context.GraphicsQueueFamily, Flags = CommandPoolCreateFlags.ResetCommandBufferBit };
@@ -242,7 +244,7 @@ public sealed unsafe partial class VulkanDevice
             {
                 try
                 {
-                    output = new VulkanBuffer(context, (ulong)bytes, BufferUsageFlags.StorageBufferBit,
+                    output = new VulkanBuffer(context, (ulong)bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit,
                         MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
                     payloadStorage.Add(output);
                     Interlocked.Add(ref payloadStorageBytes, bytes);
@@ -256,7 +258,40 @@ public sealed unsafe partial class VulkanDevice
             // A later visibility pass must never bind a freed payload buffer,
             // even though mode 0 does not access the geometry binding.
             BindOutput(tile, tile.Output!);
+            if (batch.ProbeRequested)
+            {
+                try { batch.ProbeWords = ReadProbe(tile, output, first); }
+                // Observation failure must never change mesh admission/publication.
+                catch { Wait(tile); batch.ProbeWords = null; }
+            }
             return ranges.ToArray();
+        }
+        private uint[] ReadProbe(Tile tile, VulkanBuffer output, int faces)
+        {
+            if (faces == 0) return [];
+            using var readback = new VulkanBuffer(context, (ulong)faces * 80, BufferUsageFlags.TransferDstBit,
+                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
+            var api = context.Api;
+            VulkanResult.Check(api.ResetCommandPool(context.Device, tile.Pool, 0), "chunk equality reset");
+            var begin = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = CommandBufferUsageFlags.OneTimeSubmitBit };
+            VulkanResult.Check(api.BeginCommandBuffer(tile.Command, &begin), "chunk equality begin");
+            var barrier = new MemoryBarrier2 { SType = StructureType.MemoryBarrier2,
+                SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+                DstStageMask = PipelineStageFlags2.TransferBit, DstAccessMask = AccessFlags2.TransferReadBit };
+            var dependency = new DependencyInfo { SType = StructureType.DependencyInfo, MemoryBarrierCount = 1, PMemoryBarriers = &barrier };
+            api.CmdPipelineBarrier2(tile.Command, &dependency);
+            var copy = new BufferCopy(0, 0, readback.Size);
+            api.CmdCopyBuffer(tile.Command, output.Handle, readback.Handle, 1, &copy);
+            ReadbackManager.RecordHostReadBarrier(context, tile.Command, readback, 0, readback.Size);
+            VulkanResult.Check(api.EndCommandBuffer(tile.Command), "chunk equality end");
+            var fence = tile.Fence;
+            VulkanResult.Check(api.ResetFences(context.Device, 1, &fence), "chunk equality fence");
+            var command = new CommandBufferSubmitInfo { SType = StructureType.CommandBufferSubmitInfo, CommandBuffer = tile.Command };
+            var submit = new SubmitInfo2 { SType = StructureType.SubmitInfo2, CommandBufferInfoCount = 1, PCommandBufferInfos = &command };
+            lock (context.QueueLock) VulkanResult.Check(api.QueueSubmit2(context.GraphicsQueue, 1, &submit, fence), "chunk equality submit");
+            tile.InFlight = true;
+            Wait(tile);
+            return new ReadOnlySpan<uint>((void*)readback.Mapped, faces * 20).ToArray();
         }
         private void BindOutput(Tile tile, VulkanBuffer output)
         {

@@ -173,6 +173,10 @@ internal static class HeadlessChunkMeshingProbe
     }
     internal static void Generated(long batch, ChunkMeshRange[] ranges, ChunkMeshBin[] bins) =>
         For(batch)?.Record("generated-ranges", new { ranges, bins, faces = ranges.Sum(r => r.FaceCount) }, batch);
+    internal static void Equality(long batch, long revision, int generation, object? firstMismatch, int cpuVertices, int gpuVertices) =>
+        For(batch)?.Record("mesh-equality", new { revision, generation, equal = firstMismatch == null, firstMismatch,
+            cpuVertices, gpuVertices, scope = "GPU-admitted stock cubes in target chunk",
+            encoding = "stock SSBO FaceData, RGBA/light and shared quad indices", publishedUnchanged = true }, batch);
     internal static void Refusal(long batch, int x, int y, int z, object detail)
     {
         Run? run = For(batch);

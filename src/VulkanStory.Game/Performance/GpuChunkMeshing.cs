@@ -52,6 +52,8 @@ internal static partial class GpuChunkMeshing
     private static readonly MethodInfo Process = AccessTools.Method(typeof(ChunkTesselator), "NowProcessChunk",
         [typeof(int), typeof(int), typeof(int), typeof(TesselatedChunk), typeof(bool)]);
     private static readonly MethodInfo BeginProcess = AccessTools.Method(typeof(ChunkTesselator), "BeginProcessChunk");
+    private static readonly MethodInfo ProducerStart = AccessTools.Method(typeof(ChunkTesselator), "Start", Type.EmptyTypes);
+    private static readonly MethodInfo LightLevels = AccessTools.Method(typeof(ChunkTesselator), "LightlevelsReceived", Type.EmptyTypes);
     private static readonly MethodInfo Cube = AccessTools.Method(typeof(CubeTesselator), "Tesselate", [typeof(TCTCache)]);
     private static readonly MethodInfo Bleeding = AccessTools.Method(typeof(BleedingCubeTesselator), "Tesselate", [typeof(TCTCache)]);
     private static readonly MethodInfo UnusedDispose = AccessTools.Method(typeof(TesselatedChunk), "UnusedDispose");
@@ -102,6 +104,8 @@ internal static partial class GpuChunkMeshing
         internal ChunkMeshVoxel[]? Voxels;
         internal long ProbeBatch;
         internal bool Active;
+        internal Dictionary<ChunkMeshBin, MeshData>? ReferenceMeshes;
+        internal bool ReferenceFailed;
         internal readonly List<Payload> Payloads = new();
     }
     internal sealed class Payload(IChunkMeshBatch batch, ChunkMeshRange range, int epoch, int atlasEpoch, ClientChunk chunk) : IDisposable
@@ -153,7 +157,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             generation++; atlasGeneration++; world = null; enabled = false;
-            OrderedCpu.Clear();
+            OrderedCpu.Clear(); LightingOwners.Clear(); AoTypes.Clear();
             pending = Pending.ToArray();
         }
         foreach (var payload in pending) payload.Dispose("world-left");
@@ -167,6 +171,8 @@ internal static partial class GpuChunkMeshing
         // Attach at that lifecycle boundary, never from a tessellation worker.
         harmony.Patch(ManagerStart, postfix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(LoadingWorld)));
         harmony.Patch(ManagerDispose, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(LeavingWorld)));
+        harmony.Patch(ProducerStart, postfix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(LightingStarted)));
+        harmony.Patch(LightLevels, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(LightingChanging)));
         harmony.Patch(Process, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Start)),
             postfix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Finish)),
             finalizer: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(End)));
@@ -206,7 +212,9 @@ internal static partial class GpuChunkMeshing
             retired = Pending.ToArray();
             world = next;
             dimension = next.EntityPlayer?.Pos.Dimension ?? 0; OrderedCpu.Clear();
+            LightingOwners.Clear(); AoTypes.Clear();
             generation++; atlasGeneration++;
+            if (remesh) LightingStarted(next.TerrainChunkTesselator);
             // Only a missed loading attachment needs this fallback rebuild.
             // The normal WorldReady event preserves jobs for the same owner.
             if (remesh && enabled) next.RedrawAllBlocks();
@@ -223,13 +231,14 @@ internal static partial class GpuChunkMeshing
     {
         if (Process?.ReturnType != typeof(int) || BeginProcess?.ReturnType != typeof(bool) || Cube?.ReturnType != typeof(void) ||
             Bleeding?.ReturnType != typeof(void) || CubeHeight?.FieldType != typeof(float) || BleedingHeight?.FieldType != typeof(float) ||
-            UnusedDispose == null || Visible?.ReturnType != typeof(bool) || Insert?.ReturnType != typeof(ModelDataPoolLocation) ||
+            UnusedDispose == null || ProducerStart?.ReturnType != typeof(void) || LightLevels?.ReturnType != typeof(void) ||
+            Visible?.ReturnType != typeof(bool) || Insert?.ReturnType != typeof(ModelDataPoolLocation) ||
             ManagerStart == null || ManagerDispose?.ReturnType != typeof(void) || DecorCull?.ReturnType != typeof(void) ||
             DecorBuild?.ReturnType != typeof(void) ||
             MarkDirty?.ReturnType != typeof(void) || SetDirty?.ReturnType != typeof(void) ||
             StockPolicies.Any(m => m == null))
             throw new InvalidOperationException("Official chunk meshing signatures changed.");
-        foreach (var method in new[] { Process, BeginProcess, Cube, Bleeding, Insert, Visible, DecorCull, DecorBuild })
+        foreach (var method in new[] { Process, BeginProcess, ProducerStart, LightLevels, Cube, Bleeding, Insert, Visible, DecorCull, DecorBuild })
             if (method.GetMethodBody() == null || Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
                 throw new InvalidOperationException("Chunk producer/pool has an external replacement.");
         // Validate the physical ABI used by the unchanged SSBO terrain shaders.
@@ -258,9 +267,11 @@ internal static partial class GpuChunkMeshing
             if (backend == null || !backend.ChunkMeshingAvailable)
             { admission.Refuse(Refusal.Backend, "backend-unavailable"); return; }
             if (!enabled) { admission.Refuse(Refusal.Control, "admission-disabled"); return; }
+            if (!LightingReady(__instance))
+            { admission.Refuse(Refusal.Snapshot, "current-world-lighting-not-ready"); return; }
             if (!game.Platform.UseSSBOs) { admission.Refuse(Refusal.Backend, "ssbo-disabled"); return; }
             // A late foreign producer patch keeps its original path.
-            foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
+            foreach (MethodInfo method in new[] { Cube, Bleeding, ProducerStart, LightLevels, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
                 { admission.Refuse(Refusal.ForeignPatch, "foreign-producer-patch", new { method = method.ToString(),
                     owners = Harmony.GetPatchInfo(method)?.Owners.ToArray() }); return; }
@@ -320,11 +331,15 @@ internal static partial class GpuChunkMeshing
                     __result, work?.Active == true && ReferenceEquals(work.Producer, __instance) ? work.Batch : null,
                     __4, Solid(__instance), Fluid(__instance), admission?.Describe() ?? new { reason = "start-hook-not-observed" });
                 if (work != null && ReferenceEquals(work.Producer, __instance)) work.ProbeBatch = probe;
+                if (probe != 0 && work?.Active == true) backend?.EnableChunkMeshingEquality(work.Batch);
             }
         }
     }
     private static void CaptureSnapshot(Work work, ChunkTesselator __instance)
     {
+        lock (Gate)
+            if (work.Generation != generation || !LightingReady(__instance))
+            { work.Admission.Refuse(Refusal.Snapshot, "lighting-changed-before-snapshot"); return; }
         Block[] solids = Solid(__instance), fluids = Fluid(__instance); int[] light = Lights(__instance);
         if (solids.Length != 39304 || fluids.Length != solids.Length || light.Length != solids.Length)
         { work.Admission.Refuse(Refusal.Snapshot, "snapshot-layout-unsupported", new { solids = solids.Length,
@@ -479,6 +494,7 @@ internal static partial class GpuChunkMeshing
 
     private static bool CaptureCube(object __instance, TCTCache __0)
     {
+        if (referenceProducer) return true;
         Work? work = current; TCTCache vars = __0;
         if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer)) return Cpu(vars);
         if (work.Decor || vars.isDecorTesselate || vars.IsDecorOnJson)
@@ -564,6 +580,15 @@ internal static partial class GpuChunkMeshing
         vars.UpdateChunkMinMax(vars.finalX + 1, vars.finalY + height, vars.finalZ + 1);
         if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Candidates(work.ProbeBatch, vars.posX, vars.posY, vars.posZ,
             CollectionsMarshal.AsSpan(work.Faces)[rollback..]);
+        if (work.ProbeBatch != 0)
+        {
+            try { CaptureReference(work, __instance, vars, solid); }
+            catch (Exception error)
+            {
+                work.ReferenceFailed = true;
+                HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "equality-reference-failed", new { error = error.ToString() });
+            }
+        }
         return false;
     }
 
@@ -616,9 +641,12 @@ internal static partial class GpuChunkMeshing
         }
         lock (Gate)
         {
-            if (work.Generation != generation || SourceChunk(tessChunk).Disposed)
+            bool lightingReady = LightingReady(__instance);
+            if (work.Generation != generation || SourceChunk(tessChunk).Disposed || !lightingReady)
             {
-                work.Admission.Refuse(Refusal.World, "generation-changed", new { captured = work.Generation, current = generation });
+                work.Admission.Refuse(lightingReady ? Refusal.World : Refusal.Snapshot,
+                    lightingReady ? "generation-changed" : "current-world-lighting-changed",
+                    new { captured = work.Generation, current = generation, lightingReady });
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-rejected",
                     new { captured = work.Generation, current = generation });
@@ -648,6 +676,7 @@ internal static partial class GpuChunkMeshing
                 throw new RetryTesselationException("GPU chunk generation failed; retry with stock producers.");
             }
             if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Generated(work.ProbeBatch, ranges, work.Bins.ToArray());
+            if (work.ProbeBatch != 0) CompareReference(work, ranges);
             var center = new List<TesselatedChunkPart>(); var edge = new List<TesselatedChunkPart>();
             foreach (var range in ranges)
             {
@@ -703,6 +732,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             if (!ReferenceEquals(world, Game(__instance))) return;
+            LightingOwners.Remove(__instance);
             atlasGeneration++; generation++; RetirePending("atlas-changed"); OrderedCpu.Clear(); world?.RedrawAllBlocks();
         }
     }
