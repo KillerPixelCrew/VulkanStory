@@ -22,7 +22,10 @@ void main()
     ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = imageSize(farthestDepth);
     if (tile.x >= size.x || tile.y >= size.y) return;
-    ivec2 first = tile * reduce.block;
+    // Power-of-two backing repeats the last real tile into padding. Its mip
+    // chain then matches the CPU hierarchy's ceil-sized, edge-clamped levels.
+    ivec2 logicalSize = (reduce.sourceSize + reduce.block - 1) / reduce.block;
+    ivec2 first = min(tile, logicalSize - 1) * reduce.block;
     ivec2 last = min(first + reduce.block, reduce.sourceSize);
     float farthest = 0.0;
     for (int y = first.y; y < last.y; y++)

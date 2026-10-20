@@ -19,6 +19,22 @@ public sealed unsafe partial class VulkanDevice
     private int _terrainDrawProgram;
     private VulkanBuffer?[] _terrainInputs = Array.Empty<VulkanBuffer?>();
     private ulong[] _terrainInputOffsets = Array.Empty<ulong>();
+    private readonly System.Collections.Generic.Dictionary<int, System.Collections.Generic.List<(VulkanBuffer Buffer, ulong Offset, int Count)>> _terrainResults = new();
+    public long TerrainGpuPartsTested { get; private set; }
+    public long TerrainGpuPartsVisible { get; private set; }
+
+    // Called only after this slot's fence completed, before its indirect buffers are reused.
+    private void CollectTerrainDraws(int slot)
+    {
+        if (!_terrainResults.TryGetValue(slot, out var results)) return;
+        foreach (var result in results)
+        {
+            uint* totals = (uint*)((byte*)result.Buffer.Mapped + result.Offset) + result.Count * 7;
+            TerrainGpuPartsTested += result.Count;
+            for (int group = 0; group < (result.Count + 63) / 64; group++) TerrainGpuPartsVisible += totals[group];
+        }
+        results.Clear();
+    }
     private readonly System.Collections.Generic.HashSet<int> _terrainOccluderMeshes = new();
 
     private void InvalidateTerrainGeometry(int meshId, bool deleted = false)
@@ -71,7 +87,7 @@ public sealed unsafe partial class VulkanDevice
             starts.Length / 2 < count || sizes.Length < count) return false;
         var occlusion = OcclusionDepth;
         OcclusionCamera captured = occlusion.GpuCamera!;
-        if (OcclusionProjection.From(captured.Projection) is not { } projection) return false;
+        if (OcclusionProjection.From(captured.Projection) == null) return false;
         if (!double.IsFinite(cameraX) || !double.IsFinite(cameraY) || !double.IsFinite(cameraZ)) return false;
         ComputeProgram? program = DrawPreparationProgram();
         if (program == null) return false;
@@ -90,7 +106,10 @@ public sealed unsafe partial class VulkanDevice
         const int headerWords = 64;
         ulong bytes = (ulong)(headerWords + count * 12) * 4, inputOffset = _terrainInputOffsets[slot];
         if (inputOffset + bytes > input.Size) return false;
-        indirect = AllocateIndirect(count, out offset, Math.Max(4UL, limits.MinStorageBufferOffsetAlignment));
+        int groups = (count + 63) / 64;
+        ulong outputBytes = (ulong)(count * 7 + groups) * 4;
+        indirect = AllocateIndirect(checked((int)((outputBytes + 19) / 20)), out offset,
+            Math.Max(4UL, limits.MinStorageBufferOffsetAlignment));
         _terrainInputOffsets[slot] += bytes;
 
         float* values = (float*)((byte*)input.Mapped + inputOffset);
@@ -98,16 +117,17 @@ public sealed unsafe partial class VulkanDevice
         FillVisibilityHeader(values, occlusion, planes);
         double dx = cameraX - captured.CameraX, dy = cameraY - captured.CameraY, dz = cameraZ - captured.CameraZ;
         double grow = Math.Sqrt(dx * dx + dy * dy + dz * dz) + 0.5;
+        values[38] = MathF.BitIncrement((float)grow);
         for (int i = 0; i < count; i++)
         {
             TerrainDrawBounds box = bounds[i];
             float* record = values + headerWords + i * 12;
-            record[0] = (float)(box.MinX - captured.CameraX - grow);
-            record[1] = (float)(box.MinY - captured.CameraY - grow);
-            record[2] = (float)(box.MinZ - captured.CameraZ - grow);
-            record[4] = (float)(box.MaxX - captured.CameraX + grow);
-            record[5] = (float)(box.MaxY - captured.CameraY + grow);
-            record[6] = (float)(box.MaxZ - captured.CameraZ + grow);
+            record[0] = MathF.BitDecrement((float)(box.MinX - captured.CameraX));
+            record[1] = MathF.BitDecrement((float)(box.MinY - captured.CameraY));
+            record[2] = MathF.BitDecrement((float)(box.MinZ - captured.CameraZ));
+            record[4] = MathF.BitIncrement((float)(box.MaxX - captured.CameraX));
+            record[5] = MathF.BitIncrement((float)(box.MaxY - captured.CameraY));
+            record[6] = MathF.BitIncrement((float)(box.MaxZ - captured.CameraZ));
             ulong byteOffset = (uint)starts[i * 2] | ((ulong)(uint)starts[i * 2 + 1] << 32);
             ((uint*)record)[8] = (uint)sizes[i];
             ((uint*)record)[9] = checked((uint)(byteOffset / 4));
@@ -128,25 +148,46 @@ public sealed unsafe partial class VulkanDevice
         DescriptorSet set = _computeArenas[slot].GetMixed(program.SetLayout,
             [new ComputeImageWrite(0, DescriptorType.CombinedImageSampler, depth.ViewOfMips(0, depth.MipLevels),
                 _textures.Samplers.Get(ComputeNearest), ImageLayout.ShaderReadOnlyOptimal)], 1,
-            [new DescriptorBufferInfo(input.Handle, 0, input.Size), new DescriptorBufferInfo(indirect.Handle, offset, (ulong)count * 20)]);
+            [new DescriptorBufferInfo(input.Handle, 0, input.Size), new DescriptorBufferInfo(indirect.Handle, offset, outputBytes)]);
         _context.Api.CmdBindPipeline(command, PipelineBindPoint.Compute, _compute.PipelineFor(program, Array.Empty<uint>()));
         _context.Api.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
         uint* push = stackalloc uint[3] { (uint)(inputOffset / 4), 0, (uint)count };
         _context.Api.CmdPushConstants(command, program.Layout, ShaderStageFlags.ComputeBit, 0, 12, push);
-        _context.Api.CmdDispatch(command, 1, 1, 1);
+        _context.Api.CmdDispatch(command, (uint)groups, 1, 1);
         _graph.NoteDispatch();
+        if (groups > 1)
+        {
+            var scanBarrier = new BufferMemoryBarrier2
+            {
+                SType = StructureType.BufferMemoryBarrier2, SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
+                SrcAccessMask = AccessFlags2.ShaderStorageWriteBit, DstStageMask = PipelineStageFlags2.ComputeShaderBit,
+                DstAccessMask = AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit,
+                SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                Buffer = indirect.Handle, Offset = offset, Size = outputBytes,
+            };
+            var scanDependency = new DependencyInfo { SType = StructureType.DependencyInfo,
+                BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &scanBarrier };
+            _context.Api.CmdPipelineBarrier2(command, &scanDependency);
+            _context.Api.CmdBindPipeline(command, PipelineBindPoint.Compute, _compute.PipelineFor(program, [1u, 1u]));
+            _context.Api.CmdDispatch(command, (uint)groups, 1, 1);
+            _graph.NoteDispatch();
+        }
         var barrier = new BufferMemoryBarrier2
         {
             SType = StructureType.BufferMemoryBarrier2, SrcStageMask = PipelineStageFlags2.ComputeShaderBit,
-            SrcAccessMask = AccessFlags2.ShaderStorageWriteBit, DstStageMask = PipelineStageFlags2.DrawIndirectBit,
-            DstAccessMask = AccessFlags2.IndirectCommandReadBit, SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-            DstQueueFamilyIndex = Vk.QueueFamilyIgnored, Buffer = indirect.Handle, Offset = offset, Size = (ulong)count * 20,
+            SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+            DstStageMask = PipelineStageFlags2.DrawIndirectBit | PipelineStageFlags2.HostBit,
+            DstAccessMask = AccessFlags2.IndirectCommandReadBit | AccessFlags2.HostReadBit,
+            SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            Buffer = indirect.Handle, Offset = offset, Size = outputBytes,
         };
         var dependency = new DependencyInfo
         {
             SType = StructureType.DependencyInfo, BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier,
         };
         _context.Api.CmdPipelineBarrier2(command, &dependency);
+        if (!_terrainResults.TryGetValue(slot, out var results)) _terrainResults.Add(slot, results = new());
+        results.Add((indirect, offset, count));
         return true;
     }
 
@@ -155,5 +196,6 @@ public sealed unsafe partial class VulkanDevice
         foreach (VulkanBuffer? buffer in _terrainInputs) buffer?.Dispose();
         _terrainInputs = Array.Empty<VulkanBuffer?>();
         _terrainInputOffsets = Array.Empty<ulong>();
+        _terrainResults.Clear();
     }
 }

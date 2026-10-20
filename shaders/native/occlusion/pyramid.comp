@@ -8,9 +8,8 @@ void main()
     if (any(greaterThanEqual(tile, size))) return;
     ivec2 sourceSize = textureSize(sourceDepth, 0);
     ivec2 first = tile * 2, last = min(first + 2, sourceSize);
-    // Vulkan mip extents round down. The last parent must also cover an odd trailing child.
-    if (tile.x == size.x - 1) last.x = sourceSize.x;
-    if (tile.y == size.y - 1) last.y = sourceSize.y;
+    // Power-of-two backing repeats logical edge tiles, so ordinary 2x2
+    // reduction matches the CPU's ceil-sized hierarchy without folding edges.
     float farthest = 0.0;
     for (int y = first.y; y < last.y; y++)
         for (int x = first.x; x < last.x; x++)

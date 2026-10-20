@@ -1,12 +1,12 @@
 #version 450
 layout(local_size_x = 64) in;
 layout(constant_id = 0) const bool compactDraws = true;
+layout(constant_id = 1) const bool scatterDraws = false;
 layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
-layout(binding = 2, std430) writeonly buffer Output { uint words[]; } outputData;
+layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
 layout(push_constant) uniform Parameters { uint inputWord; uint outputWord; uint count; } p;
 shared uint visible[64];
-shared uint written;
 float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word]); }
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
 bool hidden(uint index)
@@ -28,6 +28,9 @@ bool hidden(uint index)
             if (distance < -error) return true;
         }
     }
+    // Terrain uploads tight current-view bounds; motion padding belongs only to
+    // the historical-depth test. Entity records already include their padding.
+    lo -= vec3(f(38)); hi += vec3(f(38));
     mat4 view = mat4(v(0), v(4), v(8), v(12));
     mat4 projection = mat4(v(16), v(20), v(24), v(28));
     vec2 lower = vec2(1e30), upper = vec2(-1e30);
@@ -36,20 +39,19 @@ bool hidden(uint index)
         vec3 position = vec3((corner & 1u) == 0u ? lo.x : hi.x,
             (corner & 2u) == 0u ? lo.y : hi.y, (corner & 4u) == 0u ? lo.z : hi.z);
         vec4 eye = view * vec4(position, 1.0), clip = projection * eye;
-        // GL near plane and camera plane: an unobserved corner must stay visible.
-        if (clip.w <= 0.001 || clip.z <= -clip.w || any(isnan(clip)) || any(isinf(clip))) return false;
+        // Match PERF-03: a corner at or behind the camera stays visible.
+        if (clip.w <= 0.001 || any(isnan(clip)) || any(isinf(clip))) return false;
         nearest = min(nearest, -eye.z / (eye.w == 0.0 ? 1.0 : eye.w));
         lower = min(lower, clip.xy / clip.w); upper = max(upper, clip.xy / clip.w);
     }
     if (any(lessThan(lower, vec2(-1))) || any(greaterThan(upper, vec2(1)))) return false;
-    // Base tiles cover eight actual pixels, including the partial right/top tiles.
-    vec2 pixels = vec2(f(32), f(33));
-    ivec2 size = textureSize(depthPyramid, 0);
-    ivec2 first = clamp(ivec2((lower * 0.5 + 0.5) * pixels / 8.0) - 1, ivec2(0), size - 1);
-    ivec2 last = clamp(ivec2((upper * 0.5 + 0.5) * pixels / 8.0) + 1, ivec2(0), size - 1);
+    // Match PERF-03's logical base-grid mapping, excluding padded edge tiles.
+    ivec2 size = ivec2(ceil(vec2(f(32), f(33)) / 8.0));
+    ivec2 first = clamp(ivec2((lower * 0.5 + 0.5) * vec2(size)) - 1, ivec2(0), size - 1);
+    ivec2 last = clamp(ivec2((upper * 0.5 + 0.5) * vec2(size)) + 1, ivec2(0), size - 1);
     int level = 0, levels = textureQueryLevels(depthPyramid);
     while (level + 1 < levels && any(greaterThan(last - first, ivec2(3)))) {
-        level++; size = textureSize(depthPyramid, level);
+        level++; size = (size + 1) / 2;
         first = min(first / 2, size - 1); last = min(last / 2, size - 1);
     }
     float farthest = 0.0;
@@ -58,6 +60,15 @@ bool hidden(uint index)
             farthest = max(farthest, texelFetch(depthPyramid, ivec2(x,y), level).r);
     float denominator = f(35) - farthest;
     return denominator > 0.0 && nearest > (f(34) / denominator) * 1.002 + 0.25;
+}
+void writeCommand(uint index, uint rank)
+{
+    uint dst = p.outputWord + rank * 5u;
+    uint src = p.inputWord + 64u + index * 12u + 8u;
+    outputData.words[dst] = inputData.words[src];
+    outputData.words[dst+1u] = 1u;
+    outputData.words[dst+2u] = inputData.words[src+1u];
+    outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
 }
 void main()
 {
@@ -73,28 +84,38 @@ void main()
         outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = inputData.words[src + 2u] >> 8u;
         return;
     }
-    uint lane = gl_LocalInvocationID.x;
-    // Clear every output before compaction; trailing commands have zero instances.
-    for (uint i = lane; i < p.count * 5u; i += 64u) outputData.words[p.outputWord + i] = 0u;
-    if (lane == 0u) written = 0u;
-    memoryBarrierBuffer(); barrier();
-    // One workgroup per pool keeps the original order, including translucent draws.
-    for (uint base = 0u; base < p.count; base += 64u) {
-        uint index = base + lane;
-        visible[lane] = index < p.count && !hidden(index) ? 1u : 0u;
-        barrier();
-        uint prefix = 0u;
-        for (uint i = 0u; i < lane; i++) prefix += visible[i];
-        if (visible[lane] != 0u) {
-            uint dst = p.outputWord + (written + prefix) * 5u;
-            uint src = p.inputWord + 64u + index * 12u + 8u;
-            outputData.words[dst] = inputData.words[src];
-            outputData.words[dst+1u] = 1u;
-            outputData.words[dst+2u] = inputData.words[src+1u];
-            outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
+    uint lane = gl_LocalInvocationID.x, index = gl_GlobalInvocationID.x;
+    uint scratch = p.outputWord + p.count * 5u;
+    uint totals = scratch + p.count * 2u;
+    if (!scatterDraws) {
+        uint keep = 0u;
+        if (index < p.count) {
+            for (uint i = 0u; i < 5u; i++) outputData.words[p.outputWord + index * 5u + i] = 0u;
+            keep = hidden(index) ? 0u : 1u;
         }
+        visible[lane] = keep;
         barrier();
-        if (lane == 0u) for (uint i = 0u; i < 64u; i++) written += visible[i];
-        barrier();
+        // Inclusive workgroup scan, then store each part's exclusive rank.
+        for (uint step = 1u; step < 64u; step <<= 1u) {
+            uint addend = lane >= step ? visible[lane - step] : 0u;
+            barrier(); visible[lane] += addend; barrier();
+        }
+        if (index < p.count) {
+            outputData.words[scratch + index * 2u] = keep;
+            outputData.words[scratch + index * 2u + 1u] = visible[lane] - keep;
+        }
+        if (lane == 63u) outputData.words[totals + gl_WorkGroupID.x] = visible[lane];
+        // Small pools need no inter-workgroup prefix or second dispatch.
+        if (p.count <= 64u) {
+            memoryBarrierBuffer(); barrier();
+            if (keep != 0u) writeCommand(index, visible[lane] - keep);
+        }
+        return;
     }
+    // The second dispatch sees every group total. Prefixing groups in input order
+    // preserves pool order across workgroups, including translucent parts.
+    if (index >= p.count || outputData.words[scratch + index * 2u] == 0u) return;
+    uint rank = outputData.words[scratch + index * 2u + 1u];
+    for (uint group = 0u; group < gl_WorkGroupID.x; group++) rank += outputData.words[totals + group];
+    writeCommand(index, rank);
 }

@@ -166,9 +166,15 @@ internal sealed class OcclusionDepth : IDisposable
         if (_target != 0 && _width == width && _height == height) return true;
         if (_target != 0) _device.DeleteTexture(_target);
         // Captures still in flight name the old target's bytes in the arena, not the texture, so they stay valid.
+        // Native mip extents floor odd dimensions, whereas PERF-03's CPU levels
+        // ceil them. Pad with repeated edge tiles so both hierarchies have the
+        // same 2x2 coverage; never fold an unrelated trailing sky tile into a parent.
+        int paddedWidth = 1, paddedHeight = 1;
+        while (paddedWidth < width) paddedWidth <<= 1;
+        while (paddedHeight < height) paddedHeight <<= 1;
         int levels = 1;
-        for (int extent = Math.Max(width, height); extent > 1; extent >>= 1) levels++;
-        _target = _device.CreateStorageTexture(width, height, Format.R32Sfloat, levels);
+        for (int extent = Math.Max(paddedWidth, paddedHeight); extent > 1; extent >>= 1) levels++;
+        _target = _device.CreateStorageTexture(paddedWidth, paddedHeight, Format.R32Sfloat, levels);
         _width = width; _height = height;
         return _target != 0 && _device.TextureOf(_target)?.Format == Format.R32Sfloat;
     }
