@@ -34,6 +34,7 @@ internal static class ChiselMeshLod
     private static ConditionalWeakTable<ChunkTesselator, Pools> pools = new();
     private static ConditionalWeakTable<BlockEntity, Proxy> proxies = new();
     private static ConditionalWeakTable<TesselatedChunkPart, Marker> parts = new();
+    internal static bool Owns(TesselatedChunkPart part) => parts.TryGetValue(part, out _);
     private static ConditionalWeakTable<ModelDataPoolLocation, Marker> locations = new();
     [ThreadStatic] private static bool route, packing;
     private static readonly AccessTools.FieldRef<ChunkTesselator, MeshData[][][]> Current = AccessTools.FieldRefAccess<ChunkTesselator, MeshData[][][]>("currentModeldataByRenderPassByLodLevel");
