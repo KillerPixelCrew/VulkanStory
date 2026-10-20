@@ -57,8 +57,10 @@ internal sealed partial class GameGraphicsAdapter
         if (vp.Any(value => !float.IsFinite(value)) || !double.IsFinite(origin.X) ||
             !double.IsFinite(origin.Y) || !double.IsFinite(origin.Z)) return;
         var planes = entityCullPlaneSnapshot;
-        Vector4 Plane(int index) => new((float)planes[index].X, (float)planes[index].Y,
-            (float)planes[index].Z, (float)planes[index].D);
+        // SystemRenderShadowMap recalculates this same stock culler for each
+        // cascade before the entity stage; retain its double coefficients.
+        TerrainPlane Plane(int index) => new(planes[index].X, planes[index].Y,
+            planes[index].Z, planes[index].D);
         residentEntityView = new TerrainView
         {
             Eye = renderer.TerrainEyeIndex,
