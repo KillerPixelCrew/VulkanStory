@@ -28,6 +28,13 @@ layout(binding = 7, std430) buffer Queries { Query values[]; } queries;
 layout(binding = 8, std430) readonly buffer LiquidCells { uint values[]; } liquidCells;
 layout(push_constant) uniform Parameters { uint count; uint phase; uint initialPopulatedSize; } p;
 #include "../include/evolution.glsl"
+// Float division may use an approximate reciprocal even with precise. Widen
+// these stock divisions before rounding to float: a one-ulp velocity error can
+// change a truncated direction byte, which is an exact part of the output.
+float stockDivide(float numerator, float denominator) {
+    precise double quotient = double(numerator) / double(denominator);
+    return float(quotient);
+}
 #include "particle-physics.glsl"
 // .NET 10 x64 conv.u1: CVTTSS2SI (indefinite INT_MIN for NaN or
 // outside [-2^31,2^31)), then narrow the low byte. Never clamp to [0,255].
@@ -41,7 +48,9 @@ uint directionBytes(vec3 velocity) {
     // GameMath.RootSumOfSquares widens the float sum for Math.Sqrt.
     precise float magnitude = float(sqrt(double(sum)));
     if (!(magnitude > 0.0) || isinf(magnitude)) return 0u;
-    precise vec3 scaled = (velocity / magnitude) * 128.0;
+    precise vec3 normalized = vec3(stockDivide(velocity.x, magnitude),
+        stockDivide(velocity.y, magnitude), stockDivide(velocity.z, magnitude));
+    precise vec3 scaled = normalized * 128.0;
     return directionByte(scaled.x) | (directionByte(scaled.y) << 8) | (directionByte(scaled.z) << 16);
 }
 bool observedCell(uint start, uint bounds, ivec3 origin, ivec3 cell, out uint observed) {
