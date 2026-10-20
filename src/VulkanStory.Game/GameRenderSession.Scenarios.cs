@@ -846,6 +846,7 @@ internal sealed partial class GameRenderSession
         Aggregate("chunkMeshingRequeuedDuringFlight", Performance.GpuChunkMeshing.RequeuedDuringFlight);
         foreach (var counter in Performance.GpuChunkMeshing.AdmissionCounters()) Aggregate(counter.Key, counter.Value);
         Aggregate("chunkMeshingGenerationWaitMilliseconds", Performance.GpuChunkMeshing.GenerationWaitMilliseconds);
+        Current("chunkMeshingPendingGenerations", Performance.GpuChunkMeshing.PendingGenerations);
         var undrawn = Performance.GpuChunkMeshing.UndrawnState(Temporal.CurrentClient);
         Current("chunkMeshingUndrawnChunks", undrawn?.Chunks);
         Current("chunkMeshingUndrawnEntities", undrawn?.Entities);
