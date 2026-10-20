@@ -54,6 +54,8 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityVisibilityDispatchesRecorded { get; private set; }
     internal long EntityIndirectDrawsRecorded { get; private set; }
     internal long EntityCombinedDrawsRecorded { get; private set; }
+    internal long EntityRunsOpened { get; private set; }
+    internal long EntityRunBreaks { get; private set; }
 
     private void AdvanceDrawOrder() => _drawOrder++;
 
@@ -262,6 +264,7 @@ public sealed unsafe partial class VulkanDevice
     {
         var batch = _entityDrawBatch;
         var run = _entityDrawRun;
+        if (run.Open && run.Serial == _frames.Current.RecordingSerial) EntityRunBreaks++;
         run.Open = false;
         uint maxCount = 0;
         int first = -1;
@@ -287,6 +290,7 @@ public sealed unsafe partial class VulkanDevice
         if (maxCount <= 1) return;
         // Snapshot after this draw's own bindings and counting, so only later work differs.
         run.Open = true; run.Batch = batch; run.First = first; run.Count = 1; run.MaxCount = maxCount;
+        EntityRunsOpened++;
         run.CountOffset = countOffset;
         run.Serial = _frames.Current.RecordingSerial; run.Command = (ulong)command.Handle;
         run.Pipeline = pipeline.Handle; run.Segment = segment; run.Arena = arena;
@@ -320,6 +324,8 @@ public sealed unsafe partial class VulkanDevice
             !ReferenceEquals(arena, run.Arena) ||
             _boundFrameSet.Handle != run.FrameSet.Handle || _boundFrameOffset != run.FrameOffset)
         {
+            // Submission and frame end are lifetime boundaries, not failed continuations.
+            if (run.Open && run.Serial == _frames.Current.RecordingSerial) EntityRunBreaks++;
             run.Open = false;
             return false;
         }
@@ -329,6 +335,8 @@ public sealed unsafe partial class VulkanDevice
         *(uint*)((byte*)batch.Input.Mapped + run.CountOffset) = run.Count;
         EntityIndirectDrawsRecorded++;
         EntityCombinedDrawsRecorded++;
+        EntityPackedDrawsRecorded++;
+        EntityRecordDrawsRecorded++;
         return true;
     }
 

@@ -452,6 +452,12 @@
                 "entityVisibilityDispatchesRecorded",
                 "entityIndirectDrawsRecorded",
                 "entityCombinedDrawsRecorded",
+                "entityGeometryPacksRecorded",
+                "entityPackedDrawsRecorded",
+                "entityRecordDrawsRecorded",
+                "entityRecordRefusals",
+                "entityRunsOpened",
+                "entityRunBreaks",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -630,6 +636,12 @@
                         "entityVisibilityDispatchesRecorded",
                         "entityIndirectDrawsRecorded",
                         "entityCombinedDrawsRecorded",
+                        "entityGeometryPacksRecorded",
+                        "entityPackedDrawsRecorded",
+                        "entityRecordDrawsRecorded",
+                        "entityRecordRefusals",
+                        "entityRunsOpened",
+                        "entityRunBreaks",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -872,7 +884,13 @@
                         "deformationCacheReuses",
                         "entityVisibilityDispatchesRecorded",
                         "entityIndirectDrawsRecorded",
-                        "entityCombinedDrawsRecorded"
+                        "entityCombinedDrawsRecorded",
+                        "entityGeometryPacksRecorded",
+                        "entityPackedDrawsRecorded",
+                        "entityRecordDrawsRecorded",
+                        "entityRecordRefusals",
+                        "entityRunsOpened",
+                        "entityRunBreaks"
                       ]
                     },
                     "op": {
@@ -946,7 +964,13 @@
                         "deformationCacheReuses",
                         "entityVisibilityDispatchesRecorded",
                         "entityIndirectDrawsRecorded",
-                        "entityCombinedDrawsRecorded"
+                        "entityCombinedDrawsRecorded",
+                        "entityGeometryPacksRecorded",
+                        "entityPackedDrawsRecorded",
+                        "entityRecordDrawsRecorded",
+                        "entityRecordRefusals",
+                        "entityRunsOpened",
+                        "entityRunBreaks"
                       ]
                     },
                     "op": {

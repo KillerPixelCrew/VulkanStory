@@ -25,6 +25,8 @@ public sealed unsafe partial class VulkanDevice
     private PhysicalDeviceLimits? _entityGeometryLimits;
     private int _entityPackProgram;
     private readonly Dictionary<int, WeakReference<VulkanMesh>> _entityGeometryRequests = new();
+    internal long EntityGeometryPacksRecorded { get; private set; }
+    internal long EntityPackedDrawsRecorded { get; private set; }
 
     private bool TryPrepareEntityGeometry(ShaderProgramResources program, int meshId, VulkanMesh mesh,
         out EntityGeometryArena? arena, out uint firstIndex)
@@ -198,6 +200,7 @@ public sealed unsafe partial class VulkanDevice
         uint firstIndex = arena.IndexCursor;
         arena.VertexCursor += vertexCount; arena.IndexCursor += indexCount;
         arena.Slices.Add(key, firstIndex);
+        EntityGeometryPacksRecorded++;
     }
 
     private void BindEntityGeometry(CommandBuffer command, EntityGeometryArena arena)
@@ -206,6 +209,7 @@ public sealed unsafe partial class VulkanDevice
         ulong* offsets = stackalloc ulong[4] { 0, (ulong)arena.Capacity * 12, (ulong)arena.Capacity * 20, (ulong)arena.Capacity * 24 };
         _context.Api.CmdBindVertexBuffers(command, 0, 4, buffers, offsets);
         _context.Api.CmdBindIndexBuffer(command, arena.Indices.Handle, 0, IndexType.Uint32);
+        EntityPackedDrawsRecorded++;
     }
 
     private void BeginEntityGeometryFrame(int slot)

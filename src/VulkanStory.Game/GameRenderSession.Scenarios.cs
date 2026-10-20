@@ -891,6 +891,12 @@ internal sealed partial class GameRenderSession
         Aggregate("entityVisibilityDispatchesRecorded", Device.EntityVisibilityDispatchesRecorded);
         Aggregate("entityIndirectDrawsRecorded", Device.EntityIndirectDrawsRecorded);
         Aggregate("entityCombinedDrawsRecorded", Device.EntityCombinedDrawsRecorded);
+        Aggregate("entityGeometryPacksRecorded", Device.EntityGeometryPacksRecorded);
+        Aggregate("entityPackedDrawsRecorded", Device.EntityPackedDrawsRecorded);
+        Aggregate("entityRecordDrawsRecorded", Device.EntityRecordDrawsRecorded);
+        Aggregate("entityRecordRefusals", Device.EntityRecordRefusals);
+        Aggregate("entityRunsOpened", Device.EntityRunsOpened);
+        Aggregate("entityRunBreaks", Device.EntityRunBreaks);
         Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
         Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);
         Aggregate("rigidEntityMotionWindows", Graphics.RigidEntityMotionWindows);

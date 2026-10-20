@@ -183,6 +183,12 @@ internal sealed class HeadlessScenario
             ["entityVisibilityDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["entityIndirectDrawsRecorded"] = (JsonValueKind.Number, false),
             ["entityCombinedDrawsRecorded"] = (JsonValueKind.Number, false),
+            ["entityGeometryPacksRecorded"] = (JsonValueKind.Number, false),
+            ["entityPackedDrawsRecorded"] = (JsonValueKind.Number, false),
+            ["entityRecordDrawsRecorded"] = (JsonValueKind.Number, false),
+            ["entityRecordRefusals"] = (JsonValueKind.Number, false),
+            ["entityRunsOpened"] = (JsonValueKind.Number, false),
+            ["entityRunBreaks"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -209,6 +215,7 @@ internal sealed class HeadlessScenario
         "quadMotionDrawsRecorded", "quadMotionCompositesRecorded", "quadMotionValidInstances",
         "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
         "terrainNoiseDispatchesRecorded", "terrainNoiseAppliedSamples",
+        "terrainDensityDispatchesRecorded", "chunkMeshingJobsCompleted", "chunkMeshingFacesPublished",
         "terrainComparisonWrittenColumns",
         "particleSimulationDispatchesRecorded", "particleSimulationStepsRecorded", "particleSimulationStepsApplied", "particleSimulationCenterDispatchesRecorded", "particleSimulationCentersRecorded", "particleSimulationCapacityFallbacks", "particleSimulationChecks",
         "particleInstanceDispatchesRecorded", "particleInstancesRecorded", "particleInstanceHistoriesRecorded",
@@ -216,7 +223,9 @@ internal sealed class HeadlessScenario
         "particleLiquidPolicyChecks", "particleLiquidAirChecks", "particleLiquidDeathChecks", "particleLiquidWetChecks",
         "particleLiquidPolicyApplied", "particleLiquidAirApplied", "particleLiquidDeathApplied", "particleLiquidWetApplied",
         "particleSimulationCpuBenchmarkPoolMilliseconds", "particleSimulationGpuBenchmarkPoolMilliseconds",
-        "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded", "entityCombinedDrawsRecorded"
+        "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded", "entityCombinedDrawsRecorded",
+        "entityGeometryPacksRecorded", "entityPackedDrawsRecorded", "entityRecordDrawsRecorded",
+        "entityRecordRefusals", "entityRunsOpened", "entityRunBreaks"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

@@ -40,8 +40,19 @@ public sealed unsafe partial class VulkanDevice
     private bool[] _entityRecordsUnavailable = [];
     // Present only while rebinding the internal derived program. Never a mesh fallback.
     private EntityRecordSegment? _drawEntityRecords;
+    internal long EntityRecordDrawsRecorded { get; private set; }
+    internal long EntityRecordRefusals { get; private set; }
 
     private bool TryPrepareEntityRecord(NativePipeline original, out EntityRecordDraw draw)
+    {
+        // Only packed rigid draws attempt records. Count each refused draw, even
+        // when its shader variant or this frame slot was refused previously.
+        if (TryPrepareEntityRecordCore(original, out draw)) return true;
+        EntityRecordRefusals++;
+        return false;
+    }
+
+    private bool TryPrepareEntityRecordCore(NativePipeline original, out EntityRecordDraw draw)
     {
         draw = default;
         if (!_context.DrawIndirectFirstInstanceEnabled) return false;
@@ -141,11 +152,16 @@ public sealed unsafe partial class VulkanDevice
         _drawEntityRecords = segment;
         try
         {
-            if (!BindProgramSets(command, draw.Program, meshId)) return false;
+            if (!BindProgramSets(command, draw.Program, meshId))
+            {
+                EntityRecordRefusals++;
+                return false;
+            }
             _context.Api.CmdBindPipeline(command, PipelineBindPoint.Graphics, draw.Pipeline);
             _nativeBoundPipelineSerial = _frames.Current.CommandBuffer.Handle == command.Handle
                 ? _frames.Current.RecordingSerial : 0;
             _nativeBoundPipelineHandle = draw.Pipeline.Handle;
+            EntityRecordDrawsRecorded++;
             return true;
         }
         finally { _drawEntityRecords = null; }
