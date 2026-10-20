@@ -5,6 +5,8 @@ using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
+using Vintagestory.API.MathTools;
+using System.Numerics;
 
 namespace VulkanStory.Game;
 
@@ -24,6 +26,13 @@ internal sealed partial class GameGraphicsAdapter
     private AttachmentBlend[]? chunkBlendSource;
     private AttachmentBlend[] chunkBlendCopy = [];
     private bool chunkBlendCopyEnabled;
+    private bool residentReplay, residentForeignPolicy;
+    private ulong residentPolicyFrame = ulong.MaxValue, residentVisibilityFrame = ulong.MaxValue;
+    private int residentVisibilityEye = int.MinValue;
+    private ulong[] residentVisibility = [];
+    private bool? residentTerrainSetting;
+    private sealed record ResidentMainSnapshot(TerrainView View, ulong Frame, int Eye, int VisibilityBuffer);
+    private ResidentMainSnapshot? residentMainSnapshot;
 
     /// <summary>Captures target/write-mask and fixed draw state for a named terrain pool; native pass opening is deferred to its first draw.</summary>
     /// <param name="name">Retained terrain pool/pass name.</param>
@@ -33,6 +42,7 @@ internal sealed partial class GameGraphicsAdapter
         RequireDevice();
         if (chunkScopeActive) throw new InvalidOperationException("Recursive terrain pool draw.");
         chunkScopeActive = true; chunkPassOpen = false; chunkScopeName = name;
+        residentReplay = false;
         chunkTarget = CurrentTargetId; chunkSlots = Stated.DrawBuffers(chunkTarget);
         Performance.GpuTerrainDraws.BeginScope(mode == EnumFrustumCullMode.CullNormal &&
             RequireDevice().CanPrepareTerrainDraws && currentFramebuffer != null &&
@@ -53,6 +63,7 @@ internal sealed partial class GameGraphicsAdapter
         if (!chunkScopeActive) return;
         RequireDevice().SceneDrawCategory = previousChunkDrawCategory;
         chunkScopeActive = false;
+        residentReplay = false;
         Performance.GpuTerrainDraws.EndScope();
         if (chunkPassOpen) { chunkPassOpen = false; RequireDevice().EndNativePass(); }
         chunkScopeName = "";
@@ -61,11 +72,26 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         if (!chunkScopeActive || vao.VaoId == 0 || vao.Disposed) return false;
+        int handle = MeshHandle(vao);
+        if (!TryOpenChunkPipeline(handle, out var pipeline, out int textureCount)) return RefuseOpenChunkDraw();
+        var camera = Performance.TerrainOcclusionCull.CameraNow();
+        var bounds = camera.HasValue ? Performance.GpuTerrainDraws.BoundsFor(starts, sizes, groups) : default;
+        if (renderer.DrawNativeMeshMulti(pipeline!, handle, starts, sizes, groups, chunkTextures.AsSpan(0, textureCount),
+                bounds, bounds.IsEmpty ? default : Performance.GpuTerrainDraws.Planes,
+                camera?.X ?? 0, camera?.Y ?? 0, camera?.Z ?? 0))
+            RuntimeStats.drawCallsCount++;
+        else RejectSceneDraw("chunk native multi-draw rejected");
+        return true;
+    }
+    private bool TryOpenChunkPipeline(int handle, out NativePipeline? pipeline, out int textureCount)
+    {
+        var renderer = RequireDevice();
+        pipeline = null; textureCount = 0;
         ShaderProgramBase? program = ShaderProgramBase.CurrentShaderProgram;
-        if (program == null || program.ProgramId <= 0) return RefuseOpenChunkDraw();
-        int handle = MeshHandle(vao), layout = renderer.NativeMeshLayoutId(handle);
+        if (program == null || program.ProgramId <= 0) return false;
+        int layout = renderer.NativeMeshLayoutId(handle);
         RenderTargetFormats? formats = renderer.NativeTargetFormats(chunkTarget, chunkSlots);
-        if (layout < 0 || formats == null) return RefuseOpenChunkDraw();
+        if (layout < 0 || formats == null) return false;
         if (!worldSamplerNames.TryGetValue(program.ProgramId, out var names))
             worldSamplerNames.Add(program.ProgramId, names = renderer.SamplerNamesOf(program.ProgramId));
         if (chunkTextures.Length < names.Length) { chunkTextures = new NativeTexture[names.Length]; chunkReads = new int[names.Length]; }
@@ -81,13 +107,13 @@ internal sealed partial class GameGraphicsAdapter
         }
         if (!chunkPasses.TryGetValue(program.PassName, out var pass))
             chunkPasses.Add(program.PassName, pass = new NativeMeshPass(program.PassName, [], []));
-        NativePipeline? pipeline = NativeMeshPipelineFor(pass, program, formats, layout,
+        pipeline = NativeMeshPipelineFor(pass, program, formats, layout,
             new NativePipelineDescription
             {
                 Blend = ChunkBlend(Math.Max(formats.ColorFormats.Length, 1)), DepthTest = chunkDepthTest, DepthWrite = chunkDepthWrite, DepthCompare = CompareOp.Less,
                 Cull = chunkCull, Topology = PrimitiveTopology.TriangleList, SamplesBoundDepth = sampledDepth,
             });
-        if (pipeline == null) return RefuseOpenChunkDraw();
+        if (pipeline == null) return false;
         for (int index = 0; index < names.Length; index++)
             chunkTextures[index] = chunkTextures[index] with { Sampler = pipeline.Sampler(names[index]) };
         if (!chunkPassOpen)
@@ -96,15 +122,97 @@ internal sealed partial class GameGraphicsAdapter
                     chunkReads.AsSpan(0, names.Length).ToArray(), PassFlags.AllowSplit))) return false;
             chunkPassOpen = true;
         }
-        var camera = Performance.TerrainOcclusionCull.CameraNow();
-        var bounds = camera.HasValue ? Performance.GpuTerrainDraws.BoundsFor(starts, sizes, groups) : default;
-        if (renderer.DrawNativeMeshMulti(pipeline, handle, starts, sizes, groups, chunkTextures.AsSpan(0, names.Length),
-                bounds, bounds.IsEmpty ? default : Performance.GpuTerrainDraws.Planes,
-                camera?.X ?? 0, camera?.Y ?? 0, camera?.Z ?? 0))
-            RuntimeStats.drawCallsCount++;
-        else RejectSceneDraw("chunk native multi-draw rejected");
-        // Once opened, this scope owns the pool even if a later pipeline/draw is skipped.
+        textureCount = names.Length;
         return true;
+    }
+    internal bool DrawResidentTerrain(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, int site)
+    {
+        var renderer = RequireDevice();
+        residentReplay = false;
+        renderer.ResidentTerrainEnabled = AoSettings.Settings.ResidentTerrain;
+        if (residentTerrainSetting != renderer.ResidentTerrainEnabled)
+        {
+            ResetResidentTerrain();
+            ResidentTerrain.Republish(this);
+            residentTerrainSetting = renderer.ResidentTerrainEnabled;
+        }
+        if (!renderer.ResidentTerrainEnabled || !ResidentTerrain.TryManager(pool, out var manager) ||
+            manager.ResidentMesh == 0 || aoTemporal?.CurrentClient is not { } client) return false;
+        if (residentPolicyFrame != renderer.LatencyFrameId)
+        {
+            residentPolicyFrame = renderer.LatencyFrameId;
+            residentForeignPolicy = ResidentTerrain.ForeignPolicy();
+        }
+        if (residentForeignPolicy) return false;
+        if (residentVisibilityFrame != renderer.LatencyFrameId || residentVisibilityEye != renderer.TerrainEyeIndex)
+        {
+            int words = ResidentTerrain.VisibilityWords;
+            if (residentVisibility.Length < words) Array.Resize(ref residentVisibility, words);
+            ResidentTerrain.Visibility(residentVisibility.AsSpan(0, words));
+            renderer.SetTerrainChunkVisibility(residentVisibility.AsSpan(0, words));
+            residentVisibilityFrame = renderer.LatencyFrameId; residentVisibilityEye = renderer.TerrainEyeIndex;
+        }
+        if (!TryOpenChunkPipeline(manager.ResidentMesh, out var pipeline, out int textureCount)) return false;
+        if (pipeline?.Program.IsNative != true) return false;
+        var projection = client.CurrentProjectionMatrix;
+        var modelView = client.CurrentModelViewMatrix;
+        float[] combined = Mat4f.Mul(new float[16], projection, modelView);
+        static Matrix4x4 Matrix(float[] value) => new(value[0], value[1], value[2], value[3],
+            value[4], value[5], value[6], value[7], value[8], value[9], value[10], value[11],
+            value[12], value[13], value[14], value[15]);
+        TerrainView view = ResidentTerrain.View(ResidentTerrain.Frustum(pool), position, renderer.TerrainEyeIndex,
+            Matrix(combined), mode, uniform);
+        if (!renderer.DrawTerrainPass(pipeline, chunkTextures.AsSpan(0, textureCount), site, manager.Pass, manager.Atlas, view))
+            return false;
+        residentReplay = true;
+        if (mode == EnumFrustumCullMode.CullNormal)
+        {
+            manager.MainFrame = renderer.LatencyFrameId; manager.MainEye = renderer.TerrainEyeIndex;
+            Volatile.Write(ref residentMainSnapshot, new ResidentMainSnapshot(view, renderer.LatencyFrameId,
+                renderer.TerrainEyeIndex, ModelDataPoolLocation.VisibleBufIndex));
+        }
+        // Fully native managers do no CPU pool/part walk. Mixed managers replay only their compat pools.
+        return manager.CompatPools == 0;
+    }
+    internal bool SkipResidentTerrainPool(int mesh) => residentReplay && RequireDevice().IsTerrainPoolResident(mesh);
+    internal void RefreshResidentTerrainFrustum(ModelDataPoolLocation location, ResidentTerrain.Part part)
+    {
+        // Consumers may run off-thread; only immutable copies of the main-camera culler cross that boundary.
+        var snapshot = Volatile.Read(ref residentMainSnapshot);
+        if (device?.ResidentTerrainEnabled != true || snapshot == null ||
+            part.Pool.Manager.MainFrame != snapshot.Frame || part.Pool.Manager.MainEye != snapshot.Eye) return;
+        lock (part)
+        {
+            if (part.FrustumFrame == snapshot.Frame && part.FrustumEye == snapshot.Eye) return;
+            part.FrustumFrame = snapshot.Frame; part.FrustumEye = snapshot.Eye;
+            // Stock IsVisible only writes FrustumVisible after both of these admission tests.
+            if (location.Hide || !location.CullVisible[snapshot.VisibilityBuffer]) return;
+            Sphere sphere = location.FrustumCullSphere;
+            TerrainView view = snapshot.View;
+            static bool Outside(TerrainPlane plane, Sphere box)
+            {
+                double x = (double)box.x + (double)((plane.A > 0 ? 1f : -1f) * box.radius / 1.7320508f);
+                double y = (double)box.y + (double)((plane.B > 0 ? 1f : -1f) * box.radiusY / 1.7320508f);
+                double z = (double)box.z + (double)((plane.C > 0 ? 1f : -1f) * box.radiusZ / 1.7320508f);
+                return x * plane.A + y * plane.B + z * plane.C + plane.D < 0;
+            }
+            bool visible = !Outside(view.Plane0, sphere) && !Outside(view.Plane1, sphere) &&
+                !Outside(view.Plane2, sphere) && !Outside(view.Plane3, sphere) && !Outside(view.Plane4, sphere);
+            if (visible)
+            {
+                double dx = view.PlayerBlockX - (double)sphere.x, dz = view.PlayerBlockZ - (double)sphere.z;
+                double squared = (float)(dx * dx + dz * dz);
+                visible = location.LodLevel switch
+                {
+                    0 => view.Lod0BiasSq > 0 && squared < (double)((float)view.Lod0BiasSq + 1024f),
+                    1 => squared < view.ViewDistanceSq,
+                    2 => squared <= view.Lod2BiasSq,
+                    3 => squared > view.Lod2BiasSq && squared < view.ViewDistanceSq,
+                    _ => false,
+                };
+            }
+            location.FrustumVisible = visible;
+        }
     }
     /// <summary>
     /// The stated blend of the pool's target with every attachment's enable taken from the pool

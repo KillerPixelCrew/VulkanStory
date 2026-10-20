@@ -94,7 +94,9 @@ internal sealed partial class GameGraphicsAdapter
             try
             {
                 for (int index = 0; index < chunks.textureIds.Length; index++)
-                    chunks.poolsByRenderPass[4][index].Render(game.EntityPlayer.CameraPos, "origin");
+                    if (!DrawResidentTerrain(chunks.poolsByRenderPass[4][index], game.EntityPlayer.CameraPos, "origin",
+                            Vintagestory.API.Client.EnumFrustumCullMode.CullNormal, ChunkConsumerPatches.LiquidCallSite))
+                        chunks.poolsByRenderPass[4][index].Render(game.EntityPlayer.CameraPos, "origin");
             }
             finally { EndChunkPool(); }
             ScreenManager.FrameProfiler.Mark("rend3D-ret-lqmv");

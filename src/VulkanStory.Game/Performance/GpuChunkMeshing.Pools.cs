@@ -60,6 +60,7 @@ internal static partial class GpuChunkMeshing
             if (listPosition == -1) locations.Add(location); else locations.Insert(listPosition, location);
             __instance.CalcFragmentation();
             __result = location;
+            ResidentTerrain.Inserted(__instance, modelOrigin, location);
             return false;
         }
     }

@@ -53,7 +53,7 @@ internal static class GpuTerrainDraws
         harmony.Patch(Box(), prefix: new HarmonyMethod(typeof(GpuTerrainDraws), nameof(BoxWithoutPlanes)) { priority = Priority.First });
         harmony.Patch(Remove(), prefix: new HarmonyMethod(typeof(TerrainOcclusionCull), nameof(TerrainOcclusionCull.InvalidateDepth)));
         armed = true;
-    }, Uninstall: () => { armed = false; EndScope(); }, WorldLeft: EndScope);
+    }, Uninstall: () => { armed = false; EndScope(); }, WorldLeft: () => { EndScope(); ResidentTerrain.Reset(); });
 
     internal static void BeginScope(bool available)
     {
@@ -110,6 +110,7 @@ internal static class GpuTerrainDraws
     private static void AfterVisible(ModelDataPoolLocation __instance, bool __result)
     {
         if (!Collecting || !__result) return;
+        if (ResidentTerrain.IsResident(__instance)) return;
         // Float extents match Plane.AABBisOutside; world coordinates remain double until upload.
         if (bounds.Count >= 4096) { complete = false; collecting = false; pool = null; return; }
         Sphere sphere = __instance.FrustumCullSphere;

@@ -72,7 +72,8 @@ internal static class TerrainOcclusionCull
     // Main thread: the depth now holds the opaque terrain only; it becomes the occlusion source a few frames later.
     private static void AfterOpaqueTerrain()
     {
-        if (PerformancePatchSet.Current is { } settings && (settings.TerrainOcclusionCull || settings.EntityOcclusionCull)) capture?.Invoke();
+        if (PerformancePatchSet.Current is { } settings &&
+            (settings.TerrainOcclusionCull || settings.EntityOcclusionCull || settings.ResidentTerrain || settings.ResidentEntities)) capture?.Invoke();
     }
 
     // A pool's FrustumCull calls IsVisible for every part in that pass. Depth
@@ -97,6 +98,7 @@ internal static class TerrainOcclusionCull
     private static void Postfix(ModelDataPoolLocation __instance, EnumFrustumCullMode mode, ref bool __result)
     {
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
+        if (ResidentTerrain.IsResident(__instance)) return;
         if (GpuTerrainDraws.Collecting) return;
         if (PerformancePatchSet.Current?.TerrainOcclusionCull != true) return;
         var test = cullSnapshot is { } snapshot ? snapshot.Test : source;
