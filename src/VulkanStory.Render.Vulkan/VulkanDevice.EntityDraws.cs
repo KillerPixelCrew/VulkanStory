@@ -63,6 +63,24 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityRunBreakFrameSet { get; private set; }
     internal long EntityRunBreakProgram { get; private set; }
     internal long EntityRunBreakReplaced { get; private set; }
+    // Animated bodies with a prepared visibility command, and those whose joint,
+    // local or world producer recorded compute at the draw. Such a dispatch ends
+    // the rendering scope, so no run can continue across that draw.
+    internal long EntityAnimatedDrawsRecorded { get; private set; }
+    internal long EntityAnimatedProducerDraws { get; private set; }
+    internal long EntityAnimatedWorldOnlyProducerDraws { get; private set; }
+
+    private (long Joints, long Local, long World) EntityProducerDispatches =>
+        (JointPoseDispatchesRecorded, DeformationDispatchesRecorded, WorldGeometryDispatchesRecorded);
+
+    private void NoteAnimatedEntityDraw((long Joints, long Local, long World) before)
+    {
+        var after = EntityProducerDispatches;
+        EntityAnimatedDrawsRecorded++;
+        if (after == before) return;
+        EntityAnimatedProducerDraws++;
+        if (after.Joints == before.Joints && after.Local == before.Local) EntityAnimatedWorldOnlyProducerDraws++;
+    }
 
     private enum EntityRunBreak : byte { None, Contiguity, Order, Scope, DynamicState, FrameSet, Program, Replaced }
 

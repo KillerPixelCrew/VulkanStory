@@ -206,6 +206,9 @@ internal sealed class HeadlessScenario
             ["entityRunBreakFrameSet"] = (JsonValueKind.Number, false),
             ["entityRunBreakProgram"] = (JsonValueKind.Number, false),
             ["entityRunBreakReplaced"] = (JsonValueKind.Number, false),
+            ["entityAnimatedDrawsRecorded"] = (JsonValueKind.Number, false),
+            ["entityAnimatedProducerDraws"] = (JsonValueKind.Number, false),
+            ["entityAnimatedWorldOnlyProducerDraws"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -254,7 +257,8 @@ internal sealed class HeadlessScenario
         "entityGeometryPacksRecorded", "entityPackedDrawsRecorded", "entityRecordDrawsRecorded",
         "entityRecordRefusals", "entityRunsOpened", "entityRunBreaks",
         "entityRunBreakContiguity", "entityRunBreakOrder", "entityRunBreakScope", "entityRunBreakDynamicState",
-        "entityRunBreakFrameSet", "entityRunBreakProgram", "entityRunBreakReplaced"
+        "entityRunBreakFrameSet", "entityRunBreakProgram", "entityRunBreakReplaced",
+        "entityAnimatedDrawsRecorded", "entityAnimatedProducerDraws", "entityAnimatedWorldOnlyProducerDraws"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

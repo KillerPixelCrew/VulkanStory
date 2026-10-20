@@ -609,10 +609,14 @@ public sealed unsafe partial class VulkanDevice
         uint firstInstance = records ? recordDraw.Row : 0;
         bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset,
             firstIndex, firstInstance);
+        // Only animated bodies are prepared without a rigid program; their producers run in BeginNativeDraw.
+        bool animatedEntityDraw = entityDraw && EntityVisibility is { RigidProgram: 0 };
+        var entityProducers = EntityProducerDispatches;
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target, instanceCount: instanceCount))
         {
             return false;
         }
+        if (animatedEntityDraw) NoteAnimatedEntityDraw(entityProducers);
 
         if (records && entityDraw &&
             TryCombineEntityDraw(commandBuffer, recordDraw, entityGeometry, entityCommands!, entityOffset))

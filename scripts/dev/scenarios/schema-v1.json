@@ -475,6 +475,9 @@
                 "entityRunBreakFrameSet",
                 "entityRunBreakProgram",
                 "entityRunBreakReplaced",
+                "entityAnimatedDrawsRecorded",
+                "entityAnimatedProducerDraws",
+                "entityAnimatedWorldOnlyProducerDraws",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -676,6 +679,9 @@
                         "entityRunBreakFrameSet",
                         "entityRunBreakProgram",
                         "entityRunBreakReplaced",
+                        "entityAnimatedDrawsRecorded",
+                        "entityAnimatedProducerDraws",
+                        "entityAnimatedWorldOnlyProducerDraws",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -941,7 +947,10 @@
                         "entityRunBreakDynamicState",
                         "entityRunBreakFrameSet",
                         "entityRunBreakProgram",
-                        "entityRunBreakReplaced"
+                        "entityRunBreakReplaced",
+                        "entityAnimatedDrawsRecorded",
+                        "entityAnimatedProducerDraws",
+                        "entityAnimatedWorldOnlyProducerDraws"
                       ]
                     },
                     "op": {
@@ -1038,7 +1047,10 @@
                         "entityRunBreakDynamicState",
                         "entityRunBreakFrameSet",
                         "entityRunBreakProgram",
-                        "entityRunBreakReplaced"
+                        "entityRunBreakReplaced",
+                        "entityAnimatedDrawsRecorded",
+                        "entityAnimatedProducerDraws",
+                        "entityAnimatedWorldOnlyProducerDraws"
                       ]
                     },
                     "op": {
