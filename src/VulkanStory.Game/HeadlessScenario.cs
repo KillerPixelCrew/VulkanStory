@@ -151,6 +151,7 @@ internal sealed class HeadlessScenario
             ["chunkMeshingAdmissionRefusalsOrderedFallback"] = (JsonValueKind.Number, false),
             ["chunkMeshingAdmissionRefusalsBacklog"] = (JsonValueKind.Number, false),
             ["chunkMeshingGenerationWaitMilliseconds"] = (JsonValueKind.Number, false),
+            ["chunkMeshingPendingGenerations"] = (JsonValueKind.Number, false),
             ["chunkMeshingUndrawnChunks"] = (JsonValueKind.Number, true),
             ["chunkMeshingUndrawnEntities"] = (JsonValueKind.Number, true),
             ["terrainComparisonComplete"] = (JsonValueKind.True, false),
