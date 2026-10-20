@@ -399,12 +399,15 @@ internal sealed unsafe partial class TextureManager : IDisposable
     /// <summary>GL_SHORT source pixels converted to GL_RGBA16 storage.</summary>
     internal static ushort ShortToUnorm16(short value) =>
         (ushort)((Math.Max(0, (int)value) * 65535L + 16383) / 32767);
+    [ThreadStatic] private static ushort[]? _normalizedShortScratch;
 
     public void UploadNormalizedShorts(int id, int level, int x, int y,
         int width, int height, ReadOnlySpan<short> pixels)
     {
         int count = checked(width * height * 4);
-        var converted = new ushort[count];
+        var converted = _normalizedShortScratch;
+        if (converted == null || converted.Length < count)
+            _normalizedShortScratch = converted = new ushort[Math.Max(count, (converted?.Length ?? 0) * 2)];
         for (int i = 0; i < count; i++) converted[i] = ShortToUnorm16(pixels[i]);
 
         fixed (ushort* source = converted)

@@ -35,6 +35,9 @@ internal static partial class GpuChunkMeshing
     // full/edge revision. Stock retry requeues do not mark a chunk dirty again.
     private static readonly ConditionalWeakTable<ClientChunk, OrderedFallback> OrderedCpu = new();
     private static readonly HashSet<Payload> Pending = new();
+    private static readonly ConcurrentBag<List<ChunkMeshFace>> FaceScratch = new();
+    private static readonly ConcurrentBag<ChunkMeshVoxel[]> VoxelScratch = new();
+    private static List<ChunkMeshFace> RentFaces() => FaceScratch.TryTake(out var faces) ? faces : new();
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Solid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkBlocksExt");
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Fluid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkFluidBlocksExt");
     private static readonly AccessTools.FieldRef<ChunkTesselator, int[]> Lights = AccessTools.FieldRefAccess<ChunkTesselator, int[]>("currentChunkRgbsExt");
@@ -96,7 +99,7 @@ internal static partial class GpuChunkMeshing
         internal readonly bool OrderedCpu = (edgeOnly ? ordered.Edge : ordered.Full) == ordered.Revision;
         internal readonly Admission Admission = admission!;
         internal bool Decor;
-        internal readonly List<ChunkMeshFace> Faces = new();
+        internal List<ChunkMeshFace> Faces = RentFaces();
         internal readonly List<ChunkMeshBin> Bins = new();
         // Identities whose original CPU face culling is retained. Their faces
         // can still be lit and packed in compute with that stock mask.
@@ -358,7 +361,8 @@ internal static partial class GpuChunkMeshing
         if (solids.Length != 39304 || fluids.Length != solids.Length || light.Length != solids.Length)
         { work.Admission.Refuse(Refusal.Snapshot, "snapshot-layout-unsupported", new { solids = solids.Length,
             fluids = fluids.Length, lights = light.Length }); return; }
-        var voxels = new ChunkMeshVoxel[solids.Length];
+        var voxels = work.Voxels ?? (VoxelScratch.TryTake(out var scratch) ? scratch : new ChunkMeshVoxel[solids.Length]);
+        work.Voxels = voxels;
         for (int i = 0; i < voxels.Length; i++)
         {
             Block b = solids[i], f = fluids[i];
@@ -694,7 +698,6 @@ internal static partial class GpuChunkMeshing
             // Stock still charges its tessellation budget for the candidates.
             // The exact vertex count is set before this result reaches pooling.
             __result += work.Faces.Count * 4;
-            work.Voxels = null;
         }
     }
     private static void CompleteGeneration(Work work, TesselatedChunk tessChunk, ChunkMeshRange[] ranges, int cpuVertices)
@@ -759,6 +762,13 @@ internal static partial class GpuChunkMeshing
         if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
             new { candidates = work.Faces.Count, error = __exception?.Message });
         work?.Batch.Dispose();
+        if (work != null)
+        {
+            // Submit copies both spans into tile-owned mapped uploads before
+            // returning. Pending completion needs Bins, never these captures.
+            work.Faces.Clear(); FaceScratch.Add(work.Faces); work.Faces = null!;
+            if (work.Voxels is { } voxels) { VoxelScratch.Add(voxels); work.Voxels = null; }
+        }
         return __exception;
     }
     private static bool Release(MeshData __instance)

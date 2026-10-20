@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -29,6 +30,7 @@ public sealed unsafe partial class VulkanDevice
     {
         internal required InstanceStorage Inputs, Configuration;
         internal required ParticleEvolution[] Curves;
+        internal int CurveCount;
         internal required object[] Tokens;
         internal readonly List<InstanceGroup> Groups = new();
         internal long Generation;
@@ -55,6 +57,7 @@ public sealed unsafe partial class VulkanDevice
     private ulong particleInstanceBytes;
     private int particleInstanceProgram;
     private bool particleInstanceFailureLogged;
+    private ParticleEvolution[] particleCurveScratch = [];
     internal long ParticleInstanceDispatchesRecorded { get; private set; }
     internal long ParticleInstancesRecorded { get; private set; }
     internal long ParticleInstanceHistoriesRecorded { get; private set; }
@@ -124,11 +127,12 @@ public sealed unsafe partial class VulkanDevice
         bool fresh = resident == null || resident.Generation != generation;
         if (fresh)
         {
-            var normalized = new ParticleEvolution[curves.Length];
+            if (particleCurveScratch.Length < curves.Length) Array.Resize(ref particleCurveScratch, Math.Max(curves.Length, particleCurveScratch.Length * 2));
+            var normalized = particleCurveScratch.AsSpan(0, curves.Length);
             for (int i = 0; i < curves.Length; i++)
             { var c = curves[i]; normalized[i] = new ParticleEvolution(c.First, c.Factor, 0, c.Maximum, c.Function, c.Limited != 0); }
-            bool dirty = resident == null || resident.Curves.Length < normalized.Length ||
-                !MemoryMarshal.AsBytes(normalized.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(resident.Curves.AsSpan(0, normalized.Length)));
+            bool dirty = resident == null || resident.CurveCount < normalized.Length ||
+                !MemoryMarshal.AsBytes(normalized).SequenceEqual(MemoryMarshal.AsBytes(resident.Curves.AsSpan(0, normalized.Length)));
             ulong configurationBytes = Math.Max((ulong)normalized.Length * 32, resident?.Configuration.Buffer.Size ?? 0);
             var configuration = dirty ? AllocateInstanceStorage(configurationBytes, false, configurationBytes * 2) : resident!.Configuration.Retain();
             var commands = AllocateInstanceStorage((ulong)count * 80, true, (ulong)count * 80);
@@ -151,15 +155,17 @@ public sealed unsafe partial class VulkanDevice
                     }
                     for (int first = 0; first < normalized.Length;)
                     {
-                        if (resident != null && SameInstanceCurve(normalized, resident.Curves, first)) { first++; continue; }
+                        if (resident != null && SameInstanceCurve(normalized, resident.Curves.AsSpan(0, resident.CurveCount), first)) { first++; continue; }
                         int end = first + 1;
-                        while (end < normalized.Length && (resident == null || !SameInstanceCurve(normalized, resident.Curves, end))) end++;
+                        while (end < normalized.Length && (resident == null || !SameInstanceCurve(normalized, resident.Curves.AsSpan(0, resident.CurveCount), end))) end++;
                         fixed (ParticleEvolution* values = normalized)
                             _uploads.UploadToBuffer(configuration.Buffer, (ulong)first * 32, (IntPtr)(values + first), (ulong)(end - first) * 32);
                         first = end;
                     }
                 }
-                next = new InstanceResident { Inputs = commands, Configuration = configuration, Curves = normalized, Tokens = tokens.ToArray(), Generation = generation, Frame = _frameCounter };
+                next = new InstanceResident { Inputs = commands, Configuration = configuration, Curves = ArrayPool<ParticleEvolution>.Shared.Rent(normalized.Length),
+                    CurveCount = normalized.Length, Tokens = tokens.ToArray(), Generation = generation, Frame = _frameCounter };
+                normalized.CopyTo(next.Curves);
                 for (int first = 0; first < count;)
                 {
                     var simulation = (ParticleSimulationRunner.SimulationBuffer)simulations[first]!;
@@ -175,7 +181,11 @@ public sealed unsafe partial class VulkanDevice
                 if (!committed)
                 {
                     configuration.Release(); commands.Release();
-                    if (next != null) foreach (var group in next.Groups) group.Simulation.Dispose();
+                    if (next != null)
+                    {
+                        ArrayPool<ParticleEvolution>.Shared.Return(next.Curves);
+                        foreach (var group in next.Groups) group.Simulation.Dispose();
+                    }
                 }
             }
         }
@@ -254,7 +264,7 @@ public sealed unsafe partial class VulkanDevice
             particleInstances[meshId] = new InstanceRendered { Mesh = mesh, Current = output.Retain(), Tokens = tokens.ToArray(), Flags = flagValues,
                 Resident = resident, Previous = saved, Frame = frame, Valid = valid };
             particleVisualSources.Remove(mesh); // No CPU visual/history shadow may overwrite this stream.
-            mesh.ParticleHistoryShadow = []; // GPU writes invalidate the CPU upload equality cache.
+            mesh.ParticleHistoryCount = 0; // GPU writes invalidate the CPU upload equality cache.
             mesh.GeometryRevision++;
             return true;
         }
@@ -262,8 +272,8 @@ public sealed unsafe partial class VulkanDevice
     }
 
     private static DescriptorBufferInfo Info(VulkanBuffer buffer) => new(buffer.Handle, 0, buffer.Size);
-    private static bool SameInstanceCurve(ParticleEvolution[] current, ParticleEvolution[] previous, int index) => index < previous.Length &&
-        MemoryMarshal.AsBytes(current.AsSpan(index, 1)).SequenceEqual(MemoryMarshal.AsBytes(previous.AsSpan(index, 1)));
+    private static bool SameInstanceCurve(ReadOnlySpan<ParticleEvolution> current, ReadOnlySpan<ParticleEvolution> previous, int index) => index < previous.Length &&
+        MemoryMarshal.AsBytes(current.Slice(index, 1)).SequenceEqual(MemoryMarshal.AsBytes(previous.Slice(index, 1)));
     private static bool TryParticleInstanceDestinations(VulkanMesh mesh, int count, out ParticleInput centers, out ParticleInput attributes, out ParticleInput flags)
     {
         centers = attributes = flags = default;
@@ -318,12 +328,13 @@ public sealed unsafe partial class VulkanDevice
         current.Previous = new InstanceRendered { Mesh = current.Mesh, Current = current.Current.Retain(), Tokens = current.Tokens, Flags = current.Flags,
             Resident = resident, Frame = current.Frame, Drawn = current.Drawn };
         current.Frame = frame; current.Drawn = false; current.Valid = valid ? current.Tokens.Length : 0;
-        current.Mesh.ParticleHistoryShadow = []; current.Mesh.GeometryRevision++;
+        current.Mesh.ParticleHistoryCount = 0; current.Mesh.GeometryRevision++;
     }
     private void ParticleInstancesDrawn(int meshId) { if (particleInstances.TryGetValue(meshId, out var current)) current.Drawn = true; }
     private void ReleaseInstanceResident(InstanceResident resident)
     {
         resident.Inputs.Release(); resident.Configuration.Release(); resident.Last?.Release();
+        ArrayPool<ParticleEvolution>.Shared.Return(resident.Curves);
         foreach (var group in resident.Groups) group.Simulation.Dispose();
     }
     private void RetireParticleInstances(bool all)

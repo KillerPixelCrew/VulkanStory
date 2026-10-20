@@ -40,8 +40,9 @@ internal sealed class OcclusionDepth : IDisposable
     internal int GpuHeight { get; private set; }
     internal int SourceDepthTexture { get; private set; }
     private OcclusionPyramid? _latest;
+    private readonly System.Collections.Generic.List<OcclusionPyramid> _storage = new();
 
-    /// <summary>Retained settings compatibility; published storage is never recycled while readers can retain it.</summary>
+    /// <summary>Recycles retired storage only after its last query lease ends.</summary>
     public bool ReuseStorage { get; set; } = true;
 
     public OcclusionDepth(VulkanDevice device, int framesInFlight)
@@ -133,11 +134,21 @@ internal sealed class OcclusionDepth : IDisposable
     {
         if (_pending[slotIndex] is not { } pending || _readbacks[slotIndex] is not { } buffer) return;
         _pending[slotIndex] = null;
-        // A query retains its snapshot without taking a monitor. Never recycle a
-        // previously published hierarchy: the GC retires it after its last reader.
+        OcclusionPyramid? reuse = null;
+        if (ReuseStorage)
+            foreach (var candidate in _storage)
+                if (!ReferenceEquals(candidate, Volatile.Read(ref _latest)) &&
+                    candidate.HasSize(pending.Width, pending.Height) && candidate.TryBeginWrite())
+                { reuse = candidate; break; }
+        // The writer claim excludes even a delayed reader that fetched this
+        // reference before retirement. Readers retry against the current epoch.
         OcclusionPyramid next = OcclusionPyramid.FromReadback(buffer.Mapped, pending.Width, pending.Height,
-            pending.Camera, pending.Projection, null);
+            pending.Camera, pending.Projection, reuse);
+        if (reuse == null && ReuseStorage) _storage.Add(next);
+        reuse?.EndWrite();
         Volatile.Write(ref _latest, next);
+        for (int i = _storage.Count - 1; i >= 0; i--)
+            if (!_storage[i].HasSize(pending.Width, pending.Height)) _storage.RemoveAt(i);
         Published++;
     }
 
@@ -147,6 +158,7 @@ internal sealed class OcclusionDepth : IDisposable
         GpuCamera = null;
         Array.Clear(_pending);
         Volatile.Write(ref _latest, null);
+        _storage.Clear();
     }
 
     private bool Fail(string reason)
@@ -215,10 +227,30 @@ internal sealed class OcclusionDepth : IDisposable
     /// <summary>Forwards to the newest published pyramid; undecided (visible) while none exists.</summary>
     private sealed class LatestView(OcclusionDepth owner) : IOcclusionTest
     {
-        public OcclusionCamera? Source => Volatile.Read(ref owner._latest)?.Camera;
+        private OcclusionPyramid? Acquire()
+        {
+            while (Volatile.Read(ref owner._latest) is { } snapshot)
+                if (snapshot.TryAcquire())
+                {
+                    if (ReferenceEquals(snapshot, Volatile.Read(ref owner._latest))) return snapshot;
+                    snapshot.Release();
+                }
+            return null;
+        }
+        public OcclusionCamera? Source
+        {
+            get
+            {
+                var snapshot = Acquire();
+                try { return snapshot?.Camera; }
+                finally { snapshot?.Release(); }
+            }
+        }
         public bool IsOccluded(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
         {
-            return Volatile.Read(ref owner._latest)?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true;
+            var snapshot = Acquire();
+            try { return snapshot?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true; }
+            finally { snapshot?.Release(); }
         }
     }
 }
@@ -243,7 +275,7 @@ internal readonly record struct OcclusionProjection(float DepthUnpackMul, float 
 
 /// <summary>
 /// One published occlusion depth: a max-reduced pyramid of forward view distances over the captured view, with the camera
-/// that drew it. Immutable after publication; storage remains owned by this snapshot.
+/// that drew it. Immutable while published or leased; retired storage can be rebuilt after its last query finishes.
 /// </summary>
 internal sealed class OcclusionPyramid
 {
@@ -254,6 +286,23 @@ internal sealed class OcclusionPyramid
     private readonly float[][] _levels;
     private readonly int[] _widths, _heights;
     private float[] _view, _projection;
+    // -1 is an exclusive writer claim; nonnegative values count query leases.
+    private int _readers;
+    internal bool HasSize(int width, int height) => _widths[0] == width && _heights[0] == height;
+    internal bool TryBeginWrite() => Interlocked.CompareExchange(ref _readers, -1, 0) == 0;
+    internal void EndWrite() => Volatile.Write(ref _readers, 0);
+    internal bool TryAcquire()
+    {
+        int count = Volatile.Read(ref _readers);
+        while (count >= 0)
+        {
+            int observed = Interlocked.CompareExchange(ref _readers, count + 1, count);
+            if (observed == count) return true;
+            count = observed;
+        }
+        return false;
+    }
+    internal void Release() => Interlocked.Decrement(ref _readers);
 
     public OcclusionCamera Camera { get; private set; }
 

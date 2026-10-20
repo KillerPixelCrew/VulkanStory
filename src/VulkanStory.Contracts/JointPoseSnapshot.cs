@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace VulkanStory.Contracts;
 
@@ -8,26 +9,59 @@ public sealed class JointPoseSnapshot : IEquatable<JointPoseSnapshot>
     private readonly float[] pairs;
     private readonly bool[] products;
     private readonly byte[] payload;
-    private readonly int hash;
+    private int hash;
+    private int references = 1;
+    private readonly bool pooled;
+    private static readonly Dictionary<int, Stack<JointPoseSnapshot>> pool = new();
+
+    private JointPoseSnapshot(int count)
+    {
+        pairs = new float[count * 32]; products = new bool[count]; payload = new byte[count * 144]; pooled = true;
+    }
+
+    /// <summary>Rents immutable storage. Every retained owner must release its reference.</summary>
+    public static JointPoseSnapshot Rent(ReadOnlySpan<float> values)
+    {
+        if (values.Length == 0 || values.Length % 32 != 0) throw new ArgumentException("Each joint needs two complete matrices.", nameof(values));
+        var result = RentStorage(values.Length / 32);
+        values.CopyTo(result.pairs); Array.Fill(result.products, true); result.Pack();
+        return result;
+    }
+
+    private static JointPoseSnapshot RentStorage(int count)
+    {
+        lock (pool)
+            if (pool.TryGetValue(count, out var available) && available.Count != 0)
+            { var result = available.Pop(); result.references = 1; return result; }
+        return new JointPoseSnapshot(count);
+    }
+
+    public JointPoseSnapshot Retain() { Interlocked.Increment(ref references); return this; }
+    public void Release()
+    {
+        if (Interlocked.Decrement(ref references) != 0 || !pooled) return;
+        lock (pool)
+        {
+            if (!pool.TryGetValue(JointCount, out var available)) pool.Add(JointCount, available = new());
+            available.Push(this);
+        }
+    }
     public JointPoseSnapshot(ReadOnlySpan<float> modelAndInversePairs)
     {
         if (modelAndInversePairs.Length == 0 || modelAndInversePairs.Length % 32 != 0)
             throw new ArgumentException("Each joint needs two complete matrices.", nameof(modelAndInversePairs));
         pairs = modelAndInversePairs.ToArray();
         products = new bool[JointCount]; Array.Fill(products, true);
-        payload = Pack(pairs, products);
-        var code = new HashCode(); code.AddBytes(Bytes); hash = code.ToHashCode();
-    }
-    private JointPoseSnapshot(float[] pairs, bool[] products)
-    {
-        this.pairs = pairs; this.products = products; payload = Pack(pairs, products);
-        var code = new HashCode(); code.AddBytes(Bytes); hash = code.ToHashCode();
+        payload = new byte[JointCount * 144]; Pack();
     }
     public int JointCount => pairs.Length / 32;
     public ReadOnlySpan<float> Pairs => pairs;
     public ReadOnlySpan<byte> Bytes => payload;
-    public bool Matches(ReadOnlySpan<float> other) => products.All(value => value) &&
-        MemoryMarshal.AsBytes(other).SequenceEqual(MemoryMarshal.AsBytes(pairs.AsSpan()));
+    public bool Matches(ReadOnlySpan<float> other)
+    {
+        foreach (bool product in products) if (!product) return false;
+        return MemoryMarshal.AsBytes(other).SequenceEqual(MemoryMarshal.AsBytes(pairs.AsSpan()));
+    }
     public bool Equals(JointPoseSnapshot? other) => other != null && Bytes.SequenceEqual(other.Bytes);
     public override bool Equals(object? other) => other is JointPoseSnapshot pose && Equals(pose);
     public override int GetHashCode() => hash;
@@ -47,26 +81,28 @@ public sealed class JointPoseSnapshot : IEquatable<JointPoseSnapshot>
         int count = shadow.Length / 64;
         if (count == 0 || shadow.Length % 64 != 0 || prefix.JointCount > count || (previous != null && previous.JointCount != count))
             throw new ArgumentException("Pose upload range does not match its named block.", nameof(shadow));
-        var pairs = new float[count * 32]; var products = new bool[count];
+        var result = RentStorage(count);
+        var pairs = result.pairs; var products = result.products;
         if (previous != null) { previous.Pairs.CopyTo(pairs); previous.products.CopyTo(products, 0); }
         else
         {
+            Array.Clear(pairs); Array.Clear(products);
             var matrices = MemoryMarshal.Cast<byte, float>(shadow);
             for (int i = 0; i < count; i++) matrices.Slice(i * 16, 16).CopyTo(pairs.AsSpan(i * 32, 16));
         }
         prefix.Pairs.CopyTo(pairs); prefix.products.CopyTo(products, 0);
-        return new JointPoseSnapshot(pairs, products);
+        result.Pack(); return result;
     }
 
-    private static byte[] Pack(float[] pairs, bool[] products)
+    private void Pack()
     {
-        var bytes = new byte[products.Length * 144];
+        var bytes = payload;
         for (int i = 0; i < products.Length; i++)
         {
             MemoryMarshal.AsBytes(pairs.AsSpan(i * 32, 32)).CopyTo(bytes.AsSpan(i * 144, 128));
             bytes[i * 144 + 128] = products[i] ? (byte)1 : (byte)0;
         }
-        return bytes;
+        var code = new HashCode(); code.AddBytes(Bytes); hash = code.ToHashCode();
     }
 
     public static void Multiply(ReadOnlySpan<float> a, ReadOnlySpan<float> b, Span<float> output)

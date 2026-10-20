@@ -43,6 +43,10 @@ namespace VulkanStory.Game;
             /// <summary>The frame PrevBones et al. were captured in; -1 = never.</summary>
             public long PreviousFrame = -1;
             public bool CurAmbiguous, PrevAmbiguous;
+
+            public void ReleasePoses()
+            { CurGpuPose?.Release(); PrevGpuPose?.Release(); CurGpuPose = PrevGpuPose = null; }
+            ~History() => ReleasePoses();
         }
 
         private readonly ConditionalWeakTable<object, Dictionary<(int Program, EnumTemporalView View), History>> histories = new();
@@ -90,11 +94,15 @@ namespace VulkanStory.Game;
         {
             inputs.Remove(program);
             foreach (var entry in histories)
-                foreach (var key in entry.Value.Keys.Where(key => key.Program == program).ToArray()) entry.Value.Remove(key);
+                foreach (var key in entry.Value.Keys.Where(key => key.Program == program).ToArray())
+                { entry.Value[key].ReleasePoses(); entry.Value.Remove(key); }
             if (sharedUniformProgram?.ProgramId == program) sharedUniformProgram = null;
         }
         internal void Clear()
-        { inputs.Clear(); histories.Clear(); sharedUniformProgram = null; sharedUniformFrame = -1; }
+        {
+            foreach (var entry in histories) foreach (var history in entry.Value.Values) history.ReleasePoses();
+            inputs.Clear(); histories.Clear(); sharedUniformProgram = null; sharedUniformFrame = -1;
+        }
 
         private IShaderProgram sharedUniformProgram;
         private long sharedUniformFrame = -1;
@@ -158,7 +166,7 @@ namespace VulkanStory.Game;
                 float[] swap = history.PrevBones;
                 history.PrevBones = history.CurBones;
                 history.CurBones = swap;
-                history.PrevGpuPose = history.CurGpuPose; history.CurGpuPose = null;
+                history.PrevGpuPose?.Release(); history.PrevGpuPose = history.CurGpuPose; history.CurGpuPose = null;
                 history.PrevFloatCount = history.CurFloatCount;
                 Array.Copy(history.CurModelMatrix, history.PrevModelMatrix, 16);
                 history.PrevWindWaveIntensity = history.CurWindWaveIntensity;
@@ -178,7 +186,7 @@ namespace VulkanStory.Game;
                 (gpuPose != null ? !gpuPose.Equals(history.CurGpuPose) : history.CurGpuPose != null ||
                     !bones.AsSpan(0, floats).SequenceEqual(history.CurBones.AsSpan(0, floats))))) history.CurAmbiguous = true;
 
-            history.CurGpuPose = gpuPose;
+            var retainedPose = gpuPose?.Retain(); history.CurGpuPose?.Release(); history.CurGpuPose = retainedPose;
             if (gpuPose == null)
             {
                 if (history.CurBones.Length < floats) history.CurBones = new float[floats];

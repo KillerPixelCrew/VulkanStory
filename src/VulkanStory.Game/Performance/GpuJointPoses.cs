@@ -22,6 +22,7 @@ internal static class GpuJointPoses
         internal JointPoseSnapshot? Snapshot;
         internal bool Pending;
         internal bool CpuArrayPublished;
+        ~State() => Snapshot?.Release();
 
         internal bool Begin()
         {
@@ -75,9 +76,12 @@ internal static class GpuJointPoses
 
         internal void Finish(bool success)
         {
-            if (success && Owner.jointsById.Keys.All(id => id == 0 || Seen[id]))
+            bool complete = success;
+            if (complete) foreach (int id in Owner.jointsById.Keys) if (id != 0 && !Seen[id]) { complete = false; break; }
+            if (complete)
             {
-                if (Snapshot == null || !Snapshot.Matches(Pairs)) Snapshot = new JointPoseSnapshot(Pairs);
+                if (Snapshot == null || !Snapshot.Matches(Pairs))
+                { var next = JointPoseSnapshot.Rent(Pairs); Snapshot?.Release(); Snapshot = next; }
                 Pending = true;
             }
             else
@@ -86,7 +90,7 @@ internal static class GpuJointPoses
                 if (Pending && Snapshot != null) Snapshot.CopyMatrices(Output);
                 for (int i = 1; i < Seen.Length; i++)
                     if (Seen[i]) JointPoseSnapshot.Multiply(Pairs.AsSpan(i * 32, 16), Pairs.AsSpan(i * 32 + 16, 16), Output.AsSpan(i * 16, 16));
-                Pending = false; Snapshot = null;
+                Pending = false; Snapshot?.Release(); Snapshot = null;
             }
         }
 

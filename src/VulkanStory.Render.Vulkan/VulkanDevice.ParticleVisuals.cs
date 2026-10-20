@@ -19,6 +19,8 @@ public sealed unsafe partial class VulkanDevice
         internal byte[] Bytes = [];
         internal ulong Version, HistoryVersion;
         internal int Count;
+        internal int PreviousSizeCount;
+        internal float[] HistoryScratch = [];
         internal bool Materialized;
     }
     private readonly record struct ParticleVisualKey(VulkanMesh Mesh, ulong Revision, ulong Version, ulong History, int Count);
@@ -57,9 +59,12 @@ public sealed unsafe partial class VulkanDevice
         { particleVisualSources.Remove(mesh); return false; }
         if (particleTrigonometry.Length == 0) particleTrigonometry = (float[])table.Clone();
         if (!particleVisualSources.TryGetValue(mesh, out var source)) particleVisualSources.Add(mesh, source = new ParticleVisualSource(meshId));
-        Array.Resize(ref source.Properties, properties.Length); properties.CopyTo(source.Properties);
-        Array.Resize(ref source.Floats, count * 4); floats.AsSpan(0, count * 4).CopyTo(source.Floats);
-        Array.Resize(ref source.Bytes, count * 12); bytes.AsSpan(0, count * 12).CopyTo(source.Bytes);
+        if (source.Properties.Length < properties.Length) Array.Resize(ref source.Properties, Math.Max(properties.Length, source.Properties.Length * 2));
+        properties.CopyTo(source.Properties);
+        if (source.Floats.Length < count * 4) Array.Resize(ref source.Floats, Math.Max(count * 4, source.Floats.Length * 2));
+        floats.AsSpan(0, count * 4).CopyTo(source.Floats);
+        if (source.Bytes.Length < count * 12) Array.Resize(ref source.Bytes, Math.Max(count * 12, source.Bytes.Length * 2));
+        bytes.AsSpan(0, count * 12).CopyTo(source.Bytes);
         source.Count = count; source.Materialized = false; source.Version++;
         return true;
     }
@@ -71,8 +76,9 @@ public sealed unsafe partial class VulkanDevice
     internal void SetParticleVisualHistory(int meshId, ReadOnlySpan<ParticleEvolution> sizes)
     {
         if (_meshes.Get(meshId) is not { } mesh || !particleVisualSources.TryGetValue(mesh, out var source)) return;
-        if (MemoryMarshal.AsBytes(sizes).SequenceEqual(MemoryMarshal.AsBytes(source.PreviousSizes.AsSpan()))) return;
-        Array.Resize(ref source.PreviousSizes, sizes.Length); sizes.CopyTo(source.PreviousSizes); source.HistoryVersion++;
+        if (MemoryMarshal.AsBytes(sizes).SequenceEqual(MemoryMarshal.AsBytes(source.PreviousSizes.AsSpan(0, source.PreviousSizeCount)))) return;
+        if (source.PreviousSizes.Length < sizes.Length) Array.Resize(ref source.PreviousSizes, Math.Max(sizes.Length, source.PreviousSizes.Length * 2));
+        sizes.CopyTo(source.PreviousSizes); source.PreviousSizeCount = sizes.Length; source.HistoryVersion++;
     }
 
     private void MaterializeParticleVisuals(VulkanMesh mesh, ParticleVisualSource source)
@@ -88,13 +94,15 @@ public sealed unsafe partial class VulkanDevice
                 source.Bytes[rgba + 2] = unchecked((byte)(source.Bytes[rgba + 2] + source.Properties[at + 2].Evaluate(particleTrigonometry)));
                 source.Bytes[rgba + 3] = (byte)Math.Clamp(source.Properties[at + 1].Evaluate(particleTrigonometry), 0, 255);
             }
-            fixed (float* values = source.Floats) _meshes.Write(source.MeshId, MeshManager.BufferCustomFloat, 0, (IntPtr)values, source.Floats.Length * 4);
-            fixed (byte* values = source.Bytes) _meshes.Write(source.MeshId, MeshManager.BufferCustomByte, 0, (IntPtr)values, source.Bytes.Length);
+            fixed (float* values = source.Floats) _meshes.Write(source.MeshId, MeshManager.BufferCustomFloat, 0, (IntPtr)values, source.Count * 16);
+            fixed (byte* values = source.Bytes) _meshes.Write(source.MeshId, MeshManager.BufferCustomByte, 0, (IntPtr)values, source.Count * 12);
             source.Materialized = true;
         }
-        int count = source.PreviousSizes.Length;
-        if (count == 0 || mesh.ParticleHistoryShadow.Length < count * 11) return;
-        var history = (float[])mesh.ParticleHistoryShadow.Clone();
+        int count = source.PreviousSizeCount;
+        if (count == 0 || mesh.ParticleHistoryCount < count * 11) return;
+        if (source.HistoryScratch.Length < mesh.ParticleHistoryCount) Array.Resize(ref source.HistoryScratch, mesh.ParticleHistoryCount);
+        var history = source.HistoryScratch.AsSpan(0, mesh.ParticleHistoryCount);
+        mesh.ParticleHistoryShadow.AsSpan(0, mesh.ParticleHistoryCount).CopyTo(history);
         for (int i = 0; i < count; i++)
             history[i * 11 + 3] = history[i * 11 + 4] = history[i * 11 + 5] = source.PreviousSizes[i].Evaluate(particleTrigonometry);
         _meshes.UpdateParticleHistory(source.MeshId, history);
@@ -113,7 +121,7 @@ public sealed unsafe partial class VulkanDevice
         if (!TryParticleInput(mesh, 4, Format.R32G32B32Sfloat, true, out var positions) ||
             !TryParticleInput(mesh, 6, Format.R8G8B8A8Unorm, true, out var colors))
         { MaterializeParticleVisuals(mesh, source); return; }
-        bool withHistory = source.PreviousSizes.Length == count && TryParticleInput(mesh, 9, Format.R32G32B32Sfloat, true, out _);
+        bool withHistory = source.PreviousSizeCount == count && TryParticleInput(mesh, 9, Format.R32G32B32Sfloat, true, out _);
         ParticleInput history = positions;
         if (withHistory) TryParticleInput(mesh, 9, Format.R32G32B32Sfloat, true, out history);
         ulong bytes = (ulong)count * (withHistory ? 72UL : 28UL);
@@ -126,7 +134,7 @@ public sealed unsafe partial class VulkanDevice
         { MaterializeParticleVisuals(mesh, source); return; }
         MemoryMarshal.AsBytes(source.Properties.AsSpan(0, count * 5)).CopyTo(new Span<byte>((void*)properties.Pointer, propertyBytes));
         var old = new Span<byte>((void*)previous.Pointer, historyBytes); old.Clear();
-        if (withHistory) MemoryMarshal.AsBytes(source.PreviousSizes.AsSpan()).CopyTo(old);
+        if (withHistory) MemoryMarshal.AsBytes(source.PreviousSizes.AsSpan(0, count)).CopyTo(old);
         if (particleVisualProgram == 0) particleVisualProgram = CreateComputeProgram(ParticleEvolutionShader("particle-visuals.comp"), "particle-visuals",
             [new ComputeSlot(0, ComputeSlotKind.Buffer), new ComputeSlot(1, ComputeSlotKind.Buffer), new ComputeSlot(2, ComputeSlotKind.Buffer),
                 new ComputeSlot(3, ComputeSlotKind.Buffer), new ComputeSlot(4, ComputeSlotKind.Buffer), new ComputeSlot(5, ComputeSlotKind.Buffer),

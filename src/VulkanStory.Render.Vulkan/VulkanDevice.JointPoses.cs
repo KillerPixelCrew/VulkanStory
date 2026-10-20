@@ -25,6 +25,7 @@ public sealed unsafe partial class VulkanDevice
     internal long JointPoseCacheReuses { get; private set; }
     private VulkanBuffer?[] jointChecks = Array.Empty<VulkanBuffer?>();
     private JointPoseSnapshot?[] pendingJointChecks = Array.Empty<JointPoseSnapshot?>();
+    private float[] jointCheckScratch = [];
     internal long JointPoseChecks { get; private set; }
     internal double JointPoseMaximumRelativeError { get; private set; }
     internal bool JointPoseChecksPassed => JointPoseChecks > 0 && JointPoseMaximumRelativeError <= 0.00001;
@@ -101,7 +102,7 @@ public sealed unsafe partial class VulkanDevice
             _context.Api.CmdPipelineBarrier2(command, &dependency);
             CaptureJointCheck(output, pose, command);
             NoteProducerOutput(output, hoisted);
-            jointPoseBuffers.Add(pose, new JointPoseBuffer(output, _frameCounter));
+            jointPoseBuffers.Add(pose.Retain(), new JointPoseBuffer(output, _frameCounter));
             jointPoseBytes += bytes + (ulong)pose.Bytes.Length;
             return output;
         }
@@ -119,14 +120,17 @@ public sealed unsafe partial class VulkanDevice
                 jointPoseBytes -= pair.Value.Buffer.Size + (ulong)pair.Key.Bytes.Length;
                 oldJointPoses.Add(pair.Key);
             }
-        foreach (var pose in oldJointPoses) jointPoseBuffers.Remove(pose);
+        foreach (var pose in oldJointPoses) { jointPoseBuffers.Remove(pose); pose.Release(); }
+        oldJointPoses.Clear();
     }
 
     private void DisposeJointPosesIdle()
     {
-        foreach (var pose in jointPoseBuffers.Values) pose.Buffer.Dispose();
+        foreach (var buffer in _clientUniformBuffers.Buffers.Values) buffer.ClearJointPose();
+        foreach (var pair in jointPoseBuffers) { pair.Value.Buffer.Dispose(); pair.Key.Release(); }
         jointPoseBuffers.Clear(); jointPoseBytes = 0;
         foreach (var check in jointChecks) check?.Dispose();
+        foreach (var pose in pendingJointChecks) pose?.Release();
         jointChecks = Array.Empty<VulkanBuffer?>(); pendingJointChecks = Array.Empty<JointPoseSnapshot?>();
     }
 
@@ -148,14 +152,16 @@ public sealed unsafe partial class VulkanDevice
         var copy = new BufferCopy { Size = output.Size };
         _context.Api.CmdCopyBuffer(command, output.Handle, readback.Handle, 1, &copy);
         ReadbackManager.RecordHostReadBarrier(_context, command, readback, 0, output.Size);
-        pendingJointChecks[slot] = pose;
+        pendingJointChecks[slot] = pose.Retain();
     }
 
     private void CollectJointCheck(int slot)
     {
         if (pendingJointChecks.Length <= slot || pendingJointChecks[slot] is not { } pose || jointChecks[slot] is not { } buffer) return;
         pendingJointChecks[slot] = null;
-        var expected = new float[pose.JointCount * 16]; pose.CopyMatrices(expected);
+        int length = pose.JointCount * 16;
+        if (jointCheckScratch.Length < length) Array.Resize(ref jointCheckScratch, length);
+        Span<float> expected = jointCheckScratch.AsSpan(0, length); pose.CopyMatrices(expected);
         var actual = new ReadOnlySpan<float>((void*)buffer.Mapped, expected.Length);
         for (int i = 0; i < expected.Length; i++)
         {
@@ -163,5 +169,6 @@ public sealed unsafe partial class VulkanDevice
             JointPoseMaximumRelativeError = Math.Max(JointPoseMaximumRelativeError, double.IsFinite(error) ? error : double.MaxValue);
         }
         JointPoseChecks++;
+        pose.Release();
     }
 }

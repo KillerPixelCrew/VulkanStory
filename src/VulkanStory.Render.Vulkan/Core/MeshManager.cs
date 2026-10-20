@@ -43,6 +43,7 @@ internal sealed class VulkanMesh : IDisposable
     internal int[] EntityStreamPrefixBytes { get; } = new int[MeshManager.MaxBuffers];
     internal bool EntityGeometryMappingExposed { get; set; }
     internal float[] ParticleHistoryShadow = [];
+    internal int ParticleHistoryCount;
 
     public VertexLayoutDescription Layout { get; set; } = VertexLayoutDescription.Empty;
     public int LayoutId { get; set; } = -1;
@@ -543,16 +544,17 @@ internal sealed unsafe class MeshManager : IDisposable
     }
 
     /// <summary>Adds a separate previous-particle instance stream without changing the original game's buffer layout.</summary>
-    internal void UpdateParticleHistory(int meshId, float[] values)
+    internal void UpdateParticleHistory(int meshId, ReadOnlySpan<float> values)
     {
         VulkanMesh mesh = Get(meshId) ?? throw new InvalidOperationException("Particle history lost its mesh.");
         int bytes = checked(values.Length * sizeof(float));
         if (bytes == 0) return;
-        if (values.AsSpan().SequenceEqual(mesh.ParticleHistoryShadow)) return;
+        if (values.SequenceEqual(mesh.ParticleHistoryShadow.AsSpan(0, mesh.ParticleHistoryCount))) return;
         EnsureParticleHistoryStorage(meshId, bytes);
         fixed (float* source = values) Write(meshId, BufferParticleHistory, 0, (IntPtr)source, bytes);
-        if (mesh.ParticleHistoryShadow.Length != values.Length) mesh.ParticleHistoryShadow = new float[values.Length];
-        values.CopyTo(mesh.ParticleHistoryShadow, 0);
+        if (mesh.ParticleHistoryShadow.Length < values.Length)
+            Array.Resize(ref mesh.ParticleHistoryShadow, Math.Max(values.Length, mesh.ParticleHistoryShadow.Length * 2));
+        values.CopyTo(mesh.ParticleHistoryShadow); mesh.ParticleHistoryCount = values.Length;
     }
 
     /// <summary>Ensures the standard previous-particle binding without producing or uploading CPU history.</summary>

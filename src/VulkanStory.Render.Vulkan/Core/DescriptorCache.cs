@@ -43,15 +43,23 @@ internal readonly record struct BufferBindingValue(
 internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
 {
     /// <summary>Program identity included in descriptor-content equality.</summary>
-    public int ProgramId { get; }
+    public int ProgramId { get; private set; }
     /// <summary>Descriptor-set index within the program interface.</summary>
-    public int SetIndex { get; }
+    public int SetIndex { get; private set; }
     /// <summary>Sampler/image binding values retained as part of the descriptor-content key.</summary>
     public SamplerBindingValue[] Samplers { get; }
     /// <summary>Buffer binding values retained as part of the descriptor-content key.</summary>
     public BufferBindingValue[] Buffers { get; }
 
-    private readonly int _hash;
+    private int _hash;
+
+    // Arena-owned keys may be rewritten only after the retired frame's
+    // dictionary has been cleared; persistent cache keys never use this path.
+    internal void Update(DescriptorSetKey key)
+    {
+        ProgramId = key.ProgramId; SetIndex = key.SetIndex; _hash = key.Hash;
+        key.Samplers.CopyTo(Samplers); key.Buffers.CopyTo(Buffers);
+    }
 
     public DescriptorSetContents(
         int programId, int setIndex, SamplerBindingValue[] samplers, BufferBindingValue[] buffers)

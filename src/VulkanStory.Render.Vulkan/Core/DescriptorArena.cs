@@ -27,6 +27,8 @@ internal sealed unsafe class DescriptorArena : IDisposable
     private readonly VulkanContext _context;
     private readonly List<DescriptorPool> _pools = new();
     private readonly Dictionary<DescriptorSetContents, DescriptorSet> _sets = new(DescriptorSetContentsComparer.Instance);
+    private readonly Dictionary<(int Samplers, int Buffers), Stack<DescriptorSetContents>> _idleKeys = new();
+    private readonly List<DescriptorSetContents> _ownedKeys = new();
     /// <summary>Span-keyed view of <see cref="_sets" />: a hit allocates no owned key.</summary>
     private readonly Dictionary<DescriptorSetContents, DescriptorSet>.AlternateLookup<DescriptorSetKey> _setsByKey;
     private int _poolIndex;
@@ -64,6 +66,13 @@ internal sealed unsafe class DescriptorArena : IDisposable
             _context.Api.ResetDescriptorPool(_context.Device, pool, 0);
         }
         _sets.Clear();
+        foreach (var key in _ownedKeys)
+        {
+            var shape = (key.Samplers.Length, key.Buffers.Length);
+            if (!_idleKeys.TryGetValue(shape, out var idle)) _idleKeys.Add(shape, idle = new());
+            idle.Push(key);
+        }
+        _ownedKeys.Clear();
         _poolIndex = 0;
         Resets++;
     }
@@ -92,7 +101,13 @@ internal sealed unsafe class DescriptorArena : IDisposable
             return existing;
         }
 
-        return Insert(key.ToContents(), layout);
+        var shape = (key.Samplers.Length, key.Buffers.Length);
+        DescriptorSetContents contents;
+        if (_idleKeys.TryGetValue(shape, out var idle) && idle.Count != 0)
+        { contents = idle.Pop(); contents.Update(key); }
+        else contents = key.ToContents();
+        _ownedKeys.Add(contents);
+        return Insert(contents, layout);
     }
 
     /// <summary>Allocates and writes a set for a missed key and keeps it for the rest of the frame.</summary>
@@ -150,6 +165,7 @@ internal sealed unsafe class DescriptorArena : IDisposable
         _disposed = true;
 
         _sets.Clear();
+        _ownedKeys.Clear(); _idleKeys.Clear();
         foreach (DescriptorPool pool in _pools)
         {
             _context.Api.DestroyDescriptorPool(_context.Device, pool, null);

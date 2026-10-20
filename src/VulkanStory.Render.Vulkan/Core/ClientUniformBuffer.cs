@@ -27,7 +27,8 @@ internal sealed unsafe class ClientUniformBuffer
     {
         if (pose.JointCount * 64 > Shadow.Length || Shadow.Length % 64 != 0) return false;
         if (ReferenceEquals(SourceJointPose, pose)) return true;
-        JointPose = JointPoseSnapshot.WithPrefix(pose, JointPose, Shadow); SourceJointPose = pose; Version++;
+        var next = pose.JointCount * 64 == Shadow.Length ? pose.Retain() : JointPoseSnapshot.WithPrefix(pose, JointPose, Shadow);
+        ClearJointPose(); JointPose = next; SourceJointPose = pose.Retain(); Version++;
         return true;
     }
 
@@ -35,7 +36,12 @@ internal sealed unsafe class ClientUniformBuffer
     {
         if (JointPose is not { } pose) return;
         pose.CopyMatrices(MemoryMarshal.Cast<byte, float>(Shadow.AsSpan()));
-        JointPose = SourceJointPose = null; Version++;
+        ClearJointPose(); Version++;
+    }
+
+    internal void ClearJointPose()
+    {
+        JointPose?.Release(); SourceJointPose?.Release(); JointPose = SourceJointPose = null;
     }
 
     /// <summary>Bumped by every write, so an unchanged block reuses its snapshot.</summary>
@@ -54,7 +60,7 @@ internal sealed unsafe class ClientUniformBuffer
     /// <param name="size">Byte count to compare and copy.</param>
     public void Write(IntPtr data, int offset, int size)
     {
-        if (JointPose != null && offset == 0 && size == Shadow.Length) { JointPose = SourceJointPose = null; Version++; }
+        if (JointPose != null && offset == 0 && size == Shadow.Length) { ClearJointPose(); Version++; }
         else MaterializeJointPose();
         // A client that re-uploads identical bytes before every draw would
         // otherwise cost a fresh ring slice per draw; comparing is cheaper.
@@ -174,6 +180,7 @@ internal sealed class ClientUniformBufferManager
     public void DeleteUniformBuffer(int handle)
     {
         if (!Buffers.Remove(handle, out ClientUniformBuffer? ubo)) return;
+        ubo.ClearJointPose();
 
         if (ubo.BlockName.Length > 0 &&
             BoundBlocks.TryGetValue(ubo.BlockName, out int bound) && bound == handle)

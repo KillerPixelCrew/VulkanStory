@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -59,10 +60,11 @@ public sealed unsafe partial class VulkanDevice
         available.Push(buffer); _computeOutputIdleBytes += buffer.Capacity; _computeOutputIdleCount++;
     }
     private readonly record struct DeformationKey(VulkanMesh Mesh, ulong Revision, int PoseHash);
-    private sealed class DeformationGeometry(VulkanBuffer buffer, byte[] pose, uint frame)
+    private sealed class DeformationGeometry(VulkanBuffer buffer, byte[] pose, int poseLength, uint frame)
     {
         internal readonly VulkanBuffer Buffer = buffer;
         internal readonly byte[] Pose = pose;
+        internal readonly int PoseLength = poseLength;
         internal uint Frame = frame;
     }
     private readonly Dictionary<DeformationKey, List<DeformationGeometry>> _deformedGeometry = new();
@@ -168,7 +170,7 @@ public sealed unsafe partial class VulkanDevice
         var key = new DeformationKey(mesh, mesh.GeometryRevision, hash.ToHashCode());
         if (_deformedGeometry.TryGetValue(key, out var versions))
             foreach (var geometry in versions)
-                if (poseData.SequenceEqual(geometry.Pose))
+                if (poseData.SequenceEqual(geometry.Pose.AsSpan(0, geometry.PoseLength)))
                 {
                     geometry.Frame = _frameCounter;
                     DeformationCacheReuses++;
@@ -229,7 +231,9 @@ public sealed unsafe partial class VulkanDevice
             _context.Api.CmdPipelineBarrier2(command, &dependency);
             NoteProducerOutput(output, hoisted);
             if (versions == null) _deformedGeometry.Add(key, versions = new());
-            versions.Add(new DeformationGeometry(output, poseData.ToArray(), _frameCounter));
+            var poseCopy = ArrayPool<byte>.Shared.Rent(poseData.Length);
+            poseData.CopyTo(poseCopy);
+            versions.Add(new DeformationGeometry(output, poseCopy, poseData.Length, _frameCounter));
             _deformationBytes += retainedBytes;
             return output;
         }
@@ -248,7 +252,8 @@ public sealed unsafe partial class VulkanDevice
                     var geometry = versions[i];
                     _descriptors.Release(geometry.Buffer.Id);
                     RetireComputeOutput(geometry.Buffer);
-                    _deformationBytes -= geometry.Buffer.Size + (ulong)geometry.Pose.Length;
+                    _deformationBytes -= geometry.Buffer.Size + (ulong)geometry.PoseLength;
+                    ArrayPool<byte>.Shared.Return(geometry.Pose);
                     versions.RemoveAt(i);
                 }
             if (versions.Count == 0) _deformationRetire.Add(pair.Key);
@@ -264,7 +269,8 @@ public sealed unsafe partial class VulkanDevice
             foreach (var buffer in available) buffer.Dispose();
         _computeOutputIdle.Clear(); _computeOutputIdleBytes = 0; _computeOutputIdleCount = 0;
         foreach (var versions in _deformedGeometry.Values)
-            foreach (var geometry in versions) geometry.Buffer.Dispose();
+            foreach (var geometry in versions)
+            { geometry.Buffer.Dispose(); ArrayPool<byte>.Shared.Return(geometry.Pose); }
         _deformedGeometry.Clear(); _deformationBytes = 0;
     }
 }

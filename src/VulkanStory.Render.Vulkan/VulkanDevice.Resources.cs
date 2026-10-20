@@ -492,7 +492,7 @@ public sealed unsafe partial class VulkanDevice
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
     }
     /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
-    internal void UpdateParticleHistory(int meshId, float[] values) => _meshes.UpdateParticleHistory(meshId, values);
+    internal void UpdateParticleHistory(int meshId, ReadOnlySpan<float> values) => _meshes.UpdateParticleHistory(meshId, values);
 
     /// <summary>Removes the mesh and schedules its GPU-owned buffers for frame-safe deletion.</summary>
     public void DeleteMesh(int meshId)
