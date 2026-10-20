@@ -396,6 +396,13 @@ public sealed unsafe partial class VulkanDevice
         // that name; one it has not created yet reads the placeholder's zeroes.
         foreach (BlockBinding block in program.Interface.UniformBlocks)
         {
+            // A combinable animated row reads every row's poses from the slot's joint heap.
+            if (_drawEntityInputHeaps is { } inputHeaps && block.BlockName is "Animation" or "AnimationPrev")
+            {
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, inputHeaps.Joints.Handle, 0,
+                    inputHeaps.Joints.Size, inputHeaps.Joints.Id);
+                continue;
+            }
             ClientUniformBuffer? ubo = null;
             if (_clientUniformBuffers.BoundBlocks.TryGetValue(block.BlockName, out int handle)) _clientUniformBuffers.Buffers.TryGetValue(handle, out ubo);
             if (ubo == null) continue;
@@ -442,6 +449,12 @@ public sealed unsafe partial class VulkanDevice
                 if (_drawEntityRecords is not { } segment) return false;
                 buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, segment.Buffer.Handle,
                     segment.Offset, segment.Range, segment.Buffer.Id);
+                continue;
+            }
+            if (_drawEntityInputHeaps is { } deformationHeaps && block.BlockName is DeformationBlock or PreviousDeformationBlock)
+            {
+                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, deformationHeaps.Deformation.Handle, 0,
+                    deformationHeaps.Deformation.Size, deformationHeaps.Deformation.Id);
                 continue;
             }
             VulkanBuffer? buffer = block.BlockName switch
