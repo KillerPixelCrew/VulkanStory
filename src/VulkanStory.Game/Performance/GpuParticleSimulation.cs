@@ -25,7 +25,7 @@ internal static partial class GpuParticleSimulation
     private const long MaximumLatency = 32;
     internal const int BenchmarkMarker = 0x4000;
     private static readonly bool Benchmark = HeadlessHarnessOptions.Enabled && Environment.GetEnvironmentVariable("VULKANSTORY_PARTICLE_BENCHMARK") == "1";
-    private readonly record struct TickMeasurement(long Start, bool Requested, bool Gpu);
+    private readonly record struct TickMeasurement(long Start, bool Requested, bool Gpu, bool VisualDue);
     private readonly record struct PoolMeasurement(Scope? Previous, long Start, bool Requested);
     private sealed class Batch
     {
@@ -128,6 +128,11 @@ internal static partial class GpuParticleSimulation
     private static long stepsApplied, checks;
     private static long liquidPolicyChecks, airPolicyChecks, liquidDeathPolicyChecks, wetPolicyChecks;
     private static long liquidPolicyApplied, airPolicyApplied, liquidDeathPolicyApplied, wetPolicyApplied;
+    private static long gpuLightingSteps, cpuLightingSteps, gpuDirectionSteps, cpuDirectionSteps;
+    internal static long GpuLightingSteps => Interlocked.Read(ref gpuLightingSteps);
+    internal static long CpuLightingSteps => Interlocked.Read(ref cpuLightingSteps);
+    internal static long GpuDirectionSteps => Interlocked.Read(ref gpuDirectionSteps);
+    internal static long CpuDirectionSteps => Interlocked.Read(ref cpuDirectionSteps);
     internal static long LiquidPolicyChecks => Interlocked.Read(ref liquidPolicyChecks);
     internal static long AirPolicyChecks => Interlocked.Read(ref airPolicyChecks);
     internal static long LiquidDeathPolicyChecks => Interlocked.Read(ref liquidDeathPolicyChecks);
@@ -197,6 +202,10 @@ internal static partial class GpuParticleSimulation
                 StockBoxes, AccessTools.Method(typeof(ParticlePhysics), nameof(ParticlePhysics.UpdateMotion))!,
                 AccessTools.Method(typeof(Block), nameof(Block.IsLiquid))!,
                 AccessTools.Method(typeof(Vintagestory.Common.BlockAccessorReadLockfree), nameof(IBlockAccessor.GetBlockRaw))!,
+                AccessTools.Method(typeof(Vintagestory.Common.BlockAccessorReadLockfree), nameof(IBlockAccessor.GetLightRGBsAsInt), [typeof(int), typeof(int), typeof(int)])!,
+                AccessTools.Method(typeof(Vintagestory.Common.BlockAccessorReadLockfree), nameof(IBlockAccessor.GetRainMapHeightAt), [typeof(int), typeof(int)])!,
+                AccessTools.Method(typeof(Vec3f), nameof(Vec3f.Length))!,
+                AccessTools.Method(typeof(GameMath), nameof(GameMath.RootSumOfSquares), [typeof(float), typeof(float), typeof(float)])!,
                 AccessTools.Method(typeof(ParticlePhysics), nameof(ParticlePhysics.HandleBoyancy))!,
                 AccessTools.Method(typeof(EvolvingNatFloat), nameof(EvolvingNatFloat.nextFloat))!,
                 AccessTools.Method(typeof(GameMath), nameof(GameMath.FastSin))!, AccessTools.Method(typeof(GameMath), nameof(GameMath.FastCos))! })
@@ -360,13 +369,16 @@ internal static partial class GpuParticleSimulation
     private static bool BeforeTick(ParticleGeneric __instance, float __0, float __1, ICoreClientAPI __2, ParticlePhysics __3, out TickMeasurement __state)
     {
         bool track = Benchmark && __instance.VertexFlags == BenchmarkMarker;
-        __state = new TickMeasurement(track ? Stopwatch.GetTimestamp() : 0, PerformancePatchSet.Current?.GpuParticleSimulation == true, false);
+        __state = new TickMeasurement(track ? Stopwatch.GetTimestamp() : 0, PerformancePatchSet.Current?.GpuParticleSimulation == true, false,
+            unchecked((byte)(TickCount(__instance) + 1)) > 2);
         bool original = TryGpuTick(__instance, __0, __1, __2, __3);
-        if (track && !original) __state = __state with { Gpu = true };
+        if (!original) __state = __state with { Gpu = true };
         return original;
     }
     private static void AfterTick(ParticleGeneric __instance, TickMeasurement __state)
     {
+        if (__state.Requested && __state.VisualDue && !__state.Gpu)
+        { Interlocked.Increment(ref cpuLightingSteps); Interlocked.Increment(ref cpuDirectionSteps); }
         if (!__instance.Alive && current is { } scope)
         {
             scope.State.Remove(__instance);
@@ -446,7 +458,7 @@ internal static partial class GpuParticleSimulation
                     particle.accum + scope.Delta * scope.GameSpeed < physics.PhysicsTickTime) continue;
                 if (!Input(particle, lifeDt, dt, physics, state, out var snapshot)) continue;
                 if (batch == null && (batch = Acquire(state)) == null) return;
-                if (!CaptureWorld(particle, physics, state, batch, out var world)) continue;
+                if (!CaptureWorld(particle, physics, state, batch, dt, out var world)) continue;
                 int index = batch.Particles.Count;
                 if (batch.Input.Length <= index) Array.Resize(ref batch.Input, Math.Min(MaximumBatch, Math.Max(1, batch.Input.Length * 2)));
                 if (batch.World.Length <= index) Array.Resize(ref batch.World, batch.Input.Length);
@@ -536,7 +548,7 @@ internal static partial class GpuParticleSimulation
         particle.Position.Set(result.X, result.Y, result.Z);
         // Confirmation already rebuilt CachedCuboidList through the stock walk,
         // and compute applied the velocity response.
-        if (particle.TerrainCollision) ApplyCollisionResponse(particle, dt, api, result.CollisionFlags & ParticleSimulationOutput.CollisionMask);
+        if (particle.TerrainCollision) ApplyCollisionResponse(particle, in result, api);
         bool liquidPolicy = (result.QueryBounds & ParticleSimulationOutput.LiquidPolicyApplied) != 0;
         if (liquidPolicy)
         {
@@ -550,23 +562,33 @@ internal static partial class GpuParticleSimulation
             physics.BlockAccess.GetBlockRaw((int)particle.Position.X, (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
         byte ticks = unchecked((byte)(TickCount(particle) + 1)); TickCount(particle) = ticks;
         if (ticks <= 2) return;
-        particle.lightrgbs = particle.LightEmission == int.MaxValue ? particle.LightEmission : physics.BlockAccess.GetLightRGBsAsInt(
-            (int)particle.Position.X, (int)particle.Position.Y, (int)particle.Position.Z);
-        if (particle.LightEmission != 0) particle.lightrgbs = Math.Max(particle.lightrgbs & 0xff, particle.LightEmission & 0xff) |
-            Math.Max(particle.lightrgbs & 0xff00, particle.LightEmission & 0xff00) | Math.Max(particle.lightrgbs & 0xff0000, particle.LightEmission & 0xff0000);
+        bool environment = (result.VisualPolicy & ParticleSimulationWorldInput.Environment) != 0;
+        if (environment)
+        { particle.lightrgbs = result.Light; Interlocked.Increment(ref gpuLightingSteps); }
+        else
+        {
+            Interlocked.Increment(ref cpuLightingSteps);
+            particle.lightrgbs = particle.LightEmission == int.MaxValue ? particle.LightEmission : physics.BlockAccess.GetLightRGBsAsInt(
+                (int)particle.Position.X, (int)particle.Position.Y, (int)particle.Position.Z);
+            if (particle.LightEmission != 0) particle.lightrgbs = Math.Max(particle.lightrgbs & 0xff, particle.LightEmission & 0xff) |
+                Math.Max(particle.lightrgbs & 0xff00, particle.LightEmission & 0xff00) | Math.Max(particle.lightrgbs & 0xff0000, particle.LightEmission & 0xff0000);
+        }
         if (particle.DieOnRainHeightmap)
         {
-            float remainder = 1 - particle.prevPosAdvance;
-            double x = particle.prevPosDeltaX * remainder * dt * 8f, y = particle.prevPosDeltaY * remainder * dt * 12f,
-                z = particle.prevPosDeltaZ * remainder * dt * 8f;
-            particle.Alive &= physics.BlockAccess.GetRainMapHeightAt((int)(particle.Position.X + x), (int)(particle.Position.Z + z)) - y < particle.Position.Y;
+            if (environment) particle.Alive &= (result.VisualPolicy & ParticleSimulationWorldInput.RainSurvived) != 0;
+            else
+            {
+                float remainder = 1 - particle.prevPosAdvance;
+                double x = particle.prevPosDeltaX * remainder * dt * 8f, y = particle.prevPosDeltaY * remainder * dt * 12f,
+                    z = particle.prevPosDeltaZ * remainder * dt * 8f;
+                particle.Alive &= physics.BlockAccess.GetRainMapHeightAt((int)(particle.Position.X + x), (int)(particle.Position.Z + z)) - y < particle.Position.Y;
+            }
         }
         particle.Alive &= !particle.DieInLiquid || (liquidPolicy ? (result.QueryBounds & ParticleSimulationOutput.LiquidDeath) == 0 :
             !physics.BlockAccess.GetBlockRaw((int)particle.Position.X, (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
         TickCount(particle) = 0;
-        float length = particle.Velocity.Length();
-        Direction(particle) = (uint)(unchecked((byte)(particle.Velocity.X / length * 128f)) |
-            unchecked((byte)(particle.Velocity.Y / length * 128f)) << 8 | unchecked((byte)(particle.Velocity.Z / length * 128f)) << 16);
+        Direction(particle) = result.Direction;
+        Interlocked.Increment(ref gpuDirectionSteps);
     }
 
     private static void Check(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<ParticleSimulationWorldInput> world,
@@ -634,12 +656,44 @@ internal static partial class GpuParticleSimulation
                 if (liquid) Interlocked.Increment(ref wetPolicyChecks);
             }
             if (flags != 0) velocity = ReferenceResponse(velocity, flags, state.Timing.W, state.Bounciness, state.RandomDrag);
+            var observedWorld = world[i];
+            uint visualPolicy = observedWorld.VisualPolicy;
+            bool policyMismatch = false;
+            float expectedDrag = state.Control.W > 0.5f ? (flags == 0 ? 1 :
+                (1f - GameMath.Clamp(6.060606f * state.Timing.W, 0.001f, 1f)) * state.RandomDrag) : state.Control.X;
+            if ((visualPolicy & ParticleSimulationWorldInput.ThirdTick) != 0)
+            {
+                float length = GameMath.RootSumOfSquares(velocity.X, velocity.Y, velocity.Z);
+                uint direction = (uint)(unchecked((byte)(velocity.X / length * 128f)) |
+                    unchecked((byte)(velocity.Y / length * 128f)) << 8 | unchecked((byte)(velocity.Z / length * 128f)) << 16);
+                policyMismatch |= direction != result.Direction;
+                if ((visualPolicy & ParticleSimulationWorldInput.Environment) != 0)
+                {
+                    int light = observedWorld.LightEmission == int.MaxValue ? int.MaxValue :
+                        ReferenceCell(in state, observedWorld.LightStart, observedWorld.LightBounds, (int)x, (int)y, (int)z, liquidCells);
+                    int emission = observedWorld.LightEmission;
+                    if (emission != 0) light = Math.Max(light & 255, emission & 255) |
+                        Math.Max(light & 65280, emission & 65280) | Math.Max(light & 16711680, emission & 16711680);
+                    policyMismatch |= result.Light != light;
+                    if ((visualPolicy & ParticleSimulationWorldInput.Rain) != 0)
+                    {
+                        var interpolation = observedWorld.RainInterpolation;
+                        float remainder = 1 - interpolation.W, dt = state.Timing.W;
+                        double dx = interpolation.X * remainder * dt * 8f, dy = interpolation.Y * remainder * dt * 12f,
+                            dz = interpolation.Z * remainder * dt * 8f;
+                        int rain = ReferenceCell(in state, observedWorld.RainStart, observedWorld.RainBounds, (int)(x + dx), (int)state.Y, (int)(z + dz), liquidCells);
+                        if (rain - dy < y) visualPolicy |= ParticleSimulationWorldInput.RainSurvived;
+                    }
+                }
+            }
+            policyMismatch |= result.VisualPolicy != visualPolicy;
             uint expectedFlags = state.Control.W > 0.5f ? flags | reused << ParticleSimulationOutput.ReusedShift : 0;
             var delta = Vector4.Abs(result.VelocityAge - new Vector4(velocity, age));
             var motionDelta = Vector4.Abs(result.MotionAlive - new Vector4(motion, alive ? 1 : 0));
             double error = Math.Max(Math.Max(delta.X, delta.Y), Math.Max(delta.Z, delta.W));
+            error = Math.Max(error, Math.Abs(expectedDrag - result.Drag));
             error = Math.Max(error, Math.Max(Math.Max(motionDelta.X, motionDelta.Y), Math.Max(motionDelta.Z, motionDelta.W)));
-            if (expectedFlags != result.CollisionFlags || queryBounds != result.QueryBounds) error = double.MaxValue;
+            if (expectedFlags != result.CollisionFlags || queryBounds != result.QueryBounds || policyMismatch) error = double.MaxValue;
             floatError = Math.Max(floatError, double.IsFinite(error) ? error : double.MaxValue);
             error = Math.Max(Math.Abs(result.X - (state.X + (double)motion.X * factor)), Math.Max(
                 Math.Abs(result.Y - (state.Y + (double)motion.Y * factor)), Math.Abs(result.Z - (state.Z + (double)motion.Z * factor))));
@@ -651,4 +705,12 @@ internal static partial class GpuParticleSimulation
     }
     private static ParticleEvolution AtPhase(ParticleEvolution value, float phase) =>
         new(value.First, value.Factor, phase, value.Maximum, value.Function, value.Limited != 0);
+    private static int ReferenceCell(in ParticleSimulationInput state, uint start, uint bounds, int x, int y, int z, ReadOnlySpan<uint> cells)
+    {
+        int Offset(int shift) => (int)((bounds >> shift) & 15) - 8;
+        int minX = (int)state.X + Offset(0), minY = (int)state.Y + Offset(4), minZ = (int)state.Z + Offset(8),
+            maxX = (int)state.X + Offset(12), maxY = (int)state.Y + Offset(16), maxZ = (int)state.Z + Offset(20);
+        if (x < minX || x > maxX || y < minY || y > maxY || z < minZ || z > maxZ) throw new InvalidOperationException("Particle environment escaped its snapshot.");
+        return unchecked((int)cells[(int)start + ((z - minZ) * (maxY - minY + 1) + y - minY) * (maxX - minX + 1) + x - minX]);
+    }
 }

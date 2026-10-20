@@ -3,7 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 layout(local_size_x = 64) in;
 struct Evolution { vec4 values; ivec4 control; };
-struct State { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
+struct State { dvec4 position; vec4 velocityAge; vec4 motionAlive; uvec4 policy; uvec4 padding; };
 struct Input { dvec2 cameraXY; double cameraZ; uint source; uint target; vec4 interpolation; vec4 velocityPhase; uvec4 attributes; };
 struct Snapshot { vec4 center; uvec4 attributes; };
 layout(binding=0, std430) readonly buffer States { State values[]; } states;

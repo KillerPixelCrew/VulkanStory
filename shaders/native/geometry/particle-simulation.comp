@@ -8,10 +8,11 @@ struct Input {
     vec4 velocityGravity; vec4 timing; vec4 parent; vec4 startingVelocity; vec4 control; vec4 physics;
     Evolution velocityX; Evolution velocityY; Evolution velocityZ;
 };
-struct Output { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
+struct Output { dvec4 position; vec4 velocityAge; vec4 motionAlive; uvec4 policy; uvec4 padding; };
 struct Command { uint slot; float age; float lifeDelta; float physicsDelta; vec4 control; };
 struct World { vec4 liquid; vec4 flow; uint boxStart; uint boxCount; float motionCap; uint initialPopulatedSize;
-    uint liquidStart; uint liquidBounds; uint liquidPolicy; uint reserved; };
+    uint liquidStart; uint liquidBounds; uint liquidPolicy; uint reserved;
+    vec4 rainInterpolation; uvec4 environmentCells; int lightEmission; uint visualPolicy; uvec2 reserved2; };
 struct Box { vec4 minimum; vec4 maximum; ivec4 cell; };
 // minimum.w = selected count with custom-callback high bit;
 // maximum.w = exclusive prefix cache size.
@@ -28,6 +29,33 @@ layout(binding = 8, std430) readonly buffer LiquidCells { uint values[]; } liqui
 layout(push_constant) uniform Parameters { uint count; uint phase; uint initialPopulatedSize; } p;
 #include "../include/evolution.glsl"
 #include "particle-physics.glsl"
+// .NET 10 x64 conv.u1: CVTTSS2SI (indefinite INT_MIN for NaN or
+// outside [-2^31,2^31)), then narrow the low byte. Never clamp to [0,255].
+uint directionByte(float value) {
+    if (isnan(value) || value < -2147483648.0 || value >= 2147483648.0) return 0u;
+    return uint(int(value)) & 255u;
+}
+uint directionBytes(vec3 velocity) {
+    precise float xx = velocity.x * velocity.x, yy = velocity.y * velocity.y, zz = velocity.z * velocity.z;
+    precise float sum = (xx + yy) + zz;
+    // GameMath.RootSumOfSquares widens the float sum for Math.Sqrt.
+    precise float magnitude = float(sqrt(double(sum)));
+    if (!(magnitude > 0.0) || isinf(magnitude)) return 0u;
+    precise vec3 scaled = (velocity / magnitude) * 128.0;
+    return directionByte(scaled.x) | (directionByte(scaled.y) << 8) | (directionByte(scaled.z) << 16);
+}
+bool observedCell(uint start, uint bounds, ivec3 origin, ivec3 cell, out uint observed) {
+    ivec3 lo, hi;
+    for (uint axis = 0; axis < 3; ++axis) {
+        lo[axis] = origin[axis] + int((bounds >> (axis * 4)) & 15u) - 8;
+        hi[axis] = origin[axis] + int((bounds >> ((axis + 3) * 4)) & 15u) - 8;
+    }
+    observed = 0u;
+    if (any(lessThan(cell, lo)) || any(greaterThan(cell, hi))) return false;
+    uvec3 size = uvec3(hi - lo + 1), offset = uvec3(cell - lo);
+    observed = liquidCells.values[start + (offset.z * size.y + offset.y) * size.x + offset.x];
+    return true;
+}
 shared uint chunkMaximum[64];
 void cachePrefix() {
     uint lane = gl_LocalInvocationID.x;
@@ -61,6 +89,7 @@ void main() {
         precise dvec3 position = value.position.xyz;
         precise vec3 motion = value.motionAlive.xyz;
         uvec2 metadata = unpackDouble2x32(value.position.w);
+        value.policy = uvec4(0u, 0u, floatBitsToUint(step.control.x), world.visualPolicy);
         if (queries.values[index].minimum.w < 0) {
             // Never approximate or invoke the custom callback. Later actors
             // are speculative until this ordered CPU boundary is resolved.
@@ -77,7 +106,9 @@ void main() {
             // The stock velocity response follows the clipped position. Its
             // shared random draw stays at the ordered CPU tick; the command
             // carries the random drag that draw left for this step.
-            if (metadata.x != 0u) value.velocityAge.xyz = respond(value.velocityAge.xyz, metadata.x, step.physicsDelta, state.bounciness, step.control.y);
+            precise float drag = metadata.x == 0u ? 1.0 : (1.0 - clamp(6.060606 * step.physicsDelta, 0.001, 1.0)) * step.control.y;
+            value.policy.z = floatBitsToUint(drag);
+            if (metadata.x != 0u) value.velocityAge.xyz = respond(value.velocityAge.xyz, metadata.x, drag, state.bounciness);
             // Selected boxes that used reused cache rounding, so the consumer can
             // confirm the CachedCuboidList prefix it observes at the stock tick.
             metadata.x |= min(uint(query.maximum.w), uint(query.minimum.w) & 0x7fffffffu) << 8;
@@ -116,6 +147,34 @@ void main() {
             // The adapter consumes the selected cell for DieInLiquid after rain.
             if ((world.liquidPolicy & 1u) != 0u && value.motionAlive.w > 0.5 && !liquid) value.motionAlive.w = 0.0;
         }
+        if ((world.visualPolicy & 1u) != 0u) {
+            value.policy.x = directionBytes(value.velocityAge.xyz);
+            if ((world.visualPolicy & 4u) != 0u) {
+                uint light = uint(world.lightEmission);
+                ivec3 origin = ivec3(value.position.xyz);
+                bool available = world.lightEmission == 2147483647 ||
+                    observedCell(world.environmentCells.x, world.environmentCells.y, origin, ivec3(position), light);
+                if (world.lightEmission != 0) {
+                    uint emission = uint(world.lightEmission);
+                    light = max(light & 255u, emission & 255u) | max(light & 65280u, emission & 65280u) |
+                        max(light & 16711680u, emission & 16711680u);
+                }
+                value.policy.y = light;
+                if ((world.visualPolicy & 2u) != 0u) {
+                    precise float remainder = 1.0 - world.rainInterpolation.w;
+                    precise vec3 offset = ((world.rainInterpolation.xyz * remainder) * step.physicsDelta) * vec3(8.0, 12.0, 8.0);
+                    precise dvec3 rainPosition = position + dvec3(offset);
+                    uint rain;
+                    available = observedCell(world.environmentCells.z, world.environmentCells.w, origin,
+                        ivec3(int(rainPosition.x), origin.y, int(rainPosition.z)), rain) && available;
+                    precise double exposedHeight = double(int(rain)) - double(offset.y);
+                    // Non-short-circuit &=: the stock rain observation happens
+                    // even when lifetime/air already killed the particle.
+                    if (exposedHeight < position.y) value.policy.w |= 8u;
+                }
+                if (!available) metadata.x = 0x80000000u;
+            }
+        }
         value.position = dvec4(position, packDouble2x32(metadata));
         value.motionAlive.xyz = motion;
         residents.values[step.slot] = value;
@@ -147,6 +206,7 @@ void main() {
     value.position = dvec4(position, packDouble2x32(uvec2(0, queryBounds)));
     value.velocityAge = vec4(velocity, age);
     value.motionAlive = vec4(motion, age < state.timing.y ? 1.0 : 0.0);
+    value.policy = uvec4(0u); value.padding = uvec4(0u);
     // Mutable simulation storage is compute-only. Graphics leases immutable
     // per-submission results, including previous frames and the second eye.
     result.values[index] = value;

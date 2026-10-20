@@ -16,7 +16,7 @@ internal static partial class GpuParticleSimulation
     private const int MaximumLiquidCells = 262144, MaximumLiquidRegions = 512;
     private static readonly AccessTools.FieldRef<Vintagestory.API.Datastructures.CachedCuboidList, int> PopulatedSize =
         AccessTools.FieldRefAccess<Vintagestory.API.Datastructures.CachedCuboidList, int>("populatedSize");
-    private readonly record struct WorldRegion(IBlockAccessor Accessor, int Dimension, int MinX, int MinY, int MinZ, int MaxX, int MaxY, int MaxZ);
+    private readonly record struct WorldRegion(IBlockAccessor Accessor, int Dimension, int MinX, int MinY, int MinZ, int MaxX, int MaxY, int MaxZ, int Kind = 0);
     private static readonly MethodInfo StockBoxes = AccessTools.Method(typeof(Block), nameof(Block.GetParticleCollisionBoxes),
         [typeof(IBlockAccessor), typeof(BlockPos)])!;
     private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid), Type.EmptyTypes)!;
@@ -110,16 +110,25 @@ internal static partial class GpuParticleSimulation
     // markers until the actual GPU query reaches their ordered CPU boundary.
     // Never call a custom box callback speculatively.
     private static bool CaptureWorld(ParticleGeneric particle, ParticlePhysics physics, PoolState state,
-        Batch batch, out ParticleSimulationWorldInput world)
+        Batch batch, float dt, out ParticleSimulationWorldInput world)
     {
         world = default;
         world.InitialPopulatedSize = (uint)PopulatedSize(physics.CollisionBoxList);
         if (!CaptureFluid(particle, physics, state, ref world)) return false;
         world.MotionCap = physics.MotionCap;
+        world.VisualPolicy = unchecked((byte)(TickCount(particle) + 1)) > 2 ? ParticleSimulationWorldInput.ThirdTick : 0;
+        world.LightEmission = particle.LightEmission;
+        if (particle.DieOnRainHeightmap) world.VisualPolicy |= ParticleSimulationWorldInput.Rain;
+        // TickFixedStep resets advance immediately before TickNow. The worker
+        // calls TickNow directly and retains its current interpolation value.
+        world.RainInterpolation = new Vector4(particle.prevPosDeltaX, particle.prevPosDeltaY, particle.prevPosDeltaZ,
+            current is { Worker: false } ? 0 : particle.prevPosAdvance);
         if (!particle.TerrainCollision) return true;
         var pos = particle.Position;
         float half = particle.ParticleHeight * particle.SizeMultiplier / 2f, cap = physics.MotionCap;
         if (!float.IsFinite(cap) || cap < 0 || cap > 2 || half < 0 || half > 2) return false;
+        if ((world.VisualPolicy & ParticleSimulationWorldInput.ThirdTick) != 0 &&
+            CaptureEnvironment(particle, physics, batch, dt, ref world)) world.VisualPolicy |= ParticleSimulationWorldInput.Environment;
         // Only collision-clipped motion has a proven cap here. Unclipped stock
         // particles keep their original post-step CPU liquid policy.
         world.LiquidPolicy = (particle.DieInAir ? ParticleSimulationWorldInput.DieInAir : 0) |
@@ -235,14 +244,57 @@ internal static partial class GpuParticleSimulation
             (uint)(maxX - x0 + 8) << 12 | (uint)(maxY - y0 + 8) << 16 | (uint)(maxZ - z0 + 8) << 20;
         return true;
     }
-    private static void ApplyCollisionResponse(ParticleGeneric particle, float dt, ICoreClientAPI api, uint flags)
+    private static bool CaptureEnvironment(ParticleGeneric particle, ParticlePhysics physics, Batch batch, float dt,
+        ref ParticleSimulationWorldInput world)
     {
+        var p = particle.Position;
+        double cap = world.MotionCap;
+        if (world.LightEmission != int.MaxValue && !CaptureCells(1,
+            (int)(p.X - cap), (int)(p.Y - cap), (int)(p.Z - cap),
+            (int)(p.X + cap), (int)(p.Y + cap), (int)(p.Z + cap), out world.LightStart, out world.LightBounds)) return false;
+        if ((world.VisualPolicy & ParticleSimulationWorldInput.Rain) == 0) return true;
+        var interpolation = world.RainInterpolation;
+        float remainder = 1 - interpolation.W;
+        double dx = interpolation.X * remainder * dt * 8f, dy = interpolation.Y * remainder * dt * 12f,
+            dz = interpolation.Z * remainder * dt * 8f;
+        if (!double.IsFinite(dx) || !double.IsFinite(dy) || !double.IsFinite(dz) || Math.Abs(dx) > 4 || Math.Abs(dy) > 4 || Math.Abs(dz) > 4) return false;
+        return CaptureCells(2, (int)(p.X - cap + dx), (int)p.Y, (int)(p.Z - cap + dz),
+            (int)(p.X + cap + dx), (int)p.Y, (int)(p.Z + cap + dz), out world.RainStart, out world.RainBounds);
+
+        bool CaptureCells(int kind, int minX, int minY, int minZ,
+            int maxX, int maxY, int maxZ, out uint start, out uint bounds)
+        {
+            start = bounds = 0;
+            int x0 = (int)p.X, y0 = (int)p.Y, z0 = (int)p.Z;
+            Span<int> offsets = stackalloc int[] { minX - x0, minY - y0, minZ - z0, maxX - x0, maxY - y0, maxZ - z0 };
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                if (offsets[i] < -8 || offsets[i] > 7) return false;
+                bounds |= (uint)(offsets[i] + 8) << (i * 4);
+            }
+            var region = new WorldRegion(physics.BlockAccess, 0, minX, minY, minZ, maxX, maxY, maxZ, kind);
+            if (batch.LiquidRegions.TryGetValue(region, out start)) return true;
+            int count = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
+            if (batch.LiquidRegions.Count == MaximumLiquidRegions || count > MaximumLiquidCells - batch.LiquidCells.Count) return false;
+            start = (uint)batch.LiquidCells.Count;
+            for (int z = minZ; z <= maxZ; z++)
+                for (int y = minY; y <= maxY; y++)
+                    for (int x = minX; x <= maxX; x++)
+                        batch.LiquidCells.Add(unchecked((uint)(kind == 1 ? physics.BlockAccess.GetLightRGBsAsInt(x, y, z) :
+                            physics.BlockAccess.GetRainMapHeightAt(x, z))));
+            batch.LiquidRegions.Add(region, start);
+            return true;
+        }
+    }
+    private static void ApplyCollisionResponse(ParticleGeneric particle, in ParticleSimulationOutput result, ICoreClientAPI api)
+    {
+        uint flags = result.CollisionFlags & ParticleSimulationOutput.CollisionMask;
         CollisionFlags(particle) = (EnumCollideFlags)flags;
-        if (flags == 0) { Drag(particle) = 1; return; }
+        Drag(particle) = result.Drag;
+        if (flags == 0) return;
         // Compute applied the X/Y/Z velocity response with this drag, from the
         // random drag before this tick's draw. Keep the world's shared RNG and
         // its conditional second draw at the actual ordered stock TickNow boundary.
-        Drag(particle) = (1f - GameMath.Clamp(6.060606f * dt, 0.001f, 1f)) * RandomDrag(particle);
         if (api.World.Rand.NextDouble() < 0.001)
             RandomDrag(particle) = Math.Max(0, (float)api.World.Rand.NextDouble() - 0.1f);
     }

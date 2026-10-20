@@ -1,7 +1,7 @@
 #version 450
 #extension GL_ARB_gpu_shader_fp64 : require
 layout(local_size_x = 64) in;
-struct State { dvec4 position; vec4 velocityAge; vec4 motionAlive; };
+struct State { dvec4 position; vec4 velocityAge; vec4 motionAlive; uvec4 policy; uvec4 padding; };
 struct Instance {
     dvec2 cameraXY;
     double cameraZ;

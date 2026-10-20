@@ -26,9 +26,10 @@ public struct ParticleSimulationInput
 }
 
 /// <summary>GPU-produced clipped position/motion, post-response velocity, collision flags, age and lifetime.</summary>
-[StructLayout(LayoutKind.Explicit, Size = 64)]
+[StructLayout(LayoutKind.Explicit, Size = 96)]
 public struct ParticleSimulationOutput
 {
+    public const int ByteSize = 96;
     public const uint LiquidPolicyApplied = 1u << 24;
     public const uint LiquidCell = 1u << 25;
     public const uint LiquidDeath = 1u << 26;
@@ -49,14 +50,21 @@ public struct ParticleSimulationOutput
     [FieldOffset(28)] public uint QueryBounds;
     [FieldOffset(32)] public Vector4 VelocityAge;
     [FieldOffset(48)] public Vector4 MotionAlive;
+    [FieldOffset(64)] public uint Direction;
+    [FieldOffset(68)] public int Light;
+    [FieldOffset(72)] public float Drag;
+    [FieldOffset(76)] public uint VisualPolicy;
+    // std430 arrays round the dvec4-aligned structure to 96 bytes.
 }
 
 /// <summary>Fresh world observations for one due step; never reused across world updates.</summary>
-[StructLayout(LayoutKind.Sequential, Size = 64)]
+[StructLayout(LayoutKind.Sequential, Size = 112)]
 public struct ParticleSimulationWorldInput
 {
+    public const int ByteSize = 112;
     public const uint DieInAir = 1;
     public const uint DieInLiquid = 2;
+    public const uint ThirdTick = 1, Rain = 2, Environment = 4, RainSurvived = 8;
     public Vector4 Liquid;
     public Vector4 Flow;
     public uint BoxStart, BoxCount;
@@ -67,6 +75,11 @@ public struct ParticleSimulationWorldInput
     // then Y then Z. Bounds are six
     // four-bit signed offsets (+8) from the truncated admission position.
     public uint LiquidStart, LiquidBounds, LiquidPolicy, Reserved;
+    public Vector4 RainInterpolation;
+    // Light and rain share the bounded cell upload with the fluid snapshot.
+    public uint LightStart, LightBounds, RainStart, RainBounds;
+    public int LightEmission;
+    public uint VisualPolicy, Reserved2, Reserved3;
 }
 
 /// <summary>One stock collision box in WalkBlocks and collision-array order; Minimum.W marks a custom callback cell.</summary>

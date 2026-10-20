@@ -18,12 +18,55 @@ internal static partial class GpuParticleSimulation
         in ParticleSimulationOutput result)
     {
         ref readonly var expected = ref batch.World[index];
+        if (particle.LightEmission != expected.LightEmission || particle.DieOnRainHeightmap != ((expected.VisualPolicy & ParticleSimulationWorldInput.Rain) != 0)) return false;
         var observed = default(ParticleSimulationWorldInput);
         if (!CaptureFluid(particle, physics, state, ref observed) || !Same(observed.Liquid, expected.Liquid) || !Same(observed.Flow, expected.Flow) ||
             BitConverter.SingleToUInt32Bits(physics.MotionCap) != BitConverter.SingleToUInt32Bits(expected.MotionCap)) return false;
         if ((result.QueryBounds & ParticleSimulationOutput.LiquidPolicyApplied) != 0 && !ConfirmLiquidCell(particle, physics, in expected, in result))
             return false;
+        // Reject environmental/byte mismatches before collision confirmation
+        // can populate the stock cache and alter first-allocation rounding.
+        if (!ConfirmEnvironment(particle, physics, batch, index, in result)) return false;
         return !particle.TerrainCollision || state.Collision.Confirm(physics, batch, index, in result);
+    }
+
+    private static bool ConfirmEnvironment(ParticleGeneric particle, ParticlePhysics physics, Batch batch, int index,
+        in ParticleSimulationOutput result)
+    {
+        var world = batch.World[index];
+        if ((world.VisualPolicy & ParticleSimulationWorldInput.ThirdTick) == 0) return true;
+        // Shader division/sqrt precision is implementation dependent. Compare
+        // the three packed bytes before accepting a trajectory, including the
+        // x64 .NET 10 NaN/overflow conversion; a mismatch runs the stock tick.
+        var v = result.VelocityAge;
+        float length = GameMath.RootSumOfSquares(v.X, v.Y, v.Z);
+        uint direction = (uint)(unchecked((byte)(v.X / length * 128f)) |
+            unchecked((byte)(v.Y / length * 128f)) << 8 | unchecked((byte)(v.Z / length * 128f)) << 16);
+        if (direction != result.Direction) return false;
+        if ((world.VisualPolicy & ParticleSimulationWorldInput.Environment) == 0) return true;
+        var input = batch.Input[index];
+        if (world.LightEmission != int.MaxValue && (!Observed(world.LightStart, world.LightBounds, (int)result.X, (int)result.Y, (int)result.Z, out int light) ||
+            physics.BlockAccess.GetLightRGBsAsInt((int)result.X, (int)result.Y, (int)result.Z) != light)) return false;
+        if ((world.VisualPolicy & ParticleSimulationWorldInput.Rain) == 0) return true;
+        var interpolation = world.RainInterpolation;
+        if (!Same(interpolation, new Vector4(particle.prevPosDeltaX, particle.prevPosDeltaY, particle.prevPosDeltaZ, particle.prevPosAdvance))) return false;
+        float remainder = 1 - interpolation.W, dt = input.Timing.W;
+        double dx = interpolation.X * remainder * dt * 8f, dz = interpolation.Z * remainder * dt * 8f;
+        int x = (int)(result.X + dx), z = (int)(result.Z + dz);
+        return Observed(world.RainStart, world.RainBounds, x, (int)input.Y, z, out int rain) &&
+            physics.BlockAccess.GetRainMapHeightAt(x, z) == rain;
+
+        bool Observed(uint start, uint bounds, int x, int y, int z, out int observed)
+        {
+            int Offset(int shift) => (int)((bounds >> shift) & 15) - 8;
+            int minX = (int)input.X + Offset(0), minY = (int)input.Y + Offset(4), minZ = (int)input.Z + Offset(8),
+                maxX = (int)input.X + Offset(12), maxY = (int)input.Y + Offset(16), maxZ = (int)input.Z + Offset(20);
+            observed = 0;
+            if (x < minX || x > maxX || y < minY || y > maxY || z < minZ || z > maxZ) return false;
+            int address = (int)start + ((z - minZ) * (maxY - minY + 1) + y - minY) * (maxX - minX + 1) + x - minX;
+            observed = unchecked((int)batch.LiquidCells[address]);
+            return true;
+        }
     }
 
     private static bool ConfirmLiquidCell(ParticleGeneric particle, ParticlePhysics physics, in ParticleSimulationWorldInput world,

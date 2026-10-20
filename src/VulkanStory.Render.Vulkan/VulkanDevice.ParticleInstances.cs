@@ -104,7 +104,7 @@ public sealed unsafe partial class VulkanDevice
                 mesh.Layout.Attributes.Count(attribute => attribute.Location >= 9) != 4)) return false;
         for (int i = 0; i < count; i++)
             if (simulations[i] is not ParticleSimulationRunner.SimulationBuffer simulation || !ReferenceEquals(simulation.Owner, particleSimulation) ||
-                (ulong)inputs[i].Source * 64 + 64 > simulation.Buffer.Size || inputs[i].Target != (uint)i) return false;
+                ((ulong)inputs[i].Source + 1) * ParticleSimulationOutput.ByteSize > simulation.Buffer.Size || inputs[i].Target != (uint)i) return false;
         if (particleInstanceProgram == 0)
             particleInstanceProgram = CreateComputeProgram(ParticleEvolutionShader("particle-instances.comp"), "particle-instances",
                 Enumerable.Range(0, 13).Select(i => new ComputeSlot((uint)i, ComputeSlotKind.Buffer)).ToArray(), 16, 64, 1);

@@ -42,7 +42,7 @@ internal static partial class GpuParticleSimulation
         {
             if (index < Inputs.Length) return true;
             int capacity = Math.Min(65536, Math.Max(index + 1, Math.Max(16, Inputs.Length * 2)));
-            long nextCharge = capacity * 320L + 65536; // arrays plus at most 4096 ordered extrapolation commands
+            long nextCharge = capacity * (320L + ParticleSimulationOutput.ByteSize - 64) + 65536; // arrays plus at most 4096 ordered extrapolation commands
             lock (instanceBudgetGate)
             {
                 if (instanceCpuBytes + nextCharge - charge > InstanceCpuBudget) return false;
