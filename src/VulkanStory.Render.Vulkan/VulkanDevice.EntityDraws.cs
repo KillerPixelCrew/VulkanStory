@@ -322,7 +322,7 @@ public sealed unsafe partial class VulkanDevice
             _entityInputOffsets = new ulong[_frames.FramesInFlight];
         }
         int slot = CurrentFrameSlot;
-        var limits = _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
+        var limits = DrawPreparationLimits;
         ulong alignment = Math.Max(4UL, limits.MinStorageBufferOffsetAlignment);
         ulong at = (_entityInputOffsets[slot] + alignment - 1) / alignment * alignment;
         ulong capacity = Math.Min(2UL << 20, limits.MaxStorageBufferRange);
@@ -389,7 +389,7 @@ public sealed unsafe partial class VulkanDevice
             ReferenceEquals(commands, batch.Commands) && offset >= batch.CommandOffset)
         {
             first = (int)((offset - batch.CommandOffset) / 20);
-            _entityMaxDrawIndirectCount ??= _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits.MaxDrawIndirectCount;
+            _entityMaxDrawIndirectCount ??= DrawPreparationLimits.MaxDrawIndirectCount;
             maxCount = (uint)Math.Max(0, Math.Min((long)EntityBatchCapacity - first, _entityMaxDrawIndirectCount.Value));
             countOffset = batch.InputOffset + (ulong)(64 + first * 12 + 3) * 4;
         }

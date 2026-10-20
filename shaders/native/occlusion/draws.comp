@@ -2,6 +2,8 @@
 layout(local_size_x = 64) in;
 layout(constant_id = 0) const bool compactDraws = true;
 layout(constant_id = 1) const bool scatterDraws = false;
+layout(constant_id = 2) const bool batchedPools = false;
+layout(constant_id = 3) const bool countedPools = false;
 layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
 layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
@@ -61,17 +63,70 @@ bool hidden(uint index)
     float denominator = f(35) - farthest;
     return denominator > 0.0 && nearest > (f(34) / denominator) * 1.002 + 0.25;
 }
-void writeCommand(uint index, uint rank)
+void writePoolCommand(uint index, uint rank, uint outputWord)
 {
-    uint dst = p.outputWord + rank * 5u;
+    uint dst = outputWord + rank * 5u;
     uint src = p.inputWord + 64u + index * 12u + 8u;
     outputData.words[dst] = inputData.words[src];
     outputData.words[dst+1u] = 1u;
     outputData.words[dst+2u] = inputData.words[src+1u];
     outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
 }
+void writeCommand(uint index, uint rank) { writePoolCommand(index, rank, p.outputWord); }
 void main()
 {
+    if (batchedPools) {
+        // Pools occupy whole workgroups. Only their header's live extent changes
+        // before submission; all pool regions remain disjoint and ordered.
+        uint index = gl_GlobalInvocationID.x, lane = gl_LocalInvocationID.x;
+        if (index >= inputData.words[p.inputWord + 37u]) return;
+        uint head = p.inputWord + 64u + gl_WorkGroupID.x * 64u * 12u;
+        uint first = inputData.words[head + 3u], count = inputData.words[head + 7u];
+        uint outputWord = p.outputWord + inputData.words[head + 11u];
+        uint localIndex = index - first, group = (index - first) / 64u;
+        uint groups = (count + 63u) / 64u;
+        uint scratch = outputWord + count * 5u, totals = scratch + count * 2u;
+        if (!scatterDraws) {
+            uint keep = 0u;
+            if (localIndex < count) {
+                // Counted draws never consume the unused tail. Devices without
+                // indirect-count still need the original zero-command tail.
+                if (!countedPools)
+                    for (uint i = 0u; i < 5u; i++) outputData.words[outputWord + localIndex * 5u + i] = 0u;
+                keep = hidden(index) ? 0u : 1u;
+            }
+            visible[lane] = keep;
+            barrier();
+            for (uint step = 1u; step < 64u; step <<= 1u) {
+                uint addend = lane >= step ? visible[lane - step] : 0u;
+                barrier(); visible[lane] += addend; barrier();
+            }
+            if (localIndex < count) {
+                outputData.words[scratch + localIndex * 2u] = keep;
+                outputData.words[scratch + localIndex * 2u + 1u] = visible[lane] - keep;
+            }
+            if (lane == 63u) outputData.words[totals + group] = visible[lane];
+            if (groups == 1u) {
+                memoryBarrierBuffer(); barrier();
+                if (keep != 0u) writePoolCommand(index, visible[lane] - keep, outputWord);
+                if (lane == 63u) outputData.words[totals + groups] = visible[lane];
+            }
+            return;
+        }
+        if (groups == 1u) return;
+        uint prefix = 0u;
+        // Once per workgroup, rather than once per surviving part.
+        if (lane == 0u) {
+            for (uint i = 0u; i < group; i++) prefix += outputData.words[totals + i];
+            visible[0] = prefix;
+            if (group + 1u == groups)
+                outputData.words[totals + groups] = prefix + outputData.words[totals + group];
+        }
+        barrier();
+        if (localIndex < count && outputData.words[scratch + localIndex * 2u] != 0u)
+            writePoolCommand(index, visible[0] + outputData.words[scratch + localIndex * 2u + 1u], outputWord);
+        return;
+    }
     if (!compactDraws) {
         uint index = gl_GlobalInvocationID.x;
         uint count = min(p.count, inputData.words[p.inputWord + 37u]);

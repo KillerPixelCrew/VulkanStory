@@ -1206,7 +1206,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
     public void DiscardContents(VulkanTexture texture)
     {
         ResourceStateTracker tracker = texture.Sync;
-        lock (tracker) tracker.Discard();
+        lock (tracker.Gate) tracker.Discard();
     }
 
     // ------------------------------------------------------------------ barriers
@@ -1215,7 +1215,7 @@ internal sealed unsafe partial class TextureManager : IDisposable
     // thread under the upload lock and the frame thread records without it, so
     // the shared batcher is used under its own lock, one Require+Flush at a time.
     private readonly BarrierBatcher _barriers;
-    private readonly object _barrierLock = new();
+    private readonly System.Threading.Lock _barrierLock = new();
 
     /// <summary>
     /// Whether a rendering scope is open in a command buffer; the device answers

@@ -378,8 +378,9 @@ internal static partial class GpuParticleSimulation
     private static bool BeforeTick(ParticleGeneric __instance, float __0, float __1, ICoreClientAPI __2, ParticlePhysics __3, out TickMeasurement __state)
     {
         bool track = Benchmark && __instance.VertexFlags == BenchmarkMarker;
-        __state = new TickMeasurement(track ? Stopwatch.GetTimestamp() : 0, PerformancePatchSet.Current?.GpuParticleSimulation == true, false,
-            unchecked((byte)(TickCount(__instance) + 1)) > 2);
+        bool requested = PerformancePatchSet.Current?.GpuParticleSimulation == true;
+        __state = new TickMeasurement(track ? Stopwatch.GetTimestamp() : 0, requested, false,
+            requested && unchecked((byte)(TickCount(__instance) + 1)) > 2);
         bool original = TryGpuTick(__instance, __0, __1, __2, __3);
         if (!original) __state = __state with { Gpu = true };
         return original;
@@ -401,7 +402,10 @@ internal static partial class GpuParticleSimulation
     }
     private static bool TryGpuTick(ParticleGeneric __instance, float __0, float __1, ICoreClientAPI __2, ParticlePhysics __3)
     {
-        if (!Enabled || current is not { } scope || scope.Epoch != Interlocked.Read(ref epoch)) return true;
+        // BeforePool holds this state's gate until AfterPool. Disable/world
+        // transitions revoke the epoch before waiting for that gate, so the
+        // epoch check also covers them without rereading all settings per tick.
+        if (current is not { } scope || scope.Epoch != Interlocked.Read(ref epoch)) return true;
         if (Benchmark && __instance.VertexFlags != BenchmarkMarker) return true;
         var state = scope.State;
         if (state.Rendered.Remove(__instance, out var lastRender)) lastRender.Dispose();
@@ -430,7 +434,7 @@ internal static partial class GpuParticleSimulation
             // gate, using the cache prefix observed before confirmation grew it.
             if (CheckSimulation) Check(batch, index, populatedSize);
             Apply(__instance, in result, __0, __1, __2, __3, batch, index); Interlocked.Increment(ref stepsApplied);
-            state.Rendered[__instance] = new RenderState(__instance, batch.Buffer!, index, in result);
+            state.Rendered[__instance] = new RenderState(pending.Spawn, batch.Buffer!, index, in result);
             return false;
         }
         finally { state.Remove(__instance); }
@@ -468,9 +472,10 @@ internal static partial class GpuParticleSimulation
                 // mutable providers can become eligible immediately.
                 if (particle.SecondaryParticles is { Length: > 0 } || particle.DeathParticles is { Length: > 0 } || particle.RandomVelocityChange)
                 { state.Remove(particle); continue; }
-                object spawn = ParticleMotionHistory.SpawnToken(particle);
+                object? spawn = null;
                 if (state.Pending.TryGetValue(particle, out var pending))
                 {
+                    spawn = ParticleMotionHistory.SpawnToken(particle);
                     // A prepared step whose snapshot is still the actual next input stays pending.
                     var owner = pending.Batch;
                     if (ReferenceEquals(pending.Spawn, spawn) && Matches(particle, lifeDt, dt, in owner.Input[pending.Index],
@@ -483,6 +488,9 @@ internal static partial class GpuParticleSimulation
                     particle.accum + scope.Delta * scope.GameSpeed < physics.PhysicsTickTime) continue;
                 if (!Input(particle, lifeDt, dt, out var snapshot)) continue;
                 if (batch == null && (batch = Acquire(state)) == null) return;
+                // No spawn sidecar lookup for particles rejected by admission,
+                // due-time, input or available-batch checks above.
+                spawn ??= ParticleMotionHistory.SpawnToken(particle);
                 if (!CaptureWorld(particle, physics, state, batch, dt, out var world)) continue;
                 int index = batch.Particles.Count;
                 if (batch.Input.Length <= index)

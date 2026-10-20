@@ -31,13 +31,12 @@ internal static class GpuJointPoses
             if (!ReferenceEquals(output, Output)) { Materialize(); Output = output; }
             int count = output.Length / 16;
             if (Pairs.Length != count * 32) { Pairs = new float[count * 32]; Seen = new bool[count]; }
-            Array.Clear(Pairs); Array.Clear(Seen); Nodes.Clear();
-            for (int i = 0; i < count; i++)
-                for (int d = 0; d < 4; d++) { Pairs[i * 32 + d * 5] = 1; Pairs[i * 32 + 16 + d * 5] = 1; }
+            Array.Clear(Seen); Nodes.Clear();
             if (!Walk(Owner.RootPoses, 0)) return false;
             foreach (int id in Owner.jointsById.Keys)
                 if (id < 0 || id >= count || (id > 0 && !Seen[id])) return false;
             Array.Clear(Seen);
+            IdentityPair(0);
             if (Owner.jointsById.ContainsKey(0))
             {
                 if (Snapshot != null && Snapshot.JointCount == count) Snapshot.Pairs[..32].CopyTo(Pairs);
@@ -80,6 +79,11 @@ internal static class GpuJointPoses
             if (complete) foreach (int id in Owner.jointsById.Keys) if (id != 0 && !Seen[id]) { complete = false; break; }
             if (complete)
             {
+                // Recorded products overwrite both matrices in full. Initialize
+                // only unrecorded holes, retaining the original identity value
+                // even when a node exists but did not produce a product.
+                for (int i = 1; i < Seen.Length; i++)
+                    if (!Seen[i]) IdentityPair(i);
                 if (Snapshot == null || !Snapshot.Matches(Pairs))
                 { var next = JointPoseSnapshot.Rent(Pairs); Snapshot?.Release(); Snapshot = next; }
                 Pending = true;
@@ -92,6 +96,13 @@ internal static class GpuJointPoses
                     if (Seen[i]) JointPoseSnapshot.Multiply(Pairs.AsSpan(i * 32, 16), Pairs.AsSpan(i * 32 + 16, 16), Output.AsSpan(i * 16, 16));
                 Pending = false; Snapshot?.Release(); Snapshot = null;
             }
+        }
+
+        private void IdentityPair(int id)
+        {
+            var pair = Pairs.AsSpan(id * 32, 32);
+            pair.Clear();
+            for (int d = 0; d < 4; d++) { pair[d * 5] = 1; pair[16 + d * 5] = 1; }
         }
 
         internal void Materialize()

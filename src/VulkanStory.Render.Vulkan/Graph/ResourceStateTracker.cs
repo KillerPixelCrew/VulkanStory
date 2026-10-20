@@ -58,6 +58,9 @@ internal readonly record struct ImageTransition(uint BaseMip, uint MipCount, uin
 /// </summary>
 internal sealed class ResourceStateTracker
 {
+    // Upload recording and frame recording share image state, but must not use
+    // the image-state object's monitor on the per-texture, per-draw hot path.
+    internal System.Threading.Lock Gate { get; } = new();
     private SubresourceState _whole = SubresourceState.Undefined;
     private SubresourceState[]? _split;
     private bool _uploadRegionValid;

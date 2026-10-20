@@ -692,9 +692,9 @@ public sealed unsafe partial class VulkanDevice
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
         VulkanBuffer? preparedBuffer = null;
         if (!terrainBounds.IsEmpty) _terrainOccluderMeshes.Add(meshId);
-        ulong preparedOffset = 0;
+        ulong preparedOffset = 0, preparedCountOffset = 0;
         bool prepared = !terrainBounds.IsEmpty && PrepareTerrainDraws(terrainBounds, indicesStarts, indicesSizes,
-            groupCount, terrainPlanes, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset);
+            groupCount, terrainPlanes, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset, out preparedCountOffset);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -715,7 +715,10 @@ public sealed unsafe partial class VulkanDevice
         if (prepared)
         {
             _meshes.Bind(commandBuffer, mesh!);
-            _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirect.Handle, indirectOffset, (uint)groupCount, 20);
+            if (_context.DrawIndirectCountEnabled)
+                _context.Api.CmdDrawIndexedIndirectCount(commandBuffer, indirect.Handle, indirectOffset,
+                    indirect.Handle, preparedCountOffset, (uint)groupCount, 20);
+            else _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirect.Handle, indirectOffset, (uint)groupCount, 20);
         }
         else _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
         if (_gpuTimestamps != null)

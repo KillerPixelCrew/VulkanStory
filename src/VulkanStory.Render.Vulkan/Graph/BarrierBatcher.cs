@@ -49,7 +49,7 @@ internal sealed unsafe class BarrierBatcher
     public void Require(Image image, ImageAspectFlags aspect, ResourceStateTracker tracker,
         uint baseMip, uint mipCount, uint baseLayer, uint layerCount, ResourceUsage usage, bool discard)
     {
-        lock (tracker)
+        lock (tracker.Gate)
         {
             _scratch.Clear();
             if (tracker.Require(baseMip, mipCount, baseLayer, layerCount, usage, discard, _scratch) == 0) return;
@@ -63,10 +63,11 @@ internal sealed unsafe class BarrierBatcher
 
     public void RequireUpload(VulkanTexture texture, uint mip, uint layer, int x, int y, uint width, uint height)
     {
-        lock (texture.Sync)
+        ResourceStateTracker tracker = texture.Sync;
+        lock (tracker.Gate)
         {
             _scratch.Clear();
-            texture.Sync.RequireUpload(mip, layer, x, y, width, height, _scratch);
+            tracker.RequireUpload(mip, layer, x, y, width, height, _scratch);
             foreach (ImageTransition transition in _scratch) Append(texture.Image, texture.Aspect, transition);
         }
     }

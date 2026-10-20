@@ -16,8 +16,8 @@ internal static partial class GpuParticleSimulation
         internal readonly int Index;
         internal readonly ParticleSimulationOutput Result;
         internal readonly object Spawn;
-        internal RenderState(ParticleGeneric particle, ParticleSimulationBuffer buffer, int index, in ParticleSimulationOutput result)
-        { Buffer = buffer.Retain(); Index = index; Result = result; Spawn = ParticleMotionHistory.SpawnToken(particle); }
+        internal RenderState(object spawn, ParticleSimulationBuffer buffer, int index, in ParticleSimulationOutput result)
+        { Buffer = buffer.Retain(); Index = index; Result = result; Spawn = spawn; }
         public void Dispose() => Buffer.Dispose();
     }
 
