@@ -11,7 +11,7 @@ namespace VulkanStory.Game;
 
 internal sealed partial class GameGraphicsAdapter
 {
-    internal readonly record struct EntityVisibilityScope(EntityVisibilityInput? Previous);
+    internal readonly record struct EntityVisibilityScope(EntityVisibilityInput? Previous, bool PreviousShadowProducers);
     private static readonly AccessTools.FieldRef<ClientMain, Dictionary<long, EntityRenderer>> CullEntityRenderers =
         AccessTools.FieldRefAccess<ClientMain, Dictionary<long, EntityRenderer>>("EntityRenderers");
     private static readonly AccessTools.FieldRef<ClientMain, FrustumCulling> CullEntityFrustum =
@@ -105,7 +105,7 @@ internal sealed partial class GameGraphicsAdapter
     internal EntityVisibilityScope EnterFallingVisibilityScope(object renderer, EntityBlockFalling entity)
     {
         var gpu = RequireDevice();
-        var previous = new EntityVisibilityScope(gpu.EntityVisibility);
+        var previous = new EntityVisibilityScope(gpu.EntityVisibility, gpu.HoistEntityShadowProducers);
         gpu.EntityVisibility = null;
         if (!Performance.GpuEntityDraws.OwnsFallingFrame(renderer) ||
             aoTemporal?.CurrentClient is not ClientMain client || !CanGpuCullFalling(entity, CullEntityFrustum(client)) ||
@@ -146,8 +146,11 @@ internal sealed partial class GameGraphicsAdapter
     internal EntityVisibilityScope EnterEntityVisibilityScope(EntityRenderer renderer, bool shadow)
     {
         var device = RequireDevice();
-        var previous = new EntityVisibilityScope(device.EntityVisibility);
+        var previous = new EntityVisibilityScope(device.EntityVisibility, device.HoistEntityShadowProducers);
         device.EntityVisibility = null;
+        // Shadow draws keep their original path. Only the producers of an entity whose
+        // main draws are prepared may record ahead of the frame commands (renderer rules).
+        device.HoistEntityShadowProducers = shadow && CanGpuCullEntity(renderer.entity);
         if (shadow || !CanGpuCullEntity(renderer.entity) || aoTemporal?.CurrentClient is not ClientMain client ||
             Performance.TerrainOcclusionCull.CameraNow() is not { } camera) return previous;
         if (!CaptureEntityCullPlanes(client)) return previous;
@@ -173,12 +176,17 @@ internal sealed partial class GameGraphicsAdapter
         return previous;
     }
 
-    internal void ExitEntityVisibilityScope(EntityVisibilityScope previous) => RequireDevice().EntityVisibility = previous.Previous;
+    internal void ExitEntityVisibilityScope(EntityVisibilityScope previous)
+    {
+        var device = RequireDevice();
+        device.EntityVisibility = previous.Previous;
+        device.HoistEntityShadowProducers = previous.PreviousShadowProducers;
+    }
 
     internal EntityVisibilityScope EnterEntityMeshVisibility()
     {
         var renderer = RequireDevice();
-        var previous = new EntityVisibilityScope(renderer.EntityVisibility);
+        var previous = new EntityVisibilityScope(renderer.EntityVisibility, renderer.HoistEntityShadowProducers);
         if (renderer.EntityVisibility is not { RigidProgram: -1 } visibility) return previous;
         // Exact stock program identity and unmodified selected assets, for native and
         // translated standard alike. Missing uniforms never identify a rigid shader.

@@ -68,10 +68,12 @@ public sealed unsafe partial class VulkanDevice
     // local or world producer recorded compute at the draw. Such a dispatch ends
     // the rendering scope, so no run can continue across that draw. Hoisted draws
     // recorded all of their producer dispatches ahead of the frame commands instead.
+    // Combined animated draws joined an open run with their inputs in the slot heaps.
     internal long EntityAnimatedDrawsRecorded { get; private set; }
     internal long EntityAnimatedProducerDraws { get; private set; }
     internal long EntityAnimatedWorldOnlyProducerDraws { get; private set; }
     internal long EntityAnimatedHoistedProducerDraws { get; private set; }
+    internal long EntityAnimatedCombinedDrawsRecorded { get; private set; }
     private long _hoistedProducerDispatches;
 
     // Set only around BeginNativeDraw of a prepared animated body while shared
@@ -79,6 +81,13 @@ public sealed unsafe partial class VulkanDevice
     // into the slot's pre-graphics compute command buffer, which runs ahead of the
     // frame commands being recorded and so leaves their rendering scope open.
     private bool _hoistEntityProducers;
+    /// <summary>
+    /// Set by the game adapter around the shadow-pass dispatch of an entity whose main
+    /// draws are prepared. Its shadow draws keep their original path; only their joint
+    /// and local producers may record ahead of the frame commands, under the same rules,
+    /// so main-pass world warps reading that local geometry need not end the scope.
+    /// </summary>
+    internal bool HoistEntityShadowProducers { get; set; }
     // Producer outputs recorded into the frame commands since their last submission.
     // Pre-graphics work runs before those commands and must never read them.
     private readonly HashSet<ulong> _inScopeProducerOutputs = new();
@@ -100,18 +109,20 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>
     /// The command buffer a joint, local or world producer dispatch records into. It is
-    /// the pre-graphics one only for a prepared animated body whose GPU inputs were
-    /// neither written inline nor produced by the frame commands since their last
-    /// submission; otherwise the frame commands with their rendering scope closed,
-    /// as before. <paramref name="produced" /> is a producer output the dispatch
-    /// reads, <paramref name="first" /> and <paramref name="second" /> the mesh streams it reads.
+    /// the pre-graphics one only for a prepared animated body, or a shadow draw of such
+    /// an entity, whose GPU inputs were neither written inline nor produced by the frame
+    /// commands since their last submission; otherwise the frame commands with their
+    /// rendering scope closed, as before. <paramref name="produced" /> is a producer
+    /// output the dispatch reads, <paramref name="first" /> and <paramref name="second" />
+    /// the mesh streams it reads.
     /// </summary>
     private CommandBuffer BeginProducerCommands(out bool hoisted, VulkanBuffer? produced,
         VulkanBuffer? first = null, VulkanBuffer? second = null)
     {
         CommandBuffer frameCommands = Commands, commands = frameCommands;
         hoisted = false;
-        if (_hoistEntityProducers && ComputeDeformationEnabled && (produced == null || !ProducedInScope(produced)) &&
+        if ((_hoistEntityProducers || HoistEntityShadowProducers) && ComputeDeformationEnabled &&
+            (produced == null || !ProducedInScope(produced)) &&
             (first == null || !_uploads.WrittenByPendingFrame(first)) &&
             (second == null || !_uploads.WrittenByPendingFrame(second)) &&
             _frames.Current.TryGetPreGraphicsCommands(out CommandBuffer preGraphics))
@@ -450,6 +461,7 @@ public sealed unsafe partial class VulkanDevice
         EntityCombinedDrawsRecorded++;
         EntityPackedDrawsRecorded++;
         EntityRecordDrawsRecorded++;
+        if (arena is { Animated: true }) EntityAnimatedCombinedDrawsRecorded++;
         return true;
     }
 
@@ -469,7 +481,7 @@ public sealed unsafe partial class VulkanDevice
 
     private void BeginEntityDrawFrame(int slot)
     {
-        _entityDrawBatch = null; EntityVisibility = null; EndEntityDrawRun();
+        _entityDrawBatch = null; EntityVisibility = null; HoistEntityShadowProducers = false; EndEntityDrawRun();
         BeginEntityGeometryFrame(slot);
         BeginEntityRecordFrame(slot);
         if (_entityInputOffsets.Length > slot) _entityInputOffsets[slot] = 0;
