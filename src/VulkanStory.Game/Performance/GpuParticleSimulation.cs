@@ -154,6 +154,7 @@ internal static partial class GpuParticleSimulation
     internal static double GpuBenchmarkMilliseconds => Interlocked.Read(ref gpuBenchmarkTicks) * 1000.0 / Stopwatch.Frequency;
     internal static double FallbackBenchmarkMilliseconds => Interlocked.Read(ref fallbackBenchmarkTicks) * 1000.0 / Stopwatch.Frequency;
     private static double maximumFloatError, maximumPositionError;
+    private static int checkFailureLogged;
     private static readonly object checkGate = new();
     internal static long StepsApplied => Interlocked.Read(ref stepsApplied);
     internal static long Checks => Interlocked.Read(ref checks);
@@ -520,8 +521,7 @@ internal static partial class GpuParticleSimulation
         if (batch.Backend!.TryComplete(batch.Ticket) is not { } buffer) { state.Backlogged = true; return false; }
         batch.Buffer = buffer; batch.Ticket = 0; batch.Ready = true;
         if (HeadlessHarnessOptions.Enabled && !Benchmark)
-            Check(batch.Input.AsSpan(0, batch.Particles.Count), batch.World.AsSpan(0, batch.Particles.Count),
-                CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells), batch.Output.AsSpan(0, batch.Particles.Count));
+            Check(batch);
         return true;
     }
     private static void RetireStale(PoolState state)
@@ -591,9 +591,13 @@ internal static partial class GpuParticleSimulation
         Interlocked.Increment(ref gpuDirectionSteps);
     }
 
-    private static void Check(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<ParticleSimulationWorldInput> world,
-        ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells, ReadOnlySpan<ParticleSimulationOutput> output)
+    private static void Check(Batch batch)
     {
+        var input = batch.Input.AsSpan(0, batch.Particles.Count);
+        var world = batch.World.AsSpan(0, batch.Particles.Count);
+        var boxes = CollectionsMarshal.AsSpan(batch.Boxes);
+        var liquidCells = CollectionsMarshal.AsSpan(batch.LiquidCells);
+        var output = batch.Output.AsSpan(0, batch.Particles.Count);
         double floatError = 0, positionError = 0;
         int checkedCount = 0;
         uint populatedSize = world.IsEmpty ? 0 : world[0].InitialPopulatedSize;
@@ -619,7 +623,11 @@ internal static partial class GpuParticleSimulation
             if ((flags & ParticleSimulationOutput.RequiresCpuCollision) != 0)
             {
                 if (result.CollisionFlags != ParticleSimulationOutput.RequiresCpuCollision || result.QueryBounds != queryBounds)
+                {
+                    ReportCheckFailure(batch, i, "collision callback boundary", $"flags={ParticleSimulationOutput.RequiresCpuCollision:X8}, bounds={queryBounds:X8}",
+                        $"flags={result.CollisionFlags:X8}, bounds={result.QueryBounds:X8}");
                     floatError = double.MaxValue;
+                }
                 break;
             }
             double factor = state.Control.W > 0.5f ? 0.999 : 1;
@@ -633,9 +641,16 @@ internal static partial class GpuParticleSimulation
                     maxX = (int)state.X + Offset(12), maxY = (int)state.Y + Offset(16), maxZ = (int)state.Z + Offset(20);
                 int cellX = (int)x, cellY = (int)(y + 0.15000000596046448), cellZ = (int)z;
                 if (cellX < minX || cellX > maxX || cellY < minY || cellY > maxY || cellZ < minZ || cellZ > maxZ)
-                { floatError = double.MaxValue; break; }
+                {
+                    ReportCheckFailure(batch, i, "liquid snapshot cell", $"[{minX},{minY},{minZ}]..[{maxX},{maxY},{maxZ}]", $"{cellX},{cellY},{cellZ}");
+                    floatError = double.MaxValue; break;
+                }
                 int address = (int)snapshot.LiquidStart + ((cellZ - minZ) * (maxY - minY + 1) + cellY - minY) * (maxX - minX + 1) + cellX - minX;
-                if ((uint)address >= liquidCells.Length) { floatError = double.MaxValue; break; }
+                if ((uint)address >= liquidCells.Length)
+                {
+                    ReportCheckFailure(batch, i, "liquid snapshot address", $"0..{liquidCells.Length - 1}", address);
+                    floatError = double.MaxValue; break;
+                }
                 // Stock short circuit avoids the IsLiquid callback after age
                 // expiry unless the third-tick liquid policy also requires it.
                 bool needsCell = (snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInLiquid) != 0 ||
@@ -643,7 +658,11 @@ internal static partial class GpuParticleSimulation
                 if (needsCell && liquidCells[address] == 2)
                 {
                     if (result.CollisionFlags != ParticleSimulationOutput.RequiresCpuCollision || result.QueryBounds != queryBounds)
+                    {
+                        ReportCheckFailure(batch, i, "liquid callback boundary", $"flags={ParticleSimulationOutput.RequiresCpuCollision:X8}, bounds={queryBounds:X8}",
+                            $"flags={result.CollisionFlags:X8}, bounds={result.QueryBounds:X8}");
                         floatError = double.MaxValue;
+                    }
                     break;
                 }
                 bool liquid = liquidCells[address] == 1;
@@ -667,6 +686,7 @@ internal static partial class GpuParticleSimulation
                 uint direction = (uint)(unchecked((byte)(velocity.X / length * 128f)) |
                     unchecked((byte)(velocity.Y / length * 128f)) << 8 | unchecked((byte)(velocity.Z / length * 128f)) << 16);
                 policyMismatch |= direction != result.Direction;
+                if (direction != result.Direction) ReportCheckFailure(batch, i, "direction", direction, result.Direction);
                 if ((visualPolicy & ParticleSimulationWorldInput.Environment) != 0)
                 {
                     int light = observedWorld.LightEmission == int.MaxValue ? int.MaxValue :
@@ -675,6 +695,7 @@ internal static partial class GpuParticleSimulation
                     if (emission != 0) light = Math.Max(light & 255, emission & 255) |
                         Math.Max(light & 65280, emission & 65280) | Math.Max(light & 16711680, emission & 16711680);
                     policyMismatch |= result.Light != light;
+                    if (result.Light != light) ReportCheckFailure(batch, i, "light", light, result.Light);
                     if ((visualPolicy & ParticleSimulationWorldInput.Rain) != 0)
                     {
                         var interpolation = observedWorld.RainInterpolation;
@@ -687,6 +708,7 @@ internal static partial class GpuParticleSimulation
                 }
             }
             policyMismatch |= result.VisualPolicy != visualPolicy;
+            if (result.VisualPolicy != visualPolicy) ReportCheckFailure(batch, i, "visual/rain policy", visualPolicy, result.VisualPolicy);
             uint expectedFlags = state.Control.W > 0.5f ? flags | reused << ParticleSimulationOutput.ReusedShift : 0;
             var delta = Vector4.Abs(result.VelocityAge - new Vector4(velocity, age));
             var motionDelta = Vector4.Abs(result.MotionAlive - new Vector4(motion, alive ? 1 : 0));
@@ -694,14 +716,30 @@ internal static partial class GpuParticleSimulation
             error = Math.Max(error, Math.Abs(expectedDrag - result.Drag));
             error = Math.Max(error, Math.Max(Math.Max(motionDelta.X, motionDelta.Y), Math.Max(motionDelta.Z, motionDelta.W)));
             if (expectedFlags != result.CollisionFlags || queryBounds != result.QueryBounds || policyMismatch) error = double.MaxValue;
+            if (expectedFlags != result.CollisionFlags) ReportCheckFailure(batch, i, "collision flags/cache prefix", expectedFlags, result.CollisionFlags);
+            if (queryBounds != result.QueryBounds) ReportCheckFailure(batch, i, "query bounds/liquid policy", queryBounds, result.QueryBounds);
+            if (!double.IsFinite(error) || error > 0.00001)
+                ReportCheckFailure(batch, i, "velocity/age/motion/alive/drag", $"{new Vector4(velocity, age)}; {new Vector4(motion, alive ? 1 : 0)}; {expectedDrag:R}",
+                    $"{result.VelocityAge}; {result.MotionAlive}; {result.Drag:R}");
             floatError = Math.Max(floatError, double.IsFinite(error) ? error : double.MaxValue);
             error = Math.Max(Math.Abs(result.X - (state.X + (double)motion.X * factor)), Math.Max(
                 Math.Abs(result.Y - (state.Y + (double)motion.Y * factor)), Math.Abs(result.Z - (state.Z + (double)motion.Z * factor))));
             positionError = Math.Max(positionError, double.IsFinite(error) ? error : double.MaxValue);
+            if (!double.IsFinite(error) || error > 0.0001)
+                ReportCheckFailure(batch, i, "position", $"{x:R},{y:R},{z:R}", $"{result.X:R},{result.Y:R},{result.Z:R}");
             checkedCount++;
         }
         lock (checkGate) { maximumFloatError = Math.Max(maximumFloatError, floatError); maximumPositionError = Math.Max(maximumPositionError, positionError); }
         Interlocked.Add(ref checks, checkedCount);
+    }
+    private static void ReportCheckFailure(Batch batch, int index, string field, object cpu, object gpu)
+    {
+        if (Interlocked.CompareExchange(ref checkFailureLogged, 1, 0) != 0) return;
+        var input = batch.Input[index];
+        if (current is { } scope)
+            Game(scope.Pool).Logger.Warning("VulkanStory: particle check failed: field={0}, spawn={1:X8}, batchCall={2}, index={3}, CPU={4}, GPU={5}, inputPosition=({6:R},{7:R},{8:R}), inputVelocity={9}, GPUVelocity={10}.",
+                field, RuntimeHelpers.GetHashCode(batch.Spawns[index]), batch.Call, index, cpu, gpu,
+                input.X, input.Y, input.Z, input.VelocityGravity, batch.Output[index].VelocityAge);
     }
     private static ParticleEvolution AtPhase(ParticleEvolution value, float phase) =>
         new(value.First, value.Factor, phase, value.Maximum, value.Function, value.Limited != 0);
