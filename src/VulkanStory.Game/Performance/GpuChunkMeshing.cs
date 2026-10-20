@@ -24,14 +24,15 @@ internal static partial class GpuChunkMeshing
     private static bool faulted;
     private static int generation;
     private static int atlasGeneration;
+    private static int dimension;
     private static ClientMain? world;
     [ThreadStatic] private static Work? current;
     [ThreadStatic] private static bool skippedPublication;
     private static readonly ConcurrentDictionary<Type, bool> AoTypes = new();
     private static readonly ConditionalWeakTable<MeshData, Payload> Payloads = new();
-    // Chunks whose blended pass/atlas meshes mix GPU and CPU producers. Their
-    // blended producers stay on the CPU, retaining one stock-ordered mesh.
-    private static readonly ConditionalWeakTable<ClientChunk, object> OrderedCpu = new();
+    // Only the failed dirty revision stays on the CPU, with one retry per
+    // full/edge revision. Stock retry requeues do not mark a chunk dirty again.
+    private static readonly ConditionalWeakTable<ClientChunk, OrderedFallback> OrderedCpu = new();
     private static readonly HashSet<Payload> Pending = new();
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Solid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkBlocksExt");
     private static readonly AccessTools.FieldRef<ChunkTesselator, Block[]> Fluid = AccessTools.FieldRefAccess<ChunkTesselator, Block[]>("currentChunkFluidBlocksExt");
@@ -58,6 +59,11 @@ internal static partial class GpuChunkMeshing
     private static readonly FieldInfo CullField = AccessTools.Field(typeof(Block), nameof(Block.FaceCullMode));
     private static readonly MethodInfo DecorCull = AccessTools.Method(typeof(ChunkTesselator), "CullVisibleFacesWithDecor",
         [typeof(Dictionary<int, Block>), typeof(Dictionary<int, Block>)]);
+    private static readonly MethodInfo DecorBuild = AccessTools.Method(typeof(ChunkTesselator), "BuildDecorPolygons");
+    private static readonly MethodInfo MarkDirty = AccessTools.Method(typeof(ClientWorldMap), nameof(ClientWorldMap.MarkChunkDirty),
+        [typeof(int), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(Action), typeof(bool), typeof(bool)]);
+    private static readonly MethodInfo SetDirty = AccessTools.Method(typeof(ClientWorldMap), nameof(ClientWorldMap.SetChunkDirty),
+        [typeof(long), typeof(bool), typeof(bool), typeof(bool)]);
     private static readonly MethodInfo BeforeFrame = AccessTools.Method(typeof(ChunkTesselatorManager), nameof(ChunkTesselatorManager.OnBeforeFrame), [typeof(float)]);
     private static readonly ConstructorInfo ManagerStart = AccessTools.Constructor(typeof(ChunkTesselatorManager), [typeof(ClientMain)]);
     private static readonly MethodInfo ManagerDispose = AccessTools.Method(typeof(ChunkTesselatorManager), nameof(ChunkTesselatorManager.Dispose), [typeof(ClientMain)]);
@@ -73,16 +79,19 @@ internal static partial class GpuChunkMeshing
      AccessTools.PropertyGetter(typeof(Block), nameof(Block.ForFluidsLayer)),
      AccessTools.PropertyGetter(typeof(BlockForFluidsLayer), nameof(Block.ForFluidsLayer))];
 
-    private sealed class Work(ChunkTesselator producer, IChunkMeshBatch batch, int epoch, ClientChunk chunk,
-        int x, int y, int z, bool edgeOnly, bool orderedCpu)
+    private sealed class Work(ChunkTesselator producer, IChunkMeshBatch batch, int epoch,
+        int x, int y, int z, bool edgeOnly, OrderedFallback ordered)
     {
         internal readonly ChunkTesselator Producer = producer;
         internal readonly IChunkMeshBatch Batch = batch;
         internal readonly int Generation = epoch;
         internal readonly int AtlasGeneration = atlasGeneration;
-        internal readonly ClientChunk Chunk = chunk;
         internal readonly int X = x, Y = y, Z = z;
-        internal readonly bool EdgeOnly = edgeOnly, OrderedCpu = orderedCpu;
+        internal readonly bool EdgeOnly = edgeOnly;
+        internal readonly OrderedFallback Ordered = ordered;
+        internal readonly long Revision = ordered.Revision;
+        internal readonly bool OrderedCpu = (edgeOnly ? ordered.Edge : ordered.Full) == ordered.Revision;
+        internal bool Decor;
         internal readonly List<ChunkMeshFace> Faces = new();
         internal readonly List<ChunkMeshBin> Bins = new();
         // Identities whose original CPU face culling is retained. Their faces
@@ -116,7 +125,9 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             bool next = requested && !faulted && device.ChunkMeshingAvailable;
-            if (ReferenceEquals(backend, device) && enabled == next) return;
+            int nextDimension = world?.EntityPlayer?.Pos.Dimension ?? 0;
+            if (ReferenceEquals(backend, device) && enabled == next && dimension == nextDimension) return;
+            dimension = nextDimension; OrderedCpu.Clear();
             backend = device; enabled = next; generation++;
             // Retain the visible pools until the original dirty-chunk queue
             // supplies replacements, including both center and border parts.
@@ -129,6 +140,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             generation++; atlasGeneration++; world = null; enabled = false;
+            OrderedCpu.Clear();
             pending = Pending.ToArray();
         }
         foreach (var payload in pending) payload.Dispose();
@@ -149,6 +161,10 @@ internal static partial class GpuChunkMeshing
         harmony.Patch(Visible, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(PrepareVisibility)),
             transpiler: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(VisibilityTranspiler)));
         harmony.Patch(DecorCull, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(DecorVisibility)));
+        harmony.Patch(DecorBuild, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(BeginDecor)),
+            postfix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(EndDecor)));
+        harmony.Patch(MarkDirty, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(MarkedDirty)));
+        harmony.Patch(SetDirty, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(IndexedDirty)));
         harmony.Patch(Cube, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(CaptureCube)));
         harmony.Patch(Bleeding, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(CaptureCube)));
         harmony.Patch(Insert, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Reserve)));
@@ -174,6 +190,7 @@ internal static partial class GpuChunkMeshing
             if (ReferenceEquals(world, next)) return;
             retired = Pending.ToArray();
             world = next;
+            dimension = next.EntityPlayer?.Pos.Dimension ?? 0; OrderedCpu.Clear();
             generation++; atlasGeneration++;
             // Only a missed loading attachment needs this fallback rebuild.
             // The normal WorldReady event preserves jobs for the same owner.
@@ -193,9 +210,11 @@ internal static partial class GpuChunkMeshing
             Bleeding?.ReturnType != typeof(void) || CubeHeight?.FieldType != typeof(float) || BleedingHeight?.FieldType != typeof(float) ||
             UnusedDispose == null || Visible?.ReturnType != typeof(bool) || Insert?.ReturnType != typeof(ModelDataPoolLocation) ||
             ManagerStart == null || ManagerDispose?.ReturnType != typeof(void) || DecorCull?.ReturnType != typeof(void) ||
+            DecorBuild?.ReturnType != typeof(void) ||
+            MarkDirty?.ReturnType != typeof(void) || SetDirty?.ReturnType != typeof(void) ||
             StockPolicies.Any(m => m == null))
             throw new InvalidOperationException("Official chunk meshing signatures changed.");
-        foreach (var method in new[] { Process, BeginProcess, Cube, Bleeding, Insert, Visible, DecorCull })
+        foreach (var method in new[] { Process, BeginProcess, Cube, Bleeding, Insert, Visible, DecorCull, DecorBuild })
             if (method.GetMethodBody() == null || Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
                 throw new InvalidOperationException("Chunk producer/pool has an external replacement.");
         // Validate the physical ABI used by the unchanged SSBO terrain shaders.
@@ -218,7 +237,7 @@ internal static partial class GpuChunkMeshing
             if (!ReferenceEquals(world, game) || !enabled || backend == null || !game.Platform.UseSSBOs ||
                 PerformancePatchSet.Current?.GpuChunkMeshing != true) return;
             // A late foreign producer patch keeps its original path.
-            foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible, DecorCull })
+            foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
             foreach (MethodInfo method in StockPolicies)
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
@@ -232,8 +251,8 @@ internal static partial class GpuChunkMeshing
             }
             if (lease == null) return;
             ClientChunk chunk = SourceChunk(__3);
-            current = new Work(__instance, lease, generation, chunk, __0 * 32, __1 * 32 % 32768, __2 * 32, __4,
-                OrderedCpu.TryGetValue(chunk, out _));
+            current = new Work(__instance, lease, generation, __0 * 32, __1 * 32 % 32768, __2 * 32, __4,
+                OrderedCpu.GetValue(chunk, _ => new OrderedFallback()));
         }
     }
     private static void Snapshot(ChunkTesselator __instance, int __0, int __1, int __2, ClientChunk __3, bool __4, bool __result)
@@ -355,6 +374,13 @@ internal static partial class GpuChunkMeshing
         }
     }
 
+    // Stock's alternating-offset decor branch does not set isDecorTesselate.
+    // Guard the entire pass, including decorations matching the attached block.
+    private static void BeginDecor(ChunkTesselator __instance)
+    { if (current is { } work && ReferenceEquals(work.Producer, __instance)) work.Decor = true; }
+    private static void EndDecor(ChunkTesselator __instance)
+    { if (current is { } work && ReferenceEquals(work.Producer, __instance)) work.Decor = false; }
+
     // Used only when an admitted producer cannot fit or its particular cell has
     // custom AO/fluid/shape policy, and for decor-bearing cells. Other
     // GPU-culled cells never run these CPU tests.
@@ -383,7 +409,7 @@ internal static partial class GpuChunkMeshing
     }
     private static bool Cpu(TCTCache vars)
     {
-        if (current is { } work && ReferenceEquals(work.Producer, vars.tct) && !vars.isDecorTesselate &&
+        if (current is { } work && ReferenceEquals(work.Producer, vars.tct) && !work.Decor && !vars.isDecorTesselate &&
             ReferenceEquals(vars.block, Solid(vars.tct)[vars.extIndex3d]) && GpuCulled(work, vars.block))
             vars.drawFaceFlags &= CpuFaces(vars.tct, vars.block, vars.extIndex3d, vars.posX, vars.posY, vars.posZ);
         return true;
@@ -392,7 +418,7 @@ internal static partial class GpuChunkMeshing
     private static bool CaptureCube(object __instance, TCTCache __0)
     {
         Work? work = current; TCTCache vars = __0;
-        if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer) || vars.isDecorTesselate ||
+        if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer) || work.Decor || vars.isDecorTesselate ||
             vars.occ != 0.67f || vars.halfoccInverted != 0.0196875f ||
             vars.IsDecorOnJson || !ReferenceEquals(vars.blockFaceVertices, CubeFaceVertices.blockFaceVertices) ||
             !SupportedProducer(work, vars.block) || !SupportedPass(work, vars.RenderPass) ||
@@ -509,7 +535,7 @@ internal static partial class GpuChunkMeshing
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "ordered-bin-mixed", new { mixed });
                 // A blended mesh shared with CPU producers cannot keep the stock
                 // face order across two parts. Retry with original producers.
-                OrderedCpu.AddOrUpdate(work.Chunk, Gate);
+                RememberOrdered(work);
                 UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("Blended GPU chunk faces share a CPU mesh.");
             }
             ChunkMeshRange[] ranges;
@@ -576,7 +602,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             if (!ReferenceEquals(world, Game(__instance))) return;
-            atlasGeneration++; generation++; world?.RedrawAllBlocks();
+            atlasGeneration++; generation++; OrderedCpu.Clear(); world?.RedrawAllBlocks();
         }
     }
     private static bool Publishable(TesselatedChunk tesschunk, ClientChunk hostChunk)

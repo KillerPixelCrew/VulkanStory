@@ -24,6 +24,7 @@ public sealed unsafe partial class VulkanDevice
         internal sealed class Tile
         {
             internal VulkanBuffer? Voxels, Input, Neighbours, Bins, Order, Output;
+            internal bool CachedOrder;
             internal CommandPool Pool;
             internal CommandBuffer Command;
             internal DescriptorPool Descriptors;
@@ -103,7 +104,19 @@ public sealed unsafe partial class VulkanDevice
                 tile.Input = new VulkanBuffer(context, Capacity * 64UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
                 tile.Neighbours = new VulkanBuffer(context, 54UL * 20, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
                 tile.Bins = new VulkanBuffer(context, BinCapacity * 12UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
-                tile.Order = new VulkanBuffer(context, Capacity * 4UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                try
+                {
+                    // Dedicated memory makes the whole mapped cache range ours,
+                    // including non-coherent atom padding. Keep one rank buffer per lease.
+                    tile.Order = new VulkanBuffer(context, Capacity * 4UL, BufferUsageFlags.StorageBufferBit,
+                        MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCachedBit, MemoryPoolClass.Dedicated);
+                    tile.CachedOrder = true;
+                }
+                catch (VulkanMemoryAllocationException error) when
+                    (error.Result is Result.ErrorFeatureNotPresent or Result.ErrorOutOfDeviceMemory)
+                {
+                    tile.Order = new VulkanBuffer(context, Capacity * 4UL, BufferUsageFlags.StorageBufferBit, memory, MemoryPoolClass.Staging);
+                }
                 // Graphics queue ownership is retained throughout production/publication.
                 // No optional async queue capability or queue-family transfers are needed.
                 tile.Output = new VulkanBuffer(context, Capacity * 80UL, BufferUsageFlags.StorageBufferBit,
@@ -151,7 +164,11 @@ public sealed unsafe partial class VulkanDevice
             Copy(voxels, tile.Voxels!); Copy(faces, tile.Input!); Copy(neighbours, tile.Neighbours!);
             var bins = new Span<uint>((void*)tile.Bins!.Mapped, BinCapacity * 3); bins.Clear();
             if (faces.Length == 0) return [];
+            // Also drain debug poison or host writes left by an aborted rank pass
+            // before the GPU overwrites these cache lines.
+            OrderCache(tile, invalidate: false);
             Dispatch(tile, faces.Length, 0); Wait(tile);
+            OrderCache(tile, invalidate: true);
             // Rank visible faces within their bin in input order. Inputs arrive
             // in the stock producer's emission order, so every bin, including
             // blended passes, keeps the order of the original CPU mesh.
@@ -171,8 +188,18 @@ public sealed unsafe partial class VulkanDevice
                 if (count > 0) ranges.Add(new(i, first, count));
                 first += count;
             }
+            OrderCache(tile, invalidate: false);
             Dispatch(tile, faces.Length, 1); Wait(tile);
             return ranges.ToArray();
+        }
+        private void OrderCache(Tile tile, bool invalidate)
+        {
+            if (!tile.CachedOrder) return; // The fallback is host coherent.
+            var range = new MappedMemoryRange { SType = StructureType.MappedMemoryRange,
+                Memory = tile.Order!.Allocation.Memory, Offset = 0, Size = Vk.WholeSize };
+            VulkanResult.Check(invalidate
+                ? context.Api.InvalidateMappedMemoryRanges(context.Device, 1, &range)
+                : context.Api.FlushMappedMemoryRanges(context.Device, 1, &range), "chunk mesh order cache");
         }
         private static void Copy<T>(ReadOnlySpan<T> source, VulkanBuffer buffer) where T : unmanaged =>
             MemoryMarshal.AsBytes(source).CopyTo(new Span<byte>((void*)buffer.Mapped, checked((int)buffer.Size)));
