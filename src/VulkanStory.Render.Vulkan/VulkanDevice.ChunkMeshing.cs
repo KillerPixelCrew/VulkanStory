@@ -12,6 +12,8 @@ public sealed unsafe partial class VulkanDevice
     private long chunkMeshingFacesPublished;
     internal bool ChunkMeshingAvailable => chunkMeshing?.Available == true;
     internal long ChunkMeshingJobsCompleted => chunkMeshing?.JobsCompleted ?? 0;
+    internal long ChunkMeshingPayloadsDetached => chunkMeshing?.PayloadsDetached ?? 0;
+    internal long ChunkMeshingPayloadStorageBytes => chunkMeshing?.PayloadStorageBytes ?? 0;
     /// <summary>Generated faces whose real pool publication commands were recorded (not GPU execution proof).</summary>
     internal long ChunkMeshingFacesPublished => Interlocked.Read(ref chunkMeshingFacesPublished);
     internal IChunkMeshBatch? LeaseChunkMeshing(int x, int y, int z, int chunkIdentity, long revision,
@@ -69,7 +71,7 @@ public sealed unsafe partial class VulkanDevice
              new DescriptorBufferInfo(faces.Handle, 0, faces.Size), new DescriptorBufferInfo(colors.Handle, 0, colors.Size)]);
         // Pool buffers can have reads already recorded in this very command buffer.
         // Preserve their placement and order the range update after those readers.
-        BufferMemoryBarrier2* barriers = stackalloc BufferMemoryBarrier2[2];
+        BufferMemoryBarrier2* barriers = stackalloc BufferMemoryBarrier2[3];
         for (int i = 0; i < 2; i++) barriers[i] = new BufferMemoryBarrier2
         {
             SType = StructureType.BufferMemoryBarrier2, Buffer = i == 0 ? faces.Handle : colors.Handle,
@@ -78,12 +80,22 @@ public sealed unsafe partial class VulkanDevice
             DstStageMask = PipelineStageFlags2.ComputeShaderBit, DstAccessMask = AccessFlags2.ShaderStorageWriteBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
         };
-        var dependency = new DependencyInfo { SType = StructureType.DependencyInfo, BufferMemoryBarrierCount = 2, PBufferMemoryBarriers = barriers };
+        // Generate observed its fence; make its shader writes explicitly visible
+        // to this publication read on the same graphics queue as well.
+        barriers[2] = new BufferMemoryBarrier2
+        {
+            SType = StructureType.BufferMemoryBarrier2, Buffer = job.Output.Handle,
+            Offset = (ulong)range.FirstFace * 80, Size = count * 80,
+            SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+            DstStageMask = PipelineStageFlags2.ComputeShaderBit, DstAccessMask = AccessFlags2.ShaderStorageReadBit,
+            SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
+        };
+        var dependency = new DependencyInfo { SType = StructureType.DependencyInfo, BufferMemoryBarrierCount = 3, PBufferMemoryBarriers = barriers };
         _context.Api.CmdPipelineBarrier2(command, &dependency);
         _uploads.NoteUse(command, faces);
         _uploads.NoteUse(command, colors);
-        // Each recorded copy holds a lease until this frame's submitted timeline
-        // has retired. Disposing the game's count-only MeshData cannot recycle it.
+        // Each recorded publication retains its payload storage (or the lease
+        // on capacity fallback) until this frame's submitted timeline retires.
         job.RetainGpuRead();
         try { _frames.DeferDeletion(new ChunkMeshGpuRead(job)); }
         catch { job.ReleaseGpuRead(); throw; }
@@ -102,6 +114,7 @@ public sealed unsafe partial class VulkanDevice
             barriers[i].DstStageMask = PipelineStageFlags2.AllCommandsBit;
             barriers[i].DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit;
         }
+        dependency.BufferMemoryBarrierCount = 2;
         _context.Api.CmdPipelineBarrier2(command, &dependency);
         Interlocked.Add(ref chunkMeshingFacesPublished, range.FaceCount);
     }

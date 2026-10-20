@@ -180,6 +180,8 @@ internal static class HeadlessChunkMeshingProbe
             run.Record("cpu-no-gpu-admission", detail, batch);
     }
     internal static void Event(long batch, string stage, object detail) => For(batch)?.Record(stage, detail, batch);
+    internal static void PayloadDisposed(long batch, ChunkMeshRange range, double ageMilliseconds, string terminalReason) =>
+        Event(batch, "payload-disposed", new { range, ageMilliseconds, terminalReason });
     private static Run? For(long batch)
     {
         Run? run = Volatile.Read(ref active);

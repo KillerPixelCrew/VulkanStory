@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -101,22 +102,32 @@ internal static partial class GpuChunkMeshing
         internal ChunkMeshVoxel[]? Voxels;
         internal long ProbeBatch;
         internal bool Active;
+        internal readonly List<Payload> Payloads = new();
     }
-    internal sealed class Payload(IChunkMeshBatch batch, ChunkMeshRange range, int epoch, int atlasEpoch) : IDisposable
+    internal sealed class Payload(IChunkMeshBatch batch, ChunkMeshRange range, int epoch, int atlasEpoch, ClientChunk chunk) : IDisposable
     {
         internal readonly IChunkMeshBatch Batch = batch;
         internal readonly ChunkMeshRange Range = range;
         internal readonly int Generation = epoch;
         internal readonly int AtlasGeneration = atlasEpoch;
+        internal readonly ClientChunk Chunk = chunk;
+        private readonly long created = Stopwatch.GetTimestamp();
         internal long ProbeBatch;
         private int disposed;
-        public void Dispose()
+        internal bool IsDisposed => Volatile.Read(ref disposed) != 0;
+        public void Dispose() => Dispose("mesh-disposed");
+        internal void Dispose(string reason)
         {
-            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-            if (ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(ProbeBatch, "payload-disposed", new { Range });
-            lock (Gate) Pending.Remove(this);
-            Batch.Dispose();
-            GC.SuppressFinalize(this);
+            lock (Gate)
+            {
+                if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+                if (reason == "superseded") Interlocked.Increment(ref payloadsSuperseded);
+                if (ProbeBatch != 0) HeadlessChunkMeshingProbe.PayloadDisposed(ProbeBatch, Range,
+                    Stopwatch.GetElapsedTime(created).TotalMilliseconds, reason);
+                Pending.Remove(this);
+                Batch.Dispose();
+                GC.SuppressFinalize(this);
+            }
         }
         ~Payload() { Dispose(); }
     }
@@ -128,6 +139,7 @@ internal static partial class GpuChunkMeshing
             bool next = requested && !faulted && device.ChunkMeshingAvailable;
             int nextDimension = world?.EntityPlayer?.Pos.Dimension ?? 0;
             if (ReferenceEquals(backend, device) && enabled == next && dimension == nextDimension) return;
+            RetirePending(dimension != nextDimension ? "dimension-left" : "live-switch");
             dimension = nextDimension; OrderedCpu.Clear();
             backend = device; enabled = next; generation++;
             // Retain the visible pools until the original dirty-chunk queue
@@ -144,7 +156,7 @@ internal static partial class GpuChunkMeshing
             OrderedCpu.Clear();
             pending = Pending.ToArray();
         }
-        foreach (var payload in pending) payload.Dispose();
+        foreach (var payload in pending) payload.Dispose("world-left");
         if (HeadlessChunkMeshingProbe.Active) HeadlessChunkMeshingProbe.WorldLeft();
     }
     internal static bool TryPayload(MeshData data, out Payload payload) => Payloads.TryGetValue(data, out payload!);
@@ -174,9 +186,11 @@ internal static partial class GpuChunkMeshing
         harmony.Patch(AccessTools.Method(typeof(ChunkTesselator), nameof(ChunkTesselator.BlockTexturesLoaded)),
             prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(AtlasChanged)));
         harmony.Patch(AccessTools.Method(typeof(ChunkRenderer), nameof(ChunkRenderer.AddTesselatedChunk)),
-            prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Publishable)));
+            prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(Publishable)),
+            finalizer: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(PublicationEnded)));
         harmony.Patch(BeforeFrame, prefix: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(ResetPublication)),
             transpiler: new HarmonyMethod(typeof(GpuChunkMeshing), nameof(CallbackTranspiler)));
+        InstallPayloadLifecycle(harmony);
     }, Uninstall: WorldLeft, WorldReady: api =>
     {
         if (api.World is ClientMain next) AttachWorld(next, remesh: true);
@@ -197,7 +211,7 @@ internal static partial class GpuChunkMeshing
             // The normal WorldReady event preserves jobs for the same owner.
             if (remesh && enabled) next.RedrawAllBlocks();
         }
-        foreach (var payload in retired) payload.Dispose();
+        foreach (var payload in retired) payload.Dispose("world-replaced");
     }
     private static void LeavingWorld(ClientMain __0)
     {
@@ -222,6 +236,7 @@ internal static partial class GpuChunkMeshing
         if (Marshal.SizeOf<FaceData>() != 64 || Marshal.SizeOf<ChunkMeshFace>() != 64 || Marshal.SizeOf<ChunkMeshVoxel>() != 32)
             throw new InvalidOperationException("Chunk face ABI changed.");
         ValidatePool();
+        ValidatePayloadLifecycle();
         if (PatchProcessor.GetOriginalInstructions(Visible).Count(i => i.LoadsField(CullField)) != 1)
             throw new InvalidOperationException("Stock solid visibility anchor changed.");
         if (BeforeFrame?.ReturnType != typeof(void) || ChunkCallback?.ReturnType != typeof(void) ||
@@ -601,7 +616,7 @@ internal static partial class GpuChunkMeshing
         }
         lock (Gate)
         {
-            if (work.Generation != generation)
+            if (work.Generation != generation || SourceChunk(tessChunk).Disposed)
             {
                 work.Admission.Refuse(Refusal.World, "generation-changed", new { captured = work.Generation, current = generation });
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
@@ -628,7 +643,7 @@ internal static partial class GpuChunkMeshing
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-failed", new { error = error.Message });
                 // No partial chunk can reach callbacks/publication. Requeue once
                 // with the original CPU producers if backend generation failed.
-                enabled = false; faulted = true; generation++; UnusedDispose.Invoke(tessChunk, null);
+                enabled = false; faulted = true; generation++; RetirePending("cpu-fallback"); UnusedDispose.Invoke(tessChunk, null);
                 Game(__instance).Logger.Warning("VulkanStory: GPU chunk meshing generation failed: {0}", error.Message);
                 throw new RetryTesselationException("GPU chunk generation failed; retry with stock producers.");
             }
@@ -640,7 +655,8 @@ internal static partial class GpuChunkMeshing
                 var data = new MeshData(false) { VerticesCount = range.FaceCount * 4, IndicesCount = range.FaceCount * 6,
                     CustomInts = new CustomMeshDataPartInt() };
                 work.Batch.Retain();
-                var payload = new Payload(work.Batch, range, generation, work.AtlasGeneration) { ProbeBatch = work.ProbeBatch };
+                var payload = new Payload(work.Batch, range, generation, work.AtlasGeneration, SourceChunk(tessChunk)) { ProbeBatch = work.ProbeBatch };
+                work.Payloads.Add(payload);
                 Payloads.Add(data, payload); Pending.Add(payload);
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "payload-created",
                     new { range, generation, atlas = work.AtlasGeneration });
@@ -664,6 +680,8 @@ internal static partial class GpuChunkMeshing
     private static Exception? End(Exception? __exception, ProducerState? __state)
     {
         Work? work = current; current = __state?.Work; admission = __state?.Admission;
+        if (__exception != null && work != null)
+            foreach (var payload in work.Payloads) payload.Dispose(__exception is RetryTesselationException ? "retry-tessellation" : "producer-failed");
         if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
             new { candidates = work.Faces.Count, error = __exception?.Message });
         work?.Batch.Dispose();
@@ -685,34 +703,44 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             if (!ReferenceEquals(world, Game(__instance))) return;
-            atlasGeneration++; generation++; OrderedCpu.Clear(); world?.RedrawAllBlocks();
+            atlasGeneration++; generation++; RetirePending("atlas-changed"); OrderedCpu.Clear(); world?.RedrawAllBlocks();
         }
     }
-    private static bool Publishable(TesselatedChunk tesschunk, ClientChunk hostChunk)
+    private static bool Publishable(TesselatedChunk tesschunk, ClientChunk hostChunk, out bool __state)
     {
-        lock (Gate)
-        {
-            skippedPublication = false;
-            foreach (var part in (Centers(tesschunk) ?? []).Concat(Edges(tesschunk) ?? []))
-                if (PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out var payload) &&
-                    (payload.AtlasGeneration != atlasGeneration || !ReferenceEquals(SourceChunk(tesschunk), hostChunk)))
-                {
-                    if (payload.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(payload.ProbeBatch, "publication-rejected",
-                        new { payload.Range, staleAtlas = payload.AtlasGeneration != atlasGeneration,
-                            differentChunkOwner = !ReferenceEquals(SourceChunk(tesschunk), hostChunk) });
-                    UnusedDispose.Invoke(tesschunk, null);
-                    Centers(tesschunk) = null!; Edges(tesschunk) = null!;
-                    // A reloaded chunk at these coordinates is a different owner.
-                    // Keep its visible pools, just as for an obsolete atlas, and
-                    // ask the normal scheduler for a current replacement.
-                    world?.RedrawAllBlocks();
-                    skippedPublication = true;
-                    return false;
-                }
-            return true;
-        }
+        // Keep validation and every part's publication atomic with unload/live
+        // invalidation. The finalizer releases this even when stock pooling fails.
+        __state = false;
+        skippedPublication = false;
+        var parts = (Centers(tesschunk) ?? []).Concat(Edges(tesschunk) ?? []);
+        if (!parts.Any(part => PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out _))) return true;
+        Monitor.Enter(Gate); __state = true;
+        foreach (var part in parts)
+            if (PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out var payload) &&
+                (payload.IsDisposed || payload.Generation != generation || payload.AtlasGeneration != atlasGeneration ||
+                 !ReferenceEquals(SourceChunk(tesschunk), hostChunk)))
+            {
+                if (payload.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(payload.ProbeBatch, "publication-rejected",
+                    new { payload.Range, staleAtlas = payload.AtlasGeneration != atlasGeneration,
+                        differentChunkOwner = !ReferenceEquals(SourceChunk(tesschunk), hostChunk) });
+                RetireParts(Centers(tesschunk), "publication-rejected"); RetireParts(Edges(tesschunk), "publication-rejected");
+                UnusedDispose.Invoke(tesschunk, null);
+                Centers(tesschunk) = null!; Edges(tesschunk) = null!;
+                // A reloaded chunk at these coordinates is a different owner.
+                // Keep its visible pools, just as for an obsolete atlas, and
+                // ask the normal scheduler for a current replacement.
+                world?.RedrawAllBlocks();
+                skippedPublication = true;
+                return false;
+            }
+        return true;
     }
-    private static void ResetPublication() => skippedPublication = false;
+    private static void ResetPublication()
+    {
+        skippedPublication = false;
+        lock (Gate)
+            foreach (var payload in Pending.Where(p => p.Chunk.Disposed).ToArray()) payload.Dispose("chunk-unloaded");
+    }
     private static IEnumerable<CodeInstruction> CallbackTranspiler(IEnumerable<CodeInstruction> instructions)
     {
         foreach (var instruction in instructions)
