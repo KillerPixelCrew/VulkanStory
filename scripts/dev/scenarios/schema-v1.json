@@ -20,6 +20,10 @@
     "context": {
       "enum": ["world", "main"]
     },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
     "actions": {
       "type": "array",
       "minItems": 1,
@@ -109,6 +113,10 @@
           "properties": {
             "kind": {
               "const": "settings"
+            },
+            "comment": {
+              "type": "string",
+              "minLength": 1
             },
             "values": {
               "type": "object",
@@ -418,6 +426,10 @@
                 "terrainDensityDispatchesRecorded",
                 "terrainGpuPartsTested",
                 "terrainGpuPartsVisible",
+                "sceneDrawCommandsTerrain",
+                "sceneDrawCommandsEntity",
+                "sceneDrawCommandsParticle",
+                "sceneDrawCommandsCompat",
                 "chunkMeshingJobsCompleted",
                 "chunkMeshingEqualityChecks",
                 "chunkMeshingEqualityMismatches",
@@ -640,6 +652,10 @@
                 "terrainDensityDispatchesRecorded",
                 "terrainGpuPartsTested",
                 "terrainGpuPartsVisible",
+                "sceneDrawCommandsTerrain",
+                "sceneDrawCommandsEntity",
+                "sceneDrawCommandsParticle",
+                "sceneDrawCommandsCompat",
                 "chunkMeshingJobsCompleted",
                 "chunkMeshingEqualityChecks",
                 "chunkMeshingEqualityMismatches",
@@ -926,6 +942,10 @@
                 "terrainDensityDispatchesRecorded",
                 "terrainGpuPartsTested",
                 "terrainGpuPartsVisible",
+                "sceneDrawCommandsTerrain",
+                "sceneDrawCommandsEntity",
+                "sceneDrawCommandsParticle",
+                "sceneDrawCommandsCompat",
                 "chunkMeshingJobsCompleted",
                 "chunkMeshingEqualityChecks",
                 "chunkMeshingEqualityMismatches",
@@ -1042,6 +1062,10 @@
                 "terrainDensityDispatchesRecorded",
                 "terrainGpuPartsTested",
                 "terrainGpuPartsVisible",
+                "sceneDrawCommandsTerrain",
+                "sceneDrawCommandsEntity",
+                "sceneDrawCommandsParticle",
+                "sceneDrawCommandsCompat",
                 "chunkMeshingJobsCompleted",
                 "chunkMeshingEqualityChecks",
                 "chunkMeshingEqualityMismatches",

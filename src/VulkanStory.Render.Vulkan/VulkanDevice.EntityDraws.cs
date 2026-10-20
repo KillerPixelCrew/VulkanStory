@@ -401,6 +401,7 @@ public sealed unsafe partial class VulkanDevice
                 countOffset, maxCount, 20);
         }
         else _context.Api.CmdDrawIndexedIndirect(command, commands.Handle, offset, 1, 20);
+        _meshes.NoteSceneDrawCommand();
         EntityIndirectDrawsRecorded++;
         NoteNativeDraw(NativeDrawKind.Indirect);
         if (maxCount <= 1) return;

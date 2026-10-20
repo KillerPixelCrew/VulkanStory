@@ -131,6 +131,10 @@ internal sealed class HeadlessScenario
             ["terrainDensityDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["terrainGpuPartsTested"] = (JsonValueKind.Number, false),
             ["terrainGpuPartsVisible"] = (JsonValueKind.Number, false),
+            ["sceneDrawCommandsTerrain"] = (JsonValueKind.Number, false),
+            ["sceneDrawCommandsEntity"] = (JsonValueKind.Number, false),
+            ["sceneDrawCommandsParticle"] = (JsonValueKind.Number, false),
+            ["sceneDrawCommandsCompat"] = (JsonValueKind.Number, false),
             ["chunkMeshingAvailable"] = (JsonValueKind.True, false),
             ["chunkMeshingJobsCompleted"] = (JsonValueKind.Number, false),
             ["chunkMeshingEqualityChecks"] = (JsonValueKind.Number, false),
@@ -256,6 +260,7 @@ internal sealed class HeadlessScenario
         "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
         "terrainNoiseDispatchesRecorded", "terrainNoiseAppliedSamples",
         "terrainDensityDispatchesRecorded", "terrainGpuPartsTested", "terrainGpuPartsVisible", "chunkMeshingJobsCompleted", "chunkMeshingFacesPublished",
+        "sceneDrawCommandsTerrain", "sceneDrawCommandsEntity", "sceneDrawCommandsParticle", "sceneDrawCommandsCompat",
         "chunkMeshingPayloadsDetached", "chunkMeshingPayloadsSuperseded", "chunkMeshingEqualityChecks", "chunkMeshingEqualityMismatches",
         "chunkMeshingStalePublicationsDropped", "chunkMeshingRequeuedDuringFlight",
         "chunkMeshingAdmissionRefusals",
@@ -345,7 +350,8 @@ internal sealed class HeadlessScenario
     private static HeadlessScenario Parse(string path, string inputHash, JsonElement root)
     {
         Dictionary<string, JsonElement> rootProperties = ObjectProperties(root, "ScenarioField");
-        RequireOnly(rootProperties, ["schema", "id", "context", "actions"], "ScenarioField");
+        RequireOnly(rootProperties, ["schema", "id", "context", "actions", "description"], "ScenarioField");
+        if (rootProperties.TryGetValue("description", out var description)) RequiredString(description, "ScenarioField");
         RequireAll(rootProperties, ["schema", "id", "actions"], "ScenarioField");
         if (rootProperties["schema"].ValueKind != JsonValueKind.Number ||
             !rootProperties["schema"].TryGetInt32(out int schema) || schema != 1)
@@ -438,7 +444,8 @@ internal sealed class HeadlessScenario
                 }
                 case "settings":
                 {
-                    RequireOnly(properties, ["id", "tick", "kind", "values"], "ActionField");
+                    RequireOnly(properties, ["id", "tick", "kind", "values", "comment"], "ActionField");
+                    if (properties.TryGetValue("comment", out var comment)) RequiredString(comment, "ActionField");
                     RequireAll(properties, ["values"], "ActionField");
                     settings = ValidateSettingsValues(properties["values"], settings);
                     action = new(index, actionId, tick, HeadlessScenarioActionKind.Settings,

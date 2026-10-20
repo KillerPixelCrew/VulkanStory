@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "resident-equality-v1",
+  "context": "world",
+  "description": "Phase 0 equality template: run headless-capture.ps1 with -World 'foggy village story' -Scenario scripts/dev/scenarios/resident-equality.v1.json -Commands scripts/dev/scenarios/resident-equality.commands.txt -FixedDt 0.0166667 -Upscaler off -FrameGeneration off. Use the same immutable source save/settings for both runs; its saved player position, yaw and pitch are the fixed camera, with no movement commands. The companion commands fix noon, stop calendar time, disable automatic weather changes, select clear sky/still wind/no event and suppress precipitation; no debug fountains or particle emitters are added. Allow 600 ticks for streaming, require no undrawn chunks or pending GPU generations, then capture attachments at 600/601/602. The empty settings action is reserved for each phase's live switch; 604/605/606 repeat the captures in the shortest three-frame window after it. Those sequential captures exercise transitions; they do not rewind entity animation, shader time, jitter or RNG. For each phase gate, run paired isolated off/on copies and compare matching ticks with scripts/dev/ssim.py <off-attachments> <on-attachments>: require bit-identical terrain/entity opaque and depth (and phase 2 motion), and TAA SSIM >= 0.98. SSIM alone does not prove bit identity: require equal attachment bytes as well. Reject pairs with differing game/animation state; calendar/weather controls do not freeze all simulation. No phase switches exist yet, so the placeholder currently applies no setting changes. Run native and translated variants separately with Vulkan sync validation; keep the existing r24 performance batch for three all-on/all-off repeats.",
+  "actions": [
+    { "id": "fixed-camera", "tick": 0, "kind": "camera", "yawDeltaDegrees": 0, "mode": "FirstPerson" },
+    { "id": "streaming-settled", "tick": 600, "kind": "assert", "field": "chunkMeshingUndrawnChunks", "op": "eq", "expected": 0 },
+    { "id": "meshing-settled", "tick": 600, "kind": "assert", "field": "chunkMeshingPendingGenerations", "op": "eq", "expected": 0 },
+    { "id": "before", "tick": 600, "kind": "checkpoint", "name": "before" },
+    { "id": "before-600", "tick": 600, "kind": "capture", "name": "before-600", "attachments": true },
+    { "id": "before-601", "tick": 601, "kind": "capture", "name": "before-601", "attachments": true },
+    { "id": "before-602", "tick": 602, "kind": "capture", "name": "before-602", "attachments": true },
+    {
+      "id": "phase-switch-placeholder",
+      "tick": 603,
+      "kind": "settings",
+      "comment": "Fill values with the accepted phase switch list once those settings exist; leave empty in Phase 0. Pair initial off/on settings in separate isolated runs for same-tick equality.",
+      "values": {}
+    },
+    { "id": "after", "tick": 604, "kind": "checkpoint", "name": "after" },
+    { "id": "after-604", "tick": 604, "kind": "capture", "name": "after-604", "attachments": true },
+    { "id": "after-605", "tick": 605, "kind": "capture", "name": "after-605", "attachments": true },
+    { "id": "after-606", "tick": 606, "kind": "capture", "name": "after-606", "attachments": true }
+  ]
+}

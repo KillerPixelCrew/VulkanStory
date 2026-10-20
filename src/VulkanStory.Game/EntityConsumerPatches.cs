@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
+using VulkanStory.Render.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.Client;
@@ -145,7 +146,10 @@ internal static class EntityConsumerPatches
         try
         {
             motion = session.Graphics.BeginAnimatedMotionWrite() || session.Graphics.BeginRigidEntityMotionWrite(shape);
-            session.Graphics.RenderEntityMesh(mesh, sampler, session.Graphics.DeclaredProgramTexture(program, sampler));
+            var previousCategory = session.Device.SceneDrawCategory;
+            session.Device.SceneDrawCategory = SceneDrawCategory.Entity;
+            try { session.Graphics.RenderEntityMesh(mesh, sampler, session.Graphics.DeclaredProgramTexture(program, sampler)); }
+            finally { session.Device.SceneDrawCategory = previousCategory; }
         }
         finally
         {

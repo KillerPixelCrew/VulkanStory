@@ -591,6 +591,7 @@ public sealed unsafe partial class VulkanDevice
                 "' target=" + target.Id);
         }
         _context.Api.CmdDraw(commandBuffer, 3, 1, 0, 0);
+        _meshes.NoteSceneDrawCommand();
         NoteNativeDraw(NativeDrawKind.Fullscreen);
         return true;
     }

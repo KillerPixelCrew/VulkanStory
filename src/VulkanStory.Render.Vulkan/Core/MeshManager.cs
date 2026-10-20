@@ -67,6 +67,24 @@ internal sealed class VulkanMesh : IDisposable
 /// </summary>
 internal sealed unsafe class MeshManager : IDisposable
 {
+    internal SceneDrawCategory SceneDrawCategory { get; set; }
+    internal long SceneDrawCommandsTerrain { get; private set; }
+    internal long SceneDrawCommandsEntity { get; private set; }
+    internal long SceneDrawCommandsParticle { get; private set; }
+    internal long SceneDrawCommandsCompat { get; private set; }
+
+    // Called only after recording a Vulkan draw command, never per indirect entry or instance.
+    internal void NoteSceneDrawCommand()
+    {
+        switch (SceneDrawCategory)
+        {
+            case SceneDrawCategory.Terrain: SceneDrawCommandsTerrain++; break;
+            case SceneDrawCategory.Entity: SceneDrawCommandsEntity++; break;
+            case SceneDrawCategory.Particle: SceneDrawCommandsParticle++; break;
+            default: SceneDrawCommandsCompat++; break;
+        }
+    }
+
     /// <summary>xyz, normals, uv, rgba, flags, then the four custom parts.</summary>
     public const int MaxBuffers = 10;
     private const int BufferParticleHistory = 9;
@@ -971,6 +989,7 @@ internal sealed unsafe class MeshManager : IDisposable
 
         Bind(commandBuffer, mesh);
         _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh.IndexCount, (uint)instanceCount, 0, 0, 0);
+        NoteSceneDrawCommand();
     }
 
     /// <summary>
@@ -1003,6 +1022,7 @@ internal sealed unsafe class MeshManager : IDisposable
 
         _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirectScratch.Handle, indirectOffset, (uint)count,
             (uint)sizeof(DrawIndexedIndirectCommand));
+        NoteSceneDrawCommand();
     }
 
     internal static void WriteIndirectCommands(

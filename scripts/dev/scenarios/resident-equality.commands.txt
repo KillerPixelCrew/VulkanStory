@@ -1,0 +1,13 @@
+# Use only with an isolated copy of the foggy village story save.
+# Command frame defaults to 30; allow these server commands to settle before captures at tick 600.
+# Time commands: stock CmdTime; weather commands: the official VSEssentials WeatherCommands.cs.
+# https://github.com/anegostudios/vsessentialsmod/blob/master/Systems/Weather/WeatherCommands.cs
+# Codes clearsky, still and noevent are present in the official game/config assets.
+# No debug fountain or particle-producing commands.
+@30 /time set day
+@31 /time stop
+@32 /weather acp false
+@33 /weather set clearsky
+@34 /weather setw still
+@35 /weather setev noevent false
+@36 /weather setprecip -1

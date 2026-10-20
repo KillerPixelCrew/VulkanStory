@@ -12,6 +12,7 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     private bool chunkScopeActive, chunkPassOpen;
+    private SceneDrawCategory previousChunkDrawCategory;
     private string chunkScopeName = "";
     private int chunkTarget;
     private uint chunkSlots;
@@ -43,11 +44,14 @@ internal sealed partial class GameGraphicsAdapter
         chunkBlend = Stated.BlendEnabled; chunkDepthTest = Stated.DepthTest;
         chunkDepthWrite = Stated.DepthWrite; chunkCull = Stated.CullMode;
         RequireDevice().GpuMark(name);
+        previousChunkDrawCategory = RequireDevice().SceneDrawCategory;
+        RequireDevice().SceneDrawCategory = SceneDrawCategory.Terrain;
     }
     /// <summary>Closes an opened native terrain pass and clears its enclosing pool scope.</summary>
     internal void EndChunkPool()
     {
         if (!chunkScopeActive) return;
+        RequireDevice().SceneDrawCategory = previousChunkDrawCategory;
         chunkScopeActive = false;
         Performance.GpuTerrainDraws.EndScope();
         if (chunkPassOpen) { chunkPassOpen = false; RequireDevice().EndNativePass(); }

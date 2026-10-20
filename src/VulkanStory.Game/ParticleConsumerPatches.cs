@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
+using VulkanStory.Render.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
@@ -100,8 +101,14 @@ internal static class ParticleConsumerPatches
         if (platform is not ClientPlatformWindows windows || !runtime.TrySession(windows, out var session))
             throw new InvalidOperationException("Active particle routing lost its session.");
         bool motion = session.Graphics.BeginCameraMotionWrite();
+        var previousCategory = session.Device.SceneDrawCategory;
+        session.Device.SceneDrawCategory = SceneDrawCategory.Particle;
         try { session.Graphics.RenderParticles(mesh, quantity, session.Temporal.State); }
-        finally { if (motion) session.Graphics.EndMotionWrite(); }
+        finally
+        {
+            session.Device.SceneDrawCategory = previousCategory;
+            if (motion) session.Graphics.EndMotionWrite();
+        }
     }
     private static void Spawned(ParticleGeneric __instance) => ParticleMotionHistory.Spawned(__instance);
     private static IEnumerable<CodeInstruction> ProducerTranspiler(IEnumerable<CodeInstruction> instructions)

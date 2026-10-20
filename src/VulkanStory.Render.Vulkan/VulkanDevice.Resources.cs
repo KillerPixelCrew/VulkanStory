@@ -502,6 +502,9 @@ public sealed unsafe partial class VulkanDevice
     }
 }
 
+/// <summary>The game-independent seam which issued a recorded scene draw command.</summary>
+internal enum SceneDrawCategory : byte { Compat, Terrain, Entity, Particle }
+
 /// <summary>Which draw command a native draw recorded, so the stats separate the kinds.</summary>
 internal enum NativeDrawKind : byte
 {
@@ -539,6 +542,16 @@ internal enum NativeDrawKind : byte
 /// </summary>
 public sealed unsafe partial class VulkanDevice
 {
+    internal SceneDrawCategory SceneDrawCategory
+    {
+        get => _meshes.SceneDrawCategory;
+        set => _meshes.SceneDrawCategory = value;
+    }
+    internal long SceneDrawCommandsTerrain => _meshes.SceneDrawCommandsTerrain;
+    internal long SceneDrawCommandsEntity => _meshes.SceneDrawCommandsEntity;
+    internal long SceneDrawCommandsParticle => _meshes.SceneDrawCommandsParticle;
+    internal long SceneDrawCommandsCompat => _meshes.SceneDrawCommandsCompat;
+
     /// <summary>
     /// The topology a mesh was uploaded with, as the primitive a native pipeline rasterizes it
     /// as. A mesh carries its own <c>EnumDrawMode</c> from the tesselator (triangles for most
@@ -670,6 +683,7 @@ public sealed unsafe partial class VulkanDevice
             return true;
         }
         _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, firstInstance);
+        _meshes.NoteSceneDrawCommand();
         ParticleInstancesDrawn(meshId);
         NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
         return true;
@@ -719,6 +733,7 @@ public sealed unsafe partial class VulkanDevice
                 _context.Api.CmdDrawIndexedIndirectCount(commandBuffer, indirect.Handle, indirectOffset,
                     indirect.Handle, preparedCountOffset, (uint)groupCount, 20);
             else _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirect.Handle, indirectOffset, (uint)groupCount, 20);
+            _meshes.NoteSceneDrawCommand();
         }
         else _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
         if (_gpuTimestamps != null)
