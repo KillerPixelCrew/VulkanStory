@@ -34,7 +34,8 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// </summary>
 internal sealed unsafe class GpuTimestamps : IDisposable
 {
-    public const uint MarksPerFrame = 256;
+    // Sized for frames with many alternating sections; an overflow drops the frame's tail sections.
+    public const uint MarksPerFrame = 4096;
     public const string FrameLabel = "frame";
     public const string SubmitLabel = "submit";
     public const string PresentLabel = "present";
