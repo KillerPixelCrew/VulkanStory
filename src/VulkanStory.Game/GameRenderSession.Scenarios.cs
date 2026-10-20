@@ -842,6 +842,8 @@ internal sealed partial class GameRenderSession
         Aggregate("chunkMeshingPayloadsDetached", Device.ChunkMeshingPayloadsDetached);
         Current("chunkMeshingPayloadStorageBytes", Device.ChunkMeshingPayloadStorageBytes);
         Aggregate("chunkMeshingPayloadsSuperseded", Performance.GpuChunkMeshing.PayloadsSuperseded);
+        Aggregate("chunkMeshingStalePublicationsDropped", Performance.GpuChunkMeshing.StalePublicationsDropped);
+        Aggregate("chunkMeshingRequeuedDuringFlight", Performance.GpuChunkMeshing.RequeuedDuringFlight);
         foreach (var counter in Performance.GpuChunkMeshing.AdmissionCounters()) Aggregate(counter.Key, counter.Value);
         Current("terrainComparisonComplete", HeadlessTerrainComparison.Complete);
         Current("terrainComparisonOutputEqual", HeadlessTerrainComparison.Equal);

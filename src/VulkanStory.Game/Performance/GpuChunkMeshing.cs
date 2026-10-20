@@ -105,6 +105,7 @@ internal static partial class GpuChunkMeshing
         internal long ProbeBatch;
         internal bool Active;
         internal Dictionary<ChunkMeshBin, MeshData>? ReferenceMeshes;
+        internal readonly Dictionary<(bool, EnumChunkRenderPass), MeshData[]> ReferencePools = new();
         internal bool ReferenceFailed;
         internal readonly List<Payload> Payloads = new();
     }
@@ -236,7 +237,7 @@ internal static partial class GpuChunkMeshing
             ManagerStart == null || ManagerDispose?.ReturnType != typeof(void) || DecorCull?.ReturnType != typeof(void) ||
             DecorBuild?.ReturnType != typeof(void) ||
             MarkDirty?.ReturnType != typeof(void) || SetDirty?.ReturnType != typeof(void) ||
-            StockPolicies.Any(m => m == null))
+            StockPolicies.Any(m => m == null) || InitialiseReferencePools?.ReturnType != typeof(void))
             throw new InvalidOperationException("Official chunk meshing signatures changed.");
         foreach (var method in new[] { Process, BeginProcess, ProducerStart, LightLevels, Cube, Bleeding, Insert, Visible, DecorCull, DecorBuild })
             if (method.GetMethodBody() == null || Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
@@ -261,6 +262,8 @@ internal static partial class GpuChunkMeshing
             ClientMain game = Game(__instance);
             if (!ReferenceEquals(world, game))
             { admission.Refuse(Refusal.World, "world-owner-mismatch", new { attached = world != null, dimension }); return; }
+            var order = ChunkOrders.GetValue(SourceChunk(__3), _ => new ChunkOrder());
+            PublicationOrders.Add(__3, new PublicationOrder(order, ++order.Next));
             if (PerformancePatchSet.Current?.GpuChunkMeshing != true)
             { admission.Refuse(Refusal.Control, "control-disabled"); return; }
             if (faulted) { admission.Refuse(Refusal.Backend, "backend-faulted"); return; }
@@ -304,6 +307,7 @@ internal static partial class GpuChunkMeshing
             }
             current = new Work(__instance, lease, generation, __0 * 32, __1 * 32 % 32768, __2 * 32, __4,
                 ordered);
+            ordered.InFlight++;
         }
     }
     private static void Snapshot(ChunkTesselator __instance, int __0, int __1, int __2, ClientChunk __3, bool __4, bool __result)
@@ -709,6 +713,7 @@ internal static partial class GpuChunkMeshing
     private static Exception? End(Exception? __exception, ProducerState? __state)
     {
         Work? work = current; current = __state?.Work; admission = __state?.Admission;
+        if (work != null) lock (Gate) work.Ordered.InFlight--;
         if (__exception != null && work != null)
             foreach (var payload in work.Payloads) payload.Dispose(__exception is RetryTesselationException ? "retry-tessellation" : "producer-failed");
         if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
@@ -743,8 +748,19 @@ internal static partial class GpuChunkMeshing
         __state = false;
         skippedPublication = false;
         var parts = (Centers(tesschunk) ?? []).Concat(Edges(tesschunk) ?? []);
-        if (!parts.Any(part => PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out _))) return true;
+        bool ordered = PublicationOrders.TryGetValue(tesschunk, out var order);
+        if (!ordered && !parts.Any(part => PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out _))) return true;
         Monitor.Enter(Gate); __state = true;
+        if (ordered)
+        {
+            if (Centers(tesschunk) != null && order!.Center < order.Owner.PublishedCenter)
+                DropStaleParts(ref Centers(tesschunk));
+            if (Edges(tesschunk) != null && order!.Edge < order.Owner.PublishedEdge)
+                DropStaleParts(ref Edges(tesschunk));
+            if (Centers(tesschunk) == null && Edges(tesschunk) == null)
+            { skippedPublication = true; return false; }
+            parts = (Centers(tesschunk) ?? []).Concat(Edges(tesschunk) ?? []);
+        }
         foreach (var part in parts)
             if (PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out var payload) &&
                 (payload.IsDisposed || payload.Generation != generation || payload.AtlasGeneration != atlasGeneration ||
@@ -763,6 +779,11 @@ internal static partial class GpuChunkMeshing
                 skippedPublication = true;
                 return false;
             }
+        if (ordered)
+        {
+            order!.PublishingCenter = Centers(tesschunk) != null;
+            order.PublishingEdge = Edges(tesschunk) != null;
+        }
         return true;
     }
     private static void ResetPublication()

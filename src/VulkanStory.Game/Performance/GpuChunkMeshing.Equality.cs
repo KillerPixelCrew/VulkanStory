@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.Client.NoObf;
 using VulkanStory.Contracts;
@@ -11,6 +12,8 @@ internal static partial class GpuChunkMeshing
     private static long equalityChecks, equalityMismatches;
     internal static long EqualityChecks => Interlocked.Read(ref equalityChecks);
     internal static long EqualityMismatches => Interlocked.Read(ref equalityMismatches);
+    private static readonly System.Reflection.MethodInfo InitialiseReferencePools = AccessTools.Method(typeof(ChunkTesselator),
+        "InitialiseRenderPassPools", [typeof(MeshData[]), typeof(EnumChunkRenderPass), typeof(int)]);
 
     // Replay ONLY admitted stock cubes, at their original call site, using the
     // identical snapshot, revision, textures and TCTCache. Isolated pass/atlas
@@ -27,13 +30,20 @@ internal static partial class GpuChunkMeshing
         try
         {
             bool edge = vars.lx is 0 or 31 || vars.ly is 0 or 31 || vars.lz is 0 or 31;
+            var key = (edge, vars.RenderPass);
+            if (!work.ReferencePools.TryGetValue(key, out var referencePools))
+            {
+                referencePools = new MeshData[pools.Length];
+                // In particular, stock CustomInts starts with 1024 entries.
+                // Add4 on a zero-capacity part grows by ONE then writes FOUR.
+                InitialiseReferencePools.Invoke(vars.tct, [referencePools, vars.RenderPass, 1024]);
+                work.ReferencePools.Add(key, referencePools);
+            }
             for (int atlas = 0; atlas < pools.Length; atlas++)
             {
                 var bin = new ChunkMeshBin(edge, (int)vars.RenderPass, atlas);
-                if (!meshes.TryGetValue(bin, out var mesh))
-                    meshes.Add(bin, mesh = new MeshData(4, 6, false, true, true, true)
-                        { CustomInts = new CustomMeshDataPartInt() });
-                pools[atlas] = mesh;
+                meshes.TryAdd(bin, referencePools[atlas]);
+                pools[atlas] = referencePools[atlas];
             }
             if (solid && GpuCulled(work, vars.block))
                 vars.drawFaceFlags &= CpuFaces(vars.tct, vars.block, vars.extIndex3d, vars.posX, vars.posY, vars.posZ);

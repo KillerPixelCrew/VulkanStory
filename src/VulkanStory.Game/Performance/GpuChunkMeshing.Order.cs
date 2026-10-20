@@ -53,6 +53,7 @@ internal static partial class GpuChunkMeshing
     {
         internal long Revision;
         internal long Full = -1, Edge = -1;
+        internal int InFlight;
     }
 
     private static void MarkedDirty(ClientWorldMap __instance, int __0, int __1, int __2) =>
@@ -65,7 +66,15 @@ internal static partial class GpuChunkMeshing
     {
         if (chunk == null) return;
         lock (Gate)
-            if (OrderedCpu.TryGetValue(chunk, out var state)) state.Revision++;
+            if (OrderedCpu.TryGetValue(chunk, out var state))
+            {
+                state.Revision++;
+                // Stock has already cleared enquedForRedraw before NowProcessChunk.
+                // This request enters its dirty queue even while geometry is in
+                // flight or retained in a detached, not-yet-published payload.
+                if (state.InFlight != 0 || Pending.Any(p => ReferenceEquals(p.Chunk, chunk)))
+                    Interlocked.Increment(ref requeuedDuringFlight);
+            }
     }
 
     // Called under Gate only after an actual mixed mesh. A dirty event during
