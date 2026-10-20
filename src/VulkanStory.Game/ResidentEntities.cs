@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Reflection;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common.Entities;
 using Vintagestory.Client.NoObf;
 using VulkanStory.Render.Vulkan;
 using VulkanStory.Render.Vulkan.Core;
