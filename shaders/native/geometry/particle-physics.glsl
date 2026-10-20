@@ -9,10 +9,10 @@ void buoyancy(dvec3 position, inout vec3 inputVelocity, float gravity, float dt,
             precise float lift = clamp(9.0 * submerged, -1.25, 1.25);
             velocity.y += gravity * dt * lift;
             precise float resistance = clamp(30.0 * abs(velocity.y) - 0.02, 1.0, 1.25);
-            velocity.y /= resistance;
+            velocity.y = stockDivide(velocity.y, resistance);
             velocity.x *= 0.99; velocity.z *= 0.99;
             if (world.flow.w > 0.5 && submerged >= 0.0) {
-                precise float scale = 7.5 * (dt / 0.033);
+                precise float scale = 7.5 * stockDivide(dt, 0.033);
                 velocity += world.flow.xyz * scale;
             }
         }
