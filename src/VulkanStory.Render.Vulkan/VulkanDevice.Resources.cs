@@ -612,7 +612,17 @@ public sealed unsafe partial class VulkanDevice
         // Only animated bodies are prepared without a rigid program; their producers run in BeginNativeDraw.
         bool animatedEntityDraw = entityDraw && EntityVisibility is { RigidProgram: 0 };
         var entityProducers = EntityProducerDispatches;
-        if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target, instanceCount: instanceCount))
+        // Their producers may record ahead of the frame commands; see BeginProducerCommands.
+        _hoistEntityProducers = animatedEntityDraw && ComputeDeformationEnabled;
+        bool begun;
+        CommandBuffer commandBuffer;
+        VulkanFramebuffer? target;
+        try
+        {
+            begun = BeginNativeDraw(pipeline, textures, meshId, out commandBuffer, out target, instanceCount: instanceCount);
+        }
+        finally { _hoistEntityProducers = false; }
+        if (!begun)
         {
             return false;
         }

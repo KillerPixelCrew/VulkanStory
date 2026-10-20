@@ -156,6 +156,13 @@ internal sealed unsafe class UploadManager : IDisposable
     public bool UsedByPendingFrame(long frameUse) =>
         frameUse != 0 && frameUse == Volatile.Read(ref _frameGeneration) && IsFrameRecordingThread;
 
+    /// <summary>
+    /// Whether the frame command buffer the calling thread is recording wrote the
+    /// buffer inline. Work submitted ahead of that command buffer would read the
+    /// bytes from before the write.
+    /// </summary>
+    public bool WrittenByPendingFrame(VulkanBuffer buffer) => UsedByPendingFrame(buffer.FrameWrite);
+
     // --------------------------------------------------------------- recording
 
     /// <summary>
@@ -269,6 +276,7 @@ internal sealed unsafe class UploadManager : IDisposable
                 PipelineStageFlags2.CopyBit, AccessFlags2.TransferWriteBit,
                 readerStage, readerAccess);
             NoteUse(commandBuffer, destination);
+            if (IsFrameCommands(commandBuffer)) destination.FrameWrite = Volatile.Read(ref _frameGeneration);
         }
         finally
         {

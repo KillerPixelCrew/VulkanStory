@@ -145,11 +145,10 @@ public sealed unsafe partial class VulkanDevice
             BufferUsageFlags.TransferSrcBit, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         try
         {
-            var command = Commands;
-            using GpuSection section = BeginGpuSection("world-deformation");
-            _targets.EndRendering(command); _uploads.NoteUse(command, flags);
+            var command = BeginProducerCommands(out bool hoisted, local, flags);
+            using GpuSection section = hoisted ? default : BeginGpuSection("world-deformation");
             uint count = (uint)(local.Size / 64);
-            _graph.OpenComputePass(new PassSignature { NameId = _graph.NameId("compute:world-deformation"),
+            if (!hoisted) _graph.OpenComputePass(new PassSignature { NameId = _graph.NameId("compute:world-deformation"),
                 Width = (int)count, Height = 1, FormatsId = -1, Reads = [], Attachments = [] });
             var set = _computeArenas[CurrentFrameSlot].GetBuffers(program.SetLayout,
                 [new DescriptorBufferInfo(local.Handle, 0, local.Size), new DescriptorBufferInfo(flags.Handle, 0, flags.Size),
@@ -168,6 +167,7 @@ public sealed unsafe partial class VulkanDevice
             var dependency = new DependencyInfo { SType = StructureType.DependencyInfo,
                 BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
             _context.Api.CmdPipelineBarrier2(command, &dependency);
+            NoteProducerOutput(output, hoisted);
             if (versions == null) worldGeometry.Add(key, versions = new());
             versions.Add(new WorldGeometry(output, parameters.ToArray(), _frameCounter)); worldGeometryBytes += retained;
             return output;

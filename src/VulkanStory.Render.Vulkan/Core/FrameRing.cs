@@ -27,7 +27,8 @@ internal sealed class LatencySubmitTag
 /// The slot's frame command buffer is submitted together with the open upload
 /// batch (<see cref="UploadManager" />), batch first, in one SubmitInfo that
 /// signals both timelines: uploads recorded since the last submission run before
-/// the frame that uses them, and nothing waits for them.
+/// the frame that uses them, and nothing waits for them. Compute recorded ahead
+/// of the frame commands (<see cref="TryGetPreGraphicsCommands" />) goes between them.
 ///
 /// A frame may be submitted in parts (<see cref="SubmitPartial" />, for a
 /// readback that has to see the frame's work so far). Every command buffer
@@ -52,6 +53,10 @@ internal sealed unsafe class FrameSlot : IDisposable
     private ulong _cursor;
     private bool _disposed;
     private bool _frameCommands;
+    private bool _recording;
+    // Compute recorded ahead of the frame command buffer being recorded; see
+    // TryGetPreGraphicsCommands. Begun on demand, at most one per frame recording.
+    private CommandBuffer _preGraphicsCommands;
 
     /// <summary>The slot's position in the ring.</summary>
     public int Index { get; }
@@ -108,6 +113,7 @@ internal sealed unsafe class FrameSlot : IDisposable
             "vkResetCommandPool for a frame slot");
         _cursor = 0;
         _commandBuffersUsed = 0;
+        _preGraphicsCommands = default;
         PartialSubmits = 0;
         FrameValue = frameValue;
         StartCommandBuffer();
@@ -134,7 +140,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>The current command buffer is about to end for submission (slot index, buffer).</summary>
     public Action<int, CommandBuffer>? CommandsEnding { get; set; }
 
-    private void StartCommandBuffer(bool frameCommands = true)
+    private CommandBuffer BeginPooledCommandBuffer(string purpose)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer;
@@ -152,11 +158,10 @@ internal sealed unsafe class FrameSlot : IDisposable
                 CommandBufferCount = 1,
             };
             VulkanResult.Check(api.AllocateCommandBuffers(_context.Device, &allocateInfo, &commandBuffer),
-                "vkAllocateCommandBuffers for a frame slot");
+                "vkAllocateCommandBuffers for " + purpose);
             _commandBuffers.Add(commandBuffer);
         }
         _commandBuffersUsed++;
-        RecordingSerial = (ulong)System.Threading.Interlocked.Increment(ref s_recordingSerials);
 
         var begin = new CommandBufferBeginInfo
         {
@@ -164,14 +169,45 @@ internal sealed unsafe class FrameSlot : IDisposable
             Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
         };
         VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
-            "vkBeginCommandBuffer for a frame slot");
+            "vkBeginCommandBuffer for " + purpose);
+        return commandBuffer;
+    }
+
+    private void StartCommandBuffer(bool frameCommands = true)
+    {
+        // Pre-graphics buffers are only begun after a frame command buffer, so this
+        // still identifies the frame's first buffer.
+        bool later = _commandBuffersUsed > 0;
+        CommandBuffer commandBuffer = BeginPooledCommandBuffer("a frame slot");
+        RecordingSerial = (ulong)System.Threading.Interlocked.Increment(ref s_recordingSerials);
         CommandBuffer = commandBuffer;
         _frameCommands = frameCommands;
+        _recording = true;
         // The frame's first buffer is marked by the caller once the slot is its own.
-        if (_commandBuffersUsed > 1) CommandsStarted?.Invoke(Index, commandBuffer, frameCommands);
+        if (later) CommandsStarted?.Invoke(Index, commandBuffer, frameCommands);
         // The present command buffer is not the frame's: an upload recorded while
         // it is open goes into the batch, which rides the present submission.
         if (frameCommands) _uploads.OnFrameCommandsStarted(commandBuffer);
+    }
+
+    /// <summary>
+    /// The pre-graphics compute command buffer of the frame command buffer being
+    /// recorded, begun on first use. The next submission ends it and submits it in
+    /// the same batch, after the upload batch and before <see cref="CommandBuffer" />,
+    /// so it shares every gate, external and timeline wait and signal. It therefore
+    /// runs after all earlier submissions but ahead of everything recorded into
+    /// <see cref="CommandBuffer" /> since its last submission: the caller must only
+    /// record work that reads nothing that recording writes. False for the present
+    /// command buffer and between a submission and the next recording.
+    /// </summary>
+    public bool TryGetPreGraphicsCommands(out CommandBuffer commandBuffer)
+    {
+        commandBuffer = default;
+        if (!_recording || !_frameCommands) return false;
+        if (_preGraphicsCommands.Handle == 0)
+            _preGraphicsCommands = BeginPooledCommandBuffer("pre-graphics frame compute");
+        commandBuffer = _preGraphicsCommands;
+        return true;
     }
 
     /// <summary>
@@ -298,7 +334,13 @@ internal sealed unsafe class FrameSlot : IDisposable
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         CommandsEnding?.Invoke(Index, commandBuffer);
+        _recording = false;
         VulkanResult.Check(api.EndCommandBuffer(commandBuffer), "vkEndCommandBuffer for a frame submission");
+        // Only frame command buffers begin one; it rides their submission.
+        CommandBuffer preGraphics = _preGraphicsCommands;
+        _preGraphicsCommands = default;
+        if (preGraphics.Handle != 0)
+            VulkanResult.Check(api.EndCommandBuffer(preGraphics), "vkEndCommandBuffer for pre-graphics frame compute");
 
         int waitCapacity = (_frameCommands ? Gate?.Count ?? 0 : 0) + 3;
         Semaphore* waits = stackalloc Semaphore[waitCapacity];
@@ -346,7 +388,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         // timeline, then the Transfer timeline when an upload batch rides along.
         Semaphore* signals = stackalloc Semaphore[4];
         ulong* signalValues = stackalloc ulong[4];
-        CommandBuffer* commandBuffers = stackalloc CommandBuffer[2];
+        CommandBuffer* commandBuffers = stackalloc CommandBuffer[3];
 
         // The queue is shared with the swapchain's present and between-frames
         // upload submissions; see QueueLock. Counted as a wait like any other.
@@ -384,6 +426,8 @@ internal sealed unsafe class FrameSlot : IDisposable
                 signalValues[signalCount] = transferValue;
                 signalCount++;
             }
+            // After the uploads it may read, before the frame commands that consume it.
+            if (preGraphics.Handle != 0) commandBuffers[commandBufferCount++] = preGraphics;
             commandBuffers[commandBufferCount++] = commandBuffer;
 
             var timelineInfo = new TimelineSemaphoreSubmitInfo

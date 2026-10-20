@@ -74,10 +74,10 @@ public sealed unsafe partial class VulkanDevice
             MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         try
         {
-            var command = Commands;
-            using GpuSection section = BeginGpuSection("joint-poses");
-            _targets.EndRendering(command);
-            _graph.OpenComputePass(new PassSignature
+            // Reads only host-written ring bytes, which no frame command writes.
+            var command = BeginProducerCommands(out bool hoisted, null);
+            using GpuSection section = hoisted ? default : BeginGpuSection("joint-poses");
+            if (!hoisted) _graph.OpenComputePass(new PassSignature
             { NameId = _graph.NameId("compute:joint-poses"), Width = pose.JointCount, Height = 1, FormatsId = -1, Reads = [], Attachments = [] });
             var set = _computeArenas[CurrentFrameSlot].GetBuffers(program.SetLayout,
                 [new DescriptorBufferInfo(_frames.UniformBuffer, input.Offset, (ulong)pose.Bytes.Length),
@@ -99,6 +99,7 @@ public sealed unsafe partial class VulkanDevice
                 BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
             _context.Api.CmdPipelineBarrier2(command, &dependency);
             CaptureJointCheck(output, pose, command);
+            NoteProducerOutput(output, hoisted);
             jointPoseBuffers.Add(pose, new JointPoseBuffer(output, _frameCounter));
             jointPoseBytes += bytes + (ulong)pose.Bytes.Length;
             return output;

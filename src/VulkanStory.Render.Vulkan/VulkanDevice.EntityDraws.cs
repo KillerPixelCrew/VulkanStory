@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Contracts;
@@ -65,22 +66,79 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityRunBreakReplaced { get; private set; }
     // Animated bodies with a prepared visibility command, and those whose joint,
     // local or world producer recorded compute at the draw. Such a dispatch ends
-    // the rendering scope, so no run can continue across that draw.
+    // the rendering scope, so no run can continue across that draw. Hoisted draws
+    // recorded all of their producer dispatches ahead of the frame commands instead.
     internal long EntityAnimatedDrawsRecorded { get; private set; }
     internal long EntityAnimatedProducerDraws { get; private set; }
     internal long EntityAnimatedWorldOnlyProducerDraws { get; private set; }
+    internal long EntityAnimatedHoistedProducerDraws { get; private set; }
+    private long _hoistedProducerDispatches;
 
-    private (long Joints, long Local, long World) EntityProducerDispatches =>
-        (JointPoseDispatchesRecorded, DeformationDispatchesRecorded, WorldGeometryDispatchesRecorded);
+    // Set only around BeginNativeDraw of a prepared animated body while shared
+    // deformation is enabled. Its joint, local and world producers may then record
+    // into the slot's pre-graphics compute command buffer, which runs ahead of the
+    // frame commands being recorded and so leaves their rendering scope open.
+    private bool _hoistEntityProducers;
+    // Producer outputs recorded into the frame commands since their last submission.
+    // Pre-graphics work runs before those commands and must never read them.
+    private readonly HashSet<ulong> _inScopeProducerOutputs = new();
+    private ulong _inScopeProducerSerial;
 
-    private void NoteAnimatedEntityDraw((long Joints, long Local, long World) before)
+    private (long Joints, long Local, long World, long Hoisted) EntityProducerDispatches =>
+        (JointPoseDispatchesRecorded, DeformationDispatchesRecorded, WorldGeometryDispatchesRecorded, _hoistedProducerDispatches);
+
+    private void NoteAnimatedEntityDraw((long Joints, long Local, long World, long Hoisted) before)
     {
         var after = EntityProducerDispatches;
         EntityAnimatedDrawsRecorded++;
-        if (after == before) return;
+        long dispatches = after.Joints - before.Joints + after.Local - before.Local + after.World - before.World;
+        if (dispatches == 0) return;
+        if (after.Hoisted - before.Hoisted == dispatches) { EntityAnimatedHoistedProducerDraws++; return; }
         EntityAnimatedProducerDraws++;
         if (after.Joints == before.Joints && after.Local == before.Local) EntityAnimatedWorldOnlyProducerDraws++;
     }
+
+    /// <summary>
+    /// The command buffer a joint, local or world producer dispatch records into. It is
+    /// the pre-graphics one only for a prepared animated body whose GPU inputs were
+    /// neither written inline nor produced by the frame commands since their last
+    /// submission; otherwise the frame commands with their rendering scope closed,
+    /// as before. <paramref name="produced" /> is a producer output the dispatch
+    /// reads, <paramref name="first" /> and <paramref name="second" /> the mesh streams it reads.
+    /// </summary>
+    private CommandBuffer BeginProducerCommands(out bool hoisted, VulkanBuffer? produced,
+        VulkanBuffer? first = null, VulkanBuffer? second = null)
+    {
+        CommandBuffer frameCommands = Commands, commands = frameCommands;
+        hoisted = false;
+        if (_hoistEntityProducers && ComputeDeformationEnabled && (produced == null || !ProducedInScope(produced)) &&
+            (first == null || !_uploads.WrittenByPendingFrame(first)) &&
+            (second == null || !_uploads.WrittenByPendingFrame(second)) &&
+            _frames.Current.TryGetPreGraphicsCommands(out CommandBuffer preGraphics))
+        {
+            commands = preGraphics;
+            hoisted = true;
+        }
+        else _targets.EndRendering(frameCommands);
+        // Noted as frame uses in both cases. For a hoisted read this also keeps a later
+        // write of the stream after it: inline in the frame commands rather than in the
+        // upload batch, which runs before the pre-graphics commands.
+        if (first != null) _uploads.NoteUse(frameCommands, first);
+        if (second != null) _uploads.NoteUse(frameCommands, second);
+        return commands;
+    }
+
+    /// <summary>Records where a producer dispatch's output was written; see <see cref="BeginProducerCommands" />.</summary>
+    private void NoteProducerOutput(VulkanBuffer output, bool hoisted)
+    {
+        if (hoisted) { _hoistedProducerDispatches++; return; }
+        ulong serial = _frames.Current.RecordingSerial;
+        if (serial != _inScopeProducerSerial) { _inScopeProducerOutputs.Clear(); _inScopeProducerSerial = serial; }
+        _inScopeProducerOutputs.Add(output.Id);
+    }
+
+    private bool ProducedInScope(VulkanBuffer buffer) =>
+        _inScopeProducerSerial == _frames.Current.RecordingSerial && _inScopeProducerOutputs.Contains(buffer.Id);
 
     private enum EntityRunBreak : byte { None, Contiguity, Order, Scope, DynamicState, FrameSet, Program, Replaced }
 

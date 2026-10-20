@@ -61,6 +61,12 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     /// </summary>
     internal long FrameUse;
 
+    /// <summary>
+    /// The frame command buffer generation that last wrote this buffer inline; see
+    /// <see cref="UploadManager.WrittenByPendingFrame(VulkanBuffer)" />.
+    /// </summary>
+    internal long FrameWrite;
+
     public VulkanBuffer(VulkanContext context, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties)
         : this(context, size, usage, properties, VulkanAllocator.InferClass(properties, linear: true))
     {

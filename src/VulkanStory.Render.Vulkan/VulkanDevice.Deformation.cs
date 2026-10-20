@@ -149,11 +149,9 @@ public sealed unsafe partial class VulkanDevice
             BufferUsageFlags.TransferSrcBit, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         try
         {
-            CommandBuffer command = Commands;
-            using GpuSection section = BeginGpuSection("shared-deformation");
-            _targets.EndRendering(command);
-            _uploads.NoteUse(command, positions); _uploads.NoteUse(command, ids);
-            _graph.OpenComputePass(new PassSignature
+            CommandBuffer command = BeginProducerCommands(out bool hoisted, gpuBones, positions, ids);
+            using GpuSection section = hoisted ? default : BeginGpuSection("shared-deformation");
+            if (!hoisted) _graph.OpenComputePass(new PassSignature
             {
                 NameId = _graph.NameId("compute:shared-deformation"), Width = (int)count, Height = 1,
                 FormatsId = -1, Reads = [], Attachments = [],
@@ -182,6 +180,7 @@ public sealed unsafe partial class VulkanDevice
             var dependency = new DependencyInfo { SType = StructureType.DependencyInfo,
                 BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
             _context.Api.CmdPipelineBarrier2(command, &dependency);
+            NoteProducerOutput(output, hoisted);
             if (versions == null) _deformedGeometry.Add(key, versions = new());
             versions.Add(new DeformationGeometry(output, poseData.ToArray(), _frameCounter));
             _deformationBytes += retainedBytes;
