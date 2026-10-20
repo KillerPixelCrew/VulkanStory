@@ -258,6 +258,8 @@ internal sealed class RendererSettingsPanel
                 Switch("Flood-fill chunk visibility", "BfsChunkVisibility");
                 Switch("Indexed flood-fill visibility", "IndexedChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
+                Switch("Resident terrain", "ResidentTerrain");
+                Switch("Resident entities", "ResidentEntities");
                 Switch("Compute terrain draw preparation", "GpuTerrainDrawPreparation");
                 Switch("Compute stock block meshes", "GpuChunkMeshing");
                 Switch("Shared compute deformation", "GpuSharedDeformation");

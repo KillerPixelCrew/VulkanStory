@@ -38,8 +38,10 @@
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
     <Compile Include="VulkanDevice.TerrainDraws.cs" />
+    <Compile Include="VulkanDevice.TerrainScene.cs" />
     <Compile Include="VulkanDevice.Deformation.cs" />
     <Compile Include="VulkanDevice.EntityDraws.cs" />
+    <Compile Include="VulkanDevice.EntityScene.cs" />
     <Compile Include="VulkanDevice.EntityGeometry.cs" />
     <Compile Include="VulkanDevice.EntityRecords.cs" />
     <Compile Include="VulkanDevice.JointPoses.cs" />

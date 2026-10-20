@@ -93,6 +93,10 @@ internal sealed record RendererSettings
     public bool ChunkVisibilityWalk { get; init; } = true;
     /// <summary>Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws.</summary>
     public bool TerrainOcclusionCull { get; init; } = true;
+    /// <summary>Enables renderer-owned terrain state, GPU culling and indirect pass submission.</summary>
+    public bool ResidentTerrain { get; init; }
+    /// <summary>Enables renderer-owned entity rows, pose storage and indirect pass submission.</summary>
+    public bool ResidentEntities { get; init; }
     /// <summary>Tests terrain occlusion and compacts ordered indirect draws in Vulkan compute.</summary>
     public bool GpuTerrainDrawPreparation { get; init; } = true;
     /// <summary>Builds supported stock cube terrain faces in compute while retaining custom tessellators.</summary>
@@ -106,7 +110,7 @@ internal sealed record RendererSettings
     /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
     public bool GpuParticleVisualSimulation { get; init; } = true;
     /// <summary>Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling.</summary>
-    public bool GpuParticleSimulation { get; init; } = true;
+    public bool GpuParticleSimulation { get; init; }
     /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
     public bool GpuJointPosePreparation { get; init; } = true;
     /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
@@ -188,6 +192,8 @@ internal sealed record RendererSettings
         OutfitShapeCache = source.OutfitShapeCache,
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
+        ResidentTerrain = source.ResidentTerrain,
+        ResidentEntities = source.ResidentEntities,
         GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
         GpuChunkMeshing = source.GpuChunkMeshing,
         GpuTerrainNoise = source.GpuTerrainNoise,
