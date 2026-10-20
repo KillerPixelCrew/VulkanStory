@@ -89,3 +89,14 @@ uint collide(dvec3 position, inout vec3 inputMotion, float height, World world, 
     inputMotion = motion;
     return flags;
 }
+// Stock updatePositionWithCollision response after a collision, in X/Y/Z order.
+vec3 respond(vec3 inputVelocity, uint flags, float dt, float bounciness, float randomDrag) {
+    precise vec3 velocity = inputVelocity;
+    precise float drag = (1.0 - clamp(6.060606 * dt, 0.001, 1.0)) * randomDrag;
+    precise float bounce = (0.0 - bounciness) * 0.65;
+    precise float lift = min(1.0, drag * 5.0);
+    if ((flags & 1u) != 0u) { velocity.x *= bounce; velocity.y *= lift; velocity.z *= drag; }
+    if ((flags & 2u) != 0u) { velocity.x *= drag; velocity.y *= bounce; velocity.z *= drag; }
+    if ((flags & 4u) != 0u) { velocity.x *= drag; velocity.y *= lift; velocity.z *= bounce; }
+    return velocity;
+}

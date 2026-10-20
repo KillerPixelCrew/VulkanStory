@@ -103,8 +103,9 @@ internal static partial class GpuParticleSimulation
         }
     }
 
-    // Observe mutable blocks/arrays every submission. The game exposes no coherent
-    // world revision that would permit keeping these observations across ticks.
+    // Observe mutable blocks/arrays for every prepared step. The game exposes no
+    // coherent world revision, so the consumer confirms each observation the
+    // result depends on against the live world at the actual stock tick.
     // Base field-returning boxes are captured directly; custom cells are inert
     // markers until the actual GPU query reaches their ordered CPU boundary.
     // Never call a custom box callback speculatively.
@@ -113,34 +114,10 @@ internal static partial class GpuParticleSimulation
     {
         world = default;
         world.InitialPopulatedSize = (uint)PopulatedSize(physics.CollisionBoxList);
-        var pos = particle.Position;
-        state.Position.SetAndCorrectDimension((int)pos.X, (int)pos.Y, (int)pos.Z);
-        var fluid = physics.BlockAccess.GetBlock(state.Position, 2);
-        if (!HasStockLiquid(fluid)) return false;
-        bool liquid = fluid.IsLiquid();
-        bool aboveLiquid = false;
-        if (particle.SwimOnLiquid && liquid)
-        {
-            var above = physics.BlockAccess.GetBlockAbove(state.Position, 2);
-            if (!HasStockLiquid(above)) return false;
-            aboveLiquid = above.IsLiquid();
-        }
-        world.Liquid = new Vector4(liquid ? 1 : 0,
-            aboveLiquid ? 1 : 0,
-            fluid.LiquidLevel, particle.SwimOnLiquid ? 1 : 0);
-        if (fluid is IBlockFlowing flowing)
-        {
-            // Custom flow callbacks keep the original path and ordering.
-            if (!HasStockFlow(fluid)) return false;
-            if (!flowing.IsStill)
-            {
-                var push = flowing.GetPushVector(state.Position);
-                if (!float.IsFinite(push.X) || !float.IsFinite(push.Y) || !float.IsFinite(push.Z)) return false;
-                world.Flow = new Vector4(push.X, push.Y, push.Z, 1);
-            }
-        }
+        if (!CaptureFluid(particle, physics, state, ref world)) return false;
         world.MotionCap = physics.MotionCap;
         if (!particle.TerrainCollision) return true;
+        var pos = particle.Position;
         float half = particle.ParticleHeight * particle.SizeMultiplier / 2f, cap = physics.MotionCap;
         if (!float.IsFinite(cap) || cap < 0 || cap > 2 || half < 0 || half > 2) return false;
         // Only collision-clipped motion has a proven cap here. Unclipped stock
@@ -192,6 +169,38 @@ internal static partial class GpuParticleSimulation
         batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
         return true;
     }
+    // The stock HandleBoyancy observations. The consumer repeats this capture at
+    // the stock tick; only an identical observation keeps a prepared step.
+    private static bool CaptureFluid(ParticleGeneric particle, ParticlePhysics physics, PoolState state, ref ParticleSimulationWorldInput world)
+    {
+        var pos = particle.Position;
+        state.Position.SetAndCorrectDimension((int)pos.X, (int)pos.Y, (int)pos.Z);
+        var fluid = physics.BlockAccess.GetBlock(state.Position, 2);
+        if (!HasStockLiquid(fluid)) return false;
+        bool liquid = fluid.IsLiquid();
+        bool aboveLiquid = false;
+        if (particle.SwimOnLiquid && liquid)
+        {
+            var above = physics.BlockAccess.GetBlockAbove(state.Position, 2);
+            if (!HasStockLiquid(above)) return false;
+            aboveLiquid = above.IsLiquid();
+        }
+        world.Liquid = new Vector4(liquid ? 1 : 0,
+            aboveLiquid ? 1 : 0,
+            fluid.LiquidLevel, particle.SwimOnLiquid ? 1 : 0);
+        if (fluid is IBlockFlowing flowing)
+        {
+            // Custom flow callbacks keep the original path and ordering.
+            if (!HasStockFlow(fluid)) return false;
+            if (!flowing.IsStill)
+            {
+                var push = flowing.GetPushVector(state.Position);
+                if (!float.IsFinite(push.X) || !float.IsFinite(push.Y) || !float.IsFinite(push.Z)) return false;
+                world.Flow = new Vector4(push.X, push.Y, push.Z, 1);
+            }
+        }
+        return true;
+    }
     private static bool CaptureLiquidCells(ParticleGeneric particle, ParticlePhysics physics, Batch batch,
         ref ParticleSimulationWorldInput world)
     {
@@ -226,46 +235,27 @@ internal static partial class GpuParticleSimulation
             (uint)(maxX - x0 + 8) << 12 | (uint)(maxY - y0 + 8) << 16 | (uint)(maxZ - z0 + 8) << 20;
         return true;
     }
-    private static void MaterializeCollisionList(ParticlePhysics physics, Batch batch, int index,
-        in ParticleSimulationOutput result, Cuboidf scratch)
-    {
-        // CachedCuboidList changes its float/double addition after first use.
-        // Preserve that real cache state for a later unsupported/custom CPU tick,
-        // without repeating any clipping, world query or collision callback.
-        var source = batch.Input[index]; var world = batch.World[index];
-        int x = (int)source.X, y = (int)source.Y % 32768, z = (int)source.Z;
-        uint queryBounds = result.QueryBounds;
-        int Delta(int shift) => (int)((queryBounds >> shift) & 15) - 8;
-        int minX = x + Delta(0), minY = y + Delta(4), minZ = z + Delta(8),
-            maxX = x + Delta(12), maxY = y + Delta(16), maxZ = z + Delta(20);
-        var list = physics.CollisionBoxList; list.Clear();
-        for (uint j = 0; j < world.BoxCount; j++)
-        {
-            int boxIndex = (int)(world.BoxStart + j); var box = batch.Boxes[boxIndex];
-            if (box.X < minX || box.X > maxX || box.Y < minY || box.Y > maxY || box.Z < minZ || box.Z > maxZ) continue;
-            scratch.Set(box.Minimum.X, box.Minimum.Y, box.Minimum.Z, box.Maximum.X, box.Maximum.Y, box.Maximum.Z);
-            list.Add(scratch, box.X, box.Y, box.Z, batch.BoxBlocks[boxIndex]);
-        }
-    }
     private static void ApplyCollisionResponse(ParticleGeneric particle, float dt, ICoreClientAPI api, uint flags)
     {
         CollisionFlags(particle) = (EnumCollideFlags)flags;
         if (flags == 0) { Drag(particle) = 1; return; }
-        float drag = (1f - GameMath.Clamp(6.060606f * dt, 0.001f, 1f)) * RandomDrag(particle);
-        Drag(particle) = drag;
-        // Keep the world's shared RNG, its conditional second draw, and the
-        // X/Y/Z response order at the actual ordered stock TickNow boundary.
+        // Compute applied the X/Y/Z velocity response with this drag, from the
+        // random drag before this tick's draw. Keep the world's shared RNG and
+        // its conditional second draw at the actual ordered stock TickNow boundary.
+        Drag(particle) = (1f - GameMath.Clamp(6.060606f * dt, 0.001f, 1f)) * RandomDrag(particle);
         if (api.World.Rand.NextDouble() < 0.001)
             RandomDrag(particle) = Math.Max(0, (float)api.World.Rand.NextDouble() - 0.1f);
-        if ((flags & 1) != 0)
-        { particle.Velocity.X *= -particle.Bounciness * 0.65f; particle.Velocity.Y *= Math.Min(1, drag * 5); particle.Velocity.Z *= drag; }
-        if ((flags & 2) != 0)
-        { particle.Velocity.X *= drag; particle.Velocity.Y *= -particle.Bounciness * 0.65f; particle.Velocity.Z *= drag; }
-        if ((flags & 4) != 0)
-        { particle.Velocity.X *= drag; particle.Velocity.Y *= Math.Min(1, drag * 5); particle.Velocity.Z *= -particle.Bounciness * 0.65f; }
     }
 
     // Headless numeric comparison only, never part of the production tick path.
+    private static Vector3 ReferenceResponse(Vector3 velocity, uint flags, float dt, float bounciness, float randomDrag)
+    {
+        float drag = (1f - GameMath.Clamp(6.060606f * dt, 0.001f, 1f)) * randomDrag;
+        if ((flags & 1) != 0) { velocity.X *= (0f - bounciness) * 0.65f; velocity.Y *= Math.Min(1f, drag * 5f); velocity.Z *= drag; }
+        if ((flags & 2) != 0) { velocity.X *= drag; velocity.Y *= (0f - bounciness) * 0.65f; velocity.Z *= drag; }
+        if ((flags & 4) != 0) { velocity.X *= drag; velocity.Y *= Math.Min(1f, drag * 5f); velocity.Z *= (0f - bounciness) * 0.65f; }
+        return velocity;
+    }
     private static void ReferenceBuoyancy(ref Vector3 velocity, in ParticleSimulationInput state, ParticleSimulationWorldInput world)
     {
         float dt = state.Timing.W;
@@ -283,8 +273,9 @@ internal static partial class GpuParticleSimulation
         else if (world.Flow.W > 0.5f) velocity += flow * (30f * dt);
     }
     private static uint ReferenceCollision(in ParticleSimulationInput state, ParticleSimulationWorldInput world,
-        ReadOnlySpan<ParticleSimulationBox> boxes, ref Vector3 motion, ref uint populatedSize, out uint queryBounds)
+        ReadOnlySpan<ParticleSimulationBox> boxes, ref Vector3 motion, ref uint populatedSize, out uint queryBounds, out uint reused)
     {
+        reused = 0;
         float half = state.Physics.X / 2f;
         var particle = new Cuboidd(state.X - half, state.Y, state.Z - half, state.X + half, state.Y + half, state.Z + half);
         motion = Vector3.Clamp(motion, new Vector3(-world.MotionCap), new Vector3(world.MotionCap));
@@ -308,8 +299,8 @@ internal static partial class GpuParticleSimulation
                 if (value.X < minX || value.X > maxX || value.Y < minY || value.Y > maxY || value.Z < minZ || value.Z > maxZ) continue;
                 if (value.Minimum.W > 0.5f) return ParticleSimulationOutput.RequiresCpuCollision;
                 int y = value.Y % 32768;
-                bool reused = selected++ < populatedSize;
-                double Offset(float local, int offset) => reused ? (double)(local + offset) : (double)local + offset;
+                bool cached = selected++ < populatedSize;
+                double Offset(float local, int offset) => cached ? (double)(local + offset) : (double)local + offset;
                 var box = new Cuboidd(Offset(value.Minimum.X, value.X), Offset(value.Minimum.Y, y), Offset(value.Minimum.Z, value.Z),
                     Offset(value.Maximum.X, value.X), Offset(value.Maximum.Y, y), Offset(value.Maximum.Z, value.Z));
                 var direction = EnumPushDirection.None;
@@ -321,6 +312,7 @@ internal static partial class GpuParticleSimulation
             if (pass == 0) particle.Translate(0, motion.Y, 0);
             if (pass == 1) particle.Translate(motion.X, 0, 0);
         }
+        reused = Math.Min(populatedSize, selected);
         populatedSize = Math.Max(populatedSize, selected);
         return flags;
     }

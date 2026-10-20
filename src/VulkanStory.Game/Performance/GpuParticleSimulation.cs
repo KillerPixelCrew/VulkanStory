@@ -14,10 +14,15 @@ using VulkanStory.Render.Vulkan;
 
 namespace VulkanStory.Game.Performance;
 
-/// <summary>Executes due stock physics on resident GPU state, retaining immutable render results and ordered CPU events.</summary>
+/// <summary>Prepares each particle's next stock step on resident GPU state after a pool call and consumes it at the actual
+/// TickNow boundary without waiting, retaining immutable render results and ordered CPU events.</summary>
 internal static partial class GpuParticleSimulation
 {
     private const int MaximumBatch = 4096;
+    // Bounded per pool: prepared batches and the pool calls a result may wait
+    // before its stock tick. Stock ticks reach every alive particle well within it.
+    private const int MaximumBatches = 8;
+    private const long MaximumLatency = 32;
     internal const int BenchmarkMarker = 0x4000;
     private static readonly bool Benchmark = HeadlessHarnessOptions.Enabled && Environment.GetEnvironmentVariable("VULKANSTORY_PARTICLE_BENCHMARK") == "1";
     private readonly record struct TickMeasurement(long Start, bool Requested, bool Gpu);
@@ -39,12 +44,15 @@ internal static partial class GpuParticleSimulation
         internal ParticleSimulationBuffer? Buffer;
         internal int Remaining;
         internal bool Ready;
+        // Pool call that prepared this batch, and the last call that found it executing.
+        internal long Call, Polled;
         internal void Clear()
         {
             if (Ticket != 0) { Backend!.Release(Ticket); Ticket = 0; }
             Buffer?.Dispose(); Buffer = null;
             Array.Clear(Spawns, 0, Particles.Count);
             Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Backend = null; Remaining = 0; Ready = false;
+            Call = Polled = 0;
         }
     }
     private sealed class PendingStep(Batch batch, int index, object spawn)
@@ -57,29 +65,31 @@ internal static partial class GpuParticleSimulation
     {
         internal readonly object Gate = new();
         internal readonly List<Batch> Batches = new();
+        // Prepared steps survive pool calls until their stock tick. Each entry
+        // belongs to the observed spawn, never the pooled object's next occupant.
         internal readonly Dictionary<ParticleGeneric, PendingStep> Pending = new(ReferenceEqualityComparer.Instance);
-        // A callback can kill and revive the same pooled object before its next
-        // tick. Advice belongs to the observed spawn, never its next occupant.
-        internal readonly HashSet<object> CpuOnly = new(ReferenceEqualityComparer.Instance);
         internal readonly Dictionary<ParticleGeneric, RenderState> Rendered = new(ReferenceEqualityComparer.Instance);
         internal readonly BlockPos Position = new(0);
         internal readonly BlockPos WorldMinimum = new(0), WorldMaximum = new(0);
-        internal readonly Cuboidf CollisionBox = new();
+        internal readonly CollisionConfirmation Collision = new();
         internal long Epoch = -1;
+        internal long Call;
+        // An executing batch at its consumer means GPU backlog for this call.
+        internal bool Backlogged;
+        // Worker steps use their call's delta; the next call is predicted from the last.
+        internal float PredictedLifeDelta, PredictedPhysicsDelta;
+        internal bool Predicted;
         ~PoolState() => Clear();
         internal void InvalidatePending()
         {
-            // A run of CPU-only actors has no speculation left after its first
-            // boundary. Do not repeatedly clear every retained batch capacity.
             if (Pending.Count == 0) return;
             foreach (var batch in Batches)
                 if (batch.Remaining != 0) batch.Clear();
             Pending.Clear();
         }
-        internal void DiscardPending() { InvalidatePending(); CpuOnly.Clear(); }
         internal void Clear()
         {
-            DiscardPending();
+            InvalidatePending();
             foreach (var value in Rendered.Values) value.Dispose();
             Rendered.Clear();
         }
@@ -235,22 +245,24 @@ internal static partial class GpuParticleSimulation
         long generation = Interlocked.Read(ref epoch);
         current = new Scope(__instance, state, __0, Game(__instance).Calendar.SpeedOfTime / 60f, worker, generation, InstanceUploadBoundarySafe(__instance));
         if (state.Epoch != generation) { state.Clear(); state.Epoch = generation; }
-        state.CpuOnly.Clear();
-        if (!worker && __instance.ParticlesPool.FirstAlive is { } first)
-        {
-            var physics = Physics(__instance);
-            Submit(current, first, physics.PhysicsTickTime, physics.PhysicsTickTime, physics, lookahead: true);
-        }
+        state.Call++; state.Backlogged = false;
     }
     private static Exception? AfterPool(PoolMeasurement __state, Exception? __exception)
     {
         var held = current;
+        var exception = __exception;
         try
         {
             if (current is { } scope)
             {
-                if (__exception != null || scope.Epoch != Interlocked.Read(ref epoch) || !Enabled) scope.State.Clear();
-                else scope.State.DiscardPending();
+                if (exception != null || scope.Epoch != Interlocked.Read(ref epoch) || !Enabled) scope.State.Clear();
+                else
+                {
+                    // Inputs are final once the stock loop ends. Prepare the next
+                    // steps now; the following call consumes them without waiting.
+                    try { Speculate(scope); }
+                    catch (Exception failure) { scope.State.Clear(); exception = failure; }
+                }
             }
         }
         finally
@@ -264,7 +276,7 @@ internal static partial class GpuParticleSimulation
                 else { Interlocked.Increment(ref cpuBenchmarkPools); Interlocked.Add(ref cpuBenchmarkPoolTicks, ticks); }
             }
         }
-        return __exception;
+        return exception;
     }
 
     private static bool Input(ParticleGeneric particle, float lifeDt, float dt, ParticlePhysics physics, PoolState state, out ParticleSimulationInput input)
@@ -288,7 +300,8 @@ internal static partial class GpuParticleSimulation
         input.Control = new Vector4(Drag(particle), parent ? 1 : 0, particle.VelocityEvolve != null ? 1 : 0, particle.TerrainCollision ? 1 : 0);
         input.Physics = new Vector4(particle.ParticleHeight * particle.SizeMultiplier, particle.SwimOnLiquid ? 1 : 0,
             (particle.DieInAir ? 1 : 0) | (particle.DieInLiquid ? 2 : 0), TickCount(particle));
-        foreach (float value in MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref input, 1))[32..128]))
+        input.Bounciness = particle.Bounciness; input.RandomDrag = RandomDrag(particle);
+        foreach (float value in MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(MemoryMarshal.CreateReadOnlySpan(ref input, 1))[24..128]))
             if (!float.IsFinite(value) || Math.Abs(value) > 1000000) return false;
         if (particle.VelocityEvolve is { } evolution)
         {
@@ -299,20 +312,24 @@ internal static partial class GpuParticleSimulation
         }
         return true;
     }
-    private static bool Matches(ParticleGeneric particle, float lifeDt, float dt, ParticlePhysics physics, PoolState state,
-        in ParticleSimulationInput expected)
+    // Only velocity evolution and GPU liquid lifetime policies read the age.
+    // Other steps recompute it at their actual stock tick.
+    private static bool AgeSensitive(in ParticleSimulationInput input, in ParticleSimulationWorldInput world) =>
+        input.Control.Z > 0.5f || world.LiquidPolicy != 0;
+    private static bool Matches(ParticleGeneric particle, float lifeDt, float dt, in ParticleSimulationInput expected, bool age)
     {
         // Validate the original snapshot without constructing/validating another
         // 224-byte shader record or recapturing the three evolution functions.
-        // Stock collision boxes can call mod code, so later candidates still need
-        // this mutation check at their actual TickNow boundary.
+        // Callbacks and other producers can mutate a particle between its
+        // preparation and its actual TickNow boundary.
         if (particle.SecondaryParticles is { Length: > 0 } || particle.DeathParticles is { Length: > 0 } || particle.RandomVelocityChange ||
             particle.Position.X != expected.X || particle.Position.Y != expected.Y || particle.Position.Z != expected.Z ||
             particle.Velocity.X != expected.VelocityGravity.X || particle.Velocity.Y != expected.VelocityGravity.Y ||
             particle.Velocity.Z != expected.VelocityGravity.Z ||
             particle.GravityStrength != expected.VelocityGravity.W ||
-            particle.SecondsAlive != expected.Timing.X ||
-            particle.LifeLength != expected.Timing.Y || lifeDt != expected.Timing.Z || dt != expected.Timing.W ||
+            (age && (particle.SecondsAlive != expected.Timing.X || lifeDt != expected.Timing.Z)) ||
+            particle.LifeLength != expected.Timing.Y || dt != expected.Timing.W ||
+            particle.Bounciness != expected.Bounciness || RandomDrag(particle) != expected.RandomDrag ||
             particle.StartingVelocity.X != expected.StartingVelocity.X || particle.StartingVelocity.Y != expected.StartingVelocity.Y ||
             particle.StartingVelocity.Z != expected.StartingVelocity.Z || (particle.TerrainCollision && particle.SelfPropelled) != (expected.StartingVelocity.W > 0.5f) ||
             particle.TerrainCollision != (expected.Control.W > 0.5f) ||
@@ -367,135 +384,159 @@ internal static partial class GpuParticleSimulation
         if (Benchmark && __instance.VertexFlags != BenchmarkMarker) return true;
         var state = scope.State;
         if (state.Rendered.Remove(__instance, out var lastRender)) lastRender.Dispose();
-        if (state.CpuOnly.Contains(ParticleMotionHistory.SpawnToken(__instance))) { state.InvalidatePending(); return true; }
-        if (!state.Pending.TryGetValue(__instance, out var pending))
-        {
-            // A repeated due step or CPU callback changes the cache prefix before
-            // later speculative actors. Rebuild in actual TickNow order.
-            state.InvalidatePending();
-            if (!Submit(scope, __instance, __0, __1, __3) || !state.Pending.TryGetValue(__instance, out pending)) return true;
-        }
+        if (scope.Worker) { state.PredictedLifeDelta = __0; state.PredictedPhysicsDelta = __1; state.Predicted = true; }
+        if (!state.Pending.TryGetValue(__instance, out var pending)) return true;
         var batch = pending.Batch;
-        if (!ReferenceEquals(pending.Spawn, ParticleMotionHistory.SpawnToken(__instance)))
-        { state.InvalidatePending(); return TryGpuTick(__instance, __0, __1, __2, __3); }
-        if (!batch.Ready)
-        {
-            batch.Buffer = batch.Backend!.Complete(batch.Ticket, batch.Output.AsSpan(0, batch.Particles.Count));
-            batch.Ticket = 0; batch.Ready = true;
-            // Remember every actual custom-query boundary before consuming the
-            // first one. Otherwise each CPU callback discards the same suffix,
-            // and the next actor submits that entire suffix again. Advice lives
-            // only for this pool call; a callback may still change later inputs,
-            // which keep their stock CPU tick at its original position.
-            for (int i = 0; i < batch.Particles.Count; i++)
-                if ((batch.Output[i].CollisionFlags & ParticleSimulationOutput.RequiresCpuCollision) != 0 &&
-                    ReferenceEquals(batch.Spawns[i], ParticleMotionHistory.SpawnToken(batch.Particles[i])))
-                    state.CpuOnly.Add(batch.Spawns[i]);
-            if (HeadlessHarnessOptions.Enabled && !Benchmark)
-                Check(batch.Input.AsSpan(0, batch.Particles.Count), batch.World.AsSpan(0, batch.Particles.Count),
-                    CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells), batch.Output.AsSpan(0, batch.Particles.Count));
-        }
-        ref readonly var expected = ref batch.Input[pending.Index];
-        int resultIndex = pending.Index;
-        var result = batch.Output[resultIndex];
-        if ((result.CollisionFlags & ParticleSimulationOutput.RequiresCpuCollision) != 0)
-        {
-            // Only the actual stock query needs this custom callback. Keep its
-            // original tick/event order and rebase all later speculative work.
-            state.InvalidatePending();
-            return true;
-        }
-        if (!Matches(__instance, __0, __1, __3, state, in expected))
-        {
-            // An earlier stock callback changed this producer: rebase supported work
-            // at its actual stock tick boundary rather than recomputing it on CPU.
-            state.InvalidatePending();
-            return TryGpuTick(__instance, __0, __1, __2, __3);
-        }
-        if (!Enabled || scope.Epoch != Interlocked.Read(ref epoch)) { state.Remove(__instance); return true; }
-        Apply(__instance, in result, __1, __2, __3, batch, resultIndex, state); Interlocked.Increment(ref stepsApplied);
-        state.Rendered[__instance] = new RenderState(__instance, batch.Buffer!, resultIndex, in result);
-        state.Remove(__instance);
-        return false;
-    }
-
-    private static bool Submit(Scope scope, ParticleBase first, float lifeDt, float dt, ParticlePhysics physics, bool lookahead = false)
-    {
-        var state = scope.State;
-        var batch = state.Batches.FirstOrDefault(value => value.Remaining == 0);
-        if (batch == null)
-        {
-            state.Batches.Add(batch = new Batch());
-        }
+        int index = pending.Index;
         try
         {
-            int visited = 0;
-            ParticleBase? node = first;
-            for (; node != null && visited++ < MaximumBatch; node = node.Next)
+            // Consume a prepared step only at its actual stock tick: completed
+            // without waiting, for the same spawn and inputs, and with the world it
+            // observed confirmed against the live world. Anything else keeps the
+            // stock CPU tick at its original position; every other prepared step
+            // is confirmed independently at its own boundary.
+            if (!ReferenceEquals(pending.Spawn, ParticleMotionHistory.SpawnToken(__instance)) || !Poll(state, batch)) return true;
+            var result = batch.Output[index];
+            // Only the actual stock query needs this custom callback. Keep its
+            // original tick and event order.
+            if ((result.CollisionFlags & ParticleSimulationOutput.RequiresCpuCollision) != 0) return true;
+            ref readonly var expected = ref batch.Input[index];
+            if (!Matches(__instance, __0, __1, in expected, AgeSensitive(in expected, in batch.World[index])) ||
+                !Confirm(__instance, __3, state, batch, index, in result)) return true;
+            if (!Enabled || scope.Epoch != Interlocked.Read(ref epoch)) return true;
+            Apply(__instance, in result, __0, __1, __2, __3, batch, index); Interlocked.Increment(ref stepsApplied);
+            state.Rendered[__instance] = new RenderState(__instance, batch.Buffer!, index, in result);
+            return false;
+        }
+        finally { state.Remove(__instance); }
+    }
+
+    // Prepares each supported particle's next stock step once this pool call has
+    // finalized its inputs. Results are polled, never awaited, by the next call.
+    private static void Speculate(Scope scope)
+    {
+        var state = scope.State;
+        var physics = Physics(scope.Pool);
+        float lifeDt, dt;
+        if (!scope.Worker) lifeDt = dt = physics.PhysicsTickTime;
+        else if (state.Predicted) { lifeDt = state.PredictedLifeDelta; dt = state.PredictedPhysicsDelta; }
+        else return;
+        RetireStale(state);
+        // A batch still executing at its consumer is GPU backlog: queue nothing
+        // more behind it. Stock ticks continue and the next call tries again.
+        if (state.Backlogged || Volatile.Read(ref backend) is not { } target) return;
+        Batch? batch = null;
+        try
+        {
+            for (ParticleBase? node = scope.Pool.ParticlesPool.FirstAlive; node != null; node = node.Next)
             {
-                if (node is not ParticleGeneric particle || (Benchmark && particle.VertexFlags != BenchmarkMarker)) break;
-                if (state.Pending.ContainsKey(particle)) continue;
-                if ((!ReferenceEquals(particle, first) || lookahead) && !scope.Worker &&
+                if (node is not ParticleGeneric particle || (Benchmark && particle.VertexFlags != BenchmarkMarker)) continue;
+                object spawn = ParticleMotionHistory.SpawnToken(particle);
+                if (state.Pending.TryGetValue(particle, out var pending))
+                {
+                    // A prepared step whose snapshot is still the actual next input stays pending.
+                    var owner = pending.Batch;
+                    if (ReferenceEquals(pending.Spawn, spawn) && Matches(particle, lifeDt, dt, in owner.Input[pending.Index],
+                        AgeSensitive(in owner.Input[pending.Index], in owner.World[pending.Index]))) continue;
+                    state.Remove(particle);
+                }
+                // Each frame a main-thread particle is not due advances its age.
+                // Prepare age-dependent steps only for the frame predicted to tick them.
+                if (!scope.Worker && (particle.VelocityEvolve != null || (particle.TerrainCollision && (particle.DieInAir || particle.DieInLiquid))) &&
                     particle.accum + scope.Delta * scope.GameSpeed < physics.PhysicsTickTime) continue;
-                // A known due CPU tick is an ordering barrier, not a hole that
-                // speculative GPU work can cross and later discard again.
-                if (state.CpuOnly.Contains(ParticleMotionHistory.SpawnToken(particle))) break;
-                if (!Input(particle, lifeDt, dt, physics, state, out var snapshot) ||
-                    !CaptureWorld(particle, physics, state, batch, out var world))
-                { state.CpuOnly.Add(ParticleMotionHistory.SpawnToken(particle)); break; }
+                if (!Input(particle, lifeDt, dt, physics, state, out var snapshot)) continue;
+                if (batch == null && (batch = Acquire(state)) == null) return;
+                if (!CaptureWorld(particle, physics, state, batch, out var world)) continue;
                 int index = batch.Particles.Count;
                 if (batch.Input.Length <= index) Array.Resize(ref batch.Input, Math.Min(MaximumBatch, Math.Max(1, batch.Input.Length * 2)));
                 if (batch.World.Length <= index) Array.Resize(ref batch.World, batch.Input.Length);
                 if (batch.Spawns.Length <= index) Array.Resize(ref batch.Spawns, batch.Input.Length);
-                object spawn = ParticleMotionHistory.SpawnToken(particle);
                 batch.Particles.Add(particle);
                 batch.World[index] = world; batch.Spawns[index] = spawn;
                 batch.Input[index] = snapshot;
+                if (batch.Particles.Count == MaximumBatch)
+                {
+                    var full = batch; batch = null;
+                    if (!Dispatch(state, full, target)) return;
+                }
             }
-            // Do not speculate across an unsupported producer: its callbacks own the
-            // order of spawn/death events and may mutate subsequent particles.
-            batch.Backend = Volatile.Read(ref backend);
-            int count = batch.Particles.Count;
-            if (batch.Output.Length < count) Array.Resize(ref batch.Output, count);
-            if (count > 0 && batch.Backend != null)
-                batch.Ticket = batch.Backend.Submit(batch.Input.AsSpan(0, count), batch.Spawns.AsSpan(0, count),
-                    batch.World.AsSpan(0, count), CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells));
-            if (batch.Ticket != 0)
+            if (batch != null)
             {
-                batch.Remaining = count;
-                for (int i = 0; i < count; i++) state.Pending.Add(batch.Particles[i],
-                    new PendingStep(batch, i, batch.Spawns[i]));
-                return true;
+                var last = batch; batch = null;
+                Dispatch(state, last, target);
             }
-            // No speculative retry or waiting when both backend tiles are occupied.
-            // Stock work continues and admission can try again at the next pool boundary.
-            for (int i = 0; i < batch.Particles.Count; i++) state.CpuOnly.Add(batch.Spawns[i]);
-            if (first is ParticleGeneric unsupported) state.CpuOnly.Add(ParticleMotionHistory.SpawnToken(unsupported));
-            batch.Clear();
-            return false;
         }
         catch
         {
             // Preparation can fail before Remaining or Pending is populated.
             // The idle-clear shortcut cannot discover this partial owner.
-            batch.Clear();
-            state.InvalidatePending();
+            batch?.Clear();
             throw;
         }
     }
-
-    private static void Apply(ParticleGeneric particle, in ParticleSimulationOutput result, float dt, ICoreClientAPI api, ParticlePhysics physics,
-        Batch batch, int index, PoolState state)
+    private static Batch? Acquire(PoolState state)
     {
-        particle.SecondsAlive = result.VelocityAge.W;
+        foreach (var batch in state.Batches)
+            if (batch.Remaining == 0 && batch.Ticket == 0) return batch;
+        if (state.Batches.Count == MaximumBatches) return null;
+        var created = new Batch();
+        state.Batches.Add(created);
+        return created;
+    }
+    private static bool Dispatch(PoolState state, Batch batch, IParticleSimulationBackend target)
+    {
+        int count = batch.Particles.Count;
+        if (batch.Output.Length < count) Array.Resize(ref batch.Output, count);
+        batch.Backend = target;
+        if (count > 0)
+            batch.Ticket = target.Submit(batch.Input.AsSpan(0, count), batch.Spawns.AsSpan(0, count), batch.World.AsSpan(0, count),
+                CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells), batch.Output);
+        // No retry or waiting when every backend slot is occupied. Stock work
+        // continues and the next pool call prepares these steps again.
+        if (batch.Ticket == 0) { batch.Clear(); return false; }
+        batch.Remaining = count; batch.Call = state.Call;
+        for (int i = 0; i < count; i++) state.Pending.Add(batch.Particles[i], new PendingStep(batch, i, batch.Spawns[i]));
+        return true;
+    }
+    private static bool Poll(PoolState state, Batch batch)
+    {
+        if (batch.Ready) return true;
+        // One fence query per batch and pool call; a result that is not ready
+        // leaves its particles on the stock tick instead of blocking the frame.
+        if (batch.Polled == state.Call) return false;
+        batch.Polled = state.Call;
+        if (batch.Backend!.TryComplete(batch.Ticket) is not { } buffer) { state.Backlogged = true; return false; }
+        batch.Buffer = buffer; batch.Ticket = 0; batch.Ready = true;
+        if (HeadlessHarnessOptions.Enabled && !Benchmark)
+            Check(batch.Input.AsSpan(0, batch.Particles.Count), batch.World.AsSpan(0, batch.Particles.Count),
+                CollectionsMarshal.AsSpan(batch.Boxes), CollectionsMarshal.AsSpan(batch.LiquidCells), batch.Output.AsSpan(0, batch.Particles.Count));
+        return true;
+    }
+    private static void RetireStale(PoolState state)
+    {
+        foreach (var batch in state.Batches)
+        {
+            if (batch.Remaining == 0 || state.Call - batch.Call <= MaximumLatency) continue;
+            // Unconsumed steps this old belong to particles another producer
+            // removed or replaced; release their GPU result and capacity.
+            for (int i = 0; i < batch.Particles.Count; i++)
+                if (state.Pending.TryGetValue(batch.Particles[i], out var step) && ReferenceEquals(step.Batch, batch))
+                    state.Pending.Remove(batch.Particles[i]);
+            batch.Clear();
+        }
+    }
+
+    private static void Apply(ParticleGeneric particle, in ParticleSimulationOutput result, float lifeDt, float dt, ICoreClientAPI api, ParticlePhysics physics,
+        Batch batch, int index)
+    {
+        // The stock addition; equal to the GPU age whenever a result depends on it.
+        particle.SecondsAlive += lifeDt;
         particle.Velocity.Set(result.VelocityAge.X, result.VelocityAge.Y, result.VelocityAge.Z);
         Motion(particle).Set(result.MotionAlive.X, result.MotionAlive.Y, result.MotionAlive.Z);
         particle.Position.Set(result.X, result.Y, result.Z);
-        if (particle.TerrainCollision)
-        {
-            MaterializeCollisionList(physics, batch, index, in result, state.CollisionBox);
-            ApplyCollisionResponse(particle, dt, api, result.CollisionFlags);
-        }
+        // Confirmation already rebuilt CachedCuboidList through the stock walk,
+        // and compute applied the velocity response.
+        if (particle.TerrainCollision) ApplyCollisionResponse(particle, dt, api, result.CollisionFlags & ParticleSimulationOutput.CollisionMask);
         bool liquidPolicy = (result.QueryBounds & ParticleSimulationOutput.LiquidPolicyApplied) != 0;
         if (liquidPolicy)
         {
@@ -505,8 +546,8 @@ internal static partial class GpuParticleSimulation
             if ((policy & ParticleSimulationWorldInput.DieInLiquid) != 0) Interlocked.Increment(ref liquidDeathPolicyApplied);
             if ((result.QueryBounds & ParticleSimulationOutput.LiquidCell) != 0) Interlocked.Increment(ref wetPolicyApplied);
         }
-        particle.Alive = result.MotionAlive.W > 0.5f && (liquidPolicy || !particle.DieInAir || physics.BlockAccess.GetBlockRaw((int)particle.Position.X,
-            (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
+        particle.Alive = liquidPolicy ? result.MotionAlive.W > 0.5f : particle.SecondsAlive < particle.LifeLength && (!particle.DieInAir ||
+            physics.BlockAccess.GetBlockRaw((int)particle.Position.X, (int)(particle.Position.Y + 0.15000000596046448), (int)particle.Position.Z, 2).IsLiquid());
         byte ticks = unchecked((byte)(TickCount(particle) + 1)); TickCount(particle) = ticks;
         if (ticks <= 2) return;
         particle.lightrgbs = particle.LightEmission == int.MaxValue ? particle.LightEmission : physics.BlockAccess.GetLightRGBsAsInt(
@@ -548,8 +589,8 @@ internal static partial class GpuParticleSimulation
                 GpuParticleVisuals.Evaluate(AtPhase(state.VelocityY, phase)), GpuParticleVisuals.Evaluate(AtPhase(state.VelocityZ, phase)));
             motion *= state.Timing.W;
             if (state.Control.Y > 0.5f) motion += ((new Vector3(state.Parent.X, state.Parent.Y, state.Parent.Z) * state.Parent.W) * state.Timing.W) * state.Control.X;
-            uint queryBounds = 0;
-            uint flags = state.Control.W > 0.5f ? ReferenceCollision(in state, world[i], boxes, ref motion, ref populatedSize, out queryBounds) : 0;
+            uint queryBounds = 0, reused = 0;
+            uint flags = state.Control.W > 0.5f ? ReferenceCollision(in state, world[i], boxes, ref motion, ref populatedSize, out queryBounds, out reused) : 0;
             // Establish the boundary independently from the CPU query, rather
             // than trusting the GPU's flag to exclude a result from checking.
             // No numeric result beyond this opaque callback is authoritative.
@@ -592,11 +633,13 @@ internal static partial class GpuParticleSimulation
                 if ((snapshot.LiquidPolicy & ParticleSimulationWorldInput.DieInLiquid) != 0) Interlocked.Increment(ref liquidDeathPolicyChecks);
                 if (liquid) Interlocked.Increment(ref wetPolicyChecks);
             }
+            if (flags != 0) velocity = ReferenceResponse(velocity, flags, state.Timing.W, state.Bounciness, state.RandomDrag);
+            uint expectedFlags = state.Control.W > 0.5f ? flags | reused << ParticleSimulationOutput.ReusedShift : 0;
             var delta = Vector4.Abs(result.VelocityAge - new Vector4(velocity, age));
             var motionDelta = Vector4.Abs(result.MotionAlive - new Vector4(motion, alive ? 1 : 0));
             double error = Math.Max(Math.Max(delta.X, delta.Y), Math.Max(delta.Z, delta.W));
             error = Math.Max(error, Math.Max(Math.Max(motionDelta.X, motionDelta.Y), Math.Max(motionDelta.Z, motionDelta.W)));
-            if (flags != result.CollisionFlags || queryBounds != result.QueryBounds) error = double.MaxValue;
+            if (expectedFlags != result.CollisionFlags || queryBounds != result.QueryBounds) error = double.MaxValue;
             floatError = Math.Max(floatError, double.IsFinite(error) ? error : double.MaxValue);
             error = Math.Max(Math.Abs(result.X - (state.X + (double)motion.X * factor)), Math.Max(
                 Math.Abs(result.Y - (state.Y + (double)motion.Y * factor)), Math.Abs(result.Z - (state.Z + (double)motion.Z * factor))));

@@ -10,7 +10,10 @@ public struct ParticleSimulationInput
     [FieldOffset(0)] public double X;
     [FieldOffset(8)] public double Y;
     [FieldOffset(16)] public double Z;
-    [FieldOffset(24)] private double reservedPosition;
+    // Stock collision response inputs. The resident configuration keeps
+    // Bounciness; each command carries the current random drag.
+    [FieldOffset(24)] public float Bounciness;
+    [FieldOffset(28)] public float RandomDrag;
     [FieldOffset(32)] public Vector4 VelocityGravity;
     [FieldOffset(48)] public Vector4 Timing;
     [FieldOffset(64)] public Vector4 Parent;
@@ -22,7 +25,7 @@ public struct ParticleSimulationInput
     [FieldOffset(192)] public ParticleEvolution VelocityZ;
 }
 
-/// <summary>GPU-produced clipped position/motion, pre-bounce velocity, collision flags, age and lifetime.</summary>
+/// <summary>GPU-produced clipped position/motion, post-response velocity, collision flags, age and lifetime.</summary>
 [StructLayout(LayoutKind.Explicit, Size = 64)]
 public struct ParticleSimulationOutput
 {
@@ -32,6 +35,12 @@ public struct ParticleSimulationOutput
     // A custom collision callback intersects the actual stock motion query.
     // The adapter must run that ordered CPU tick and rebase later speculation.
     public const uint RequiresCpuCollision = 0x80000000;
+    // Stock EnumCollideFlags occupy the low bits. The number of selected boxes
+    // that used reused CachedCuboidList rounding follows, so a later consumer
+    // can confirm the cache prefix it actually observes at the stock tick.
+    public const uint CollisionMask = 7;
+    public const int ReusedShift = 8;
+    public const uint ReusedMask = 0xfffff;
     [FieldOffset(0)] public double X;
     [FieldOffset(8)] public double Y;
     [FieldOffset(16)] public double Z;
@@ -69,7 +78,7 @@ public struct ParticleSimulationBox
     private int reserved;
 }
 
-/// <summary>Compact command; persistent spawn state supplies position, velocity and configuration.</summary>
+/// <summary>Compact command; persistent spawn state supplies position, velocity and configuration. Control.Y is the current random drag.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct ParticleSimulationCommand
 {
@@ -100,14 +109,16 @@ public struct ParticleSimulationRenderInput
     [FieldOffset(56)] public uint UploadDeltaZ;
 }
 
-/// <summary>Fixed-step submissions. Each actor produces its actually due stock step.</summary>
+/// <summary>Fixed-step submissions. Each actor's next stock step is prepared ahead and consumed without waiting.</summary>
 public interface IParticleSimulationBackend
 {
-    /// <summary>Copies inputs and submits without waiting. Returns zero when the bounded slot or retained-buffer budget is exhausted.</summary>
+    /// <summary>Copies inputs and submits without waiting. Results are copied into <paramref name="output"/> when completion is observed;
+    /// the array must remain untouched until the ticket completes or is released. Returns zero when the bounded slot or retained-buffer budget is exhausted.</summary>
     long Submit(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<object> spawns,
-        ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells);
-    /// <summary>Completes accepted work once, copies the CPU facade and transfers ownership of its immutable GPU buffer.</summary>
-    ParticleSimulationBuffer Complete(long ticket, Span<ParticleSimulationOutput> output);
+        ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells,
+        ParticleSimulationOutput[] output);
+    /// <summary>Never waits. Returns null while the GPU still owns the ticket; otherwise completes it once and transfers ownership of its immutable GPU buffer.</summary>
+    ParticleSimulationBuffer? TryComplete(long ticket);
     /// <summary>Relinquishes a ticket immediately. Its buffers remain owned by the backend until GPU completion.</summary>
     void Release(long ticket);
     /// <summary>Relinquishes all pending tickets at a world or feature transition, without waiting.</summary>

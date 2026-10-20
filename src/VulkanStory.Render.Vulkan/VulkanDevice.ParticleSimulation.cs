@@ -48,14 +48,20 @@ public sealed unsafe partial class VulkanDevice
     internal ulong ParticleSimulationRetainedBytes => particleSimulation?.RetainedBytes ?? 0;
     internal long ParticleSimulationCapacityFallbacks => particleSimulation?.CapacityFallbacks ?? 0;
 
-    /// <summary>Two immutable submissions, shared by pool workers without touching frame command state.</summary>
+    /// <summary>A bounded ring of immutable submissions, shared by pool workers without touching frame command state.
+    /// Completion is observed by polling fences; no caller waits for particle state.</summary>
     private sealed class ParticleSimulationRunner : IParticleSimulationBackend, IDisposable
     {
+        // A slot is held only until any producer observes its fence; completed
+        // results then wait in their producer's array, not in the slot.
+        private const int SlotCount = 3;
         private readonly object gate = new();
         private readonly VulkanContext context;
         private readonly ParticleSimulationSlot[] slots;
-        private readonly long[] tickets = new long[2];
-        private readonly bool[] abandoned = new bool[2];
+        private readonly long[] tickets = new long[SlotCount];
+        private readonly bool[] abandoned = new bool[SlotCount];
+        private readonly ParticleSimulationOutput[]?[] destinations = new ParticleSimulationOutput[]?[SlotCount];
+        private readonly Dictionary<long, SimulationBuffer> completed = new();
         private readonly HashSet<SimulationBuffer> retained = new();
         private readonly List<VulkanBuffer> reusable = new();
         private const int ResidentCapacity = 65536;
@@ -64,12 +70,12 @@ public sealed unsafe partial class VulkanDevice
         // Device inputs plus mapped uploads, per-slot seeds/readback/query scratch,
         // and shared device residents all count against the same 128 MiB budget.
         private const ulong WorkspaceBytes = ResidentCapacity * (224UL + 64) +
-            2 * (2 * (4096UL * (32 + 64) + BoxCapacity * 48UL + LiquidCapacity * 4UL + 8193UL * 4) + 4096UL * (224 + 64 + 64 + 32));
+            SlotCount * (2 * (4096UL * (32 + 64) + BoxCapacity * 48UL + LiquidCapacity * 4UL + 8193UL * 4) + 4096UL * (224 + 64 + 64 + 32));
         private readonly VulkanBuffer configurations, simulationState;
         internal readonly Semaphore Timeline;
         private readonly ConditionalWeakTable<object, Resident> residents = new();
         private readonly Resident?[] residentSlots = new Resident?[ResidentCapacity];
-        private readonly Resident[][] pendingResidents = [[], []];
+        private readonly Resident[][] pendingResidents = Enumerable.Range(0, SlotCount).Select(_ => Array.Empty<Resident>()).ToArray();
         private readonly ParticleSimulationCommand[] commands = new ParticleSimulationCommand[4096];
         private int nextResident;
         private sealed class Resident(int slot, object spawn)
@@ -104,20 +110,21 @@ public sealed unsafe partial class VulkanDevice
             configurations = new VulkanBuffer(context, ResidentCapacity * 224UL, usage, memory, MemoryPoolClass.DeviceBuffers);
             try { simulationState = new VulkanBuffer(context, ResidentCapacity * 64UL, usage, memory, MemoryPoolClass.DeviceBuffers); }
             catch { configurations.Dispose(); throw; }
-            ParticleSimulationSlot? first = null;
+            var made = new List<ParticleSimulationSlot>(SlotCount);
             try
             {
                 var type = new SemaphoreTypeCreateInfo { SType = StructureType.SemaphoreTypeCreateInfo, SemaphoreType = SemaphoreType.Timeline };
                 var create = new SemaphoreCreateInfo { SType = StructureType.SemaphoreCreateInfo, PNext = &type };
-                Semaphore made;
-                VulkanResult.Check(context.Api.CreateSemaphore(context.Device, &create, null, &made), "particle simulation timeline"); Timeline = made;
-                first = new ParticleSimulationSlot(context, program, pipeline, values, configurations, simulationState);
-                slots = [first, new ParticleSimulationSlot(context, program, pipeline, values, configurations, simulationState)];
+                Semaphore timeline;
+                VulkanResult.Check(context.Api.CreateSemaphore(context.Device, &create, null, &timeline), "particle simulation timeline"); Timeline = timeline;
+                for (int i = 0; i < SlotCount; i++) made.Add(new ParticleSimulationSlot(context, program, pipeline, values, configurations, simulationState));
+                slots = made.ToArray();
                 retainedBytes = WorkspaceBytes;
             }
             catch
             {
-                first?.Dispose(); configurations.Dispose(); simulationState.Dispose();
+                foreach (var slot in made) slot.Dispose();
+                configurations.Dispose(); simulationState.Dispose();
                 if (Timeline.Handle != 0) context.Api.DestroySemaphore(context.Device, Timeline, null);
                 throw;
             }
@@ -139,6 +146,7 @@ public sealed unsafe partial class VulkanDevice
             new(value.First, value.Factor, 0, value.Maximum, value.Function, value.Limited != 0);
         private static ParticleSimulationInput Configuration(in ParticleSimulationInput input) => new()
         {
+            Bounciness = input.Bounciness,
             VelocityGravity = new(0, 0, 0, input.VelocityGravity.W), Timing = new(0, input.Timing.Y, 0, 0),
             Parent = input.Parent, StartingVelocity = input.StartingVelocity,
             Physics = new(input.Physics.X, input.Physics.Y, input.Physics.Z, 0),
@@ -147,19 +155,19 @@ public sealed unsafe partial class VulkanDevice
             VelocityZ = ConfigurationEvolution(input.VelocityZ),
         };
         public long Submit(ReadOnlySpan<ParticleSimulationInput> input, ReadOnlySpan<object> spawns,
-            ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells)
+            ReadOnlySpan<ParticleSimulationWorldInput> world, ReadOnlySpan<ParticleSimulationBox> boxes, ReadOnlySpan<uint> liquidCells,
+            ParticleSimulationOutput[] output)
         {
             lock (gate)
             {
-                if (disposed || failed || input.IsEmpty || input.Length > 4096 || spawns.Length != input.Length ||
+                if (disposed || failed || input.IsEmpty || input.Length > 4096 || spawns.Length != input.Length || output.Length < input.Length ||
                     world.Length != input.Length || boxes.Length > BoxCapacity || liquidCells.Length > LiquidCapacity) return 0;
                 ulong bytes = (ulong)input.Length * 64;
+                // Free every slot whose fence has signaled, including other
+                // producers' work; never wait for one that is still executing.
+                Collect();
                 for (int i = 0; i < slots.Length; i++)
                 {
-                    if (abandoned[i])
-                    {
-                        if (!CollectDiscarded(i)) continue;
-                    }
                     if (tickets[i] != 0) continue;
                     long admissionStart = Stopwatch.GetTimestamp();
                     var active = new Resident[input.Length];
@@ -213,13 +221,16 @@ public sealed unsafe partial class VulkanDevice
                         slots[i].Seed(j, (uint)resident.Slot, configuration, new ParticleSimulationOutput
                             { X = value.X, Y = value.Y, Z = value.Z, VelocityAge = value.VelocityGravity }, configChanged, stateChanged);
                         resident.Initialized = true;
+                        // The shader reads the flags from the resident configuration;
+                        // the command slot carries the current random drag instead.
+                        var control = value.Control; control.Y = value.RandomDrag;
                         commands[j] = new ParticleSimulationCommand { Slot = (uint)resident.Slot, Age = value.Timing.X,
-                            LifeDelta = value.Timing.Z, PhysicsDelta = value.Timing.W, Control = value.Control };
+                            LifeDelta = value.Timing.Z, PhysicsDelta = value.Timing.W, Control = control };
                     }
                     Interlocked.Add(ref admissionTicks, Stopwatch.GetTimestamp() - admissionStart);
                     try { if (!slots[i].Submit(commands.AsSpan(0, input.Length), world, boxes, liquidCells, target, Timeline, (ulong)ticket)) { Recycle(target); return 0; } }
                     catch { failed = true; throw; }
-                    pendingResidents[i] = active;
+                    pendingResidents[i] = active; destinations[i] = output;
                     foreach (var resident in active) resident.Pending = true;
                     sequence = ticket;
                     return tickets[i] = ticket;
@@ -228,23 +239,39 @@ public sealed unsafe partial class VulkanDevice
                 return 0;
             }
         }
-        public ParticleSimulationBuffer Complete(long ticket, Span<ParticleSimulationOutput> output)
+        public ParticleSimulationBuffer? TryComplete(long ticket)
         {
             lock (gate)
             {
-                if (disposed || failed || ticket == 0) throw new InvalidOperationException("Particle simulation backend lost an accepted trajectory.");
+                // Results are speculative until their producer confirms them at the
+                // stock tick. A failed runner leaves every particle on its CPU tick.
+                if (disposed || failed) return null;
+                if (ticket == 0) throw new InvalidOperationException("Particle simulation backend lost an accepted trajectory.");
+                if (completed.Remove(ticket, out var done)) return done;
                 int index = Array.IndexOf(tickets, ticket);
                 if (index < 0 || abandoned[index]) throw new InvalidOperationException("Particle simulation ticket is no longer owned by its producer.");
-                try
-                {
-                    var buffer = new SimulationBuffer(this, slots[index].Complete(output), (ulong)ticket);
-                    for (int j = 0; j < pendingResidents[index].Length; j++)
-                    { var resident = pendingResidents[index][j]; resident.Last = output[j]; resident.Pending = false; }
-                    pendingResidents[index] = [];
-                    retained.Add(buffer); tickets[index] = 0;
-                    return buffer;
-                }
+                Collect();
+                return completed.Remove(ticket, out done) ? done : null;
+            }
+        }
+        // Called with gate held. Polls fences only; a completed slot copies its
+        // results into the producer's array and becomes free immediately.
+        private void Collect()
+        {
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (tickets[i] == 0) continue;
+                if (abandoned[i]) { CollectDiscarded(i); continue; }
+                var destination = destinations[i]!;
+                VulkanBuffer? buffer;
+                try { if (!slots[i].TryComplete(destination, out buffer)) continue; }
                 catch { failed = true; throw; }
+                var result = new SimulationBuffer(this, buffer!, (ulong)tickets[i]);
+                var active = pendingResidents[i];
+                for (int j = 0; j < active.Length; j++) { active[j].Last = destination[j]; active[j].Pending = false; }
+                pendingResidents[i] = [];
+                retained.Add(result); completed.Add(tickets[i], result);
+                tickets[i] = 0; destinations[i] = null;
             }
         }
         // Producer buffers, meshes and frame retirements release references.
@@ -298,7 +325,7 @@ public sealed unsafe partial class VulkanDevice
             // command must rebase from the still authoritative game producer.
             foreach (var resident in pendingResidents[index]) { resident.Pending = false; resident.Initialized = false; }
             pendingResidents[index] = [];
-            tickets[index] = 0; abandoned[index] = false;
+            tickets[index] = 0; abandoned[index] = false; destinations[index] = null;
             return true;
         }
         public void Release(long ticket)
@@ -306,9 +333,12 @@ public sealed unsafe partial class VulkanDevice
             lock (gate)
             {
                 if (disposed || ticket == 0) return;
+                // An unclaimed completed result holds only a buffer reference.
+                if (completed.Remove(ticket, out var done)) { done.Dispose(); return; }
                 int index = Array.IndexOf(tickets, ticket);
                 if (index < 0) return;
-                abandoned[index] = true;
+                // The producer may reuse its result array once this returns.
+                abandoned[index] = true; destinations[index] = null;
                 // Release can run from a weak producer-sidecar finalizer. Mark
                 // ownership only; Submit/DiscardPending/Dispose collect on their
                 // normal callers and never recycle an uncompleted buffer.
@@ -319,10 +349,12 @@ public sealed unsafe partial class VulkanDevice
             lock (gate)
             {
                 if (disposed) return;
+                foreach (var done in completed.Values) done.Dispose();
+                completed.Clear();
                 for (int i = 0; i < slots.Length; i++)
                     if (tickets[i] != 0)
                     {
-                        abandoned[i] = true;
+                        abandoned[i] = true; destinations[i] = null;
                         if (!failed) CollectDiscarded(i);
                     }
             }
@@ -334,7 +366,7 @@ public sealed unsafe partial class VulkanDevice
                 if (disposed) return;
                 foreach (var slot in slots) slot.Dispose();
                 if (Timeline.Handle != 0) context.Api.DestroySemaphore(context.Device, Timeline, null);
-                configurations.Dispose(); simulationState.Dispose(); residents.Clear();
+                configurations.Dispose(); simulationState.Dispose(); residents.Clear(); completed.Clear();
                 foreach (var buffer in retained) buffer.Buffer.Dispose();
                 foreach (var buffer in reusable) buffer.Dispose(); reusable.Clear();
                 retained.Clear();
@@ -342,6 +374,7 @@ public sealed unsafe partial class VulkanDevice
                 disposed = true;
                 Array.Clear(tickets);
                 Array.Clear(abandoned);
+                Array.Clear(destinations);
             }
         }
     }
@@ -565,54 +598,53 @@ public sealed unsafe partial class VulkanDevice
             long start = Stopwatch.GetTimestamp();
             lock (gate)
             {
-                if (disposed || !inFlight) return false;
-                var api = context.Api;
-                var status = api.GetFenceStatus(context.Device, fence);
-                if (status == Result.NotReady) return false;
-                VulkanResult.Check(status, "particle simulation result fence");
+                if (disposed || !inFlight || !Signaled()) return false;
                 inFlight = false;
-                if (timestamps.Handle != 0)
-                {
-                    ulong* ticks = stackalloc ulong[2];
-                    if (api.GetQueryPoolResults(context.Device, timestamps, 0, 2, 16, ticks, 8, QueryResultFlags.Result64Bit) == Result.Success)
-                    {
-                        ulong mask = timestampBits >= 64 ? ulong.MaxValue : (1UL << (int)timestampBits) - 1;
-                        gpuMilliseconds += ((ticks[1] - ticks[0]) & mask) * (double)timestampPeriod / 1000000;
-                    }
-                }
+                ReadTimestamps();
                 submitMilliseconds += Stopwatch.GetElapsedTime(start).TotalMilliseconds;
                 // This path only discards abandoned work. Successful consumers
-                // transfer output ownership through Complete instead.
+                // transfer output ownership through TryComplete instead.
                 buffer = output; output = null;
                 return true;
             }
         }
 
-        internal VulkanBuffer Complete(Span<ParticleSimulationOutput> destination)
+        internal bool TryComplete(ParticleSimulationOutput[] destination, out VulkanBuffer? buffer)
         {
+            buffer = null;
             long start = Stopwatch.GetTimestamp();
             lock (gate)
             {
                 if (disposed || !inFlight || destination.Length < count)
                     throw new InvalidOperationException("Particle trajectory completion has no matching submission or CPU facade.");
-                var completed = fence;
-                // Accepted supported work is authoritative: do not compute it a
-                // second time on the CPU while its immutable result is pending.
-                VulkanResult.Check(context.Api.WaitForFences(context.Device, 1, &completed, true, ulong.MaxValue), "particle simulation completion fence");
+                // Speculative work is never awaited. While this slot executes, its
+                // producers keep their stock CPU ticks until a later poll observes it.
+                if (!Signaled()) return false;
                 inFlight = false;
                 new ReadOnlySpan<ParticleSimulationOutput>((void*)readback!.Mapped, count).CopyTo(destination);
-                if (timestamps.Handle != 0)
-                {
-                    ulong* ticks = stackalloc ulong[2];
-                    if (context.Api.GetQueryPoolResults(context.Device, timestamps, 0, 2, 16, ticks, 8, QueryResultFlags.Result64Bit) == Result.Success)
-                    {
-                        ulong mask = timestampBits >= 64 ? ulong.MaxValue : (1UL << (int)timestampBits) - 1;
-                        gpuMilliseconds += ((ticks[1] - ticks[0]) & mask) * (double)timestampPeriod / 1000000;
-                    }
-                }
+                ReadTimestamps();
                 submitMilliseconds += Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                var result = output; output = null;
-                return result;
+                buffer = output; output = null;
+                return true;
+            }
+        }
+
+        private bool Signaled()
+        {
+            var status = context.Api.GetFenceStatus(context.Device, fence);
+            if (status == Result.NotReady) return false;
+            VulkanResult.Check(status, "particle simulation result fence");
+            return true;
+        }
+
+        private void ReadTimestamps()
+        {
+            if (timestamps.Handle == 0) return;
+            ulong* ticks = stackalloc ulong[2];
+            if (context.Api.GetQueryPoolResults(context.Device, timestamps, 0, 2, 16, ticks, 8, QueryResultFlags.Result64Bit) == Result.Success)
+            {
+                ulong mask = timestampBits >= 64 ? ulong.MaxValue : (1UL << (int)timestampBits) - 1;
+                gpuMilliseconds += ((ticks[1] - ticks[0]) & mask) * (double)timestampPeriod / 1000000;
             }
         }
 

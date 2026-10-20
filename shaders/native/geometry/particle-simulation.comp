@@ -4,7 +4,7 @@
 layout(local_size_x = 64) in;
 struct Evolution { vec4 values; ivec4 control; };
 struct Input {
-    dvec4 position;
+    dvec3 position; float bounciness; float randomDrag;
     vec4 velocityGravity; vec4 timing; vec4 parent; vec4 startingVelocity; vec4 control; vec4 physics;
     Evolution velocityX; Evolution velocityY; Evolution velocityZ;
 };
@@ -71,8 +71,16 @@ void main() {
             return;
         }
         if (state.control.w > 0.5) {
-            metadata.x = collide(position, motion, state.physics.x, world, queries.values[index]);
+            Query query = queries.values[index];
+            metadata.x = collide(position, motion, state.physics.x, world, query);
             position += dvec3(motion) * 0.999LF;
+            // The stock velocity response follows the clipped position. Its
+            // shared random draw stays at the ordered CPU tick; the command
+            // carries the random drag that draw left for this step.
+            if (metadata.x != 0u) value.velocityAge.xyz = respond(value.velocityAge.xyz, metadata.x, step.physicsDelta, state.bounciness, step.control.y);
+            // Selected boxes that used reused cache rounding, so the consumer can
+            // confirm the CachedCuboidList prefix it observes at the stock tick.
+            metadata.x |= min(uint(query.maximum.w), uint(query.minimum.w) & 0x7fffffffu) << 8;
         } else position += dvec3(motion);
         if (world.liquidPolicy != 0u) {
             // The pre-step position remains in value until the final write.
