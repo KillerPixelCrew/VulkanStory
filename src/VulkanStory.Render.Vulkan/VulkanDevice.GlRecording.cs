@@ -60,7 +60,6 @@ public sealed unsafe partial class VulkanDevice
     {
         BeginIndirectFrame(slot.Index);
         BeginEntityDrawFrame(slot.Index);
-        BeginEntitySceneFrame(slot.Index);
         RetireDeformationGeometry(all: !ComputeDeformationEnabled);
         RetireJointPoses(all: !ComputeJointPosesEnabled);
         RetireWorldGeometry(all: !ComputeDeformationEnabled);
@@ -76,6 +75,7 @@ public sealed unsafe partial class VulkanDevice
         _gpuTimestamps?.BeginSlot(slot.Index, slot.CommandBuffer);
         _occlusionDepth?.Collect(slot.Index);
         foreach (var depth in _stereoOcclusionDepths) depth?.Collect(slot.Index);
+        BeginEntitySceneFrame(slot.Index);
         _readbacks.BeginSlot(slot.Index);
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);
