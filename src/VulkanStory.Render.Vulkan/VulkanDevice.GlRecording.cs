@@ -78,5 +78,6 @@ public sealed unsafe partial class VulkanDevice
         _readbacks.BeginSlot(slot.Index);
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);
+        FlushEntityGeometryPacks(slot.Index);
     }
 }

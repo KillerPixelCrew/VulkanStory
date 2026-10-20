@@ -603,7 +603,7 @@ public sealed unsafe partial class VulkanDevice
         ulong entityOffset = 0;
         EntityGeometryArena? entityGeometry = null;
         uint firstIndex = 0;
-        bool packed = instanceCount == 1 && TryPrepareEntityGeometry(pipeline.Program, mesh!, out entityGeometry, out firstIndex);
+        bool packed = instanceCount == 1 && TryPrepareEntityGeometry(pipeline.Program, meshId, mesh!, out entityGeometry, out firstIndex);
         EntityRecordDraw recordDraw = default;
         bool records = packed && TryPrepareEntityRecord(pipeline, out recordDraw);
         uint firstInstance = records ? recordDraw.Row : 0;

@@ -307,6 +307,8 @@ public sealed unsafe partial class VulkanDevice
     {
         var run = _entityDrawRun;
         var batch = run.Batch;
+        // Mesh identity and firstIndex deliberately differ: slot preparation packed
+        // every available slice into this arena's common bindings before the pass.
         if (!run.Open || arena == null || batch == null || !ReferenceEquals(batch, _entityDrawBatch) ||
             !ReferenceEquals(commands, batch.Commands) || run.Count >= run.MaxCount ||
             offset != batch.CommandOffset + (ulong)(run.First + run.Count) * 20 ||
