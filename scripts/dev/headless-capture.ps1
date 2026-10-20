@@ -486,7 +486,7 @@ function Test-ScenarioDocument($Root) {
 }
 
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('GpuTerrainDrawPreparation','GpuChunkMeshing','GpuSharedDeformation','GpuEntityDrawPreparation','GpuJointPosePreparation','GpuParticleGeometry','GpuParticleVisualSimulation','GpuParticleSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
+foreach ($name in @('GpuTerrainDrawPreparation','GpuChunkMeshing','ResidentTerrain','ResidentEntities','GpuSharedDeformation','GpuEntityDrawPreparation','GpuJointPosePreparation','GpuParticleGeometry','GpuParticleVisualSimulation','GpuParticleSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
 foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
     $script:settingTypes.Add($name, 'bool')
 }

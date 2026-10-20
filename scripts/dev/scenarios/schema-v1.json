@@ -248,6 +248,8 @@
                 },
                 "GpuTerrainDrawPreparation": { "type": "boolean" },
                 "GpuChunkMeshing": { "type": "boolean" },
+                "ResidentTerrain": { "type": "boolean" },
+                "ResidentEntities": { "type": "boolean" },
                 "GpuSharedDeformation": { "type": "boolean" },
                 "GpuParticleGeometry": { "type": "boolean" },
                 "GpuParticleVisualSimulation": { "type": "boolean" },
