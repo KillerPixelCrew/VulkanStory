@@ -23,12 +23,14 @@ internal sealed class OcclusionDepth : IDisposable
     public const int Block = 8;
     private const string ResourcePrefix = "shaders-vk/occlusion/";
 
-    private sealed record Pending(int Width, int Height, OcclusionCamera Camera, OcclusionProjection Projection);
+    private sealed record Pending(int Width, int Height, OcclusionCamera Camera, OcclusionProjection Projection,
+        int GpuTexture, int PixelWidth, int PixelHeight);
 
     private readonly VulkanDevice _device;
     private readonly Pending?[] _pending;
     // One mapped buffer per frame slot, owned here: the shared readback arena can be replaced (and retired) within a frame.
     private readonly VulkanBuffer?[] _readbacks;
+    private readonly int[] _gpuTargets, _gpuWidths, _gpuHeights;
     private readonly byte[] _push = new byte[16];
     private int _program, _target;
     private Format _programFormat;
@@ -39,6 +41,12 @@ internal sealed class OcclusionDepth : IDisposable
     internal int GpuWidth { get; private set; }
     internal int GpuHeight { get; private set; }
     internal int SourceDepthTexture { get; private set; }
+    // Published only after the slot fence completes. Pre-graphics scene culls read
+    // these targets before this frame's reduction is allowed to overwrite them.
+    internal int CompletedGpuTexture { get; private set; }
+    internal OcclusionCamera? CompletedGpuCamera { get; private set; }
+    internal int CompletedGpuWidth { get; private set; }
+    internal int CompletedGpuHeight { get; private set; }
     private OcclusionPyramid? _latest;
     private readonly System.Collections.Generic.List<OcclusionPyramid> _storage = new();
 
@@ -50,6 +58,9 @@ internal sealed class OcclusionDepth : IDisposable
         _device = device;
         _pending = new Pending?[framesInFlight];
         _readbacks = new VulkanBuffer?[framesInFlight];
+        _gpuTargets = new int[framesInFlight];
+        _gpuWidths = new int[framesInFlight];
+        _gpuHeights = new int[framesInFlight];
         Test = new LatestView(this);
     }
 
@@ -122,7 +133,8 @@ internal sealed class OcclusionDepth : IDisposable
             buffer = _readbacks[slot] = _device.CreateReadbackBuffer(bytes);
         }
         _device.CopyTextureToReadbackBuffer(_target, (uint)width, (uint)height, buffer);
-        _pending[slot] = new Pending(width, height, camera, projection);
+        _pending[slot] = new Pending(width, height, camera, projection,
+            prepareGpuDraws ? _target : 0, (int)depth.Width, (int)depth.Height);
         return true;
     }
 
@@ -134,6 +146,13 @@ internal sealed class OcclusionDepth : IDisposable
     {
         if (_pending[slotIndex] is not { } pending || _readbacks[slotIndex] is not { } buffer) return;
         _pending[slotIndex] = null;
+        if (pending.GpuTexture != 0)
+        {
+            CompletedGpuTexture = pending.GpuTexture;
+            CompletedGpuCamera = pending.Camera;
+            CompletedGpuWidth = pending.PixelWidth;
+            CompletedGpuHeight = pending.PixelHeight;
+        }
         OcclusionPyramid? reuse = null;
         if (ReuseStorage)
             foreach (var candidate in _storage)
@@ -156,6 +175,8 @@ internal sealed class OcclusionDepth : IDisposable
     public void Reset()
     {
         GpuCamera = null;
+        CompletedGpuTexture = 0;
+        CompletedGpuCamera = null;
         Array.Clear(_pending);
         Volatile.Write(ref _latest, null);
         _storage.Clear();
@@ -169,8 +190,15 @@ internal sealed class OcclusionDepth : IDisposable
 
     private bool EnsureTarget(int width, int height)
     {
+        int slot = _device.CurrentFrameSlot;
+        _target = _gpuTargets[slot];
+        _width = _gpuWidths[slot]; _height = _gpuHeights[slot];
         if (_target != 0 && _width == width && _height == height) return true;
-        if (_target != 0) _device.DeleteTexture(_target);
+        if (_target != 0)
+        {
+            if (CompletedGpuTexture == _target) { CompletedGpuTexture = 0; CompletedGpuCamera = null; }
+            _device.DeleteTexture(_target);
+        }
         // Captures still in flight name the old target's bytes in the arena, not the texture, so they stay valid.
         // Native mip extents floor odd dimensions, whereas PERF-03's CPU levels
         // ceil them. Pad with repeated edge tiles so both hierarchies have the
@@ -182,6 +210,8 @@ internal sealed class OcclusionDepth : IDisposable
         for (int extent = Math.Max(paddedWidth, paddedHeight); extent > 1; extent >>= 1) levels++;
         _target = _device.CreateStorageTexture(paddedWidth, paddedHeight, Format.R32Sfloat, levels);
         _width = width; _height = height;
+        _gpuTargets[slot] = _target;
+        _gpuWidths[slot] = width; _gpuHeights[slot] = height;
         return _target != 0 && _device.TextureOf(_target)?.Format == Format.R32Sfloat;
     }
 
@@ -218,7 +248,8 @@ internal sealed class OcclusionDepth : IDisposable
     {
         Reset();
         for (int i = 0; i < _readbacks.Length; i++) { if (_readbacks[i] is { } buffer) _device.DeferBufferDeletion(buffer); _readbacks[i] = null; }
-        if (_target != 0) _device.DeleteTexture(_target);
+        foreach (int target in _gpuTargets) if (target != 0) _device.DeleteTexture(target);
+        Array.Clear(_gpuTargets);
         if (_program != 0) _device.DeleteComputeProgram(_program);
         if (_mipProgram != 0) _device.DeleteComputeProgram(_mipProgram);
         _target = _program = _mipProgram = 0;
