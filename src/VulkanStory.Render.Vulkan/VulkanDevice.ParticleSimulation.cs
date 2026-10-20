@@ -76,7 +76,9 @@ public sealed unsafe partial class VulkanDevice
         internal readonly Semaphore Timeline;
         private readonly ConditionalWeakTable<object, Resident> residents = new();
         private readonly Resident?[] residentSlots = new Resident?[ResidentCapacity];
-        private readonly Resident[][] pendingResidents = Enumerable.Range(0, SlotCount).Select(_ => Array.Empty<Resident>()).ToArray();
+        private readonly Resident[][] pendingResidents = Enumerable.Range(0, SlotCount).Select(_ => new Resident[4096]).ToArray();
+        private readonly int[] pendingResidentCounts = new int[SlotCount];
+        private readonly List<SimulationBuffer> retiredScratch = new();
         private readonly ParticleSimulationCommand[] commands = new ParticleSimulationCommand[4096];
         private int nextResident;
         private sealed class Resident(int slot, object spawn)
@@ -86,6 +88,7 @@ public sealed unsafe partial class VulkanDevice
             internal ParticleSimulationInput Configuration;
             internal ParticleSimulationOutput Last;
             internal bool Initialized, Pending;
+            internal long Admission;
         }
         private const int MaximumReusableBuffers = 16;
         private const ulong MaximumRetainedBytes = 128UL << 20;
@@ -93,9 +96,10 @@ public sealed unsafe partial class VulkanDevice
         private long capacityFallbacks;
         private long admissionTicks;
         private long sequence;
+        private long admissionSequence;
         private bool disposed, failed;
         internal bool Available => !Volatile.Read(ref disposed) && !Volatile.Read(ref failed);
-        internal ulong RetainedBytes { get { lock (gate) return retainedBytes; } }
+        internal ulong RetainedBytes => Volatile.Read(ref retainedBytes);
         internal long CapacityFallbacks => Interlocked.Read(ref capacityFallbacks);
         internal long Dispatches => slots.Sum(slot => slot.Dispatches);
         internal long Steps => slots.Sum(slot => slot.Steps);
@@ -171,17 +175,18 @@ public sealed unsafe partial class VulkanDevice
                 {
                     if (tickets[i] != 0) continue;
                     long admissionStart = Stopwatch.GetTimestamp();
-                    var active = new Resident[input.Length];
-                    var unique = new HashSet<Resident>();
+                    var active = pendingResidents[i];
+                    long admission = ++admissionSequence;
                     for (int j = 0; j < input.Length; j++)
                     {
                         var resident = FindResident(spawns[j]);
-                        if (resident == null || resident.Pending || !unique.Add(resident))
+                        if (resident == null || resident.Pending || resident.Admission == admission)
                         {
                             Interlocked.Add(ref admissionTicks, Stopwatch.GetTimestamp() - admissionStart);
                             Interlocked.Increment(ref capacityFallbacks); return 0;
                         }
                         active[j] = resident;
+                        resident.Admission = admission;
                     }
                     int reusableIndex = reusable.FindIndex(buffer => buffer.Size >= bytes);
                     VulkanBuffer target;
@@ -231,8 +236,8 @@ public sealed unsafe partial class VulkanDevice
                     Interlocked.Add(ref admissionTicks, Stopwatch.GetTimestamp() - admissionStart);
                     try { if (!slots[i].Submit(commands.AsSpan(0, input.Length), world, boxes, liquidCells, target, Timeline, (ulong)ticket)) { Recycle(target); return 0; } }
                     catch { failed = true; throw; }
-                    pendingResidents[i] = active; destinations[i] = output;
-                    foreach (var resident in active) resident.Pending = true;
+                    pendingResidentCounts[i] = input.Length; destinations[i] = output;
+                    for (int j = 0; j < input.Length; j++) active[j].Pending = true;
                     sequence = ticket;
                     return tickets[i] = ticket;
                 }
@@ -269,8 +274,8 @@ public sealed unsafe partial class VulkanDevice
                 catch { failed = true; throw; }
                 var result = new SimulationBuffer(this, buffer!, (ulong)tickets[i]);
                 var active = pendingResidents[i];
-                for (int j = 0; j < active.Length; j++) { active[j].Last = destination[j]; active[j].Pending = false; }
-                pendingResidents[i] = [];
+                for (int j = 0; j < pendingResidentCounts[i]; j++) { active[j].Last = destination[j]; active[j].Pending = false; }
+                Array.Clear(active, 0, pendingResidentCounts[i]); pendingResidentCounts[i] = 0;
                 retained.Add(result); completed.Add(tickets[i], result);
                 tickets[i] = 0; destinations[i] = null;
             }
@@ -280,11 +285,19 @@ public sealed unsafe partial class VulkanDevice
         // formerly rendered buffers to the bounded reuse list through Retire.
         internal void Retire(Action<VulkanBuffer> invalidate)
         {
-            lock (gate)
+            // A particle worker may be recording/uploading a submission. These
+            // zero-reference buffers can wait for the next frame within the
+            // existing retention budget; never stall graphics to recycle them.
+            if (!Monitor.TryEnter(gate)) return;
+            try
             {
-                foreach (var buffer in retained.Where(value => value.References == 0).ToArray())
+                retiredScratch.Clear();
+                foreach (var buffer in retained) if (buffer.References == 0) retiredScratch.Add(buffer);
+                foreach (var buffer in retiredScratch)
                 { retained.Remove(buffer); invalidate(buffer.Buffer); Recycle(buffer.Buffer); }
+                retiredScratch.Clear();
             }
+            finally { Monitor.Exit(gate); }
         }
         private void Recycle(VulkanBuffer buffer)
         {
@@ -324,8 +337,9 @@ public sealed unsafe partial class VulkanDevice
             Recycle(buffer!);
             // Discarded GPU state has no committed facade: the next accepted
             // command must rebase from the still authoritative game producer.
-            foreach (var resident in pendingResidents[index]) { resident.Pending = false; resident.Initialized = false; }
-            pendingResidents[index] = [];
+            var active = pendingResidents[index];
+            for (int j = 0; j < pendingResidentCounts[index]; j++) { active[j].Pending = false; active[j].Initialized = false; }
+            Array.Clear(active, 0, pendingResidentCounts[index]); pendingResidentCounts[index] = 0;
             tickets[index] = 0; abandoned[index] = false; destinations[index] = null;
             return true;
         }

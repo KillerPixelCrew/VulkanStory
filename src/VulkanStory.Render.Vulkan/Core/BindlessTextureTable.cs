@@ -140,6 +140,13 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
             return 0;
         }
         SamplerState effective = BindlessKinds.EffectiveState(state, kind);
+        ImageView selectedView = view.Handle != 0 ? view : texture.View;
+        var key = new BindlessSlotKey(texture.Id, kind, effective, layout, selectedView.Handle);
+        // Resolve is render-thread-owned; Release only marks a texture dead and
+        // retires its slots. The most recent variant remains the book's MRU, so
+        // repeating it needs neither a lookup nor an LRU mutation under _lock.
+        if (ReferenceEquals(texture.LastBindlessTable, this) && texture.LastBindlessSlot != 0 &&
+            texture.LastBindlessKey == key && !texture.Released) return texture.LastBindlessSlot;
         lock (_lock)
         {
             // Read under the lock Release takes: a delete that set the flag after this
@@ -149,14 +156,14 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
                 NotePlaceholder();
                 return 0;
             }
-            ImageView selectedView = view.Handle != 0 ? view : texture.View;
-            uint slot = _book.Acquire(new BindlessSlotKey(texture.Id, kind, effective, layout, selectedView.Handle), out bool created);
+            uint slot = _book.Acquire(key, out bool created);
             if (slot == 0)
             {
                 NotePlaceholder();
                 return 0;
             }
             if (created) Queue(new PendingWrite(kind, slot, selectedView, _textures.Samplers.Get(effective), layout));
+            texture.LastBindlessTable = this; texture.LastBindlessKey = key; texture.LastBindlessSlot = slot;
             return slot;
         }
     }

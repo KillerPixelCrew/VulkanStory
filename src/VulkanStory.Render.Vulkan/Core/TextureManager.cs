@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using VulkanStory.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
@@ -130,6 +131,13 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// <summary>Mutable, as glTexParameter is.</summary>
     public SamplerState State { get; set; } = SamplerState.Default;
 
+    // Render-thread-only MRU for this texture's bindless variants. Repeating
+    // this key cannot change the slot book's LRU order. Delete publishes Released
+    // before retiring any slot; a different table must resolve its own slots.
+    internal BindlessTextureTable? LastBindlessTable;
+    internal BindlessSlotKey LastBindlessKey;
+    internal uint LastBindlessSlot;
+
     private ResourceStateTracker? _sync;
 
     /// <summary>
@@ -210,7 +218,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// exactly one level, and a sampled read of level n must not name the levels the
     /// same pass writes: validation checks the layout of every level a view covers.
     /// </summary>
-    private readonly Dictionary<(uint BaseMip, uint MipCount, Format Format, ImageViewType Type, uint Layers), ImageView> _mipViews = new();
+    private readonly ConcurrentDictionary<(uint BaseMip, uint MipCount, Format Format, ImageViewType Type, uint Layers), ImageView> _mipViews = new();
 
     public ImageView ViewOfMips(uint baseMip, uint mipCount, bool linearColor = false, bool sampledShape = false)
     {
@@ -220,9 +228,11 @@ internal sealed unsafe class VulkanTexture : IDisposable
         ImageViewType type = !sampledShape ? ImageViewType.Type2D : Cube ? ImageViewType.TypeCube : Volume ? ImageViewType.Type3D : Layers > 1 ? ImageViewType.Type2DArray : ImageViewType.Type2D;
         uint layers = sampledShape ? Layers : 1;
         if (viewFormat == Format && baseMip == 0 && mipCount == MipLevels && (sampledShape || Layers <= 1 && !Cube && !Volume)) return View;
+        var key = (baseMip, mipCount, viewFormat, type, layers);
+        if (_mipViews.TryGetValue(key, out ImageView ready)) return ready;
         lock (_mipViews)
         {
-            if (_mipViews.TryGetValue((baseMip, mipCount, viewFormat, type, layers), out ImageView existing)) return existing;
+            if (_mipViews.TryGetValue(key, out ImageView existing)) return existing;
 
             var createInfo = new ImageViewCreateInfo
             {
@@ -234,7 +244,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
             };
             VulkanResult.Check(_context.Api.CreateImageView(_context.Device, &createInfo, null, out ImageView view),
                 "vkCreateImageView for mips " + baseMip + "+" + mipCount);
-            _mipViews[(baseMip, mipCount, viewFormat, type, layers)] = view;
+            _mipViews[key] = view;
             return view;
         }
     }

@@ -39,6 +39,7 @@ internal static partial class GpuParticleSimulation
         internal readonly Dictionary<WorldRegion, (uint Start, uint Count)> Regions = new();
         internal readonly List<uint> LiquidCells = new();
         internal readonly Dictionary<WorldRegion, uint> LiquidRegions = new();
+        internal readonly Dictionary<WorldRegion, (Vector4 Liquid, Vector4 Flow)> Fluids = new();
         internal IParticleSimulationBackend? Backend;
         internal long Ticket;
         internal ParticleSimulationBuffer? Buffer;
@@ -51,7 +52,7 @@ internal static partial class GpuParticleSimulation
             if (Ticket != 0) { Backend!.Release(Ticket); Ticket = 0; }
             Buffer?.Dispose(); Buffer = null;
             Array.Clear(Spawns, 0, Particles.Count);
-            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Backend = null; Remaining = 0; Ready = false;
+            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Fluids.Clear(); Backend = null; Remaining = 0; Ready = false;
             Call = Polled = 0;
         }
     }
@@ -72,6 +73,7 @@ internal static partial class GpuParticleSimulation
         internal readonly BlockPos Position = new(0);
         internal readonly BlockPos WorldMinimum = new(0), WorldMaximum = new(0);
         internal readonly CollisionConfirmation Collision = new();
+        internal readonly WorldCapture WorldCapture = new();
         internal long Epoch = -1;
         internal long Call;
         // An executing batch at its consumer means GPU backlog for this call.
@@ -185,9 +187,7 @@ internal static partial class GpuParticleSimulation
         }, Uninstall: () => { armed = ready = false; ResetPools(detach: true); backendDevice = null; }, WorldReady: _ =>
         {
             ready = false;
-            lock (stockBoxTypes) stockBoxTypes.Clear();
-            lock (stockFlowTypes) stockFlowTypes.Clear();
-            lock (stockLiquidTypes) stockLiquidTypes.Clear();
+            stockBoxTypes.Clear(); stockFlowTypes.Clear(); stockLiquidTypes.Clear();
             foreach (var method in new[] { Main, Worker, Tick, Collision,
                 AccessTools.Method(typeof(ParticlePoolQuads), "ProcessParticlesFromOffThread")!,
                 AccessTools.Method(typeof(ParticleBase), nameof(ParticleBase.TickFixedStep))!,

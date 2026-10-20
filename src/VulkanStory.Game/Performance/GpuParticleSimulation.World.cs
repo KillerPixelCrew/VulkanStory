@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Reflection;
+using System.Collections.Concurrent;
 using HarmonyLib;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -22,42 +23,33 @@ internal static partial class GpuParticleSimulation
     private static readonly MethodInfo StockLiquid = AccessTools.Method(typeof(CollectibleObject), nameof(CollectibleObject.IsLiquid), Type.EmptyTypes)!;
     private static readonly MethodInfo StockFlowStill = AccessTools.PropertyGetter(typeof(Vintagestory.GameContent.BlockForFluidsLayer), nameof(IBlockFlowing.IsStill))!;
     private static readonly MethodInfo StockFlowPush = AccessTools.Method(typeof(Vintagestory.GameContent.BlockForFluidsLayer), nameof(IBlockFlowing.GetPushVector), [typeof(BlockPos)])!;
-    private static readonly Dictionary<Type, bool> stockBoxTypes = new();
-    private static readonly Dictionary<Type, MethodInfo[]?> stockFlowTypes = new();
-    private static readonly Dictionary<Type, bool> stockLiquidTypes = new();
+    private static readonly ConcurrentDictionary<Type, bool> stockBoxTypes = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo[]> stockFlowTypes = new();
+    private static readonly ConcurrentDictionary<Type, bool> stockLiquidTypes = new();
     internal static bool HasStockLiquid(Block block)
     {
-        lock (stockLiquidTypes)
-        {
-            var type = block.GetType();
-            if (!stockLiquidTypes.TryGetValue(type, out bool stock))
-                // Inherited methods can have different ReflectedType values; compare the actual declaration.
-                stockLiquidTypes[type] = stock = AccessTools.Method(type, nameof(Block.IsLiquid), Type.EmptyTypes)?.DeclaringType == StockLiquid.DeclaringType &&
-                    Harmony.GetPatchInfo(StockLiquid)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) != true;
-            return stock;
-        }
+        // A hit is a read shared by the render and particle threads, not a
+        // reason to serialize every cell on one metadata monitor.
+        return stockLiquidTypes.GetOrAdd(block.GetType(), static type =>
+            AccessTools.Method(type, nameof(Block.IsLiquid), Type.EmptyTypes)?.DeclaringType == StockLiquid.DeclaringType &&
+            Harmony.GetPatchInfo(StockLiquid)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) != true);
     }
     private static bool HasStockFlow(Block block)
     {
-        lock (stockFlowTypes)
+        var methods = stockFlowTypes.GetOrAdd(block.GetType(), static type =>
         {
-            var type = block.GetType();
-            if (!stockFlowTypes.TryGetValue(type, out var methods))
-            {
-                var map = type.GetInterfaceMap(typeof(IBlockFlowing));
-                int still = Array.FindIndex(map.InterfaceMethods, method => method.Name == "get_IsStill");
-                int push = Array.FindIndex(map.InterfaceMethods, method => method.Name == nameof(IBlockFlowing.GetPushVector));
-                methods = still >= 0 && push >= 0 &&
-                    IsStockFlowTarget(map.TargetMethods[still], StockFlowStill) &&
-                    IsStockFlowTarget(map.TargetMethods[push], StockFlowPush)
-                    ? [map.TargetMethods[still], map.TargetMethods[push]] : null;
-                stockFlowTypes[type] = methods;
-            }
-            // Cache only structural identity. Patches installed after admission
-            // must still refuse both the interface stub and its stock callee.
-            return methods != null && !HasForeignFlowPatch(methods[0]) && !HasForeignFlowPatch(methods[1]) &&
-                !HasForeignFlowPatch(StockFlowStill) && !HasForeignFlowPatch(StockFlowPush);
-        }
+            var map = type.GetInterfaceMap(typeof(IBlockFlowing));
+            int still = Array.FindIndex(map.InterfaceMethods, method => method.Name == "get_IsStill");
+            int push = Array.FindIndex(map.InterfaceMethods, method => method.Name == nameof(IBlockFlowing.GetPushVector));
+            return still >= 0 && push >= 0 && IsStockFlowTarget(map.TargetMethods[still], StockFlowStill) &&
+                IsStockFlowTarget(map.TargetMethods[push], StockFlowPush)
+                ? [map.TargetMethods[still], map.TargetMethods[push]] : Array.Empty<MethodInfo>();
+        });
+        // Keep live patch checks at every confirmation. Only structural
+        // identity is cached, and no metadata lock spans the Harmony queries.
+        return methods.Length != 0 && !HasForeignFlowPatch(methods[0]) && !HasForeignFlowPatch(methods[1]) &&
+            (methods[0] == StockFlowStill || !HasForeignFlowPatch(StockFlowStill)) &&
+            (methods[1] == StockFlowPush || !HasForeignFlowPatch(StockFlowPush));
     }
     private static bool HasForeignFlowPatch(MethodInfo method) =>
         Harmony.GetPatchInfo(method)?.Owners.Any(owner => !PerformancePatchSet.IsOwnOwner(owner)) == true;
@@ -93,14 +85,9 @@ internal static partial class GpuParticleSimulation
     }
     private static bool HasStockBoxes(Block block)
     {
-        lock (stockBoxTypes)
-        {
-            var type = block.GetType();
-            if (!stockBoxTypes.TryGetValue(type, out bool stock))
-                stockBoxTypes[type] = stock = AccessTools.Method(type, nameof(Block.GetParticleCollisionBoxes),
-                    [typeof(IBlockAccessor), typeof(BlockPos)])?.DeclaringType == StockBoxes.DeclaringType;
-            return stock;
-        }
+        return stockBoxTypes.GetOrAdd(block.GetType(), static type =>
+            AccessTools.Method(type, nameof(Block.GetParticleCollisionBoxes),
+                [typeof(IBlockAccessor), typeof(BlockPos)])?.DeclaringType == StockBoxes.DeclaringType);
     }
 
     // Observe mutable blocks/arrays for every prepared step. The game exposes no
@@ -114,7 +101,7 @@ internal static partial class GpuParticleSimulation
     {
         world = default;
         world.InitialPopulatedSize = (uint)PopulatedSize(physics.CollisionBoxList);
-        if (!CaptureFluid(particle, physics, state, ref world)) return false;
+        if (!CaptureFluid(particle, physics, state, ref world, batch)) return false;
         world.MotionCap = physics.MotionCap;
         world.VisualPolicy = unchecked((byte)(TickCount(particle) + 1)) > 2 ? ParticleSimulationWorldInput.ThirdTick : 0;
         world.LightEmission = particle.LightEmission;
@@ -141,12 +128,38 @@ internal static partial class GpuParticleSimulation
         var region = new WorldRegion(physics.BlockAccess, min.dimension, min.X, min.Y, min.Z, max.X, max.Y, max.Z);
         if (batch.Regions.TryGetValue(region, out var captured))
         { world.BoxStart = captured.Start; world.BoxCount = captured.Count; return true; }
-        var boxes = batch.Boxes;
-        int start = boxes.Count;
-        bool supported = true;
-        physics.BlockAccess.WalkBlocks(min, max, (block, x, y, z) =>
+        if (!state.WorldCapture.Capture(physics, batch, min, max, out world.BoxStart, out world.BoxCount)) return false;
+        batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
+        return true;
+    }
+    // PoolState.Gate owns this visitor just like CollisionConfirmation. Retain
+    // its delegate once instead of allocating a closure for each capture walk.
+    private sealed class WorldCapture
+    {
+        private readonly Action<Block, int, int, int> visit;
+        private Batch batch = null!;
+        private bool supported;
+        internal WorldCapture() => visit = Visit;
+        internal bool Capture(ParticlePhysics physics, Batch batch, BlockPos minimum, BlockPos maximum, out uint start, out uint count)
+        {
+            this.batch = batch; supported = true;
+            int first = batch.Boxes.Count;
+            start = (uint)first; count = 0;
+            try { physics.BlockAccess.WalkBlocks(minimum, maximum, visit); }
+            finally { this.batch = null!; }
+            if (!supported)
+            {
+                batch.Boxes.RemoveRange(first, batch.Boxes.Count - first);
+                batch.BoxBlocks.RemoveRange(first, batch.BoxBlocks.Count - first);
+                return false;
+            }
+            count = (uint)(batch.Boxes.Count - first);
+            return true;
+        }
+        private void Visit(Block block, int x, int y, int z)
         {
             if (!supported) return;
+            var boxes = batch.Boxes;
             if (!HasStockBoxes(block))
             {
                 // The cap-sized region is only a conservative envelope. A
@@ -171,19 +184,25 @@ internal static partial class GpuParticleSimulation
                     Maximum = new Vector4(box.X2, box.Y2, box.Z2, 0), X = x, Y = y, Z = z });
                 batch.BoxBlocks.Add(block);
             }
-        });
-        if (!supported)
-        { boxes.RemoveRange(start, boxes.Count - start); batch.BoxBlocks.RemoveRange(start, batch.BoxBlocks.Count - start); return false; }
-        world.BoxStart = (uint)start; world.BoxCount = (uint)(boxes.Count - start);
-        batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
-        return true;
+        }
     }
     // The stock HandleBoyancy observations. The consumer repeats this capture at
     // the stock tick; only an identical observation keeps a prepared step.
-    private static bool CaptureFluid(ParticleGeneric particle, ParticlePhysics physics, PoolState state, ref ParticleSimulationWorldInput world)
+    private static bool CaptureFluid(ParticleGeneric particle, ParticlePhysics physics, PoolState state, ref ParticleSimulationWorldInput world, Batch? batch = null)
     {
         var pos = particle.Position;
         state.Position.SetAndCorrectDimension((int)pos.X, (int)pos.Y, (int)pos.Z);
+        WorldRegion region = default;
+        // Speculation may reuse stock observations within this batch. Confirmation
+        // passes no batch and always re-reads the live cell at the actual tick.
+        if (batch != null)
+        {
+            var cell = state.Position;
+            region = new WorldRegion(physics.BlockAccess, cell.dimension, cell.X, cell.Y, cell.Z, cell.X, cell.Y, cell.Z,
+                particle.SwimOnLiquid ? 1 : 0);
+            if (batch.Fluids.TryGetValue(region, out var captured))
+            { world.Liquid = captured.Liquid; world.Flow = captured.Flow; return true; }
+        }
         var fluid = physics.BlockAccess.GetBlock(state.Position, 2);
         if (!HasStockLiquid(fluid)) return false;
         bool liquid = fluid.IsLiquid();
@@ -208,6 +227,7 @@ internal static partial class GpuParticleSimulation
                 world.Flow = new Vector4(push.X, push.Y, push.Z, 1);
             }
         }
+        if (batch != null && batch.Fluids.Count < MaximumLiquidRegions) batch.Fluids.TryAdd(region, (world.Liquid, world.Flow));
         return true;
     }
     private static bool CaptureLiquidCells(ParticleGeneric particle, ParticlePhysics physics, Batch batch,
