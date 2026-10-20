@@ -1,0 +1,121 @@
+#version 450
+// One workgroup per (pipeline, mesh, immutable frame globals). The workgroup
+// culls and stably compacts its rows in 64-row tiles in this single dispatch.
+// Input header: current VP[0..16), completed view[16..32), projection[32..48),
+// pixel extent[48..50), depth unpack[50..52), frustum/occlusion flags[52..54),
+// historical camera margin @54, group count @55, world-center rounding @56,
+// stock plane count @59,
+// camera-relative stock planes[60..84). Group headers start at word 96:
+// {first input row, row count, first output word, mesh index count}.
+// Bounds start at word 16480: {current relative xyz, radius, historical
+// relative xyz, persistent row id}. Output per group: count*5 command words,
+// then one count word. Every command has instanceCount=1, firstInstance=row.
+layout(local_size_x = 64) in;
+layout(binding = 0) uniform sampler2D depthPyramid;
+layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
+layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
+shared uint ranks[64];
+shared uint prefix;
+float f(uint i) { return uintBitsToFloat(inputData.words[i]); }
+vec4 v(uint i) { return vec4(f(i), f(i+1u), f(i+2u), f(i+3u)); }
+bool finite4(vec4 x) { return !any(isnan(x)) && !any(isinf(x)); }
+
+bool outside(vec4 sphere)
+{
+    if (inputData.words[52] == 0u || !finite4(sphere)) return false;
+    if (inputData.words[59] == 6u) {
+        for (uint i = 0u; i < 6u; i++) {
+            vec4 plane = v(60u + i * 4u);
+            if (!finite4(plane)) continue;
+            precise float distance = dot(plane.xyz, sphere.xyz) + plane.w;
+            float error = 64.0 * 1.1920929e-7 * (dot(abs(plane.xyz), abs(sphere.xyz)) + abs(plane.w)) + 0.001;
+            if (distance < -sphere.w * length(plane.xyz) - error) return true;
+        }
+        return false;
+    }
+    // Cascades can supply a camera-relative matrix without stock plane inputs.
+    mat4 rows = transpose(mat4(v(0u), v(4u), v(8u), v(12u)));
+    for (uint i = 0u; i < 6u; i++) {
+        vec4 plane = rows[3] + ((i & 1u) == 0u ? rows[i / 2u] : -rows[i / 2u]);
+        if (!finite4(plane)) continue;
+        float error = 64.0 * 1.1920929e-7 * (dot(abs(plane.xyz), abs(sphere.xyz)) + abs(plane.w)) + 0.001;
+        if (dot(plane.xyz, sphere.xyz) + plane.w < -sphere.w * length(plane.xyz) - error) return true;
+    }
+    return false;
+}
+
+bool occluded(vec3 center, float radius)
+{
+    if (inputData.words[53] == 0u) return false;
+    // Preserve the old entity culler's interpolation allowance independently
+    // from tight current-view sphere tests, plus its historical camera margin.
+    float expanded = radius + 1.5 + f(54u) + f(56u) + 0.001;
+    vec3 lo = center - vec3(expanded), hi = center + vec3(expanded);
+    if (!finite4(vec4(lo, expanded)) || !finite4(vec4(hi, expanded))) return false;
+    mat4 view = mat4(v(16u), v(20u), v(24u), v(28u));
+    mat4 projection = mat4(v(32u), v(36u), v(40u), v(44u));
+    vec2 lower = vec2(1e30), upper = vec2(-1e30);
+    float nearest = 1e30;
+    for (uint corner = 0u; corner < 8u; corner++) {
+        vec3 position = vec3((corner & 1u) == 0u ? lo.x : hi.x,
+            (corner & 2u) == 0u ? lo.y : hi.y, (corner & 4u) == 0u ? lo.z : hi.z);
+        vec4 eye = view * vec4(position, 1.0), clip = projection * eye;
+        if (clip.w <= 0.001 || !finite4(clip)) return false;
+        nearest = min(nearest, -eye.z / (eye.w == 0.0 ? 1.0 : eye.w));
+        lower = min(lower, clip.xy / clip.w); upper = max(upper, clip.xy / clip.w);
+    }
+    if (any(lessThan(lower, vec2(-1))) || any(greaterThan(upper, vec2(1)))) return false;
+    ivec2 size = ivec2(ceil(vec2(f(48u), f(49u)) / 8.0));
+    if (any(lessThanEqual(size, ivec2(0)))) return false;
+    ivec2 first = clamp(ivec2((lower * 0.5 + 0.5) * vec2(size)) - 1, ivec2(0), size - 1);
+    ivec2 last = clamp(ivec2((upper * 0.5 + 0.5) * vec2(size)) + 1, ivec2(0), size - 1);
+    int level = 0, levels = textureQueryLevels(depthPyramid);
+    while (level + 1 < levels && any(greaterThan(last - first, ivec2(3)))) {
+        level++; size = (size + 1) / 2;
+        first = min(first / 2, size - 1); last = min(last / 2, size - 1);
+    }
+    float farthest = 0.0;
+    for (int y = first.y; y <= last.y; y++)
+        for (int x = first.x; x <= last.x; x++)
+            farthest = max(farthest, texelFetch(depthPyramid, ivec2(x,y), level).r);
+    float denominator = f(51u) - farthest;
+    return denominator > 0.0 && nearest > (f(50u) / denominator) * 1.002 + 0.25;
+}
+
+void main()
+{
+    uint group = gl_WorkGroupID.x, lane = gl_LocalInvocationID.x;
+    if (group >= inputData.words[55]) return;
+    uint header = 96u + group * 4u;
+    uint first = inputData.words[header], count = inputData.words[header + 1u];
+    uint outputWord = inputData.words[header + 2u], indexCount = inputData.words[header + 3u];
+    // The non-count extension path consumes this zeroed tail as zero instances.
+    for (uint i = lane; i < count; i += 64u)
+        for (uint j = 0u; j < 5u; j++) outputData.words[outputWord + i * 5u + j] = 0u;
+    if (lane == 0u) prefix = 0u;
+    memoryBarrierBuffer(); barrier();
+    for (uint start = 0u; start < count; start += 64u) {
+        uint index = start + lane, record = 16480u + (first + index) * 8u;
+        uint keep = 0u;
+        if (index < count) {
+            vec4 sphere = v(record);
+            keep = outside(sphere) || occluded(v(record + 4u).xyz, sphere.w) ? 0u : 1u;
+        }
+        ranks[lane] = keep;
+        barrier();
+        for (uint step = 1u; step < 64u; step <<= 1u) {
+            uint addend = lane >= step ? ranks[lane - step] : 0u;
+            barrier(); ranks[lane] += addend; barrier();
+        }
+        if (keep != 0u) {
+            uint dst = outputWord + (prefix + ranks[lane] - keep) * 5u;
+            outputData.words[dst] = indexCount; outputData.words[dst + 1u] = 1u;
+            outputData.words[dst + 2u] = 0u; outputData.words[dst + 3u] = 0u;
+            outputData.words[dst + 4u] = inputData.words[record + 7u];
+        }
+        barrier();
+        if (lane == 0u) prefix += ranks[63];
+        barrier();
+    }
+    if (lane == 0u) outputData.words[outputWord + count * 5u] = prefix;
+}

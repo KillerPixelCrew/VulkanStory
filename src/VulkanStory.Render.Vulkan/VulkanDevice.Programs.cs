@@ -189,6 +189,7 @@ public sealed unsafe partial class VulkanDevice
         // so a native pipeline request can state the variant it expects.
         if (resources.IsNative) _programVariants[programId] = nativeDetail;
         _programNames[programId] = program.PassName ?? "";
+        LinkResidentEntityVariant(resources, passName, stages);
         // Pipelines an earlier launch used with this exact program start compiling now.
         int prewarming = _pipelines.PrewarmFor(resources);
         if (prewarming > 0 && RenderTrace.Enabled)
@@ -196,6 +197,33 @@ public sealed unsafe partial class VulkanDevice
             RenderTrace.Write("program " + programId + " prewarming " + prewarming + " pipelines");
         }
         return programId;
+    }
+
+    // Keep the stock link (and all its public uniform locations) intact. Only
+    // EntityScene selects these native, instance-indexed modules at submission.
+    private readonly Dictionary<ShaderProgramResources, ShaderProgramResources> _residentEntityPrograms = new();
+
+    private void LinkResidentEntityVariant(ShaderProgramResources source, string passName,
+        IReadOnlyList<ShaderStageSource> stages)
+    {
+        if (!source.IsNative || !_context.SampledImageArrayNonUniformIndexingEnabled || _nativeShaders == null ||
+            passName is not ("entityanimated" or "shadowmapentityanimated")) return;
+        if (_nativeShaders.TryLink(passName + ".instanced", stages, out var variant, out _) !=
+            NativeShaderLibrary.Outcome.Native || variant == null) return;
+        _residentEntityPrograms[source] = new ShaderProgramResources(_context, _nextProgramId++, variant,
+            _sharedLayout!.Layout);
+    }
+
+    private void RetireResidentEntityProgram(ShaderProgramResources source)
+    {
+        var stale = new List<NativePipeline>();
+        foreach (var pipeline in _residentEntityPipelines.Keys)
+            if (ReferenceEquals(pipeline.Program, source)) stale.Add(pipeline);
+        foreach (var pipeline in stale) _residentEntityPipelines.Remove(pipeline);
+        if (!_residentEntityPrograms.Remove(source, out var variant)) return;
+        _pipelines.CancelProgram(variant);
+        if (_pipelines.RemoveProgramPipelines(variant.ProgramId) is { } pipelines) _frames.DeferDeletion(pipelines);
+        _frames.DeferDeletion(variant);
     }
 
     /// <summary>
@@ -338,6 +366,7 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
         RetireEntityRecordProgram(program);
+        RetireResidentEntityProgram(program);
         ProgramDeleted?.Invoke(programId);
         _programNames.Remove(programId);
         _activeVertexInputLocations.Remove(programId);
