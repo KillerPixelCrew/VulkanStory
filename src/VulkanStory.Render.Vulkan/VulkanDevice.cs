@@ -334,7 +334,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     /// are baked into the instance.
     /// </summary>
     private static readonly string? ValidationSetting =
-        Environment.GetEnvironmentVariable("VULKANSTORY_VULKAN_VALIDATION");
+        NonEmptyEnvironment("VULKANSTORY_VULKAN_VALIDATION");
 
     private static readonly bool ValidationRequestedByEnvironment =
         !string.IsNullOrEmpty(ValidationSetting);
@@ -1259,7 +1259,11 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     internal TextureManager TexturesForTests => _textures;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
-    private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("VULKANSTORY_VULKAN_STATS");
+    private static readonly string? StatsLogPath = NonEmptyEnvironment("VULKANSTORY_VULKAN_STATS");
+
+    // An empty variable (as some shells leave after clearing one) means unset, not an empty path.
+    private static string? NonEmptyEnvironment(string name) =>
+        Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : null;
 
     /// <summary>
     /// Leaves a marker the driver reports back if the GPU stops. Free when the
