@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 
 namespace VulkanStory.Render.Vulkan.Core;
@@ -19,9 +20,10 @@ internal static partial class RenderTrace
     private static readonly object Gate = new();
     private static readonly string? Path = Environment.GetEnvironmentVariable("VULKANSTORY_RENDER_TRACE");
 
-    public static bool Enabled => Path != null;
+    public static bool Enabled { [MethodImpl(MethodImplOptions.NoInlining)] get => Path != null; }
 
     /// <summary>Writes an enabled trace message through the retained diagnostic output path.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static void Write(string line)
     {
         if (Path == null) return;

@@ -1,4 +1,5 @@
 using VulkanStory.Render.Vulkan;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.MathTools;
@@ -98,6 +99,7 @@ internal sealed partial class GameGraphicsAdapter
         if (opened) AnimatedMotionWindows++;
         return opened;
     }
+    [MethodImpl(MethodImplOptions.NoInlining)]
     internal bool BeginMotionWrite(GameTemporalOwner temporal, bool onlyMotion = false)
     {
         RequireDevice();

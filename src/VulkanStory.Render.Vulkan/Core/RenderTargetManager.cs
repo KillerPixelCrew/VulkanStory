@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using VulkanStory.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
@@ -244,6 +245,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private ImageLayout DepthAttachmentLayout => DepthReadOnly ? DepthSamplingLayout : ImageLayout.DepthStencilAttachmentOptimal;
     private ResourceUsage DepthUsage => !DepthReadOnly ? ResourceUsage.DepthWrite : StencilWritable ? ResourceUsage.DepthReadStencilWriteSampled : ResourceUsage.DepthReadOnlySampled;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void SetDepthReadOnly(bool readOnly, bool stencilWritable = false)
     {
         stencilWritable &= readOnly;
@@ -254,6 +256,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     }
 
     /// <summary>Whether a texture is the bound framebuffer's depth attachment.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public bool IsBoundDepth(int textureId) =>
         _bound != null && textureId > 0 && _bound.DepthTextureId == textureId;
 
@@ -266,6 +269,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// samples exactly such a slot - so it has to stay transitionable, or it is
     /// read in the colour-attachment layout it was left in.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public bool IsAttachmentOfBound(int textureId)
     {
         if (_bound == null || textureId <= 0) return false;
@@ -408,6 +412,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// closing an open scope first: the texture is about to be used some other way (sampled,
     /// copied, read back, uploaded to) before any pass attached it.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void FlushPendingClears(CommandBuffer commandBuffer, VulkanTexture texture)
     {
         if (!_graph.HasPendingClears || !_graph.HasPendingClear(texture)) return;
@@ -452,6 +457,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         framebuffer.FormatsId = -1;
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void EnsureRendering(CommandBuffer commandBuffer)
     {
         if (_renderingActive && !_needsRestart) return;
@@ -616,6 +622,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// Closes the scope. Uploads and layout transitions have to happen outside
     /// one, so this is called before them and the scope reopens on the next draw.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void EndRendering(CommandBuffer commandBuffer)
     {
         if (!_renderingActive) return;
@@ -845,6 +852,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// comparison as building <see cref="DeclaredFormats" /> for the scope and calling Equals,
     /// without allocating anything per draw.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public bool ScopeFormatsMatch(VulkanFramebuffer framebuffer, RenderTargetFormats? expected)
     {
         if (expected is null) return false;

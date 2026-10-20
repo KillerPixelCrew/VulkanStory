@@ -49,7 +49,6 @@ internal static partial class GpuParticleSimulation
         internal readonly Dictionary<WorldRegion, (uint Start, uint Count)> Regions = new();
         internal readonly List<uint> LiquidCells = new();
         internal readonly Dictionary<WorldRegion, uint> LiquidRegions = new();
-        internal readonly Dictionary<WorldRegion, (Vector4 Liquid, Vector4 Flow)> Fluids = new();
         internal IParticleSimulationBackend? Backend;
         internal long Ticket;
         internal ParticleSimulationBuffer? Buffer;
@@ -62,16 +61,11 @@ internal static partial class GpuParticleSimulation
             if (Ticket != 0) { Backend!.Release(Ticket); Ticket = 0; }
             Buffer?.Dispose(); Buffer = null;
             Array.Clear(Spawns, 0, Particles.Count);
-            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Fluids.Clear(); Backend = null; Remaining = 0; Ready = false;
+            Particles.Clear(); Boxes.Clear(); BoxBlocks.Clear(); Regions.Clear(); LiquidCells.Clear(); LiquidRegions.Clear(); Backend = null; Remaining = 0; Ready = false;
             Call = Polled = 0;
         }
     }
-    private sealed class PendingStep(Batch batch, int index, object spawn)
-    {
-        internal readonly Batch Batch = batch;
-        internal readonly int Index = index;
-        internal readonly object Spawn = spawn;
-    }
+    private readonly record struct PendingStep(Batch Batch, int Index, object Spawn);
     private sealed class PoolState
     {
         internal readonly object Gate = new();
@@ -84,6 +78,10 @@ internal static partial class GpuParticleSimulation
         internal readonly BlockPos WorldMinimum = new(0), WorldMaximum = new(0);
         internal readonly CollisionConfirmation Collision = new();
         internal readonly WorldCapture WorldCapture = new();
+        // Speculation-only observations, shared across batches of one pool call.
+        // They are cleared before the next call; confirmation always reads live.
+        internal readonly Dictionary<WorldRegion, (Vector4 Liquid, Vector4 Flow)> Fluids = new();
+        internal readonly Dictionary<WorldRegion, (Batch Owner, uint Start, uint Count)> Regions = new();
         internal long Epoch = -1;
         internal long Call;
         // An executing batch at its consumer means GPU backlog for this call.
@@ -102,6 +100,7 @@ internal static partial class GpuParticleSimulation
         internal void Clear()
         {
             InvalidatePending();
+            Fluids.Clear(); Regions.Clear();
             foreach (var value in Rendered.Values) value.Dispose();
             Rendered.Clear();
         }
@@ -299,14 +298,13 @@ internal static partial class GpuParticleSimulation
         return exception;
     }
 
-    private static bool Input(ParticleGeneric particle, float lifeDt, float dt, ParticlePhysics physics, PoolState state, out ParticleSimulationInput input)
+    private static bool Input(ParticleGeneric particle, float lifeDt, float dt, out ParticleSimulationInput input)
     {
         input = default;
-        if (physics.GetType() != typeof(ParticlePhysics) || physics.BlockAccess.GetType() != typeof(Vintagestory.Common.BlockAccessorReadLockfree) ||
-            particle.SecondaryParticles is { Length: > 0 } || particle.DeathParticles is { Length: > 0 } || particle.RandomVelocityChange ||
-            !double.IsFinite(particle.Position.X) || !double.IsFinite(particle.Position.Y) || !double.IsFinite(particle.Position.Z) ||
+        // Pool contracts, callback admission and step deltas were checked once
+        // by Speculate before reaching the per-particle shader-record work.
+        if (!double.IsFinite(particle.Position.X) || !double.IsFinite(particle.Position.Y) || !double.IsFinite(particle.Position.Z) ||
             Math.Abs(particle.Position.X) > int.MaxValue - 8 || Math.Abs(particle.Position.Y) > int.MaxValue - 8 || Math.Abs(particle.Position.Z) > int.MaxValue - 8 ||
-            !float.IsFinite(lifeDt) || !float.IsFinite(dt) || lifeDt <= 0 || dt <= 0 || dt > 1 || lifeDt > 1 ||
             !float.IsFinite(particle.SecondsAlive) || !float.IsFinite(particle.LifeLength) || particle.LifeLength <= 0 ||
             !float.IsFinite(particle.GravityStrength) || !float.IsFinite(particle.SizeMultiplier) || !float.IsFinite(particle.ParticleHeight)) return false;
         var velocity = particle.Velocity;
@@ -419,7 +417,7 @@ internal static partial class GpuParticleSimulation
             // stock CPU tick at its original position; every other prepared step
             // is confirmed independently at its own boundary.
             if (!ReferenceEquals(pending.Spawn, ParticleMotionHistory.SpawnToken(__instance)) || !Poll(state, batch)) return true;
-            var result = batch.Output[index];
+            ref readonly var result = ref batch.Output[index];
             // Only the actual stock query needs this custom callback. Keep its
             // original tick and event order.
             if ((result.CollisionFlags & (ParticleSimulationOutput.RequiresCpuCollision | ParticleSimulationOutput.RequiresCpuArithmetic)) != 0) return true;
@@ -444,6 +442,11 @@ internal static partial class GpuParticleSimulation
     {
         var state = scope.State;
         var physics = Physics(scope.Pool);
+        // These contracts belong to the pool, not each particle. A custom
+        // physics/accessor pool cannot produce a GPU step at all.
+        if (physics.GetType() != typeof(ParticlePhysics) ||
+            physics.BlockAccess.GetType() != typeof(Vintagestory.Common.BlockAccessorReadLockfree))
+        { state.InvalidatePending(); return; }
         float lifeDt, dt;
         if (!scope.Worker) lifeDt = dt = physics.PhysicsTickTime;
         else if (state.Predicted) { lifeDt = state.PredictedLifeDelta; dt = state.PredictedPhysicsDelta; }
@@ -452,12 +455,19 @@ internal static partial class GpuParticleSimulation
         // A batch still executing at its consumer is GPU backlog: queue nothing
         // more behind it. Stock ticks continue and the next call tries again.
         if (state.Backlogged || Volatile.Read(ref backend) is not { } target) return;
+        if (!float.IsFinite(lifeDt) || !float.IsFinite(dt) || lifeDt <= 0 || dt <= 0 || dt > 1 || lifeDt > 1) return;
+        state.Fluids.Clear(); state.Regions.Clear();
         Batch? batch = null;
         try
         {
             for (ParticleBase? node = scope.Pool.ParticlesPool.FirstAlive; node != null; node = node.Next)
             {
                 if (node is not ParticleGeneric particle || (Benchmark && particle.VertexFlags != BenchmarkMarker)) continue;
+                // Reject callback-only particles before spawn sidecars, full
+                // shader records or world observations. Recheck every call so
+                // mutable providers can become eligible immediately.
+                if (particle.SecondaryParticles is { Length: > 0 } || particle.DeathParticles is { Length: > 0 } || particle.RandomVelocityChange)
+                { state.Remove(particle); continue; }
                 object spawn = ParticleMotionHistory.SpawnToken(particle);
                 if (state.Pending.TryGetValue(particle, out var pending))
                 {
@@ -471,11 +481,17 @@ internal static partial class GpuParticleSimulation
                 // Prepare age-dependent steps only for the frame predicted to tick them.
                 if (!scope.Worker && (particle.VelocityEvolve != null || (particle.TerrainCollision && (particle.DieInAir || particle.DieInLiquid))) &&
                     particle.accum + scope.Delta * scope.GameSpeed < physics.PhysicsTickTime) continue;
-                if (!Input(particle, lifeDt, dt, physics, state, out var snapshot)) continue;
+                if (!Input(particle, lifeDt, dt, out var snapshot)) continue;
                 if (batch == null && (batch = Acquire(state)) == null) return;
                 if (!CaptureWorld(particle, physics, state, batch, dt, out var world)) continue;
                 int index = batch.Particles.Count;
-                if (batch.Input.Length <= index) Array.Resize(ref batch.Input, Math.Min(MaximumBatch, Math.Max(1, batch.Input.Length * 2)));
+                if (batch.Input.Length <= index)
+                {
+                    int capacity = Math.Min(MaximumBatch, Math.Max(index + 1,
+                        Math.Max(Math.Min(scope.Pool.ParticlesPool.AliveCount, MaximumBatch), batch.Input.Length * 2)));
+                    Array.Resize(ref batch.Input, capacity);
+                    batch.Particles.EnsureCapacity(capacity);
+                }
                 if (batch.World.Length <= index) Array.Resize(ref batch.World, batch.Input.Length);
                 if (batch.Spawns.Length <= index) Array.Resize(ref batch.Spawns, batch.Input.Length);
                 batch.Particles.Add(particle);
@@ -500,6 +516,11 @@ internal static partial class GpuParticleSimulation
             batch?.Clear();
             throw;
         }
+        finally
+        {
+            // Do not retain completed batches/world objects through call caches.
+            state.Fluids.Clear(); state.Regions.Clear();
+        }
     }
     private static Batch? Acquire(PoolState state)
     {
@@ -522,6 +543,7 @@ internal static partial class GpuParticleSimulation
         // continues and the next pool call prepares these steps again.
         if (batch.Ticket == 0) { batch.Clear(); return false; }
         batch.Remaining = count; batch.Call = state.Call;
+        state.Pending.EnsureCapacity(state.Pending.Count + count);
         for (int i = 0; i < count; i++) state.Pending.Add(batch.Particles[i], new PendingStep(batch, i, batch.Spawns[i]));
         return true;
     }

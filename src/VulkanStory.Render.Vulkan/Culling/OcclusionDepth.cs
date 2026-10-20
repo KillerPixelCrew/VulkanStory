@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Silk.NET.Vulkan;
 using VulkanStory.Contracts;
 using VulkanStory.Render.Vulkan.Core;
@@ -39,10 +40,8 @@ internal sealed class OcclusionDepth : IDisposable
     internal int GpuHeight { get; private set; }
     internal int SourceDepthTexture { get; private set; }
     private OcclusionPyramid? _latest;
-    private OcclusionPyramid? _spare;
-    private readonly object _publicationGate = new();
 
-    /// <summary>Reuses size-matched CPU hierarchy storage. Applies to the next completed readback.</summary>
+    /// <summary>Retained settings compatibility; published storage is never recycled while readers can retain it.</summary>
     public bool ReuseStorage { get; set; } = true;
 
     public OcclusionDepth(VulkanDevice device, int framesInFlight)
@@ -134,16 +133,11 @@ internal sealed class OcclusionDepth : IDisposable
     {
         if (_pending[slotIndex] is not { } pending || _readbacks[slotIndex] is not { } buffer) return;
         _pending[slotIndex] = null;
-        // Only LatestView exposes the published pyramid, and its queries hold the publication gate.
-        // The spare is unreachable by readers; build it outside the gate, then retire the old snapshot
-        // only after all queries using it have finished. Neither readers nor the GPU retain spare storage.
+        // A query retains its snapshot without taking a monitor. Never recycle a
+        // previously published hierarchy: the GC retires it after its last reader.
         OcclusionPyramid next = OcclusionPyramid.FromReadback(buffer.Mapped, pending.Width, pending.Height,
-            pending.Camera, pending.Projection, ReuseStorage ? _spare : null);
-        lock (_publicationGate)
-        {
-            _spare = ReuseStorage ? _latest : null;
-            _latest = next;
-        }
+            pending.Camera, pending.Projection, null);
+        Volatile.Write(ref _latest, next);
         Published++;
     }
 
@@ -152,7 +146,7 @@ internal sealed class OcclusionDepth : IDisposable
     {
         GpuCamera = null;
         Array.Clear(_pending);
-        lock (_publicationGate) { _latest = null; _spare = null; }
+        Volatile.Write(ref _latest, null);
     }
 
     private bool Fail(string reason)
@@ -221,11 +215,10 @@ internal sealed class OcclusionDepth : IDisposable
     /// <summary>Forwards to the newest published pyramid; undecided (visible) while none exists.</summary>
     private sealed class LatestView(OcclusionDepth owner) : IOcclusionTest
     {
-        public OcclusionCamera? Source { get { lock (owner._publicationGate) return owner._latest?.Camera; } }
+        public OcclusionCamera? Source => Volatile.Read(ref owner._latest)?.Camera;
         public bool IsOccluded(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
         {
-            lock (owner._publicationGate)
-                return owner._latest?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true;
+            return Volatile.Read(ref owner._latest)?.IsOccluded(minX, minY, minZ, maxX, maxY, maxZ) == true;
         }
     }
 }
@@ -250,7 +243,7 @@ internal readonly record struct OcclusionProjection(float DepthUnpackMul, float 
 
 /// <summary>
 /// One published occlusion depth: a max-reduced pyramid of forward view distances over the captured view, with the camera
-/// that drew it. Immutable while published; OcclusionDepth recycles it only after all readers finish.
+/// that drew it. Immutable after publication; storage remains owned by this snapshot.
 /// </summary>
 internal sealed class OcclusionPyramid
 {

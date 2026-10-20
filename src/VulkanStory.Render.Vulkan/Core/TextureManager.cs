@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using VulkanStory.Render.Vulkan.Graph;
@@ -220,6 +221,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// </summary>
     private readonly ConcurrentDictionary<(uint BaseMip, uint MipCount, Format Format, ImageViewType Type, uint Layers), ImageView> _mipViews = new();
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public ImageView ViewOfMips(uint baseMip, uint mipCount, bool linearColor = false, bool sampledShape = false)
     {
         if (mipCount == uint.MaxValue && baseMip < MipLevels) mipCount = MipLevels - baseMip;
@@ -274,6 +276,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
         (GlImmutable || IsGlRenderbuffer || GlLevelBacking || level >= EffectiveBaseLevel && level <= EffectiveMaxLevel &&
             (level == EffectiveBaseLevel || MipRangeComplete));
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     internal bool TrySamplingView(SamplerState sampling, bool linearColor, out ImageView view, out SamplerState effective)
     {
         view = default; effective = sampling;
@@ -328,6 +331,7 @@ internal sealed unsafe class SamplerCache : IDisposable
 
     public SamplerCache(VulkanContext context) => _context = context;
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public Sampler Get(SamplerState state)
     {
         if (_samplers.TryGetValue(state, out Sampler existing)) return existing;

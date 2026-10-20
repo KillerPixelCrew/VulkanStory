@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Render.Vulkan.Shaders;
 
@@ -47,6 +49,9 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     private readonly TextureManager _textures;
     private readonly BindlessSlotBook _book;
     private readonly object _lock = new();
+    // Deletion can run on upload/finalizer threads. Only the render thread
+    // mutates the slot book, so a deletion never blocks a draw's Resolve.
+    private readonly ConcurrentQueue<ulong> _released = new();
     private readonly int[] _placeholders = new int[BindlessKinds.Count];
     private readonly List<PendingWrite> _pending = new();
     // (kind, slot) -> index in _pending: a later write to the same slot replaces the earlier one.
@@ -125,6 +130,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     /// write lands before their submission. 0 (the placeholder) for no texture, a
     /// texture that cannot sit behind the kind, or a full array.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public uint Resolve(VulkanTexture? texture, TextureKind kind, SamplerState state,
         ImageLayout layout = ImageLayout.ShaderReadOnlyOptimal, ImageView view = default)
     {
@@ -142,15 +148,15 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
         SamplerState effective = BindlessKinds.EffectiveState(state, kind);
         ImageView selectedView = view.Handle != 0 ? view : texture.View;
         var key = new BindlessSlotKey(texture.Id, kind, effective, layout, selectedView.Handle);
-        // Resolve is render-thread-owned; Release only marks a texture dead and
-        // retires its slots. The most recent variant remains the book's MRU, so
+        // Resolve is render-thread-owned; deletion marks a texture dead and
+        // queues retirement. The most recent variant remains the book's MRU, so
         // repeating it needs neither a lookup nor an LRU mutation under _lock.
         if (ReferenceEquals(texture.LastBindlessTable, this) && texture.LastBindlessSlot != 0 &&
             texture.LastBindlessKey == key && !texture.Released) return texture.LastBindlessSlot;
         lock (_lock)
         {
-            // Read under the lock Release takes: a delete that set the flag after this
-            // read blocks in Release until the slot below exists, and then retires it.
+            // A concurrent delete marks Released before queuing retirement. If
+            // it races this check, Flush retires the newly acquired slot too.
             if (texture.Released)
             {
                 NotePlaceholder();
@@ -175,12 +181,18 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     }
 
     /// <summary>
-    /// Retires every slot of a deleted physical texture against the Frame value
-    /// recorded now. Any thread (<see cref="TextureManager.Deleted" />).
+    /// Queues retirement of a deleted physical texture. Any thread
+    /// (<see cref="TextureManager.Deleted" />); the render thread retires slots
+    /// before submission, against its then-current frame timeline value.
     /// </summary>
     public void Release(ulong textureId)
     {
-        lock (_lock) _book.Release(textureId);
+        _released.Enqueue(textureId);
+    }
+
+    private void DrainReleased()
+    {
+        while (_released.TryDequeue(out ulong textureId)) _book.Release(textureId);
     }
 
     /// <summary>
@@ -192,6 +204,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     {
         lock (_lock)
         {
+            DrainReleased();
             _freed.Clear();
             _book.Collect(_freed);
             foreach ((TextureKind kind, uint slot) in _freed) QueuePlaceholder(kind, slot);
@@ -204,6 +217,7 @@ internal sealed unsafe class BindlessTextureTable : IDisposable
     {
         lock (_lock)
         {
+            DrainReleased();
             int count = _pending.Count;
             if (count == 0) return 0;
 
@@ -476,6 +490,7 @@ internal enum TextureKind
 /// <summary>What of a texture decides which kinds it may sit behind.</summary>
 internal readonly record struct TextureShape(Format Format, uint Layers, bool Cube, bool Volume)
 {
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static TextureShape Of(VulkanTexture texture) =>
         new(texture.Format, texture.Layers, texture.Cube, texture.Volume);
 }
@@ -528,6 +543,7 @@ internal static class BindlessKinds
     /// the matching signedness, and float kinds a non-integer format (depth reads
     /// through <c>sampler2D</c> as it does on GL).
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static bool Suits(TextureShape shape, TextureKind kind)
     {
         bool plain = !shape.Cube && !shape.Volume;
@@ -565,6 +581,7 @@ internal static class BindlessKinds
     /// compare, the others do not. Integer formats cannot be filtered linearly or
     /// anisotropically, so integer kinds sample nearest.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static SamplerState EffectiveState(SamplerState state, TextureKind kind)
     {
         state = state with { CompareEnable = IsShadow(kind) };

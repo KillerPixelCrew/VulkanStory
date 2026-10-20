@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Shaders;
 using Silk.NET.Vulkan;
@@ -55,6 +56,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>Copies a sampled color attachment to a feedback texture before a draw reads its current rendering target.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void SnapshotColorAttachment(CommandBuffer commandBuffer, int textureId, VulkanTexture source)
     {
         if (_sampledTextureOverrides.ContainsKey(textureId)) return;
@@ -163,7 +165,9 @@ public sealed unsafe partial class VulkanDevice
 
     /// <summary>The client texture id each <see cref="_frameTextureValues" /> entry was resolved from.</summary>
     private readonly int[] _frameTextureIds = new int[SetConvention.FrameTextures.Length];
-    private readonly object _frameTextureLock = new();
+    // Texture deletion runs on upload/finalizer threads. Bindings themselves
+    // stay render-thread-owned; drain invalidations before reading or writing.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<ulong> _forgottenFrameTextures = new();
     private readonly SamplerBindingValue[] _frameSamplerScratch = new SamplerBindingValue[SetConvention.FrameTextures.Length];
     private readonly SamplerBindingValue[] _lastFrameSamplers = new SamplerBindingValue[SetConvention.FrameTextures.Length];
     /// <summary>Set 0's one buffer binding (the frame block), borrowed by the lookup key.</summary>
@@ -200,7 +204,13 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Invalidates frame-texture bindings that still refer to the released texture identity.</summary>
     private void ForgetFrameTexture(ulong textureId)
     {
-        lock (_frameTextureLock)
+        _forgottenFrameTextures.Enqueue(textureId);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void DrainForgottenFrameTextures()
+    {
+        while (_forgottenFrameTextures.TryDequeue(out ulong textureId))
         {
             for (int i = 0; i < _frameTextureValues.Length; i++)
             {
@@ -273,8 +283,10 @@ public sealed unsafe partial class VulkanDevice
     /// its sampler slots: the frame set, the texture set with the push block, and the storage
     /// set. Every native draw binds through here.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private bool BindProgramSets(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
+        DrainForgottenFrameTextures();
         Vk api = _context.Api;
         SharedPipelineLayout shared = _sharedLayout!;
         SyncBoundDescriptors(commandBuffer);
@@ -284,12 +296,9 @@ public sealed unsafe partial class VulkanDevice
         {
             if (!TrySnapshotFrameGlobals(program, out uint offset)) return false;
             var samplers = _frameSamplerScratch;
-            lock (_frameTextureLock)
+            for (int i = 0; i < samplers.Length; i++)
             {
-                for (int i = 0; i < samplers.Length; i++)
-                {
-                    samplers[i] = _frameTextureValues[i].View.Handle != 0 ? _frameTextureValues[i] : FrameTexturePlaceholder(i);
-                }
+                samplers[i] = _frameTextureValues[i].View.Handle != 0 ? _frameTextureValues[i] : FrameTexturePlaceholder(i);
             }
             DescriptorSet frameSet = _boundFrameSet;
             if (frameSet.Handle == 0 || !samplers.AsSpan().SequenceEqual(_lastFrameSamplers))

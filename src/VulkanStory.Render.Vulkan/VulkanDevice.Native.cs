@@ -44,6 +44,7 @@ public sealed unsafe partial class VulkanDevice
     internal string? NativeDrawRefusal { get; private set; }
 
     /// <summary>Stores the native-operation refusal reason and returns false to the caller.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private bool RefuseNativeDraw(string reason)
     {
         NativeDrawRefusal = reason;
@@ -355,6 +356,9 @@ public sealed unsafe partial class VulkanDevice
     private void ReleaseNativeReadSelfCopies() => ReleaseReadSelfCopies();
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private void NoteNativeRenderStageStarted() => NoteRenderStageStarted();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private Pipeline GetNativeDrawPipeline(NativePipeline pipeline) => _pipelines.Get(pipeline.Key, pipeline.Request);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -364,12 +368,9 @@ public sealed unsafe partial class VulkanDevice
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void SetNativeFrameTexture(int index, SamplerBindingValue value, int textureId)
     {
-        // Texture finalizers invalidate these bindings from other threads.
-        lock (_frameTextureLock)
-        {
-            _frameTextureValues[index] = value;
-            _frameTextureIds[index] = textureId;
-        }
+        DrainForgottenFrameTextures();
+        _frameTextureValues[index] = value;
+        _frameTextureIds[index] = textureId;
     }
 
     /// <summary>Invalidates cached native pipeline bindings for a deleted program.</summary>
@@ -608,6 +609,16 @@ public sealed unsafe partial class VulkanDevice
     /// Shared by the fullscreen draw and every mesh draw. None of it reads the GL state
     /// tracker, a texture unit or a draw-buffer mask.
     /// </summary>
+    // Lock audit: pipeline Get/TryGet can enter compile queue/driver-cache
+    // gates; mutable sampling and ReadSelf can enter uploads/resource pools;
+    // sampler requirements and target setup can enter image-state trackers;
+    // sampling views can enter their mip-view creation gate. Keep each of these
+    // boundaries out of line so a later Monitor sample identifies its owner.
+    // Bindless Release and frame-texture invalidation now queue render-owned
+    // work instead of holding a draw's monitor on an upload/finalizer thread.
+    // Commands/lifetime, cache reads, slot indices, format/kind tests, push-byte
+    // writes and VulkanStats.Note* are plain reads/arithmetic/Interlocked only.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private bool BeginNativeDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures, int meshId,
         out CommandBuffer commandBuffer, out VulkanFramebuffer? target, bool requirePipeline = false, int instanceCount = 1)
     {
@@ -623,7 +634,7 @@ public sealed unsafe partial class VulkanDevice
 
         // Menu and loading-screen draws do not pass through a world render stage.
         // Start their render bracket at the first recorded draw instead.
-        NoteRenderStageStarted();
+        NoteNativeRenderStageStarted();
 
         NativePassDescription pass = _nativePass;
         VulkanFramebuffer bound = _nativeTarget;
@@ -640,6 +651,7 @@ public sealed unsafe partial class VulkanDevice
         }
 
         commandBuffer = Commands;
+        DrainForgottenFrameTextures();
         for (int i = 0; i < textures.Length; i++)
             if (textures[i].Sampler.IsPresent) PrepareNativeMutableSampling(textures[i].TextureId);
         ReleaseNativeReadSelfCopies();
@@ -856,13 +868,8 @@ public sealed unsafe partial class VulkanDevice
             if (named) continue;
 
             int index = FrameTextureIndex(declared.FrameBinding);
-            SamplerBindingValue stale;
-            int textureId;
-            lock (_frameTextureLock)
-            {
-                stale = _frameTextureValues[index];
-                textureId = _frameTextureIds[index];
-            }
+            SamplerBindingValue stale = _frameTextureValues[index];
+            int textureId = _frameTextureIds[index];
             if (stale.View.Handle == 0) continue;
 
             // Gone, recreated, a ReadSelf copy of an attachment, or an attachment of this draw's own
@@ -870,16 +877,13 @@ public sealed unsafe partial class VulkanDevice
             VulkanTexture? texture = _textures.Get(textureId);
             if (texture == null || texture.Id != stale.Resource || _targets.IsAttachmentOfBound(textureId))
             {
-                lock (_frameTextureLock)
-                {
-                    _frameTextureValues[index] = default;
-                    _frameTextureIds[index] = 0;
-                }
+                _frameTextureValues[index] = default;
+                _frameTextureIds[index] = 0;
                 continue;
             }
             if (stale.Layout != ImageLayout.ShaderReadOnlyOptimal)
             {
-                lock (_frameTextureLock) _frameTextureValues[index] = stale with { Layout = ImageLayout.ShaderReadOnlyOptimal };
+                _frameTextureValues[index] = stale with { Layout = ImageLayout.ShaderReadOnlyOptimal };
             }
             _targets.FlushPendingClears(commandBuffer, texture);
             RequireSamplerStages(commandBuffer, pipeline.SamplerStageUsages(samplerIndex), texture);
@@ -891,6 +895,7 @@ public sealed unsafe partial class VulkanDevice
     /// The stages come from the pipeline (<see cref="NativePipeline.SamplerStageUsages" />), resolved
     /// when it was created.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void RequireSamplerStages(CommandBuffer commands, ReadOnlySpan<ResourceUsage> stageUsages, VulkanTexture texture)
     {
         foreach (ResourceUsage usage in stageUsages)
@@ -900,6 +905,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>The dynamic state of a native draw: the pipeline's fixed state and the pass's viewport, never the tracker's.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void EmitNativeDynamicState(CommandBuffer commandBuffer, VulkanFramebuffer target,
         NativePassDescription pass, NativePipeline pipeline)
     {

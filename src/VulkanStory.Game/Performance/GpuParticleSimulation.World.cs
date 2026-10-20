@@ -100,6 +100,8 @@ internal static partial class GpuParticleSimulation
         Batch batch, float dt, out ParticleSimulationWorldInput world)
     {
         world = default;
+        float half = particle.ParticleHeight * particle.SizeMultiplier / 2f, cap = physics.MotionCap;
+        if (particle.TerrainCollision && (!float.IsFinite(cap) || cap < 0 || cap > 2 || half < 0 || half > 2)) return false;
         world.InitialPopulatedSize = (uint)PopulatedSize(physics.CollisionBoxList);
         if (!CaptureFluid(particle, physics, state, ref world, batch)) return false;
         world.MotionCap = physics.MotionCap;
@@ -112,8 +114,6 @@ internal static partial class GpuParticleSimulation
             current is { Worker: false } ? 0 : particle.prevPosAdvance);
         if (!particle.TerrainCollision) return true;
         var pos = particle.Position;
-        float half = particle.ParticleHeight * particle.SizeMultiplier / 2f, cap = physics.MotionCap;
-        if (!float.IsFinite(cap) || cap < 0 || cap > 2 || half < 0 || half > 2) return false;
         if ((world.VisualPolicy & ParticleSimulationWorldInput.ThirdTick) != 0 &&
             CaptureEnvironment(particle, physics, batch, dt, ref world)) world.VisualPolicy |= ParticleSimulationWorldInput.Environment;
         // Only collision-clipped motion has a proven cap here. Unclipped stock
@@ -128,8 +128,23 @@ internal static partial class GpuParticleSimulation
         var region = new WorldRegion(physics.BlockAccess, min.dimension, min.X, min.Y, min.Z, max.X, max.Y, max.Z);
         if (batch.Regions.TryGetValue(region, out var captured))
         { world.BoxStart = captured.Start; world.BoxCount = captured.Count; return true; }
+        // A pool larger than one GPU batch still observes a region just once.
+        // Copy its immutable bytes into this batch's independent upload ranges.
+        if (state.Regions.TryGetValue(region, out var prior))
+        {
+            if (prior.Count > MaximumWorldBoxes - batch.Boxes.Count) return false;
+            world.BoxStart = (uint)batch.Boxes.Count; world.BoxCount = prior.Count;
+            for (int i = (int)prior.Start, end = i + (int)prior.Count; i < end; i++)
+            {
+                batch.Boxes.Add(prior.Owner.Boxes[i]);
+                batch.BoxBlocks.Add(prior.Owner.BoxBlocks[i]);
+            }
+            batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
+            return true;
+        }
         if (!state.WorldCapture.Capture(physics, batch, min, max, out world.BoxStart, out world.BoxCount)) return false;
         batch.Regions.Add(region, (world.BoxStart, world.BoxCount));
+        if (state.Regions.Count < MaximumLiquidRegions) state.Regions.Add(region, (batch, world.BoxStart, world.BoxCount));
         return true;
     }
     // PoolState.Gate owns this visitor just like CollisionConfirmation. Retain
@@ -200,7 +215,7 @@ internal static partial class GpuParticleSimulation
             var cell = state.Position;
             region = new WorldRegion(physics.BlockAccess, cell.dimension, cell.X, cell.Y, cell.Z, cell.X, cell.Y, cell.Z,
                 particle.SwimOnLiquid ? 1 : 0);
-            if (batch.Fluids.TryGetValue(region, out var captured))
+            if (state.Fluids.TryGetValue(region, out var captured))
             { world.Liquid = captured.Liquid; world.Flow = captured.Flow; return true; }
         }
         var fluid = physics.BlockAccess.GetBlock(state.Position, 2);
@@ -227,7 +242,7 @@ internal static partial class GpuParticleSimulation
                 world.Flow = new Vector4(push.X, push.Y, push.Z, 1);
             }
         }
-        if (batch != null && batch.Fluids.Count < MaximumLiquidRegions) batch.Fluids.TryAdd(region, (world.Liquid, world.Flow));
+        if (batch != null && state.Fluids.Count < MaximumLiquidRegions) state.Fluids.TryAdd(region, (world.Liquid, world.Flow));
         return true;
     }
     private static bool CaptureLiquidCells(ParticleGeneric particle, ParticlePhysics physics, Batch batch,

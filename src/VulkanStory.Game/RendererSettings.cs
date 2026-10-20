@@ -269,7 +269,9 @@ internal sealed record RendererSettings
 internal sealed class RendererSettingsState : IUpscalerRuntimeState
 {
     private RendererSettings settings;
-    private readonly HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
+    // Writers publish a private replacement; per-draw eligibility never takes
+    // the runtime failure gate, including BeginMotionWrite's temporal check.
+    private HashSet<string> disabled = new(StringComparer.OrdinalIgnoreCase);
     private readonly object gate = new();
     private float activeRenderScale, activeLodBias;
     internal bool TaaDisabled { get; private set; }
@@ -279,7 +281,14 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     internal RendererSettingsState(RendererSettings settings) => this.settings = settings.Normalize();
     internal RendererSettings Settings => Volatile.Read(ref settings);
     internal void Apply(RendererSettings value) => Volatile.Write(ref settings, value.Normalize());
-    internal string EffectiveUpscaler { get { lock (gate) return StereoRendering || disabled.Contains(Settings.Upscaler) ? "off" : Settings.Upscaler; } }
+    internal string EffectiveUpscaler
+    {
+        get
+        {
+            string requested = Settings.Upscaler;
+            return StereoRendering || Volatile.Read(ref disabled).Contains(requested) ? "off" : requested;
+        }
+    }
     internal bool UpscalerReplacesTaa => EffectiveUpscaler != "off";
     internal bool EffectiveTaa => !StereoRendering && Settings.Taa && !TaaDisabled && !UpscalerReplacesTaa;
     internal bool EffectiveTemporalPipeline => !StereoRendering && (EffectiveTaa || UpscalerReplacesTaa || Settings.FrameGeneration != "off");
@@ -309,11 +318,14 @@ internal sealed class RendererSettingsState : IUpscalerRuntimeState
     {
         lock (gate)
         {
-            if (Settings.Upscaler == "off" || !disabled.Add(Settings.Upscaler)) return false;
+            string requested = Settings.Upscaler;
+            if (requested == "off" || disabled.Contains(requested)) return false;
+            var next = new HashSet<string>(disabled, StringComparer.OrdinalIgnoreCase) { requested };
+            Volatile.Write(ref disabled, next);
             ClearActivePlan(); return true;
         }
     }
-    internal bool IsDisabled(string provider) { lock (gate) return disabled.Contains(provider); }
+    internal bool IsDisabled(string provider) => Volatile.Read(ref disabled).Contains(provider);
     internal void DisableTaa() => TaaDisabled = true;
     /// <summary>Latency selection using the requested FG provider, before provider availability is known.</summary>
     internal RendererLatencySelection LatencySelection => EffectiveLatencySelection(null);
