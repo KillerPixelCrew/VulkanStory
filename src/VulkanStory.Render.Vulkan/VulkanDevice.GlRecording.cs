@@ -60,6 +60,7 @@ public sealed unsafe partial class VulkanDevice
     {
         BeginIndirectFrame(slot.Index);
         BeginEntityDrawFrame(slot.Index);
+        BeginEntitySceneFrame(slot.Index);
         RetireDeformationGeometry(all: !ComputeDeformationEnabled);
         RetireJointPoses(all: !ComputeJointPosesEnabled);
         RetireWorldGeometry(all: !ComputeDeformationEnabled);
