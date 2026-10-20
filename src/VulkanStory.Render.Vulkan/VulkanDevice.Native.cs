@@ -418,6 +418,7 @@ public sealed unsafe partial class VulkanDevice
         }
         if (!ReferenceEquals(_targets.Bound, target)) _targets.Bind(commandBuffer, id);
 
+        if (pass.ClearSlots != 0) AdvanceDrawOrder();
         for (int slot = 0; slot < RenderLimits.MaxColorAttachments && pass.ClearSlots != 0; slot++)
         {
             if (((pass.ClearSlots >> slot) & 1) == 0) continue;

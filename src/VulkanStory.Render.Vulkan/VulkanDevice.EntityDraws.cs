@@ -24,12 +24,38 @@ public sealed unsafe partial class VulkanDevice
         internal readonly TerrainFrustumPlane[] Planes = planes;
         internal int Count;
     }
+    // One recorded indirect-count command over consecutive commands of a batch. Its
+    // count word is host-written until submission; a following draw joins only when
+    // everything its own command would observe is what the first command observes.
+    private sealed class EntityDrawRun
+    {
+        internal bool Open;
+        internal EntityDrawBatch? Batch;
+        internal int First;
+        internal uint Count, MaxCount;
+        internal ulong CountOffset, Serial, Command, Pipeline;
+        internal long Order, Scope, DynamicCommands;
+        internal EntityRecordSegment? Segment;
+        internal EntityGeometryArena? Arena;
+        internal NativePassDescription? Pass;
+        internal VulkanFramebuffer? Target;
+        internal DescriptorSet FrameSet;
+        internal uint FrameOffset;
+    }
     private VulkanBuffer?[] _entityInputs = Array.Empty<VulkanBuffer?>();
     private ulong[] _entityInputOffsets = Array.Empty<ulong>();
     private EntityDrawBatch? _entityDrawBatch;
+    private readonly EntityDrawRun _entityDrawRun = new();
+    private uint? _entityMaxDrawIndirectCount;
+    // Advanced by every recorded draw, in-scope attachment clear and occlusion query
+    // boundary. Scope restarts, dispatches, barriers and transfers change ScopesOpened.
+    private long _drawOrder;
     internal EntityVisibilityInput? EntityVisibility { get; set; }
     internal long EntityVisibilityDispatchesRecorded { get; private set; }
     internal long EntityIndirectDrawsRecorded { get; private set; }
+    internal long EntityCombinedDrawsRecorded { get; private set; }
+
+    private void AdvanceDrawOrder() => _drawOrder++;
 
     // Admission before the producer writes its final model matrix. This only
     // certifies retained streams/current warp state; the real draw repeats these
@@ -182,7 +208,9 @@ public sealed unsafe partial class VulkanDevice
         ulong at = (_entityInputOffsets[slot] + alignment - 1) / alignment * alignment;
         ulong capacity = Math.Min(2UL << 20, limits.MaxStorageBufferRange);
         if (at + EntityBatchBytes > capacity) return null;
-        var input = _entityInputs[slot] ??= new VulkanBuffer(_context, capacity, BufferUsageFlags.StorageBufferBit,
+        // Also the count source of combined draws: the first record's unused word 3.
+        var input = _entityInputs[slot] ??= new VulkanBuffer(_context, capacity,
+            BufferUsageFlags.StorageBufferBit | BufferUsageFlags.IndirectBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
         var indirect = AllocateIndirect(EntityBatchCapacity, out ulong indirectOffset, alignment);
         _entityInputOffsets[slot] = at + EntityBatchBytes;
@@ -224,9 +252,87 @@ public sealed unsafe partial class VulkanDevice
             TerrainEyeIndex, OcclusionDepth.GpuCamera!, visibility.Planes);
     }
 
+    /// <summary>
+    /// Records a prepared entity command. A shader-record draw opens a run: one
+    /// indirect-count command over this and the following commands of its batch,
+    /// counted by a host-written word until this recording is submitted.
+    /// </summary>
+    private void RecordEntityDraw(CommandBuffer command, VulkanBuffer commands, ulong offset,
+        EntityRecordSegment? segment, Pipeline pipeline, EntityGeometryArena? arena)
+    {
+        var batch = _entityDrawBatch;
+        var run = _entityDrawRun;
+        run.Open = false;
+        uint maxCount = 0;
+        int first = -1;
+        ulong countOffset = 0;
+        if (segment != null && arena != null && _context.DrawIndirectCountEnabled && batch != null &&
+            ReferenceEquals(commands, batch.Commands) && offset >= batch.CommandOffset)
+        {
+            first = (int)((offset - batch.CommandOffset) / 20);
+            _entityMaxDrawIndirectCount ??= _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits.MaxDrawIndirectCount;
+            maxCount = (uint)Math.Max(0, Math.Min((long)EntityBatchCapacity - first, _entityMaxDrawIndirectCount.Value));
+            countOffset = batch.InputOffset + (ulong)(64 + first * 12 + 3) * 4;
+        }
+        if (maxCount > 1)
+        {
+            // The command region spans the whole batch, so maxCount never reads past it.
+            *(uint*)((byte*)batch!.Input.Mapped + countOffset) = 1;
+            _context.Api.CmdDrawIndexedIndirectCount(command, commands.Handle, offset, batch.Input.Handle,
+                countOffset, maxCount, 20);
+        }
+        else _context.Api.CmdDrawIndexedIndirect(command, commands.Handle, offset, 1, 20);
+        EntityIndirectDrawsRecorded++;
+        NoteNativeDraw(NativeDrawKind.Indirect);
+        if (maxCount <= 1) return;
+        // Snapshot after this draw's own bindings and counting, so only later work differs.
+        run.Open = true; run.Batch = batch; run.First = first; run.Count = 1; run.MaxCount = maxCount;
+        run.CountOffset = countOffset;
+        run.Serial = _frames.Current.RecordingSerial; run.Command = (ulong)command.Handle;
+        run.Pipeline = pipeline.Handle; run.Segment = segment; run.Arena = arena;
+        run.Order = _drawOrder; run.Scope = _targets.ScopesOpened; run.DynamicCommands = _dynamicStateCommands;
+        run.Pass = _nativePass; run.Target = _nativeTarget;
+        run.FrameSet = _boundFrameSet; run.FrameOffset = _boundFrameOffset;
+    }
+
+    /// <summary>
+    /// Appends a prepared shader-record draw to the open run instead of recording a
+    /// command. Called after BeginNativeDraw, whose state recording for the original
+    /// program does not affect the record variant: per-draw uniforms and push values
+    /// live in this draw's row. Any other recorded draw, clear, query boundary,
+    /// scope restart, dynamic-state change, frame-set change or submission refuses.
+    /// </summary>
+    private bool TryCombineEntityDraw(CommandBuffer command, in EntityRecordDraw draw, EntityGeometryArena? arena,
+        VulkanBuffer commands, ulong offset)
+    {
+        var run = _entityDrawRun;
+        var batch = run.Batch;
+        if (!run.Open || arena == null || batch == null || !ReferenceEquals(batch, _entityDrawBatch) ||
+            !ReferenceEquals(commands, batch.Commands) || run.Count >= run.MaxCount ||
+            offset != batch.CommandOffset + (ulong)(run.First + run.Count) * 20 ||
+            (ulong)command.Handle != run.Command || _frames.Current.RecordingSerial != run.Serial ||
+            _drawOrder != run.Order || _targets.ScopesOpened != run.Scope || !_targets.RenderingActive ||
+            _dynamicStateCommands != run.DynamicCommands ||
+            !ReferenceEquals(_nativePass, run.Pass) || !ReferenceEquals(_nativeTarget, run.Target) ||
+            draw.Pipeline.Handle != run.Pipeline || !ReferenceEquals(draw.Segment, run.Segment) ||
+            !ReferenceEquals(arena, run.Arena) ||
+            _boundFrameSet.Handle != run.FrameSet.Handle || _boundFrameOffset != run.FrameOffset)
+        {
+            run.Open = false;
+            return false;
+        }
+        // The row is new and the count word is still unsubmitted host memory.
+        WriteEntityRecord(draw);
+        run.Count++;
+        *(uint*)((byte*)batch.Input.Mapped + run.CountOffset) = run.Count;
+        EntityIndirectDrawsRecorded++;
+        EntityCombinedDrawsRecorded++;
+        return true;
+    }
+
     private void BeginEntityDrawFrame(int slot)
     {
-        _entityDrawBatch = null; EntityVisibility = null;
+        _entityDrawBatch = null; EntityVisibility = null; EndEntityDrawRun();
         BeginEntityGeometryFrame(slot);
         BeginEntityRecordFrame(slot);
         if (_entityInputOffsets.Length > slot) _entityInputOffsets[slot] = 0;
@@ -240,5 +346,12 @@ public sealed unsafe partial class VulkanDevice
         _entityInputs = Array.Empty<VulkanBuffer?>();
         _entityInputOffsets = Array.Empty<ulong>();
         _entityDrawBatch = null;
+        EndEntityDrawRun();
+    }
+
+    private void EndEntityDrawRun()
+    {
+        var run = _entityDrawRun;
+        run.Open = false; run.Batch = null; run.Segment = null; run.Arena = null; run.Pass = null; run.Target = null;
     }
 }

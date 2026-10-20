@@ -119,7 +119,7 @@ public sealed unsafe partial class VulkanDevice
         return true;
     }
 
-    private bool BindEntityRecord(CommandBuffer command, int meshId, in EntityRecordDraw draw)
+    private void WriteEntityRecord(in EntityRecordDraw draw)
     {
         EntityRecordSegment segment = draw.Segment;
         // BeginNativeDraw has now resolved actual bindless slots and push scalars.
@@ -130,6 +130,12 @@ public sealed unsafe partial class VulkanDevice
         segment.Source.UniformShadow.AsSpan().CopyTo(bytes);
         _pushShadow.AsSpan(0, segment.Source.Interface.PushConstantSize)
             .CopyTo(bytes[EntityRecordShader.PushOffset(segment.Source)..]);
+    }
+
+    private bool BindEntityRecord(CommandBuffer command, int meshId, in EntityRecordDraw draw)
+    {
+        EntityRecordSegment segment = draw.Segment;
+        WriteEntityRecord(draw);
         // Descriptors still retain the original frame globals, read-self texture
         // lifetime and sampler readiness. The derived UBO is unused by its shader.
         _drawEntityRecords = segment;

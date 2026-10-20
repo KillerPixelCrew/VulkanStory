@@ -182,6 +182,7 @@ internal sealed class HeadlessScenario
             ["deformationCacheReuses"] = (JsonValueKind.Number, false),
             ["entityVisibilityDispatchesRecorded"] = (JsonValueKind.Number, false),
             ["entityIndirectDrawsRecorded"] = (JsonValueKind.Number, false),
+            ["entityCombinedDrawsRecorded"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -215,7 +216,7 @@ internal sealed class HeadlessScenario
         "particleLiquidPolicyChecks", "particleLiquidAirChecks", "particleLiquidDeathChecks", "particleLiquidWetChecks",
         "particleLiquidPolicyApplied", "particleLiquidAirApplied", "particleLiquidDeathApplied", "particleLiquidWetApplied",
         "particleSimulationCpuBenchmarkPoolMilliseconds", "particleSimulationGpuBenchmarkPoolMilliseconds",
-        "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded"
+        "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded", "entityCombinedDrawsRecorded"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

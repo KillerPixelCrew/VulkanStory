@@ -81,6 +81,7 @@ public sealed unsafe partial class VulkanDevice
     public void BeginOcclusionQuery(int queryId)
     {
         if (!_frameActive || !_queryRing.CanBegin(queryId)) return;
+        AdvanceDrawOrder();
 
         // The slot's pools are reset at frame start, before any scope opens, so
         // the query begins inside the scope the covered draw uses. Only a pool
@@ -102,6 +103,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Ends the active logical occlusion query while preserving segmented query results.</summary>
     public void EndOcclusionQuery(int queryId)
     {
+        AdvanceDrawOrder();
         if (_frameActive) _queryRing.End(queryId, _frames.Current.FrameValue, Commands);
     }
 

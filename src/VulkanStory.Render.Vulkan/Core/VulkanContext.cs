@@ -214,6 +214,8 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
     public bool BufferDeviceAddressEnabled { get; private set; }
     /// <summary>Whether the device was created with drawIndirectFirstInstance enabled.</summary>
     public bool DrawIndirectFirstInstanceEnabled { get; private set; }
+    /// <summary>Whether the device was created with drawIndirectCount enabled.</summary>
+    public bool DrawIndirectCountEnabled { get; private set; }
     /// <summary>Device properties and supported/enabled renderer feature snapshot.</summary>
     public VulkanCapabilities Capabilities { get; private set; } = new();
     internal bool GeometryShadersEnabled { get; private set; }
@@ -1178,6 +1180,15 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         };
         Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &vulkan13QueryRoot);
         bool pipelineCacheControl = vulkan13Query.PipelineCreationCacheControl;
+        // Optional: combined entity draws read their draw count from a buffer.
+        // Without it each entity draw keeps its own indirect command.
+        var vulkan12Query = new PhysicalDeviceVulkan12Features { SType = StructureType.PhysicalDeviceVulkan12Features };
+        var vulkan12QueryRoot = new PhysicalDeviceFeatures2
+        {
+            SType = StructureType.PhysicalDeviceFeatures2,
+            PNext = &vulkan12Query,
+        };
+        Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &vulkan12QueryRoot);
 
         var vulkan13 = new PhysicalDeviceVulkan13Features
         {
@@ -1201,6 +1212,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
             RuntimeDescriptorArray = true,
             DescriptorBindingPartiallyBound = true,
             DescriptorBindingSampledImageUpdateAfterBind = true,
+            DrawIndirectCount = vulkan12Query.DrawIndirectCount,
         };
         var features2 = new PhysicalDeviceFeatures2
         {
@@ -1365,6 +1377,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         Capabilities.PresentFencesEnabled = enablePresentFences;
         Allocator = new VulkanAllocator(this);
         DrawIndirectFirstInstanceEnabled = enabledFeatures.DrawIndirectFirstInstance;
+        DrawIndirectCountEnabled = vulkan12.DrawIndirectCount;
         return true;
     }
 

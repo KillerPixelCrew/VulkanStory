@@ -434,6 +434,7 @@ public sealed unsafe partial class VulkanDevice
             RenderTrace.Write("clearColor attachment=" + attachment + " target=" + _targets.Bound!.Id +
                 " rgba=" + r + "," + g + "," + b + "," + a);
         }
+        AdvanceDrawOrder();
         _targets.ClearColor(Commands, attachment, r, g, b, a);
     }
 
@@ -442,6 +443,7 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!BindForNativeClear(framebufferId)) return;
         if (RenderTrace.Enabled) RenderTrace.Write("clearDepth target=" + _targets.Bound!.Id + " depth=" + depth);
+        AdvanceDrawOrder();
         _targets.ClearDepth(Commands, depth);
     }
 
@@ -550,6 +552,7 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Counts one native draw, once in the total and once in its own kind.</summary>
     private void NoteNativeDraw(NativeDrawKind kind)
     {
+        AdvanceDrawOrder();
         VulkanStats.NoteNativeDraw();
         // The generic stated route is counted apart, so the counters below say what the dedicated
         // routes recorded (the differential tests compare the two).
@@ -611,6 +614,13 @@ public sealed unsafe partial class VulkanDevice
             return false;
         }
 
+        if (records && entityDraw &&
+            TryCombineEntityDraw(commandBuffer, recordDraw, entityGeometry, entityCommands!, entityOffset))
+        {
+            if (RenderTrace.Enabled) RenderTrace.Write("native mesh=" + meshId + " combined into the open entity draw");
+            ParticleInstancesDrawn(meshId);
+            return true;
+        }
         if (records && !BindEntityRecord(commandBuffer, meshId, recordDraw))
         {
             // The indirect command already carries the reserved row. Leave it
@@ -634,12 +644,14 @@ public sealed unsafe partial class VulkanDevice
         BindParticleVisuals(commandBuffer, meshId);
         if (entityDraw)
         {
-            _context.Api.CmdDrawIndexedIndirect(commandBuffer, entityCommands!.Handle, entityOffset, 1, 20);
-            EntityIndirectDrawsRecorded++;
+            RecordEntityDraw(commandBuffer, entityCommands!, entityOffset, records ? recordDraw.Segment : null,
+                recordDraw.Pipeline, entityGeometry);
+            ParticleInstancesDrawn(meshId);
+            return true;
         }
-        else _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, firstInstance);
+        _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, firstInstance);
         ParticleInstancesDrawn(meshId);
-        NoteNativeDraw(entityDraw ? NativeDrawKind.Indirect : instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
+        NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
         return true;
     }
 
