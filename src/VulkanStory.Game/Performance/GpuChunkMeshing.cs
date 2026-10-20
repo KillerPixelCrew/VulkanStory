@@ -91,6 +91,7 @@ internal static partial class GpuChunkMeshing
         internal readonly OrderedFallback Ordered = ordered;
         internal readonly long Revision = ordered.Revision;
         internal readonly bool OrderedCpu = (edgeOnly ? ordered.Edge : ordered.Full) == ordered.Revision;
+        internal readonly Admission Admission = admission!;
         internal bool Decor;
         internal readonly List<ChunkMeshFace> Faces = new();
         internal readonly List<ChunkMeshBin> Bins = new();
@@ -228,51 +229,97 @@ internal static partial class GpuChunkMeshing
             throw new InvalidOperationException("Stock chunk publication callbacks changed.");
     }
 
-    private static void Start(ChunkTesselator __instance, int __0, int __1, int __2, TesselatedChunk __3, bool __4, out Work? __state)
+    private static void Start(ChunkTesselator __instance, int __0, int __1, int __2, TesselatedChunk __3, bool __4, out ProducerState __state)
     {
-        __state = current; current = null;
+        __state = new(current, admission); current = null; admission = new Admission();
         lock (Gate)
         {
             ClientMain game = Game(__instance);
-            if (!ReferenceEquals(world, game) || !enabled || backend == null || !game.Platform.UseSSBOs ||
-                PerformancePatchSet.Current?.GpuChunkMeshing != true) return;
+            if (!ReferenceEquals(world, game))
+            { admission.Refuse(Refusal.World, "world-owner-mismatch", new { attached = world != null, dimension }); return; }
+            if (PerformancePatchSet.Current?.GpuChunkMeshing != true)
+            { admission.Refuse(Refusal.Control, "control-disabled"); return; }
+            if (faulted) { admission.Refuse(Refusal.Backend, "backend-faulted"); return; }
+            if (backend == null || !backend.ChunkMeshingAvailable)
+            { admission.Refuse(Refusal.Backend, "backend-unavailable"); return; }
+            if (!enabled) { admission.Refuse(Refusal.Control, "admission-disabled"); return; }
+            if (!game.Platform.UseSSBOs) { admission.Refuse(Refusal.Backend, "ssbo-disabled"); return; }
             // A late foreign producer patch keeps its original path.
             foreach (MethodInfo method in new[] { Cube, Bleeding, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
-                if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
+                if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
+                { admission.Refuse(Refusal.ForeignPatch, "foreign-producer-patch", new { method = method.ToString(),
+                    owners = Harmony.GetPatchInfo(method)?.Owners.ToArray() }); return; }
             foreach (MethodInfo method in StockPolicies)
-                if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true) return;
+                if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
+                { admission.Refuse(Refusal.ForeignPatch, "foreign-policy-patch", new { method = method.ToString(),
+                    owners = Harmony.GetPatchInfo(method)?.Owners.ToArray() }); return; }
+            ClientChunk chunk = SourceChunk(__3);
+            OrderedFallback ordered = OrderedCpu.GetValue(chunk, _ => new OrderedFallback());
             IChunkMeshBatch? lease;
-            try { lease = backend.LeaseChunkMeshing(); }
+            try
+            {
+                admission.LeaseAttempted = true;
+                lease = backend.LeaseChunkMeshing(__0, __1, __2, RuntimeHelpers.GetHashCode(chunk), ordered.Revision,
+                    __4, generation, out string? refusal, out object? owners);
+                if (lease == null)
+                {
+                    admission.Refuse(refusal == "lease-capacity-saturated" ? Refusal.Capacity : Refusal.Backend,
+                        refusal ?? "backend-unavailable", new { owners, pendingPayloads = Pending.GroupBy(p => p.Batch)
+                            .Select(g => new { leaseIdentity = RuntimeHelpers.GetHashCode(g.Key), count = g.Count() }).ToArray() });
+                    return;
+                }
+            }
             catch (Exception error)
             {
+                admission.Refuse(Refusal.Allocation, "lease-allocation-failed", new { error = error.ToString() });
                 enabled = false; faulted = true;
                 game.Logger.Warning("VulkanStory: GPU chunk meshing allocation refused: {0}", error.Message);
                 return;
             }
-            if (lease == null) return;
-            ClientChunk chunk = SourceChunk(__3);
             current = new Work(__instance, lease, generation, __0 * 32, __1 * 32 % 32768, __2 * 32, __4,
-                OrderedCpu.GetValue(chunk, _ => new OrderedFallback()));
+                ordered);
         }
     }
     private static void Snapshot(ChunkTesselator __instance, int __0, int __1, int __2, ClientChunk __3, bool __4, bool __result)
     {
         Work? work = current;
-        if (HeadlessChunkMeshingProbe.Active)
+        try
         {
-            long probe = HeadlessChunkMeshingProbe.Snapshot(Game(__instance), __0, __1, __2, __3,
-                __result, work != null && ReferenceEquals(work.Producer, __instance) ? work.Batch : null,
-                __4, Solid(__instance), Fluid(__instance));
-            if (work != null && ReferenceEquals(work.Producer, __instance)) work.ProbeBatch = probe;
+            if (work != null && ReferenceEquals(work.Producer, __instance))
+            {
+                if (!__result) work.Admission.Refuse(Refusal.Snapshot, "stock-snapshot-not-visible");
+                else CaptureSnapshot(work, __instance);
+            }
         }
-        if (!__result || work == null || !ReferenceEquals(work.Producer, __instance)) return;
+        catch (Exception error)
+        {
+            admission?.Refuse(error is OutOfMemoryException ? Refusal.Allocation : Refusal.Snapshot,
+                error is OutOfMemoryException ? "snapshot-allocation-failed" : "snapshot-capture-failed", new { error = error.ToString() });
+            throw;
+        }
+        finally
+        {
+            if (HeadlessChunkMeshingProbe.Active)
+            {
+                long probe = HeadlessChunkMeshingProbe.Snapshot(Game(__instance), __0, __1, __2, __3,
+                    __result, work?.Active == true && ReferenceEquals(work.Producer, __instance) ? work.Batch : null,
+                    __4, Solid(__instance), Fluid(__instance), admission?.Describe() ?? new { reason = "start-hook-not-observed" });
+                if (work != null && ReferenceEquals(work.Producer, __instance)) work.ProbeBatch = probe;
+            }
+        }
+    }
+    private static void CaptureSnapshot(Work work, ChunkTesselator __instance)
+    {
         Block[] solids = Solid(__instance), fluids = Fluid(__instance); int[] light = Lights(__instance);
-        if (solids.Length != 39304 || fluids.Length != solids.Length || light.Length != solids.Length) return;
+        if (solids.Length != 39304 || fluids.Length != solids.Length || light.Length != solids.Length)
+        { work.Admission.Refuse(Refusal.Snapshot, "snapshot-layout-unsupported", new { solids = solids.Length,
+            fluids = fluids.Length, lights = light.Length }); return; }
         var voxels = new ChunkMeshVoxel[solids.Length];
         for (int i = 0; i < voxels.Length; i++)
         {
             Block b = solids[i], f = fluids[i];
-            if (b == null || f == null) return;
+            if (b == null || f == null)
+            { work.Admission.Refuse(Refusal.Snapshot, "snapshot-null-block", new { index = i, solid = b == null, fluid = f == null }); return; }
             // The stock face-light pass treats an absorbing fluid as the front
             // block, otherwise the solid. Pack that front block's policies too.
             Block front = f.LightAbsorption > 0 ? f : b;
@@ -418,16 +465,32 @@ internal static partial class GpuChunkMeshing
     private static bool CaptureCube(object __instance, TCTCache __0)
     {
         Work? work = current; TCTCache vars = __0;
-        if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer) || work.Decor || vars.isDecorTesselate ||
-            vars.occ != 0.67f || vars.halfoccInverted != 0.0196875f ||
-            vars.IsDecorOnJson || !ReferenceEquals(vars.blockFaceVertices, CubeFaceVertices.blockFaceVertices) ||
-            !SupportedProducer(work, vars.block) || !SupportedPass(work, vars.RenderPass) ||
-            __instance.GetType() != typeof(CubeTesselator) && __instance.GetType() != typeof(BleedingCubeTesselator) ||
-            work.Faces.Count + 6 > work.Batch.FaceCapacity) return Cpu(vars);
+        if (work?.Active != true || !ReferenceEquals(vars.tct, work.Producer)) return Cpu(vars);
+        if (work.Decor || vars.isDecorTesselate || vars.IsDecorOnJson)
+            return RefuseCube(work, vars, Refusal.UnsupportedProducer, "decor-producer");
+        if (vars.occ != 0.67f || vars.halfoccInverted != 0.0196875f ||
+            !ReferenceEquals(vars.blockFaceVertices, CubeFaceVertices.blockFaceVertices))
+            return RefuseCube(work, vars, Refusal.UnsupportedProducer, "custom-cube-layout-or-ao");
+        if (work.OrderedCpu && (Ordered(vars.RenderPass) || Ordered(vars.block.RenderPass)))
+            return RefuseCube(work, vars, Refusal.OrderedFallback, "ordered-cpu-dirty-revision-marker",
+                work.ProbeBatch == 0 ? null : new { work.Revision, currentRevision = work.Ordered.Revision, work.Ordered.Full, work.Ordered.Edge,
+                    work.EdgeOnly, pass = vars.RenderPass.ToString() });
+        if (!SupportedPass(work, vars.RenderPass))
+            return RefuseCube(work, vars, Refusal.UnsupportedProducer, "unsupported-render-pass",
+                work.ProbeBatch == 0 ? null : new { pass = vars.RenderPass.ToString() });
+        if (!SupportedProducer(work, vars.block) ||
+            __instance.GetType() != typeof(CubeTesselator) && __instance.GetType() != typeof(BleedingCubeTesselator))
+            return RefuseCube(work, vars, Refusal.UnsupportedProducer, "unsupported-cube-producer",
+                work.ProbeBatch == 0 ? null : new { producer = __instance.GetType().FullName,
+                    block = vars.block.Code?.ToString(), draw = vars.block.DrawType.ToString() });
+        if (work.Faces.Count + 6 > work.Batch.FaceCapacity)
+            return RefuseCube(work, vars, Refusal.Capacity, "face-capacity-saturated",
+                work.ProbeBatch == 0 ? null : new { count = work.Faces.Count, work.Batch.FaceCapacity });
         Block[] blocks = Solid(vars.tct), fluids = Fluid(vars.tct);
         // Fluid-layer cubes (lake ice) keep their stock fluid-layer culling.
         bool solid = ReferenceEquals(vars.block, blocks[vars.extIndex3d]);
-        if (!solid && !ReferenceEquals(vars.block, fluids[vars.extIndex3d])) return Cpu(vars);
+        if (!solid && !ReferenceEquals(vars.block, fluids[vars.extIndex3d]))
+            return RefuseCube(work, vars, Refusal.UnsupportedProducer, "snapshot-producer-identity-mismatch");
         // Position-dependent/custom AO remains CPU. The full 3x3x3 producer
         // neighborhood, and each absorbing fluid that stock lighting can treat
         // as the front block, must use the stock AO and fluid-layer policies.
@@ -436,7 +499,10 @@ internal static partial class GpuChunkMeshing
                 for (int x = -1; x <= 1; x++)
                 {
                     int i = vars.extIndex3d + y * 1156 + z * 34 + x;
-                    if (!StockAo(blocks[i].GetType()) || fluids[i].LightAbsorption > 0 && !StockAo(fluids[i].GetType())) return Cpu(vars);
+                    if (!StockAo(blocks[i].GetType()) || fluids[i].LightAbsorption > 0 && !StockAo(fluids[i].GetType()))
+                        return RefuseCube(work, vars, Refusal.UnsupportedProducer, "custom-neighbour-ao-or-fluid-policy",
+                            work.ProbeBatch == 0 ? null : new { index = i,
+                                solid = blocks[i].GetType().FullName, fluid = fluids[i].GetType().FullName });
                 }
         // Retained CPU culling already produced the stock face mask; compute
         // keeps it with NeverCull and only performs lighting and packing.
@@ -459,7 +525,10 @@ internal static partial class GpuChunkMeshing
                 int bin = work.Bins.IndexOf(key);
                 if (bin < 0)
                 {
-                    if (work.Bins.Count >= 128) { work.Faces.RemoveRange(rollback, work.Faces.Count - rollback); return Cpu(vars); }
+                    if (work.Bins.Count >= 128)
+                    { work.Faces.RemoveRange(rollback, work.Faces.Count - rollback);
+                        return RefuseCube(work, vars, Refusal.Capacity, "bin-capacity-saturated",
+                            work.ProbeBatch == 0 ? null : new { count = work.Bins.Count }); }
                     bin = work.Bins.Count; work.Bins.Add(key);
                 }
                 work.Faces.Add(new ChunkMeshFace { X = vars.finalX, Y = vars.finalY, Z = vars.finalZ, Height = height,
@@ -521,17 +590,29 @@ internal static partial class GpuChunkMeshing
     private static void Finish(ChunkTesselator __instance, TesselatedChunk tessChunk, ref int __result)
     {
         Work? work = current;
-        if (work?.Active != true || !ReferenceEquals(work.Producer, __instance) || work.Faces.Count == 0) return;
+        if (work?.Active != true || !ReferenceEquals(work.Producer, __instance)) return;
+        if (work.Faces.Count == 0)
+        {
+            // A lease is only resource admission. No supported producer may
+            // have supplied faces after the stock snapshot was captured.
+            work.Admission.Refuse(Refusal.UnsupportedProducer, "no-supported-face-candidates");
+            if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
+            return;
+        }
         lock (Gate)
         {
             if (work.Generation != generation)
             {
+                work.Admission.Refuse(Refusal.World, "generation-changed", new { captured = work.Generation, current = generation });
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-rejected",
                     new { captured = work.Generation, current = generation });
                 UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("GPU chunk generation changed.");
             }
             if (MixedOrderedBin(work) is { } mixed)
             {
+                work.Admission.Refuse(Refusal.OrderedFallback, "mixed-blended-bin-retry", new { mixed, work.Revision, work.EdgeOnly });
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "ordered-bin-mixed", new { mixed });
                 // A blended mesh shared with CPU producers cannot keep the stock
                 // face order across two parts. Retry with original producers.
@@ -542,6 +623,8 @@ internal static partial class GpuChunkMeshing
             try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
             catch (Exception error)
             {
+                work.Admission.Refuse(Refusal.Backend, "generation-failed", new { error = error.ToString() });
+                if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "cpu-no-gpu-admission", work.Admission.Describe());
                 if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-failed", new { error = error.Message });
                 // No partial chunk can reach callbacks/publication. Requeue once
                 // with the original CPU producers if backend generation failed.
@@ -578,9 +661,9 @@ internal static partial class GpuChunkMeshing
                 (bin.Edge ? EdgePools(work.Producer) : CenterPools(work.Producer))[1][bin.Pass][bin.Atlas].VerticesCount != 0) return bin;
         return null;
     }
-    private static Exception? End(Exception? __exception, Work? __state)
+    private static Exception? End(Exception? __exception, ProducerState? __state)
     {
-        Work? work = current; current = __state;
+        Work? work = current; current = __state?.Work; admission = __state?.Admission;
         if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
             new { candidates = work.Faces.Count, error = __exception?.Message });
         work?.Batch.Dispose();

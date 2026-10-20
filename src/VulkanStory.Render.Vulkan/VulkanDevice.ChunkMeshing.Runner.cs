@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Contracts;
@@ -31,16 +33,32 @@ public sealed unsafe partial class VulkanDevice
             internal DescriptorSet Set;
             internal Fence Fence;
             internal bool Leased, InFlight;
+            internal Batch? Lease;
         }
         internal sealed class Batch : IChunkMeshBatch
         {
             internal readonly ChunkMeshingRunner Owner;
             private readonly Tile tile;
             private int references = 1;
+            private int gpuReads;
+            private readonly long started = Stopwatch.GetTimestamp();
+            internal readonly int X, Y, Z, ChunkIdentity, Generation;
+            internal readonly long Revision;
+            internal readonly bool EdgeOnly;
             private ChunkMeshRange[]? ranges;
             internal VulkanBuffer Output => tile.Output!;
             public int FaceCapacity => Capacity;
-            internal Batch(ChunkMeshingRunner owner, Tile tile) { Owner = owner; this.tile = tile; }
+            internal Batch(ChunkMeshingRunner owner, Tile tile, int x, int y, int z, int chunkIdentity,
+                long revision, bool edgeOnly, int generation)
+            { Owner = owner; this.tile = tile; X = x; Y = y; Z = z; ChunkIdentity = chunkIdentity;
+                Revision = revision; EdgeOnly = edgeOnly; Generation = generation; }
+            internal object Describe() => new { X, Y, Z, ChunkIdentity, Revision, EdgeOnly, Generation,
+                leaseIdentity = RuntimeHelpers.GetHashCode(this),
+                ageMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                references, gpuReads, producerOrPayloadReferences = references - gpuReads,
+                generated = ranges != null, tile.InFlight };
+            internal void RetainGpuRead() { lock (Owner.gate) { Retain(); gpuReads++; } }
+            internal void ReleaseGpuRead() { lock (Owner.gate) { gpuReads--; Dispose(); } }
             public void Retain()
             {
                 lock (Owner.gate)
@@ -74,23 +92,28 @@ public sealed unsafe partial class VulkanDevice
                     if (--references != 0) return;
                     if (!Owner.disposed) Owner.Wait(tile);
                     tile.Leased = false;
+                    tile.Lease = null;
                 }
             }
         }
         internal ChunkMeshingRunner(VulkanContext context, ComputeProgram program, Pipeline pipeline)
         { this.context = context; this.program = program; this.pipeline = pipeline; }
-        internal IChunkMeshBatch? Lease()
+        internal IChunkMeshBatch? Lease(int x, int y, int z, int chunkIdentity, long revision,
+            bool edgeOnly, int generation, out string? refusal, out object? owners)
         {
             lock (gate)
             {
-                if (disposed) return null;
+                owners = null; refusal = null;
+                if (disposed) { refusal = "backend-disposed"; return null; }
                 for (int i = 0; i < tiles.Length; i++)
                 {
                     if (tiles[i]?.Leased == true) continue;
                     Tile tile = tiles[i] ??= Allocate();
                     tile.Leased = true;
-                    return new Batch(this, tile);
+                    return tile.Lease = new Batch(this, tile, x, y, z, chunkIdentity, revision, edgeOnly, generation);
                 }
+                refusal = "lease-capacity-saturated";
+                owners = tiles.Select((tile, slot) => new { slot, owner = tile?.Lease?.Describe() }).ToArray();
                 return null;
             }
         }

@@ -133,7 +133,7 @@ internal static class HeadlessChunkMeshingProbe
     }
 
     internal static long Snapshot(ClientMain client, int cx, int cy, int cz, ClientChunk chunk,
-        bool visible, IChunkMeshBatch? lease, bool edgeOnly, Block[] solids, Block[] fluids)
+        bool visible, IChunkMeshBatch? lease, bool edgeOnly, Block[] solids, Block[] fluids, object admission)
     {
         Run? run = Volatile.Read(ref active);
         if (run == null || Volatile.Read(ref run.Block) == 0 || !run.Client.TryGetTarget(out var known) || !ReferenceEquals(known, client) ||
@@ -143,7 +143,11 @@ internal static class HeadlessChunkMeshingProbe
         long batch = ((long)run.Number << 32) | (uint)attempt;
         int index = (((run.Y & 31) + 1) * 34 + (run.Z & 31) + 1) * 34 + (run.X & 31) + 1;
         if (solids.Length != 39304 || fluids.Length != 39304)
-        { run.Record("client-snapshot-invalid", new { solids = solids.Length, fluids = fluids.Length }, batch); return batch; }
+        {
+            run.Record("client-snapshot-invalid", new { solids = solids.Length, fluids = fluids.Length }, batch);
+            run.Record("cpu-no-gpu-admission", new { snapshotMatches = false, admission }, batch);
+            return batch;
+        }
         var solid = new int[27]; var fluid = new int[27]; bool matches = true; int n = 0;
         for (int y = -1; y <= 1; y++)
             for (int z = -1; z <= 1; z++)
@@ -156,7 +160,7 @@ internal static class HeadlessChunkMeshingProbe
         run.Record("client-snapshot", new { clientChunk = RuntimeHelpers.GetHashCode(chunk), visible, edgeOnly,
             targetAndAirMatch = matches, solid, fluid, order = "y/z/x, offsets -1..1", index }, batch);
         run.Record(lease != null ? "gpu-admitted" : "cpu-no-gpu-admission",
-            new { snapshotMatches = matches, leaseIdentity = lease == null ? (int?)null : RuntimeHelpers.GetHashCode(lease) }, batch);
+            new { snapshotMatches = matches, leaseIdentity = lease == null ? (int?)null : RuntimeHelpers.GetHashCode(lease), admission }, batch);
         return batch;
     }
 
@@ -169,6 +173,12 @@ internal static class HeadlessChunkMeshingProbe
     }
     internal static void Generated(long batch, ChunkMeshRange[] ranges, ChunkMeshBin[] bins) =>
         For(batch)?.Record("generated-ranges", new { ranges, bins, faces = ranges.Sum(r => r.FaceCount) }, batch);
+    internal static void Refusal(long batch, int x, int y, int z, object detail)
+    {
+        Run? run = For(batch);
+        if (run != null && x == run.X && y == run.Y && z == run.Z)
+            run.Record("cpu-no-gpu-admission", detail, batch);
+    }
     internal static void Event(long batch, string stage, object detail) => For(batch)?.Record(stage, detail, batch);
     private static Run? For(long batch)
     {

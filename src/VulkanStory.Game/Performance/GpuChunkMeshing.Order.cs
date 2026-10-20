@@ -1,9 +1,54 @@
+using System.Runtime.CompilerServices;
+using Vintagestory.API.Client;
 using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game.Performance;
 
 internal static partial class GpuChunkMeshing
 {
+    // Counts refusal events: once per category per producer batch, rather than
+    // once per cube. Counters are process cumulative like the backend totals.
+    private enum Refusal { Control, World, Backend, ForeignPatch, Capacity, Allocation, Snapshot, UnsupportedProducer, OrderedFallback }
+    private static readonly long[] AdmissionRefusals = new long[Enum.GetValues<Refusal>().Length];
+    private static long admissionRefusals;
+    internal static IEnumerable<KeyValuePair<string, long>> AdmissionCounters()
+    {
+        yield return new("chunkMeshingAdmissionRefusals", Interlocked.Read(ref admissionRefusals));
+        foreach (Refusal category in Enum.GetValues<Refusal>())
+            yield return new("chunkMeshingAdmissionRefusals" + category, Interlocked.Read(ref AdmissionRefusals[(int)category]));
+    }
+    private sealed class Admission
+    {
+        internal string? Reason;
+        internal object? Detail;
+        internal bool LeaseAttempted;
+        internal readonly HashSet<Refusal> Counted = new();
+        internal void Refuse(Refusal category, string reason, object? detail = null)
+        {
+            Reason = reason; Detail = detail;
+            if (!Counted.Add(category)) return;
+            Interlocked.Increment(ref admissionRefusals);
+            Interlocked.Increment(ref AdmissionRefusals[(int)category]);
+        }
+        internal object Describe() => new { reason = Reason, leaseAttempted = LeaseAttempted, detail = Detail };
+    }
+    [ThreadStatic] private static Admission? admission;
+    private sealed record ProducerState(Work? Work, Admission? Admission);
+
+    private static bool RefuseCube(Work work, TCTCache vars, Refusal category, string reason, object? detail = null)
+    {
+        bool first = work.Admission.Counted.Add(category);
+        if (first)
+        {
+            Interlocked.Increment(ref admissionRefusals);
+            Interlocked.Increment(ref AdmissionRefusals[(int)category]);
+        }
+        if (work.ProbeBatch != 0)
+            HeadlessChunkMeshingProbe.Refusal(work.ProbeBatch, vars.posX, vars.posY, vars.posZ,
+                new { reason, leaseAttempted = true, leaseIdentity = RuntimeHelpers.GetHashCode(work.Batch), detail });
+        return Cpu(vars);
+    }
+
     private sealed class OrderedFallback
     {
         internal long Revision;

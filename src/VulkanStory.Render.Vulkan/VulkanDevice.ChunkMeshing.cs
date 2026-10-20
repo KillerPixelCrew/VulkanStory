@@ -14,7 +14,12 @@ public sealed unsafe partial class VulkanDevice
     internal long ChunkMeshingJobsCompleted => chunkMeshing?.JobsCompleted ?? 0;
     /// <summary>Generated faces whose real pool publication commands were recorded (not GPU execution proof).</summary>
     internal long ChunkMeshingFacesPublished => Interlocked.Read(ref chunkMeshingFacesPublished);
-    internal IChunkMeshBatch? LeaseChunkMeshing() => chunkMeshing?.Lease();
+    internal IChunkMeshBatch? LeaseChunkMeshing(int x, int y, int z, int chunkIdentity, long revision,
+        bool edgeOnly, int generation, out string? refusal, out object? owners)
+    {
+        refusal = "backend-unavailable"; owners = null;
+        return chunkMeshing?.Lease(x, y, z, chunkIdentity, revision, edgeOnly, generation, out refusal, out owners);
+    }
 
     internal void PrepareChunkMeshing(bool enabled)
     {
@@ -79,9 +84,9 @@ public sealed unsafe partial class VulkanDevice
         _uploads.NoteUse(command, colors);
         // Each recorded copy holds a lease until this frame's submitted timeline
         // has retired. Disposing the game's count-only MeshData cannot recycle it.
-        job.Retain();
+        job.RetainGpuRead();
         try { _frames.DeferDeletion(new ChunkMeshGpuRead(job)); }
-        catch { job.Dispose(); throw; }
+        catch { job.ReleaseGpuRead(); throw; }
         _context.Api.CmdBindPipeline(command, PipelineBindPoint.Compute, _compute.PipelineFor(program, []));
         _context.Api.CmdBindDescriptorSets(command, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
         uint* push = stackalloc uint[8] { (uint)range.FirstFace, (uint)range.FaceCount, (uint)first, 0,
@@ -102,7 +107,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     private sealed class ChunkMeshGpuRead(ChunkMeshingRunner.Batch job) : IDisposable
-    { public void Dispose() => job.Dispose(); }
+    { public void Dispose() => job.ReleaseGpuRead(); }
 
     // Called after device idle, before compute programs and mesh owners are destroyed.
     internal void DisposeChunkMeshing() { chunkMeshing?.Dispose(); chunkMeshing = null; }
