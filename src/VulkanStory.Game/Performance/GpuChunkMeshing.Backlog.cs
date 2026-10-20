@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using HarmonyLib;
 using Vintagestory.API.Common.Entities;
-using Vintagestory.API.Datastructures;
 using Vintagestory.Client.NoObf;
 
 namespace VulkanStory.Game.Performance;
@@ -9,46 +7,18 @@ namespace VulkanStory.Game.Performance;
 // Stock TesselateChunk increments ClientChunk.quantityDrawn when it first
 // reaches a chunk, and ClientWorldMap.IsChunkRendered (quantityDrawn > 0)
 // admits that chunk's entities in SystemRenderEntities.OnBeforeRender, for both
-// the main and shadow passes. A GPU job blocks this single tessellation thread
-// on two fence waits behind the frame's graphics work, so every chunk queued
-// after it reaches its first tessellation later than with stock producers.
-// Chunks the tessellator has not reached yet therefore keep stock producers.
+// the main and shadow passes. First attempts keep stock CPU geometry, while
+// later attempts can submit GPU work without blocking other queued chunks.
 internal static partial class GpuChunkMeshing
 {
-    private static readonly AccessTools.FieldRef<ClientMain, UniqueQueue<long>> DirtyNormal =
-        AccessTools.FieldRefAccess<ClientMain, UniqueQueue<long>>("dirtyChunks");
-    private static readonly AccessTools.FieldRef<ClientMain, UniqueQueue<long>> DirtyPriority =
-        AccessTools.FieldRefAccess<ClientMain, UniqueQueue<long>>("dirtyChunksPriority");
-    private static readonly AccessTools.FieldRef<ClientMain, UniqueQueue<long>> DirtyLast =
-        AccessTools.FieldRefAccess<ClientMain, UniqueQueue<long>>("dirtyChunksLast");
     private static readonly AccessTools.FieldRef<ClientWorldMap, Dictionary<long, ClientChunk>> LoadedChunks =
         AccessTools.FieldRefAccess<ClientWorldMap, Dictionary<long, ClientChunk>>("chunks");
     private static readonly AccessTools.FieldRef<ClientWorldMap, object> LoadedChunksLock =
         AccessTools.FieldRefAccess<ClientWorldMap, object>("chunksLock");
     private static readonly AccessTools.FieldRef<ClientChunk, int> QuantityDrawn =
         AccessTools.FieldRefAccess<ClientChunk, int>("quantityDrawn");
-    [ThreadStatic] private static long backlogCheckedAt;
-    [ThreadStatic] private static bool backlogFound;
-    private static long generationWaitTicks;
-
-    /// <summary>Producer-thread time spent inside synchronous GPU generation, including both fence waits.</summary>
-    internal static double GenerationWaitMilliseconds => Interlocked.Read(ref generationWaitTicks) * 1000.0 / Stopwatch.Frequency;
-
-    // Called before Gate: stock unload disposes chunks under chunksLock, and
-    // that disposal takes Gate (Unloading).
-    private static bool FirstTessellationsQueued(ClientMain game)
-    {
-        // The caller's chunk has already left its queue. Without other queued
-        // work no chunk can wait behind this job. Counts are read without the
-        // queue locks; a racing enqueue is equivalent to arriving after the check.
-        if (DirtyPriority(game).Count + DirtyNormal(game).Count + DirtyLast(game).Count == 0) return false;
-        long now = Stopwatch.GetTimestamp();
-        // A found backlog keeps stock producers briefly instead of rescanning
-        // the loaded-chunk map for every queued chunk.
-        if (backlogFound && now - backlogCheckedAt < Stopwatch.Frequency / 10) return true;
-        backlogCheckedAt = now;
-        return backlogFound = UndrawnChunks(game, stopAtFirst: true) != 0;
-    }
+    /// <summary>Producer-thread GPU fence wait time; submit/poll generation never waits.</summary>
+    internal static double GenerationWaitMilliseconds => 0;
 
     private static int UndrawnChunks(ClientMain game, bool stopAtFirst)
     {

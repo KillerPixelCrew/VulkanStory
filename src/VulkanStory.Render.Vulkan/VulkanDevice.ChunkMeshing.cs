@@ -90,7 +90,7 @@ public sealed unsafe partial class VulkanDevice
             DstStageMask = PipelineStageFlags2.ComputeShaderBit, DstAccessMask = AccessFlags2.ShaderStorageWriteBit,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
         };
-        // Generate observed its fence; make its shader writes explicitly visible
+        // Completion observed its fence; make its shader writes explicitly visible
         // to this publication read on the same graphics queue as well.
         barriers[2] = new BufferMemoryBarrier2
         {

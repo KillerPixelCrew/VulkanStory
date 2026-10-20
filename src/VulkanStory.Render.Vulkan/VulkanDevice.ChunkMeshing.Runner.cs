@@ -54,6 +54,8 @@ public sealed unsafe partial class VulkanDevice
             internal readonly long Revision;
             internal readonly bool EdgeOnly;
             private ChunkMeshRange[]? ranges;
+            private int stage, faceCount, binCount;
+            private VulkanBuffer? readback;
             internal bool ProbeRequested;
             internal uint[]? ProbeWords;
             internal VulkanBuffer Output => storage ?? tile!.Output!;
@@ -77,29 +79,62 @@ public sealed unsafe partial class VulkanDevice
                     references++;
                 }
             }
-            public ChunkMeshRange[] Generate(ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
+            public void Submit(ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
                 ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount)
             {
                 lock (Owner.gate)
                 {
-                    if (references == 0 || Owner.disposed || ranges != null) throw new InvalidOperationException("Invalid chunk mesh lease.");
+                    if (references == 0 || Owner.disposed || stage != 0) throw new InvalidOperationException("Invalid chunk mesh lease.");
+                    Owner.Submit(tile!, voxels, faces, neighbours, binCount);
+                    faceCount = faces.Length; this.binCount = binCount; stage = 1;
+                }
+            }
+            public bool TryComplete(out ChunkMeshRange[] result)
+            {
+                lock (Owner.gate)
+                {
+                    result = [];
+                    if (references == 0 || Owner.disposed || stage == 0) throw new InvalidOperationException("Invalid chunk mesh lease.");
+                    if (stage == 4) { result = ranges!; return true; }
                     Tile workspace = tile!;
-                    ranges = Owner.Generate(workspace, voxels, faces, neighbours, binCount, this);
-                    // Generate has observed the fence. Only the payload buffer
-                    // survives; no pending publication can read this workspace.
-                    if (storage != null || ranges.Length == 0)
+                    if (!Owner.Ready(workspace)) return false;
+                    if (stage == 1)
                     {
-                        workspace.Leased = false; workspace.Lease = null; tile = null;
-                        Interlocked.Add(ref Owner.payloadsDetached, ranges.Length);
+                        ranges = Owner.Pack(workspace, faceCount, binCount, this);
+                        stage = 2;
+                        return false;
                     }
+                    if (stage == 2)
+                    {
+                        Owner.BindOutput(workspace, workspace.Output!);
+                        if (ProbeRequested && ranges!.Length != 0)
+                        {
+                            // The copy is another polled stage, never a fence wait.
+                            try
+                            {
+                                readback = Owner.SubmitProbe(workspace, Output, ranges.Sum(r => r.FaceCount));
+                                stage = 3; return false;
+                            }
+                            catch { ProbeWords = null; }
+                        }
+                        else if (ProbeRequested) ProbeWords = [];
+                    }
+                    if (stage == 3)
+                    {
+                        ProbeWords = new ReadOnlySpan<uint>((void*)readback!.Mapped, checked((int)readback.Size / 4)).ToArray();
+                        readback.Dispose(); readback = null;
+                    }
+                    stage = 4;
+                    if (storage != null || ranges!.Length == 0) ReleaseTile();
+                    Interlocked.Add(ref Owner.payloadsDetached, storage != null ? ranges!.Length : 0);
                     Interlocked.Increment(ref Owner.jobsCompleted);
-                    return ranges;
+                    result = ranges!; return true;
                 }
             }
             internal void RequireRange(ChunkMeshRange range)
             {
                 lock (Owner.gate)
-                    if (references == 0 || Owner.disposed || ranges == null || !ranges.Contains(range))
+                    if (references == 0 || Owner.disposed || stage != 4 || ranges == null || !ranges.Contains(range))
                         throw new InvalidOperationException("Uncompleted chunk mesh range.");
             }
             public void Dispose()
@@ -108,14 +143,29 @@ public sealed unsafe partial class VulkanDevice
                 {
                     if (references == 0) return;
                     if (--references != 0) return;
-                    if (!Owner.disposed)
-                    {
-                        if (tile != null) Owner.Wait(tile);
-                        if (storage != null) Owner.ReleaseStorage(storage);
-                    }
-                    storage = null;
-                    if (tile != null) { tile.Leased = false; tile.Lease = null; tile = null; }
+                    // Cancellation never blocks an unload or producer. The tile
+                    // owns abandoned resources until a later status poll retires them.
+                    if (!Owner.disposed && tile != null && !Owner.Ready(tile)) return;
+                    ReleaseResources();
                 }
+            }
+            internal void Reap()
+            {
+                if (references == 0 && tile != null && Owner.Ready(tile)) ReleaseResources();
+            }
+            internal void DeviceDrained() { readback?.Dispose(); readback = null; }
+            private void ReleaseResources()
+            {
+                if (!Owner.disposed && storage != null) Owner.ReleaseStorage(storage);
+                storage = null; readback?.Dispose(); readback = null;
+                ReleaseTile();
+            }
+            private void ReleaseTile()
+            {
+                if (tile == null) return;
+                // Its descriptor may still name payload storage after cancellation.
+                if (!Owner.disposed) Owner.BindOutput(tile, tile.Output!);
+                tile.Leased = false; tile.Lease = null; tile = null;
             }
             internal void OwnStorage(VulkanBuffer buffer) => storage = buffer;
         }
@@ -130,6 +180,7 @@ public sealed unsafe partial class VulkanDevice
                 if (disposed) { refusal = "backend-disposed"; return null; }
                 for (int i = 0; i < tiles.Length; i++)
                 {
+                    tiles[i]?.Lease?.Reap();
                     if (tiles[i]?.Leased == true) continue;
                     Tile tile = tiles[i] ??= Allocate();
                     tile.Leased = true;
@@ -200,8 +251,8 @@ public sealed unsafe partial class VulkanDevice
             }
             catch { Destroy(tile); throw; }
         }
-        private ChunkMeshRange[] Generate(Tile tile, ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
-            ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount, Batch batch)
+        private void Submit(Tile tile, ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
+            ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount)
         {
             if (voxels.Length != 39304 || faces.Length > Capacity || neighbours.Length != 54 || binCount > BinCapacity || binCount < 0)
                 throw new ArgumentOutOfRangeException(nameof(faces));
@@ -209,17 +260,23 @@ public sealed unsafe partial class VulkanDevice
                 throw new ArgumentException("Invalid chunk mesh input.");
             Copy(voxels, tile.Voxels!); Copy(faces, tile.Input!); Copy(neighbours, tile.Neighbours!);
             var bins = new Span<uint>((void*)tile.Bins!.Mapped, BinCapacity * 3); bins.Clear();
-            if (faces.Length == 0) return [];
+            if (faces.Length == 0) return;
             // Also drain debug poison or host writes left by an aborted rank pass
             // before the GPU overwrites these cache lines.
             OrderCache(tile, invalidate: false);
-            Dispatch(tile, faces.Length, 0); Wait(tile);
+            Dispatch(tile, faces.Length, 0);
+        }
+        private ChunkMeshRange[] Pack(Tile tile, int faceCount, int binCount, Batch batch)
+        {
+            if (faceCount == 0) return [];
             OrderCache(tile, invalidate: true);
             // Rank visible faces within their bin in input order. Inputs arrive
             // in the stock producer's emission order, so every bin, including
             // blended passes, keeps the order of the original CPU mesh.
-            var order = new Span<uint>((void*)tile.Order!.Mapped, faces.Length);
-            for (int i = 0; i < faces.Length; i++)
+            var bins = new Span<uint>((void*)tile.Bins!.Mapped, BinCapacity * 3);
+            var faces = new ReadOnlySpan<ChunkMeshFace>((void*)tile.Input!.Mapped, faceCount);
+            var order = new Span<uint>((void*)tile.Order!.Mapped, faceCount);
+            for (int i = 0; i < faceCount; i++)
             {
                 uint bin = faces[i].Bin;
                 order[i] = order[i] switch { 0 => uint.MaxValue, 1 => bins[(int)bin * 3]++,
@@ -254,23 +311,15 @@ public sealed unsafe partial class VulkanDevice
             }
             // The preceding pass's fence has retired this descriptor set.
             BindOutput(tile, output);
-            Dispatch(tile, faces.Length, 1); Wait(tile);
-            // A later visibility pass must never bind a freed payload buffer,
-            // even though mode 0 does not access the geometry binding.
-            BindOutput(tile, tile.Output!);
-            if (batch.ProbeRequested)
-            {
-                try { batch.ProbeWords = ReadProbe(tile, output, first); }
-                // Observation failure must never change mesh admission/publication.
-                catch { Wait(tile); batch.ProbeWords = null; }
-            }
+            Dispatch(tile, faceCount, 1);
             return ranges.ToArray();
         }
-        private uint[] ReadProbe(Tile tile, VulkanBuffer output, int faces)
+        private VulkanBuffer SubmitProbe(Tile tile, VulkanBuffer output, int faces)
         {
-            if (faces == 0) return [];
-            using var readback = new VulkanBuffer(context, (ulong)faces * 80, BufferUsageFlags.TransferDstBit,
+            var readback = new VulkanBuffer(context, (ulong)faces * 80, BufferUsageFlags.TransferDstBit,
                 MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
+            try
+            {
             var api = context.Api;
             VulkanResult.Check(api.ResetCommandPool(context.Device, tile.Pool, 0), "chunk equality reset");
             var begin = new CommandBufferBeginInfo { SType = StructureType.CommandBufferBeginInfo, Flags = CommandBufferUsageFlags.OneTimeSubmitBit };
@@ -290,8 +339,9 @@ public sealed unsafe partial class VulkanDevice
             var submit = new SubmitInfo2 { SType = StructureType.SubmitInfo2, CommandBufferInfoCount = 1, PCommandBufferInfos = &command };
             lock (context.QueueLock) VulkanResult.Check(api.QueueSubmit2(context.GraphicsQueue, 1, &submit, fence), "chunk equality submit");
             tile.InFlight = true;
-            Wait(tile);
-            return new ReadOnlySpan<uint>((void*)readback.Mapped, faces * 20).ToArray();
+            return readback;
+            }
+            catch { readback.Dispose(); throw; }
         }
         private void BindOutput(Tile tile, VulkanBuffer output)
         {
@@ -350,6 +400,15 @@ public sealed unsafe partial class VulkanDevice
             VulkanResult.Check(context.Api.WaitForFences(context.Device, 1, &fence, true, ulong.MaxValue), "chunk mesh result");
             tile.InFlight = false;
         }
+        private bool Ready(Tile tile)
+        {
+            if (!tile.InFlight) return true;
+            Result status = context.Api.GetFenceStatus(context.Device, tile.Fence);
+            if (status == Result.NotReady) return false;
+            VulkanResult.Check(status, "chunk mesh status");
+            tile.InFlight = false;
+            return true;
+        }
         private void Destroy(Tile tile)
         {
             if (tile.Descriptors.Handle != 0) context.Api.DestroyDescriptorPool(context.Device, tile.Descriptors, null);
@@ -362,9 +421,9 @@ public sealed unsafe partial class VulkanDevice
             lock (gate)
             {
                 if (disposed) return;
-                foreach (Tile? tile in tiles) if (tile != null) Wait(tile);
+                foreach (Tile? tile in tiles) if (tile != null) { Wait(tile); tile.Lease?.Reap(); }
                 disposed = true;
-                foreach (Tile? tile in tiles) if (tile != null) Destroy(tile);
+                foreach (Tile? tile in tiles) if (tile != null) { tile.Lease?.DeviceDrained(); Destroy(tile); }
                 foreach (VulkanBuffer buffer in payloadStorage) buffer.Dispose();
                 payloadStorage.Clear(); Interlocked.Exchange(ref payloadStorageBytes, 0);
             }

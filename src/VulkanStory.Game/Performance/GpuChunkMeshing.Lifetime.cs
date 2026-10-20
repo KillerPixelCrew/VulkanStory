@@ -53,6 +53,9 @@ internal static partial class GpuChunkMeshing
     private static bool Superseding(TesselatedChunk __instance, TesselatedChunk __0, ref bool __result, out bool __state)
     {
         __state = false;
+        lock (Gate)
+            if (Generations.ContainsKey(__instance) || Generations.ContainsKey(__0))
+            { __result = false; return false; }
         if (PositionX(__instance) != PositionX(__0) || PositionY(__instance) != PositionY(__0) || PositionZ(__instance) != PositionZ(__0)) return true;
         // Stock compares coordinates alone. Do not merge a reloaded chunk's
         // arrays into a queue entry still owned by the unloaded chunk.
@@ -87,6 +90,7 @@ internal static partial class GpuChunkMeshing
     {
         lock (Gate)
         {
+            CancelGeneration(__instance, "unused-tessellation");
             string reason = SourceChunk(__instance)?.Disposed == true ? "chunk-unloaded" : "unused-tessellation";
             RetireParts(Centers(__instance), reason); RetireParts(Edges(__instance), reason);
         }
@@ -95,7 +99,11 @@ internal static partial class GpuChunkMeshing
     {
         if (__instance is not ClientChunk chunk) return;
         lock (Gate)
+        {
+            foreach (var pending in Generations.Keys.Where(c => ReferenceEquals(SourceChunk(c), chunk)).ToArray())
+                CancelGeneration(pending, "chunk-unloaded");
             foreach (var payload in Pending.Where(p => ReferenceEquals(p.Chunk, chunk)).ToArray()) payload.Dispose("chunk-unloaded");
+        }
     }
     private static Exception? PublicationEnded(TesselatedChunk tesschunk, Exception? __exception, bool __state)
     {
@@ -127,6 +135,7 @@ internal static partial class GpuChunkMeshing
     // so invalidated count-only meshes cannot enter the CPU array recycler.
     private static void RetirePending(string reason)
     {
+        foreach (var chunk in Generations.Keys.ToArray()) CancelGeneration(chunk, reason);
         foreach (var payload in Pending.ToArray()) payload.Dispose(reason);
     }
 }

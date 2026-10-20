@@ -108,6 +108,7 @@ internal static partial class GpuChunkMeshing
         internal readonly Dictionary<(bool, EnumChunkRenderPass), MeshData[]> ReferencePools = new();
         internal bool ReferenceFailed;
         internal readonly List<Payload> Payloads = new();
+        internal bool Deferred;
     }
     internal sealed class Payload(IChunkMeshBatch batch, ChunkMeshRange range, int epoch, int atlasEpoch, ClientChunk chunk) : IDisposable
     {
@@ -158,6 +159,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             generation++; atlasGeneration++; world = null; enabled = false;
+            foreach (var chunk in Generations.Keys.ToArray()) CancelGeneration(chunk, "world-left");
             OrderedCpu.Clear(); LightingOwners.Clear(); AoTypes.Clear();
             pending = Pending.ToArray();
         }
@@ -210,6 +212,7 @@ internal static partial class GpuChunkMeshing
         lock (Gate)
         {
             if (ReferenceEquals(world, next)) return;
+            foreach (var chunk in Generations.Keys.ToArray()) CancelGeneration(chunk, "world-replaced");
             retired = Pending.ToArray();
             world = next;
             dimension = next.EntityPlayer?.Pos.Dimension ?? 0; OrderedCpu.Clear();
@@ -257,8 +260,6 @@ internal static partial class GpuChunkMeshing
     private static void Start(ChunkTesselator __instance, int __0, int __1, int __2, TesselatedChunk __3, bool __4, out ProducerState __state)
     {
         __state = new(current, admission); current = null; admission = new Admission();
-        bool backlog = PerformancePatchSet.Current?.GpuChunkMeshing == true && Volatile.Read(ref enabled) &&
-            FirstTessellationsQueued(Game(__instance));
         lock (Gate)
         {
             ClientMain game = Game(__instance);
@@ -275,8 +276,13 @@ internal static partial class GpuChunkMeshing
             if (!LightingReady(__instance))
             { admission.Refuse(Refusal.Snapshot, "current-world-lighting-not-ready"); return; }
             if (!game.Platform.UseSSBOs) { admission.Refuse(Refusal.Backend, "ssbo-disabled"); return; }
-            // Stock entity admission waits for each chunk's first tessellation.
-            if (backlog) { admission.Refuse(Refusal.Backlog, "first-tessellations-queued"); return; }
+            // TesselateChunk increments quantityDrawn immediately before this
+            // call. Preserve the first attempt's complete stock geometry and
+            // entity admission; other chunks can submit without a global gate.
+            if (Volatile.Read(ref QuantityDrawn(SourceChunk(__3))) <= 1)
+            { admission.Refuse(Refusal.Backlog, "first-tessellation-cpu"); return; }
+            if (Generations.Count >= 2)
+            { admission.Refuse(Refusal.Capacity, "pending-generation-capacity"); return; }
             // A late foreign producer patch keeps its original path.
             foreach (MethodInfo method in new[] { Cube, Bleeding, ProducerStart, LightLevels, BeginProcess, Process, Insert, Visible, DecorCull, DecorBuild })
                 if (Harmony.GetPatchInfo(method)?.Owners.Any(o => !PerformancePatchSet.IsOwnOwner(o)) == true)
@@ -661,11 +667,8 @@ internal static partial class GpuChunkMeshing
                 UnusedDispose.Invoke(tessChunk, null); throw new RetryTesselationException("Blended GPU chunk faces share a CPU mesh.");
             }
         }
-        // Both compute passes wait on their fences. Gate stays released there:
-        // the main thread takes it for each frame's publication and unload checks.
-        ChunkMeshRange[] ranges;
-        long waitStarted = Stopwatch.GetTimestamp();
-        try { ranges = work.Batch.Generate(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
+        // Submit only. Neither this worker nor cancellation waits for a fence.
+        try { work.Batch.Submit(work.Voxels!, CollectionsMarshal.AsSpan(work.Faces), Neighbours(), work.Bins.Count); }
         catch (Exception error)
         {
             lock (Gate)
@@ -680,11 +683,24 @@ internal static partial class GpuChunkMeshing
                 throw new RetryTesselationException("GPU chunk generation failed; retry with stock producers.");
             }
         }
-        finally { Interlocked.Add(ref generationWaitTicks, Stopwatch.GetTimestamp() - waitStarted); }
         lock (Gate)
         {
-            // Unload, lighting, atlas and live/world/dimension changes during generation.
             RejectChanged(work, __instance, tessChunk);
+            work.Batch.Retain();
+            work.Deferred = true;
+            Generations.Add(tessChunk, new PendingGeneration(work, __result));
+            if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "generation-submitted",
+                new { candidates = work.Faces.Count, pendingGenerations = Generations.Count });
+            // Stock still charges its tessellation budget for the candidates.
+            // The exact vertex count is set before this result reaches pooling.
+            __result += work.Faces.Count * 4;
+            work.Voxels = null;
+        }
+    }
+    private static void CompleteGeneration(Work work, TesselatedChunk tessChunk, ChunkMeshRange[] ranges, int cpuVertices)
+    {
+        lock (Gate)
+        {
             if (work.ProbeBatch != 0) HeadlessChunkMeshingProbe.Generated(work.ProbeBatch, ranges, work.Bins.ToArray());
             if (work.ProbeBatch != 0) CompareReference(work, ranges);
             var center = new List<TesselatedChunkPart>(); var edge = new List<TesselatedChunkPart>();
@@ -702,10 +718,10 @@ internal static partial class GpuChunkMeshing
                 var part = new TesselatedChunkPart();
                 PartAtlas.SetValue(part, bin.Atlas); PartPass.SetValue(part, (EnumChunkRenderPass)bin.Pass); PartLod.SetValue(part, data);
                 (bin.Edge ? edge : center).Add(part);
-                __result += data.VerticesCount;
             }
             if (center.Count != 0) Centers(tessChunk) = (Centers(tessChunk) ?? []).Concat(center).ToArray();
             if (edge.Count != 0) Edges(tessChunk) = (Edges(tessChunk) ?? []).Concat(edge).ToArray();
+            VertexCount(tessChunk) = cpuVertices + ranges.Sum(r => r.FaceCount * 4);
         }
     }
     // Gate is held by every caller.
@@ -732,9 +748,14 @@ internal static partial class GpuChunkMeshing
     private static Exception? End(Exception? __exception, ProducerState? __state)
     {
         Work? work = current; current = __state?.Work; admission = __state?.Admission;
-        if (work != null) lock (Gate) work.Ordered.InFlight--;
+        if (work != null && !work.Deferred) lock (Gate) work.Ordered.InFlight--;
         if (__exception != null && work != null)
+        {
+            lock (Gate)
+                foreach (var chunk in Generations.Where(p => ReferenceEquals(p.Value.Work, work)).Select(p => p.Key).ToArray())
+                    CancelGeneration(chunk, "producer-failed");
             foreach (var payload in work.Payloads) payload.Dispose(__exception is RetryTesselationException ? "retry-tessellation" : "producer-failed");
+        }
         if (work?.ProbeBatch is > 0) HeadlessChunkMeshingProbe.Event(work.ProbeBatch, "producer-ended",
             new { candidates = work.Faces.Count, error = __exception?.Message });
         work?.Batch.Dispose();
@@ -766,6 +787,16 @@ internal static partial class GpuChunkMeshing
         // invalidation. The finalizer releases this even when stock pooling fails.
         __state = false;
         skippedPublication = false;
+        lock (Gate)
+            if (Generations.TryGetValue(tesschunk, out var pending))
+            {
+                pending.Dequeued = true;
+                // Stock adds this count to its upload budget after returning.
+                // A pending placeholder must not hold other ready chunks back.
+                VertexCount(tesschunk) = 0;
+                skippedPublication = true;
+                return false;
+            }
         var parts = (Centers(tesschunk) ?? []).Concat(Edges(tesschunk) ?? []);
         bool ordered = PublicationOrders.TryGetValue(tesschunk, out var order);
         if (!ordered && !parts.Any(part => PartLod.GetValue(part) is MeshData data && Payloads.TryGetValue(data, out _))) return true;
@@ -805,9 +836,10 @@ internal static partial class GpuChunkMeshing
         }
         return true;
     }
-    private static void ResetPublication()
+    private static void ResetPublication(ChunkTesselatorManager __instance)
     {
         skippedPublication = false;
+        PollGenerations(__instance);
         lock (Gate)
             foreach (var payload in Pending.Where(p => p.Chunk.Disposed).ToArray()) payload.Dispose("chunk-unloaded");
     }

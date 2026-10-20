@@ -35,6 +35,8 @@ public interface IChunkMeshBatch : IDisposable
 {
     int FaceCapacity { get; }
     void Retain();
-    ChunkMeshRange[] Generate(ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
+    void Submit(ReadOnlySpan<ChunkMeshVoxel> voxels, ReadOnlySpan<ChunkMeshFace> faces,
         ReadOnlySpan<ChunkMeshAoNeighbour> neighbours, int binCount);
+    /// <summary>Advance completed stages without waiting; ranges are valid only when true.</summary>
+    bool TryComplete(out ChunkMeshRange[] ranges);
 }
