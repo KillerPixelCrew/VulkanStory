@@ -28,6 +28,8 @@ internal static class TerrainOcclusionCull
     private static volatile IOcclusionTest? source;
     private static Func<(double X, double Y, double Z)?>? camera;
     private static Action? capture, reset;
+    [ThreadStatic] private static CullSnapshot? cullSnapshot;
+    private readonly record struct CullSnapshot(IOcclusionTest? Test, OcclusionCamera? Camera);
 
     /// <summary>The session's occlusion test, or null.</summary>
     internal static IOcclusionTest? Source => source;
@@ -44,6 +46,10 @@ internal static class TerrainOcclusionCull
         [typeof(EnumFrustumCullMode), typeof(FrustumCulling)]) ??
         throw new MissingMethodException(typeof(ModelDataPoolLocation).FullName, nameof(ModelDataPoolLocation.IsVisible));
 
+    private static MethodInfo CullPool() => AccessTools.Method(typeof(MeshDataPool), nameof(MeshDataPool.FrustumCull),
+        [typeof(FrustumCulling), typeof(EnumFrustumCullMode)]) ??
+        throw new MissingMethodException(typeof(MeshDataPool).FullName, nameof(MeshDataPool.FrustumCull));
+
     // The opaque terrain pass (render order 0.37) runs before entities (0.4) and long before liquids and OIT.
     private static MethodInfo OpaqueTerrain() => AccessTools.Method(typeof(Vintagestory.Client.NoObf.ChunkRenderer), "RenderOpaque", [typeof(float)]) ??
         throw new MissingMethodException(typeof(Vintagestory.Client.NoObf.ChunkRenderer).FullName, "RenderOpaque");
@@ -54,10 +60,13 @@ internal static class TerrainOcclusionCull
         if (AccessTools.Field(typeof(ModelDataPoolLocation), nameof(ModelDataPoolLocation.FrustumCullSphere)) == null)
             throw new MissingFieldException(typeof(ModelDataPoolLocation).FullName, "FrustumCullSphere");
         _ = OpaqueTerrain();
+        _ = CullPool();
     }, harmony =>
     {
         harmony.Patch(Target(), postfix: new HarmonyMethod(typeof(TerrainOcclusionCull), nameof(Postfix)));
         harmony.Patch(OpaqueTerrain(), postfix: new HarmonyMethod(typeof(TerrainOcclusionCull), nameof(AfterOpaqueTerrain)));
+        harmony.Patch(CullPool(), prefix: new HarmonyMethod(typeof(TerrainOcclusionCull), nameof(BeforeCullPool)),
+            finalizer: new HarmonyMethod(typeof(TerrainOcclusionCull), nameof(FinishCullPool)));
     }, WorldLeft: () => reset?.Invoke());
 
     // Main thread: the depth now holds the opaque terrain only; it becomes the occlusion source a few frames later.
@@ -66,12 +75,33 @@ internal static class TerrainOcclusionCull
         if (PerformancePatchSet.Current is { } settings && (settings.TerrainOcclusionCull || settings.EntityOcclusionCull)) capture?.Invoke();
     }
 
+    // A pool's FrustumCull calls IsVisible for every part in that pass. Depth
+    // publication occurs at frame start on this same thread, outside this scope.
+    // Restore even on exceptions/nested culls; unscoped mod calls keep live reads.
+    private static void BeforeCullPool(EnumFrustumCullMode frustumCullMode, out CullSnapshot? __state)
+    {
+        __state = cullSnapshot;
+        if (frustumCullMode != EnumFrustumCullMode.CullNormal || PerformancePatchSet.Current?.TerrainOcclusionCull != true)
+        { cullSnapshot = null; return; }
+        var test = source;
+        cullSnapshot = new CullSnapshot(test, test?.Source);
+    }
+
+    private static Exception? FinishCullPool(CullSnapshot? __state, Exception? __exception)
+    {
+        cullSnapshot = __state;
+        return __exception;
+    }
+
     // Main thread, once per visible chunk part per main-camera pass.
     private static void Postfix(ModelDataPoolLocation __instance, EnumFrustumCullMode mode, ref bool __result)
     {
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
         if (GpuTerrainDraws.Collecting) return;
-        if (PerformancePatchSet.Current?.TerrainOcclusionCull != true || source is not { Source: { } captured } test) return;
+        if (PerformancePatchSet.Current?.TerrainOcclusionCull != true) return;
+        var test = cullSnapshot is { } snapshot ? snapshot.Test : source;
+        var captured = cullSnapshot is { } current ? current.Camera : test?.Source;
+        if (test == null || captured == null) return;
         if (camera?.Invoke() is not { } now) return;
         Interlocked.Increment(ref PerformanceCounters.OcclusionTests);
         Sphere sphere = __instance.FrustumCullSphere;

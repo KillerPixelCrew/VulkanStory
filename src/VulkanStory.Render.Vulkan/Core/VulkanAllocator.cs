@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 using Buffer = Silk.NET.Vulkan.Buffer;
 
@@ -135,6 +136,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         Allocate(requirements, properties, linear, what, InferClass(properties, linear), false, default, default);
 
     /// <summary>Allocates VMA memory for the existing resource, retaining its required memory flags.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public MemoryAllocation Allocate(
         MemoryRequirements requirements, MemoryPropertyFlags properties, bool linear, string what,
         MemoryPoolClass poolClass, bool requiresDedicated, Buffer buffer, Image image)
@@ -287,7 +289,11 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private Result AllocateNativeLocked(in VmaAllocateInfo request, out VmaAllocationInfo allocation)
     {
         Result result = _vma.Allocate(request, out allocation);
-        try { RefreshStatisticsLocked(); }
+        // A zero-growth request can only suballocate existing blocks. Their
+        // totals/budgets cannot change, so avoid a native statistics walk while
+        // holding the allocator gate shared with meshing and particle workers.
+        // The growth path, explicit snapshots, frees and frame advance refresh.
+        try { if (request.GrowthLimitBytes != 0) RefreshStatisticsLocked(); }
         catch
         {
             if (result == Result.Success) _vma.Free(allocation.Allocation);

@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
@@ -26,6 +27,7 @@ public sealed unsafe partial class VulkanDevice
     internal long ParticleGeometryDispatchesRecorded { get; private set; }
     internal long ParticleGeometryCacheReuses { get; private set; }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareParticleGeometry(ShaderProgramResources program, int meshId, int instances)
     {
         drawParticleGeometry = null;
@@ -105,8 +107,7 @@ public sealed unsafe partial class VulkanDevice
         var compute = _compute.Get(particleGeometryProgram);
         if (compute == null) return 0;
         parameters[..128].CopyTo(new Span<byte>((void*)state.Pointer, 128));
-        var output = new VulkanBuffer(_context, size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit);
         try
         {
             var command = Commands;
@@ -134,7 +135,7 @@ public sealed unsafe partial class VulkanDevice
             versions.Add(new ParticleGeometry(output, parameters.ToArray(), _frameCounter)); particleGeometryBytes += size + (ulong)parameters.Length;
             drawParticleGeometry = output; return (int)vertexCount;
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 
     private void RetireParticleGeometry(bool all = false)
@@ -145,7 +146,7 @@ public sealed unsafe partial class VulkanDevice
             for (int i = pair.Value.Count - 1; i >= 0; i--)
                 if (all || unchecked(_frameCounter - pair.Value[i].Frame) > 2)
                 {
-                    var geometry = pair.Value[i]; _descriptors.Release(geometry.Buffer.Id); _frames.DeferDeletion(geometry.Buffer);
+                    var geometry = pair.Value[i]; _descriptors.Release(geometry.Buffer.Id); RetireComputeOutput(geometry.Buffer);
                     particleGeometryBytes -= geometry.Buffer.Size + (ulong)geometry.Parameters.Length; pair.Value.RemoveAt(i);
                 }
             if (pair.Value.Count == 0) oldParticleGeometry.Add(pair.Key);

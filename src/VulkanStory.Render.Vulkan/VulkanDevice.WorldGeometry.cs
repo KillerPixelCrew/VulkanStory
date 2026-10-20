@@ -141,8 +141,8 @@ public sealed unsafe partial class VulkanDevice
         var program = _compute.Get(worldGeometryProgram);
         if (program == null) return null;
         parameters[..128].CopyTo(new Span<byte>((void*)state.Pointer, 128));
-        var output = new VulkanBuffer(_context, local.Size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit |
-            BufferUsageFlags.TransferSrcBit, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(local.Size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit |
+            BufferUsageFlags.TransferSrcBit);
         try
         {
             var command = BeginProducerCommands(out bool hoisted, local, flags);
@@ -172,7 +172,7 @@ public sealed unsafe partial class VulkanDevice
             versions.Add(new WorldGeometry(output, parameters.ToArray(), _frameCounter)); worldGeometryBytes += retained;
             return output;
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 
     private static string ReadWorldShader(string name)
@@ -189,7 +189,7 @@ public sealed unsafe partial class VulkanDevice
             for (int i = pair.Value.Count - 1; i >= 0; i--)
                 if (all || unchecked(_frameCounter - pair.Value[i].Frame) > 2)
                 {
-                    var geometry = pair.Value[i]; _descriptors.Release(geometry.Buffer.Id); _frames.DeferDeletion(geometry.Buffer);
+                    var geometry = pair.Value[i]; _descriptors.Release(geometry.Buffer.Id); RetireComputeOutput(geometry.Buffer);
                     worldGeometryBytes -= geometry.Buffer.Size + (ulong)geometry.Parameters.Length; pair.Value.RemoveAt(i);
                 }
             if (pair.Value.Count == 0) oldWorldGeometry.Add(pair.Key);

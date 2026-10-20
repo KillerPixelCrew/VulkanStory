@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Contracts;
 using VulkanStory.Render.Vulkan.Core;
@@ -35,6 +36,7 @@ public sealed unsafe partial class VulkanDevice
         shader.LocationOf("vsComputeDeformation") >= 0 && shader.Interface.StorageBlocks.Exists(block => block.BlockName == DeformationBlock);
 
     private VulkanBuffer? drawCurrentJointPose, drawPreviousJointPose;
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareProgramJointPoses(ShaderProgramResources program)
     {
         drawCurrentJointPose = drawPreviousJointPose = null;
@@ -70,8 +72,7 @@ public sealed unsafe partial class VulkanDevice
         var program = _compute.Get(jointPoseProgram);
         if (program == null) return null;
         pose.Bytes.CopyTo(new Span<byte>((void*)input.Pointer, pose.Bytes.Length));
-        var output = new VulkanBuffer(_context, bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.UniformBufferBit | BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.UniformBufferBit | BufferUsageFlags.TransferSrcBit);
         try
         {
             // Reads only host-written ring bytes, which no frame command writes.
@@ -104,7 +105,7 @@ public sealed unsafe partial class VulkanDevice
             jointPoseBytes += bytes + (ulong)pose.Bytes.Length;
             return output;
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 
     private void RetireJointPoses(bool all = false)
@@ -114,7 +115,7 @@ public sealed unsafe partial class VulkanDevice
             if (all || unchecked(_frameCounter - pair.Value.Frame) > 2)
             {
                 _descriptors.Release(pair.Value.Buffer.Id);
-                _frames.DeferDeletion(pair.Value.Buffer);
+                RetireComputeOutput(pair.Value.Buffer);
                 jointPoseBytes -= pair.Value.Buffer.Size + (ulong)pair.Key.Bytes.Length;
                 oldJointPoses.Add(pair.Key);
             }

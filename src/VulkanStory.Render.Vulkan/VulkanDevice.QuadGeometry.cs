@@ -79,8 +79,7 @@ public sealed unsafe partial class VulkanDevice
         var compute = _compute.Get(quadGeometryProgram);
         if (compute == null) return 0;
         parameters[..256].CopyTo(new Span<byte>((void*)state.Pointer, 256));
-        var output = new VulkanBuffer(_context, size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(size, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.TransferSrcBit);
         try
         {
             var command = Commands; using GpuSection section = BeginGpuSection("quad-geometry"); _targets.EndRendering(command);
@@ -108,6 +107,6 @@ public sealed unsafe partial class VulkanDevice
             versions.Add(new ParticleGeometry(output, parameters.ToArray(), _frameCounter)); particleGeometryBytes += size + (ulong)parameters.Length;
             drawParticleGeometry = output; return (int)vertexCount;
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 }

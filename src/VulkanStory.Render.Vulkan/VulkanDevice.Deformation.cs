@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Silk.NET.Vulkan;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
@@ -12,6 +13,51 @@ public sealed unsafe partial class VulkanDevice
     internal const string DeformationBlock = "VulkanDeformation";
     internal const string PreviousDeformationBlock = "VulkanPreviousDeformation";
     private const ulong DeformationBudget = 64UL << 20;
+    // Cached outputs outlive individual frame slots. Recycle native buffers only
+    // through FrameRing's frame/transfer retirement, never at a cache eviction.
+    // Active outputs keep their existing feature budgets; idle capacity is capped.
+    private const ulong ComputeOutputIdleBudget = 32UL << 20;
+    private readonly Dictionary<(ulong, BufferUsageFlags), Stack<VulkanBuffer>> _computeOutputIdle = new();
+    private ulong _computeOutputIdleBytes;
+    private int _computeOutputIdleCount;
+    private bool _computeOutputPoolClosed;
+
+    private VulkanBuffer RentComputeOutput(ulong bytes, BufferUsageFlags usage)
+    {
+        ulong capacity = 256;
+        while (capacity < bytes) capacity <<= 1;
+        var key = (capacity, usage);
+        if (_computeOutputIdle.TryGetValue(key, out var available) && available.Count != 0)
+        {
+            var buffer = available.Pop();
+            if (available.Count == 0) _computeOutputIdle.Remove(key);
+            _computeOutputIdleBytes -= capacity; _computeOutputIdleCount--;
+            buffer.ReuseComputeOutput(bytes);
+            return buffer;
+        }
+        var output = new VulkanBuffer(_context, capacity, usage, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        output.ReuseComputeOutput(bytes);
+        return output;
+    }
+
+    private sealed class RetiredComputeOutput(VulkanDevice owner, VulkanBuffer buffer) : IDisposable
+    {
+        public void Dispose() => owner.ReturnComputeOutputIdle(buffer);
+    }
+
+    private void RetireComputeOutput(VulkanBuffer buffer) =>
+        _frames.DeferDeletion(new RetiredComputeOutput(this, buffer));
+
+    private void ReturnComputeOutputIdle(VulkanBuffer buffer)
+    {
+        // Deferred disposals execute on the render thread after both timelines.
+        if (_computeOutputPoolClosed || _computeOutputIdleCount >= 1024 ||
+            buffer.Capacity > ComputeOutputIdleBudget - _computeOutputIdleBytes)
+        { buffer.Dispose(); return; }
+        var key = (buffer.Capacity, buffer.Usage);
+        if (!_computeOutputIdle.TryGetValue(key, out var available)) _computeOutputIdle.Add(key, available = new());
+        available.Push(buffer); _computeOutputIdleBytes += buffer.Capacity; _computeOutputIdleCount++;
+    }
     private readonly record struct DeformationKey(VulkanMesh Mesh, ulong Revision, int PoseHash);
     private sealed class DeformationGeometry(VulkanBuffer buffer, byte[] pose, uint frame)
     {
@@ -38,6 +84,7 @@ public sealed unsafe partial class VulkanDevice
         else program.SetUniform(location, bytes);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareSharedDeformation(ShaderProgramResources program, int meshId)
     {
         _drawDeformation = _drawPreviousDeformation = null;
@@ -145,8 +192,8 @@ public sealed unsafe partial class VulkanDevice
         }
         var program = _compute.Get(_deformationProgram);
         if (program == null) return null;
-        var output = new VulkanBuffer(_context, bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit |
-            BufferUsageFlags.TransferSrcBit, MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit |
+            BufferUsageFlags.TransferSrcBit);
         try
         {
             CommandBuffer command = BeginProducerCommands(out bool hoisted, gpuBones, positions, ids);
@@ -186,7 +233,7 @@ public sealed unsafe partial class VulkanDevice
             _deformationBytes += retainedBytes;
             return output;
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 
     private void RetireDeformationGeometry(bool all = false)
@@ -200,7 +247,7 @@ public sealed unsafe partial class VulkanDevice
                 {
                     var geometry = versions[i];
                     _descriptors.Release(geometry.Buffer.Id);
-                    _frames.DeferDeletion(geometry.Buffer);
+                    RetireComputeOutput(geometry.Buffer);
                     _deformationBytes -= geometry.Buffer.Size + (ulong)geometry.Pose.Length;
                     versions.RemoveAt(i);
                 }
@@ -212,6 +259,10 @@ public sealed unsafe partial class VulkanDevice
 
     private void DisposeDeformationGeometryIdle()
     {
+        _computeOutputPoolClosed = true;
+        foreach (var available in _computeOutputIdle.Values)
+            foreach (var buffer in available) buffer.Dispose();
+        _computeOutputIdle.Clear(); _computeOutputIdleBytes = 0; _computeOutputIdleCount = 0;
         foreach (var versions in _deformedGeometry.Values)
             foreach (var geometry in versions) geometry.Buffer.Dispose();
         _deformedGeometry.Clear(); _deformationBytes = 0;

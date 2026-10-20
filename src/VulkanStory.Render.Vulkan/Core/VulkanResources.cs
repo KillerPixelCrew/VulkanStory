@@ -36,13 +36,14 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     private bool _disposed;
 
     public Buffer Handle { get; }
-    public ulong Size { get; }
+    public ulong Size { get; private set; }
+    internal ulong Capacity { get; }
 
     /// <summary>What the buffer was created for; the barriers around a staged copy name these uses.</summary>
     public BufferUsageFlags Usage { get; }
 
     /// <summary>Never reused, unlike <see cref="Handle" />; see <see cref="ResourceIds" />.</summary>
-    public ulong Id { get; } = ResourceIds.Next();
+    public ulong Id { get; private set; } = ResourceIds.Next();
 
     private MemoryAllocation _allocation;
 
@@ -80,7 +81,7 @@ internal sealed unsafe class VulkanBuffer : IDisposable
             throw new ArgumentException("Buffer sharing accepts at most the compute and graphics queue families.", nameof(queueFamilies));
         bool concurrent = queueFamilies.Length == 2 && queueFamilies[0] != queueFamilies[1];
         _context = context;
-        Size = size;
+        Capacity = Size = size;
         Usage = usage;
 
         var createInfo = new BufferCreateInfo
@@ -123,6 +124,16 @@ internal sealed unsafe class VulkanBuffer : IDisposable
             context.Allocator.Free(_allocation);
             throw;
         }
+    }
+
+    // Only the render-thread compute pool calls this, after timeline retirement.
+    // A fresh identity prevents retained world-warp keys and descriptors from
+    // confusing this lease with an older output using the same native buffer.
+    internal void ReuseComputeOutput(ulong size)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (size == 0 || size > Capacity) throw new ArgumentOutOfRangeException(nameof(size));
+        Size = size; Id = ResourceIds.Next(); FrameUse = FrameWrite = 0;
     }
 
     /// <inheritdoc/>

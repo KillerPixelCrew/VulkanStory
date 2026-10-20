@@ -25,6 +25,16 @@ internal static partial class GpuParticleSimulation
     private const long MaximumLatency = 32;
     internal const int BenchmarkMarker = 0x4000;
     private static readonly bool Benchmark = HeadlessHarnessOptions.Enabled && Environment.GetEnvironmentVariable("VULKANSTORY_PARTICLE_BENCHMARK") == "1";
+    // Numeric comparison replays the CPU trajectory. Only an explicit probe or
+    // a scenario observing correctness pays for it, never a normal/profile tick.
+    private static readonly bool CheckSimulation = HeadlessHarnessOptions.Enabled && !Benchmark &&
+        (Environment.GetEnvironmentVariable("VULKANSTORY_PARTICLE_CHECKS") == "1" ||
+         HeadlessHarnessOptions.Scenario?.Actions.Any(action => action.Field is
+             "particleSimulationChecks" or "particleSimulationChecksPassed" or
+             "particleSimulationFloatError" or "particleSimulationPositionError" or
+             "particleLiquidPolicyChecks" or "particleLiquidAirChecks" or
+             "particleLiquidDeathChecks" or "particleLiquidWetChecks" or
+             "particleLiquidPolicyCoveragePassed") == true);
     private readonly record struct TickMeasurement(long Start, bool Requested, bool Gpu, bool VisualDue);
     private readonly record struct PoolMeasurement(Scope? Previous, long Start, bool Requested);
     private sealed class Batch
@@ -414,13 +424,13 @@ internal static partial class GpuParticleSimulation
             // original tick and event order.
             if ((result.CollisionFlags & (ParticleSimulationOutput.RequiresCpuCollision | ParticleSimulationOutput.RequiresCpuArithmetic)) != 0) return true;
             ref readonly var expected = ref batch.Input[index];
-            uint populatedSize = (uint)PopulatedSize(__3.CollisionBoxList);
+            uint populatedSize = CheckSimulation ? (uint)PopulatedSize(__3.CollisionBoxList) : 0;
             if (!Matches(__instance, __0, __1, in expected, AgeSensitive(in expected, in batch.World[index])) ||
                 !Confirm(__instance, __3, state, batch, index, in result)) return true;
             if (!Enabled || scope.Epoch != Interlocked.Read(ref epoch)) return true;
             // Check only the trajectory that passed the production publication
             // gate, using the cache prefix observed before confirmation grew it.
-            if (HeadlessHarnessOptions.Enabled && !Benchmark) Check(batch, index, populatedSize);
+            if (CheckSimulation) Check(batch, index, populatedSize);
             Apply(__instance, in result, __0, __1, __2, __3, batch, index); Interlocked.Increment(ref stepsApplied);
             state.Rendered[__instance] = new RenderState(__instance, batch.Buffer!, index, in result);
             return false;

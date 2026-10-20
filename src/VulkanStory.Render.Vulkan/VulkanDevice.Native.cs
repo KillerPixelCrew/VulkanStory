@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using VulkanStory.Render.Vulkan.Core;
 using VulkanStory.Render.Vulkan.Graph;
 using VulkanStory.Render.Vulkan.Shaders;
@@ -78,6 +79,7 @@ public sealed unsafe partial class VulkanDevice
     internal int NativePipelinesForTests => _nativePipelines.Count;
 
     /// <summary>Set 1's placeholders are written shader-read-only and never used any other way: put them there once.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void EnsureBindlessPlaceholdersReadable(CommandBuffer commandBuffer)
     {
         if (_bindlessPlaceholdersReadable || _bindless == null) return;
@@ -338,9 +340,37 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>Whether a pipeline's program is still the linked one of that id (a shader reload replaces it).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     internal bool IsNativePipelineLive(NativePipeline pipeline) =>
         _programs.TryGetValue(pipeline.ProgramId, out ShaderProgramResources? program) &&
         ReferenceEquals(program, pipeline.Program);
+
+    // Keep these boundaries in sampling profiles: mutable-image copies can
+    // enter the shared upload lock, read-self release can reach resource pools,
+    // and pipeline misses can join workers or enter the driver-cache lock.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void PrepareNativeMutableSampling(int textureId) => PrepareGlMutableSampling(textureId);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReleaseNativeReadSelfCopies() => ReleaseReadSelfCopies();
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Pipeline GetNativeDrawPipeline(NativePipeline pipeline) => _pipelines.Get(pipeline.Key, pipeline.Request);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool TryGetNativeDrawPipeline(NativePipeline pipeline, out Pipeline handle) =>
+        _pipelines.TryGet(pipeline.Key, pipeline.Request, out handle);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SetNativeFrameTexture(int index, SamplerBindingValue value, int textureId)
+    {
+        // Texture finalizers invalidate these bindings from other threads.
+        lock (_frameTextureLock)
+        {
+            _frameTextureValues[index] = value;
+            _frameTextureIds[index] = textureId;
+        }
+    }
 
     /// <summary>Invalidates cached native pipeline bindings for a deleted program.</summary>
     private void ForgetNativePipelines(int programId)
@@ -611,8 +641,8 @@ public sealed unsafe partial class VulkanDevice
 
         commandBuffer = Commands;
         for (int i = 0; i < textures.Length; i++)
-            if (textures[i].Sampler.IsPresent) PrepareGlMutableSampling(textures[i].TextureId);
-        ReleaseReadSelfCopies();
+            if (textures[i].Sampler.IsPresent) PrepareNativeMutableSampling(textures[i].TextureId);
+        ReleaseNativeReadSelfCopies();
         EnsureBindlessPlaceholdersReadable(commandBuffer);
 
         // The pass's reads, put into the layout a shader read needs. A colour attachment of
@@ -677,8 +707,8 @@ public sealed unsafe partial class VulkanDevice
         // Presentation cannot skip its only scene draw while a first-use PSO compiles.
         // Get retains the normal cache fast path and compiles blocking only on a miss.
         Pipeline handle;
-        if (requirePipeline) handle = _pipelines.Get(pipeline.Key, pipeline.Request);
-        else if (!_pipelines.TryGet(pipeline.Key, pipeline.Request, out handle))
+        if (requirePipeline) handle = GetNativeDrawPipeline(pipeline);
+        else if (!TryGetNativeDrawPipeline(pipeline, out handle))
         {
             if (RenderTrace.Enabled)
             {
@@ -776,11 +806,7 @@ public sealed unsafe partial class VulkanDevice
                         _textures.Samplers.Get(BindlessKinds.EffectiveState(sampling, sampler.Kind)), texture.Id, layout);
                 if (texture == null) VulkanStats.NoteSamplerPlaceholder();
                 int frameIndex = FrameTextureIndex(sampler.FrameBinding);
-                lock (_frameTextureLock)
-                {
-                    _frameTextureValues[frameIndex] = value;
-                    _frameTextureIds[frameIndex] = texture == null ? 0 : sampled.TextureId;
-                }
+                SetNativeFrameTexture(frameIndex, value, texture == null ? 0 : sampled.TextureId);
                 continue;
             }
 
@@ -811,6 +837,7 @@ public sealed unsafe partial class VulkanDevice
     /// replaced by the placeholder when it is an attachment of this draw's own target, which a
     /// shader cannot read.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareUnnamedFrameTextures(CommandBuffer commandBuffer, NativePipeline pipeline,
         ReadOnlySpan<NativeTexture> textures)
     {

@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
@@ -99,6 +100,7 @@ public sealed unsafe partial class VulkanDevice
         _meshes.UpdateParticleHistory(source.MeshId, history);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void PrepareParticleVisuals(int meshId, int count)
     {
         drawParticleVisuals = null; drawParticleVisualMesh = 0; drawParticleVisualCount = 0;
@@ -137,8 +139,7 @@ public sealed unsafe partial class VulkanDevice
                 MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
             particleTrigonometry.AsSpan().CopyTo(new Span<float>((void*)particleTrigonometryBuffer.Mapped, particleTrigonometry.Length));
         }
-        var output = new VulkanBuffer(_context, bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit | BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
+        var output = RentComputeOutput(bytes, BufferUsageFlags.StorageBufferBit | BufferUsageFlags.VertexBufferBit | BufferUsageFlags.TransferSrcBit);
         try
         {
             var command = Commands; using GpuSection section = BeginGpuSection("particle-visuals"); _targets.EndRendering(command);
@@ -166,7 +167,7 @@ public sealed unsafe partial class VulkanDevice
             particleVisualResults.Add(key, new ParticleVisualResult(output, _frameCounter)); particleVisualBytes += bytes;
             SelectParticleVisuals(meshId, count, output);
         }
-        catch { _frames.DeferDeletion(output); throw; }
+        catch { RetireComputeOutput(output); throw; }
     }
 
     private void SelectParticleVisuals(int meshId, int count, VulkanBuffer buffer)
@@ -197,7 +198,7 @@ public sealed unsafe partial class VulkanDevice
         oldParticleVisualResults.Clear();
         foreach (var pair in particleVisualResults)
             if (all || unchecked(_frameCounter - pair.Value.Frame) > 2)
-            { _descriptors.Release(pair.Value.Buffer.Id); _frames.DeferDeletion(pair.Value.Buffer); particleVisualBytes -= pair.Value.Buffer.Size; oldParticleVisualResults.Add(pair.Key); }
+            { _descriptors.Release(pair.Value.Buffer.Id); RetireComputeOutput(pair.Value.Buffer); particleVisualBytes -= pair.Value.Buffer.Size; oldParticleVisualResults.Add(pair.Key); }
         foreach (var key in oldParticleVisualResults) particleVisualResults.Remove(key);
         oldParticleVisualSources.Clear();
         foreach (var pair in particleVisualSources) if (all || !ReferenceEquals(_meshes.Get(pair.Value.MeshId), pair.Key)) oldParticleVisualSources.Add(pair.Key);
