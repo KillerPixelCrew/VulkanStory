@@ -56,6 +56,36 @@ public sealed unsafe partial class VulkanDevice
     internal long EntityCombinedDrawsRecorded { get; private set; }
     internal long EntityRunsOpened { get; private set; }
     internal long EntityRunBreaks { get; private set; }
+    internal long EntityRunBreakContiguity { get; private set; }
+    internal long EntityRunBreakOrder { get; private set; }
+    internal long EntityRunBreakScope { get; private set; }
+    internal long EntityRunBreakDynamicState { get; private set; }
+    internal long EntityRunBreakFrameSet { get; private set; }
+    internal long EntityRunBreakProgram { get; private set; }
+    internal long EntityRunBreakReplaced { get; private set; }
+
+    private enum EntityRunBreak : byte { None, Contiguity, Order, Scope, DynamicState, FrameSet, Program, Replaced }
+
+    private void BreakEntityDrawRun(EntityRunBreak reason)
+    {
+        var run = _entityDrawRun;
+        // Submission and frame end are lifetime boundaries, not failed continuations.
+        if (run.Open && run.Serial == _frames.Current.RecordingSerial)
+        {
+            EntityRunBreaks++;
+            switch (reason)
+            {
+                case EntityRunBreak.Contiguity: EntityRunBreakContiguity++; break;
+                case EntityRunBreak.Order: EntityRunBreakOrder++; break;
+                case EntityRunBreak.Scope: EntityRunBreakScope++; break;
+                case EntityRunBreak.DynamicState: EntityRunBreakDynamicState++; break;
+                case EntityRunBreak.FrameSet: EntityRunBreakFrameSet++; break;
+                case EntityRunBreak.Program: EntityRunBreakProgram++; break;
+                case EntityRunBreak.Replaced: EntityRunBreakReplaced++; break;
+            }
+        }
+        run.Open = false;
+    }
 
     private void AdvanceDrawOrder() => _drawOrder++;
 
@@ -264,8 +294,7 @@ public sealed unsafe partial class VulkanDevice
     {
         var batch = _entityDrawBatch;
         var run = _entityDrawRun;
-        if (run.Open && run.Serial == _frames.Current.RecordingSerial) EntityRunBreaks++;
-        run.Open = false;
+        BreakEntityDrawRun(EntityRunBreak.Replaced);
         uint maxCount = 0;
         int first = -1;
         ulong countOffset = 0;
@@ -311,34 +340,56 @@ public sealed unsafe partial class VulkanDevice
     {
         var run = _entityDrawRun;
         var batch = run.Batch;
+        if (!run.Open) return false;
         // Mesh identity and firstIndex deliberately differ: slot preparation packed
         // every available slice into this arena's common bindings before the pass.
-        if (!run.Open || arena == null || batch == null || !ReferenceEquals(batch, _entityDrawBatch) ||
+        // Classify only the first failed guard, so these counters sum to EntityRunBreaks.
+        EntityRunBreak reason;
+        if (batch == null || !ReferenceEquals(batch, _entityDrawBatch) ||
             !ReferenceEquals(commands, batch.Commands) || run.Count >= run.MaxCount ||
             offset != batch.CommandOffset + (ulong)(run.First + run.Count) * 20 ||
-            (ulong)command.Handle != run.Command || _frames.Current.RecordingSerial != run.Serial ||
-            _drawOrder != run.Order || _targets.ScopesOpened != run.Scope || !_targets.RenderingActive ||
-            _dynamicStateCommands != run.DynamicCommands ||
-            !ReferenceEquals(_nativePass, run.Pass) || !ReferenceEquals(_nativeTarget, run.Target) ||
-            draw.Pipeline.Handle != run.Pipeline || !ReferenceEquals(draw.Segment, run.Segment) ||
-            !ReferenceEquals(arena, run.Arena) ||
-            _boundFrameSet.Handle != run.FrameSet.Handle || _boundFrameOffset != run.FrameOffset)
+            (ulong)command.Handle != run.Command || _frames.Current.RecordingSerial != run.Serial)
+            reason = EntityRunBreak.Contiguity;
+        else if (_drawOrder != run.Order) reason = EntityRunBreak.Order;
+        else if (_targets.ScopesOpened != run.Scope || !_targets.RenderingActive ||
+            !SameEntityDrawPass(_nativePass, run.Pass) || !ReferenceEquals(_nativeTarget, run.Target))
+            reason = EntityRunBreak.Scope;
+        else if (_dynamicStateCommands != run.DynamicCommands) reason = EntityRunBreak.DynamicState;
+        else if (_boundFrameSet.Handle != run.FrameSet.Handle || _boundFrameOffset != run.FrameOffset)
+            reason = EntityRunBreak.FrameSet;
+        else if (arena == null || draw.Pipeline.Handle != run.Pipeline ||
+            !ReferenceEquals(draw.Segment, run.Segment) || !ReferenceEquals(arena, run.Arena))
+            reason = EntityRunBreak.Program;
+        else reason = EntityRunBreak.None;
+        if (reason != EntityRunBreak.None)
         {
-            // Submission and frame end are lifetime boundaries, not failed continuations.
-            if (run.Open && run.Serial == _frames.Current.RecordingSerial) EntityRunBreaks++;
-            run.Open = false;
+            BreakEntityDrawRun(reason);
             return false;
         }
         // The row is new and the count word is still unsubmitted host memory.
         WriteEntityRecord(draw);
         run.Count++;
-        *(uint*)((byte*)batch.Input.Mapped + run.CountOffset) = run.Count;
+        *(uint*)((byte*)batch!.Input.Mapped + run.CountOffset) = run.Count;
         EntityIndirectDrawsRecorded++;
         EntityCombinedDrawsRecorded++;
         EntityPackedDrawsRecorded++;
         EntityRecordDrawsRecorded++;
         return true;
     }
+
+    // The stated route creates a new description for every draw while retaining
+    // the same rendering scope. Object identity is not a pass-state change. Keep
+    // every description field equal as well as the independent scope/target guards.
+    private static bool SameEntityDrawPass(NativePassDescription? a, NativePassDescription? b) =>
+        ReferenceEquals(a, b) || (a != null && b != null &&
+        a.LinearColorAttachments == b.LinearColorAttachments && a.Name == b.Name &&
+        a.FramebufferId == b.FramebufferId && a.ColorSlots == b.ColorSlots &&
+        a.Reads.AsSpan().SequenceEqual(b.Reads) && a.TransientSlots == b.TransientSlots &&
+        a.Flags == b.Flags && a.ClearSlots == b.ClearSlots &&
+        MemoryMarshal.AsBytes(a.ClearValue.AsSpan()).SequenceEqual(MemoryMarshal.AsBytes(b.ClearValue.AsSpan())) &&
+        a.ViewportX == b.ViewportX && a.ViewportY == b.ViewportY &&
+        a.ViewportWidth == b.ViewportWidth && a.ViewportHeight == b.ViewportHeight &&
+        Nullable.Equals(a.Scissor, b.Scissor) && a.Generic == b.Generic);
 
     private void BeginEntityDrawFrame(int slot)
     {

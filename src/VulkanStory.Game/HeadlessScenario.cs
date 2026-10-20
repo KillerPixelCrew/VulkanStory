@@ -189,6 +189,13 @@ internal sealed class HeadlessScenario
             ["entityRecordRefusals"] = (JsonValueKind.Number, false),
             ["entityRunsOpened"] = (JsonValueKind.Number, false),
             ["entityRunBreaks"] = (JsonValueKind.Number, false),
+            ["entityRunBreakContiguity"] = (JsonValueKind.Number, false),
+            ["entityRunBreakOrder"] = (JsonValueKind.Number, false),
+            ["entityRunBreakScope"] = (JsonValueKind.Number, false),
+            ["entityRunBreakDynamicState"] = (JsonValueKind.Number, false),
+            ["entityRunBreakFrameSet"] = (JsonValueKind.Number, false),
+            ["entityRunBreakProgram"] = (JsonValueKind.Number, false),
+            ["entityRunBreakReplaced"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -225,7 +232,9 @@ internal sealed class HeadlessScenario
         "particleSimulationCpuBenchmarkPoolMilliseconds", "particleSimulationGpuBenchmarkPoolMilliseconds",
         "entityVisibilityDispatchesRecorded", "entityIndirectDrawsRecorded", "entityCombinedDrawsRecorded",
         "entityGeometryPacksRecorded", "entityPackedDrawsRecorded", "entityRecordDrawsRecorded",
-        "entityRecordRefusals", "entityRunsOpened", "entityRunBreaks"
+        "entityRecordRefusals", "entityRunsOpened", "entityRunBreaks",
+        "entityRunBreakContiguity", "entityRunBreakOrder", "entityRunBreakScope", "entityRunBreakDynamicState",
+        "entityRunBreakFrameSet", "entityRunBreakProgram", "entityRunBreakReplaced"
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)

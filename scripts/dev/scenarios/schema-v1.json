@@ -458,6 +458,13 @@
                 "entityRecordRefusals",
                 "entityRunsOpened",
                 "entityRunBreaks",
+                "entityRunBreakContiguity",
+                "entityRunBreakOrder",
+                "entityRunBreakScope",
+                "entityRunBreakDynamicState",
+                "entityRunBreakFrameSet",
+                "entityRunBreakProgram",
+                "entityRunBreakReplaced",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -642,6 +649,13 @@
                         "entityRecordRefusals",
                         "entityRunsOpened",
                         "entityRunBreaks",
+                        "entityRunBreakContiguity",
+                        "entityRunBreakOrder",
+                        "entityRunBreakScope",
+                        "entityRunBreakDynamicState",
+                        "entityRunBreakFrameSet",
+                        "entityRunBreakProgram",
+                        "entityRunBreakReplaced",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -890,7 +904,14 @@
                         "entityRecordDrawsRecorded",
                         "entityRecordRefusals",
                         "entityRunsOpened",
-                        "entityRunBreaks"
+                        "entityRunBreaks",
+                        "entityRunBreakContiguity",
+                        "entityRunBreakOrder",
+                        "entityRunBreakScope",
+                        "entityRunBreakDynamicState",
+                        "entityRunBreakFrameSet",
+                        "entityRunBreakProgram",
+                        "entityRunBreakReplaced"
                       ]
                     },
                     "op": {
@@ -970,7 +991,14 @@
                         "entityRecordDrawsRecorded",
                         "entityRecordRefusals",
                         "entityRunsOpened",
-                        "entityRunBreaks"
+                        "entityRunBreaks",
+                        "entityRunBreakContiguity",
+                        "entityRunBreakOrder",
+                        "entityRunBreakScope",
+                        "entityRunBreakDynamicState",
+                        "entityRunBreakFrameSet",
+                        "entityRunBreakProgram",
+                        "entityRunBreakReplaced"
                       ]
                     },
                     "op": {
