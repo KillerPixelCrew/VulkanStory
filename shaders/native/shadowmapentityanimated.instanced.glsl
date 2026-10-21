@@ -7,7 +7,7 @@
 // uint poseOffset @140, uint previousPoseOffset @144 (unused in this pass).
 // OptimumProgram is projectionMatrix @0. OptimumDraw retains its 76 bytes:
 // entityTex @64 (set 1 binding 0), modelViewMatrix @68, addRenderFlags @132,
-// vsComputeDeformation @136. The compute flag is ignored: resident skinning
+// entityReserved0 @136. The reserved field retains padding: resident skinning
 // executes in the vertex shader, retaining stock shadow arithmetic.
 // Set 2 binding 1: readonly EntityPoses SSBO, a tightly packed mat4 values[].
 // poseOffset counts floats from that SSBO's start, is a multiple of 16, and
@@ -35,7 +35,7 @@ struct OptimumDraw
     uint entityTex;
     mat4 modelViewMatrix;
     int addRenderFlags;
-    int vsComputeDeformation;
+    int entityReserved0;
 };
 
 struct EntityRow
