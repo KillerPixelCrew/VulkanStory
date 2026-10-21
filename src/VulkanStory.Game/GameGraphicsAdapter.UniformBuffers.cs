@@ -10,7 +10,7 @@ namespace VulkanStory.Game;
 internal sealed partial class GameGraphicsAdapter
 {
     private sealed record BufferOwner(GameGraphicsAdapter Adapter, int Handle, int Binding, string Block);
-    private sealed record PreviousAnimation(UBO Buffer, Action<float[], int> Upload, Action<JointPoseSnapshot> UploadGpu);
+    private sealed record PreviousAnimation(UBO Buffer, Action<float[], int> Upload);
     private readonly Dictionary<int, PreviousAnimation> previousAnimations = new();
     private static readonly ConditionalWeakTable<UBO, BufferOwner> UniformBuffers = new();
     private static readonly Action<UBORef, bool> SetUniformBufferDisposed =
@@ -66,12 +66,8 @@ internal sealed partial class GameGraphicsAdapter
         GCHandle pin = default;
         try
         {
-            if (!TryUploadGpuJointPose(buffer, data, offset, size))
-            {
-                Performance.GpuJointPoses.MaterializePayload(data);
-                pin = GCHandle.Alloc(data, GCHandleType.Pinned);
-                renderer.UpdateUniformBuffer(handle, pin.AddrOfPinnedObject(), offset, size);
-            }
+            pin = GCHandle.Alloc(data, GCHandleType.Pinned);
+            renderer.UpdateUniformBuffer(handle, pin.AddrOfPinnedObject(), offset, size);
         }
         finally { if (pin.IsAllocated) pin.Free(); renderer.UnbindUniformBuffer(handle); }
         ObserveAnimationPayload(buffer, data, offset, size);
@@ -79,26 +75,6 @@ internal sealed partial class GameGraphicsAdapter
     private void InvalidateAnimationPayload(UBO buffer)
     {
         if (UniformBuffers.TryGetValue(buffer, out var owner)) aoTemporal?.EntityMotion.InvalidateBuffer(owner.Handle);
-    }
-    internal bool TryUploadGpuJointPose(UBO buffer, object data, int offset, int size)
-    {
-        if (offset != 0 || size <= 0 || size > buffer.Size ||
-            Performance.GpuJointPoses.PoseFor(data) is not { } pose || pose.JointCount * 64 != size ||
-            ShaderProgramBase.CurrentShaderProgram?.HasUniform("vsComputeDeformation") != true) return false;
-        var renderer = RequireDevice();
-        if (!renderer.ComputeJointPosesEnabled || !renderer.SupportsGpuJointPoses(StatedProgram) ||
-            !UniformBuffers.TryGetValue(buffer, out var owner) || !ReferenceEquals(owner.Adapter, this) || owner.Block != "Animation") return false;
-        InvalidateAnimationPayload(buffer);
-        return renderer.SetJointPose(owner.Handle, pose);
-    }
-
-    private void UploadPreviousGpuPose(UBO buffer, JointPoseSnapshot pose)
-    {
-        var renderer = RequireDevice();
-        int handle = UniformBufferHandle(buffer);
-        InvalidateAnimationPayload(buffer); renderer.BindUniformBuffer(handle);
-        if (!renderer.SetJointPose(handle, pose)) throw new InvalidOperationException("Previous visual pose exceeds its named block.");
-        renderer.UnbindUniformBuffer(handle);
     }
     internal void ObserveAnimationPayload(UBO buffer, object data, int offset, int size)
     {
@@ -128,13 +104,11 @@ internal sealed partial class GameGraphicsAdapter
                 program.ubos["AnimationPrev"] = previousBuffer;
             }
             previous = new PreviousAnimation(previousBuffer,
-                (bones, bytes) => UpdateUniformBuffer(previousBuffer, bones, 0, bytes),
-                pose => UploadPreviousGpuPose(previousBuffer, pose));
+                (bones, bytes) => UpdateUniformBuffer(previousBuffer, bones, 0, bytes));
             previousAnimations[program.ProgramId] = previous;
         }
         if (previous.Buffer.Size < size) return;
-        aoTemporal.EntityMotion.OnAnimationUpload(program, owner.Handle, UniformBufferHandle(previous.Buffer), previous.Upload, data, size,
-            Performance.GpuJointPoses.PoseFor(data), previous.UploadGpu);
+        aoTemporal.EntityMotion.OnAnimationUpload(program, owner.Handle, UniformBufferHandle(previous.Buffer), previous.Upload, data, size);
     }
     internal void ReleasePreviousAnimation(int program)
     {

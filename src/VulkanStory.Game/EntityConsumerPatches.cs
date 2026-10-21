@@ -150,7 +150,6 @@ internal static class EntityConsumerPatches
     {
         GameGraphicsAdapter? graphics = null;
         GameGraphicsAdapter.RigidEntityScope previous = default;
-        GameGraphicsAdapter.EntityVisibilityScope previousVisibility = default;
         GameGraphicsAdapter.ResidentEntityScope previousResident = default;
         if (runtime?.Routing.RoutingEnabled == true)
         {
@@ -159,7 +158,6 @@ internal static class EntityConsumerPatches
             graphics = session.Graphics;
             previousResident = graphics.EnterResidentEntityScope(renderer, shadow);
             previous = graphics.EnterRigidEntityMotionScope(shadow ? null : renderer.entity);
-            previousVisibility = graphics.EnterEntityVisibilityScope(renderer, shadow);
         }
         try
         {
@@ -173,7 +171,6 @@ internal static class EntityConsumerPatches
         }
         finally
         {
-            graphics?.ExitEntityVisibilityScope(previousVisibility);
             graphics?.ExitRigidEntityMotionScope(previous);
             graphics?.ExitResidentEntityScope(previousResident);
         }
@@ -184,7 +181,6 @@ internal static class EntityConsumerPatches
         if (platform is not ClientPlatformWindows windows || !runtime.TrySession(windows, out var session))
             throw new InvalidOperationException("Active entity routing lost its session.");
         int program = ShaderProgramBase.CurrentShaderProgram?.ProgramId ?? 0;
-        var visibility = session.Graphics.EnterEntityMeshVisibility();
         bool motion = false;
         try
         {
@@ -196,8 +192,7 @@ internal static class EntityConsumerPatches
         }
         finally
         {
-            try { if (motion) session.Graphics.EndMotionWrite(); }
-            finally { session.Graphics.ExitEntityVisibilityScope(visibility); }
+            if (motion) session.Graphics.EndMotionWrite();
         }
     }
 }

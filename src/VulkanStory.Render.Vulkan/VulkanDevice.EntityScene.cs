@@ -378,11 +378,8 @@ public sealed unsafe partial class VulkanDevice
             {
                 poseOffset = BeginEntityPose(poseCount);
                 if (poseOffset < 0) return false;
-                // Read the normal upload without materializing or invalidating it.
-                // A later refusal must still feed the original joint/deformation
-                // producers, including their immutable GPU joint-pose snapshot.
-                if (ubo.JointPose is { } pose) pose.CopyMatrices(EntityPoseSpan(poseOffset, poseCount));
-                else MemoryMarshal.Cast<byte, float>(ubo.Shadow.AsSpan()).CopyTo(EntityPoseSpan(poseOffset, poseCount));
+                // Copy the stock Animation upload without changing the compat draw's UBO.
+                MemoryMarshal.Cast<byte, float>(ubo.Shadow.AsSpan()).CopyTo(EntityPoseSpan(poseOffset, poseCount));
                 _residentEntityCurrentPoses[ubo] = (ubo.Version, poseOffset);
             }
         }
