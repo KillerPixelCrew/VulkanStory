@@ -16,7 +16,7 @@ internal sealed partial class GameRenderSession
     private (int Width, int Height, byte[] Pixels) ReadCapturedFrame()
     {
         Graphics.LoadFramebuffer(EnumFrameBuffer.Default);
-        var size = Graphics.CaptureDisplaySize();
+        var size = Window.PixelSize;
         byte[] pixels = new byte[checked(size.Width * size.Height * 4)];
         GCHandle pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
         try { Graphics.ReadCapturePixels(0, 0, size.Width, size.Height, pin.AddrOfPinnedObject()); }
