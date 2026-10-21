@@ -39,8 +39,7 @@ internal sealed partial class GameRenderSession
             view[12] = view[13] = view[14] = 0;
         }
         var settings = Performance.PerformancePatchSet.Current;
-        bool gpu = settings != null && ((settings.EntityOcclusionCull && settings.GpuEntityDrawPreparation) ||
-            settings.ResidentTerrain || settings.ResidentEntities);
+        bool gpu = settings != null && (settings.ResidentTerrain || settings.ResidentEntities);
         if (device.OcclusionDepth.Capture(primary.DepthTextureId, new OcclusionCamera(view, projection, x, y, z), gpu))
         {
             occlusionCaptureRefusal = null;
