@@ -143,6 +143,9 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>A pre-graphics command buffer began recording (slot index, buffer).</summary>
     public Action<int, CommandBuffer>? PreGraphicsBegun { get; set; }
 
+    /// <summary>A pre-graphics command buffer is about to end for submission (slot index, buffer).</summary>
+    public Action<int, CommandBuffer>? PreGraphicsEnding { get; set; }
+
     private CommandBuffer BeginPooledCommandBuffer(string purpose)
     {
         Vk api = _context.Api;
@@ -346,7 +349,10 @@ internal sealed unsafe class FrameSlot : IDisposable
         CommandBuffer preGraphics = _preGraphicsCommands;
         _preGraphicsCommands = default;
         if (preGraphics.Handle != 0)
+        {
+            PreGraphicsEnding?.Invoke(Index, preGraphics);
             VulkanResult.Check(api.EndCommandBuffer(preGraphics), "vkEndCommandBuffer for pre-graphics frame compute");
+        }
 
         int waitCapacity = (_frameCommands ? Gate?.Count ?? 0 : 0) + 3;
         Semaphore* waits = stackalloc Semaphore[waitCapacity];
@@ -670,13 +676,14 @@ internal sealed class FrameRing : IDisposable
 
     /// <summary>Installs command-buffer start and end hooks on every slot (GPU timestamps).</summary>
     public void SetCommandHooks(Action<int, CommandBuffer, bool>? started, Action<int, CommandBuffer>? ending,
-        Action<int, CommandBuffer>? preGraphicsBegun)
+        Action<int, CommandBuffer>? preGraphicsBegun, Action<int, CommandBuffer>? preGraphicsEnding)
     {
         foreach (FrameSlot slot in _slots)
         {
             slot.CommandsStarted = started;
             slot.CommandsEnding = ending;
             slot.PreGraphicsBegun = preGraphicsBegun;
+            slot.PreGraphicsEnding = preGraphicsEnding;
         }
     }
 

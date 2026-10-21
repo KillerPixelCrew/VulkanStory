@@ -24,11 +24,12 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// that is kept busy.
 ///
 /// Query indices follow submission order, not CPU recording order. Every frame
-/// recording, including a continuation, reserves a "pre_graphics" index before
+/// recording, including a continuation, reserves a block of pre-graphics indices before
 /// its opening mark: the lazily begun compute buffer executes after earlier
 /// submissions and before that recording's frame buffer. The compute buffer
-/// resets and writes only its reserved index; the frame buffer resets only the
-/// following indices. Harvest skips unwritten reservations using CPU flags,
+/// resets and writes only its reserved block, from "pre_graphics" through the
+/// labelled compute work to "pg_handoff" at its end; the frame buffer resets only
+/// the following indices. Harvest skips unwritten reservations using CPU flags,
 /// since an unused query can still contain a previous frame's available result.
 ///
 /// Results are read without the wait bit when the slot is recycled, after the
@@ -44,8 +45,11 @@ internal sealed unsafe class GpuTimestamps : IDisposable
 {
     // Sized for frames with many alternating sections; an overflow drops the frame's tail sections.
     public const uint MarksPerFrame = 4096;
+    // Includes the opening and handoff marks; the final entry is kept for the handoff.
+    private const uint PreGraphicsMarksPerRecording = 128;
     public const string FrameLabel = "frame";
     public const string PreGraphicsLabel = "pre_graphics";
+    public const string PreGraphicsHandoffLabel = "pg_handoff";
     public const string SubmitLabel = "submit";
     public const string PresentLabel = "present";
 
@@ -73,7 +77,9 @@ internal sealed unsafe class GpuTimestamps : IDisposable
         public readonly int[] Labels = new int[MarksPerFrame];
         public readonly bool[] Written = new bool[MarksPerFrame];
         public uint Used;
-        public uint PreGraphicsIndex = MarksPerFrame;
+        public uint PreGraphicsNext = MarksPerFrame;
+        public uint PreGraphicsEnd = MarksPerFrame;
+        public CommandBuffer PreGraphicsCommands;
     }
 
     private GpuTimestamps(VulkanContext context, int framesInFlight, double nanosecondsPerTick, uint validBits)
@@ -128,7 +134,7 @@ internal sealed unsafe class GpuTimestamps : IDisposable
 
     /// <summary>
     /// The slot's previous frame has completed: its marks are harvested, then
-    /// a pre-graphics index is reserved and the frame mark written after it.
+    /// a pre-graphics block is reserved and the frame mark written after it.
     /// Must run outside any rendering scope.
     /// </summary>
     public void BeginSlot(int slotIndex, CommandBuffer commands)
@@ -158,33 +164,63 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     private void BeginFrameCommands(CommandBuffer commands, string label)
     {
         SlotMarks slot = _slots[_current];
-        slot.PreGraphicsIndex = MarksPerFrame;
+        slot.PreGraphicsNext = slot.PreGraphicsEnd = MarksPerFrame;
+        slot.PreGraphicsCommands = default;
         if (commands.Handle != 0 && slot.Used < MarksPerFrame)
         {
-            uint index = slot.Used++;
-            slot.PreGraphicsIndex = index;
-            slot.Labels[index] = LabelId(PreGraphicsLabel);
-            slot.Written[index] = false;
+            uint count = Math.Min(PreGraphicsMarksPerRecording, MarksPerFrame - slot.Used);
+            slot.PreGraphicsNext = slot.Used;
+            Array.Clear(slot.Written, (int)slot.Used, (int)count);
+            slot.Used += count;
+            slot.PreGraphicsEnd = slot.Used;
             if (slot.Used < MarksPerFrame)
                 _context.Api.CmdResetQueryPool(commands, slot.Pool, slot.Used, MarksPerFrame - slot.Used);
         }
         Write(commands, label);
     }
 
-    /// <summary>Writes the current recording's reserved mark before its pre-graphics work.</summary>
+    /// <summary>Resets the current recording's reserved block and opens its pre-graphics section.</summary>
     public void OnPreGraphicsBegun(int slotIndex, CommandBuffer commands)
     {
         if (slotIndex != _current || commands.Handle == 0) return;
         SlotMarks slot = _slots[slotIndex];
-        uint index = slot.PreGraphicsIndex;
-        if (index >= MarksPerFrame)
+        slot.PreGraphicsCommands = commands;
+        uint count = slot.PreGraphicsEnd - slot.PreGraphicsNext;
+        if (count > 0)
+            _context.Api.CmdResetQueryPool(commands, slot.Pool, slot.PreGraphicsNext, count);
+        WritePreGraphics(commands, PreGraphicsLabel);
+    }
+
+    /// <summary>
+    /// Opens a section within the current pre-graphics buffer without changing the frame buffer's section.
+    /// Repeated labels are retained: each pass contributes to the same harvested label sum.
+    /// </summary>
+    public void MarkPreGraphics(CommandBuffer commands, string label) => WritePreGraphics(commands, label);
+
+    /// <summary>Closes the last compute section; the gap to the first frame mark is "pg_handoff".</summary>
+    public void OnPreGraphicsEnding(int slotIndex, CommandBuffer commands)
+    {
+        if (slotIndex != _current) return;
+        WritePreGraphics(commands, PreGraphicsHandoffLabel, ending: true);
+        _slots[slotIndex].PreGraphicsCommands = default;
+    }
+
+    private void WritePreGraphics(CommandBuffer commands, string label, bool ending = false)
+    {
+        if (_current < 0 || commands.Handle == 0) return;
+        SlotMarks slot = _slots[_current];
+        if (commands.Handle != slot.PreGraphicsCommands.Handle) return;
+        uint index = slot.PreGraphicsNext;
+        // Keep one entry for the end boundary even when the compute marks overflow.
+        if (index >= slot.PreGraphicsEnd || (!ending && index + 1 >= slot.PreGraphicsEnd))
         {
             _dropped++;
             return;
         }
-        _context.Api.CmdResetQueryPool(commands, slot.Pool, index, 1);
         _context.Api.CmdWriteTimestamp(commands, PipelineStageFlags.BottomOfPipeBit, slot.Pool, index);
         slot.Written[index] = true;
+        slot.Labels[index] = LabelId(label);
+        slot.PreGraphicsNext++;
     }
 
     /// <summary>The slot's current command buffer is about to be submitted.</summary>
