@@ -1599,7 +1599,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             else VulkanResult.Check(idle, "vkDeviceWaitIdle before device teardown");
         }
         particleSimulation?.Dispose();
-        DisposeChunkMeshing();
         OpenXr?.Dispose(); OpenXr = null;
         DisposeAuxiliaryTargets();
 
