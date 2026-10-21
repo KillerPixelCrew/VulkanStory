@@ -94,11 +94,9 @@ internal sealed record RendererSettings
     /// <summary>Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws.</summary>
     public bool TerrainOcclusionCull { get; init; } = true;
     /// <summary>Enables renderer-owned terrain state, GPU culling and indirect pass submission.</summary>
-    public bool ResidentTerrain { get; init; }
+    public bool ResidentTerrain { get; init; } = true;
     /// <summary>Enables renderer-owned entity rows, pose storage and indirect pass submission.</summary>
-    public bool ResidentEntities { get; init; }
-    /// <summary>Tests terrain occlusion and compacts ordered indirect draws in Vulkan compute.</summary>
-    public bool GpuTerrainDrawPreparation { get; init; } = true;
+    public bool ResidentEntities { get; init; } = true;
     /// <summary>Builds supported stock cube terrain faces in compute while retaining custom tessellators.</summary>
     public bool GpuChunkMeshing { get; init; } = true;
     /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
@@ -194,7 +192,6 @@ internal sealed record RendererSettings
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         ResidentTerrain = source.ResidentTerrain,
         ResidentEntities = source.ResidentEntities,
-        GpuTerrainDrawPreparation = source.GpuTerrainDrawPreparation,
         GpuChunkMeshing = source.GpuChunkMeshing,
         GpuTerrainNoise = source.GpuTerrainNoise,
         GpuSharedDeformation = source.GpuSharedDeformation,
