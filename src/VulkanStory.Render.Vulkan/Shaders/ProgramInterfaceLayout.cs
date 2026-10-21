@@ -159,17 +159,6 @@ internal sealed partial class ProgramInterfaceLayout
     public List<BlockBinding> UniformBlocks { get; } = new();
     public List<BlockBinding> StorageBlocks { get; private set; } = new();
 
-    // The original interface remains the authority for packing, uniforms and motion.
-    internal ProgramInterfaceLayout WithEntityRecords()
-    {
-        var copy = (ProgramInterfaceLayout)MemberwiseClone();
-        copy.StorageBlocks = new List<BlockBinding>(StorageBlocks)
-        {
-            new() { BlockName = EntityRecordShader.BlockName, Binding = SetConvention.FaceDataBinding },
-        };
-        return copy;
-    }
-
     /// <summary>Stage-to-stage varying locations, keyed by variable name.</summary>
     public Dictionary<string, int> VaryingLocations { get; } = new(StringComparer.Ordinal);
 
@@ -857,8 +846,7 @@ internal sealed partial class ProgramInterfaceLayout
             switch (binding.Binding)
             {
                 case SetConvention.FaceDataBinding:
-                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name == "vsGeometry" ? "VulkanDeformation" :
-                        binding.Name == "vsParticleGeometry" ? "VulkanParticleGeometry" : binding.Name,
+                    layout.StorageBlocks.Add(new BlockBinding { BlockName = binding.Name == "vsParticleGeometry" ? "VulkanParticleGeometry" : binding.Name,
                         Binding = binding.Binding });
                     break;
                 case SetConvention.AnimationBinding:
@@ -866,9 +854,6 @@ internal sealed partial class ProgramInterfaceLayout
                     break;
                 case SetConvention.AnimationPrevBinding:
                     layout.UniformBlocks.Add(new BlockBinding { BlockName = "AnimationPrev", Binding = binding.Binding });
-                    break;
-                case SetConvention.PreviousDeformationBinding when binding.Name == "vsPreviousGeometry":
-                    layout.StorageBlocks.Add(new BlockBinding { BlockName = "VulkanPreviousDeformation", Binding = binding.Binding });
                     break;
                 default:
                     layout.Errors.Add("storage binding '" + binding.Name + "' at binding " + binding.Binding +
