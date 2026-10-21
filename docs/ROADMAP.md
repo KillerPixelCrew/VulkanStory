@@ -50,7 +50,6 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - **PERF-09: Additional Vulkan compute**
   - Supported stock singleplayer terrain noise and density-sign evaluation run in bounded compute batches; threshold production, block decisions and unsupported generation retain the CPU path.
   - Particle geometry and visual evolution remain enabled by default: supported cube/quad/rain geometry, current/previous rendered state, and stock size/opacity/colour evolution run in compute. Unsupported inputs retain their original path.
-  - Fixed-step `GpuParticleSimulation` is available but defaults off. It retains CPU world snapshots, confirmation and ordered shared RNG work, with the stock CPU tick when results are unavailable or inputs change.
 
 - **GL-02 / GL-03: Managed OpenGL compatibility**
   - The shared bridge routes supported operations from both OpenTK GL namespaces, including depth/culling/color-mask state and float vector uniforms. Game-created shader programs can be queried through a borrowed GL view; uniform writes retain the game adapter's motion handling. OpenAL procedure lookups are excluded from graphics refusal.
@@ -128,6 +127,5 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 
 ## Deferred
 
-- **Phase 3 / PERF-09: Particle fixed steps:** keep or delete `GpuParticleSimulation` after measuring its total cost, including CPU snapshots, confirmation and ordered RNG work. Particle geometry and visual evolution remain separate features.
 - **TEST-01:** Tests.
 - **LINUX-01:** Linux release.
