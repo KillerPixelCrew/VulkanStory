@@ -449,7 +449,6 @@ public sealed unsafe partial class VulkanDevice
         }
         if (!ReferenceEquals(_targets.Bound, target)) _targets.Bind(commandBuffer, id);
 
-        if (pass.ClearSlots != 0) AdvanceDrawOrder();
         for (int slot = 0; slot < RenderLimits.MaxColorAttachments && pass.ClearSlots != 0; slot++)
         {
             if (((pass.ClearSlots >> slot) & 1) == 0) continue;
@@ -703,9 +702,7 @@ public sealed unsafe partial class VulkanDevice
         _barriers.Flush(commandBuffer);
 
         // Decided before the scope opens, since it decides the depth attachment's layout.
-        PrepareProgramJointPoses(program);
         PrepareParticleVisuals(meshId, instanceCount);
-        PrepareSharedDeformation(program, meshId);
         PrepareParticleGeometry(program, meshId, instanceCount);
         bool stencilWritable = pipeline.Description.StencilTest && bound.Stencil.TextureId != 0 &&
             (WritesStencil(pipeline.Description.StencilFront) || WritesStencil(pipeline.Description.StencilBack));
