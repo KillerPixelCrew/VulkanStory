@@ -9,7 +9,6 @@ internal static class PerformanceFeatures
     [
         ChunkVisibilityWalk.Create(),
         TerrainOcclusionCull.Create(),
-        GpuChunkMeshing.Create(),
         EntityOcclusionCull.Create(),
         ShadowFarFoliage.Create(),
         EntityShadowCull.Create(),
