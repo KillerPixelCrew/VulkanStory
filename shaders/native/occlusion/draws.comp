@@ -1,22 +1,17 @@
 #version 450
+#extension GL_ARB_gpu_shader_fp64 : require
 layout(local_size_x = 64) in;
-layout(constant_id = 0) const bool compactDraws = true;
-layout(constant_id = 1) const bool scatterDraws = false;
-layout(constant_id = 2) const bool batchedPools = false;
-layout(constant_id = 3) const bool countedPools = false;
+layout(constant_id = 0) const bool scatterDraws = false;
 layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
 layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
 layout(push_constant) uniform Parameters {
     uint inputWord; uint outputWord; uint count;
-#ifdef RESIDENT_TERRAIN
     uint firstPart;
-#endif
 } p;
 shared uint visible[64];
 float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word]); }
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
-#ifdef RESIDENT_TERRAIN
 // Persistent 64-byte rows: float xyz/radii xyz; first/count; lod; chunk slot;
 // Hide; pool mesh; render pass; atlas; part handle; spare word. The view header ends at word 144,
 // followed by the stock ChunkCuller visibility bitset (low uint first).
@@ -86,10 +81,8 @@ bool residentHidden(uint index, out vec3 lo, out vec3 hi)
     for (uint axis = 0u; axis < 3u; axis++) { lo[axis] = outward(lo[axis], false); hi[axis] = outward(hi[axis], true); }
     return false;
 }
-#endif
 bool hidden(uint index)
 {
-#ifdef RESIDENT_TERRAIN
     vec3 lo, hi;
     bool stockHidden = residentHidden(index, lo, hi);
     if (inputData.words[p.inputWord + 87u] != 0u) {
@@ -100,30 +93,8 @@ bool hidden(uint index)
     }
     if (stockHidden) return true;
     if (inputData.words[p.inputWord + 85u] == 0u) return false;
-#else
-    uint record = 64u + index * 12u;
-    vec3 lo = v(record).xyz, hi = v(record + 4u).xyz;
+    // Motion padding belongs only to the historical-depth test.
     if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
-    if (inputData.words[p.inputWord + 36u] != 0u) {
-        // Low byte is plane count; upper bits carry the immutable shader-record row.
-        uint planeCount = inputData.words[p.inputWord + record + 10u] & 255u;
-        for (uint i = 0u; i < planeCount; i++) {
-            vec4 plane = v(40u + i * 4u);
-            if (any(isnan(plane)) || any(isinf(plane))) continue;
-            vec3 positive = mix(lo, hi, greaterThan(plane.xyz, vec3(0)));
-            // Camera-relative coordinates plus an outward error bound keep float rounding
-            // conservative against the game's double-precision CPU plane tests.
-            precise float distance = dot(plane.xyz, positive) + plane.w;
-            float error = 64.0 * 1.1920929e-7 * (dot(abs(plane.xyz), abs(positive)) + abs(plane.w)) + 0.001;
-            if (distance < -error) return true;
-        }
-    }
-#endif
-    // Terrain uploads tight current-view bounds; motion padding belongs only to
-    // the historical-depth test. Entity records already include their padding.
-#ifdef RESIDENT_TERRAIN
-    if (any(isnan(lo)) || any(isnan(hi)) || any(isinf(lo)) || any(isinf(hi))) return false;
-#endif
     lo -= vec3(f(38)); hi += vec3(f(38));
     mat4 view = mat4(v(0), v(4), v(8), v(12));
     mat4 projection = mat4(v(16), v(20), v(24), v(28));
@@ -158,87 +129,15 @@ bool hidden(uint index)
 void writePoolCommand(uint index, uint rank, uint outputWord)
 {
     uint dst = outputWord + rank * 5u;
-#ifdef RESIDENT_TERRAIN
     uint row = (p.firstPart + index) * 16u;
     outputData.words[dst] = resident.words[row + 7u];
     outputData.words[dst + 1u] = 1u;
     outputData.words[dst + 2u] = resident.words[row + 6u];
     outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = 0u;
-#else
-    uint src = p.inputWord + 64u + index * 12u + 8u;
-    outputData.words[dst] = inputData.words[src];
-    outputData.words[dst+1u] = 1u;
-    outputData.words[dst+2u] = inputData.words[src+1u];
-    outputData.words[dst+3u] = 0u; outputData.words[dst+4u] = inputData.words[src+2u] >> 8u;
-#endif
 }
 void writeCommand(uint index, uint rank) { writePoolCommand(index, rank, p.outputWord); }
 void main()
 {
-    if (batchedPools) {
-        // Pools occupy whole workgroups. Only their header's live extent changes
-        // before submission; all pool regions remain disjoint and ordered.
-        uint index = gl_GlobalInvocationID.x, lane = gl_LocalInvocationID.x;
-        if (index >= inputData.words[p.inputWord + 37u]) return;
-        uint head = p.inputWord + 64u + gl_WorkGroupID.x * 64u * 12u;
-        uint first = inputData.words[head + 3u], count = inputData.words[head + 7u];
-        uint outputWord = p.outputWord + inputData.words[head + 11u];
-        uint localIndex = index - first, group = (index - first) / 64u;
-        uint groups = (count + 63u) / 64u;
-        uint scratch = outputWord + count * 5u, totals = scratch + count * 2u;
-        if (!scatterDraws) {
-            uint keep = 0u;
-            if (localIndex < count) {
-                // Counted draws never consume the unused tail. Devices without
-                // indirect-count still need the original zero-command tail.
-                if (!countedPools)
-                    for (uint i = 0u; i < 5u; i++) outputData.words[outputWord + localIndex * 5u + i] = 0u;
-                keep = hidden(index) ? 0u : 1u;
-            }
-            visible[lane] = keep;
-            barrier();
-            for (uint step = 1u; step < 64u; step <<= 1u) {
-                uint addend = lane >= step ? visible[lane - step] : 0u;
-                barrier(); visible[lane] += addend; barrier();
-            }
-            if (localIndex < count) {
-                outputData.words[scratch + localIndex * 2u] = keep;
-                outputData.words[scratch + localIndex * 2u + 1u] = visible[lane] - keep;
-            }
-            if (lane == 63u) outputData.words[totals + group] = visible[lane];
-            if (groups == 1u) {
-                memoryBarrierBuffer(); barrier();
-                if (keep != 0u) writePoolCommand(index, visible[lane] - keep, outputWord);
-                if (lane == 63u) outputData.words[totals + groups] = visible[lane];
-            }
-            return;
-        }
-        if (groups == 1u) return;
-        uint prefix = 0u;
-        // Once per workgroup, rather than once per surviving part.
-        if (lane == 0u) {
-            for (uint i = 0u; i < group; i++) prefix += outputData.words[totals + i];
-            visible[0] = prefix;
-            if (group + 1u == groups)
-                outputData.words[totals + groups] = prefix + outputData.words[totals + group];
-        }
-        barrier();
-        if (localIndex < count && outputData.words[scratch + localIndex * 2u] != 0u)
-            writePoolCommand(index, visible[0] + outputData.words[scratch + localIndex * 2u + 1u], outputWord);
-        return;
-    }
-    if (!compactDraws) {
-        uint index = gl_GlobalInvocationID.x;
-        uint count = min(p.count, inputData.words[p.inputWord + 37u]);
-        if (index >= count) return;
-        uint src = p.inputWord + 64u + index * 12u + 8u;
-        uint dst = p.outputWord + index * 5u;
-        outputData.words[dst] = inputData.words[src];
-        outputData.words[dst + 1u] = hidden(index) ? 0u : inputData.words[src + 3u];
-        outputData.words[dst + 2u] = inputData.words[src + 1u];
-        outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = inputData.words[src + 2u] >> 8u;
-        return;
-    }
     uint lane = gl_LocalInvocationID.x, index = gl_GlobalInvocationID.x;
     uint scratch = p.outputWord + p.count * 5u;
     uint totals = scratch + p.count * 2u;
@@ -264,21 +163,17 @@ void main()
         if (p.count <= 64u) {
             memoryBarrierBuffer(); barrier();
             if (keep != 0u) writeCommand(index, visible[lane] - keep);
-#ifdef RESIDENT_TERRAIN
             if (lane == 63u) outputData.words[totals + 1u] = visible[lane];
-#endif
         }
         return;
     }
     // The second dispatch sees every group total. Prefixing groups in input order
     // preserves pool order across workgroups, including translucent parts.
-#ifdef RESIDENT_TERRAIN
     if (index == 0u) {
         uint total = 0u, groups = (p.count + 63u) / 64u;
         for (uint group = 0u; group < groups; group++) total += outputData.words[totals + group];
         outputData.words[totals + groups] = total;
     }
-#endif
     if (index >= p.count || outputData.words[scratch + index * 2u] == 0u) return;
     uint rank = outputData.words[scratch + index * 2u + 1u];
     for (uint group = 0u; group < gl_WorkGroupID.x; group++) rank += outputData.words[totals + group];

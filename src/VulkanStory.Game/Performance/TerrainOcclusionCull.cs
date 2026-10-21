@@ -100,7 +100,6 @@ internal static class TerrainOcclusionCull
         if (ResidentTerrain.ParityActive) return;
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
         if (ResidentTerrain.IsResident(__instance)) return;
-        if (GpuTerrainDraws.Collecting) return;
         if (PerformancePatchSet.Current?.TerrainOcclusionCull != true) return;
         var test = cullSnapshot is { } snapshot ? snapshot.Test : source;
         var captured = cullSnapshot is { } current ? current.Camera : test?.Source;
@@ -190,7 +189,6 @@ internal static class EntityOcclusionCull
     private static bool Hidden(Entity entity)
     {
         if (PerformancePatchSet.Current?.EntityOcclusionCull != true || entity is EntityPlayer) return false;
-        if (GpuEntityDraws.Handles(entity)) return false;
         if (TerrainOcclusionCull.Source is not { Source: { } captured } test || TerrainOcclusionCull.CameraNow() is not { } now) return false;
         Interlocked.Increment(ref PerformanceCounters.EntityOcclusionTests);
         // The game's own frustum sphere for this entity, as a box, grown by camera and entity movement since the capture.

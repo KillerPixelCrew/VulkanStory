@@ -36,17 +36,13 @@ internal sealed partial class GameGraphicsAdapter
 
     /// <summary>Captures target/write-mask and fixed draw state for a named terrain pool; native pass opening is deferred to its first draw.</summary>
     /// <param name="name">Retained terrain pool/pass name.</param>
-    /// <param name="mode">Stock visibility policy for this pool.</param>
-    internal void BeginChunkPool(string name, EnumFrustumCullMode mode = EnumFrustumCullMode.NoCull)
+    internal void BeginChunkPool(string name)
     {
         RequireDevice();
         if (chunkScopeActive) throw new InvalidOperationException("Recursive terrain pool draw.");
         chunkScopeActive = true; chunkPassOpen = false; chunkScopeName = name;
         residentReplay = false;
         chunkTarget = CurrentTargetId; chunkSlots = Stated.DrawBuffers(chunkTarget);
-        Performance.GpuTerrainDraws.BeginScope(mode == EnumFrustumCullMode.CullNormal &&
-            RequireDevice().CanPrepareTerrainDraws && currentFramebuffer != null &&
-            ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[0]));
         int motion = FrameState.MotionAttachment;
         if (currentFramebuffer != null && ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[0]) && motion is >= 0 and < 32)
             // BeginMotionWrite owns the exact mask, including a liquid motion-only redraw.
@@ -64,7 +60,6 @@ internal sealed partial class GameGraphicsAdapter
         RequireDevice().SceneDrawCategory = previousChunkDrawCategory;
         chunkScopeActive = false;
         residentReplay = false;
-        Performance.GpuTerrainDraws.EndScope();
         if (chunkPassOpen) { chunkPassOpen = false; RequireDevice().EndNativePass(); }
         chunkScopeName = "";
     }
@@ -74,11 +69,7 @@ internal sealed partial class GameGraphicsAdapter
         if (!chunkScopeActive || vao.VaoId == 0 || vao.Disposed) return false;
         int handle = MeshHandle(vao);
         if (!TryOpenChunkPipeline(handle, out var pipeline, out int textureCount)) return RefuseOpenChunkDraw();
-        var camera = Performance.TerrainOcclusionCull.CameraNow();
-        var bounds = camera.HasValue ? Performance.GpuTerrainDraws.BoundsFor(starts, sizes, groups) : default;
-        if (renderer.DrawNativeMeshMulti(pipeline!, handle, starts, sizes, groups, chunkTextures.AsSpan(0, textureCount),
-                bounds, bounds.IsEmpty ? default : Performance.GpuTerrainDraws.Planes,
-                camera?.X ?? 0, camera?.Y ?? 0, camera?.Z ?? 0))
+        if (renderer.DrawNativeMeshMulti(pipeline!, handle, starts, sizes, groups, chunkTextures.AsSpan(0, textureCount)))
             RuntimeStats.drawCallsCount++;
         else RejectSceneDraw("chunk native multi-draw rejected");
         return true;

@@ -9,6 +9,9 @@ using VulkanStory.Render.Vulkan.Graph;
 
 namespace VulkanStory.Render.Vulkan;
 
+/// <summary>A stock world-space plane retained by the resident entity culler.</summary>
+internal readonly record struct TerrainFrustumPlane(double X, double Y, double Z, double D);
+
 internal readonly record struct TerrainPartDesc(int PoolMesh, int RenderPass, int Atlas,
     uint FirstIndex, uint IndexCount, double CenterX, double CenterY, double CenterZ,
     float Radius, float RadiusY, float RadiusZ, int LodLevel, int ChunkSlot)
@@ -46,6 +49,22 @@ internal readonly record struct TerrainView(int Eye, double CameraX, double Came
 public sealed unsafe partial class VulkanDevice
 {
     internal bool ResidentTerrainEnabled { get; set; }
+    private PhysicalDeviceLimits? _terrainLimits;
+    private PhysicalDeviceLimits DrawPreparationLimits
+    {
+        get
+        {
+            _terrainLimits ??= _context.Api.GetPhysicalDeviceProperties(_context.PhysicalDevice).Limits;
+            return _terrainLimits.Value;
+        }
+    }
+    private readonly HashSet<int> _terrainOccluderMeshes = new();
+
+    private void InvalidateTerrainGeometry(int meshId, bool deleted = false)
+    {
+        if (_terrainOccluderMeshes.Contains(meshId)) ResetTerrainOcclusion();
+        if (deleted) _terrainOccluderMeshes.Remove(meshId);
+    }
 
     // Rows are rebuilt only when producer state changes, never by walking parts at draw time.
     // GPU row (16 uints): float xyz/radii xyz, first/count, lod, chunk, Hide,
@@ -92,8 +111,8 @@ public sealed unsafe partial class VulkanDevice
         if (!readback) return AllocateIndirect(checked((int)((bytes + 19) / 20)), out offset,
             Math.Max(4UL, DrawPreparationLimits.MinStorageBufferOffsetAlignment));
         // Generic indirect overflow buffers can retire before this slot returns.
-        // Both old-path totals and resident parity outputs need slot ownership
-        // through CPU collection, beyond GPU completion alone.
+        // Resident parity outputs need slot ownership through CPU collection,
+        // beyond GPU completion alone.
         offset = 0;
         if (_terrainReadbackBufferCursors.Length == 0)
             _terrainReadbackBufferCursors = new int[_frames.FramesInFlight];
@@ -204,8 +223,8 @@ public sealed unsafe partial class VulkanDevice
             // including any partial submissions before a later eye or replay.
             var input = TerrainSceneInput(view, useDepth ? depth : default, parity != null, out ulong inputOffset);
             if (input == null) return false;
-            var cullPipeline = _compute.PipelineFor(program, [1u, 0u, 0u, _context.DrawIndirectCountEnabled ? 1u : 0u]);
-            var scatterPipeline = _compute.PipelineFor(program, [1u, 1u, 0u, _context.DrawIndirectCountEnabled ? 1u : 0u]);
+            var cullPipeline = _compute.PipelineFor(program, [0u]);
+            var scatterPipeline = _compute.PipelineFor(program, [1u]);
             prepared = new TerrainSceneIndirect[pools.Length];
             var sets = new DescriptorSet[pools.Length];
             for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
@@ -339,7 +358,7 @@ public sealed unsafe partial class VulkanDevice
 
     private bool PreflightTerrainSceneDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)
     {
-        if (_drawEntityRecords != null || !ReferenceEquals(_targets.Bound, _nativeTarget) ||
+        if (!ReferenceEquals(_targets.Bound, _nativeTarget) ||
             !_targets.ScopeFormatsMatch(_nativeTarget!, pipeline.Description.Targets)) return false;
         foreach (var sampled in textures)
             if (sampled.Sampler.IsPresent && _targets.IsBoundDepth(sampled.TextureId) &&
@@ -433,8 +452,6 @@ public sealed unsafe partial class VulkanDevice
         if (_terrainSceneProgram == 0)
         {
             string source = Culling.OcclusionDepth.Source("draws.comp");
-            int line = source.IndexOf('\n') + 1;
-            source = source.Insert(line, "#define RESIDENT_TERRAIN\n#extension GL_ARB_gpu_shader_fp64 : require\n");
             _terrainSceneProgram = CreateComputeProgram(source, "resident-terrain-draws",
                 [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer), new(3, ComputeSlotKind.Buffer)], 16, 64, 1);
         }

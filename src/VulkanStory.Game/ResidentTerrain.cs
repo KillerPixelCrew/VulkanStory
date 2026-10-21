@@ -93,6 +93,8 @@ internal static class ResidentTerrain
         Patch(typeof(MeshDataPoolManager), "AddModel", prefix: nameof(BeforeAdd), finalizer: nameof(FinishPublication));
         Patch(typeof(TesselatedChunkPart), "AddModelAndStoreLocation", prefix: nameof(BeforePart), finalizer: nameof(FinishPublication));
         Patch(typeof(MeshDataPool), "InsertAt", postfix: nameof(AfterInsert));
+        harmony.Patch(Target(typeof(MeshDataPool), "RemoveLocation"), prefix:
+            new HarmonyMethod(typeof(Performance.TerrainOcclusionCull), nameof(Performance.TerrainOcclusionCull.InvalidateDepth)));
         Patch(typeof(MeshDataPool), "RemoveLocation", postfix: nameof(Removed));
         Patch(typeof(MeshDataPool), "FrustumCull", prefix: nameof(ReplayCompatPool));
         Patch(typeof(MeshDataPoolMasterManager), "RemoveDataPoolLocations", postfix: nameof(LocationsRemoved));
