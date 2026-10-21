@@ -108,7 +108,6 @@ internal static class SetConvention
     /// unchanged. A program with more named blocks than this range fails to link.
     /// </summary>
     public const int NamedBlockFirstBinding = 4;
-    public const int PreviousDeformationBinding = NamedBlockFirstBinding;
     public const int NamedBlockLastBinding = 7;
 
     /// <summary>Every set 2 binding: storage buffers, the record, and the named-block range.</summary>
