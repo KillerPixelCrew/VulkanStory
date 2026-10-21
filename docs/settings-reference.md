@@ -34,7 +34,8 @@ values to supported ranges, depending on the entry point.
 | Generation multiplier | Live, bounded by active SDK capability |
 | Input, FPS counter and latency policy | Live |
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
-| `ResidentTerrain`, `ResidentEntities`, `GpuParticleSimulation` | Live Performance-page switches; default off |
+| `ResidentTerrain`, `ResidentEntities` | Live Performance-page switches; default on |
+| `GpuParticleSimulation` | Live Performance-page switch; default off |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
 Changing restart settings writes the next-launch request. It does not recreate the
@@ -180,8 +181,8 @@ choice and range definitions live in
 | `OutfitShapeCache` | bool | `true` | Caches assembled villager/trader outfit shapes and texture sets, and pre-inserts outfit textures gradually after world load. |
 | `ChunkVisibilityWalk` | bool | `true` | Walks the occlusion culler's own rays from a precomputed shared tree instead of recomputing each ray. |
 | `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws. |
-| `ResidentTerrain` | bool | `false` | Requests renderer-owned terrain state, GPU culling and indirect pass submission; applies live. |
-| `ResidentEntities` | bool | `false` | Requests renderer-owned entity rows, pose storage and indirect pass submission; applies live. |
+| `ResidentTerrain` | bool | `true` | Requests renderer-owned terrain state, GPU culling and indirect pass submission; applies live. |
+| `ResidentEntities` | bool | `true` | Requests renderer-owned entity rows, pose storage and indirect pass submission; applies live. |
 | `GpuParticleSimulation` | bool | `false` | Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling; applies live. |
 | `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth). |
 | `ParallelChunkReads` | bool | `true` | Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load. |
