@@ -72,6 +72,7 @@ internal static class ResidentTerrain
         (typeof(ChunkRenderer), "AddPoolsForAtlasAndPass"), (typeof(MeshDataPoolManager), "AddModel"),
         (typeof(TesselatedChunkPart), "AddModelAndStoreLocation"), (typeof(MeshDataPool), "InsertAt"),
         (typeof(MeshDataPool), "RemoveLocation"), (typeof(MeshDataPool), "FrustumCull"),
+        (typeof(MeshDataPoolMasterManager), "RemoveDataPoolLocations"),
         (typeof(ClientChunk), "SetVisibility"), (typeof(ClientChunk), "SetPoolLocations"),
         (typeof(ClientChunk), "IsFrustumVisible")
     ];
@@ -94,6 +95,7 @@ internal static class ResidentTerrain
         Patch(typeof(MeshDataPool), "InsertAt", postfix: nameof(AfterInsert));
         Patch(typeof(MeshDataPool), "RemoveLocation", postfix: nameof(Removed));
         Patch(typeof(MeshDataPool), "FrustumCull", prefix: nameof(ReplayCompatPool));
+        Patch(typeof(MeshDataPoolMasterManager), "RemoveDataPoolLocations", postfix: nameof(LocationsRemoved));
         Patch(typeof(ClientChunk), "SetVisibility", postfix: nameof(VisibilityChanged));
         Patch(typeof(ClientChunk), "SetPoolLocations", postfix: nameof(LocationsChanged));
         Patch(typeof(ClientChunk), "IsFrustumVisible", prefix: nameof(ReadChunkFrustum));
@@ -189,6 +191,9 @@ internal static class ResidentTerrain
     private static void VisibilityChanged(ClientChunk __instance)
     { Changed(Centers(__instance)); Changed(Edges(__instance)); }
     private static void LocationsChanged(ModelDataPoolLocation[] modelDataPoolLocations) => Changed(modelDataPoolLocations);
+    // Delayed removal hides the old locations immediately, three frames before RemoveLocation.
+    // Notify the same update path so a post-freeze change also refuses resident replay this frame.
+    private static void LocationsRemoved(ModelDataPoolLocation[] locations) => Changed(locations);
     private static void ReadChunkFrustum(ClientChunk __instance)
     {
         // Match the original choice of first centre/edge part, including its null/empty cases.
