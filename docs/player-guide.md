@@ -126,9 +126,8 @@ compat lane. Resident terrain also falls back there when the device lacks
 `shaderFloat64`.
 
 **Compute particle geometry** and **Compute particle visual evolution** remain
-on by default. **Compute particle fixed steps** (`GpuParticleSimulation`) is a
-separate option and defaults off. Particle density and pool limits apply
-independently of these switches.
+on by default. Particle physics uses the stock CPU tick. Particle density and
+pool limits apply independently of these switches.
 
 ## Controllers and multiplayer
 
