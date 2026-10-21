@@ -139,8 +139,6 @@ internal static class DroppedFallingMotionConsumerPatches
     private static void DrawFalling(IRenderAPI render, MultiTextureMeshRef mesh, string sampler, int unit, object renderer, object entity)
     {
         var session = Session(); bool motion = false;
-        var visibility = session != null && entity is EntityBlockFalling falling
-            ? session.Graphics.EnterFallingVisibilityScope(renderer, falling) : default;
         try
         {
             // Motion is independent of visibility support and its live switch.
@@ -149,8 +147,7 @@ internal static class DroppedFallingMotionConsumerPatches
         }
         finally
         {
-            try { if (motion) session!.Graphics.EndMotionWrite(); }
-            finally { session?.Graphics.ExitEntityVisibilityScope(visibility); }
+            if (motion) session!.Graphics.EndMotionWrite();
         }
     }
 }
