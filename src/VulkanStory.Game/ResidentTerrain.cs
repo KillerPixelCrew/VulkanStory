@@ -275,6 +275,7 @@ internal static class ResidentTerrain
         var expected = new Dictionary<int, TerrainParityPart>();
         var test = Performance.TerrainOcclusionCull.Source;
         var captured = test?.Source;
+        var now = view.OcclusionCameraPosition ?? (X: view.CameraX, Y: view.CameraY, Z: view.CameraZ);
         bool depthApplies = view.CullMode == (int)EnumFrustumCullMode.CullNormal &&
             Performance.PerformancePatchSet.Current?.TerrainOcclusionCull == true;
         bool previous = ParityActive;
@@ -303,8 +304,7 @@ internal static class ResidentTerrain
                     };
                     bool stockVisible = copy.IsVisible((EnumFrustumCullMode)view.CullMode, culler);
                     bool stockDepthVisible = stockVisible && !(depthApplies && test != null && captured != null &&
-                        Performance.TerrainOcclusionCull.StockOccluded(sphere, captured,
-                            (view.CameraX, view.CameraY, view.CameraZ), test));
+                        Performance.TerrainOcclusionCull.StockOccluded(sphere, captured, now, test));
                     expected.Add(part.Handle, new TerrainParityPart(stockVisible, stockDepthVisible, inputs, visible));
                 }
             }
@@ -323,6 +323,7 @@ internal static class ResidentTerrain
             ClientSettings.ViewDistance, culler.lod0BiasSq, culler.lod2BiasSq, (int)mode,
             mode is EnumFrustumCullMode.CullInstantShadowPassNear or EnumFrustumCullMode.CullInstantShadowPassFar)
         {
+            OcclusionCameraPosition = eye is >= 0 and < 2 ? Performance.TerrainOcclusionCull.CameraNow() : null,
             ViewDistanceSq = culler.ViewDistanceSq, PlayerBlockX = player.X, PlayerBlockZ = player.Z,
             ShadowRangeX = culler.shadowRangeX, ShadowRangeZ = culler.shadowRangeZ, OriginUniform = uniform,
             Plane0 = Plane(0), Plane1 = Plane(1), Plane2 = Plane(2), Plane3 = Plane(3), Plane4 = Plane(4), Plane5 = Plane(5)

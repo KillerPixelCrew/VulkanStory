@@ -32,6 +32,9 @@ internal readonly record struct TerrainView(int Eye, double CameraX, double Came
     double Lod0BiasSq, double Lod2BiasSq,
     int CullMode /* stock EnumFrustumCullMode */, bool Shadow)
 {
+    // Stereo's terrain draw origin differs from the physical eye used for depth capture.
+    // Mono retains CameraX/Y/Z for the existing movement calculation.
+    public (double X, double Y, double Z)? OcclusionCameraPosition { get; init; }
     public int ViewDistanceSq { get; init; }
     public int PlayerBlockX { get; init; }
     public int PlayerBlockZ { get; init; }
@@ -620,7 +623,8 @@ public sealed unsafe partial class VulkanDevice
             camera.Projection.AsSpan(0, 16).CopyTo(new Span<float>(values + 16, 16));
             values[32] = depth.Width; values[33] = depth.Height;
             values[34] = projection.DepthUnpackMul; values[35] = projection.DepthUnpackAdd;
-            double dx = view.CameraX - camera.CameraX, dy = view.CameraY - camera.CameraY, dz = view.CameraZ - camera.CameraZ;
+            var now = view.OcclusionCameraPosition ?? (X: view.CameraX, Y: view.CameraY, Z: view.CameraZ);
+            double dx = now.X - camera.CameraX, dy = now.Y - camera.CameraY, dz = now.Z - camera.CameraZ;
             values[38] = MathF.BitIncrement((float)(Math.Sqrt(dx * dx + dy * dy + dz * dz) + 0.5));
             *(double*)(words + 136) = camera.CameraX; *(double*)(words + 138) = camera.CameraY; *(double*)(words + 140) = camera.CameraZ;
             words[85] = 1;

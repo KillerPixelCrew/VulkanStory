@@ -7,7 +7,11 @@ internal sealed partial class GameRenderSession
 {
     private string? occlusionCaptureRefusal;
 
-    /// <summary>The attached world's current camera position, which terrain draws are relative to; null without a world.</summary>
+    // RenderStereo sets TerrainEyeIndex from OpenXrEye before rendering each eye.
+    // Resolve at the cull, not session creation, using the same owner as Capture.
+    internal IOcclusionTest? OcclusionSource() => device?.OcclusionDepth.Test;
+
+    /// <summary>The attached world's current camera position for depth capture and movement padding; null without a world.</summary>
     internal (double X, double Y, double Z)? OcclusionCameraPosition()
     {
         if (device?.OpenXr != null && OpenXrEye >= 0 && Temporal.CurrentClient is ClientMain client)

@@ -25,21 +25,21 @@ internal static class TerrainOcclusionCull
 {
     private const double Sqrt3 = 1.7320508075688772;
     private const double BoxPadding = 0.5;
-    private static volatile IOcclusionTest? source;
+    private static volatile Func<IOcclusionTest?>? source;
     private static Func<(double X, double Y, double Z)?>? camera;
     private static Action? capture, reset;
     [ThreadStatic] private static CullSnapshot? cullSnapshot;
     private readonly record struct CullSnapshot(IOcclusionTest? Test, OcclusionCamera? Camera);
 
-    /// <summary>The session's occlusion test, or null.</summary>
-    internal static IOcclusionTest? Source => source;
+    /// <summary>The active eye's completed occlusion test, or the desktop test in mono; null without a session.</summary>
+    internal static IOcclusionTest? Source => source?.Invoke();
 
     /// <summary>The current camera position, or null without a world.</summary>
     internal static (double X, double Y, double Z)? CameraNow() => camera?.Invoke();
     internal static void InvalidateDepth() => reset?.Invoke();
 
     /// <summary>The session's occlusion source, current camera position, depth capture and reset; nulls when no session renders.</summary>
-    internal static void Attach(IOcclusionTest? test, Func<(double X, double Y, double Z)?>? currentCamera, Action? captureDepth, Action? resetDepth)
+    internal static void Attach(Func<IOcclusionTest?>? test, Func<(double X, double Y, double Z)?>? currentCamera, Action? captureDepth, Action? resetDepth)
     { source = test; camera = currentCamera; capture = captureDepth; reset = resetDepth; }
 
     private static MethodInfo Target() => AccessTools.Method(typeof(ModelDataPoolLocation), nameof(ModelDataPoolLocation.IsVisible),
@@ -84,7 +84,7 @@ internal static class TerrainOcclusionCull
         __state = cullSnapshot;
         if (frustumCullMode != EnumFrustumCullMode.CullNormal || PerformancePatchSet.Current?.TerrainOcclusionCull != true)
         { cullSnapshot = null; return; }
-        var test = source;
+        var test = Source;
         cullSnapshot = new CullSnapshot(test, test?.Source);
     }
 
@@ -101,7 +101,7 @@ internal static class TerrainOcclusionCull
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
         if (ResidentTerrain.IsResident(__instance)) return;
         if (PerformancePatchSet.Current?.TerrainOcclusionCull != true) return;
-        var test = cullSnapshot is { } snapshot ? snapshot.Test : source;
+        var test = cullSnapshot is { } snapshot ? snapshot.Test : Source;
         var captured = cullSnapshot is { } current ? current.Camera : test?.Source;
         if (test == null || captured == null) return;
         if (camera?.Invoke() is not { } now) return;
