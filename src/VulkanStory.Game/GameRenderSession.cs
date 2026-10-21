@@ -192,9 +192,6 @@ internal sealed partial class GameRenderSession : IDisposable
             Device.ResidentEntitiesEnabled = services.RendererSettings.Settings.ResidentEntities;
             Device.ComputeParticleGeometryEnabled = services.RendererSettings.Settings.GpuParticleGeometry;
             Device.ComputeParticleVisualsEnabled = services.RendererSettings.Settings.GpuParticleVisualSimulation;
-            bool particleSimulation = services.RendererSettings.Settings.GpuParticleSimulation;
-            Device.PrepareParticleSimulation(particleSimulation, Performance.GpuParticleVisuals.Trigonometry);
-            Performance.GpuParticleSimulation.Configure(Device, particleSimulation);
             bool terrainNoise = services.RendererSettings.Settings.GpuTerrainNoise &&
                 Performance.PerformancePatchSet.IsInstalled("gpu-terrain-noise");
             Device.PrepareTerrainNoise(terrainNoise, terrainNoise ? Performance.GpuTerrainNoise.Gradients : []);
