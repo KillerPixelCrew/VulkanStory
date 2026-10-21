@@ -59,13 +59,8 @@ public sealed unsafe partial class VulkanDevice
     private void PrepareGraphicsSlot(FrameSlot slot)
     {
         BeginIndirectFrame(slot.Index);
-        BeginEntityDrawFrame(slot.Index);
-        RetireDeformationGeometry(all: !ComputeDeformationEnabled);
-        RetireJointPoses(all: !ComputeJointPosesEnabled);
-        RetireWorldGeometry(all: !ComputeDeformationEnabled);
         RetireParticleGeometry(all: !ComputeParticleGeometryEnabled);
         RetireParticleVisuals();
-        CollectJointCheck(slot.Index);
         CollectParticleVisualCheck(slot.Index);
         _descriptorArenas[slot.Index].Reset();
         _computeArenas[slot.Index].Reset();
@@ -79,6 +74,5 @@ public sealed unsafe partial class VulkanDevice
         _readbacks.BeginSlot(slot.Index);
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);
-        FlushEntityGeometryPacks(slot.Index);
     }
 }
