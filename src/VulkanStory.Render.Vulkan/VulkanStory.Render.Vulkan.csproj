@@ -49,8 +49,6 @@
     <Compile Include="VulkanDevice.ParticleInstances.cs" />
     <Compile Include="VulkanDevice.TerrainNoise.cs" />
     <Compile Include="VulkanDevice.TerrainDensity.cs" />
-    <Compile Include="VulkanDevice.ChunkMeshing.cs" />
-    <Compile Include="VulkanDevice.ChunkMeshing.Runner.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilTransfers.cs" />
@@ -174,9 +172,6 @@
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl;../../shaders/native/worldgen/terrain-binary64.glsl;../../shaders/native/worldgen/terrain-noise-kernel.glsl">
       <LogicalName>shaders-vk/worldgen/%(Filename)%(Extension)</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/terrain-meshing/*.comp">
-      <LogicalName>shaders-vk/terrain-meshing/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl;../../shaders/native/include/evolution.glsl">
       <LogicalName>shaders-vk/include/%(Filename)%(Extension)</LogicalName>
