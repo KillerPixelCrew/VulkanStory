@@ -29,7 +29,7 @@ layout(push_constant, scalar) uniform OptimumDraw
 
     mat4 modelViewMatrix;
     int addRenderFlags;
-    int vsComputeDeformation;
+    int entityReserved0;
 };
 
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
@@ -53,14 +53,12 @@ layout(std140, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_ANIMATION) r
     mat4 values[];
 } ElementTransforms;
 
-#include "deformation.glsl"
 
 layout(location = 0) out vec2 uv;
 
 void main(void)
 {
-	vec4 cameraPos = vsComputeDeformation != 0 ? modelViewMatrix * vsDeformedPosition() :
-		modelViewMatrix * ElementTransforms.values[jointId] * vec4(vertexPositionIn, 1.0);
+	vec4 cameraPos = modelViewMatrix * ElementTransforms.values[jointId] * vec4(vertexPositionIn, 1.0);
 	uv = uvIn;
 	gl_Position = projectionMatrix * cameraPos;
 
