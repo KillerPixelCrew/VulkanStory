@@ -5,18 +5,22 @@ namespace VulkanStory.Game;
 
 internal sealed partial class GameRenderSession
 {
-    /// <summary>Reads the complete display framebuffer using the shared capture boundary and a bounded pin lifetime.</summary>
-    /// <returns>Display-pixel dimensions and a newly allocated, tightly packed four-channel BGRA readback in the backend's capture row order.</returns>
+    /// <summary>Reads the complete default framebuffer using the shared capture boundary and a bounded pin lifetime.</summary>
+    /// <returns>Native image dimensions and a newly allocated, tightly packed four-channel BGRA readback in the backend's capture row order.</returns>
     /// <remarks>
     /// Runs at the session capture seam on the owner thread. Selects the default framebuffer,
-    /// uses display dimensions rather than the internal SR render dimensions, and frees the
+    /// uses its color image dimensions rather than window or internal SR dimensions, and frees the
     /// managed pin even if readback fails. Framebuffer selection remains at Default afterward.
     /// Allocation overflow and backend readback failures propagate to the harness owner.
     /// </remarks>
     private (int Width, int Height, byte[] Pixels) ReadCapturedFrame()
     {
         Graphics.LoadFramebuffer(EnumFrameBuffer.Default);
-        var size = Window.PixelSize;
+        int color = Device.NativeFramebufferColorTexture(Graphics.CurrentTargetId, 0);
+        if (!Device.TryGetTexture2DDescription(color, out int width, out int height, out _, out _))
+            throw new InvalidOperationException("Capture framebuffer has no native 2D color image.");
+        // Stereo captures contain the last rendered eye at its native size.
+        var size = (Width: width, Height: height);
         byte[] pixels = new byte[checked(size.Width * size.Height * 4)];
         GCHandle pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
         try { Graphics.ReadCapturePixels(0, 0, size.Width, size.Height, pin.AddrOfPinnedObject()); }
@@ -28,7 +32,7 @@ internal sealed partial class GameRenderSession
     /// <param name="frame">Zero-based world or explicitly selected main-menu frame used by the shared capture filename.</param>
     /// <returns>True after both files are written; false when the Netpbm writer declines the capture.</returns>
     /// <remarks>
-    /// Both files use the same display-sized BGRA readback. PPM strips alpha and preserves
+    /// Both files use the same native-sized BGRA readback. PPM strips alpha and preserves
     /// capture row order for comparisons; PNG reverses rows for top-down viewing and encodes
     /// opaque alpha. File/encoding failures propagate. A PNG failure can leave an already
     /// written PPM, so the return value certifies the paired write only after PNG completes.
