@@ -12,8 +12,8 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// GPU time per labelled section of a frame, for attributing a GPU-bound frame
 /// rather than guessing at it.
 ///
-/// Each frame slot owns one timestamp pool. The slot's first commands reset it and
-/// write the "frame" mark; every later <see cref="Mark" /> closes the previous
+/// Each frame slot owns one timestamp pool. Its first frame command buffer writes
+/// the "frame" mark; every later <see cref="Mark" /> closes the previous
 /// section and opens a new one, and every command-buffer submission of the slot
 /// writes a "submit" mark, so GPU idle between a frame's command buffers shows up
 /// as its own section rather than inflating the one before it. The next frame
@@ -22,6 +22,14 @@ namespace VulkanStory.Render.Vulkan.Core;
 /// is dropped. Marks are written at BOTTOM_OF_PIPE, so a section is the work that
 /// finished between the two marks, which is close to exclusive time on a GPU
 /// that is kept busy.
+///
+/// Query indices follow submission order, not CPU recording order. Every frame
+/// recording, including a continuation, reserves a "pre_graphics" index before
+/// its opening mark: the lazily begun compute buffer executes after earlier
+/// submissions and before that recording's frame buffer. The compute buffer
+/// resets and writes only its reserved index; the frame buffer resets only the
+/// following indices. Harvest skips unwritten reservations using CPU flags,
+/// since an unused query can still contain a previous frame's available result.
 ///
 /// Results are read without the wait bit when the slot is recycled, after the
 /// ring's wait for that slot's last submission, so nothing ever blocks on them.
@@ -37,6 +45,7 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     // Sized for frames with many alternating sections; an overflow drops the frame's tail sections.
     public const uint MarksPerFrame = 4096;
     public const string FrameLabel = "frame";
+    public const string PreGraphicsLabel = "pre_graphics";
     public const string SubmitLabel = "submit";
     public const string PresentLabel = "present";
 
@@ -62,7 +71,9 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     {
         public QueryPool Pool;
         public readonly int[] Labels = new int[MarksPerFrame];
+        public readonly bool[] Written = new bool[MarksPerFrame];
         public uint Used;
+        public uint PreGraphicsIndex = MarksPerFrame;
     }
 
     private GpuTimestamps(VulkanContext context, int framesInFlight, double nanosecondsPerTick, uint validBits)
@@ -116,19 +127,18 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     }
 
     /// <summary>
-    /// The slot's previous frame has completed: its marks are harvested, then the
-    /// pool is reset on the slot's first command buffer and the frame mark written.
+    /// The slot's previous frame has completed: its marks are harvested, then
+    /// a pre-graphics index is reserved and the frame mark written after it.
     /// Must run outside any rendering scope.
     /// </summary>
     public void BeginSlot(int slotIndex, CommandBuffer commands)
     {
         SlotMarks slot = _slots[slotIndex];
         Harvest(slot);
-        _context.Api.CmdResetQueryPool(commands, slot.Pool, 0, MarksPerFrame);
         slot.Used = 0;
         _current = slotIndex;
         _recordedFrames++;
-        Write(commands, FrameLabel);
+        BeginFrameCommands(commands, FrameLabel);
     }
 
     /// <summary>The section the next mark closes.</summary>
@@ -141,7 +151,40 @@ internal sealed unsafe class GpuTimestamps : IDisposable
     public void OnCommandsStarted(int slotIndex, CommandBuffer commands, bool frameCommands)
     {
         if (slotIndex != _current) return;
-        Write(commands, frameCommands ? _openLabel : PresentLabel);
+        if (frameCommands) BeginFrameCommands(commands, _openLabel);
+        else Write(commands, PresentLabel);
+    }
+
+    private void BeginFrameCommands(CommandBuffer commands, string label)
+    {
+        SlotMarks slot = _slots[_current];
+        slot.PreGraphicsIndex = MarksPerFrame;
+        if (commands.Handle != 0 && slot.Used < MarksPerFrame)
+        {
+            uint index = slot.Used++;
+            slot.PreGraphicsIndex = index;
+            slot.Labels[index] = LabelId(PreGraphicsLabel);
+            slot.Written[index] = false;
+            if (slot.Used < MarksPerFrame)
+                _context.Api.CmdResetQueryPool(commands, slot.Pool, slot.Used, MarksPerFrame - slot.Used);
+        }
+        Write(commands, label);
+    }
+
+    /// <summary>Writes the current recording's reserved mark before its pre-graphics work.</summary>
+    public void OnPreGraphicsBegun(int slotIndex, CommandBuffer commands)
+    {
+        if (slotIndex != _current || commands.Handle == 0) return;
+        SlotMarks slot = _slots[slotIndex];
+        uint index = slot.PreGraphicsIndex;
+        if (index >= MarksPerFrame)
+        {
+            _dropped++;
+            return;
+        }
+        _context.Api.CmdResetQueryPool(commands, slot.Pool, index, 1);
+        _context.Api.CmdWriteTimestamp(commands, PipelineStageFlags.BottomOfPipeBit, slot.Pool, index);
+        slot.Written[index] = true;
     }
 
     /// <summary>The slot's current command buffer is about to be submitted.</summary>
@@ -174,6 +217,7 @@ internal sealed unsafe class GpuTimestamps : IDisposable
             return;
         }
         _context.Api.CmdWriteTimestamp(commands, PipelineStageFlags.BottomOfPipeBit, slot.Pool, slot.Used);
+        slot.Written[slot.Used] = true;
         slot.Labels[slot.Used++] = LabelId(label);
     }
 
@@ -226,14 +270,25 @@ internal sealed unsafe class GpuTimestamps : IDisposable
                 QueryResultFlags.Result64Bit | QueryResultFlags.ResultWithAvailabilityBit);
             if (result != Result.Success && result != Result.NotReady) return;
         }
+        uint first = used;
+        uint last = used;
         for (uint i = 0; i < used; i++)
-            if (_results[i * 2 + 1] == 0) return;
-        for (uint i = 0; i + 1 < used; i++)
         {
-            ulong ticks = (_results[(i + 1) * 2] - _results[i * 2]) & _validMask;
-            _sums[slot.Labels[i]] += ticks * _nanosecondsPerTick / 1e6;
+            if (!slot.Written[i]) continue;
+            if (_results[i * 2 + 1] == 0) return;
+            if (first == used) first = i;
+            last = i;
         }
-        _frameSum += ((_results[(used - 1) * 2] - _results[0]) & _validMask) * _nanosecondsPerTick / 1e6;
+        if (first == last) return;
+        uint previous = first;
+        for (uint i = first + 1; i <= last; i++)
+        {
+            if (!slot.Written[i]) continue;
+            ulong ticks = (_results[i * 2] - _results[previous * 2]) & _validMask;
+            _sums[slot.Labels[previous]] += ticks * _nanosecondsPerTick / 1e6;
+            previous = i;
+        }
+        _frameSum += ((_results[last * 2] - _results[first * 2]) & _validMask) * _nanosecondsPerTick / 1e6;
         _frames++;
     }
 

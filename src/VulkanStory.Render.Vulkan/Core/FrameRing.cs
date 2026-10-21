@@ -140,6 +140,9 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>The current command buffer is about to end for submission (slot index, buffer).</summary>
     public Action<int, CommandBuffer>? CommandsEnding { get; set; }
 
+    /// <summary>A pre-graphics command buffer began recording (slot index, buffer).</summary>
+    public Action<int, CommandBuffer>? PreGraphicsBegun { get; set; }
+
     private CommandBuffer BeginPooledCommandBuffer(string purpose)
     {
         Vk api = _context.Api;
@@ -205,7 +208,10 @@ internal sealed unsafe class FrameSlot : IDisposable
         commandBuffer = default;
         if (!_recording || !_frameCommands) return false;
         if (_preGraphicsCommands.Handle == 0)
+        {
             _preGraphicsCommands = BeginPooledCommandBuffer("pre-graphics frame compute");
+            PreGraphicsBegun?.Invoke(Index, _preGraphicsCommands);
+        }
         commandBuffer = _preGraphicsCommands;
         return true;
     }
@@ -663,12 +669,14 @@ internal sealed class FrameRing : IDisposable
     public void ClearSubmitGate(Semaphore semaphore) => _gate.Clear(semaphore);
 
     /// <summary>Installs command-buffer start and end hooks on every slot (GPU timestamps).</summary>
-    public void SetCommandHooks(Action<int, CommandBuffer, bool>? started, Action<int, CommandBuffer>? ending)
+    public void SetCommandHooks(Action<int, CommandBuffer, bool>? started, Action<int, CommandBuffer>? ending,
+        Action<int, CommandBuffer>? preGraphicsBegun)
     {
         foreach (FrameSlot slot in _slots)
         {
             slot.CommandsStarted = started;
             slot.CommandsEnding = ending;
+            slot.PreGraphicsBegun = preGraphicsBegun;
         }
     }
 
