@@ -10,7 +10,7 @@ namespace VulkanStory.Game;
 
 internal sealed partial class GameGraphicsAdapter
 {
-    internal readonly record struct ResidentEntityScope(EntityRenderer? Renderer, int PoseOffset);
+    internal readonly record struct ResidentEntityScope(EntityRenderer? Renderer);
     private ResidentEntityScope residentEntityScope;
     private readonly HashSet<int> residentEntityReads = new();
     private bool residentEntitySetting, residentEntityStageActive, residentEntityStageCaptured;
@@ -111,7 +111,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         var previous = residentEntityScope;
         residentEntityScope = new(residentEntityStageActive && RequireDevice().ResidentEntitiesEnabled &&
-            shadow == (residentEntityPassKind >= 2) && SupportedEntityRenderer(renderer) ? renderer : null, -1);
+            shadow == (residentEntityPassKind >= 2) && SupportedEntityRenderer(renderer) ? renderer : null);
         return previous;
     }
 
@@ -129,52 +129,15 @@ internal sealed partial class GameGraphicsAdapter
     private bool CaptureResidentEntityMesh(NativePipeline pipeline, VAO mesh, MultiTextureMeshRef? shape, int subMesh)
     {
         if (shape?.meshrefs == null || subMesh < 0 || subMesh >= shape.meshrefs.Length ||
-            !ReferenceEquals(shape.meshrefs[subMesh], mesh) || !ResidentEntityProgram(out var program) ||
-            (program.ubos.ContainsKey("Animation") && residentEntityScope.PoseOffset < 0)) return false;
+            !ReferenceEquals(shape.meshrefs[subMesh], mesh) || !ResidentEntityProgram(out _)) return false;
         var entity = residentEntityScope.Renderer!.entity;
         double x = (float)entity.Pos.X, y = (float)entity.Pos.InternalY, z = (float)entity.Pos.Z;
         float radius = residentEntityPassKind >= 2 ? 3f : (float)entity.FrustumSphereRadius;
         if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) || !float.IsFinite(radius) || radius < 0 ||
             !RequireDevice().CaptureEntityRow(pipeline, mesh.VaoId, nativeEntityTextures, entity.EntityId, subMesh,
-                x, y, z, radius, residentEntityScope.PoseOffset)) return false;
+                x, y, z, radius)) return false;
         residentEntityStageCaptured = true;
         foreach (int texture in nativeEntityReads) residentEntityReads.Add(texture);
-        return true;
-    }
-
-    private bool CaptureResidentEntityPose(UBO buffer, ReadOnlySpan<float> bones, int offset, int size)
-    {
-        if (!ResidentEntityProgram(out var program) || !UniformBuffers.TryGetValue(buffer, out var owner) ||
-            !ReferenceEquals(owner.Adapter, this) || owner.Block is not ("Animation" or "AnimationPrev") ||
-            !program.ubos.TryGetValue(owner.Block, out var declared) || !ReferenceEquals(declared, buffer)) return false;
-        if (offset != 0 || size <= 0 || size % 64 != 0 || size > buffer.Size || bones.Length < size / sizeof(float))
-        {
-            if (owner.Block == "Animation") residentEntityScope = residentEntityScope with { PoseOffset = -1 };
-            return false;
-        }
-        if (owner.Block == "AnimationPrev")
-            return residentEntityScope.PoseOffset >= 0; // Previous poses come from the same row in the previous frame.
-        residentEntityScope = residentEntityScope with { PoseOffset = -1 };
-        int count = size / sizeof(float);
-        int pose = RequireDevice().BeginEntityPose(count);
-        if (pose < 0) return false;
-        Span<float> destination = RequireDevice().EntityPoseSpan(pose, count);
-        if (destination.Length != count) return false;
-        bones[..count].CopyTo(destination);
-        residentEntityScope = residentEntityScope with { PoseOffset = pose };
-        return true;
-    }
-
-    private unsafe bool TryUploadResidentEntityPose(UBO buffer, object data, int offset, int size)
-    {
-        if (data is not float[] bones || !ResidentEntityProgram(out _)) return false;
-        Performance.GpuJointPoses.MaterializePayload(data);
-        if (!CaptureResidentEntityPose(buffer, bones, offset, size)) return false;
-        InvalidateAnimationPayload(buffer);
-        // Keep only the ordinary CPU shadow for refused captures and nonresident draws.
-        // No per-draw animation snapshot is allocated unless the compat lane consumes it.
-        fixed (float* source = bones)
-            RequireDevice().UpdateUniformBuffer(UniformBufferHandle(buffer), (IntPtr)source, offset, size);
         return true;
     }
 }

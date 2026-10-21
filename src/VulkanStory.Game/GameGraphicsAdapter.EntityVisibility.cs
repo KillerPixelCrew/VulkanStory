@@ -148,11 +148,8 @@ internal sealed partial class GameGraphicsAdapter
         var device = RequireDevice();
         var previous = new EntityVisibilityScope(device.EntityVisibility, device.HoistEntityShadowProducers);
         device.EntityVisibility = null;
-        if (residentEntityScope.Renderer != null)
-        {
-            device.HoistEntityShadowProducers = false;
-            return previous;
-        }
+        // A resident scope is only a candidate. Keep every compat input intact
+        // until CaptureResidentEntityMesh accepts the actual draw and returns.
         // Shadow draws keep their original path. Only the producers of an entity whose
         // main draws are prepared may record ahead of the frame commands (renderer rules).
         device.HoistEntityShadowProducers = shadow && CanGpuCullEntity(renderer.entity);

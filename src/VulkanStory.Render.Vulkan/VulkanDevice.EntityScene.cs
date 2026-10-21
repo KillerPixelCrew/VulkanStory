@@ -55,7 +55,7 @@ public sealed unsafe partial class VulkanDevice
     }
     private readonly record struct ResidentEntityCapture(int Row, double X, double Y, double Z, float Radius);
     private sealed class ResidentEntityGroup(NativePipeline pipeline, Pipeline handle,
-        ResidentEntityTable table, int mesh, VulkanMesh geometry, DescriptorSet frameSet, uint frameOffset)
+        ResidentEntityTable table, int mesh, VulkanMesh geometry, DescriptorSet frameSet, uint frameOffset, byte[] frameGlobals)
     {
         internal readonly NativePipeline Pipeline = pipeline;
         internal readonly Pipeline Handle = handle;
@@ -68,6 +68,7 @@ public sealed unsafe partial class VulkanDevice
         internal readonly VulkanBuffer[] Vertices = CaptureVertices(geometry);
         internal readonly DescriptorSet FrameSet = frameSet;
         internal readonly uint FrameOffset = frameOffset;
+        internal readonly byte[] FrameGlobals = frameGlobals;
         internal readonly List<ResidentEntityCapture> Captures = new();
         internal ulong CommandOffset, CountOffset;
         private static VulkanBuffer[] CaptureVertices(VulkanMesh mesh)
@@ -103,6 +104,7 @@ public sealed unsafe partial class VulkanDevice
     private readonly Stack<int> _residentEntityFreeRows = new();
     private readonly List<int> _residentEntityReleasedRows = new();
     private readonly Dictionary<int, int> _residentEntityPoseRanges = new();
+    private readonly Dictionary<ClientUniformBuffer, (uint Version, int Offset)> _residentEntityCurrentPoses = new();
     private readonly Dictionary<int, float[]> _residentEntityPoseSnapshots = new();
     private readonly Dictionary<float[], int> _residentEntityPreviousPoseOffsets = new();
     private readonly Dictionary<NativePipeline, Pipeline> _residentEntityPipelines = new();
@@ -111,6 +113,9 @@ public sealed unsafe partial class VulkanDevice
     private int _residentEntityNextRow, _residentEntityPoseCursor, _residentEntityCullProgram;
     private ulong _residentEntityFrame;
     internal bool ResidentEntitiesEnabled { get; set; }
+    internal long EntityResidentRowsCaptured { get; private set; }
+    internal long EntityResidentCaptureRefusals { get; private set; }
+    internal void RefuseResidentEntityCapture() => EntityResidentCaptureRefusals++;
 
     private void BeginEntitySceneFrame(int slot)
     {
@@ -118,6 +123,7 @@ public sealed unsafe partial class VulkanDevice
         _residentEntityPending = null;
         _residentEntityPoseCursor = ResidentEntityIdentityFloats;
         _residentEntityPoseRanges.Clear();
+        _residentEntityCurrentPoses.Clear();
         _residentEntityPoseSnapshots.Clear(); _residentEntityPreviousPoseOffsets.Clear();
         foreach (int index in _residentEntityReleasedRows) _residentEntityFreeRows.Push(index);
         _residentEntityReleasedRows.Clear();
@@ -300,11 +306,31 @@ public sealed unsafe partial class VulkanDevice
     {
         set = default;
         if (!TrySnapshotFrameGlobals(program, out offset)) return false;
-        for (int i = 0; i < _frameSamplerScratch.Length; i++)
-            _frameSamplerScratch[i] = _frameTextureValues[i].View.Handle != 0 ? _frameTextureValues[i] : FrameTexturePlaceholder(i);
+        // Unused slots can change during interleaved compat draws. They cannot
+        // split a resident group: the instanced program never samples them.
+        for (int i = 0; i < _frameSamplerScratch.Length; i++) _frameSamplerScratch[i] = FrameTexturePlaceholder(i);
+        foreach (var sampler in program.Interface.Samplers)
+            if (sampler.FrameBinding >= 0)
+            {
+                int index = FrameTextureIndex(sampler.FrameBinding);
+                if (_frameTextureValues[index].View.Handle != 0) _frameSamplerScratch[index] = _frameTextureValues[index];
+            }
         _frameBufferScratch[0] = new((uint)SetConvention.FrameGlobalsBinding, _frames.UniformBuffer, 0, (ulong)_frameGlobals.Length);
         set = GetDescriptorSet(new DescriptorSetKey(0, SetConvention.FrameSet, _frameSamplerScratch, _frameBufferScratch),
             _sharedLayout!.FrameSetLayout);
+        return true;
+    }
+
+    private bool ResidentEntityFrameMatches(ResidentEntityGroup group, ShaderProgramResources program)
+    {
+        // Ring offsets name allocations, not values. A compat draw can change
+        // globals and restore them before the next row of the same mesh.
+        foreach (var declaration in program.Interface.FrameMemberDeclaredLengths)
+        {
+            if (!FrameGlobals.TryGetMember(declaration.Key, out var member)) return false;
+            int bytes = member.Type.Size * Math.Max(1, declaration.Value);
+            if (!_frameGlobals.AsSpan(member.Offset, bytes).SequenceEqual(group.FrameGlobals.AsSpan(member.Offset, bytes))) return false;
+        }
         return true;
     }
 
@@ -323,7 +349,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     internal bool CaptureEntityRow(NativePipeline pipeline, int meshId, ReadOnlySpan<NativeTexture> textures,
-        long entityKey, int subMesh, double centerX, double centerY, double centerZ, float radius, int poseOffset)
+        long entityKey, int subMesh, double centerX, double centerY, double centerZ, float radius)
     {
         if (!ResidentEntitiesEnabled || !_frameActive || !_context.DrawIndirectFirstInstanceEnabled ||
             !_context.SampledImageArrayNonUniformIndexingEnabled ||
@@ -341,20 +367,25 @@ public sealed unsafe partial class VulkanDevice
             int id = _residentEntityFreeRows.Count != 0 ? _residentEntityFreeRows.Pop() : _residentEntityNextRow++;
             _residentEntityRows.Add((entityKey, subMesh), row = new(id));
         }
-        int poseCount;
-        if (poseOffset < 0)
+        int poseOffset = 0, poseCount = ResidentEntityIdentityFloats;
+        if (_clientUniformBuffers.BoundBlocks.TryGetValue("Animation", out int animation) &&
+            _clientUniformBuffers.Buffers.TryGetValue(animation, out var ubo))
         {
-            if (_clientUniformBuffers.BoundBlocks.TryGetValue("Animation", out int animation) &&
-                _clientUniformBuffers.Buffers.TryGetValue(animation, out var ubo))
+            poseCount = ubo.Shadow.Length / 4;
+            if (_residentEntityCurrentPoses.TryGetValue(ubo, out var saved) && saved.Version == ubo.Version)
+                poseOffset = saved.Offset;
+            else
             {
-                ubo.MaterializeJointPose(); poseCount = ubo.Shadow.Length / 4;
                 poseOffset = BeginEntityPose(poseCount);
                 if (poseOffset < 0) return false;
-                MemoryMarshal.Cast<byte, float>(ubo.Shadow.AsSpan()).CopyTo(EntityPoseSpan(poseOffset, poseCount));
+                // Read the normal upload without materializing or invalidating it.
+                // A later refusal must still feed the original joint/deformation
+                // producers, including their immutable GPU joint-pose snapshot.
+                if (ubo.JointPose is { } pose) pose.CopyMatrices(EntityPoseSpan(poseOffset, poseCount));
+                else MemoryMarshal.Cast<byte, float>(ubo.Shadow.AsSpan()).CopyTo(EntityPoseSpan(poseOffset, poseCount));
+                _residentEntityCurrentPoses[ubo] = (ubo.Version, poseOffset);
             }
-            else { poseOffset = 0; poseCount = ResidentEntityIdentityFloats; }
         }
-        else if (!_residentEntityPoseRanges.TryGetValue(poseOffset, out poseCount)) return false;
         if (!ReserveResidentPoseStorage(_residentEntityPoseCursor)) return false;
         var batch = PrepareResidentEntityBatch();
         if (batch == null || batch.Count == ResidentEntityCapacity || batch.Eye != TerrainEyeIndex) return false;
@@ -447,16 +478,17 @@ public sealed unsafe partial class VulkanDevice
         foreach (var candidate in batch.Groups)
             if (ReferenceEquals(candidate.Pipeline, pipeline) && candidate.Mesh == meshId &&
                 ReferenceEquals(candidate.Geometry, geometry) && candidate.Revision == geometry.GeometryRevision &&
-                candidate.FrameSet.Handle == frameSet.Handle && candidate.FrameOffset == frameOffset &&
+                candidate.FrameSet.Handle == frameSet.Handle && ResidentEntityFrameMatches(candidate, variant) &&
                 (uint)candidate.Captures.Count < DrawPreparationLimits.MaxDrawIndirectCount) { group = candidate; break; }
         if (group == null)
         {
-            group = new(pipeline, handle, table, meshId, geometry, frameSet, frameOffset); batch.Groups.Add(group);
+            group = new(pipeline, handle, table, meshId, geometry, frameSet, frameOffset, (byte[])_frameGlobals.Clone()); batch.Groups.Add(group);
         }
         group.Captures.Add(new(row.Index, centerX, centerY, centerZ, radius));
         foreach (NativeTexture texture in textures)
             if (texture.Sampler.IsPresent && batch.TextureSet.Add(texture)) batch.Textures.Add((pipeline, texture));
         batch.Count++;
+        EntityResidentRowsCaptured++;
         return true;
     }
 
@@ -474,6 +506,7 @@ public sealed unsafe partial class VulkanDevice
     {
         _residentEntityRows.Clear(); _residentEntityFreeRows.Clear(); _residentEntityReleasedRows.Clear();
         _residentEntityNextRow = 0; _residentEntityPending = null; _residentEntityPipelines.Clear();
+        _residentEntityCurrentPoses.Clear();
         _residentEntityPoseSnapshots.Clear(); _residentEntityPreviousPoseOffsets.Clear();
         Array.Clear(_residentEntityDepths);
     }
