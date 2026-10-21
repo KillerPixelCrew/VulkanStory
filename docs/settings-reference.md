@@ -35,7 +35,7 @@ values to supported ranges, depending on the entry point.
 | Input, FPS counter and latency policy | Live |
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
 | `ResidentTerrain`, `ResidentEntities` | Live Performance-page switches; default on |
-| `GpuChunkMeshing`, `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
+| `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
 | `GpuParticleSimulation` | Live Performance-page switch; default off |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
@@ -192,7 +192,6 @@ choice and range definitions live in
 | `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws. |
 | `ResidentTerrain` | bool | `true` | Persistent terrain part/pool tables, pre-graphics compute visibility and indirect pass submission for admitted native pools; otherwise compat draws. Applies live. |
 | `ResidentEntities` | bool | `true` | Persistent entity/submesh rows, current/previous poses, pre-graphics compute culling and indirect submission; native vertex shaders retain skinning. Applies live. |
-| `GpuChunkMeshing` | bool | `true` | Builds supported stock cube terrain faces in compute; custom tessellators and unsupported producers retain CPU meshing. Applies live. |
 | `GpuTerrainNoise` | bool | `true` | Batches supported stock singleplayer terrain noise and density signs, retaining original CPU threshold/block decisions. Applies live. |
 | `GpuParticleGeometry` | bool | `true` | Produces supported cube, quad and rain current/previous render geometry in compute; unsupported inputs keep the original shader path. Applies live. |
 | `GpuParticleVisualSimulation` | bool | `true` | Computes supported stock size, opacity and colour evolution with CPU materialization for unsupported inputs and transitions. Applies live. |
