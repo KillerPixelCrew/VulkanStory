@@ -7,8 +7,8 @@
 // uint poseOffset @604, uint previousPoseOffset @608.
 // OptimumDraw retains all 36 original bytes: entityTex @568 (set 1 binding 0),
 // addRenderFlags @572, extraGlow @576, taaHistoryValid @580, taaReactive @584,
-// entityId @588, glitchFlicker @592, vsComputeDeformation @596 and
-// vsComputeWorldDeformation @600. The last two fields are ignored: resident
+// entityId @588, glitchFlicker @592, entityReserved0 @596 and
+// entityReserved1 @600. The last two fields retain padding: resident
 // skinning and all current/previous warps execute in the vertex shader.
 // Set 2 binding 1: readonly EntityPoses SSBO, a tightly packed mat4 values[].
 // Both pose offsets count floats from that SSBO's start, are multiples of 16,
@@ -84,8 +84,8 @@ struct OptimumDraw
     float taaReactive;
     int entityId;
     int glitchFlicker;
-    int vsComputeDeformation;
-    int vsComputeWorldDeformation;
+    int entityReserved0;
+    int entityReserved1;
 };
 
 struct EntityRow
