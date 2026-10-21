@@ -1,19 +1,10 @@
-// Stock EvolvingNatFloat operations shared by particle visual and fixed-step compute.
-#ifdef PARTICLE_CHECKED_ARITHMETIC
-#define EV_VALUE(a) stockValue(a)
-#define EV_ADD(a,b) stockAdd(a,b)
-#define EV_SUB(a,b) stockSub(a,b)
-#define EV_MUL(a,b) stockMul(a,b)
-#define EV_DIV(a,b) stockDivide(a,b)
-#define EV_SQRT(a) stockSqrt(a)
-#else
+// Stock EvolvingNatFloat operations for particle visual evolution.
 #define EV_VALUE(a) (a)
 #define EV_ADD(a,b) ((a)+(b))
 #define EV_SUB(a,b) ((a)-(b))
 #define EV_MUL(a,b) ((a)*(b))
 #define EV_DIV(a,b) ((a)/(b))
 #define EV_SQRT(a) sqrt(a)
-#endif
 float evaluate(Evolution evolution) {
     precise float first = EV_VALUE(evolution.values.x), factor = EV_VALUE(evolution.values.y), phase = EV_VALUE(evolution.values.z);
     precise float x = EV_MUL(factor, phase);

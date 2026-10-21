@@ -114,8 +114,7 @@ internal sealed partial class GameGraphicsAdapter
             if (!BeginNativeTargetPass("QuadParticleMotion/" + target.FboId, target.FboId, 1u, target.Width, target.Height, []) ||
                 !renderer.DrawNativeMeshInstanced(pipeline, handle, count, []))
             { quadMotionFrameFailed = true; return; }
-            QuadMotionDrawsRecorded++; QuadMotionValidInstances += renderer.HasParticleInstances(handle)
-                ? renderer.ParticleInstanceValidHistory(handle) : ParticleMotionHistory.ValidInstances(mesh);
+            QuadMotionDrawsRecorded++; QuadMotionValidInstances += ParticleMotionHistory.ValidInstances(mesh);
         }
         finally { renderer.EndNativePass(); }
     }

@@ -182,10 +182,7 @@ public sealed unsafe partial class VulkanDevice
     private void SelectParticleVisuals(int meshId, int count, VulkanBuffer buffer)
     { drawParticleVisualMesh = meshId; drawParticleVisualCount = count; drawParticleVisuals = buffer; }
     private static string ParticleEvolutionShader(string file) => ReadWorldShader("geometry/" + file).Replace(
-        "#include \"../include/evolution.glsl\"", ReadWorldShader("include/evolution.glsl"), StringComparison.Ordinal).Replace(
-        "#include \"particle-physics.glsl\"", ReadWorldShader("geometry/particle-physics.glsl"), StringComparison.Ordinal).Replace(
-        "#include \"particle-arithmetic.glsl\"", ReadWorldShader("geometry/particle-arithmetic.glsl"), StringComparison.Ordinal).Replace(
-        "#include \"../worldgen/terrain-binary32.glsl\"", ReadWorldShader("worldgen/terrain-binary32.glsl"), StringComparison.Ordinal);
+        "#include \"../include/evolution.glsl\"", ReadWorldShader("include/evolution.glsl"), StringComparison.Ordinal);
     private ParticleInput VisualParticleInput(int meshId, uint location, ParticleInput original) => drawParticleVisualMesh == meshId && drawParticleVisuals is { } buffer
         ? location == 4 ? new ParticleInput(buffer, 16, 0) : location == 9 ? new ParticleInput(buffer, 44, (uint)drawParticleVisualCount * 28) : original : original;
     private void BindParticleVisuals(CommandBuffer command, int meshId)
@@ -202,8 +199,6 @@ public sealed unsafe partial class VulkanDevice
     }
     private void RetireParticleVisuals(bool all = false)
     {
-        RetireParticleInstances(all);
-        RetireParticleSimulationCenters(all);
         oldParticleVisualResults.Clear();
         foreach (var pair in particleVisualResults)
             if (all || unchecked(_frameCounter - pair.Value.Frame) > 2)
@@ -216,10 +211,8 @@ public sealed unsafe partial class VulkanDevice
     }
     private void DisposeParticleVisualsIdle()
     {
-        RetireParticleInstances(all: true);
         foreach (var result in particleVisualResults.Values) result.Buffer.Dispose(); particleVisualResults.Clear(); particleVisualSources.Clear();
         particleTrigonometryBuffer?.Dispose(); particleTrigonometryBuffer = null; particleVisualBytes = 0;
-        particleInstanceBytes -= particleInstanceTableCharge; particleInstanceTableCharge = 0;
         foreach (var readback in particleVisualReadbacks) readback?.Dispose();
         particleVisualReadbacks = []; pendingParticleVisualChecks = [];
     }

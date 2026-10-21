@@ -62,15 +62,6 @@ internal static class ParticleMotionHistory
     /// <remarks>Called after the original spawn operation. The weak association retains no particle beyond its original lifetime.</remarks>
     internal static void Spawned(ParticleGeneric particle) => Spawns.GetValue(particle, _ => new Spawn()).Token = new object();
 
-    internal static object SpawnToken(ParticleGeneric particle) => Spawns.GetValue(particle, _ => new Spawn()).Token;
-
-    internal static void ProducedToken(MeshData data, int index, object token)
-    {
-        if (data.CustomFloats?.Values is not { } values) return;
-        var tokens = Buffers.GetValue(values, value => new BufferTokens(value.Length / 4));
-        if ((uint)index < tokens.Tokens.Length) tokens.Tokens[index] = token;
-    }
-
     /// <summary>Records the identity paired with one original producer's four-float instance record.</summary>
     /// <param name="particle">Original particle contributing the just-written instance.</param>
     /// <param name="buffer">Original producer mesh buffer containing position xyz and scalar scale in CustomFloats.</param>
@@ -96,7 +87,6 @@ internal static class ParticleMotionHistory
     /// </remarks>
     internal static void Uploaded(MeshRef mesh, MeshData data)
     {
-        Performance.GpuParticleSimulation.Uploaded(mesh, data);
         if (data.CustomFloats?.Values is not { } floats || !Buffers.TryGetValue(floats, out var identities) ||
             data.CustomBytes?.Values is not { } bytes)
         {
