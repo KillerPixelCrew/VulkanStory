@@ -154,7 +154,10 @@ internal static class PlatformStartupRoutingPatches
         var gui = new ShaderProgramMinimalGui();
         Gui(__instance) = gui;
         gui.Compile();
-        var pixels = session.Window.PixelSize;
+        // Match the targets and SDL layout callback, including XR eye extents.
+        // A spurious startup resize calls RebuildFrameBuffers, whose registry
+        // flag access publishes uncompiled GUI shaders before the loading screen.
+        var pixels = session.RenderExtent;
         __instance.WindowSize.Width = pixels.Width; __instance.WindowSize.Height = pixels.Height;
         session.Graphics.RequireStatedState().LineWidth = 1.5f;
         __instance.SupportsThickLines = session.Device.SupportsThickLines;
