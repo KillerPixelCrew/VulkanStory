@@ -434,7 +434,6 @@ public sealed unsafe partial class VulkanDevice
             RenderTrace.Write("clearColor attachment=" + attachment + " target=" + _targets.Bound!.Id +
                 " rgba=" + r + "," + g + "," + b + "," + a);
         }
-        AdvanceDrawOrder();
         _targets.ClearColor(Commands, attachment, r, g, b, a);
     }
 
@@ -443,7 +442,6 @@ public sealed unsafe partial class VulkanDevice
     {
         if (!BindForNativeClear(framebufferId)) return;
         if (RenderTrace.Enabled) RenderTrace.Write("clearDepth target=" + _targets.Bound!.Id + " depth=" + depth);
-        AdvanceDrawOrder();
         _targets.ClearDepth(Commands, depth);
     }
 
@@ -565,7 +563,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Counts one native draw, once in the total and once in its own kind.</summary>
     private void NoteNativeDraw(NativeDrawKind kind)
     {
-        AdvanceDrawOrder();
         VulkanStats.NoteNativeDraw();
         // The generic stated route is counted apart, so the counters below say what the dedicated
         // routes recorded (the differential tests compare the two).
@@ -612,57 +609,8 @@ public sealed unsafe partial class VulkanDevice
     {
         if (instanceCount <= 0) return false;
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
-        VulkanBuffer? entityCommands = null;
-        ulong entityOffset = 0;
-        EntityGeometryArena? entityGeometry = null;
-        uint firstIndex = 0;
-        bool packed = instanceCount == 1 && TryPrepareEntityGeometry(pipeline.Program, meshId, mesh!, out entityGeometry, out firstIndex);
-        EntityRecordDraw recordDraw = default;
-        bool records = packed && TryPrepareEntityRecord(pipeline, out recordDraw);
-        // An animated slice is addressed only through its record variant.
-        if (packed && !records && entityGeometry!.Animated) { packed = false; firstIndex = 0; }
-        uint firstInstance = records ? recordDraw.Row : 0;
-        bool entityDraw = instanceCount == 1 && PrepareEntityDraw(pipeline.Program, mesh!, out entityCommands, out entityOffset,
-            firstIndex, firstInstance);
-        // Only animated bodies are prepared without a rigid program; their producers run in BeginNativeDraw.
-        bool animatedEntityDraw = entityDraw && EntityVisibility is { RigidProgram: 0 };
-        var entityProducers = EntityProducerDispatches;
-        // Their producers may record ahead of the frame commands; see BeginProducerCommands.
-        _hoistEntityProducers = animatedEntityDraw && ComputeDeformationEnabled;
-        bool begun;
-        CommandBuffer commandBuffer;
-        VulkanFramebuffer? target;
-        try
-        {
-            begun = BeginNativeDraw(pipeline, textures, meshId, out commandBuffer, out target, instanceCount: instanceCount);
-        }
-        finally { _hoistEntityProducers = false; }
-        if (!begun)
-        {
-            return false;
-        }
-        if (animatedEntityDraw) NoteAnimatedEntityDraw(entityProducers);
-        // Its producers have run: an animated row's inputs move to the slot heaps if they can.
-        if (records) PlaceEntityRecordInputs(ref recordDraw);
-
-        if (records && recordDraw.Combinable && entityDraw &&
-            TryCombineEntityDraw(commandBuffer, recordDraw, entityGeometry, entityCommands!, entityOffset))
-        {
-            if (RenderTrace.Enabled) RenderTrace.Write("native mesh=" + meshId + " combined into the open entity draw");
-            ParticleInstancesDrawn(meshId);
-            return true;
-        }
-        if (records && !BindEntityRecord(commandBuffer, meshId, recordDraw))
-        {
-            // The indirect command already carries the reserved row. Leave it
-            // unused and draw the original program directly with zero base instance.
-            // Never rewrite visibility input which may already have been submitted.
-            firstInstance = 0; entityDraw = false;
-            // The original program reads its deformation by local vertex index.
-            if (entityGeometry!.Animated) { packed = false; firstIndex = 0; }
-            if (!BindProgramSets(commandBuffer, pipeline.Program, meshId)) return false;
-        }
-
+        if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer,
+                out VulkanFramebuffer? target, instanceCount: instanceCount)) return false;
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.Draw, pipeline.ProgramId, target!.Id, meshId));
         if (RenderTrace.Enabled)
@@ -672,17 +620,9 @@ public sealed unsafe partial class VulkanDevice
                 " instances=" + instanceCount);
         }
 
-        if (packed) BindEntityGeometry(commandBuffer, entityGeometry!);
-        else _meshes.Bind(commandBuffer, mesh!);
+        _meshes.Bind(commandBuffer, mesh!);
         BindParticleVisuals(commandBuffer, meshId);
-        if (entityDraw)
-        {
-            RecordEntityDraw(commandBuffer, entityCommands!, entityOffset, records && recordDraw.Combinable ? recordDraw.Segment : null,
-                recordDraw.Pipeline, entityGeometry);
-            ParticleInstancesDrawn(meshId);
-            return true;
-        }
-        _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, firstIndex, 0, firstInstance);
+        _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, 0, 0, 0);
         _meshes.NoteSceneDrawCommand();
         ParticleInstancesDrawn(meshId);
         NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
