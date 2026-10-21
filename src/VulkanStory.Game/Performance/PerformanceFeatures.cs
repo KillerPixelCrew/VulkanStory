@@ -15,7 +15,6 @@ internal static class PerformanceFeatures
         ParticleDistanceGate.Create(),
         ParticleBudgets.Create(),
         GpuParticleVisuals.Create(),
-        GpuParticleSimulation.Create(),
         EarlyItemMerge.Create(),
         DroppedItemCull.Create(essentials),
         UploadQueueSortSkip.Create(),
