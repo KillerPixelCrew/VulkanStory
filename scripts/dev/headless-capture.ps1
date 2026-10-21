@@ -122,9 +122,11 @@ if ($MainMenuOptions -and ($Commands -or $ParityDump -or $ControllerEnabled -or 
 }
 if (-not $MainMenuOptions -and $MainOptionsAction -ne 'open') { throw 'MainOptionsAction requires MainMenuOptions.' }
 if ($OptionsPage -ne 'Image' -and $MainOptionsAction -ne 'open') { throw 'Main Save/Cancel diagnostics require the Image page.' }
+
 function Throw-ScenarioError([string]$Category, [string]$Message) {
     throw "H01SCENARIO|$Category|$Message"
 }
+
 <#
 .SYNOPSIS
 Reads a scenario object with duplicate-name rejection.
@@ -148,6 +150,7 @@ function Get-ScenarioProperties($Element, [string]$Category) {
     }
     return ,$properties
 }
+
 <#
 .SYNOPSIS
 Checks allowed and required scenario property names.
@@ -172,6 +175,7 @@ function Require-ScenarioProperties($Properties, [string[]]$Allowed, [string[]]$
         if (-not $Properties.ContainsKey($name)) { Throw-ScenarioError $Category "Missing property: $name" }
     }
 }
+
 function Get-ScenarioString($Element, [string]$Category) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
         Throw-ScenarioError $Category 'Expected a nonempty string.'
@@ -180,6 +184,7 @@ function Get-ScenarioString($Element, [string]$Category) {
     if ([string]::IsNullOrEmpty($value)) { Throw-ScenarioError $Category 'Expected a nonempty string.' }
     return $value
 }
+
 function Get-ScenarioTick($Element) {
     $value = 0
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
@@ -188,6 +193,7 @@ function Get-ScenarioTick($Element) {
     }
     return $value
 }
+
 function Get-ScenarioName($Element) {
     $value = Get-ScenarioString $Element 'CaptureName'
     if (-not [regex]::IsMatch($value, '\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\z')) {
@@ -195,6 +201,7 @@ function Get-ScenarioName($Element) {
     }
     return $value
 }
+
 <#
 .SYNOPSIS
 Decodes one setting using its declared scalar type.
@@ -240,12 +247,14 @@ function Get-ScenarioSettingValue([string]$Name, [string]$Type, $Element) {
     }
     Throw-ScenarioError 'SettingsType' "Unsupported RendererSettings type for $Name."
 }
+
 function Normalize-ScenarioChoice([string]$Value, [string[]]$Choices, [string]$Name) {
     foreach ($choice in $Choices) {
         if ([string]::Equals($Value.Trim(), $choice, [StringComparison]::OrdinalIgnoreCase)) { return $choice }
     }
     Throw-ScenarioError 'SettingsEnum' ("Unknown choice for RendererSettings." + $Name + ": " + $Value)
 }
+
 <#
 .SYNOPSIS
 Validates a scenario settings action and advances validation choice state.
@@ -269,6 +278,7 @@ function Apply-ScenarioSettings($Values) {
         }
         $updates.Add($name, $value)
     }
+
     $upscalerInput = if ($updates.ContainsKey('Upscaler')) { $updates['Upscaler'] } else { $script:scenarioSettingsState['Upscaler'] }
     $upscaler = Normalize-ScenarioChoice $upscalerInput @('off','dlss','xess','fsr3','fsr4') 'Upscaler'
     $qualityInput = if ($updates.ContainsKey('UpscalerQuality')) { $updates['UpscalerQuality'] } else { $script:scenarioSettingsState['UpscalerQuality'] }
@@ -295,6 +305,7 @@ function Apply-ScenarioSettings($Values) {
     $script:scenarioSettingsState['AmbientOcclusion'] = $ao
     $script:scenarioSettingsState['AmbientOcclusionPreset'] = $aoPreset
 }
+
 function Get-ScenarioNumber($Element, [string]$Category) {
     $number = 0.0
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
@@ -303,6 +314,7 @@ function Get-ScenarioNumber($Element, [string]$Category) {
     }
     return $number
 }
+
 <#
 .SYNOPSIS
 Checks schema-one scenario actions before run creation.
@@ -472,6 +484,7 @@ function Test-ScenarioDocument($Root) {
     }
     return @{ Id = $scenarioId; ActionCount = $index; Context = $context }
 }
+
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
 foreach ($name in @('GpuChunkMeshing','ResidentTerrain','ResidentEntities','GpuParticleGeometry','GpuParticleVisualSimulation','GpuParticleSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
 foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
@@ -508,6 +521,7 @@ $script:scenarioSettingsState = @{
     AmbientOcclusion = 'auto'
     AmbientOcclusionPreset = 'medium'
 }
+
 $scenarioSourcePath = $null
 $scenarioSourceBytes = $null
 $scenarioId = $null
@@ -578,6 +592,7 @@ catch {
         childStarted=$false; childPid=$null; runDirectoryCreated=$false } | ConvertTo-Json -Compress
     exit 1
 }
+
 $gameRoot = (Resolve-Path -LiteralPath $GameDirectory).Path
 $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sourceRoot = (Resolve-Path -LiteralPath $SourceDataDirectory).Path
