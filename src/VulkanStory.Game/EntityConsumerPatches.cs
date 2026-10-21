@@ -15,6 +15,8 @@ internal static class EntityConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-entities";
     private static ProcessRuntime? runtime;
+    private static readonly HashSet<Assembly> stockRendererAssemblies = new();
+    internal static bool OwnsRenderer(Type type) => stockRendererAssemblies.Contains(type.Assembly);
     private static readonly MethodInfo Multi = AccessTools.Method(typeof(RenderAPIBase), "RenderMultiTextureMesh",
         [typeof(MultiTextureMeshRef), typeof(string), typeof(int)])!;
     private static readonly MethodInfo Draw = AccessTools.Method(typeof(ClientPlatformAbstract), "RenderMesh", [typeof(MeshRef)])!;
@@ -56,7 +58,7 @@ internal static class EntityConsumerPatches
     /// <param name="owner">Process runtime that owns this group and its session.</param>
     /// <returns>Validation, installation and removal callbacks for the startup transaction.</returns>
     /// <remarks>Binding or IL-anchor mismatches reject the group. Creating the group does not enable graphics routing.</remarks>
-    internal static StartupPatchGroup CreateGroup(ProcessRuntime owner)
+    internal static StartupPatchGroup CreateGroup(ProcessRuntime owner, Assembly essentials, Assembly survival)
     {
         var harmony = new Harmony(Owner); bool attempted = false;
         return new StartupPatchGroup("graphics-scene-entities", () =>
@@ -76,6 +78,9 @@ internal static class EntityConsumerPatches
         {
             if (runtime != null) throw new InvalidOperationException("Entity routing already has an owner.");
             runtime = owner; attempted = true;
+            stockRendererAssemblies.Add(typeof(EntityShapeRenderer).Assembly);
+            stockRendererAssemblies.Add(essentials);
+            stockRendererAssemblies.Add(survival);
             harmony.Patch(Multi, transpiler: new HarmonyMethod(typeof(EntityConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
             foreach (var target in new[] { OpaqueDispatch, AfterDispatch, ShadowDispatch })
                 harmony.Patch(target,
@@ -89,7 +94,11 @@ internal static class EntityConsumerPatches
         {
             if (!attempted) return;
             harmony.UnpatchAll(Owner);
-            if (ReferenceEquals(runtime, owner)) runtime = null;
+            if (ReferenceEquals(runtime, owner))
+            {
+                runtime = null;
+                stockRendererAssemblies.Clear();
+            }
             attempted = false;
         });
     }

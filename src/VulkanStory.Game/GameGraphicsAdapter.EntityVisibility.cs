@@ -18,15 +18,11 @@ internal sealed partial class GameGraphicsAdapter
     private readonly Dictionary<Type, (ulong Frame, bool Supported)> entityCullPolicies = new();
     private TerrainFrustumPlane[] entityCullPlaneSnapshot = [];
 
-    private static bool StockEntityRendererAssembly(Assembly assembly) =>
-        assembly == typeof(EntityShapeRenderer).Assembly || assembly == typeof(EntityItemRenderer).Assembly ||
-        assembly == typeof(EntityBlockFalling).Assembly;
-
     private bool SupportedEntityRenderer(EntityRenderer renderer)
     {
         var type = renderer.GetType();
         if (renderer.entity is EntityPlayer || (renderer is not EntityShapeRenderer && type != typeof(EntityItemRenderer)) ||
-            !StockEntityRendererAssembly(type.Assembly)) return false;
+            !EntityConsumerPatches.OwnsRenderer(type)) return false;
         // Device identity advances even when temporal reconstruction is disabled.
         ulong frame = device?.LatencyFrameId ?? 0;
         if (frame != 0 && entityCullPolicies.TryGetValue(type, out var saved) && saved.Frame == frame) return saved.Supported;
