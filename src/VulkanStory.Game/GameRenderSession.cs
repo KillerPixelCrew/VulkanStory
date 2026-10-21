@@ -150,7 +150,7 @@ internal sealed partial class GameRenderSession : IDisposable
                 throw new InvalidOperationException("Shader override policy was not prepared."));
             session.graphics.ConfigureFramebufferHost(session.CreateFramebufferHost());
             session.input = GamePlatformAdapter.Attach(platform, session.window, routing, session.CreatePlatformCallbacks(), windowBorder);
-            Performance.TerrainOcclusionCull.Attach(session.device.OcclusionDepth.Test, session.OcclusionCameraPosition,
+            Performance.TerrainOcclusionCull.Attach(session.OcclusionSource, session.OcclusionCameraPosition,
                 session.CaptureOcclusionDepth, () => session.device?.ResetTerrainOcclusion());
             var renderExtent = session.RenderExtent;
             platform.WindowSize.Width = renderExtent.Width;
