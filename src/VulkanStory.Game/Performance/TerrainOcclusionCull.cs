@@ -97,6 +97,7 @@ internal static class TerrainOcclusionCull
     // Main thread, once per visible chunk part per main-camera pass.
     private static void Postfix(ModelDataPoolLocation __instance, EnumFrustumCullMode mode, ref bool __result)
     {
+        if (ResidentTerrain.ParityActive) return;
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
         if (ResidentTerrain.IsResident(__instance)) return;
         if (GpuTerrainDraws.Collecting) return;

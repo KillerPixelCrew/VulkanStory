@@ -162,7 +162,8 @@ internal sealed partial class GameGraphicsAdapter
             value[12], value[13], value[14], value[15]);
         TerrainView view = ResidentTerrain.View(ResidentTerrain.Frustum(pool), position, renderer.TerrainEyeIndex,
             Matrix(combined), mode, uniform);
-        if (!renderer.DrawTerrainPass(pipeline, chunkTextures.AsSpan(0, textureCount), site, manager.Pass, manager.Atlas, view))
+        var parity = ResidentTerrain.ParityRequested ? ResidentTerrain.CaptureParity(manager, view, residentVisibility) : null;
+        if (!renderer.DrawTerrainPass(pipeline, chunkTextures.AsSpan(0, textureCount), site, manager.Pass, manager.Atlas, view, parity))
             return false;
         residentReplay = true;
         if (mode == EnumFrustumCullMode.CullNormal)

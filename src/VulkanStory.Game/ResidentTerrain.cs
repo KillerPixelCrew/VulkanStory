@@ -48,6 +48,10 @@ internal static class ResidentTerrain
     }
     private readonly record struct Publication(Manager? Manager, Bools? Visibility, int Lod, bool Compat);
     [ThreadStatic] private static Publication publication;
+    [ThreadStatic] internal static bool ParityActive;
+    internal static readonly bool ParityRequested = Environment.GetEnvironmentVariable("VULKANSTORY_TERRAIN_PARITY") == "1" ||
+        (HeadlessHarnessOptions.Enabled && HeadlessHarnessOptions.Scenario?.Actions.Any(action =>
+            action.Kind == HeadlessScenarioActionKind.Assert && action.Field is "terrainParityChecks" or "terrainParityMismatches") == true);
     private static readonly ConditionalWeakTable<MeshDataPoolManager, Manager> Managers = new();
     private static readonly ConditionalWeakTable<MeshDataPool, Pool> Pools = new();
     private static readonly ConditionalWeakTable<VAO, Pool> MeshPools = new();
@@ -244,6 +248,57 @@ internal static class ResidentTerrain
             if (slot.Visibility[buffer]) words[slot.Index >> 6] |= 1UL << (slot.Index & 63);
     }
     internal static int VisibilityWords => (nextSlot + 63) >> 6;
+
+    // Evaluate the real stock method now, on private copies: neither later culler/visibility
+    // updates nor IsVisible's FrustumVisible write may change the submitted frame or the game.
+    internal static Dictionary<int, TerrainParityPart> CaptureParity(Manager manager, in TerrainView view,
+        ReadOnlySpan<ulong> visibility)
+    {
+        var culler = new FrustumCulling
+        {
+            ViewDistanceSq = view.ViewDistanceSq, lod0BiasSq = (float)view.Lod0BiasSq, lod2BiasSq = view.Lod2BiasSq,
+            shadowRangeX = view.ShadowRangeX, shadowRangeZ = view.ShadowRangeZ
+        };
+        Player(culler) = new BlockPos(view.PlayerBlockX, (int)view.PlayerY, view.PlayerBlockZ);
+        static Vintagestory.API.Client.Plane Plane(TerrainPlane plane) => new()
+        { normalX = plane.A, normalY = plane.B, normalZ = plane.C, D = plane.D };
+        // The Plane constructor normalizes; these coefficients are already normalized.
+        Planes(culler) = [Plane(view.Plane0), Plane(view.Plane1), Plane(view.Plane2),
+            Plane(view.Plane3), Plane(view.Plane4), Plane(view.Plane5)];
+        var expected = new Dictionary<int, TerrainParityPart>();
+        bool previous = ParityActive;
+        ParityActive = true;
+        try
+        {
+            foreach (var pool in manager.Pools)
+            {
+                if (pool.Refused) continue;
+                foreach (var location in pool.Parts)
+                {
+                    if (!Parts.TryGetValue(location, out var part) || part.Handle == 0) continue;
+                    int slot = part.Slot.Index;
+                    bool visible = (uint)(slot >> 6) < (uint)visibility.Length &&
+                        (visibility[slot >> 6] & (1UL << (slot & 63))) != 0;
+                    Sphere sphere = location.FrustumCullSphere;
+                    var inputs = part.Desc with { CenterX = sphere.x, CenterY = sphere.y, CenterZ = sphere.z,
+                        Radius = sphere.radius, RadiusY = sphere.radiusY, RadiusZ = sphere.radiusZ,
+                        Hidden = location.Hide, LodLevel = location.LodLevel };
+                    var copy = new ModelDataPoolLocation
+                    {
+                        Hide = inputs.Hidden, LodLevel = inputs.LodLevel, FrustumVisible = location.FrustumVisible,
+                        // Both entries agree, so a subsequent global VisibleBufIndex swap cannot affect this snapshot.
+                        CullVisible = new Bools(visible, visible),
+                        FrustumCullSphere = sphere // Sphere is a value type; preserve its exact float bits.
+                    };
+                    expected.Add(part.Handle, new TerrainParityPart(copy.IsVisible((EnumFrustumCullMode)view.CullMode, culler),
+                        inputs, visible));
+                }
+            }
+        }
+        finally { ParityActive = previous; }
+        return expected;
+    }
+
     internal static TerrainView View(FrustumCulling culler, Vec3d camera, int eye, Matrix4x4 matrix, EnumFrustumCullMode mode, string uniform)
     {
         BlockPos player = Player(culler);

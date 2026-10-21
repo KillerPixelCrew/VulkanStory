@@ -18,7 +18,7 @@ float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word])
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
 #ifdef RESIDENT_TERRAIN
 // Persistent 64-byte rows: float xyz/radii xyz; first/count; lod; chunk slot;
-// Hide; pool mesh; render pass; atlas; two spare words. The view header ends at word 144,
+// Hide; pool mesh; render pass; atlas; part handle; spare word. The view header ends at word 144,
 // followed by the stock ChunkCuller visibility bitset (low uint first).
 layout(binding = 3, std430) readonly buffer ResidentParts { uint words[]; } resident;
 double d(uint word) {
@@ -91,7 +91,14 @@ bool hidden(uint index)
 {
 #ifdef RESIDENT_TERRAIN
     vec3 lo, hi;
-    if (residentHidden(index, lo, hi)) return true;
+    bool stockHidden = residentHidden(index, lo, hi);
+    if (inputData.words[p.inputWord + 87u] != 0u) {
+        // Diagnostic-only handles at the stock boundary, before historical-depth
+        // rejection. This runs in the same cull dispatch and never changes keep.
+        uint parityWord = p.outputWord + p.count * 7u + (p.count + 63u) / 64u + 1u;
+        outputData.words[parityWord + index] = stockHidden ? 0u : resident.words[(p.firstPart + index) * 16u + 14u];
+    }
+    if (stockHidden) return true;
     if (inputData.words[p.inputWord + 85u] == 0u) return false;
 #else
     uint record = 64u + index * 12u;

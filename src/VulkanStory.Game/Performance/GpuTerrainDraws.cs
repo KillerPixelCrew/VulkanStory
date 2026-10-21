@@ -24,7 +24,7 @@ internal static class GpuTerrainDraws
     private static readonly List<TerrainDrawBounds> bounds = new();
     private static readonly List<(int First, int Count)> ranges = new();
     private static MethodInfo? cullTarget, visibleTarget, removeTarget, rangeTarget, boxTarget;
-    internal static bool Collecting => collecting && scopeThread == Environment.CurrentManagedThreadId;
+    internal static bool Collecting => !ResidentTerrain.ParityActive && collecting && scopeThread == Environment.CurrentManagedThreadId;
     internal static ReadOnlySpan<TerrainFrustumPlane> Planes => gpuFrustum && snapshotValid && complete ? planes : default;
 
     private static MethodInfo Cull() => cullTarget ??= AccessTools.Method(typeof(MeshDataPool), nameof(MeshDataPool.FrustumCull),

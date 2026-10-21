@@ -21,6 +21,8 @@ internal readonly record struct TerrainPartDesc(int PoolMesh, int RenderPass, in
 
 internal readonly record struct TerrainPlane(double A, double B, double C, double D);
 
+internal readonly record struct TerrainParityPart(bool StockVisible, TerrainPartDesc Inputs, bool ChunkVisible);
+
 internal readonly record struct TerrainView(int Eye, double CameraX, double CameraY, double CameraZ,
     double PlayerX, double PlayerY, double PlayerZ,
     System.Numerics.Matrix4x4 ViewProjection /* camera-relative */, float ViewDistance,
@@ -47,7 +49,7 @@ public sealed unsafe partial class VulkanDevice
 
     // Rows are rebuilt only when producer state changes, never by walking parts at draw time.
     // GPU row (16 uints): float xyz/radii xyz, first/count, lod, chunk, Hide,
-    // pool, render pass, atlas, and two reserved words. Stock float centers are
+    // pool, render pass, atlas, part handle, and a reserved word. Stock float centers are
     // promoted to double by the cull shader before the stock arithmetic.
     private const int TerrainSceneRowWords = 16, TerrainSceneHeaderWords = 144;
     private readonly object _terrainSceneLock = new();
@@ -64,14 +66,50 @@ public sealed unsafe partial class VulkanDevice
     private VulkanBuffer?[] _terrainSceneInputs = [];
     private ulong[] _terrainSceneInputCursors = [];
     private TerrainScenePool[] _terrainScenePools = [];
+    private KeyValuePair<int, TerrainPartDesc>[] _terrainSceneRows = [];
     private readonly record struct TerrainScenePool(int Mesh, int Pass, int Atlas, int First, int Count,
         double OriginX, double OriginY, double OriginZ);
     private readonly record struct TerrainSceneDepth(int Texture, int Width, int Height, OcclusionCamera? Camera);
     private readonly TerrainSceneDepth[] _terrainSceneDepths = new TerrainSceneDepth[3];
     private readonly HashSet<int> _terrainSceneDrawnPools = new();
-    private readonly record struct TerrainSceneCullKey(int Pass, int Atlas, TerrainView View, ulong[] Visibility, bool Depth);
+    private readonly record struct TerrainSceneCullKey(int Pass, int Atlas, TerrainView View, ulong[] Visibility, bool Depth, bool Parity);
     private readonly record struct TerrainSceneIndirect(TerrainScenePool Pool, VulkanBuffer Buffer, ulong Offset, ulong CountOffset);
     private readonly Dictionary<TerrainSceneCullKey, TerrainSceneIndirect[]> _terrainSceneCulls = new();
+    private sealed record TerrainSceneParityResult(int Site, int Pass, int Atlas, TerrainView View, ulong Frame,
+        TerrainSceneIndirect[] Draws, KeyValuePair<int, TerrainPartDesc>[] Rows, IReadOnlyDictionary<int, TerrainParityPart> Expected);
+    private readonly Dictionary<int, List<TerrainSceneParityResult>> _terrainSceneParityResults = new();
+    private readonly Dictionary<int, List<VulkanBuffer>> _terrainSceneParityBuffers = new();
+    private int[] _terrainSceneParityBufferCursors = [];
+    private bool _terrainParityMismatchLogged;
+    public long TerrainParityChecks { get; private set; }
+    public long TerrainParityMismatches { get; private set; }
+
+    private static ulong TerrainSceneOutputBytes(TerrainScenePool pool, bool parity) =>
+        (ulong)(pool.Count * (parity ? 8L : 7L) + (pool.Count + 63) / 64 + 1) * 4;
+
+    private VulkanBuffer AllocateTerrainSceneOutput(ulong bytes, bool parity, out ulong offset)
+    {
+        if (!parity) return AllocateIndirect(checked((int)((bytes + 19) / 20)), out offset,
+            Math.Max(4UL, DrawPreparationLimits.MinStorageBufferOffsetAlignment));
+        // Generic indirect overflow buffers can retire before this slot returns.
+        // Diagnostic outputs therefore stay owned by the slot through fenced collection.
+        offset = 0;
+        if (_terrainSceneParityBufferCursors.Length == 0)
+            _terrainSceneParityBufferCursors = new int[_frames.FramesInFlight];
+        int slot = CurrentFrameSlot, index = _terrainSceneParityBufferCursors[slot]++;
+        if (!_terrainSceneParityBuffers.TryGetValue(slot, out var buffers))
+            _terrainSceneParityBuffers.Add(slot, buffers = new());
+        if (index == buffers.Count || buffers[index].Size < bytes)
+        {
+            var replacement = new VulkanBuffer(_context, bytes,
+                BufferUsageFlags.StorageBufferBit | BufferUsageFlags.IndirectBufferBit,
+                MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+                MemoryPoolClass.ReBar);
+            if (index == buffers.Count) buffers.Add(replacement);
+            else { buffers[index].Dispose(); buffers[index] = replacement; }
+        }
+        return buffers[index];
+    }
 
     internal bool IsTerrainPoolResident(int poolMesh) => _terrainSceneDrawnPools.Contains(poolMesh);
 
@@ -124,7 +162,8 @@ public sealed unsafe partial class VulkanDevice
     }
 
     internal bool DrawTerrainPass(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures,
-        int stockCallSite /* 0..13 */, int renderPass, int atlas, in TerrainView view)
+        int stockCallSite /* 0..13 */, int renderPass, int atlas, in TerrainView view,
+        IReadOnlyDictionary<int, TerrainParityPart>? parity = null)
     {
         _terrainSceneDrawnPools.Clear();
         if (!ResidentTerrainEnabled || !_context.ShaderFloat64Enabled || !_frameActive ||
@@ -136,14 +175,18 @@ public sealed unsafe partial class VulkanDevice
         lock (_terrainSceneLock)
             if (_terrainSceneFrameVersion != _terrainSceneVersion) return false;
         TerrainScenePool[] pools = _terrainScenePools.Where(pool => pool.Pass == renderPass && pool.Atlas == atlas).ToArray();
-        if (pools.Length == 0) return true;
+        if (pools.Length == 0)
+        {
+            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, [], parity);
+            return true;
+        }
         NativeUniform origin = pipeline.Uniform(string.IsNullOrEmpty(view.OriginUniform) ? "origin" : view.OriginUniform);
         // Every maintained native chunk program puts its per-pool origin in push
         // constants. This keeps the preflighted record/frame snapshots unchanged.
         if (origin.Block != NativeUniformBlock.Push || origin.Size != 12) return false;
         foreach (var pool in pools)
             if (!NativeMeshIsDrawable(pipeline, pool.Mesh, out _) || (uint)pool.Count > DrawPreparationLimits.MaxDrawIndirectCount ||
-                (ulong)(pool.Count * 7L + (pool.Count + 63) / 64 + 1) * 4 > DrawPreparationLimits.MaxStorageBufferRange)
+                TerrainSceneOutputBytes(pool, parity != null) > DrawPreparationLimits.MaxStorageBufferRange)
                 return false;
         if (!PreflightTerrainSceneDraw(pipeline, textures)) return false;
         ComputeProgram? program = TerrainSceneProgram();
@@ -152,13 +195,13 @@ public sealed unsafe partial class VulkanDevice
         bool useDepth = !view.Shadow && view.CullMode == 1 && stockCallSite is >= 5 and <= 9 && pipeline.Description.DepthWrite &&
             depth.Camera != null && _textures.Get(depth.Texture) != null;
         var key = new TerrainSceneCullKey(renderPass, atlas, view with { ViewProjection = default, OriginUniform = "" },
-            _terrainSceneVisibility.GetValueOrDefault(view.Eye) ?? Array.Empty<ulong>(), useDepth);
+            _terrainSceneVisibility.GetValueOrDefault(view.Eye) ?? Array.Empty<ulong>(), useDepth, parity != null);
         if (!_terrainSceneCulls.TryGetValue(key, out var prepared))
         {
             VulkanTexture sampled = _textures.Get(useDepth ? depth.Texture : _bindless!.PlaceholderTextureId(TextureKind.Texture2D))!;
             // Completed pyramids stay immutable throughout this logical frame,
             // including any partial submissions before a later eye or replay.
-            var input = TerrainSceneInput(view, useDepth ? depth : default, out ulong inputOffset);
+            var input = TerrainSceneInput(view, useDepth ? depth : default, parity != null, out ulong inputOffset);
             if (input == null) return false;
             var cullPipeline = _compute.PipelineFor(program, [1u, 0u, 0u, _context.DrawIndirectCountEnabled ? 1u : 0u]);
             var scatterPipeline = _compute.PipelineFor(program, [1u, 1u, 0u, _context.DrawIndirectCountEnabled ? 1u : 0u]);
@@ -168,9 +211,8 @@ public sealed unsafe partial class VulkanDevice
             {
                 var pool = pools[poolIndex];
                 int groups = (pool.Count + 63) / 64;
-                ulong bytes = (ulong)(pool.Count * 7 + groups + 1) * 4;
-                VulkanBuffer output = AllocateIndirect(checked((int)((bytes + 19) / 20)), out ulong outputOffset,
-                    Math.Max(4UL, DrawPreparationLimits.MinStorageBufferOffsetAlignment));
+                ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
+                VulkanBuffer output = AllocateTerrainSceneOutput(bytes, parity != null, out ulong outputOffset);
                 sets[poolIndex] = _computeArenas[CurrentFrameSlot].GetMixed(program.SetLayout,
                     [new ComputeImageWrite(0, DescriptorType.CombinedImageSampler, sampled.ViewOfMips(0, sampled.MipLevels),
                         _textures.Samplers.Get(ComputeNearest), ImageLayout.ShaderReadOnlyOptimal)], 1,
@@ -195,7 +237,7 @@ public sealed unsafe partial class VulkanDevice
                 var draw = prepared[poolIndex];
                 var pool = draw.Pool;
                 int groups = (pool.Count + 63) / 64;
-                ulong bytes = (ulong)(pool.Count * 7 + groups + 1) * 4;
+                ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
                 DescriptorSet set = sets[poolIndex];
                 _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
                 push[0] = (uint)(inputOffset / 4); push[1] = 0; push[2] = (uint)pool.Count; push[3] = (uint)pool.First;
@@ -211,7 +253,9 @@ public sealed unsafe partial class VulkanDevice
                     _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
                     _graph.NoteDispatch();
                 }
-                TerrainSceneBarrier(producer, draw.Buffer, draw.Offset, bytes, PipelineStageFlags2.DrawIndirectBit, AccessFlags2.IndirectCommandReadBit);
+                TerrainSceneBarrier(producer, draw.Buffer, draw.Offset, bytes,
+                    PipelineStageFlags2.DrawIndirectBit | (parity != null ? PipelineStageFlags2.HostBit : 0),
+                    AccessFlags2.IndirectCommandReadBit | (parity != null ? AccessFlags2.HostReadBit : 0));
             }
             _terrainSceneCulls.Add(key, prepared);
         }
@@ -234,7 +278,63 @@ public sealed unsafe partial class VulkanDevice
             _terrainOccluderMeshes.Add(pool.Mesh);
             _terrainSceneDrawnPools.Add(pool.Mesh);
         }
+        QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, prepared, parity);
         return true;
+    }
+
+    private void QueueTerrainSceneParity(int site, int pass, int atlas, in TerrainView view,
+        TerrainSceneIndirect[] draws, IReadOnlyDictionary<int, TerrainParityPart>? expected)
+    {
+        if (expected == null) return;
+        if (!_terrainSceneParityResults.TryGetValue(CurrentFrameSlot, out var results))
+            _terrainSceneParityResults.Add(CurrentFrameSlot, results = new());
+        // Record every pass, including a liquid replay that reuses the same cull output.
+        results.Add(new(site, pass, atlas, view, _frameCounter, draws, _terrainSceneRows, expected));
+    }
+
+    // Called only after this slot's fence completes, before its mapped/coherent
+    // diagnostic outputs can be reused. No wait or readback submit.
+    private void CollectTerrainSceneParity(int slot)
+    {
+        if (_terrainSceneParityBufferCursors.Length > slot) _terrainSceneParityBufferCursors[slot] = 0;
+        if (!_terrainSceneParityResults.TryGetValue(slot, out var results)) return;
+        foreach (var result in results)
+        {
+            var seen = new HashSet<int>();
+            foreach (var draw in result.Draws)
+            {
+                uint* handles = (uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset + 4);
+                for (int i = 0; i < draw.Pool.Count; i++)
+                {
+                    var row = result.Rows[draw.Pool.First + i];
+                    seen.Add(row.Key);
+                    bool found = result.Expected.TryGetValue(row.Key, out var expected);
+                    uint gpu = handles[i];
+                    TerrainParityChecks++;
+                    if (!found || gpu != (expected.StockVisible ? (uint)row.Key : 0u))
+                        NoteTerrainParityMismatch(result, row.Key, found ? expected : null, gpu, row.Value);
+                }
+            }
+            foreach (var expected in result.Expected)
+                if (!seen.Contains(expected.Key))
+                {
+                    TerrainParityChecks++;
+                    NoteTerrainParityMismatch(result, expected.Key, expected.Value, 0, null);
+                }
+        }
+        results.Clear();
+    }
+
+    private void NoteTerrainParityMismatch(TerrainSceneParityResult result, int handle, TerrainParityPart? stock,
+        uint gpuHandle, TerrainPartDesc? gpuInputs)
+    {
+        TerrainParityMismatches++;
+        if (_terrainParityMismatchLogged) return;
+        _terrainParityMismatchLogged = true;
+        RenderLogger?.Warning("VulkanStory: terrain parity mismatch: frame={0} site={1} pass={2} atlas={3} eye={4} part={5} " +
+            "stock={6} GPU={7} GPUHandle={8} stockInputs={9} GPUInputs={10} view={11}", result.Frame,
+            result.Site, result.Pass, result.Atlas, result.View.Eye, handle, stock?.StockVisible,
+            gpuHandle != 0, gpuHandle, stock, gpuInputs, result.View);
     }
 
     private bool PreflightTerrainSceneDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)
@@ -308,11 +408,13 @@ public sealed unsafe partial class VulkanDevice
                     row[5] = BitConverter.SingleToUInt32Bits(part.RadiusZ); row[6] = part.FirstIndex; row[7] = part.IndexCount;
                     row[8] = (uint)part.LodLevel; row[9] = (uint)part.ChunkSlot; row[10] = part.Hidden ? 1u : 0u;
                     row[11] = (uint)part.PoolMesh; row[12] = (uint)part.RenderPass; row[13] = (uint)part.Atlas;
+                    row[14] = (uint)parts[i].Key;
                     if (pools.Count == 0 || pools[^1].Mesh != part.PoolMesh)
                         pools.Add(new(part.PoolMesh, part.RenderPass, part.Atlas, i, 1, part.PoolOriginX, part.PoolOriginY, part.PoolOriginZ));
                     else pools[^1] = pools[^1] with { Count = pools[^1].Count + 1 };
                 }
                 _terrainScenePendingUpload = rows;
+                _terrainSceneRows = parts;
                 _terrainScenePools = pools.ToArray();
             }
             _terrainSceneFrozen = true;
@@ -339,7 +441,7 @@ public sealed unsafe partial class VulkanDevice
         return _compute.Get(_terrainSceneProgram);
     }
 
-    private VulkanBuffer? TerrainSceneInput(in TerrainView view, TerrainSceneDepth depth, out ulong offset)
+    private VulkanBuffer? TerrainSceneInput(in TerrainView view, TerrainSceneDepth depth, bool parity, out ulong offset)
     {
         _terrainSceneVisibility.TryGetValue(view.Eye, out var visibility);
         visibility ??= [];
@@ -392,6 +494,7 @@ public sealed unsafe partial class VulkanDevice
         words[78] = (uint)view.ViewDistanceSq; words[79] = (uint)view.CullMode;
         *(double*)(words + 80) = view.ShadowRangeX; *(double*)(words + 82) = view.ShadowRangeZ;
         words[86] = (uint)visibility.Length * 2;
+        words[87] = parity ? 1u : 0u;
         TerrainPlane[] planes = [view.Plane0, view.Plane1, view.Plane2, view.Plane3, view.Plane4, view.Plane5];
         for (int i = 0; i < planes.Length; i++)
         {
@@ -429,7 +532,7 @@ public sealed unsafe partial class VulkanDevice
     {
         lock (_terrainSceneLock)
         {
-            _terrainSceneParts.Clear(); _terrainScenePools = []; _terrainSceneVersion++;
+            _terrainSceneParts.Clear(); _terrainScenePools = []; _terrainSceneRows = []; _terrainSceneVersion++;
             _terrainSceneFrozen = false;
         }
         _terrainSceneVisibility.Clear();
@@ -445,5 +548,9 @@ public sealed unsafe partial class VulkanDevice
         _terrainSceneTable?.Dispose(); _terrainSceneTable = null;
         foreach (var input in _terrainSceneInputs) input?.Dispose();
         _terrainSceneInputs = []; _terrainSceneInputCursors = []; _terrainSceneParts.Clear(); _terrainScenePools = [];
+        _terrainSceneRows = []; _terrainSceneParityResults.Clear();
+        foreach (var buffers in _terrainSceneParityBuffers.Values)
+            foreach (var buffer in buffers) buffer.Dispose();
+        _terrainSceneParityBuffers.Clear(); _terrainSceneParityBufferCursors = [];
     }
 }
