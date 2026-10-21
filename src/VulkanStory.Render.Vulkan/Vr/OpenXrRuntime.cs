@@ -16,7 +16,7 @@ internal readonly record struct OpenXrEyeView(Vector3 Position, Quaternion Orien
 
 // The renderer owns XR and Vulkan together. The game adapter supplies only eye cameras
 // and finished colour; game types and Harmony never enter the runtime.
-internal sealed unsafe class OpenXrRuntime : IDisposable
+internal sealed unsafe class OpenXrRuntime : XrRuntime
 {
     private readonly XR api;
     private Instance instance;
@@ -40,17 +40,8 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
     private bool projectionFrame;
     private SessionState state;
     private long referenceChangeTime = long.MaxValue;
-    internal int ReferenceRevision { get; private set; }
-    internal bool Running { get; private set; }
-    internal bool ShouldRender { get; private set; }
-    internal int Width { get; private set; }
-    internal int Height { get; private set; }
-    internal V.Format ColorFormat { get; private set; }
-    internal V.Format TransferFormat => ColorFormat == V.Format.B8G8R8A8Srgb ? V.Format.B8G8R8A8Unorm : V.Format.R8G8B8A8Unorm;
-    internal float? FrameDeltaSeconds { get; private set; }
-    internal string Status { get; private set; } = "OpenXR is starting.";
-    internal string RuntimeName { get; private set; } = "";
-    internal string FrameStatus { get; private set; } = "Waiting for session readiness.";
+    private int referenceRevision;
+    internal override int ReferenceRevision => referenceRevision;
 
     private OpenXrRuntime(XR api) => this.api = api;
 
@@ -119,7 +110,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         Status = RuntimeName + ": waiting for the Vulkan session.";
     }
 
-    internal V.Result CreateVulkanInstance(V.Vk vk, V.InstanceCreateInfo* createInfo, out V.Instance created)
+    internal override V.Result CreateVulkanInstance(V.Vk vk, V.InstanceCreateInfo* createInfo, out V.Instance created)
     {
         var info = new VulkanInstanceCreateInfoKHR { Type = StructureType.VulkanInstanceCreateInfoKhr,
             SystemId = system, VulkanCreateInfo = createInfo,
@@ -131,7 +122,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         return (V.Result)result;
     }
 
-    internal V.PhysicalDevice SelectPhysicalDevice(V.Instance vkInstance)
+    internal override V.PhysicalDevice? SelectPhysicalDevice(V.Instance vkInstance)
     {
         var info = new VulkanGraphicsDeviceGetInfoKHR { Type = StructureType.VulkanGraphicsDeviceGetInfoKhr,
             SystemId = system, VulkanInstance = new VkHandle(vkInstance.Handle) };
@@ -140,7 +131,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         return new V.PhysicalDevice(handle.Handle);
     }
 
-    internal V.Result CreateVulkanDevice(V.Vk vk, V.PhysicalDevice physical, V.DeviceCreateInfo* createInfo, out V.Device created)
+    internal override V.Result CreateVulkanDevice(V.Vk vk, V.PhysicalDevice physical, V.DeviceCreateInfo* createInfo, out V.Device created)
     {
         var info = new VulkanDeviceCreateInfoKHR { Type = StructureType.VulkanDeviceCreateInfoKhr,
             SystemId = system, VulkanPhysicalDevice = new VkHandle(physical.Handle), VulkanCreateInfo = createInfo,
@@ -152,7 +143,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         return (V.Result)result;
     }
 
-    internal void Attach(VulkanContext device)
+    internal override void Attach(VulkanContext device)
     {
         context = device;
         var graphics = new GraphicsBindingVulkanKHR { Type = StructureType.GraphicsBindingVulkanKhr,
@@ -232,7 +223,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         catch { DestroySwapchains(); throw; }
     }
 
-    internal void PollEvents()
+    internal override void PollEvents()
     {
         if (terminal || session.Handle == 0) return;
         while (true)
@@ -280,7 +271,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         }
     }
 
-    internal void BeginFrame()
+    internal override void BeginFrame()
     {
         if (frameOpen) throw new InvalidOperationException("The previous OpenXR frame has not ended.");
         ShouldRender = false;
@@ -302,7 +293,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         previousDisplayTime = displayTime;
         if (elapsed > 0) FrameDeltaSeconds = (float)Math.Min(elapsed / 1e9, .1);
         projectionFrame = true;
-        if (displayTime >= referenceChangeTime) { ReferenceRevision++; referenceChangeTime = long.MaxValue; }
+        if (displayTime >= referenceChangeTime) { referenceRevision++; referenceChangeTime = long.MaxValue; }
         Array.Clear(copied);
         if (frame.ShouldRender == 0) { FrameStatus = "Runtime requests no rendering."; return; }
         for (int eye = 0; eye < 2; eye++) views[eye] = new View { Type = StructureType.View };
@@ -332,7 +323,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         FrameStatus = "Eye images acquired and ready.";
     }
 
-    internal OpenXrEyeView Eye(int eye)
+    internal override OpenXrEyeView Eye(int eye)
     {
         View view = views[eye];
         return new(new Vector3(view.Pose.Position.X, view.Pose.Position.Y, view.Pose.Position.Z),
@@ -352,11 +343,11 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         return true;
     }
 
-    internal V.Image Image(int eye) => imageReady[eye] ? new(images[eye][acquired[eye]].Image) :
+    internal override V.Image Image(int eye) => imageReady[eye] ? new(images[eye][acquired[eye]].Image) :
         throw new InvalidOperationException("OpenXR eye image has not completed its acquire/wait sequence.");
-    internal void MarkCopied(int eye) => copied[eye] = true;
-    internal void UseHeadLockedMenu() => projectionFrame = false;
-    internal void SuppressFrame()
+    internal override void MarkCopied(int eye) => copied[eye] = true;
+    internal override void UseHeadLockedMenu() => projectionFrame = false;
+    internal override void SuppressFrame()
     {
         ShouldRender = false;
         FrameStatus = "Scene transition/loading hold; submitting no scene layer.";
@@ -364,7 +355,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
 
     // Called after the renderer has submitted both copies to the binding's graphics
     // queue. xrEndFrame shares that queue's external-synchronization lock.
-    internal void EndFrame()
+    internal override void EndFrame()
     {
         if (!frameOpen) return;
         if (terminal) { ClearFrame(); return; }
@@ -426,7 +417,7 @@ internal sealed unsafe class OpenXrRuntime : IDisposable
         Width = Height = 0;
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         // The Vulkan device owner drains GPU work before disposing XR; its borrowed
         // images must not be destroyed while our submitted copy commands reference them.

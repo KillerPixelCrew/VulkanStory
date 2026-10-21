@@ -58,7 +58,7 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Initialized before Vulkan calls; owned by the created context.</summary>
     public StreamlineRuntime? Streamline;
-    public Vr.OpenXrRuntime? OpenXr;
+    public Vr.XrRuntime? OpenXr;
 
     /// <summary>Reserve the four distinct queues required by the FidelityFX Vulkan FG proxy.</summary>
     public bool PrepareFrameGenerationQueues;
@@ -768,9 +768,8 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
     {
         failureReason = null;
 
-        if (options.OpenXr != null)
+        if (options.OpenXr?.SelectPhysicalDevice(Instance) is { } selected)
         {
-            PhysicalDevice selected = options.OpenXr.SelectPhysicalDevice(Instance);
             if (!IsUsable(selected, out failureReason)) return false;
             if (options.PreferredVendorId is { } vendor && Api.GetPhysicalDeviceProperties(selected).VendorID != vendor)
             {

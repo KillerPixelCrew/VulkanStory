@@ -25,7 +25,9 @@
     <Compile Include="VulkanDevice.cs" />
     <Compile Include="VulkanDevice.LatencyHost.cs" />
     <Compile Include="VulkanDevice.OpenXr.cs" />
+    <Compile Include="Vr/XrRuntime.cs" />
     <Compile Include="Vr/OpenXrRuntime.cs" />
+    <Compile Include="Vr/SimulatedXrRuntime.cs" />
     <Compile Include="VulkanDevice.Binding.cs" />
     <Compile Include="VulkanDevice.Dlss.cs" />
     <Compile Include="VulkanDevice.FrameGeneration.cs" />

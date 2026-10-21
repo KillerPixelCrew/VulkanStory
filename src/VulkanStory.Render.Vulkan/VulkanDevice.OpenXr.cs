@@ -6,7 +6,9 @@ namespace VulkanStory.Render.Vulkan;
 public sealed unsafe partial class VulkanDevice
 {
     internal bool OpenXrEnabled { get; set; }
-    internal OpenXrRuntime? OpenXr { get; private set; }
+    internal bool OpenXrSimulated { get; set; }
+    internal (int Width, int Height) OpenXrSimulatedEyeSize { get; set; }
+    internal XrRuntime? OpenXr { get; private set; }
     internal string OpenXrStatus => OpenXr is { } xr ? xr.Status + " " + xr.FrameStatus : openXrRefusal ?? "OpenXR disabled.";
     private string? openXrRefusal;
     private int openXrTransfer;
@@ -15,7 +17,13 @@ public sealed unsafe partial class VulkanDevice
 
     private void PrepareOpenXr(bool headless)
     {
-        if (!OpenXrEnabled || headless) return;
+        if (!OpenXrEnabled) return;
+        if (OpenXrSimulated)
+        {
+            OpenXr = SimulatedXrRuntime.Create(OpenXrSimulatedEyeSize);
+            return;
+        }
+        if (headless) return;
         try { OpenXr = OpenXrRuntime.Create(); }
         catch (Exception error)
         {
@@ -26,7 +34,7 @@ public sealed unsafe partial class VulkanDevice
     }
 
     // Capture the current eye before the shared raster targets are cleared for the
-    // next eye. The OpenXR images are borrowed; only this transfer texture is owned.
+    // next eye. The XR runtime owns the eye images; this device owns the transfer texture.
     internal void CopyOpenXrEye(int eye)
     {
         if (OpenXr is not { ShouldRender: true } xr) return;
@@ -58,8 +66,12 @@ public sealed unsafe partial class VulkanDevice
             transfer.Image, ImageLayout.TransferDstOptimal, 1, &blit, Filter.Nearest);
         _textures.TransitionTexture(commands, transfer, ImageLayout.TransferSrcOptimal);
         Image destination = xr.Image(eye);
+        // Simulated images are reused across in-flight frames. Real XR acquire/wait
+        // owns that ordering; the simulated copies need a dependency on earlier writes.
+        bool simulated = xr is SimulatedXrRuntime;
         var barrier = new ImageMemoryBarrier2 { SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.None, SrcAccessMask = AccessFlags2.None,
+            SrcStageMask = simulated ? PipelineStageFlags2.AllCommandsBit : PipelineStageFlags2.None,
+            SrcAccessMask = simulated ? AccessFlags2.MemoryWriteBit : AccessFlags2.None,
             DstStageMask = PipelineStageFlags2.TransferBit, DstAccessMask = AccessFlags2.TransferWriteBit,
             OldLayout = ImageLayout.Undefined, NewLayout = ImageLayout.TransferDstOptimal,
             SrcQueueFamilyIndex = Vk.QueueFamilyIgnored, DstQueueFamilyIndex = Vk.QueueFamilyIgnored,
