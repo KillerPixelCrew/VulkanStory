@@ -40,7 +40,6 @@ internal sealed class VulkanMesh : IDisposable
     internal int EntityIndexPrefixCount { get; set; }
     internal uint EntityMaxIndex { get; set; }
     internal int[] EntityStreamPrefixBytes { get; } = new int[MeshManager.MaxBuffers];
-    internal bool EntityGeometryMappingExposed { get; set; }
     internal float[] ParticleHistoryShadow = [];
     internal int ParticleHistoryCount;
 
@@ -794,7 +793,6 @@ internal sealed unsafe class MeshManager : IDisposable
         VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
         if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
         // A borrowed pointer can be written again without another API notification.
-        mesh.EntityGeometryMappingExposed = true;
         mesh.GeometryRevision++;
         InvalidateEntityBounds(mesh, slot);
         return WritableBuffer(mesh, slot, buffer).Mapped;
