@@ -11,6 +11,7 @@ namespace VulkanStory.Render.Vulkan;
 
 public sealed unsafe partial class VulkanDevice
 {
+    private static readonly bool CheckParticleVisuals = Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS") == "1";
     private sealed class ParticleVisualSource(int id)
     {
         internal readonly int MeshId = id;
@@ -225,7 +226,7 @@ public sealed unsafe partial class VulkanDevice
 
     private void CaptureParticleVisualCheck(CommandBuffer command, VulkanBuffer output, VulkanMesh mesh, ParticleVisualSource source, int count, bool withHistory)
     {
-        if (!CheckJointPoses) return;
+        if (!CheckParticleVisuals) return;
         if (particleVisualReadbacks.Length == 0)
         {
             particleVisualReadbacks = new VulkanBuffer?[_frames.FramesInFlight];
