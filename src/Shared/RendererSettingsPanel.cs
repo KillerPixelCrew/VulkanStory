@@ -262,7 +262,6 @@ internal sealed class RendererSettingsPanel
                 Switch("Resident entities", "ResidentEntities");
                 Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute particle visual evolution", "GpuParticleVisualSimulation");
-                Switch("Compute particle fixed steps", "GpuParticleSimulation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");
                 Switch("Cull distant entity shadows", "EntityShadowCull");
