@@ -36,8 +36,6 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     public Dictionary<EnumShaderType, ShaderModule> Modules { get; } = new();
     // Original immutable binaries are retained for internal variants of either shader origin.
     internal Dictionary<EnumShaderType, byte[]> OriginalSpirv { get; } = new();
-    internal bool EntityRecordsAttempted { get; set; }
-    internal ShaderProgramResources? EntityRecordVariant { get; set; }
 
     /// <summary>The shared pipeline layout this program's pipelines are created against. Not owned.</summary>
     public PipelineLayout PipelineLayout { get; }
@@ -379,7 +377,6 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        EntityRecordVariant?.Dispose();
 
         Vk api = _context.Api;
         // A device's shared layout belongs to the device.
