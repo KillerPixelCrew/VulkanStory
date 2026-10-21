@@ -36,6 +36,7 @@ internal sealed partial class GameRenderSession
     // later, so its ordinary post-frame dump cannot represent the TAA input.
     private void CaptureNativeTaaInputs()
     {
+        if (OpenXrEye == 1) return; // One consumer-seam sample for the logical frame.
         CaptureQuadMotionInputs();
         if (!NativeTaaInputCapture || !HeadlessHarnessOptions.Enabled ||
             !services.RendererSettings.EffectiveTaa || scenarioTick == null ||
@@ -160,6 +161,7 @@ internal sealed partial class GameRenderSession
     // recording, while Primary still holds the scene and before the post tail.
     private void CaptureSrInputs()
     {
+        if (OpenXrEye == 1) return;
         if (!SrInputCaptureScheduled || !Graphics.UpscaledThisFrame || PrimaryTarget is not { } primary ||
             platform.FrameBuffers.Count <= GameGraphicsAdapter.UpscaledSceneIndex ||
             platform.FrameBuffers[GameGraphicsAdapter.UpscaledSceneIndex] is not { } output) return;
