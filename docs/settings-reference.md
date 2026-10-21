@@ -36,7 +36,6 @@ values to supported ranges, depending on the entry point.
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
 | `ResidentTerrain`, `ResidentEntities` | Live Performance-page switches; default on |
 | `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
-| `GpuParticleSimulation` | Live Performance-page switch; default off |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
 Changing restart settings writes the next-launch request. It does not recreate the
@@ -195,7 +194,6 @@ choice and range definitions live in
 | `GpuTerrainNoise` | bool | `true` | Batches supported stock singleplayer terrain noise and density signs, retaining original CPU threshold/block decisions. Applies live. |
 | `GpuParticleGeometry` | bool | `true` | Produces supported cube, quad and rain current/previous render geometry in compute; unsupported inputs keep the original shader path. Applies live. |
 | `GpuParticleVisualSimulation` | bool | `true` | Computes supported stock size, opacity and colour evolution with CPU materialization for unsupported inputs and transitions. Applies live. |
-| `GpuParticleSimulation` | bool | `false` | Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling; applies live. |
 | `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth). |
 | `ParallelChunkReads` | bool | `true` | Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load. |
 | `WorldgenWorkers` | string | `"auto"` | Live singleplayer worldgen worker policy: off, auto, 1, 2 or 3. |
