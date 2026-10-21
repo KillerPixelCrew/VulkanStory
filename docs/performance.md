@@ -38,8 +38,7 @@ client package does not install these patches into a separate dedicated server.
 
 The [settings reference](settings-reference.md) lists exact property names and
 defaults. Resident terrain/entities, particle geometry and particle visual evolution
-default on; fixed-step `GpuParticleSimulation` defaults off. Distances and particle
-budgets have explicit numeric defaults.
+default on. Distances and particle budgets have explicit numeric defaults.
 
 ## Resident scene submission
 
@@ -190,9 +189,7 @@ loop covers quads, cubes, asynchronous and secondary particles.
 
 `GpuParticleGeometry` and `GpuParticleVisualSimulation` independently enable
 supported compute geometry and size/opacity/colour evolution, both by default.
-`GpuParticleSimulation` is a separate opt-in fixed-step path. It retains CPU world
-snapshots, confirmation and ordered shared RNG work; an unavailable, late or
-mismatched result keeps the stock CPU tick. Particle budgets apply independently
+Particle physics uses the stock CPU tick. Particle budgets apply independently
 of these compute controls.
 
 ## Capture performance
