@@ -59,6 +59,10 @@ Explicit attachment-capture frame; a negative value uses First.
 Enables the child's diagnostic AO output environment flag.
 .PARAMETER AsyncPipelines
 Enables asynchronous pipelines in the isolated child via its environment flag.
+.PARAMETER Stereo
+Runs the two-eye render path against a simulated XR runtime without a headset; cannot combine with MainMenuOptions.
+.PARAMETER StereoEyeSize
+Optional simulated eye dimensions as WxH, with both dimensions in 128..8192. Empty uses the renderer default.
 .PARAMETER Visible
 Allows the diagnostic child window to be visible and changes verifier visibility expectations.
 .PARAMETER Focus
@@ -70,7 +74,7 @@ Selects menu-only Options capture without opening/copying a world. Accepts only 
 .PARAMETER MainOptionsAction
 Menu-only open/save/cancel action; Save/Cancel require the Image page.
 .PARAMETER OptionsPage
-Requested original Options page: Image, Generation, Effects, Device, or Status.
+Requested original Options page: Image, Generation, Effects, Device, Performance, or Status.
 .PARAMETER Python
 Python command used by snapshot-world.py for SQLite backup.
 #>
@@ -104,6 +108,13 @@ param(
     [int]$ParityFrame = -1,
     [switch]$AoOutputs,
     [switch]$AsyncPipelines,
+    [switch]$Stereo,
+    [ValidateScript({
+        $_ -eq '' -or ($_ -match '^([0-9]{3,4})[xX]([0-9]{3,4})$' -and
+            [int]$Matches[1] -ge 128 -and [int]$Matches[1] -le 8192 -and
+            [int]$Matches[2] -ge 128 -and [int]$Matches[2] -le 8192)
+    }, ErrorMessage = 'StereoEyeSize must be empty or WxH with both dimensions in 128..8192.')]
+    [string]$StereoEyeSize = '',
     [switch]$Visible,
     [switch]$Focus,
     [switch]$KeepOpen,
@@ -117,6 +128,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($Focus -and (-not $Visible -or -not $Scenario)) { throw 'Focus requires Visible and an explicit scenario.' }
 if ($KeepOpen -and -not $Visible) { throw 'KeepOpen requires the explicitly selected Visible diagnostic mode.' }
+if ($MainMenuOptions -and $Stereo) { throw 'MainMenuOptions cannot combine with Stereo.' }
 if ($MainMenuOptions -and ($Commands -or $ParityDump -or $ControllerEnabled -or $TouchEnabled)) {
     throw 'MainMenuOptions cannot combine with commands/parity/input profiles.'
 }
@@ -732,6 +744,9 @@ if (-not $menuOnly) { $launchArguments += @('--openWorld',$World) }
 foreach ($argument in $launchArguments) { $info.ArgumentList.Add($argument) }
 $info.Environment['DOTNET_STARTUP_HOOKS'] = $hook
 $info.Environment['VULKANSTORY_HEADLESS'] = '1'
+$info.Environment['VULKANSTORY_HEADLESS_STEREO'] = if ($Stereo) { '1' } else { '0' }
+if ($StereoEyeSize) { $info.Environment['VULKANSTORY_HEADLESS_STEREO_SIZE'] = $StereoEyeSize }
+else { [void]$info.Environment.Remove('VULKANSTORY_HEADLESS_STEREO_SIZE') }
 $info.Environment['VULKANSTORY_HEADLESS_VISIBLE'] = if ($Visible) { '1' } else { '0' }
 $info.Environment['VULKANSTORY_HEADLESS_REQUIRE_FOCUS'] = if ($Focus) { '1' } else { '0' }
 $info.Environment['VULKANSTORY_HEADLESS_MAIN_OPTIONS'] = if ($menuOnly) { '1' } else { '0' }

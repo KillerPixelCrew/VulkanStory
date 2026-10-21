@@ -108,6 +108,25 @@ flags require the deferred child-owned input profile and are refused when it is 
   generation presents generated frames only to a visible, focused window, so run
   `-FrameGeneration dlss` checks in this mode.
 
+## Simulated stereo
+
+`-Stereo` runs the two-eye render path against a simulated XR runtime with fixed
+eye poses and asymmetric FOVs. No headset is needed and nothing is displayed on a
+headset; the desktop mirror window still presents and stays hidden by default.
+`-StereoEyeSize '1440x1600'` selects each eye's dimensions (128..8192 per axis);
+omit it or pass an empty string for the renderer default. These options set
+`VULKANSTORY_HEADLESS_STEREO` and `VULKANSTORY_HEADLESS_STEREO_SIZE`. Stereo works
+with world scenarios, command scripts and settings overrides, and cannot combine
+with `-MainMenuOptions`.
+
+World frames, timed commands, scenario ticks and completion advance once per
+stereo frame. Captured PNG/PPM files contain the window-sized desktop mirror;
+stats and scenario `renderWidth`/`renderHeight` describe the eye render targets,
+while `displayWidth`/`displayHeight` describe the mirror window. Scene draw counters
+include both eye passes. Stereo uses raster rendering with desktop temporal
+providers and frame generation inactive. The game's `MaxFps`/`FrameSleep` frame
+cap is not applied while XR is running; the hidden harness's 33ms throttle remains.
+
 ## Outputs
 
 | Path | Contents |
@@ -151,10 +170,10 @@ Scenario checkpoints and assertions expose cumulative renderer fields:
 
 Terrain parity is enabled by `VULKANSTORY_TERRAIN_PARITY=1`, or automatically
 when the scenario contains an assertion on either parity field. The adapter
-evaluates the game's `IsVisible` on private copies of the same frozen inputs;
-the GPU records its decision before historical-depth rejection. Comparisons are
-collected only when the owning frame slot completes. A zero mismatch count with
-zero checks does not establish parity.
+evaluates the game's `IsVisible` on private copies of the same frozen inputs and
+compares GPU decisions at the stock-visibility and applicable historical-depth
+boundaries. Comparisons are collected only when the owning frame slot completes.
+A zero mismatch count with zero checks does not establish parity.
 
 Scene draw counters count commands, not indirect entries, instances or visible
 objects. A populated resident group can record a command whose GPU culling keeps

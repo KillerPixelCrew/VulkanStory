@@ -7,6 +7,10 @@ public static class HeadlessHarnessOptions
 {
     /// <summary>True when <c>VULKANSTORY_HEADLESS</c> asks for an invisible window.</summary>
     public static readonly bool Enabled = ResolveFlag("VULKANSTORY_HEADLESS");
+    /// <summary>Runs both stereo eyes against a simulated XR runtime without a headset.</summary>
+    public static readonly bool Stereo = Enabled && ResolveFlag("VULKANSTORY_HEADLESS_STEREO");
+    /// <summary>Simulated eye dimensions, or (0, 0) to use the renderer default.</summary>
+    public static readonly (int Width, int Height) StereoEyeSize = ResolveStereoEyeSize();
     /// <summary>Explicit diagnostic launch only; routine harness windows stay hidden.</summary>
     public static readonly bool KeepWindowHidden = Enabled && !ResolveFlag("VULKANSTORY_HEADLESS_VISIBLE");
     /// <summary>Explicit focused check: request focus once and wait for it before the scenario starts.</summary>
@@ -119,6 +123,19 @@ public static class HeadlessHarnessOptions
         // A negative or absurd step would make the simulation meaningless rather
         // than reproducible; one second per frame is already far past useful.
         return seconds > 0f && seconds <= 1f ? seconds : 0f;
+    }
+
+    private static (int Width, int Height) ResolveStereoEyeSize()
+    {
+        string? value = Environment.GetEnvironmentVariable("VULKANSTORY_HEADLESS_STEREO_SIZE");
+        if (string.IsNullOrWhiteSpace(value)) return (0, 0);
+        string[] parts = value.Trim().Split(new char[] { 'x', 'X' });
+        return parts.Length == 2 &&
+            int.TryParse(parts[0], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out int width) && width is >= 128 and <= 8192 &&
+            int.TryParse(parts[1], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out int height) && height is >= 128 and <= 8192
+            ? (width, height) : (0, 0);
     }
 
     private static long[] ResolveFrames()

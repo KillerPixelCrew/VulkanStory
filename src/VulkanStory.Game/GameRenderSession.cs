@@ -104,7 +104,9 @@ internal sealed partial class GameRenderSession : IDisposable
             session.window.Sync();
             session.device = new VulkanDevice { RenderLogger = new GameRenderLogger(platform.Logger) };
             session.ConfigureDevice();
-            session.device.OpenXrEnabled = services.RendererSettings.Settings.OpenXr && !HeadlessHarnessOptions.Enabled;
+            session.device.OpenXrEnabled = (services.RendererSettings.Settings.OpenXr && !HeadlessHarnessOptions.Enabled) || HeadlessHarnessOptions.Stereo;
+            session.device.OpenXrSimulated = HeadlessHarnessOptions.Stereo;
+            session.device.OpenXrSimulatedEyeSize = HeadlessHarnessOptions.StereoEyeSize;
             services.RendererSettings.StereoRendering = session.device.OpenXrEnabled;
             session.device.NativeShadersEnabled = services.RendererSettings.Settings.NativeShaders;
             session.device.EnableStreamline = services.RendererSettings.Settings.Streamline;
