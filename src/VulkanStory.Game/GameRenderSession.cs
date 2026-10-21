@@ -199,10 +199,6 @@ internal sealed partial class GameRenderSession : IDisposable
                 Performance.PerformancePatchSet.IsInstalled("gpu-terrain-noise");
             Device.PrepareTerrainNoise(terrainNoise, terrainNoise ? Performance.GpuTerrainNoise.Gradients : []);
             Performance.GpuTerrainNoise.Configure(Device, terrainNoise);
-            bool chunkMeshing = services.RendererSettings.Settings.GpuChunkMeshing &&
-                Performance.PerformancePatchSet.IsInstalled("gpu-chunk-meshing");
-            Device.PrepareChunkMeshing(chunkMeshing);
-            Performance.GpuChunkMeshing.Configure(Device, chunkMeshing);
             GameFrameSettings settings = pendingFrameSettings ?? throw new InvalidOperationException("SDL input must start this frame before rendering.");
             pendingFrameSettings = null;
             float delta = (float)frameClock.Elapsed.TotalSeconds;
