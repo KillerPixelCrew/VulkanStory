@@ -23,7 +23,7 @@ internal static class SceneProfileComposition
             ChunkConsumerPatches.CreateGroup(runtime),
             CloudConsumerPatches.CreateGroup(runtime, essentials),
             CloudMapConsumerPatches.CreateGroup(runtime, essentials),
-            EntityConsumerPatches.CreateGroup(runtime),
+            EntityConsumerPatches.CreateGroup(runtime, essentials, survival),
             HeldItemMotionConsumerPatches.CreateGroup(runtime, essentials),
             InstanceMotionConsumerPatches.CreateGroup(runtime, survival),
             RigidContentMotionConsumerPatches.CreateGroup(runtime, survival),
