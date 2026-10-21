@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using VulkanStory.Contracts;
 
 namespace VulkanStory.Render.Vulkan.Core;
 
@@ -20,30 +18,6 @@ internal sealed unsafe class ClientUniformBuffer
     public byte[] Shadow { get; }
     /// <summary>Shader block name used to resolve the client buffer association.</summary>
     public string BlockName { get; }
-    internal JointPoseSnapshot? JointPose { get; private set; }
-    internal JointPoseSnapshot? SourceJointPose { get; private set; }
-
-    internal bool SetJointPose(JointPoseSnapshot pose)
-    {
-        if (pose.JointCount * 64 > Shadow.Length || Shadow.Length % 64 != 0) return false;
-        if (ReferenceEquals(SourceJointPose, pose)) return true;
-        var next = pose.JointCount * 64 == Shadow.Length ? pose.Retain() : JointPoseSnapshot.WithPrefix(pose, JointPose, Shadow);
-        ClearJointPose(); JointPose = next; SourceJointPose = pose.Retain(); Version++;
-        return true;
-    }
-
-    internal void MaterializeJointPose()
-    {
-        if (JointPose is not { } pose) return;
-        pose.CopyMatrices(MemoryMarshal.Cast<byte, float>(Shadow.AsSpan()));
-        ClearJointPose(); Version++;
-    }
-
-    internal void ClearJointPose()
-    {
-        JointPose?.Release(); SourceJointPose?.Release(); JointPose = SourceJointPose = null;
-    }
-
     /// <summary>Bumped by every write, so an unchanged block reuses its snapshot.</summary>
     public uint Version { get; private set; } = 1;
 
@@ -60,8 +34,6 @@ internal sealed unsafe class ClientUniformBuffer
     /// <param name="size">Byte count to compare and copy.</param>
     public void Write(IntPtr data, int offset, int size)
     {
-        if (JointPose != null && offset == 0 && size == Shadow.Length) { ClearJointPose(); Version++; }
-        else MaterializeJointPose();
         // A client that re-uploads identical bytes before every draw would
         // otherwise cost a fresh ring slice per draw; comparing is cheaper.
         var incoming = new ReadOnlySpan<byte>((void*)data, size);
@@ -91,7 +63,6 @@ internal sealed unsafe class ClientUniformBuffer
     /// <returns>Whether a valid snapshot is available; false when the arena has no room.</returns>
     public bool TrySnapshot(uint frame, FrameSlot slot, out uint offset)
     {
-        MaterializeJointPose();
         if (HasSnapshotFor(frame))
         {
             offset = SnapshotOffset;
@@ -180,7 +151,6 @@ internal sealed class ClientUniformBufferManager
     public void DeleteUniformBuffer(int handle)
     {
         if (!Buffers.Remove(handle, out ClientUniformBuffer? ubo)) return;
-        ubo.ClearJointPose();
 
         if (ubo.BlockName.Length > 0 &&
             BoundBlocks.TryGetValue(ubo.BlockName, out int bound) && bound == handle)
