@@ -315,11 +315,13 @@ public sealed unsafe partial class VulkanDevice
             push[0] = (uint)(inputOffset / 4); push[1] = (uint)poolCount;
             _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
             _context.Api.CmdPushConstants(producer, program.Layout, ShaderStageFlags.ComputeBit, 0, 8, push);
+            _gpuTimestamps?.MarkPreGraphics(producer, "pg_terrain_cull");
             _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, cullPipeline);
             _context.Api.CmdDispatch(producer, groups, 1, 1);
             _graph.NoteDispatch();
             TerrainSceneBarrier(producer, output, outputOffset, bytes, PipelineStageFlags2.ComputeShaderBit,
                 AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
+            _gpuTimestamps?.MarkPreGraphics(producer, "pg_terrain_scatter");
             _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, scatterPipeline);
             _context.Api.CmdDispatch(producer, groups, 1, 1);
             _graph.NoteDispatch();
