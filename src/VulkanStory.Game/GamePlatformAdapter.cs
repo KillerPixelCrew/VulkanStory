@@ -24,6 +24,7 @@ internal sealed record GamePlatformCallbacks(
     /// <summary>Renderer state: the last frame could not acquire/present (parked or skipped swapchain). Null falls back to the drawable extent.</summary>
     internal Func<bool>? PresentationStalled { get; init; }
     internal Func<bool>? HeadsetRunning { get; init; }
+    /// <summary>Optional render extent independent of the SDL mirror; mono leaves this null.</summary>
     internal Func<(int Width, int Height)>? RenderExtent { get; init; }
     /// <summary>Receives one SDL gamepad button transition (instance id, button index, down) in queue order during the drain.</summary>
     internal Action<int, int, bool>? GamepadButton { get; init; }
@@ -439,7 +440,10 @@ internal sealed class GamePlatformAdapter : IDisposable
                 QueueLayout();
                 break;
             case SdlEventPump.WindowPixelSizeChanged:
-                if (e.Data1 > 0 && e.Data2 > 0) pendingPixels = (e.Data1, e.Data2);
+                // Mirror pixels cannot resize the XR eye targets. Match QueueLayout's
+                // override while preserving the exact SDL event dimensions for mono.
+                if (e.Data1 > 0 && e.Data2 > 0)
+                    pendingPixels = callbacks?.RenderExtent?.Invoke() ?? (e.Data1, e.Data2);
                 break;
             case SdlEventPump.WindowMaximized:
             case SdlEventPump.WindowRestored:
