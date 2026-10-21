@@ -769,19 +769,6 @@ internal sealed unsafe class MeshManager : IDisposable
         return slot < 0 ? mesh.Indices : mesh.Buffers[slot];
     }
 
-    /// <summary>Obtains an existing range for ordered GPU writes, without mapping or renaming the pool.</summary>
-    internal VulkanBuffer GpuWriteRange(int meshId, int slot, ulong offset, ulong bytes)
-    {
-        VulkanMesh mesh = Get(meshId) ?? throw new ArgumentException("Unknown mesh.", nameof(meshId));
-        if (slot < 0 || slot >= MaxBuffers) throw new ArgumentOutOfRangeException(nameof(slot));
-        VulkanBuffer buffer = mesh.Buffers[slot] ?? throw new InvalidOperationException("Missing mesh stream.");
-        if ((buffer.Usage & BufferUsageFlags.StorageBufferBit) == 0 || offset > buffer.Size || bytes > buffer.Size - offset)
-            throw new ArgumentOutOfRangeException(nameof(bytes), "GPU mesh range exceeds storage capacity.");
-        mesh.GeometryRevision++;
-        InvalidateEntityBounds(mesh, slot);
-        return buffer;
-    }
-
     /// <summary>Returns a borrowed writable mapped pointer, or zero for unmapped or shared immutable storage.</summary>
     public IntPtr MappedPointer(int meshId, int slot)
     {
