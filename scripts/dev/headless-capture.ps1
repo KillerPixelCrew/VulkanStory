@@ -122,11 +122,9 @@ if ($MainMenuOptions -and ($Commands -or $ParityDump -or $ControllerEnabled -or 
 }
 if (-not $MainMenuOptions -and $MainOptionsAction -ne 'open') { throw 'MainOptionsAction requires MainMenuOptions.' }
 if ($OptionsPage -ne 'Image' -and $MainOptionsAction -ne 'open') { throw 'Main Save/Cancel diagnostics require the Image page.' }
-
 function Throw-ScenarioError([string]$Category, [string]$Message) {
     throw "H01SCENARIO|$Category|$Message"
 }
-
 <#
 .SYNOPSIS
 Reads a scenario object with duplicate-name rejection.
@@ -150,7 +148,6 @@ function Get-ScenarioProperties($Element, [string]$Category) {
     }
     return ,$properties
 }
-
 <#
 .SYNOPSIS
 Checks allowed and required scenario property names.
@@ -175,7 +172,6 @@ function Require-ScenarioProperties($Properties, [string[]]$Allowed, [string[]]$
         if (-not $Properties.ContainsKey($name)) { Throw-ScenarioError $Category "Missing property: $name" }
     }
 }
-
 function Get-ScenarioString($Element, [string]$Category) {
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
         Throw-ScenarioError $Category 'Expected a nonempty string.'
@@ -184,7 +180,6 @@ function Get-ScenarioString($Element, [string]$Category) {
     if ([string]::IsNullOrEmpty($value)) { Throw-ScenarioError $Category 'Expected a nonempty string.' }
     return $value
 }
-
 function Get-ScenarioTick($Element) {
     $value = 0
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
@@ -193,7 +188,6 @@ function Get-ScenarioTick($Element) {
     }
     return $value
 }
-
 function Get-ScenarioName($Element) {
     $value = Get-ScenarioString $Element 'CaptureName'
     if (-not [regex]::IsMatch($value, '\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\z')) {
@@ -201,7 +195,6 @@ function Get-ScenarioName($Element) {
     }
     return $value
 }
-
 <#
 .SYNOPSIS
 Decodes one setting using its declared scalar type.
@@ -247,14 +240,12 @@ function Get-ScenarioSettingValue([string]$Name, [string]$Type, $Element) {
     }
     Throw-ScenarioError 'SettingsType' "Unsupported RendererSettings type for $Name."
 }
-
 function Normalize-ScenarioChoice([string]$Value, [string[]]$Choices, [string]$Name) {
     foreach ($choice in $Choices) {
         if ([string]::Equals($Value.Trim(), $choice, [StringComparison]::OrdinalIgnoreCase)) { return $choice }
     }
     Throw-ScenarioError 'SettingsEnum' ("Unknown choice for RendererSettings." + $Name + ": " + $Value)
 }
-
 <#
 .SYNOPSIS
 Validates a scenario settings action and advances validation choice state.
@@ -278,7 +269,6 @@ function Apply-ScenarioSettings($Values) {
         }
         $updates.Add($name, $value)
     }
-
     $upscalerInput = if ($updates.ContainsKey('Upscaler')) { $updates['Upscaler'] } else { $script:scenarioSettingsState['Upscaler'] }
     $upscaler = Normalize-ScenarioChoice $upscalerInput @('off','dlss','xess','fsr3','fsr4') 'Upscaler'
     $qualityInput = if ($updates.ContainsKey('UpscalerQuality')) { $updates['UpscalerQuality'] } else { $script:scenarioSettingsState['UpscalerQuality'] }
@@ -305,7 +295,6 @@ function Apply-ScenarioSettings($Values) {
     $script:scenarioSettingsState['AmbientOcclusion'] = $ao
     $script:scenarioSettingsState['AmbientOcclusionPreset'] = $aoPreset
 }
-
 function Get-ScenarioNumber($Element, [string]$Category) {
     $number = 0.0
     if ($Element.ValueKind -ne [System.Text.Json.JsonValueKind]::Number -or
@@ -314,7 +303,6 @@ function Get-ScenarioNumber($Element, [string]$Category) {
     }
     return $number
 }
-
 <#
 .SYNOPSIS
 Checks schema-one scenario actions before run creation.
@@ -460,7 +448,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('particleSimulationCenterDispatchesRecorded','particleSimulationCentersRecorded','particleInstanceDispatchesRecorded','particleInstancesRecorded','particleInstanceHistoriesRecorded','particleSimulationCapacityFallbacks','successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','deformationDispatchesRecorded','deformationCacheReuses','entityVisibilityDispatchesRecorded','entityIndirectDrawsRecorded','entityCombinedDrawsRecorded','entityGeometryPacksRecorded','entityPackedDrawsRecorded','entityRecordDrawsRecorded','entityRecordRefusals','entityResidentRowsCaptured','entityResidentCaptureRefusals','entityRunsOpened','entityRunBreaks','entityRunBreakContiguity','entityRunBreakOrder','entityRunBreakScope','entityRunBreakDynamicState','entityRunBreakFrameSet','entityRunBreakProgram','entityRunBreakReplaced','entityAnimatedDrawsRecorded','entityAnimatedProducerDraws','entityAnimatedWorldOnlyProducerDraws','entityAnimatedHoistedProducerDraws','entityAnimatedCombinedDrawsRecorded','jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','terrainParityChecks','terrainParityMismatches','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','chunkMeshingJobsCompleted','chunkMeshingEqualityChecks','chunkMeshingEqualityMismatches','chunkMeshingFacesPublished','chunkMeshingPayloadsDetached','chunkMeshingPayloadsSuperseded','chunkMeshingStalePublicationsDropped','chunkMeshingRequeuedDuringFlight','chunkMeshingAdmissionRefusals','chunkMeshingAdmissionRefusalsControl','chunkMeshingAdmissionRefusalsWorld','chunkMeshingAdmissionRefusalsBackend','chunkMeshingAdmissionRefusalsForeignPatch','chunkMeshingAdmissionRefusalsCapacity','chunkMeshingAdmissionRefusalsAllocation','chunkMeshingAdmissionRefusalsSnapshot','chunkMeshingAdmissionRefusalsUnsupportedProducer','chunkMeshingAdmissionRefusalsOrderedFallback','chunkMeshingAdmissionRefusalsBacklog','chunkMeshingGenerationWaitMilliseconds','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleSimulationDispatchesRecorded','particleSimulationStepsRecorded','particleSimulationStepsApplied','particleSimulationChecks','particleLiquidPolicyChecks','particleLiquidAirChecks','particleLiquidDeathChecks','particleLiquidWetChecks','particleLiquidPolicyApplied','particleLiquidAirApplied','particleLiquidDeathApplied','particleLiquidWetApplied','particleLightingGpuSteps','particleLightingCpuFallbackSteps','particleDirectionGpuSteps','particleDirectionCpuFallbackSteps','particleSimulationFloatError','particleSimulationPositionError','particleSimulationSubmitMilliseconds','particleSimulationGpuMilliseconds','particleSimulationCpuBenchmarkSteps','particleSimulationGpuBenchmarkSteps','particleSimulationFallbackBenchmarkSteps','particleSimulationCpuBenchmarkMilliseconds','particleSimulationGpuBenchmarkMilliseconds','particleSimulationFallbackBenchmarkMilliseconds','particleSimulationCpuBenchmarkPools','particleSimulationGpuBenchmarkPools','particleSimulationCpuBenchmarkPoolMilliseconds','particleSimulationGpuBenchmarkPoolMilliseconds','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks','jointPoseChecks','cpuJointProductsDeferred','cpuJointFacadeChecks')) {
+                    if ($field -notin @('particleSimulationCenterDispatchesRecorded','particleSimulationCentersRecorded','particleInstanceDispatchesRecorded','particleInstancesRecorded','particleInstanceHistoriesRecorded','particleSimulationCapacityFallbacks','successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','entityResidentRowsCaptured','entityResidentCaptureRefusals','particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','terrainParityChecks','terrainParityMismatches','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','chunkMeshingJobsCompleted','chunkMeshingEqualityChecks','chunkMeshingEqualityMismatches','chunkMeshingFacesPublished','chunkMeshingPayloadsDetached','chunkMeshingPayloadsSuperseded','chunkMeshingStalePublicationsDropped','chunkMeshingRequeuedDuringFlight','chunkMeshingAdmissionRefusals','chunkMeshingAdmissionRefusalsControl','chunkMeshingAdmissionRefusalsWorld','chunkMeshingAdmissionRefusalsBackend','chunkMeshingAdmissionRefusalsForeignPatch','chunkMeshingAdmissionRefusalsCapacity','chunkMeshingAdmissionRefusalsAllocation','chunkMeshingAdmissionRefusalsSnapshot','chunkMeshingAdmissionRefusalsUnsupportedProducer','chunkMeshingAdmissionRefusalsOrderedFallback','chunkMeshingAdmissionRefusalsBacklog','chunkMeshingGenerationWaitMilliseconds','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleSimulationDispatchesRecorded','particleSimulationStepsRecorded','particleSimulationStepsApplied','particleSimulationChecks','particleLiquidPolicyChecks','particleLiquidAirChecks','particleLiquidDeathChecks','particleLiquidWetChecks','particleLiquidPolicyApplied','particleLiquidAirApplied','particleLiquidDeathApplied','particleLiquidWetApplied','particleLightingGpuSteps','particleLightingCpuFallbackSteps','particleDirectionGpuSteps','particleDirectionCpuFallbackSteps','particleSimulationFloatError','particleSimulationPositionError','particleSimulationSubmitMilliseconds','particleSimulationGpuMilliseconds','particleSimulationCpuBenchmarkSteps','particleSimulationGpuBenchmarkSteps','particleSimulationFallbackBenchmarkSteps','particleSimulationCpuBenchmarkMilliseconds','particleSimulationGpuBenchmarkMilliseconds','particleSimulationFallbackBenchmarkMilliseconds','particleSimulationCpuBenchmarkPools','particleSimulationGpuBenchmarkPools','particleSimulationCpuBenchmarkPoolMilliseconds','particleSimulationGpuBenchmarkPoolMilliseconds','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -484,9 +472,8 @@ function Test-ScenarioDocument($Root) {
     }
     return @{ Id = $scenarioId; ActionCount = $index; Context = $context }
 }
-
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('GpuChunkMeshing','ResidentTerrain','ResidentEntities','GpuSharedDeformation','GpuEntityDrawPreparation','GpuJointPosePreparation','GpuParticleGeometry','GpuParticleVisualSimulation','GpuParticleSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
+foreach ($name in @('GpuChunkMeshing','ResidentTerrain','ResidentEntities','GpuParticleGeometry','GpuParticleVisualSimulation','GpuParticleSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
 foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
     $script:settingTypes.Add($name, 'bool')
 }
@@ -496,9 +483,9 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('jointPoseChecksPassed','cpuJointFacadeValid','cpuParticleFacadeValid','particleVisualChecksPassed','terrainNoiseAvailable','terrainDensityAvailable','chunkMeshingAvailable','terrainComparisonComplete','terrainComparisonOutputEqual','terrainComparisonGpuEquivalent','particleSimulationAvailable','particleSimulationSeparateQueue','particleSimulationChecksPassed','particleLiquidPolicyCoveragePassed','particleLiquidWetAvailable')) { $script:assertionKinds.Add($name, 'bool') }
-foreach ($name in @('jointPoseDispatchesRecorded','jointPoseCacheReuses','worldGeometryDispatchesRecorded','worldGeometryCacheReuses','particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','terrainParityChecks','terrainParityMismatches','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','chunkMeshingJobsCompleted','chunkMeshingEqualityChecks','chunkMeshingEqualityMismatches','chunkMeshingFacesPublished','chunkMeshingPayloadStorageBytes','chunkMeshingPayloadsDetached','chunkMeshingPayloadsSuperseded','chunkMeshingStalePublicationsDropped','chunkMeshingRequeuedDuringFlight','chunkMeshingAdmissionRefusals','chunkMeshingAdmissionRefusalsControl','chunkMeshingAdmissionRefusalsWorld','chunkMeshingAdmissionRefusalsBackend','chunkMeshingAdmissionRefusalsForeignPatch','chunkMeshingAdmissionRefusalsCapacity','chunkMeshingAdmissionRefusalsAllocation','chunkMeshingAdmissionRefusalsSnapshot','chunkMeshingAdmissionRefusalsUnsupportedProducer','chunkMeshingAdmissionRefusalsOrderedFallback','chunkMeshingAdmissionRefusalsBacklog','chunkMeshingGenerationWaitMilliseconds','chunkMeshingPendingGenerations','chunkMeshingUndrawnChunks','chunkMeshingUndrawnEntities','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleSimulationDispatchesRecorded','particleSimulationStepsRecorded','particleSimulationStepsApplied','particleSimulationChecks','particleLiquidPolicyChecks','particleLiquidAirChecks','particleLiquidDeathChecks','particleLiquidWetChecks','particleLiquidPolicyApplied','particleLiquidAirApplied','particleLiquidDeathApplied','particleLiquidWetApplied','particleLightingGpuSteps','particleLightingCpuFallbackSteps','particleDirectionGpuSteps','particleDirectionCpuFallbackSteps','particleSimulationFloatError','particleSimulationPositionError','particleSimulationSubmitMilliseconds','particleSimulationGpuMilliseconds','particleSimulationCpuBenchmarkSteps','particleSimulationGpuBenchmarkSteps','particleSimulationFallbackBenchmarkSteps','particleSimulationCpuBenchmarkMilliseconds','particleSimulationGpuBenchmarkMilliseconds','particleSimulationFallbackBenchmarkMilliseconds','particleSimulationCpuBenchmarkPools','particleSimulationGpuBenchmarkPools','particleSimulationCpuBenchmarkPoolMilliseconds','particleSimulationGpuBenchmarkPoolMilliseconds','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks','jointPoseChecks','jointPoseMaximumRelativeError','cpuJointProductsDeferred','cpuJointFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
-foreach ($name in @('particleSimulationCenterDispatchesRecorded','particleSimulationCentersRecorded','particleInstanceDispatchesRecorded','particleInstancesRecorded','particleInstanceHistoriesRecorded','particleSimulationCapacityFallbacks','deformationDispatchesRecorded','deformationCacheReuses','entityVisibilityDispatchesRecorded','entityIndirectDrawsRecorded','entityCombinedDrawsRecorded','entityGeometryPacksRecorded','entityPackedDrawsRecorded','entityRecordDrawsRecorded','entityRecordRefusals','entityResidentRowsCaptured','entityResidentCaptureRefusals','entityRunsOpened','entityRunBreaks','entityRunBreakContiguity','entityRunBreakOrder','entityRunBreakScope','entityRunBreakDynamicState','entityRunBreakFrameSet','entityRunBreakProgram','entityRunBreakReplaced','entityAnimatedDrawsRecorded','entityAnimatedProducerDraws','entityAnimatedWorldOnlyProducerDraws','entityAnimatedHoistedProducerDraws','entityAnimatedCombinedDrawsRecorded')) { $script:assertionKinds.Add($name, 'number') }
+foreach ($name in @('cpuParticleFacadeValid','particleVisualChecksPassed','terrainNoiseAvailable','terrainDensityAvailable','chunkMeshingAvailable','terrainComparisonComplete','terrainComparisonOutputEqual','terrainComparisonGpuEquivalent','particleSimulationAvailable','particleSimulationSeparateQueue','particleSimulationChecksPassed','particleLiquidPolicyCoveragePassed','particleLiquidWetAvailable')) { $script:assertionKinds.Add($name, 'bool') }
+foreach ($name in @('particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','terrainParityChecks','terrainParityMismatches','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','chunkMeshingJobsCompleted','chunkMeshingEqualityChecks','chunkMeshingEqualityMismatches','chunkMeshingFacesPublished','chunkMeshingPayloadStorageBytes','chunkMeshingPayloadsDetached','chunkMeshingPayloadsSuperseded','chunkMeshingStalePublicationsDropped','chunkMeshingRequeuedDuringFlight','chunkMeshingAdmissionRefusals','chunkMeshingAdmissionRefusalsControl','chunkMeshingAdmissionRefusalsWorld','chunkMeshingAdmissionRefusalsBackend','chunkMeshingAdmissionRefusalsForeignPatch','chunkMeshingAdmissionRefusalsCapacity','chunkMeshingAdmissionRefusalsAllocation','chunkMeshingAdmissionRefusalsSnapshot','chunkMeshingAdmissionRefusalsUnsupportedProducer','chunkMeshingAdmissionRefusalsOrderedFallback','chunkMeshingAdmissionRefusalsBacklog','chunkMeshingGenerationWaitMilliseconds','chunkMeshingPendingGenerations','chunkMeshingUndrawnChunks','chunkMeshingUndrawnEntities','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleSimulationDispatchesRecorded','particleSimulationStepsRecorded','particleSimulationStepsApplied','particleSimulationChecks','particleLiquidPolicyChecks','particleLiquidAirChecks','particleLiquidDeathChecks','particleLiquidWetChecks','particleLiquidPolicyApplied','particleLiquidAirApplied','particleLiquidDeathApplied','particleLiquidWetApplied','particleLightingGpuSteps','particleLightingCpuFallbackSteps','particleDirectionGpuSteps','particleDirectionCpuFallbackSteps','particleSimulationFloatError','particleSimulationPositionError','particleSimulationSubmitMilliseconds','particleSimulationGpuMilliseconds','particleSimulationCpuBenchmarkSteps','particleSimulationGpuBenchmarkSteps','particleSimulationFallbackBenchmarkSteps','particleSimulationCpuBenchmarkMilliseconds','particleSimulationGpuBenchmarkMilliseconds','particleSimulationFallbackBenchmarkMilliseconds','particleSimulationCpuBenchmarkPools','particleSimulationGpuBenchmarkPools','particleSimulationCpuBenchmarkPoolMilliseconds','particleSimulationGpuBenchmarkPoolMilliseconds','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
+foreach ($name in @('particleSimulationCenterDispatchesRecorded','particleSimulationCentersRecorded','particleInstanceDispatchesRecorded','particleInstancesRecorded','particleInstanceHistoriesRecorded','particleSimulationCapacityFallbacks','entityResidentRowsCaptured','entityResidentCaptureRefusals')) { $script:assertionKinds.Add($name, 'number') }
 foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive','managedDependencyResolutionVerified')) {
     $script:assertionKinds.Add($name, 'bool')
 }
@@ -521,7 +508,6 @@ $script:scenarioSettingsState = @{
     AmbientOcclusion = 'auto'
     AmbientOcclusionPreset = 'medium'
 }
-
 $scenarioSourcePath = $null
 $scenarioSourceBytes = $null
 $scenarioId = $null
@@ -592,7 +578,6 @@ catch {
         childStarted=$false; childPid=$null; runDirectoryCreated=$false } | ConvertTo-Json -Compress
     exit 1
 }
-
 $gameRoot = (Resolve-Path -LiteralPath $GameDirectory).Path
 $packageRoot = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sourceRoot = (Resolve-Path -LiteralPath $SourceDataDirectory).Path
