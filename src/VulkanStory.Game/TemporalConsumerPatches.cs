@@ -118,12 +118,15 @@ internal static class TemporalConsumerPatches
         else if (tailFailure == null) tailFailure = graphics.CompiledMotionStatus;
         owner.CompleteSceneMotion(complete, tailFailure);
     }
-    private static void BeforeStage(ClientMain __instance, EnumRenderStage __0, float __1,
+    private static void BeforeStage(ClientMain __instance, EnumRenderStage __0, ref float __1,
         out (GameGraphicsAdapter Graphics, EnumRenderStage? Previous)? __state)
     {
         __state = null;
+        // RenderAfter* restores DeltaTimeLimiter before triggering its stage.
+        // Keep the replay a view even when the harness fixes the logical delta.
+        if (runtime?.Routing.RoutingEnabled == true && runtime.Session.OpenXrEye == 1) __1 = 0;
         if (__0 == EnumRenderStage.Before && TryOwner(__instance, out var owner) && owner.InScene)
-            owner.Begin(__1);
+            owner.Begin(__1, runtime!.Session.OpenXrEye);
         if (TryOwner(__instance, out var stageOwner))
         {
             stageOwner.NoteSceneStage(__0);

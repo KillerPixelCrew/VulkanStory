@@ -70,12 +70,17 @@ internal sealed class GameTemporalOwner(ClientPlatformWindows platform, VulkanDe
         motionFailed = opaqueEntered = afterOitEntered = false;
         motionDrawFailure = null;
     }
-    /// <summary>Advances camera/warp history and temporal frame identity at the scene Before stage.</summary>
+    /// <summary>Advances camera/warp history and temporal frame identity once at the scene Before stage.</summary>
     /// <param name="dt">Original render delta in seconds, converted to milliseconds for provider timing.</param>
+    /// <param name="openXrEye">Session view index; the right eye reuses the left eye's logical frame.</param>
     /// <remarks>Requires scene entry and a current client; captures FOV/dimension changes as reset reasons.</remarks>
-    internal void Begin(float dt)
+    internal void Begin(float dt, int openXrEye = -1)
     {
         if (!inScene || client == null) throw new InvalidOperationException("Temporal advance is outside the world render loop.");
+        // Stereo replays the Before stage to prepare the current view. History,
+        // warp, jitter and frame identity belong to the presented frame instead.
+        // CaptureWorld/RecordProjection still capture the current eye below.
+        if (openXrEye == 1) return;
         var targets = platform.FrameBuffers;
         FrameBufferRef? primary = targets is { Count: > 0 } ? targets[0] : null;
         bool temporal = !settings.StereoRendering && (settings.EffectiveTaa || settings.UpscalerReplacesTaa || settings.Settings.FrameGeneration != "off");

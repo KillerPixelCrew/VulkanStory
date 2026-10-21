@@ -1,5 +1,6 @@
 using System.Numerics;
 using HarmonyLib;
+using Vintagestory.API.Client;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
 using Vintagestory.API.MathTools;
@@ -20,6 +21,8 @@ internal sealed partial class GameRenderSession
     private Vector3 referencePosition;
     private Quaternion referenceRotation;
     private static readonly AccessTools.FieldRef<ScreenManager, GuiScreen> ActiveScreen = AccessTools.FieldRefAccess<ScreenManager, GuiScreen>("CurrentScreen");
+    private static readonly AccessTools.FieldRef<ClientMain, FrustumCulling> EyeFrustum =
+        AccessTools.FieldRefAccess<ClientMain, FrustumCulling>("frustumCuller");
 
     internal void RenderStereo(ScreenManager manager, float delta, Action<ScreenManager, float> render)
     {
@@ -99,6 +102,11 @@ internal sealed partial class GameRenderSession
         FillView(camera.CameraMatrixOrigin, orientation, x - origin.X, y - origin.Y, z - origin.Z);
         for (int index = 0; index < 16; index++) camera.CameraMatrixOriginf[index] = (float)camera.CameraMatrixOrigin[index];
         client.Set3DProjection(camera.ZFar, camera.Fov);
+        // Before-stage entity visibility runs before MainRenderLoop's ordinary
+        // frustum refresh. It must see this eye, not the previous rendered view.
+        client.GlLoadMatrix(camera.CameraMatrix);
+        EyeFrustum(client).CalcFrustumEquations(client.EntityPlayer.Pos.AsBlockPos,
+            OpenXrConsumerPatches.Perspective(client), camera.CameraMatrix);
         // TODO(VR-01): sample poses again near submission, with per-frame owned UBO
         // storage and synchronization; never overwrite matrices already read by the GPU.
     }
