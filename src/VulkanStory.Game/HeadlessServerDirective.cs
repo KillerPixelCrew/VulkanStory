@@ -39,10 +39,6 @@ internal static class HeadlessServerDirective
         if (parts.Length == 1 && parts[0] == "fallingsource") { HeadlessFallingMeshSource.Arm(client); return; }
         if (parts.Length == 1 && parts[0] == "resolve-library") { ModCompatibilityConsumerPatches.VerifyManagedDependencyResolution(); return; }
         if (parts.Length == 1 && parts[0] == "evolution-particles") { HeadlessParticleEvolution.Emit(client); return; }
-        if (parts.Length == 1 && parts[0] == "step-particles") { HeadlessParticleEvolution.EmitSteps(client, false); return; }
-        if (parts.Length == 1 && parts[0] == "step-particles-async") { HeadlessParticleEvolution.EmitSteps(client, true); return; }
-        if (parts.Length == 1 && parts[0] == "liquid-particles" && HeadlessHarnessOptions.Enabled)
-        { HeadlessParticleEvolution.EmitLiquidPolicies(client); return; }
         ServerMain server = Performance.WorldgenPipeline.IntegratedServer ??
             throw new InvalidOperationException("No integrated server is known to the harness.");
         int Arg(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
