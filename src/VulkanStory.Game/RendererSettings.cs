@@ -105,7 +105,6 @@ internal sealed record RendererSettings
     /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
     public bool GpuParticleVisualSimulation { get; init; } = true;
     /// <summary>Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling.</summary>
-    public bool GpuParticleSimulation { get; init; }
     /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
     /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
@@ -190,7 +189,6 @@ internal sealed record RendererSettings
         GpuTerrainNoise = source.GpuTerrainNoise,
         GpuParticleGeometry = source.GpuParticleGeometry,
         GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
-        GpuParticleSimulation = source.GpuParticleSimulation,
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,
