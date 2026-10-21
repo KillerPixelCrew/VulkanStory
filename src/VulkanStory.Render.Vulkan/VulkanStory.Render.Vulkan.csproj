@@ -44,9 +44,6 @@
     <Compile Include="VulkanDevice.ParticleGeometry.cs" />
     <Compile Include="VulkanDevice.QuadGeometry.cs" />
     <Compile Include="VulkanDevice.ParticleVisuals.cs" />
-    <Compile Include="VulkanDevice.ParticleSimulation.cs" />
-    <Compile Include="VulkanDevice.ParticleCenters.cs" />
-    <Compile Include="VulkanDevice.ParticleInstances.cs" />
     <Compile Include="VulkanDevice.TerrainNoise.cs" />
     <Compile Include="VulkanDevice.TerrainDensity.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
@@ -167,7 +164,7 @@
     <EmbeddedResource Include="../../shaders/native/occlusion/*.comp">
       <LogicalName>shaders-vk/occlusion/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/geometry/*.comp;../../shaders/native/geometry/particle-physics.glsl;../../shaders/native/geometry/particle-arithmetic.glsl">
+    <EmbeddedResource Include="../../shaders/native/geometry/*.comp">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="../../shaders/native/worldgen/*.comp;../../shaders/native/worldgen/terrain-binary32.glsl;../../shaders/native/worldgen/terrain-binary64.glsl;../../shaders/native/worldgen/terrain-noise-kernel.glsl">
