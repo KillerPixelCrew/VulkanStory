@@ -1,6 +1,6 @@
 #version 330 core
-// Optimum override of the vanilla entityanimated.vsh, extended with shared joint
-// deformation and retaining the TAA motion-vector writer for skinned entities (P3).
+// Optimum override of the vanilla entityanimated.vsh, retaining stock vertex
+// skinning and the TAA motion-vector writer for skinned entities (P3).
 //
 // The previous position is the same skinning run twice: previous model matrix x
 // previous bone matrix from the AnimationPrev block, then the SAME warp branch
@@ -43,8 +43,6 @@ layout (std140) uniform Animation
     mat4 values[MAXANIMATEDELEMENTS];	// MAXANIMATEDELEMENTS constant is defined during game engine shader loading.
 } ElementTransforms;
 
-#include vulkanstory-deformation.ash
-uniform int vsComputeWorldDeformation = 0;
 
 // TAA motion vectors (Optimum P3). TAAMOTION is stamped by
 // ShaderRegistry.registerDefaultShaderCodePrefixes and is 1 only while TAA is
@@ -61,7 +59,6 @@ layout (std140) uniform AnimationPrev
 {
     mat4 values[MAXANIMATEDELEMENTS];
 } PrevElementTransforms;
-layout(std430) readonly buffer VulkanPreviousDeformation { vec4 values[]; } vsPreviousGeometry;
 
 out vec4 taaPrevClip;
 #endif
@@ -94,13 +91,8 @@ out vec4 gnormal;
 void main(void)
 {
 	damageEffect = damageEffectIn;
-	mat4 animModelMat = modelMatrix;
-	if (vsComputeWorldDeformation != 0) worldPos = vsDeformedPosition();
-	else if (vsComputeDeformation != 0) worldPos = modelMatrix * vsDeformedPosition();
-	else {
-		animModelMat = modelMatrix * ElementTransforms.values[jointId];
-		worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
-	}
+	mat4 animModelMat = modelMatrix * ElementTransforms.values[jointId];
+	worldPos = animModelMat * vec4(vertexPositionIn, 1.0);
 
 	renderFlags = flags | addRenderFlags;
 	
@@ -109,14 +101,12 @@ void main(void)
 		renderFlags &= ~WindModeFruitMask;
 	} else fragFrostAlpha = frostAlpha;
 	
-	if (vsComputeWorldDeformation == 0) {
-		if ((renderFlags & WindModeWaterMask) > 0) {
-			worldPos = applyLiquidWarping(true, worldPos, 5);
-		} else {
-			worldPos = applyVertexWarping(renderFlags, worldPos);
-		}
-		worldPos = applyGlobalWarping(worldPos);
+	if ((renderFlags & WindModeWaterMask) > 0) {
+		worldPos = applyLiquidWarping(true, worldPos, 5);
+	} else {
+		worldPos = applyVertexWarping(renderFlags, worldPos);
 	}
+	worldPos = applyGlobalWarping(worldPos);
 	
 
 #if TAAMOTION > 0
@@ -126,21 +116,15 @@ void main(void)
 	{
 		vec4 taaPrevWorld;
 		if (taaHistoryValid != 0) {
-			if (vsComputeWorldDeformation != 0) taaPrevWorld = vsPreviousGeometry.values[gl_VertexID * 4];
-			else if (vsComputeDeformation != 0) taaPrevWorld = prevModelMatrix * vsPreviousGeometry.values[gl_VertexID * 4];
-			else {
-				mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
-				taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			mat4 taaPrevAnimMat = prevModelMatrix * PrevElementTransforms.values[jointId];
+			taaPrevWorld = taaPrevAnimMat * vec4(vertexPositionIn, 1.0);
+			WarpState taaPrev = previousWarpState();
+			if ((renderFlags & WindModeWaterMask) > 0) {
+				taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
+			} else {
+				taaPrevWorld = applyVertexWarpingState(taaPrev, renderFlags, taaPrevWorld);
 			}
-			if (vsComputeWorldDeformation == 0) {
-				WarpState taaPrev = previousWarpState();
-				if ((renderFlags & WindModeWaterMask) > 0) {
-					taaPrevWorld = applyLiquidWarpingState(taaPrev, true, taaPrevWorld, 5);
-				} else {
-					taaPrevWorld = applyVertexWarpingState(taaPrev, renderFlags, taaPrevWorld);
-				}
-				taaPrevWorld = applyGlobalWarpingState(taaPrev, taaPrevWorld);
-			}
+			taaPrevWorld = applyGlobalWarpingState(taaPrev, taaPrevWorld);
 		} else {
 			// Treat the surface as static in the world: its camera-relative position
 			// a frame ago differed by the camera's own movement only (accuracy rule 4).
@@ -169,8 +153,7 @@ void main(void)
 	fogAmount = getFogLevel(worldPos, fogMinIn, fogDensityIn);
 	
 	normal = unpackNormal(renderFlags);
-	normal = vsComputeWorldDeformation != 0 ? vsDeformedNormal(normal).xyz : vsComputeDeformation != 0 ? (modelMatrix * vsDeformedNormal(normal)).xyz :
-		(animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
+	normal = (animModelMat * vec4(normal.x, normal.y, normal.z, 0)).xyz;
 	
 	#if SSAOLEVEL > 0
 		fragPosition = cameraPos;
