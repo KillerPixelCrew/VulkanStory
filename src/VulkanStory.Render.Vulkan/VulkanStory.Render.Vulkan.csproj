@@ -37,7 +37,6 @@
     <Compile Include="VulkanDevice.Programs.cs" />
     <Compile Include="VulkanDevice.Readback.cs" />
     <Compile Include="VulkanDevice.Resources.cs" />
-    <Compile Include="VulkanDevice.TerrainDraws.cs" />
     <Compile Include="VulkanDevice.TerrainScene.cs" />
     <Compile Include="VulkanDevice.Deformation.cs" />
     <Compile Include="VulkanDevice.EntityScene.cs" />
