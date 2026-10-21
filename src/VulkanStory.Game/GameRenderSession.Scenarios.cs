@@ -918,6 +918,8 @@ internal sealed partial class GameRenderSession
         Aggregate("entityPackedDrawsRecorded", Device.EntityPackedDrawsRecorded);
         Aggregate("entityRecordDrawsRecorded", Device.EntityRecordDrawsRecorded);
         Aggregate("entityRecordRefusals", Device.EntityRecordRefusals);
+        Aggregate("entityResidentRowsCaptured", Device.EntityResidentRowsCaptured);
+        Aggregate("entityResidentCaptureRefusals", Device.EntityResidentCaptureRefusals);
         Aggregate("entityRunsOpened", Device.EntityRunsOpened);
         Aggregate("entityRunBreaks", Device.EntityRunBreaks);
         Aggregate("entityRunBreakContiguity", Device.EntityRunBreakContiguity);
