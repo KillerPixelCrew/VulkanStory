@@ -3,7 +3,9 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vintagestory.API.Client;
+
 namespace VulkanStory.Game;
+
 internal sealed partial class GameRenderSession
 {
     private readonly HashSet<int> scenarioExecutedActions = new();
@@ -29,6 +31,7 @@ internal sealed partial class GameRenderSession
         !scenarioTerminal && !headlessDone && scenarioTick.HasValue &&
         HeadlessHarnessOptions.Scenario is { } scenario && scenario.Actions.Any(action =>
             action.Tick == scenarioTick && action.Kind == HeadlessScenarioActionKind.Capture);
+
     // Capture at the actual consumer seam. Final composition overwrites Primary
     // later, so its ordinary post-frame dump cannot represent the TAA input.
     private void CaptureNativeTaaInputs()
@@ -48,6 +51,7 @@ internal sealed partial class GameRenderSession
             DumpNativeTaaWindowProbes(Path.Combine(directory, "window"), Graphics.TaaSampleReadTargets);
         }
     }
+
     private void CaptureQuadMotionInputs()
     {
         if (!QuadMotionInputCapture || !HeadlessHarnessOptions.Enabled || scenarioTick == null || PrimaryTarget is not { } primary ||
@@ -151,6 +155,7 @@ internal sealed partial class GameRenderSession
             }, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
         }
     }
+
     // SR owns a separate consumer seam. Capture after its dispatch has completed
     // recording, while Primary still holds the scene and before the post tail.
     private void CaptureSrInputs()
@@ -211,6 +216,7 @@ internal sealed partial class GameRenderSession
                 output.Width, output.Height, "postUpscalerPrePostTail");
         }
     }
+
     private void DumpNativeTaaTarget(string directory, int slot, string name, FrameBufferRef target, bool primary)
     {
         for (int i = 0; i < target.ColorTextureIds.Length; i++)
@@ -222,6 +228,7 @@ internal sealed partial class GameRenderSession
         if (primary && target.DepthTextureId > 0 && Device.ReadTextureForParity(target.DepthTextureId) is { } depth)
             HeadlessParityDump.Write(directory, slot, name, "depth", depth);
     }
+
     // Cache probes retain the exact local footprint used by the failing scene
     // pixels without exporting thirty full-size auxiliary images per capture.
     private void DumpNativeTaaWindowProbes(string directory, FrameBufferRef[] targets)
@@ -244,11 +251,13 @@ internal sealed partial class GameRenderSession
             }
         }
     }
+
     private sealed record ScenarioFile(string Path, string Sha256, int? Width, int? Height);
     private sealed record ScenarioObservedField(object? Value, string Scope, ulong? SourceFrameId,
         ulong? SampledAtFrameId, string SessionId);
     private sealed record ScenarioCheckpoint(string Name, string SessionId,
         IReadOnlyDictionary<string, ScenarioObservedField> Fields);
+
     private sealed class ScenarioCaptureReceipt(
         HeadlessScenarioAction action,
         int tick,
@@ -267,6 +276,7 @@ internal sealed partial class GameRenderSession
         internal IReadOnlyList<ScenarioFile> Files { get; } = files;
         internal ulong? CompletedFrameId { get; set; }
     }
+
     private void AdvanceHeadlessScenarioBeforeInput()
     {
         Graphics.PrepareQuadMotionInputCapture(false);
@@ -311,10 +321,13 @@ internal sealed partial class GameRenderSession
             scenarioTick = 0;
         }
         else scenarioTick++;
+
         Graphics.PrepareQuadMotionInputCapture(QuadMotionInputCapture && HeadlessHarnessOptions.Enabled &&
             scenario.Actions.Any(action => action.Tick == scenarioTick && action.Kind == HeadlessScenarioActionKind.Capture));
+
         try { RequireScenarioContext(); }
         catch (Exception error) { FailHeadlessRun(error.GetBaseException().Message, "beforeInput"); return; }
+
         int tick = scenarioTick.Value;
         HeadlessScenarioAction? missed = scenario.Actions.FirstOrDefault(action =>
             action.Tick < tick && !scenarioExecutedActions.Contains(action.Index));
@@ -329,6 +342,7 @@ internal sealed partial class GameRenderSession
             FailHeadlessRun("Action missed its declared scenario tick: " + missed.Id, "settings");
             return;
         }
+
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
                      action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Settings or
                          HeadlessScenarioActionKind.Options or HeadlessScenarioActionKind.Camera or
@@ -390,6 +404,7 @@ internal sealed partial class GameRenderSession
         }
         scenarioFailurePhase = "renderCycle";
     }
+
     private void WriteScenarioEvent(HeadlessScenarioAction action, string phase, bool accepted,
         bool executed, object? result, string? reason, ulong? captureFrameId = null,
         ulong? completedFrameId = null)
@@ -415,6 +430,7 @@ internal sealed partial class GameRenderSession
         File.AppendAllText(Path.Combine(ScenarioOutputDirectory, "scenario-events.jsonl"),
             JsonSerializer.Serialize(entry) + Environment.NewLine);
     }
+
     private static string ScenarioActionPhase(HeadlessScenarioActionKind kind) => kind switch
     {
         HeadlessScenarioActionKind.Settings => "settings",
@@ -423,7 +439,9 @@ internal sealed partial class GameRenderSession
         HeadlessScenarioActionKind.Capture => "preGenerateReadback",
         _ => "completedFrame"
     };
+
     private string ScenarioManifestPath => Path.Combine(ScenarioOutputDirectory, "scenario-captures.json");
+
     private void SaveScenarioCaptureManifest()
     {
         var manifest = new
@@ -450,6 +468,7 @@ internal sealed partial class GameRenderSession
         };
         WriteJsonAtomically(ScenarioManifestPath, manifest);
     }
+
     /// <summary>Writes requested scenario attachment readbacks at the scheduled post-render seam and records their file identities.</summary>
     private void CaptureScenarioReadbacks()
     {
@@ -485,6 +504,7 @@ internal sealed partial class GameRenderSession
         }
         scenarioFailurePhase = "renderCycle";
     }
+
     private void CaptureScenario(HeadlessScenarioAction action, int tick)
     {
         ulong captureFrameId = Device.LatencyFrameId;
@@ -495,6 +515,7 @@ internal sealed partial class GameRenderSession
         var captured = ReadCapturedFrame();
         var size = (captured.Width, captured.Height);
         byte[] pixels = captured.Pixels;
+
         string ppmPath = Path.Combine(captureDirectory, action.Name + ".ppm");
         string pngPath = Path.Combine(captureDirectory, action.Name + ".png");
         if (!HeadlessHarnessOptions.WriteFrame(ppmPath, size.Width, size.Height, pixels, true))
@@ -516,6 +537,7 @@ internal sealed partial class GameRenderSession
                 DumpNativeTaaTarget(Path.Combine(captureDirectory, "taa-output"), writeIndex, "TaaWrite", write, false);
             DumpNativeTaaWindowProbes(Path.Combine(captureDirectory, "taa-output", "window"), Graphics.TaaSampleWrittenTargets);
         }
+
         var files = Directory.EnumerateFiles(captureDirectory, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.Ordinal)
             .Select(path =>
@@ -538,6 +560,7 @@ internal sealed partial class GameRenderSession
         WriteScenarioEvent(action, "preGenerateReadback", true, true,
             new { fileCount = files.Length, currentWorldSample }, null, captureFrameId);
     }
+
     private void WriteScenarioFrameInputs(string directory, ulong captureFrameId,
         in GameTemporalFrame raw, bool currentWorldSample, int width, int height,
         string phase = "preGenerateReadback")
@@ -608,6 +631,7 @@ internal sealed partial class GameRenderSession
             NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
         }));
     }
+
     private void CompleteHeadlessScenarioFrame()
     {
         if (headlessDone) return;
@@ -635,6 +659,7 @@ internal sealed partial class GameRenderSession
             return;
         }
         if (scenarioTerminal || scenarioTick == null) return;
+
         scenarioFailurePhase = "completedFrame";
         int tick = scenarioTick.Value;
         ulong completedFrameId = Device.LatencyFrameId;
@@ -652,6 +677,7 @@ internal sealed partial class GameRenderSession
             scenarioPairedCaptures++;
         }
         SaveScenarioCaptureManifest();
+
         lastSuccessfulScenarioFrameId = completedFrameId;
         RequireScenarioContext();
         // Settings-file observations belong to requested checkpoints/assertions, not every provider frame.
@@ -667,6 +693,7 @@ internal sealed partial class GameRenderSession
             FailHeadlessRun("Observation action missed its declared scenario tick: " + missed.Id, "completedFrame");
             return;
         }
+
         foreach (HeadlessScenarioAction action in scenario.Actions.Where(action =>
                      action.Tick == tick && action.Kind is HeadlessScenarioActionKind.Checkpoint or HeadlessScenarioActionKind.Assert))
         {
@@ -690,6 +717,7 @@ internal sealed partial class GameRenderSession
             else if (!EvaluateScenarioAssertion(action, tick, completedFrameId, observation!))
                 return;
         }
+
         if (scenarioTerminal) return;
         bool allActionsExecuted = scenarioExecutedActions.Count == scenario.Actions.Count;
         if (!allActionsExecuted || !headlessLegacyReady) return;
@@ -711,6 +739,7 @@ internal sealed partial class GameRenderSession
         FinalizeHeadlessRun(true, "scenario complete", scenarioHidden, scenarioFocused, staged, location,
             completedFrameId);
     }
+
     private IReadOnlyDictionary<string, ScenarioObservedField> SnapshotScenarioFrame(int tick, ulong completedFrameId)
     {
         var raw = Temporal.Snapshot();
@@ -732,11 +761,13 @@ internal sealed partial class GameRenderSession
         object? queryDynamic = queryCurrent ? query!.Value.State?.DynamicMfgSupport : null;
         object? successfulUpscaleFrames = countersAvailable ? diagnosticUpscaleFrames : null;
         object? preparedFrames = countersAvailable ? diagnosticPreparedFrames : null;
+
         var fields = new Dictionary<string, ScenarioObservedField>(StringComparer.Ordinal);
         void Current(string name, object? value) =>
             fields[name] = new ScenarioObservedField(value, "current-cpu-frame", completedFrameId, completedFrameId, ScenarioSessionId);
         void Aggregate(string name, object? value) =>
             fields[name] = new ScenarioObservedField(value, "aggregate-at-sample", null, completedFrameId, ScenarioSessionId);
+
         Current("hidden", !Window.IsVisible);
         Current("focused", Window.IsFocused);
         Current("stagedModLoaded", HeadlessModDiscovery.IsStagedModLoaded(HeadlessModDiscovery.LoadedModLocation()));
@@ -891,6 +922,7 @@ internal sealed partial class GameRenderSession
         Current("phase", "completedFrame");
         return fields;
     }
+
     private void WriteScenarioCheckpoint(HeadlessScenarioAction action, int tick, ulong completedFrameId,
         IReadOnlyDictionary<string, ScenarioObservedField> fields)
     {
@@ -919,6 +951,7 @@ internal sealed partial class GameRenderSession
         File.AppendAllText(Path.Combine(ScenarioOutputDirectory, "scenario-checkpoints.jsonl"),
             JsonSerializer.Serialize(entry) + Environment.NewLine);
     }
+
     private bool EvaluateScenarioAssertion(HeadlessScenarioAction action, int tick, ulong completedFrameId,
         IReadOnlyDictionary<string, ScenarioObservedField> fields)
     {
@@ -963,6 +996,7 @@ internal sealed partial class GameRenderSession
         if (!passed) FailHeadlessRun(reason!, "completedFrame");
         return passed;
     }
+
     private static bool ScenarioValueEquals(object? actual, JsonElement expected)
     {
         if (expected.ValueKind == JsonValueKind.Null) return actual == null;
@@ -977,6 +1011,7 @@ internal sealed partial class GameRenderSession
             _ => false
         };
     }
+
     private static bool TryObservedNumber(object? value, out double number)
     {
         number = 0;
@@ -989,6 +1024,7 @@ internal sealed partial class GameRenderSession
         catch (Exception error) when (error is FormatException or InvalidCastException or OverflowException)
         { return false; }
     }
+
     private static bool TryExpectedNumber(JsonElement value, out double number)
     {
         number = 0;
@@ -996,12 +1032,14 @@ internal sealed partial class GameRenderSession
             double.TryParse(value.GetRawText(), NumberStyles.Float, CultureInfo.InvariantCulture, out number) &&
             double.IsFinite(number);
     }
+
     private (bool Hidden, bool Focused, bool StagedModLoaded, string ModLocation) CurrentScenarioInvariants()
     {
         string modLocation = HeadlessModDiscovery.LoadedModLocation();
         return (!Window.IsVisible, Window.IsFocused,
             HeadlessModDiscovery.IsStagedModLoaded(modLocation), modLocation);
     }
+
     private void RecordHeadlessRenderFailure(Exception error)
     {
         if (!HeadlessHarnessOptions.Active) return;
@@ -1016,6 +1054,7 @@ internal sealed partial class GameRenderSession
         }
         catch { }
     }
+
     private void FailHeadlessRun(string reason, string failedPhase)
     {
         HeadlessTerrainComparison.Cancel(reason);
@@ -1055,6 +1094,7 @@ internal sealed partial class GameRenderSession
         }
         catch { }
     }
+
     private void FinalizeHeadlessRun(bool success, string reason, bool hidden, bool focused,
         bool stagedModLoaded, string modLocation, ulong? completedFrameId = null)
     {
@@ -1077,6 +1117,7 @@ internal sealed partial class GameRenderSession
         catch { }
         if (HeadlessHarnessOptions.ExitWhenDone) Input.RequestWindowExit();
     }
+
     private void WriteScenarioTerminal(bool success, string reason, string? failedPhase, ulong? completedFrameId,
         bool hidden, bool focused, bool stagedModLoaded, bool worldReady, bool legacyReady)
     {
@@ -1112,6 +1153,7 @@ internal sealed partial class GameRenderSession
         };
         WriteJsonAtomically(Path.Combine(ScenarioOutputDirectory, "scenario-result.json"), result);
     }
+
     private void WriteLegacyHeadlessResult(bool success, string reason, bool hidden, bool focused,
         bool stagedModLoaded, string modLocation)
     {
@@ -1140,6 +1182,7 @@ internal sealed partial class GameRenderSession
         };
         WriteJsonAtomically(Path.Combine(directory, "headless-result.json"), result);
     }
+
     private static void WriteJsonAtomically(string path, object value) =>
         AtomicFile.WriteAllText(path, JsonSerializer.Serialize(value));
 }
