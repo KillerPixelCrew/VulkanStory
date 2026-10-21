@@ -122,7 +122,7 @@ internal static class ResidentTerrain
     private static void AfterInsert(MeshDataPool __instance, Vec3i modelOrigin, ModelDataPoolLocation __result)
     { if (__result != null) Inserted(__instance, modelOrigin, __result); }
 
-    // Also called explicitly by the GPU reservation prefix, which skips stock InsertAt.
+    // Publishes stock pool insertions into the resident part tables.
     internal static void Inserted(MeshDataPool pool, Vec3i modelOrigin, ModelDataPoolLocation location)
     {
         if (Parts.TryGetValue(location, out _) || publication.Manager is not { } manager ||
