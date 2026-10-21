@@ -374,7 +374,7 @@ public sealed unsafe partial class VulkanDevice
         uint recordOffset = 0;
         const int record = SetConvention.ProgramRecordBinding;
 
-        ShaderProgramResources snapshotProgram = _drawEntityRecords?.Source ?? program;
+        ShaderProgramResources snapshotProgram = program;
         if (program.Interface.HasUniformBlock)
         {
             if (snapshotProgram.HasSnapshotFor(_frameCounter))
@@ -405,24 +405,9 @@ public sealed unsafe partial class VulkanDevice
         // that name; one it has not created yet reads the placeholder's zeroes.
         foreach (BlockBinding block in program.Interface.UniformBlocks)
         {
-            // A combinable animated row reads every row's poses from the slot's joint heap.
-            if (_drawEntityInputHeaps is { } inputHeaps && block.BlockName is "Animation" or "AnimationPrev")
-            {
-                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, inputHeaps.Joints.Handle, 0,
-                    inputHeaps.Joints.Size, inputHeaps.Joints.Id);
-                continue;
-            }
             ClientUniformBuffer? ubo = null;
             if (_clientUniformBuffers.BoundBlocks.TryGetValue(block.BlockName, out int handle)) _clientUniformBuffers.Buffers.TryGetValue(handle, out ubo);
             if (ubo == null) continue;
-
-            VulkanBuffer? jointPose = block.BlockName == "Animation" ? drawCurrentJointPose :
-                block.BlockName == "AnimationPrev" ? drawPreviousJointPose : null;
-            if (jointPose != null)
-            {
-                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, jointPose.Handle, 0, jointPose.Size, jointPose.Id);
-                continue;
-            }
 
             if (TrySnapshotClientBlock(ubo, program, out uint blockOffset))
             {
@@ -453,23 +438,8 @@ public sealed unsafe partial class VulkanDevice
         // The SSBO chunk path reads its vertices from the mesh's xyz buffer by gl_VertexIndex.
         foreach (BlockBinding block in program.Interface.StorageBlocks)
         {
-            if (block.BlockName == EntityRecordShader.BlockName)
-            {
-                if (_drawEntityRecords is not { } segment) return false;
-                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, segment.Buffer.Handle,
-                    segment.Offset, segment.Range, segment.Buffer.Id);
-                continue;
-            }
-            if (_drawEntityInputHeaps is { } deformationHeaps && block.BlockName is DeformationBlock or PreviousDeformationBlock)
-            {
-                buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, deformationHeaps.Deformation.Handle, 0,
-                    deformationHeaps.Deformation.Size, deformationHeaps.Deformation.Id);
-                continue;
-            }
             VulkanBuffer? buffer = block.BlockName switch
             {
-                DeformationBlock => _drawDeformation,
-                PreviousDeformationBlock => _drawPreviousDeformation,
                 "VulkanParticleGeometry" => drawParticleGeometry,
                 _ => meshId > 0 ? _meshes.BufferOf(meshId, MeshManager.BufferXyz) : null,
             };
