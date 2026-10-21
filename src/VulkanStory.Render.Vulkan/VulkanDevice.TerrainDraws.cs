@@ -183,8 +183,7 @@ public sealed unsafe partial class VulkanDevice
         VulkanBuffer input = _terrainInputs[slot] ??= new VulkanBuffer(_context, capacity,
             BufferUsageFlags.StorageBufferBit, MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
             MemoryPoolClass.Staging);
-        VulkanBuffer indirect = AllocateIndirect((int)((TerrainBatchOutputBytes + 19) / 20), out ulong offset,
-            Math.Max(4UL, limits.MinStorageBufferOffsetAlignment));
+        VulkanBuffer indirect = AllocateTerrainOutput(TerrainBatchOutputBytes, readback: true, out ulong offset);
         _terrainInputOffsets[slot] += TerrainBatchInputBytes;
         float* values = (float*)((byte*)input.Mapped + inputOffset);
         FillVisibilityHeader(values, OcclusionDepth, planes);

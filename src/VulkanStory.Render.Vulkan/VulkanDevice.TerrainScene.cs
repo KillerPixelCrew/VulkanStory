@@ -78,8 +78,8 @@ public sealed unsafe partial class VulkanDevice
     private sealed record TerrainSceneParityResult(int Site, int Pass, int Atlas, TerrainView View, ulong Frame,
         TerrainSceneIndirect[] Draws, KeyValuePair<int, TerrainPartDesc>[] Rows, IReadOnlyDictionary<int, TerrainParityPart> Expected);
     private readonly Dictionary<int, List<TerrainSceneParityResult>> _terrainSceneParityResults = new();
-    private readonly Dictionary<int, List<VulkanBuffer>> _terrainSceneParityBuffers = new();
-    private int[] _terrainSceneParityBufferCursors = [];
+    private readonly Dictionary<int, List<VulkanBuffer>> _terrainReadbackBuffers = new();
+    private int[] _terrainReadbackBufferCursors = [];
     private bool _terrainParityMismatchLogged;
     public long TerrainParityChecks { get; private set; }
     public long TerrainParityMismatches { get; private set; }
@@ -87,18 +87,19 @@ public sealed unsafe partial class VulkanDevice
     private static ulong TerrainSceneOutputBytes(TerrainScenePool pool, bool parity) =>
         (ulong)(pool.Count * (parity ? 8L : 7L) + (pool.Count + 63) / 64 + 1) * 4;
 
-    private VulkanBuffer AllocateTerrainSceneOutput(ulong bytes, bool parity, out ulong offset)
+    private VulkanBuffer AllocateTerrainOutput(ulong bytes, bool readback, out ulong offset)
     {
-        if (!parity) return AllocateIndirect(checked((int)((bytes + 19) / 20)), out offset,
+        if (!readback) return AllocateIndirect(checked((int)((bytes + 19) / 20)), out offset,
             Math.Max(4UL, DrawPreparationLimits.MinStorageBufferOffsetAlignment));
         // Generic indirect overflow buffers can retire before this slot returns.
-        // Diagnostic outputs therefore stay owned by the slot through fenced collection.
+        // Both old-path totals and resident parity outputs need slot ownership
+        // through CPU collection, beyond GPU completion alone.
         offset = 0;
-        if (_terrainSceneParityBufferCursors.Length == 0)
-            _terrainSceneParityBufferCursors = new int[_frames.FramesInFlight];
-        int slot = CurrentFrameSlot, index = _terrainSceneParityBufferCursors[slot]++;
-        if (!_terrainSceneParityBuffers.TryGetValue(slot, out var buffers))
-            _terrainSceneParityBuffers.Add(slot, buffers = new());
+        if (_terrainReadbackBufferCursors.Length == 0)
+            _terrainReadbackBufferCursors = new int[_frames.FramesInFlight];
+        int slot = CurrentFrameSlot, index = _terrainReadbackBufferCursors[slot]++;
+        if (!_terrainReadbackBuffers.TryGetValue(slot, out var buffers))
+            _terrainReadbackBuffers.Add(slot, buffers = new());
         if (index == buffers.Count || buffers[index].Size < bytes)
         {
             var replacement = new VulkanBuffer(_context, bytes,
@@ -212,7 +213,7 @@ public sealed unsafe partial class VulkanDevice
                 var pool = pools[poolIndex];
                 int groups = (pool.Count + 63) / 64;
                 ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
-                VulkanBuffer output = AllocateTerrainSceneOutput(bytes, parity != null, out ulong outputOffset);
+                VulkanBuffer output = AllocateTerrainOutput(bytes, parity != null, out ulong outputOffset);
                 sets[poolIndex] = _computeArenas[CurrentFrameSlot].GetMixed(program.SetLayout,
                     [new ComputeImageWrite(0, DescriptorType.CombinedImageSampler, sampled.ViewOfMips(0, sampled.MipLevels),
                         _textures.Samplers.Get(ComputeNearest), ImageLayout.ShaderReadOnlyOptimal)], 1,
@@ -296,7 +297,6 @@ public sealed unsafe partial class VulkanDevice
     // diagnostic outputs can be reused. No wait or readback submit.
     private void CollectTerrainSceneParity(int slot)
     {
-        if (_terrainSceneParityBufferCursors.Length > slot) _terrainSceneParityBufferCursors[slot] = 0;
         if (!_terrainSceneParityResults.TryGetValue(slot, out var results)) return;
         foreach (var result in results)
         {
@@ -549,8 +549,8 @@ public sealed unsafe partial class VulkanDevice
         foreach (var input in _terrainSceneInputs) input?.Dispose();
         _terrainSceneInputs = []; _terrainSceneInputCursors = []; _terrainSceneParts.Clear(); _terrainScenePools = [];
         _terrainSceneRows = []; _terrainSceneParityResults.Clear();
-        foreach (var buffers in _terrainSceneParityBuffers.Values)
+        foreach (var buffers in _terrainReadbackBuffers.Values)
             foreach (var buffer in buffers) buffer.Dispose();
-        _terrainSceneParityBuffers.Clear(); _terrainSceneParityBufferCursors = [];
+        _terrainReadbackBuffers.Clear(); _terrainReadbackBufferCursors = [];
     }
 }
