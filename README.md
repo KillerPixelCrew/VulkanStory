@@ -27,7 +27,7 @@ unmodified game.
   draws, indexed visibility traversal and stock cloud updates. `ResidentTerrain`
   and `ResidentEntities` default on; refused content and translated shaders retain
   the stock per-draw compat lane. Particle geometry and visual evolution remain
-  enabled; fixed-step `GpuParticleSimulation` defaults off.
+  enabled, with particle physics using the stock CPU tick.
   Optional algorithms are switchable on the Performance options page.
 - **Performance inspection**: in-game captures with offline flame graphs, allocation
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
