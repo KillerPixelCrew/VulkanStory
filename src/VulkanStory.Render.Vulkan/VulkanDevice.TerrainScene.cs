@@ -87,12 +87,21 @@ public sealed unsafe partial class VulkanDevice
     private TerrainScenePool[] _terrainScenePools = [];
     private KeyValuePair<int, TerrainPartDesc>[] _terrainSceneRows = [];
     private readonly record struct TerrainScenePool(int Mesh, int Pass, int Atlas, int First, int Count,
-        double OriginX, double OriginY, double OriginZ);
+        double OriginX, double OriginY, double OriginZ)
+    {
+        public double MinX { get; init; }
+        public double MinY { get; init; }
+        public double MinZ { get; init; }
+        public double MaxX { get; init; }
+        public double MaxY { get; init; }
+        public double MaxZ { get; init; }
+        public ulong[] ChunkSlots { get; init; } = [];
+    }
     private readonly record struct TerrainSceneDepth(int Texture, int Width, int Height, OcclusionCamera? Camera);
     private readonly TerrainSceneDepth[] _terrainSceneDepths = new TerrainSceneDepth[3];
     private readonly HashSet<int> _terrainSceneDrawnPools = new();
     private readonly record struct TerrainSceneCullKey(int Pass, int Atlas, TerrainView View, ulong[] Visibility, bool Depth, bool Parity);
-    private readonly record struct TerrainSceneIndirect(TerrainScenePool Pool, VulkanBuffer Buffer, ulong Offset, ulong CountOffset);
+    private readonly record struct TerrainSceneIndirect(TerrainScenePool Pool, VulkanBuffer? Buffer, ulong Offset, ulong CountOffset);
     private readonly Dictionary<TerrainSceneCullKey, TerrainSceneIndirect[]> _terrainSceneCulls = new();
     private sealed record TerrainSceneParityResult(int Site, int Pass, int Atlas, TerrainView View, ulong Frame,
         TerrainSceneIndirect[] Draws, KeyValuePair<int, TerrainPartDesc>[] Rows, IReadOnlyDictionary<int, TerrainParityPart> Expected);
@@ -200,22 +209,41 @@ public sealed unsafe partial class VulkanDevice
             QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, [], parity);
             return true;
         }
-        NativeUniform origin = pipeline.Uniform(string.IsNullOrEmpty(view.OriginUniform) ? "origin" : view.OriginUniform);
-        // Every maintained native chunk program puts its per-pool origin in push
-        // constants. This keeps the preflighted record/frame snapshots unchanged.
-        if (origin.Block != NativeUniformBlock.Push || origin.Size != 12) return false;
-        foreach (var pool in pools)
-            if (!NativeMeshIsDrawable(pipeline, pool.Mesh, out _) || (uint)pool.Count > DrawPreparationLimits.MaxDrawIndirectCount ||
-                TerrainSceneOutputBytes(pool, parity != null) > DrawPreparationLimits.MaxStorageBufferRange)
-                return false;
-        if (!PreflightTerrainSceneDraw(pipeline, textures)) return false;
-        ComputeProgram? program = TerrainSceneProgram();
-        if (program == null) return false;
+        ulong[] visibility = _terrainSceneVisibility.GetValueOrDefault(view.Eye) ?? Array.Empty<ulong>();
+        var skipped = new bool[pools.Length];
+        for (int i = 0; i < pools.Length; i++) skipped[i] = SkipTerrainScenePool(pools[i], view, visibility);
         TerrainSceneDepth depth = _terrainSceneDepths[view.Eye is >= 0 and < 2 ? view.Eye : 2];
         bool useDepth = !view.Shadow && view.CullMode == 1 && stockCallSite is >= 5 and <= 9 && pipeline.Description.DepthWrite &&
             depth.Camera != null && _textures.Get(depth.Texture) != null;
         var key = new TerrainSceneCullKey(renderPass, atlas, view with { ViewProjection = default, OriginUniform = "" },
-            _terrainSceneVisibility.GetValueOrDefault(view.Eye) ?? Array.Empty<ulong>(), useDepth, parity != null);
+            visibility, useDepth, parity != null);
+        if (skipped.All(skip => skip))
+        {
+            if (!_terrainSceneCulls.TryGetValue(key, out var empty))
+            {
+                empty = pools.Select(pool => new TerrainSceneIndirect(pool, null, 0, 0)).ToArray();
+                _terrainSceneCulls.Add(key, empty);
+            }
+            foreach (var pool in pools)
+            {
+                _terrainOccluderMeshes.Add(pool.Mesh);
+                _terrainSceneDrawnPools.Add(pool.Mesh);
+            }
+            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, empty, parity);
+            return true;
+        }
+        NativeUniform origin = pipeline.Uniform(string.IsNullOrEmpty(view.OriginUniform) ? "origin" : view.OriginUniform);
+        // Every maintained native chunk program puts its per-pool origin in push
+        // constants. This keeps the preflighted record/frame snapshots unchanged.
+        if (origin.Block != NativeUniformBlock.Push || origin.Size != 12) return false;
+        for (int i = 0; i < pools.Length; i++)
+            if (!skipped[i] && (!NativeMeshIsDrawable(pipeline, pools[i].Mesh, out _) ||
+                (uint)pools[i].Count > DrawPreparationLimits.MaxDrawIndirectCount ||
+                TerrainSceneOutputBytes(pools[i], parity != null) > DrawPreparationLimits.MaxStorageBufferRange))
+                return false;
+        if (!PreflightTerrainSceneDraw(pipeline, textures)) return false;
+        ComputeProgram? program = TerrainSceneProgram();
+        if (program == null) return false;
         if (!_terrainSceneCulls.TryGetValue(key, out var prepared))
         {
             VulkanTexture sampled = _textures.Get(useDepth ? depth.Texture : _bindless!.PlaceholderTextureId(TextureKind.Texture2D))!;
@@ -230,6 +258,11 @@ public sealed unsafe partial class VulkanDevice
             for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
             {
                 var pool = pools[poolIndex];
+                if (skipped[poolIndex])
+                {
+                    prepared[poolIndex] = new(pool, null, 0, 0);
+                    continue;
+                }
                 int groups = (pool.Count + 63) / 64;
                 ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
                 VulkanBuffer output = AllocateTerrainOutput(bytes, parity != null, out ulong outputOffset);
@@ -255,6 +288,7 @@ public sealed unsafe partial class VulkanDevice
             for (int poolIndex = 0; poolIndex < prepared.Length; poolIndex++)
             {
                 var draw = prepared[poolIndex];
+                if (draw.Buffer == null) continue;
                 var pool = draw.Pool;
                 int groups = (pool.Count + 63) / 64;
                 ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
@@ -284,22 +318,50 @@ public sealed unsafe partial class VulkanDevice
         foreach (var draw in prepared)
         {
             var pool = draw.Pool;
-            WriteNative(pipeline, origin, (float)(pool.OriginX - view.CameraX),
-                (float)(pool.OriginY - view.CameraY), (float)(pool.OriginZ - view.CameraZ));
-            if (!BeginNativeDraw(pipeline, textures, pool.Mesh, out var command, out _, requirePipeline: true))
-                throw new InvalidOperationException("Preflighted resident terrain draw was invalidated: " + NativeDrawRefusal);
-            _meshes.Bind(command, _meshes.Get(pool.Mesh)!);
-            if (_context.DrawIndirectCountEnabled)
-                _context.Api.CmdDrawIndexedIndirectCount(command, draw.Buffer.Handle, draw.Offset, draw.Buffer.Handle,
-                    draw.CountOffset, (uint)pool.Count, 20);
-            else _context.Api.CmdDrawIndexedIndirect(command, draw.Buffer.Handle, draw.Offset, (uint)pool.Count, 20);
-            _meshes.NoteSceneDrawCommand();
-            NoteNativeDraw(NativeDrawKind.Indirect);
+            if (draw.Buffer != null)
+            {
+                WriteNative(pipeline, origin, (float)(pool.OriginX - view.CameraX),
+                    (float)(pool.OriginY - view.CameraY), (float)(pool.OriginZ - view.CameraZ));
+                if (!BeginNativeDraw(pipeline, textures, pool.Mesh, out var command, out _, requirePipeline: true))
+                    throw new InvalidOperationException("Preflighted resident terrain draw was invalidated: " + NativeDrawRefusal);
+                _meshes.Bind(command, _meshes.Get(pool.Mesh)!);
+                if (_context.DrawIndirectCountEnabled)
+                    _context.Api.CmdDrawIndexedIndirectCount(command, draw.Buffer.Handle, draw.Offset, draw.Buffer.Handle,
+                        draw.CountOffset, (uint)pool.Count, 20);
+                else _context.Api.CmdDrawIndexedIndirect(command, draw.Buffer.Handle, draw.Offset, (uint)pool.Count, 20);
+                _meshes.NoteSceneDrawCommand();
+                NoteNativeDraw(NativeDrawKind.Indirect);
+            }
             _terrainOccluderMeshes.Add(pool.Mesh);
             _terrainSceneDrawnPools.Add(pool.Mesh);
         }
         QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, prepared, parity);
         return true;
+    }
+
+    private static bool SkipTerrainScenePool(in TerrainScenePool pool, in TerrainView view, ulong[] visibility)
+    {
+        if (pool.ChunkSlots.Length == 0) return true;
+        if (view.CullMode is < 1 or > 4) return false;
+        bool chunkVisible = false;
+        // Two low-first uint header words per ulong; slots beyond the header count are clear.
+        for (int i = 0, count = Math.Min(pool.ChunkSlots.Length, visibility.Length); i < count; i++)
+            if ((pool.ChunkSlots[i] & visibility[i]) != 0) { chunkVisible = true; break; }
+        if (!chunkVisible) return true;
+        for (int i = 0, count = view.CullMode == 1 ? 5 : 6; i < count; i++)
+        {
+            TerrainPlane plane = i switch
+            {
+                0 => view.Plane0, 1 => view.Plane1, 2 => view.Plane2,
+                3 => view.Plane3, 4 => view.Plane4, _ => view.Plane5
+            };
+            double x = plane.A > 0 ? pool.MaxX : pool.MinX;
+            double y = plane.B > 0 ? pool.MaxY : pool.MinY;
+            double z = plane.C > 0 ? pool.MaxZ : pool.MinZ;
+            // The pool vertex dominates each row's positive vertex; allow for double rounding order.
+            if (((x * plane.A + y * plane.B) + z * plane.C) + plane.D < -1e-3) return true;
+        }
+        return false;
     }
 
     private void QueueTerrainSceneParity(int site, int pass, int atlas, in TerrainView view,
@@ -322,13 +384,13 @@ public sealed unsafe partial class VulkanDevice
             var seen = new HashSet<int>();
             foreach (var draw in result.Draws)
             {
-                uint* handles = (uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset + 4);
+                uint* handles = draw.Buffer == null ? null : (uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset + 4);
                 for (int i = 0; i < draw.Pool.Count; i++)
                 {
                     var row = result.Rows[draw.Pool.First + i];
                     seen.Add(row.Key);
                     bool found = result.Expected.TryGetValue(row.Key, out var expected);
-                    uint gpu = handles[i];
+                    uint gpu = handles == null ? 0u : handles[i];
                     TerrainParityChecks++;
                     if (!found || gpu != (expected.StockVisible ? (uint)row.Key : 0u))
                         NoteTerrainParityMismatch(result, row.Key, found ? expected : null, gpu, row.Value);
@@ -431,6 +493,32 @@ public sealed unsafe partial class VulkanDevice
                     if (pools.Count == 0 || pools[^1].Mesh != part.PoolMesh)
                         pools.Add(new(part.PoolMesh, part.RenderPass, part.Atlas, i, 1, part.PoolOriginX, part.PoolOriginY, part.PoolOriginZ));
                     else pools[^1] = pools[^1] with { Count = pools[^1].Count + 1 };
+                }
+                for (int poolIndex = 0; poolIndex < pools.Count; poolIndex++)
+                {
+                    var pool = pools[poolIndex];
+                    double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+                    double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+                    int words = 0;
+                    for (int i = pool.First; i < pool.First + pool.Count; i++)
+                    {
+                        var part = parts[i].Value;
+                        if (part.Hidden) continue;
+                        // Mirror the row's float centers and float division before widening to double.
+                        double x = (float)part.CenterX, y = (float)part.CenterY, z = (float)part.CenterZ;
+                        double rx = part.Radius / 1.7320508f, ry = part.RadiusY / 1.7320508f, rz = part.RadiusZ / 1.7320508f;
+                        minX = Math.Min(minX, x - rx); minY = Math.Min(minY, y - ry); minZ = Math.Min(minZ, z - rz);
+                        maxX = Math.Max(maxX, x + rx); maxY = Math.Max(maxY, y + ry); maxZ = Math.Max(maxZ, z + rz);
+                        words = Math.Max(words, (part.ChunkSlot >> 6) + 1);
+                    }
+                    var chunks = new ulong[words];
+                    for (int i = pool.First; i < pool.First + pool.Count; i++)
+                    {
+                        var part = parts[i].Value;
+                        if (!part.Hidden) chunks[part.ChunkSlot >> 6] |= 1UL << (part.ChunkSlot & 63);
+                    }
+                    pools[poolIndex] = pool with { MinX = minX, MinY = minY, MinZ = minZ,
+                        MaxX = maxX, MaxY = maxY, MaxZ = maxZ, ChunkSlots = chunks };
                 }
                 _terrainScenePendingUpload = rows;
                 _terrainSceneRows = parts;
