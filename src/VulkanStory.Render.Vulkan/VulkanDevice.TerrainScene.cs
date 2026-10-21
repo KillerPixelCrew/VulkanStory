@@ -291,7 +291,6 @@ public sealed unsafe partial class VulkanDevice
                 if (draw.Buffer == null) continue;
                 var pool = draw.Pool;
                 int groups = (pool.Count + 63) / 64;
-                ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
                 DescriptorSet set = sets[poolIndex];
                 _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
                 push[0] = (uint)(inputOffset / 4); push[1] = 0; push[2] = (uint)pool.Count; push[3] = (uint)pool.First;
@@ -299,18 +298,27 @@ public sealed unsafe partial class VulkanDevice
                 _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, cullPipeline);
                 _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
                 _graph.NoteDispatch();
-                TerrainSceneBarrier(producer, draw.Buffer, draw.Offset, bytes, PipelineStageFlags2.ComputeShaderBit,
-                    AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
-                if (groups > 1)
-                {
-                    _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, scatterPipeline);
-                    _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
-                    _graph.NoteDispatch();
-                }
-                TerrainSceneBarrier(producer, draw.Buffer, draw.Offset, bytes,
-                    PipelineStageFlags2.DrawIndirectBit | (parity != null ? PipelineStageFlags2.HostBit : 0),
-                    AccessFlags2.IndirectCommandReadBit | (parity != null ? AccessFlags2.HostReadBit : 0));
             }
+            TerrainSceneBarrier(producer, prepared, parity != null, PipelineStageFlags2.ComputeShaderBit,
+                AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
+            for (int poolIndex = 0; poolIndex < prepared.Length; poolIndex++)
+            {
+                var draw = prepared[poolIndex];
+                if (draw.Buffer == null) continue;
+                var pool = draw.Pool;
+                int groups = (pool.Count + 63) / 64;
+                if (groups <= 1) continue;
+                DescriptorSet set = sets[poolIndex];
+                _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
+                push[0] = (uint)(inputOffset / 4); push[1] = 0; push[2] = (uint)pool.Count; push[3] = (uint)pool.First;
+                _context.Api.CmdPushConstants(producer, program.Layout, ShaderStageFlags.ComputeBit, 0, 16, push);
+                _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, scatterPipeline);
+                _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
+                _graph.NoteDispatch();
+            }
+            TerrainSceneBarrier(producer, prepared, parity != null,
+                PipelineStageFlags2.DrawIndirectBit | (parity != null ? PipelineStageFlags2.HostBit : 0),
+                AccessFlags2.IndirectCommandReadBit | (parity != null ? AccessFlags2.HostReadBit : 0));
             _terrainSceneCulls.Add(key, prepared);
         }
         // Liquid-motion replay uses these very same compacted lists. A distinct eye,
@@ -610,15 +618,30 @@ public sealed unsafe partial class VulkanDevice
         return input;
     }
 
-    private void TerrainSceneBarrier(CommandBuffer command, VulkanBuffer buffer, ulong offset, ulong size,
+    private void TerrainSceneBarrier(CommandBuffer command, ReadOnlySpan<TerrainSceneIndirect> draws, bool parity,
         PipelineStageFlags2 stage, AccessFlags2 access)
     {
-        var barrier = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
-            DstStageMask = stage, DstAccessMask = access, SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-            DstQueueFamilyIndex = Vk.QueueFamilyIgnored, Buffer = buffer.Handle, Offset = offset, Size = size };
-        var dependency = new DependencyInfo { SType = StructureType.DependencyInfo, BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
-        _context.Api.CmdPipelineBarrier2(command, &dependency);
+        Span<BufferMemoryBarrier2> barriers = draws.Length <= 64
+            ? stackalloc BufferMemoryBarrier2[draws.Length] : new BufferMemoryBarrier2[draws.Length];
+        int count = 0;
+        foreach (var draw in draws)
+        {
+            if (draw.Buffer == null) continue;
+            // Keep each exact range, including outputs in separate overflow/readback buffers,
+            // in one dependency so the whole stage has just one synchronization boundary.
+            barriers[count++] = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,
+                SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+                DstStageMask = stage, DstAccessMask = access, SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+                DstQueueFamilyIndex = Vk.QueueFamilyIgnored, Buffer = draw.Buffer.Handle, Offset = draw.Offset,
+                Size = TerrainSceneOutputBytes(draw.Pool, parity) };
+        }
+        if (count == 0) return;
+        fixed (BufferMemoryBarrier2* ranges = barriers)
+        {
+            var dependency = new DependencyInfo { SType = StructureType.DependencyInfo,
+                BufferMemoryBarrierCount = (uint)count, PBufferMemoryBarriers = ranges };
+            _context.Api.CmdPipelineBarrier2(command, &dependency);
+        }
     }
 
     private void BeginTerrainSceneFrame()
