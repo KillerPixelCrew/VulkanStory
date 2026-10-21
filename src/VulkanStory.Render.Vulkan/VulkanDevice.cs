@@ -1615,12 +1615,9 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         foreach (var depth in _stereoOcclusionDepths) depth?.DisposeIdle();
         Array.Clear(_stereoOcclusionDepths);
         DisposeTerrainInputsIdle();
-        DisposeDeformationGeometryIdle();
-        DisposeJointPosesIdle();
-        DisposeWorldGeometryIdle();
+        DisposeComputeOutputsIdle();
         DisposeParticleGeometryIdle();
         DisposeParticleVisualsIdle();
-        DisposeEntityDrawsIdle();
         DisposeEntitySceneIdle();
         _occlusionDepth = null;
         _compute?.Dispose();
