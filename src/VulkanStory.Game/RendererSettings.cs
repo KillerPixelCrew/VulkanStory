@@ -102,7 +102,6 @@ internal sealed record RendererSettings
     /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
     public bool GpuTerrainNoise { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
-    public bool GpuSharedDeformation { get; init; } = true;
     /// <summary>Produces supported cube-particle current/previous geometry in compute.</summary>
     public bool GpuParticleGeometry { get; init; } = true;
     /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
@@ -110,9 +109,7 @@ internal sealed record RendererSettings
     /// <summary>Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling.</summary>
     public bool GpuParticleSimulation { get; init; }
     /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
-    public bool GpuJointPosePreparation { get; init; } = true;
     /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
-    public bool GpuEntityDrawPreparation { get; init; } = true;
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
@@ -194,12 +191,9 @@ internal sealed record RendererSettings
         ResidentEntities = source.ResidentEntities,
         GpuChunkMeshing = source.GpuChunkMeshing,
         GpuTerrainNoise = source.GpuTerrainNoise,
-        GpuSharedDeformation = source.GpuSharedDeformation,
         GpuParticleGeometry = source.GpuParticleGeometry,
         GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
         GpuParticleSimulation = source.GpuParticleSimulation,
-        GpuJointPosePreparation = source.GpuJointPosePreparation,
-        GpuEntityDrawPreparation = source.GpuEntityDrawPreparation,
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,
