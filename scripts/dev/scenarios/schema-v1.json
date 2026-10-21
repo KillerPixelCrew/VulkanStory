@@ -427,7 +427,8 @@
                 "particleVisualFunctionCoverage",
                 "cpuParticlePropertiesDeferred",
                 "cpuParticleFacadeChecks",
-                "cpuParticleFacadeValid", "particleVisualChecksPassed", "terrainNoiseAvailable", "terrainDensityAvailable", "terrainComparisonComplete", "terrainComparisonOutputEqual", "terrainComparisonGpuEquivalent",                 "entityResidentRowsCaptured",
+                "cpuParticleFacadeValid", "particleVisualChecksPassed", "terrainNoiseAvailable", "terrainDensityAvailable", "terrainComparisonComplete", "terrainComparisonOutputEqual", "terrainComparisonGpuEquivalent",
+                "entityResidentRowsCaptured",
                 "entityResidentCaptureRefusals",
                 "realPresents",
                 "sdkReportedPresents",
@@ -510,7 +511,8 @@
                         "mapPageRendererActive",
                         "managedDependencyResolutionVerified",
                         "cpuRenderCycleSucceeded",
-                        "cpuParticleFacadeValid", "particleVisualChecksPassed", "terrainNoiseAvailable", "terrainDensityAvailable", "terrainComparisonComplete", "terrainComparisonOutputEqual", "terrainComparisonGpuEquivalent",                         "presentCallReturned"
+                        "cpuParticleFacadeValid", "particleVisualChecksPassed", "terrainNoiseAvailable", "terrainDensityAvailable", "terrainComparisonComplete", "terrainComparisonOutputEqual", "terrainComparisonGpuEquivalent",
+                        "presentCallReturned"
                       ]
                     },
                     "op": {
