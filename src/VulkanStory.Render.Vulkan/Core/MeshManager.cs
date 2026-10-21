@@ -35,7 +35,6 @@ internal sealed class VulkanMesh : IDisposable
     public bool Persistent { get; set; }
     public bool Ssbo { get; set; }
     internal ulong GeometryRevision { get; set; }
-    internal TerrainDrawBounds? EntityLocalBounds { get; set; }
     internal bool EntityFlagsWithoutWind { get; set; }
     // CPU-upload certificates, never inferred from spare allocation capacity.
     internal int EntityIndexPrefixCount { get; set; }
@@ -847,25 +846,24 @@ internal sealed unsafe class MeshManager : IDisposable
             // for mapped storage. Keep the buffer, placement and descriptors;
             // copying its whole capacity on each small update is prohibitively costly.
             _uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);
-            CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount, buffer.Size);
+            CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount);
             return;
         }
 
         buffer = WritableBuffer(mesh!, slot, buffer);
         System.Buffer.MemoryCopy(
             (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
-        CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount, buffer.Size);
+        CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount);
     }
 
     private static void InvalidateEntityBounds(VulkanMesh mesh, int slot)
     {
         if (slot < 0) mesh.EntityIndexPrefixCount = 0;
         else mesh.EntityStreamPrefixBytes[slot] = 0;
-        if (slot == BufferXyz) mesh.EntityLocalBounds = null;
         if (slot == BufferFlags) mesh.EntityFlagsWithoutWind = false;
     }
 
-    private static void CaptureEntityBounds(VulkanMesh mesh, int slot, int offset, IntPtr source, int bytes, ulong capacity)
+    private static void CaptureEntityBounds(VulkanMesh mesh, int slot, int offset, IntPtr source, int bytes)
     {
         InvalidateEntityBounds(mesh, slot);
         // Certify complete ordinary streams only. Partial updates and borrowed
@@ -896,18 +894,6 @@ internal sealed unsafe class MeshManager : IDisposable
             foreach (int flag in flags) if ((flag & (0xf << 25)) != 0) return;
             mesh.EntityFlagsWithoutWind = true;
         }
-        if (slot != BufferXyz || (ulong)bytes != capacity || bytes % 12 != 0 || bytes > 12 * 262144) return;
-        var positions = new ReadOnlySpan<float>((void*)source, bytes / 4);
-        double minX = double.PositiveInfinity, minY = minX, minZ = minX;
-        double maxX = double.NegativeInfinity, maxY = maxX, maxZ = maxX;
-        for (int i = 0; i < positions.Length; i += 3)
-        {
-            float x = positions[i], y = positions[i + 1], z = positions[i + 2];
-            if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z)) return;
-            minX = Math.Min(minX, x); minY = Math.Min(minY, y); minZ = Math.Min(minZ, z);
-            maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y); maxZ = Math.Max(maxZ, z);
-        }
-        mesh.EntityLocalBounds = new(minX, minY, minZ, maxX, maxY, maxZ);
     }
 
     /// <summary>Renames previously recorded mapped storage before CPU writes; old command buffers retain their own bytes.</summary>
