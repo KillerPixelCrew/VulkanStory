@@ -699,16 +699,10 @@ public sealed unsafe partial class VulkanDevice
     /// one place that converts them.
     /// </summary>
     internal bool DrawNativeMeshMulti(NativePipeline pipeline, int meshId, int[] indicesStarts, int[] indicesSizes,
-        int groupCount, ReadOnlySpan<NativeTexture> textures, ReadOnlySpan<TerrainDrawBounds> terrainBounds = default,
-        ReadOnlySpan<TerrainFrustumPlane> terrainPlanes = default, double cameraX = 0, double cameraY = 0, double cameraZ = 0)
+        int groupCount, ReadOnlySpan<NativeTexture> textures)
     {
         if (groupCount <= 0 || indicesStarts == null || indicesSizes == null) return false;
         if (!NativeMeshIsDrawable(pipeline, meshId, out VulkanMesh? mesh)) return false;
-        VulkanBuffer? preparedBuffer = null;
-        if (!terrainBounds.IsEmpty) _terrainOccluderMeshes.Add(meshId);
-        ulong preparedOffset = 0, preparedCountOffset = 0;
-        bool prepared = !terrainBounds.IsEmpty && PrepareTerrainDraws(terrainBounds, indicesStarts, indicesSizes,
-            groupCount, terrainPlanes, cameraX, cameraY, cameraZ, out preparedBuffer, out preparedOffset, out preparedCountOffset);
         if (!BeginNativeDraw(pipeline, textures, meshId, out CommandBuffer commandBuffer, out VulkanFramebuffer? target))
         {
             return false;
@@ -717,8 +711,7 @@ public sealed unsafe partial class VulkanDevice
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.DrawMulti, pipeline.ProgramId, target!.Id, meshId));
 
-        ulong indirectOffset = preparedOffset;
-        VulkanBuffer indirect = prepared ? preparedBuffer! : AllocateIndirect(groupCount, out indirectOffset);
+        VulkanBuffer indirect = AllocateIndirect(groupCount, out ulong indirectOffset);
         if (RenderTrace.Enabled)
         {
             RenderTrace.Write("native multidraw mesh=" + meshId + " program=" + pipeline.ProgramId + " pass='" +
@@ -726,16 +719,7 @@ public sealed unsafe partial class VulkanDevice
                 " indirectOffset=" + indirectOffset);
         }
 
-        if (prepared)
-        {
-            _meshes.Bind(commandBuffer, mesh!);
-            if (_context.DrawIndirectCountEnabled)
-                _context.Api.CmdDrawIndexedIndirectCount(commandBuffer, indirect.Handle, indirectOffset,
-                    indirect.Handle, preparedCountOffset, (uint)groupCount, 20);
-            else _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirect.Handle, indirectOffset, (uint)groupCount, 20);
-            _meshes.NoteSceneDrawCommand();
-        }
-        else _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
+        _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
         if (_gpuTimestamps != null)
         {
             long indices = 0;
