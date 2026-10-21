@@ -113,6 +113,8 @@ public sealed unsafe partial class VulkanDevice
     public long TerrainParityChecks { get; private set; }
     public long TerrainParityMismatches { get; private set; }
 
+    // Each pool's subrange retains five command words and two rank words per
+    // part, one total per workgroup, the count, then optional per-part handles.
     private static ulong TerrainSceneOutputBytes(TerrainScenePool pool, bool parity) =>
         (ulong)(pool.Count * (parity ? 8L : 7L) + (pool.Count + 63) / 64 + 1) * 4;
 
@@ -247,15 +249,43 @@ public sealed unsafe partial class VulkanDevice
         if (program == null) return false;
         if (!_terrainSceneCulls.TryGetValue(key, out var prepared))
         {
+            var limits = DrawPreparationLimits;
+            ulong alignment = Math.Max(4UL, limits.MinStorageBufferOffsetAlignment), bytes = 0;
+            var offsets = new ulong[pools.Length];
+            int poolCount = skipped.Count(skip => !skip), poolWord = 0;
+            var poolWords = new uint[poolCount * 4];
+            uint groups = 0;
+            // One descriptor covers the pass. Each aligned pool range keeps its
+            // commands, ranks, group totals, count and optional parity handles.
+            for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
+            {
+                if (skipped[poolIndex]) continue;
+                var pool = pools[poolIndex];
+                ulong offset = (bytes + alignment - 1) / alignment * alignment;
+                offsets[poolIndex] = offset;
+                bytes = offset + TerrainSceneOutputBytes(pool, parity != null);
+                if (bytes > limits.MaxStorageBufferRange) return false;
+                poolWords[poolWord++] = (uint)pool.First;
+                poolWords[poolWord++] = (uint)pool.Count;
+                poolWords[poolWord++] = (uint)(offset / 4);
+                poolWords[poolWord++] = groups;
+                groups += (uint)((pool.Count + 63) / 64);
+            }
+            if (groups > limits.MaxComputeWorkGroupCount[0]) return false;
             VulkanTexture sampled = _textures.Get(useDepth ? depth.Texture : _bindless!.PlaceholderTextureId(TextureKind.Texture2D))!;
             // Completed pyramids stay immutable throughout this logical frame,
             // including any partial submissions before a later eye or replay.
-            var input = TerrainSceneInput(view, useDepth ? depth : default, parity != null, out ulong inputOffset);
+            var input = TerrainSceneInput(view, useDepth ? depth : default, parity != null, poolWords, out ulong inputOffset);
             if (input == null) return false;
             var cullPipeline = _compute.PipelineFor(program, [0u]);
             var scatterPipeline = _compute.PipelineFor(program, [1u]);
+            VulkanBuffer output = AllocateTerrainOutput(bytes, parity != null, out ulong outputOffset);
+            DescriptorSet set = _computeArenas[CurrentFrameSlot].GetMixed(program.SetLayout,
+                [new ComputeImageWrite(0, DescriptorType.CombinedImageSampler, sampled.ViewOfMips(0, sampled.MipLevels),
+                    _textures.Samplers.Get(ComputeNearest), ImageLayout.ShaderReadOnlyOptimal)], 1,
+                [new DescriptorBufferInfo(input.Handle, 0, input.Size), new DescriptorBufferInfo(output.Handle, outputOffset, bytes),
+                    new DescriptorBufferInfo(_terrainSceneTable!.Handle, 0, _terrainSceneTable.Size)]);
             prepared = new TerrainSceneIndirect[pools.Length];
-            var sets = new DescriptorSet[pools.Length];
             for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
             {
                 var pool = pools[poolIndex];
@@ -264,15 +294,8 @@ public sealed unsafe partial class VulkanDevice
                     prepared[poolIndex] = new(pool, null, 0, 0);
                     continue;
                 }
-                int groups = (pool.Count + 63) / 64;
-                ulong bytes = TerrainSceneOutputBytes(pool, parity != null);
-                VulkanBuffer output = AllocateTerrainOutput(bytes, parity != null, out ulong outputOffset);
-                sets[poolIndex] = _computeArenas[CurrentFrameSlot].GetMixed(program.SetLayout,
-                    [new ComputeImageWrite(0, DescriptorType.CombinedImageSampler, sampled.ViewOfMips(0, sampled.MipLevels),
-                        _textures.Samplers.Get(ComputeNearest), ImageLayout.ShaderReadOnlyOptimal)], 1,
-                    [new DescriptorBufferInfo(input.Handle, 0, input.Size), new DescriptorBufferInfo(output.Handle, outputOffset, bytes),
-                        new DescriptorBufferInfo(_terrainSceneTable!.Handle, 0, _terrainSceneTable.Size)]);
-                prepared[poolIndex] = new(pool, output, outputOffset, outputOffset + (ulong)(pool.Count * 7 + groups) * 4);
+                ulong offset = outputOffset + offsets[poolIndex];
+                prepared[poolIndex] = new(pool, output, offset, offset + (ulong)(pool.Count * 7L + (pool.Count + 63) / 64) * 4);
             }
             // All optional admission and capacity checks are now complete. Everything
             // below records the whole call, with no partial-success fallback.
@@ -285,39 +308,19 @@ public sealed unsafe partial class VulkanDevice
             var barriers = _terrainSceneBarriers ??= _textures.CreateBatcher();
             _textures.Require(barriers, producer, sampled, 0, sampled.MipLevels, ResourceUsage.SampleCompute);
             barriers.Flush(producer);
-            uint* push = stackalloc uint[4];
-            for (int poolIndex = 0; poolIndex < prepared.Length; poolIndex++)
-            {
-                var draw = prepared[poolIndex];
-                if (draw.Buffer == null) continue;
-                var pool = draw.Pool;
-                int groups = (pool.Count + 63) / 64;
-                DescriptorSet set = sets[poolIndex];
-                _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
-                push[0] = (uint)(inputOffset / 4); push[1] = 0; push[2] = (uint)pool.Count; push[3] = (uint)pool.First;
-                _context.Api.CmdPushConstants(producer, program.Layout, ShaderStageFlags.ComputeBit, 0, 16, push);
-                _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, cullPipeline);
-                _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
-                _graph.NoteDispatch();
-            }
-            TerrainSceneBarrier(producer, prepared, parity != null, PipelineStageFlags2.ComputeShaderBit,
+            uint* push = stackalloc uint[2];
+            push[0] = (uint)(inputOffset / 4); push[1] = (uint)poolCount;
+            _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
+            _context.Api.CmdPushConstants(producer, program.Layout, ShaderStageFlags.ComputeBit, 0, 8, push);
+            _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, cullPipeline);
+            _context.Api.CmdDispatch(producer, groups, 1, 1);
+            _graph.NoteDispatch();
+            TerrainSceneBarrier(producer, output, outputOffset, bytes, PipelineStageFlags2.ComputeShaderBit,
                 AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit);
-            for (int poolIndex = 0; poolIndex < prepared.Length; poolIndex++)
-            {
-                var draw = prepared[poolIndex];
-                if (draw.Buffer == null) continue;
-                var pool = draw.Pool;
-                int groups = (pool.Count + 63) / 64;
-                if (groups <= 1) continue;
-                DescriptorSet set = sets[poolIndex];
-                _context.Api.CmdBindDescriptorSets(producer, PipelineBindPoint.Compute, program.Layout, 0, 1, &set, 0, null);
-                push[0] = (uint)(inputOffset / 4); push[1] = 0; push[2] = (uint)pool.Count; push[3] = (uint)pool.First;
-                _context.Api.CmdPushConstants(producer, program.Layout, ShaderStageFlags.ComputeBit, 0, 16, push);
-                _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, scatterPipeline);
-                _context.Api.CmdDispatch(producer, (uint)groups, 1, 1);
-                _graph.NoteDispatch();
-            }
-            TerrainSceneBarrier(producer, prepared, parity != null,
+            _context.Api.CmdBindPipeline(producer, PipelineBindPoint.Compute, scatterPipeline);
+            _context.Api.CmdDispatch(producer, groups, 1, 1);
+            _graph.NoteDispatch();
+            TerrainSceneBarrier(producer, output, outputOffset, bytes,
                 PipelineStageFlags2.DrawIndirectBit | (parity != null ? PipelineStageFlags2.HostBit : 0),
                 AccessFlags2.IndirectCommandReadBit | (parity != null ? AccessFlags2.HostReadBit : 0));
             _terrainSceneCulls.Add(key, prepared);
@@ -393,6 +396,8 @@ public sealed unsafe partial class VulkanDevice
             var seen = new HashSet<int>();
             foreach (var draw in result.Draws)
             {
+                // Offsets are absolute within the shared pass buffer; each pool's
+                // stock-boundary handles still follow its own indirect count.
                 uint* handles = draw.Buffer == null ? null : (uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset + 4);
                 HashSet<uint>? depthKept = null;
                 if (result.UseDepth && draw.Buffer != null)
@@ -567,16 +572,17 @@ public sealed unsafe partial class VulkanDevice
         {
             string source = Culling.OcclusionDepth.Source("draws.comp");
             _terrainSceneProgram = CreateComputeProgram(source, "resident-terrain-draws",
-                [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer), new(3, ComputeSlotKind.Buffer)], 16, 64, 1);
+                [new(0, ComputeSlotKind.Sampled), new(1, ComputeSlotKind.Buffer), new(2, ComputeSlotKind.Buffer), new(3, ComputeSlotKind.Buffer)], 8, 64, 1);
         }
         return _compute.Get(_terrainSceneProgram);
     }
 
-    private VulkanBuffer? TerrainSceneInput(in TerrainView view, TerrainSceneDepth depth, bool parity, out ulong offset)
+    private VulkanBuffer? TerrainSceneInput(in TerrainView view, TerrainSceneDepth depth, bool parity,
+        ReadOnlySpan<uint> poolWords, out ulong offset)
     {
         _terrainSceneVisibility.TryGetValue(view.Eye, out var visibility);
         visibility ??= [];
-        ulong bytes = (ulong)TerrainSceneHeaderWords * 4 + (ulong)visibility.Length * 8;
+        ulong bytes = (ulong)TerrainSceneHeaderWords * 4 + (ulong)visibility.Length * 8 + (ulong)poolWords.Length * 4;
         offset = 0;
         if (bytes > DrawPreparationLimits.MaxStorageBufferRange) return null;
         if (_terrainSceneInputs.Length == 0)
@@ -633,33 +639,22 @@ public sealed unsafe partial class VulkanDevice
             plane[0] = planes[i].A; plane[1] = planes[i].B; plane[2] = planes[i].C; plane[3] = planes[i].D;
         }
         visibility.AsSpan().CopyTo(new Span<ulong>(words + TerrainSceneHeaderWords, visibility.Length));
+        // Four words per non-skipped pool: first part, part count, relative
+        // output word and first workgroup in the pass-wide dispatch.
+        poolWords.CopyTo(new Span<uint>(words + TerrainSceneHeaderWords + visibility.Length * 2, poolWords.Length));
         return input;
     }
 
-    private void TerrainSceneBarrier(CommandBuffer command, ReadOnlySpan<TerrainSceneIndirect> draws, bool parity,
+    private void TerrainSceneBarrier(CommandBuffer command, VulkanBuffer output, ulong offset, ulong bytes,
         PipelineStageFlags2 stage, AccessFlags2 access)
     {
-        Span<BufferMemoryBarrier2> barriers = draws.Length <= 64
-            ? stackalloc BufferMemoryBarrier2[draws.Length] : new BufferMemoryBarrier2[draws.Length];
-        int count = 0;
-        foreach (var draw in draws)
-        {
-            if (draw.Buffer == null) continue;
-            // Keep each exact range, including outputs in separate overflow/readback buffers,
-            // in one dependency so the whole stage has just one synchronization boundary.
-            barriers[count++] = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,
-                SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
-                DstStageMask = stage, DstAccessMask = access, SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
-                DstQueueFamilyIndex = Vk.QueueFamilyIgnored, Buffer = draw.Buffer.Handle, Offset = draw.Offset,
-                Size = TerrainSceneOutputBytes(draw.Pool, parity) };
-        }
-        if (count == 0) return;
-        fixed (BufferMemoryBarrier2* ranges = barriers)
-        {
-            var dependency = new DependencyInfo { SType = StructureType.DependencyInfo,
-                BufferMemoryBarrierCount = (uint)count, PBufferMemoryBarriers = ranges };
-            _context.Api.CmdPipelineBarrier2(command, &dependency);
-        }
+        var barrier = new BufferMemoryBarrier2 { SType = StructureType.BufferMemoryBarrier2,
+            SrcStageMask = PipelineStageFlags2.ComputeShaderBit, SrcAccessMask = AccessFlags2.ShaderStorageWriteBit,
+            DstStageMask = stage, DstAccessMask = access, SrcQueueFamilyIndex = Vk.QueueFamilyIgnored,
+            DstQueueFamilyIndex = Vk.QueueFamilyIgnored, Buffer = output.Handle, Offset = offset, Size = bytes };
+        var dependency = new DependencyInfo { SType = StructureType.DependencyInfo,
+            BufferMemoryBarrierCount = 1, PBufferMemoryBarriers = &barrier };
+        _context.Api.CmdPipelineBarrier2(command, &dependency);
     }
 
     private void BeginTerrainSceneFrame()

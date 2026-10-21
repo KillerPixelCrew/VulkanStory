@@ -6,15 +6,17 @@ layout(binding = 0) uniform sampler2D depthPyramid;
 layout(binding = 1, std430) readonly buffer Input { uint words[]; } inputData;
 layout(binding = 2, std430) buffer Output { uint words[]; } outputData;
 layout(push_constant) uniform Parameters {
-    uint inputWord; uint outputWord; uint count;
-    uint firstPart;
+    uint inputWord; uint poolCount;
 } p;
+struct Pool { uint firstPart; uint count; uint outputWord; uint firstGroup; };
+Pool pool;
 shared uint visible[64];
 float f(uint word) { return uintBitsToFloat(inputData.words[p.inputWord + word]); }
 vec4 v(uint word) { return vec4(f(word), f(word+1), f(word+2), f(word+3)); }
 // Persistent 64-byte rows: float xyz/radii xyz; first/count; lod; chunk slot;
 // Hide; pool mesh; render pass; atlas; part handle; spare word. The view header ends at word 144,
-// followed by the stock ChunkCuller visibility bitset (low uint first).
+// followed by the stock ChunkCuller visibility bitset (low uint first), then
+// four words per pool: first part, count, output word and first pass workgroup.
 layout(binding = 3, std430) readonly buffer ResidentParts { uint words[]; } resident;
 double d(uint word) {
     return packDouble2x32(uvec2(inputData.words[p.inputWord + word], inputData.words[p.inputWord + word + 1u]));
@@ -26,7 +28,7 @@ float outward(float value, bool up) {
 }
 bool residentHidden(uint index, out vec3 lo, out vec3 hi)
 {
-    uint row = (p.firstPart + index) * 16u;
+    uint row = (pool.firstPart + index) * 16u;
     lo = hi = vec3(0);
     if (resident.words[row + 10u] != 0u) return true;
     uint mode = inputData.words[p.inputWord + 79u];
@@ -88,8 +90,8 @@ bool hidden(uint index)
     if (inputData.words[p.inputWord + 87u] != 0u) {
         // Diagnostic-only handles at the stock boundary, before historical-depth
         // rejection. This runs in the same cull dispatch and never changes keep.
-        uint parityWord = p.outputWord + p.count * 7u + (p.count + 63u) / 64u + 1u;
-        outputData.words[parityWord + index] = stockHidden ? 0u : resident.words[(p.firstPart + index) * 16u + 14u];
+        uint parityWord = pool.outputWord + pool.count * 7u + (pool.count + 63u) / 64u + 1u;
+        outputData.words[parityWord + index] = stockHidden ? 0u : resident.words[(pool.firstPart + index) * 16u + 14u];
     }
     if (stockHidden) return true;
     if (inputData.words[p.inputWord + 85u] == 0u) return false;
@@ -129,22 +131,34 @@ bool hidden(uint index)
 void writePoolCommand(uint index, uint rank, uint outputWord)
 {
     uint dst = outputWord + rank * 5u;
-    uint row = (p.firstPart + index) * 16u;
+    uint row = (pool.firstPart + index) * 16u;
     outputData.words[dst] = resident.words[row + 7u];
     outputData.words[dst + 1u] = 1u;
     outputData.words[dst + 2u] = resident.words[row + 6u];
     outputData.words[dst + 3u] = 0u; outputData.words[dst + 4u] = 0u;
 }
-void writeCommand(uint index, uint rank) { writePoolCommand(index, rank, p.outputWord); }
+void writeCommand(uint index, uint rank) { writePoolCommand(index, rank, pool.outputWord); }
 void main()
 {
-    uint lane = gl_LocalInvocationID.x, index = gl_GlobalInvocationID.x;
-    uint scratch = p.outputWord + p.count * 5u;
-    uint totals = scratch + p.count * 2u;
+    uint table = p.inputWord + 144u + inputData.words[p.inputWord + 86u];
+    // firstGroup is strictly increasing; every workgroup belongs to one pool.
+    uint first = 0u, last = p.poolCount;
+    while (first + 1u < last) {
+        uint middle = (first + last) / 2u;
+        if (inputData.words[table + middle * 4u + 3u] <= gl_WorkGroupID.x) first = middle;
+        else last = middle;
+    }
+    uint entry = table + first * 4u;
+    pool = Pool(inputData.words[entry], inputData.words[entry + 1u],
+        inputData.words[entry + 2u], inputData.words[entry + 3u]);
+    uint group = gl_WorkGroupID.x - pool.firstGroup;
+    uint lane = gl_LocalInvocationID.x, index = group * 64u + lane;
+    uint scratch = pool.outputWord + pool.count * 5u;
+    uint totals = scratch + pool.count * 2u;
     if (!scatterDraws) {
         uint keep = 0u;
-        if (index < p.count) {
-            for (uint i = 0u; i < 5u; i++) outputData.words[p.outputWord + index * 5u + i] = 0u;
+        if (index < pool.count) {
+            for (uint i = 0u; i < 5u; i++) outputData.words[pool.outputWord + index * 5u + i] = 0u;
             keep = hidden(index) ? 0u : 1u;
         }
         visible[lane] = keep;
@@ -154,28 +168,29 @@ void main()
             uint addend = lane >= step ? visible[lane - step] : 0u;
             barrier(); visible[lane] += addend; barrier();
         }
-        if (index < p.count) {
+        if (index < pool.count) {
             outputData.words[scratch + index * 2u] = keep;
             outputData.words[scratch + index * 2u + 1u] = visible[lane] - keep;
         }
-        if (lane == 63u) outputData.words[totals + gl_WorkGroupID.x] = visible[lane];
-        // Small pools need no inter-workgroup prefix or second dispatch.
-        if (p.count <= 64u) {
+        if (lane == 63u) outputData.words[totals + group] = visible[lane];
+        // Small pools finish here and skip the pass-wide scatter dispatch.
+        if (pool.count <= 64u) {
             memoryBarrierBuffer(); barrier();
             if (keep != 0u) writeCommand(index, visible[lane] - keep);
             if (lane == 63u) outputData.words[totals + 1u] = visible[lane];
         }
         return;
     }
+    if (pool.count <= 64u) return;
     // The second dispatch sees every group total. Prefixing groups in input order
     // preserves pool order across workgroups, including translucent parts.
     if (index == 0u) {
-        uint total = 0u, groups = (p.count + 63u) / 64u;
-        for (uint group = 0u; group < groups; group++) total += outputData.words[totals + group];
+        uint total = 0u, groups = (pool.count + 63u) / 64u;
+        for (uint i = 0u; i < groups; i++) total += outputData.words[totals + i];
         outputData.words[totals + groups] = total;
     }
-    if (index >= p.count || outputData.words[scratch + index * 2u] == 0u) return;
+    if (index >= pool.count || outputData.words[scratch + index * 2u] == 0u) return;
     uint rank = outputData.words[scratch + index * 2u + 1u];
-    for (uint group = 0u; group < gl_WorkGroupID.x; group++) rank += outputData.words[totals + group];
+    for (uint i = 0u; i < group; i++) rank += outputData.words[totals + i];
     writeCommand(index, rank);
 }
