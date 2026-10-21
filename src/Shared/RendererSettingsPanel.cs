@@ -261,12 +261,9 @@ internal sealed class RendererSettingsPanel
                 Switch("Resident terrain", "ResidentTerrain");
                 Switch("Resident entities", "ResidentEntities");
                 Switch("Compute stock block meshes", "GpuChunkMeshing");
-                Switch("Shared compute deformation", "GpuSharedDeformation");
                 Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute particle visual evolution", "GpuParticleVisualSimulation");
                 Switch("Compute particle fixed steps", "GpuParticleSimulation");
-                Switch("Compute visual joint poses", "GpuJointPosePreparation");
-                Switch("Compute entity draw preparation", "GpuEntityDrawPreparation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
                 Switch("Skip foliage in far shadows", "ShadowFarFoliage");
                 Switch("Cull distant entity shadows", "EntityShadowCull");
