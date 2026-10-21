@@ -6,6 +6,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
+using Vintagestory.GameContent;
 
 namespace VulkanStory.Game;
 
