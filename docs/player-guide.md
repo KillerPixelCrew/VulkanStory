@@ -117,6 +117,19 @@ post-processing path is disabled.
 See the [settings reference](settings-reference.md) for defaults and limits, and
 [rendering](rendering.md) for the image flow behind these controls.
 
+The Performance page's **Resident terrain** (`ResidentTerrain`) and **Resident
+entities** (`ResidentEntities`) switches are on by default and apply live. They
+keep scene data in the renderer for GPU culling and indirect submission. Unsupported
+or mod-patched content retains the existing per-draw compat path; turning either
+switch off uses that path too. Translated shaders (`NativeShaders=false`) use the
+compat lane. Resident terrain also falls back there when the device lacks
+`shaderFloat64`.
+
+**Compute particle geometry** and **Compute particle visual evolution** remain
+on by default. **Compute particle fixed steps** (`GpuParticleSimulation`) is a
+separate option and defaults off. Particle density and pool limits apply
+independently of these switches.
+
 ## Controllers and multiplayer
 
 SDL discovers controllers and loads the bundled mapping database. Per-controller

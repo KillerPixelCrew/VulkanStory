@@ -223,8 +223,8 @@ and counts the snapshot outside that lock. Indexed BFS precomputes loaded-chunk
 neighbors and stores face arrivals in arrays. Runtime diagnostics compare its
 visible set with the coordinate BFS using the same snapshot and traversability data.
 
-Occlusion culling splits across the boundary. Right after the game's opaque terrain
-pass, the session asks `VulkanDevice.OcclusionDepth` to reduce the primary depth to
+The compat lane's occlusion culling splits across the boundary. Right after the
+game's opaque terrain pass, the session asks `VulkanDevice.OcclusionDepth` to reduce the primary depth to
 8×8-pixel max-depth tiles (`shaders/native/occlusion/reduce.comp`) and copy them
 into a readback buffer owned by that frame slot. When the slot comes round again,
 the tiles become a CPU max-depth pyramid together with the view, projection and
@@ -237,6 +237,10 @@ CPU hierarchy reuse alternates published and spare storage. Publication and quer
 access are guarded so storage cannot be overwritten while a reader uses it; size
 changes and world resets rebuild or discard storage. Visibility math stays unchanged.
 
+Resident terrain and entities consume the completed GPU depth pyramid directly
+from a frozen per-frame snapshot. Their culling runs in a pre-graphics compute
+pass and writes indirect commands; compat draws retain the CPU queries above.
+
 ## Rendering
 
 `GameGraphicsAdapter` implements the game's graphics API surface (meshes, textures,
@@ -244,6 +248,24 @@ framebuffers, shaders, uniforms and UBOs, samplers, state, queries, readback) on
 of `VulkanDevice`. GL-shaped IDs used by game and mod code are owned by the adapter;
 the same registry serves the game and third-party `RenderAPI` users, so an ID
 created on one path resolves on another.
+
+`ResidentTerrain` and `ResidentEntities` default on and apply live. The game side
+publishes terrain part/pool changes and captures supported entity/submesh rows;
+the renderer owns the persistent tables, current/previous pose storage and
+frame-slot snapshots. Compute culls and compacts those snapshots before graphics,
+which submits indirect terrain pools and entity groups. Native instanced entity
+vertex shaders retain skinning and current/previous warps. No per-draw entity
+record rewrite, shared geometry packing or deformation/joint-finalization compute
+path is used.
+
+Resident terrain reproduces the stock visibility arithmetic in double precision.
+If `shaderFloat64` is unavailable, its submission is refused and the existing
+per-draw path runs. That **compat lane** also handles refused pools/entities,
+translated shaders (`NativeShaders=false`), foreign-patched policies and
+unsupported shader overrides. Entity capture must succeed before its original
+draw is suppressed; compat entities retain stock vertex-shader skinning.
+See [resident scene submission](rendering.md#resident-scene-and-compat-lane) for
+the pass and snapshot contracts.
 
 Shaders:
 
@@ -326,7 +348,7 @@ and optionally on dedicated servers. Servers without it get digital movement.
 | --- | --- |
 | Game `RenderAPI` | Routed through the ordinary Vulkan adapter |
 | VulkanStory pass API | `VulkanStory.Game.ModRendering`: declared passes at fixed stages, named attachments, motion writers, lifetime-bound registration |
-| Direct OpenGL / OpenTK, native GL, GL proc-address loaders | Detected and refused |
+| Direct OpenGL / OpenTK, native GL, GL proc-address loaders | Supported operations use the shared compatibility bridge; detected unsupported operations are refused |
 
 The `graphics-mod-compatibility` group hooks the game's mod loader. While the Vulkan
 renderer is active, before an enabled third-party client code mod is loaded or
@@ -334,8 +356,10 @@ compiled, `ModGlUsage` scans its
 assembly metadata with Cecil for direct GL calls and native graphics imports,
 without executing it. A mod with unsupported operations is refused through the
 game's own mod-loading error path, so dependency handling and the mod manager behave
-normally. `.vulkanstory status` lists the decisions. Arbitrary mods are not translated
-from OpenGL to Vulkan automatically. A specific direct-GL mod needs its own adapter.
+normally. `.vulkanstory status` lists the decisions. The shared bridge routes its
+supported GL operations into the Vulkan adapter; operations outside that capability
+set require additional integration. A scan with no refused operations does not
+establish compatibility for an arbitrary mod.
 
 ## Files and diagnostics
 

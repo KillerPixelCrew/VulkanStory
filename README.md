@@ -23,7 +23,11 @@ unmodified game.
   (with an optional server-side input companion).
 - **Performance**: optional smoothness patches (culling, chunk streaming, entities,
   singleplayer worldgen, inventory, lighting, physics, chisel LOD and world-map caching),
-  plus terrain/entity occlusion, indexed visibility traversal and stock cloud updates.
+  plus resident terrain/entity tables with pre-graphics GPU culling and indirect
+  draws, indexed visibility traversal and stock cloud updates. `ResidentTerrain`
+  and `ResidentEntities` default on; refused content and translated shaders retain
+  the stock per-draw compat lane. Particle geometry and visual evolution remain
+  enabled; fixed-step `GpuParticleSimulation` defaults off.
   Optional algorithms are switchable on the Performance options page.
 - **Performance inspection**: in-game captures with offline flame graphs, allocation
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
@@ -41,6 +45,9 @@ unmodified game.
   and XeSS-FG needs a supported DX12 GPU and driver (including non-Intel GPUs with
   Shader Model 6.4). The FSR and XeSS upscalers run across vendors; unsupported
   upscalers fall back automatically.
+
+Resident terrain uses `shaderFloat64` for the game's visibility arithmetic. When
+that device feature is unavailable, terrain retains the compat draw path.
 
 ## Installation (players)
 
@@ -127,13 +134,14 @@ your own installation.
 | Path | Contents |
 | --- | --- |
 | `src/VulkanStory.Bootstrap` | Early managed startup, activated by the native `hostfxr.dll` proxy |
-| `src/VulkanStory.Render.Vulkan` | Vulkan device, frame graph, pipelines, upscalers, frame generation, presentation, latency |
+| `src/VulkanStory.Render.Vulkan` | Vulkan device, resident scene tables, frame graph, pipelines and provider resource/presentation adapters |
 | `src/VulkanStory.Platform.Sdl` | SDL3 window, events and coordinates (game-independent) |
 | `src/VulkanStory.Game` | Game integration: Harmony patches, graphics/platform adapters, temporal state, controller input |
 | `src/VulkanStory.Mod` | Mod entry point, settings UI and chat commands |
 | `src/VulkanStory.Contracts`, `src/Shared` | Shared contracts and settings choices |
 | `src/VulkanStory.Input`, `src/VulkanStory.Input.Companion` | Analog movement protocol and the optional server companion |
-| `native/` | Native bootstrap and provider bridges (NGX, FSR3, FSR4, XeSS-FG, Streamline) |
+| `native/` | Native bootstrap, allocation and support bridges |
+| `sdk/rescaleframe` | Shared SR, frame-generation and latency owners, plus native provider bridges |
 | `shaders/native` | Native GLSL shader corpus |
 | `tools/` | Shader compiler, game-profile/preflight tools and the performance collector |
 | `scripts/` | Build, stage, package, deploy and removal scripts |

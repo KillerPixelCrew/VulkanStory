@@ -35,6 +35,7 @@ values to supported ranges, depending on the entry point.
 | Input, FPS counter and latency policy | Live |
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
 | `ResidentTerrain`, `ResidentEntities` | Live Performance-page switches; default on |
+| `GpuChunkMeshing`, `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
 | `GpuParticleSimulation` | Live Performance-page switch; default off |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
@@ -42,6 +43,14 @@ Changing restart settings writes the next-launch request. It does not recreate t
 process runtime immediately. Changing a performance switch generally retains
 installed hooks and changes the path they choose, allowing a return to the
 ordinary behavior without repeatedly patching methods.
+
+Resident submission uses native shaders and renderer-owned scene tables. Refused
+pools/entities, foreign-patched policies and translated mode
+(`NativeShaders=false`) use the compat lane: the existing per-draw path, including
+stock vertex-shader skinning for entities. Resident terrain requires
+`shaderFloat64` to reproduce stock visibility arithmetic; if that feature is
+unavailable, it uses the compat lane automatically. A requested resident switch
+does not mean every object was admitted.
 
 ## Choices
 
@@ -181,8 +190,12 @@ choice and range definitions live in
 | `OutfitShapeCache` | bool | `true` | Caches assembled villager/trader outfit shapes and texture sets, and pre-inserts outfit textures gradually after world load. |
 | `ChunkVisibilityWalk` | bool | `true` | Walks the occlusion culler's own rays from a precomputed shared tree instead of recomputing each ray. |
 | `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws. |
-| `ResidentTerrain` | bool | `true` | Requests renderer-owned terrain state, GPU culling and indirect pass submission; applies live. |
-| `ResidentEntities` | bool | `true` | Requests renderer-owned entity rows, pose storage and indirect pass submission; applies live. |
+| `ResidentTerrain` | bool | `true` | Persistent terrain part/pool tables, pre-graphics compute visibility and indirect pass submission for admitted native pools; otherwise compat draws. Applies live. |
+| `ResidentEntities` | bool | `true` | Persistent entity/submesh rows, current/previous poses, pre-graphics compute culling and indirect submission; native vertex shaders retain skinning. Applies live. |
+| `GpuChunkMeshing` | bool | `true` | Builds supported stock cube terrain faces in compute; custom tessellators and unsupported producers retain CPU meshing. Applies live. |
+| `GpuTerrainNoise` | bool | `true` | Batches supported stock singleplayer terrain noise and density signs, retaining original CPU threshold/block decisions. Applies live. |
+| `GpuParticleGeometry` | bool | `true` | Produces supported cube, quad and rain current/previous render geometry in compute; unsupported inputs keep the original shader path. Applies live. |
+| `GpuParticleVisualSimulation` | bool | `true` | Computes supported stock size, opacity and colour evolution with CPU materialization for unsupported inputs and transitions. Applies live. |
 | `GpuParticleSimulation` | bool | `false` | Batches supported fixed-step particle integration in Vulkan compute, retaining stock world-dependent handling; applies live. |
 | `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth). |
 | `ParallelChunkReads` | bool | `true` | Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load. |

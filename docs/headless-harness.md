@@ -114,6 +114,7 @@ flags require the deferred child-owned input profile and are refused when it is 
 | --- | --- |
 | `frames/frame-NNNNNN.ppm`, `.png` | Scheduled frames. PPM is bottom-up (GL row order), PNG is top-down |
 | `frames/headless-result.json` | Completion record; scenario runs add `scenario-result.json` and `scenario-events.jsonl` |
+| `frames/scenario-checkpoints.jsonl` | Named scenario checkpoints, with observed fields and their frame/session provenance |
 | `attachments/` | `<slot>-<name>-<color<i>\|depth>-<format>.{ppm,pgm,pfm}`. Names come from `EnumFrameBuffer`, `SlotN` for extra targets, slots 40–43 for AO |
 | `status/runtime-<pid>.jsonl` | Provider counters (SR frames, prepared FG frames, SDK-reported presents), game frame work-time percentiles (`frameWorkMs`) and performance-port counters (`performance`) |
 | `bootstrap.jsonl`, `stdout.log`, `stderr.log` | Bootstrap events and child output |
@@ -128,6 +129,38 @@ frames show the world after chunk streaming has finished.
 `python scripts/dev/ssim.py <dir-a> <dir-b> [--threshold 0.98] [--allowlist f.md]`
 compares two attachment dumps by SSIM and mean absolute difference (requires
 numpy).
+
+## Resident scene observations
+
+`ResidentTerrain` and `ResidentEntities` default on. Scenario `settings` actions
+can toggle either live to compare against the stock per-draw compat lane.
+`NativeShaders=false` selects translated/compat rendering at launch; refused
+content and foreign-patched policies also stay in that lane. Resident terrain
+requires `shaderFloat64`; an unavailable feature selects compat terrain rather
+than ending the run.
+
+Scenario checkpoints and assertions expose cumulative renderer fields:
+
+| Field | Meaning |
+| --- | --- |
+| `sceneDrawCommandsTerrain`, `sceneDrawCommandsEntity`, `sceneDrawCommandsParticle` | Vulkan commands recorded in the named scene category, including its compat draws |
+| `sceneDrawCommandsCompat` | Commands outside those three categories, not all content refused by resident admission |
+| `entityResidentRowsCaptured` | Successful row captures, including repeated captures of the same entity/submesh |
+| `entityResidentCaptureRefusals` | Candidate mesh draws that continued without completing resident capture |
+| `terrainParityChecks`, `terrainParityMismatches` | Completed stock-boundary visibility comparisons and disagreements |
+
+Terrain parity is enabled by `VULKANSTORY_TERRAIN_PARITY=1`, or automatically
+when the scenario contains an assertion on either parity field. The adapter
+evaluates the game's `IsVisible` on private copies of the same frozen inputs;
+the GPU records its decision before historical-depth rejection. Comparisons are
+collected only when the owning frame slot completes. A zero mismatch count with
+zero checks does not establish parity.
+
+Scene draw counters count commands, not indirect entries, instances or visible
+objects. A populated resident group can record a command whose GPU culling keeps
+no entries. Neither these counts nor the parity fields measure GPU execution time.
+See [performance](performance.md#resident-scene-submission) for the submission
+and fallback behavior.
 
 ## Performance captures
 
