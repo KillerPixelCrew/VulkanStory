@@ -97,8 +97,6 @@ internal sealed record RendererSettings
     public bool ResidentTerrain { get; init; } = true;
     /// <summary>Enables renderer-owned entity rows, pose storage and indirect pass submission.</summary>
     public bool ResidentEntities { get; init; } = true;
-    /// <summary>Builds supported stock cube terrain faces in compute while retaining custom tessellators.</summary>
-    public bool GpuChunkMeshing { get; init; } = true;
     /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
     public bool GpuTerrainNoise { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
@@ -189,7 +187,6 @@ internal sealed record RendererSettings
         TerrainOcclusionCull = source.TerrainOcclusionCull,
         ResidentTerrain = source.ResidentTerrain,
         ResidentEntities = source.ResidentEntities,
-        GpuChunkMeshing = source.GpuChunkMeshing,
         GpuTerrainNoise = source.GpuTerrainNoise,
         GpuParticleGeometry = source.GpuParticleGeometry,
         GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
