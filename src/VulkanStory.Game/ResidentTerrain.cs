@@ -273,6 +273,10 @@ internal static class ResidentTerrain
         Planes(culler) = [Plane(view.Plane0), Plane(view.Plane1), Plane(view.Plane2),
             Plane(view.Plane3), Plane(view.Plane4), Plane(view.Plane5)];
         var expected = new Dictionary<int, TerrainParityPart>();
+        var test = Performance.TerrainOcclusionCull.Source;
+        var captured = test?.Source;
+        bool depthApplies = view.CullMode == (int)EnumFrustumCullMode.CullNormal &&
+            Performance.PerformancePatchSet.Current?.TerrainOcclusionCull == true;
         bool previous = ParityActive;
         ParityActive = true;
         try
@@ -297,8 +301,11 @@ internal static class ResidentTerrain
                         CullVisible = new Bools(visible, visible),
                         FrustumCullSphere = sphere // Sphere is a value type; preserve its exact float bits.
                     };
-                    expected.Add(part.Handle, new TerrainParityPart(copy.IsVisible((EnumFrustumCullMode)view.CullMode, culler),
-                        inputs, visible));
+                    bool stockVisible = copy.IsVisible((EnumFrustumCullMode)view.CullMode, culler);
+                    bool stockDepthVisible = stockVisible && !(depthApplies && test != null && captured != null &&
+                        Performance.TerrainOcclusionCull.StockOccluded(sphere, captured,
+                            (view.CameraX, view.CameraY, view.CameraZ), test));
+                    expected.Add(part.Handle, new TerrainParityPart(stockVisible, stockDepthVisible, inputs, visible));
                 }
             }
         }

@@ -107,6 +107,16 @@ internal static class TerrainOcclusionCull
         if (camera?.Invoke() is not { } now) return;
         Interlocked.Increment(ref PerformanceCounters.OcclusionTests);
         Sphere sphere = __instance.FrustumCullSphere;
+        if (StockOccluded(sphere, captured, now, test))
+        {
+            __result = false;
+            Interlocked.Increment(ref PerformanceCounters.OcclusionCulled);
+        }
+    }
+
+    internal static bool StockOccluded(in Sphere sphere, OcclusionCamera captured,
+        (double X, double Y, double Z) now, IOcclusionTest test)
+    {
         // The game's "sphere" is the part's tight geometry box: centre plus 0.866 x the full size per axis
         // (TesselatedChunk.SetBounds), so the box half-size is that extent / sqrt(3). Half a block of padding covers
         // geometry that a block model draws past its block.
@@ -114,11 +124,7 @@ internal static class TerrainOcclusionCull
         double dx = now.X - captured.CameraX, dy = now.Y - captured.CameraY, dz = now.Z - captured.CameraZ;
         double grow = Math.Sqrt(dx * dx + dy * dy + dz * dz) + BoxPadding;
         double hx = sphere.radius / Sqrt3 + grow, hy = sphere.radiusY / Sqrt3 + grow, hz = sphere.radiusZ / Sqrt3 + grow;
-        if (test.IsOccluded(sphere.x - hx, sphere.y - hy, sphere.z - hz, sphere.x + hx, sphere.y + hy, sphere.z + hz))
-        {
-            __result = false;
-            Interlocked.Increment(ref PerformanceCounters.OcclusionCulled);
-        }
+        return test.IsOccluded(sphere.x - hx, sphere.y - hy, sphere.z - hz, sphere.x + hx, sphere.y + hy, sphere.z + hz);
     }
 }
 

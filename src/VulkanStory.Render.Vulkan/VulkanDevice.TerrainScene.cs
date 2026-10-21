@@ -24,7 +24,7 @@ internal readonly record struct TerrainPartDesc(int PoolMesh, int RenderPass, in
 
 internal readonly record struct TerrainPlane(double A, double B, double C, double D);
 
-internal readonly record struct TerrainParityPart(bool StockVisible, TerrainPartDesc Inputs, bool ChunkVisible);
+internal readonly record struct TerrainParityPart(bool StockVisible, bool StockDepthVisible, TerrainPartDesc Inputs, bool ChunkVisible);
 
 internal readonly record struct TerrainView(int Eye, double CameraX, double CameraY, double CameraZ,
     double PlayerX, double PlayerY, double PlayerZ,
@@ -104,7 +104,8 @@ public sealed unsafe partial class VulkanDevice
     private readonly record struct TerrainSceneIndirect(TerrainScenePool Pool, VulkanBuffer? Buffer, ulong Offset, ulong CountOffset);
     private readonly Dictionary<TerrainSceneCullKey, TerrainSceneIndirect[]> _terrainSceneCulls = new();
     private sealed record TerrainSceneParityResult(int Site, int Pass, int Atlas, TerrainView View, ulong Frame,
-        TerrainSceneIndirect[] Draws, KeyValuePair<int, TerrainPartDesc>[] Rows, IReadOnlyDictionary<int, TerrainParityPart> Expected);
+        TerrainSceneIndirect[] Draws, KeyValuePair<int, TerrainPartDesc>[] Rows, IReadOnlyDictionary<int, TerrainParityPart> Expected,
+        bool UseDepth);
     private readonly Dictionary<int, List<TerrainSceneParityResult>> _terrainSceneParityResults = new();
     private readonly Dictionary<int, List<VulkanBuffer>> _terrainReadbackBuffers = new();
     private int[] _terrainReadbackBufferCursors = [];
@@ -206,7 +207,7 @@ public sealed unsafe partial class VulkanDevice
         TerrainScenePool[] pools = _terrainScenePools.Where(pool => pool.Pass == renderPass && pool.Atlas == atlas).ToArray();
         if (pools.Length == 0)
         {
-            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, [], parity);
+            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, false, [], parity);
             return true;
         }
         ulong[] visibility = _terrainSceneVisibility.GetValueOrDefault(view.Eye) ?? Array.Empty<ulong>();
@@ -229,7 +230,7 @@ public sealed unsafe partial class VulkanDevice
                 _terrainOccluderMeshes.Add(pool.Mesh);
                 _terrainSceneDrawnPools.Add(pool.Mesh);
             }
-            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, empty, parity);
+            QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, useDepth, empty, parity);
             return true;
         }
         NativeUniform origin = pipeline.Uniform(string.IsNullOrEmpty(view.OriginUniform) ? "origin" : view.OriginUniform);
@@ -343,7 +344,7 @@ public sealed unsafe partial class VulkanDevice
             _terrainOccluderMeshes.Add(pool.Mesh);
             _terrainSceneDrawnPools.Add(pool.Mesh);
         }
-        QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, prepared, parity);
+        QueueTerrainSceneParity(stockCallSite, renderPass, atlas, view, useDepth, prepared, parity);
         return true;
     }
 
@@ -372,14 +373,14 @@ public sealed unsafe partial class VulkanDevice
         return false;
     }
 
-    private void QueueTerrainSceneParity(int site, int pass, int atlas, in TerrainView view,
+    private void QueueTerrainSceneParity(int site, int pass, int atlas, in TerrainView view, bool useDepth,
         TerrainSceneIndirect[] draws, IReadOnlyDictionary<int, TerrainParityPart>? expected)
     {
         if (expected == null) return;
         if (!_terrainSceneParityResults.TryGetValue(CurrentFrameSlot, out var results))
             _terrainSceneParityResults.Add(CurrentFrameSlot, results = new());
         // Record every pass, including a liquid replay that reuses the same cull output.
-        results.Add(new(site, pass, atlas, view, _frameCounter, draws, _terrainSceneRows, expected));
+        results.Add(new(site, pass, atlas, view, _frameCounter, draws, _terrainSceneRows, expected, useDepth));
     }
 
     // Called only after this slot's fence completes, before its mapped/coherent
@@ -393,6 +394,14 @@ public sealed unsafe partial class VulkanDevice
             foreach (var draw in result.Draws)
             {
                 uint* handles = draw.Buffer == null ? null : (uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset + 4);
+                HashSet<uint>? depthKept = null;
+                if (result.UseDepth && draw.Buffer != null)
+                {
+                    uint count = *(uint*)((byte*)draw.Buffer.Mapped + draw.CountOffset);
+                    uint* commands = (uint*)((byte*)draw.Buffer.Mapped + draw.Offset);
+                    depthKept = new HashSet<uint>();
+                    for (uint i = 0; i < count; i++) depthKept.Add(commands[i * 5 + 2]);
+                }
                 for (int i = 0; i < draw.Pool.Count; i++)
                 {
                     var row = result.Rows[draw.Pool.First + i];
@@ -402,6 +411,15 @@ public sealed unsafe partial class VulkanDevice
                     TerrainParityChecks++;
                     if (!found || gpu != (expected.StockVisible ? (uint)row.Key : 0u))
                         NoteTerrainParityMismatch(result, row.Key, found ? expected : null, gpu, row.Value);
+                    if (depthKept != null)
+                    {
+                        bool gpuDepthKept = depthKept.Contains(row.Value.FirstIndex);
+                        bool stockDepthKept = found && expected.StockDepthVisible;
+                        TerrainParityChecks++;
+                        if (gpuDepthKept != stockDepthKept)
+                            NoteTerrainParityMismatch(result, row.Key, found ? expected : null,
+                                gpuDepthKept ? (uint)row.Key : 0u, row.Value, depth: true);
+                    }
                 }
             }
             foreach (var expected in result.Expected)
@@ -415,15 +433,15 @@ public sealed unsafe partial class VulkanDevice
     }
 
     private void NoteTerrainParityMismatch(TerrainSceneParityResult result, int handle, TerrainParityPart? stock,
-        uint gpuHandle, TerrainPartDesc? gpuInputs)
+        uint gpuHandle, TerrainPartDesc? gpuInputs, bool depth = false)
     {
         TerrainParityMismatches++;
         if (_terrainParityMismatchLogged) return;
         _terrainParityMismatchLogged = true;
         RenderLogger?.Warning("VulkanStory: terrain parity mismatch: frame={0} site={1} pass={2} atlas={3} eye={4} part={5} " +
-            "stock={6} GPU={7} GPUHandle={8} stockInputs={9} GPUInputs={10} view={11}", result.Frame,
-            result.Site, result.Pass, result.Atlas, result.View.Eye, handle, stock?.StockVisible,
-            gpuHandle != 0, gpuHandle, stock, gpuInputs, result.View);
+            "stock={6} GPU={7} GPUHandle={8} stockInputs={9} GPUInputs={10} view={11} stage={12}", result.Frame,
+            result.Site, result.Pass, result.Atlas, result.View.Eye, handle, depth ? stock?.StockDepthVisible : stock?.StockVisible,
+            gpuHandle != 0, gpuHandle, stock, gpuInputs, result.View, depth ? "depth" : "stock");
     }
 
     private bool PreflightTerrainSceneDraw(NativePipeline pipeline, ReadOnlySpan<NativeTexture> textures)
