@@ -69,6 +69,8 @@ Allows the diagnostic child window to be visible and changes verifier visibility
 Requires Visible and Scenario. Requests focus once, then waits for confirmed focus before starting scenario ticks. Focus is never repeatedly reclaimed.
 .PARAMETER KeepOpen
 Requires Visible and disables child exit-on-capture-completion; the launcher's timeout still applies.
+.PARAMETER KeepSave
+Retains the isolated data/Saves, data/Backups and data/BackupSaves directories after the child stops, for save-related diagnostics.
 .PARAMETER MainMenuOptions
 Selects menu-only Options capture without opening/copying a world. Accepts only main-context scenarios; rejects commands, parity, and input switches.
 .PARAMETER MainOptionsAction
@@ -118,6 +120,7 @@ param(
     [switch]$Visible,
     [switch]$Focus,
     [switch]$KeepOpen,
+    [switch]$KeepSave,
     [switch]$MainMenuOptions,
     [ValidateSet('open','save','cancel')][string]$MainOptionsAction = 'open',
     [ValidateSet('Image','Generation','Effects','Device','Performance','Status')][string]$OptionsPage = 'Image',
@@ -618,6 +621,10 @@ $dotnet = (Get-Command dotnet.exe -ErrorAction Stop).Source
 Get-Command $Python -ErrorAction Stop | Out-Null
 New-Item -ItemType Directory -Path $runRoot | Out-Null
 $dataRoot = Join-Path $runRoot 'data'
+$process = $null
+$ownedClientStopped = $false
+# Save cleanup must also cover preparation failures and the post-exit result checks.
+try {
 New-Item -ItemType Directory -Path (Join-Path $dataRoot 'ModConfig') -Force | Out-Null
 if ($scenarioSourcePath) {
     $inputRoot = Join-Path $runRoot 'input'
@@ -785,7 +792,6 @@ if ($NativeCrashCapture) {
     [IO.File]::WriteAllText((Join-Path $reportRoot 'game-data-path.txt'), $dataRoot)
     $info.Environment['VULKANSTORY_NATIVE_CRASH_CAPTURE_DIRECTORY'] = $reportRoot
 }
-$process = $null
 $monitor = $null
 $monitorReady = $null
 $stdout = $null
@@ -927,3 +933,40 @@ if ($Commands -and (Select-String -LiteralPath $Commands -Pattern '^\s*(?:@\d+\s
     }
 }
 Write-Host "Captured $expectedFrameCount frames in $runRoot. No installed files or user settings changed."
+}
+finally {
+    if (-not $KeepSave -and (-not $process -or $ownedClientStopped)) {
+        try {
+            $cleanupRunRoot = [IO.Path]::GetFullPath($runRoot).TrimEnd('\','/')
+            $cleanupDataRoot = [IO.Path]::GetFullPath($dataRoot).TrimEnd('\','/')
+            $runPrefix = $cleanupRunRoot + [IO.Path]::DirectorySeparatorChar
+            $dataPrefix = $cleanupDataRoot + [IO.Path]::DirectorySeparatorChar
+            if (-not $cleanupDataRoot.StartsWith($runPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+                -not $cleanupDataRoot.Equals((Join-Path $cleanupRunRoot 'data'), [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Refusing save cleanup outside this run''s data directory.'
+            }
+            foreach ($name in @('Saves', 'Backups', 'BackupSaves')) {
+                $cleanupPath = [IO.Path]::GetFullPath((Join-Path $cleanupDataRoot $name))
+                if (-not (Test-Path -LiteralPath $cleanupPath)) { continue }
+                $cleanupPath = (Resolve-Path -LiteralPath $cleanupPath).ProviderPath
+                if (-not $cleanupPath.StartsWith($runPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+                    -not $cleanupPath.StartsWith($dataPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Refusing save cleanup outside this run's data directory: $cleanupPath"
+                }
+                # Resolve-Path does not dereference junctions; refuse linked paths and contents.
+                $node = $cleanupPath
+                while ($node -and $node.Length -ge $cleanupRunRoot.Length) {
+                    if (((Get-Item -LiteralPath $node -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                        throw "Refusing save cleanup through a reparse point: $node"
+                    }
+                    if ($node.Equals($cleanupRunRoot, [StringComparison]::OrdinalIgnoreCase)) { break }
+                    $node = Split-Path -Path $node -Parent
+                }
+                if (Get-ChildItem -LiteralPath $cleanupPath -Force -Recurse -Attributes ReparsePoint) {
+                    throw "Refusing save cleanup containing a reparse point: $cleanupPath"
+                }
+                Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction Stop
+            }
+        } catch { Write-Warning "Isolated save cleanup failed: $($_.Exception.Message)" -WarningAction Continue }
+    }
+}

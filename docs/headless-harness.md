@@ -139,6 +139,8 @@ cap is not applied while XR is running; the hidden harness's 33ms throttle remai
 | `bootstrap.jsonl`, `stdout.log`, `stderr.log` | Bootstrap events and child output |
 | `data/` | Isolated data path |
 
+After the child stops and result checks finish (including failures), cleanup removes only `data/Saves`, `data/Backups` and `data/BackupSaves`; use `-KeepSave` to retain them for save-related diagnostics.
+
 `verify-headless-result.ps1` runs after the child exits. It checks the exit code,
 timeout, frame counts, that the staged mod copy was the one loaded, world readiness
 and the window state. If any check fails, the launcher fails. Passing means the
