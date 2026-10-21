@@ -572,6 +572,7 @@ public sealed unsafe partial class VulkanDevice
             throw new InvalidOperationException("Accepted resident entities require their stage's native pass.");
         FillResidentEntityCull(batch, passKind, view);
         var api = _context.Api; DescriptorSet set = batch.ComputeSet;
+        _gpuTimestamps?.MarkPreGraphics(computeCommands, "pg_entity_cull");
         api.CmdBindPipeline(computeCommands, PipelineBindPoint.Compute, batch.ComputePipeline);
         api.CmdBindDescriptorSets(computeCommands, PipelineBindPoint.Compute, batch.Compute.Layout, 0, 1, &set, 0, null);
         api.CmdDispatch(computeCommands, (uint)batch.Groups.Count, 1, 1);
