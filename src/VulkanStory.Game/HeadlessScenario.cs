@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using VulkanStory.Settings;
+
 namespace VulkanStory.Game;
+
 /// <summary>Supported deterministic operations in an isolated headless scenario.</summary>
 internal enum HeadlessScenarioActionKind
 {
@@ -17,6 +19,7 @@ internal enum HeadlessScenarioActionKind
     Checkpoint,
     Assert
 }
+
 /// <summary>Validated action scheduled at a scenario tick, including host operations, drawable-pixel resize and observation expectations.</summary>
 internal sealed record HeadlessScenarioAction(
     int Index,
@@ -36,11 +39,13 @@ internal sealed record HeadlessScenarioAction(
     int Height = 0,
     float YawDeltaDegrees = 0,
     string? CameraMode = null);
+
 /// <summary>Identifies the scenario validation category alongside its failure detail.</summary>
 internal sealed class HeadlessScenarioValidationException(string category, string message) : Exception(message)
 {
     internal string Category { get; } = category;
 }
+
 /// <summary>Loads and validates the scenario document before session execution; action support and observation scope are explicit.</summary>
 internal sealed class HeadlessScenario
 {
@@ -215,7 +220,8 @@ internal sealed class HeadlessScenario
         "successfulUpscaleFrames", "preparedFrames", "realPresents", "hostGeneratedPresents", "sdkReportedPresents",
         "validAnimatedHistoryUploads", "animatedMotionWindows", "validRigidHistoryWrites",
         "rigidEntityMotionWindows", "validRigidEntityHistoryWrites", "inventoryMotionWindows", "validInventoryHistoryWrites",
-        "inventorySharedGeometryDraws",         "particleGeometryDispatchesRecorded", "particleGeometryCacheReuses",
+        "inventorySharedGeometryDraws", 
+        "particleGeometryDispatchesRecorded", "particleGeometryCacheReuses",
         "quadGeometryDispatchesRecorded",
         "quadMotionDrawsRecorded", "quadMotionCompositesRecorded", "quadMotionValidInstances",
         "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
@@ -247,6 +253,7 @@ internal sealed class HeadlessScenario
         "particleSimulationCpuBenchmarkPoolMilliseconds", "particleSimulationGpuBenchmarkPoolMilliseconds",
         "entityResidentRowsCaptured", "entityResidentCaptureRefusals",
     };
+
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)
     {
         InputPath = path;
@@ -255,6 +262,7 @@ internal sealed class HeadlessScenario
         Context = context;
         Actions = actions;
     }
+
     internal string InputPath { get; }
     internal string InputSha256 { get; }
     internal string Id { get; }
@@ -262,6 +270,7 @@ internal sealed class HeadlessScenario
     internal string Context { get; }
     internal IReadOnlyList<HeadlessScenarioAction> Actions { get; }
     internal static IReadOnlyDictionary<string, (JsonValueKind Kind, bool Nullable)> Fields => AssertionFields;
+
     /// <summary>Loads, hashes and validates the complete isolated scenario before any action executes.</summary>
     /// <param name="path">Scenario JSON pathname.</param>
     /// <returns>Validated scenario with supported actions and observation scopes.</returns>
@@ -282,6 +291,7 @@ internal sealed class HeadlessScenario
         {
             throw new HeadlessScenarioValidationException("ScenarioPath", error.Message);
         }
+
         try
         {
             using JsonDocument document = JsonDocument.Parse(bytes, new JsonDocumentOptions
@@ -298,6 +308,7 @@ internal sealed class HeadlessScenario
             throw new HeadlessScenarioValidationException("MalformedJson", error.Message);
         }
     }
+
     private static HeadlessScenario Parse(string path, string inputHash, JsonElement root)
     {
         Dictionary<string, JsonElement> rootProperties = ObjectProperties(root, "ScenarioField");
@@ -317,6 +328,7 @@ internal sealed class HeadlessScenario
             throw Error("ActionsRange", "Scenario actions must be an array.");
         if (actionArray.GetArrayLength() is < 1 or > 128)
             throw Error("ActionsRange", "Scenario must contain 1..128 actions.");
+
         var actions = new List<HeadlessScenarioAction>(actionArray.GetArrayLength());
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var captureNames = new HashSet<string>(StringComparer.Ordinal);
@@ -472,6 +484,7 @@ internal sealed class HeadlessScenario
         }
         return new HeadlessScenario(path, inputHash, id, context, actions);
     }
+
     private static RendererSettings InitialSettings()
     {
         static string Choice(string variable) => Environment.GetEnvironmentVariable(variable)?.Trim() ?? "off";
@@ -484,6 +497,7 @@ internal sealed class HeadlessScenario
             ShowFpsCounter = true
         }.Normalize();
     }
+
     private static RendererSettings ValidateSettingsValues(JsonElement values, RendererSettings current)
     {
         Dictionary<string, JsonElement> properties = ObjectProperties(values, "SettingsShape");
@@ -517,6 +531,7 @@ internal sealed class HeadlessScenario
                 ValidateChoice(choiceValue.GetString()!, choice);
         return next.Normalize();
     }
+
     private static void ValidateSettingValue(string name, Type type, JsonElement value)
     {
         bool valid = type == typeof(bool) ? value.ValueKind is JsonValueKind.True or JsonValueKind.False
@@ -526,14 +541,18 @@ internal sealed class HeadlessScenario
             : false;
         if (!valid) throw Error("SettingsType", "RendererSettings." + name + " has the wrong JSON type.");
     }
+
     private static void ValidateChoice(string value, string property, bool xess = false)
     {
         if (!RendererChoices.Contains(property, Canonical(value), xess))
             throw Error("SettingsEnum", "Unknown choice for RendererSettings." + property + ": " + value);
     }
+
     private static string Canonical(string value) => value.Trim().ToLowerInvariant();
+
     private static string[] ChoiceValues(string property) =>
         RendererChoices.Get(property).Select(choice => choice.Value).ToArray();
+
     private static void ValidateEqualityExpected(string field, (JsonValueKind Kind, bool Nullable) fieldSpec, JsonElement expected)
     {
         if (expected.ValueKind == JsonValueKind.Null && fieldSpec.Nullable) return;
@@ -546,6 +565,7 @@ internal sealed class HeadlessScenario
         };
         if (!sameType) throw Error("AssertionExpected", "eq expected value must match the field's JSON type.");
     }
+
     private static void ValidateAssertionChoice(string field, string expected)
     {
         string[]? choices = field switch
@@ -560,6 +580,7 @@ internal sealed class HeadlessScenario
         if (choices != null && !choices.Contains(expected, StringComparer.Ordinal))
             throw Error("AssertionExpected", "Unknown assertion choice for " + field + ": " + expected);
     }
+
     private static Dictionary<string, JsonElement> ObjectProperties(JsonElement value, string category)
     {
         if (value.ValueKind != JsonValueKind.Object)
@@ -570,29 +591,34 @@ internal sealed class HeadlessScenario
                 throw Error("DuplicateProperty", "Duplicate JSON property: " + property.Name);
         return properties;
     }
+
     private static void RequireOnly(Dictionary<string, JsonElement> properties, string[] allowed, string category)
     {
         var known = new HashSet<string>(allowed, StringComparer.Ordinal);
         string? unknown = properties.Keys.FirstOrDefault(name => !known.Contains(name));
         if (unknown != null) throw Error(category, "Unknown property: " + unknown);
     }
+
     private static void RequireAll(Dictionary<string, JsonElement> properties, string[] required, string category)
     {
         string? missing = required.FirstOrDefault(name => !properties.ContainsKey(name));
         if (missing != null) throw Error(category, "Missing property: " + missing);
     }
+
     private static string RequiredString(JsonElement value, string category)
     {
         if (value.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(value.GetString()))
             throw Error(category, "Expected a nonempty string.");
         return value.GetString()!;
     }
+
     private static string RequiredName(JsonElement value)
     {
         string name = RequiredString(value, "CaptureName");
         if (!NamePattern.IsMatch(name)) throw Error("CaptureName", "Name must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}.");
         return name;
     }
+
     private static bool TryFiniteNumber(JsonElement value, out double number)
     {
         number = 0;
@@ -600,5 +626,6 @@ internal sealed class HeadlessScenario
             double.TryParse(value.GetRawText(), NumberStyles.Float, CultureInfo.InvariantCulture, out number) &&
             double.IsFinite(number);
     }
+
     private static HeadlessScenarioValidationException Error(string category, string message) => new(category, message);
 }
