@@ -60,7 +60,15 @@ internal static class OpenXrConsumerPatches
     private static bool RightEye() => Session(out var session) && session.OpenXrEye == 1;
     private static bool StereoRender(ScreenManager __instance, float __0)
     {
-        if (!Session(out var session) || session.OpenXrEye >= 0 || session.Device.OpenXr?.ShouldRender != true) return true;
+        if (!Session(out var session) || session.OpenXrEye >= 0 || session.Device.OpenXr is not { ShouldRender: true } xr) return true;
+        // The loading screen draws with MinimalGui until DoGameInitStage2 loads
+        // the regular GUI program. Read its published identity, not ShaderRegistry:
+        // touching the registry here would itself create uncompiled GUI programs.
+        if (ShaderPrograms.Gui is not { ProgramId: > 0, LoadError: false, Disposed: false })
+        {
+            xr.SuppressFrame();
+            return true;
+        }
         session.RenderStereo(__instance, __0, OriginalRender);
         return false;
     }
