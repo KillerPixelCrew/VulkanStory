@@ -1598,7 +1598,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
             if (idle == Result.ErrorDeviceLost) VulkanResult.DeviceLost = true;
             else VulkanResult.Check(idle, "vkDeviceWaitIdle before device teardown");
         }
-        particleSimulation?.Dispose();
         OpenXr?.Dispose(); OpenXr = null;
         DisposeAuxiliaryTargets();
 
