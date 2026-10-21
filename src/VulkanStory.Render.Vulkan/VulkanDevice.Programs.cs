@@ -365,7 +365,6 @@ public sealed unsafe partial class VulkanDevice
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
-        RetireEntityRecordProgram(program);
         RetireResidentEntityProgram(program);
         ProgramDeleted?.Invoke(programId);
         _programNames.Remove(programId);
@@ -667,7 +666,6 @@ public sealed unsafe partial class VulkanDevice
     internal byte[]? UniformBufferShadowForTests(int handle)
     {
         if (!_clientUniformBuffers.Buffers.TryGetValue(handle, out var buffer)) return null;
-        buffer.MaterializeJointPose();
         return (byte[])buffer.Shadow.Clone();
     }
 }
