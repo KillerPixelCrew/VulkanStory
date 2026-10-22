@@ -44,9 +44,6 @@ internal static class HeadlessServerDirective
         int Arg(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
         switch (parts[0])
         {
-            case "terrain-peek":
-                HeadlessTerrainComparison.Start(server, parts);
-                break;
             case "sand" when parts.Length == 4:
             {
                 int dx = Arg(1), dy = Arg(2), dz = Arg(3);
