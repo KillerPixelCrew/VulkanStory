@@ -127,15 +127,12 @@ internal sealed class HeadlessScenario
             ["terrainParityChecks"] = (JsonValueKind.Number, false),
             ["terrainParityMismatches"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsTerrain"] = (JsonValueKind.Number, false),
-            ["sceneDrawCommandsEntity"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsParticle"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsCompat"] = (JsonValueKind.Number, false),
             ["terrainComparisonComplete"] = (JsonValueKind.True, false),
             ["terrainComparisonOutputEqual"] = (JsonValueKind.True, false),
             ["terrainComparisonGpuEquivalent"] = (JsonValueKind.True, false),
             ["terrainComparisonWrittenColumns"] = (JsonValueKind.Number, false),
-            ["entityResidentRowsCaptured"] = (JsonValueKind.Number, false),
-            ["entityResidentCaptureRefusals"] = (JsonValueKind.Number, false),
             ["realPresents"] = (JsonValueKind.Number, false),
             ["hostGeneratedPresents"] = (JsonValueKind.Number, false),
             ["sdkReportedPresents"] = (JsonValueKind.Number, false),
@@ -162,9 +159,8 @@ internal sealed class HeadlessScenario
         "terrainNoiseDispatchesRecorded", "terrainNoiseAppliedSamples",
         "terrainDensityDispatchesRecorded",
         "terrainParityChecks", "terrainParityMismatches",
-        "sceneDrawCommandsTerrain", "sceneDrawCommandsEntity", "sceneDrawCommandsParticle", "sceneDrawCommandsCompat",
+        "sceneDrawCommandsTerrain", "sceneDrawCommandsParticle", "sceneDrawCommandsCompat",
         "terrainComparisonWrittenColumns",
-        "entityResidentRowsCaptured", "entityResidentCaptureRefusals",
     };
 
     private HeadlessScenario(string path, string inputHash, string id, string context, IReadOnlyList<HeadlessScenarioAction> actions)
