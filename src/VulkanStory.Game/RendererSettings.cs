@@ -95,13 +95,10 @@ internal sealed record RendererSettings
     public bool TerrainOcclusionCull { get; init; } = true;
     /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
     public bool GpuTerrainNoise { get; init; } = true;
-    /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
     /// <summary>Produces supported cube-particle current/previous geometry in compute.</summary>
     public bool GpuParticleGeometry { get; init; } = true;
     /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
     public bool GpuParticleVisualSimulation { get; init; } = true;
-    /// <summary>Finalizes supported visual joint matrices on the GPU while retaining CPU hierarchy/attachment transforms.</summary>
-    /// <summary>Uses batched compute visibility and indirect commands for supported entity bodies.</summary>
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
