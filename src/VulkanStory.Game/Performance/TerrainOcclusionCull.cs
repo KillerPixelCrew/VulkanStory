@@ -73,7 +73,7 @@ internal static class TerrainOcclusionCull
     private static void AfterOpaqueTerrain()
     {
         if (PerformancePatchSet.Current is { } settings &&
-            (settings.TerrainOcclusionCull || settings.EntityOcclusionCull || settings.ResidentTerrain || settings.ResidentEntities)) capture?.Invoke();
+            (settings.TerrainOcclusionCull || settings.EntityOcclusionCull || settings.ResidentTerrain)) capture?.Invoke();
     }
 
     // A pool's FrustumCull calls IsVisible for every part in that pass. Depth
