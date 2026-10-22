@@ -109,20 +109,12 @@ internal sealed partial class GameGraphicsAdapter
     /// <param name="mesh">Owned entity mesh.</param>
     /// <param name="samplerName">Original program sampler receiving the supplied texture.</param>
     /// <param name="textureId">Adapter-owned texture identifier.</param>
-    internal void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId, MultiTextureMeshRef? shape = null, int subMesh = -1)
-    {
-        bool candidate = residentEntityScope.Renderer != null && shape != null && device?.ResidentEntitiesEnabled == true;
-        if (!RenderEntityMeshCore(mesh, samplerName, textureId, shape, subMesh) && candidate)
-            RequireDevice().RefuseResidentEntityCapture();
-    }
-
-    // Only a completed row capture may return before the existing draw path.
-    private bool RenderEntityMeshCore(MeshRef mesh, string samplerName, int textureId, MultiTextureMeshRef? shape, int subMesh)
+    internal void RenderEntityMesh(MeshRef mesh, string samplerName, int textureId)
     {
         if (!NativeEntitiesEnabled || device == null || mesh == null)
         {
             RenderMesh(mesh!);
-            return false;
+            return;
         }
         VulkanDevice renderer = RequireDevice();
         renderer.GpuMark("entities");
@@ -134,27 +126,26 @@ internal sealed partial class GameGraphicsAdapter
             !IsNativeEntityProgram(program))
         {
             RenderMesh(mesh);
-            return false;
+            return;
         }
 
         int layoutId = renderer.NativeMeshLayoutId(vao.VaoId);
         if (layoutId < 0)
         {
             RenderMesh(mesh);
-            return false;
+            return;
         }
 
         NativePipeline? pipeline = NativeEntityPipelineFor(program, target, layoutId);
         if (pipeline == null)
         {
             RenderMesh(mesh);
-            return false;
+            return;
         }
 
         // Every sampler the program declares, resolved from what the client declared for it, with
         // this draw's own texture for the sampler the seam names.
         ResolveNativeEntityTextures(pipeline, program.ProgramId, samplerName, textureId);
-        if (CaptureResidentEntityMesh(pipeline, vao, shape, subMesh)) return true;
 
         NativePassDescription pass = NativeEntityPassFor(target.FboId);
         pass.Reads = nativeEntityReads;
@@ -171,7 +162,6 @@ internal sealed partial class GameGraphicsAdapter
         finally { renderer.EndNativePass(keepScope: true); }
         if (drawn) RuntimeStats.drawCallsCount++;
         else RejectSceneDraw(passOpened ? "entity native mesh draw rejected" : "entity native pass declined");
-        return false;
     }
 
     /// <summary>
