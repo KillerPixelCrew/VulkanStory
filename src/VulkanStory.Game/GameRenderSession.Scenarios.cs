@@ -810,6 +810,7 @@ internal sealed partial class GameRenderSession
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
         Aggregate("sceneDrawCommandsTerrain", Device.SceneDrawCommandsTerrain);
+        Aggregate("sceneDrawCommandsEntity", Device.SceneDrawCommandsEntity);
         Aggregate("sceneDrawCommandsParticle", Device.SceneDrawCommandsParticle);
         Aggregate("sceneDrawCommandsCompat", Device.SceneDrawCommandsCompat);
         Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
