@@ -93,10 +93,6 @@ internal sealed record RendererSettings
     public bool ChunkVisibilityWalk { get; init; } = true;
     /// <summary>Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws.</summary>
     public bool TerrainOcclusionCull { get; init; } = true;
-    /// <summary>Produces supported cube-particle current/previous geometry in compute.</summary>
-    public bool GpuParticleGeometry { get; init; } = true;
-    /// <summary>Evaluates supported stock particle size, opacity and colour evolution in compute.</summary>
-    public bool GpuParticleVisualSimulation { get; init; } = true;
     /// <summary>Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth).</summary>
     public bool EntityOcclusionCull { get; init; } = true;
     /// <summary>Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load.</summary>
@@ -174,8 +170,6 @@ internal sealed record RendererSettings
         OutfitShapeCache = source.OutfitShapeCache,
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
-        GpuParticleGeometry = source.GpuParticleGeometry,
-        GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
         EntityOcclusionCull = source.EntityOcclusionCull,
         ParallelChunkReads = source.ParallelChunkReads,
         WorldgenWorkers = source.WorldgenWorkers,
