@@ -438,11 +438,7 @@ public sealed unsafe partial class VulkanDevice
         // The SSBO chunk path reads its vertices from the mesh's xyz buffer by gl_VertexIndex.
         foreach (BlockBinding block in program.Interface.StorageBlocks)
         {
-            VulkanBuffer? buffer = block.BlockName switch
-            {
-                "VulkanParticleGeometry" => drawParticleGeometry,
-                _ => meshId > 0 ? _meshes.BufferOf(meshId, MeshManager.BufferXyz) : null,
-            };
+            VulkanBuffer? buffer = meshId > 0 ? _meshes.BufferOf(meshId, MeshManager.BufferXyz) : null;
             if (buffer != null)
             {
                 buffers[block.Binding] = new BufferBindingValue((uint)block.Binding, buffer.Handle, 0, buffer.Size, buffer.Id);
