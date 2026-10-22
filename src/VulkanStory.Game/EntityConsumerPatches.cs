@@ -3,6 +3,7 @@ using System.Reflection.Emit;
 using HarmonyLib;
 using VulkanStory.Render.Vulkan;
 using Vintagestory.API.Client;
+using Vintagestory.API.Common.Entities;
 using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
 
