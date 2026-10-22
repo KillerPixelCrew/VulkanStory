@@ -41,7 +41,6 @@
     <Compile Include="VulkanDevice.Resources.cs" />
     <Compile Include="VulkanDevice.TerrainScene.cs" />
     <Compile Include="VulkanDevice.Deformation.cs" />
-    <Compile Include="VulkanDevice.EntityScene.cs" />
     <Compile Include="VulkanDevice.WorldGeometry.cs" />
     <Compile Include="VulkanDevice.ParticleGeometry.cs" />
     <Compile Include="VulkanDevice.QuadGeometry.cs" />
