@@ -836,8 +836,6 @@ internal sealed partial class GameRenderSession
         Aggregate("terrainDensityAvailable", Device.TerrainDensityAvailable);
         Aggregate("terrainDensityAvailabilityReason", Device.TerrainDensityAvailabilityReason);
         Aggregate("terrainDensityDispatchesRecorded", Device.TerrainDensityDispatchesRecorded);
-        Aggregate("terrainParityChecks", Device.TerrainParityChecks);
-        Aggregate("terrainParityMismatches", Device.TerrainParityMismatches);
         Current("terrainComparisonComplete", HeadlessTerrainComparison.Complete);
         Current("terrainComparisonOutputEqual", HeadlessTerrainComparison.Equal);
         Current("terrainComparisonGpuEquivalent", HeadlessTerrainComparison.GpuEquivalent);
