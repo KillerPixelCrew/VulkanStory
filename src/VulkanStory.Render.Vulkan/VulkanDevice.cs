@@ -675,8 +675,7 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
         {
             _gpuTimestamps = GpuTimestamps.TryCreate(_context, _frames.FramesInFlight);
             if (_gpuTimestamps != null)
-                _frames.SetCommandHooks(_gpuTimestamps.OnCommandsStarted, _gpuTimestamps.OnCommandsEnding,
-                    _gpuTimestamps.OnPreGraphicsBegun, _gpuTimestamps.OnPreGraphicsEnding);
+                _frames.SetCommandHooks(_gpuTimestamps.OnCommandsStarted, _gpuTimestamps.OnCommandsEnding);
         }
         _readbacks = new ReadbackManager(_context, _textures, _frames);
         // A GL query counts across scope ends; a Vulkan one must not be active
