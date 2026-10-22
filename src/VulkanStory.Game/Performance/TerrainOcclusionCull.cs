@@ -73,7 +73,7 @@ internal static class TerrainOcclusionCull
     private static void AfterOpaqueTerrain()
     {
         if (PerformancePatchSet.Current is { } settings &&
-            (settings.TerrainOcclusionCull || settings.EntityOcclusionCull || settings.ResidentTerrain)) capture?.Invoke();
+            (settings.TerrainOcclusionCull || settings.EntityOcclusionCull)) capture?.Invoke();
     }
 
     // A pool's FrustumCull calls IsVisible for every part in that pass. Depth
@@ -97,9 +97,7 @@ internal static class TerrainOcclusionCull
     // Main thread, once per visible chunk part per main-camera pass.
     private static void Postfix(ModelDataPoolLocation __instance, EnumFrustumCullMode mode, ref bool __result)
     {
-        if (ResidentTerrain.ParityActive) return;
         if (!__result || mode != EnumFrustumCullMode.CullNormal) return;
-        if (ResidentTerrain.IsResident(__instance)) return;
         if (PerformancePatchSet.Current?.TerrainOcclusionCull != true) return;
         var test = cullSnapshot is { } snapshot ? snapshot.Test : Source;
         var captured = cullSnapshot is { } current ? current.Camera : test?.Source;
