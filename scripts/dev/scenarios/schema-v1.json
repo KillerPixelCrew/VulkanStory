@@ -247,7 +247,6 @@
                   "type": "boolean"
                 },
                 "ResidentTerrain": { "type": "boolean" },
-                "ResidentEntities": { "type": "boolean" },
                 "GpuParticleGeometry": { "type": "boolean" },
                 "GpuParticleVisualSimulation": { "type": "boolean" },
                 "GpuTerrainNoise": { "type": "boolean" },
@@ -418,7 +417,6 @@
                 "terrainParityChecks",
                 "terrainParityMismatches",
                 "sceneDrawCommandsTerrain",
-                "sceneDrawCommandsEntity",
                 "sceneDrawCommandsParticle",
                 "sceneDrawCommandsCompat",
                 "terrainNoiseAppliedSamples", "terrainComparisonWrittenColumns",
@@ -428,8 +426,6 @@
                 "cpuParticlePropertiesDeferred",
                 "cpuParticleFacadeChecks",
                 "cpuParticleFacadeValid", "particleVisualChecksPassed", "terrainNoiseAvailable", "terrainDensityAvailable", "terrainComparisonComplete", "terrainComparisonOutputEqual", "terrainComparisonGpuEquivalent",
-                "entityResidentRowsCaptured",
-                "entityResidentCaptureRefusals",
                 "realPresents",
                 "sdkReportedPresents",
                 "sdkReportedDlssPresents",
@@ -571,7 +567,6 @@
                 "terrainParityChecks",
                 "terrainParityMismatches",
                 "sceneDrawCommandsTerrain",
-                "sceneDrawCommandsEntity",
                 "sceneDrawCommandsParticle",
                 "sceneDrawCommandsCompat",
                 "terrainNoiseAppliedSamples", "terrainComparisonWrittenColumns",
@@ -580,8 +575,6 @@
                 "particleVisualFunctionCoverage",
                 "cpuParticlePropertiesDeferred",
                 "cpuParticleFacadeChecks",
-                        "entityResidentRowsCaptured",
-                        "entityResidentCaptureRefusals",
                         "realPresents",
                         "sdkReportedPresents",
                         "sdkReportedDlssPresents",
@@ -790,7 +783,6 @@
                 "terrainParityChecks",
                 "terrainParityMismatches",
                 "sceneDrawCommandsTerrain",
-                "sceneDrawCommandsEntity",
                 "sceneDrawCommandsParticle",
                 "sceneDrawCommandsCompat",
                 "terrainNoiseAppliedSamples", "terrainComparisonWrittenColumns",
@@ -798,9 +790,7 @@
                 "particleVisualMaximumColorError",
                 "particleVisualFunctionCoverage",
                 "cpuParticlePropertiesDeferred",
-                "cpuParticleFacadeChecks",
-                        "entityResidentRowsCaptured",
-                        "entityResidentCaptureRefusals"
+                "cpuParticleFacadeChecks"
                       ]
                     },
                     "op": {
@@ -840,7 +830,6 @@
                 "terrainParityChecks",
                 "terrainParityMismatches",
                 "sceneDrawCommandsTerrain",
-                "sceneDrawCommandsEntity",
                 "sceneDrawCommandsParticle",
                 "sceneDrawCommandsCompat",
                 "terrainNoiseAppliedSamples", "terrainComparisonWrittenColumns",
@@ -848,9 +837,7 @@
                 "particleVisualMaximumColorError",
                 "particleVisualFunctionCoverage",
                 "cpuParticlePropertiesDeferred",
-                "cpuParticleFacadeChecks",
-                        "entityResidentRowsCaptured",
-                        "entityResidentCaptureRefusals"
+                "cpuParticleFacadeChecks"
                       ]
                     },
                     "op": {
