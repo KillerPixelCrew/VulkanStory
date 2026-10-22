@@ -475,7 +475,7 @@ function Test-ScenarioDocument($Root) {
                     }
                 }
                 if ($operator -eq 'deltaGte') {
-                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) {
+                    if ($field -notin @('successfulUpscaleFrames','preparedFrames','realPresents','hostGeneratedPresents','sdkReportedPresents','validAnimatedHistoryUploads','animatedMotionWindows','validRigidHistoryWrites','rigidEntityMotionWindows','validRigidEntityHistoryWrites','inventoryMotionWindows','validInventoryHistoryWrites','inventorySharedGeometryDraws','particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) {
                         Throw-ScenarioError 'AssertionField' 'deltaGte is supported only for monotonic session totals.'
                     }
                     if (-not $properties.ContainsKey('baseline')) { Throw-ScenarioError 'AssertionBaseline' 'deltaGte requires a baseline checkpoint.' }
@@ -501,7 +501,7 @@ function Test-ScenarioDocument($Root) {
 }
 
 $script:settingTypes = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('GpuParticleGeometry','GpuParticleVisualSimulation','GpuTerrainNoise')) { $script:settingTypes.Add($name, 'bool') }
+foreach ($name in @('GpuParticleGeometry','GpuParticleVisualSimulation')) { $script:settingTypes.Add($name, 'bool') }
 foreach ($name in @('Enabled','Taa','TaaJitterDev','ShowFpsCounter','AmbientOcclusionDebugView','GodRaysSampleCap','HandheldShadowTier','NativeShaders','Streamline','ControllerEnabled','TouchEnabled','ShadowFarFoliage','EntityShadowCull','UploadQueueSortSkip','AnimationLinqFree','FallingBlockMeshFix','MeshPartPool','ParticleDistanceGate','DroppedItemCull','OutfitShapeCache','ChunkVisibilityWalk','TerrainOcclusionCull','EntityOcclusionCull','ParallelChunkReads')) {
     $script:settingTypes.Add($name, 'bool')
 }
@@ -511,8 +511,8 @@ foreach ($name in @('Upscaler','UpscalerQuality','FrameGeneration','LowLatencyMo
     $script:settingTypes.Add($name, 'string')
 }
 $script:assertionKinds = [System.Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
-foreach ($name in @('cpuParticleFacadeValid','particleVisualChecksPassed','terrainNoiseAvailable','terrainDensityAvailable','terrainComparisonComplete','terrainComparisonOutputEqual','terrainComparisonGpuEquivalent')) { $script:assertionKinds.Add($name, 'bool') }
-foreach ($name in @('particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','terrainNoiseDispatchesRecorded','terrainDensityDispatchesRecorded','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','terrainNoiseAppliedSamples','terrainComparisonWrittenColumns','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
+foreach ($name in @('cpuParticleFacadeValid','particleVisualChecksPassed')) { $script:assertionKinds.Add($name, 'bool') }
+foreach ($name in @('particleGeometryDispatchesRecorded','quadGeometryDispatchesRecorded','quadMotionDrawsRecorded','quadMotionCompositesRecorded','quadMotionValidInstances','particleGeometryCacheReuses','particleVisualDispatchesRecorded','particleVisualChecks','sceneDrawCommandsTerrain','sceneDrawCommandsEntity','sceneDrawCommandsParticle','sceneDrawCommandsCompat','particleVisualMaximumError','particleVisualMaximumColorError','particleVisualFunctionCoverage','cpuParticlePropertiesDeferred','cpuParticleFacadeChecks')) { $script:assertionKinds.Add($name, 'number') }
 foreach ($name in @('hidden','focused','stagedModLoaded','worldReady','hasCurrentWorldSample','inputsPreparedThisFrame','cpuRenderCycleSucceeded','presentCallReturned','pauseMenuOpen','requestedTaa','appliedTaa','persistedTaa','upscaleEvaluatedThisFrame','taaResolvedThisFrame','godRaysInScene','mapPageRendererActive','managedDependencyResolutionVerified')) {
     $script:assertionKinds.Add($name, 'bool')
 }
@@ -920,17 +920,6 @@ $verifyArguments = @{
 if ($Scenario) { $verifyArguments.RequireScenario = $true }
 & (Join-Path $PSScriptRoot 'verify-headless-result.ps1') @verifyArguments
 if ($LASTEXITCODE -ne 0) { throw 'Headless result verification failed; inspect run artifacts.' }
-if ($Commands -and (Select-String -LiteralPath $Commands -Pattern '^\s*(?:@\d+\s+)?!terrain-peek(?:\s|$)' -Quiet)) {
-    $terrainResultPath = Join-Path $runRoot 'frames/terrain-comparison/result.json'
-    if (-not (Test-Path -LiteralPath $terrainResultPath -PathType Leaf)) { throw 'Terrain comparison completion result is missing.' }
-    $terrainResult = Get-Content -LiteralPath $terrainResultPath -Raw | ConvertFrom-Json
-    if ($terrainResult.complete -ne $true -or $terrainResult.success -ne $true -or $terrainResult.outputEqual -ne $true) {
-        throw "Terrain comparison failed or CPU/GPU output differs; inspect $terrainResultPath"
-    }
-    if ($terrainResult.gpuEquivalent -ne $true) {
-        throw "Terrain capture completed without GPU equivalence: at least one requested column was unsupported or all-fallback; inspect $terrainResultPath"
-    }
-}
 Write-Host "Captured $expectedFrameCount frames in $runRoot. No installed files or user settings changed."
 }
 finally {
