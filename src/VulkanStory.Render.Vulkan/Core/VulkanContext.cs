@@ -170,9 +170,6 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
     internal bool ShaderFloat64Enabled { get; private set; }
     /// <summary>Borrowed primary graphics queue used for rendering and direct presentation.</summary>
     public Queue GraphicsQueue { get; private set; }
-    internal Queue ParticleComputeQueue { get; private set; }
-    internal uint ParticleComputeQueueFamily { get; private set; }
-    internal bool ParticleComputeQueueSeparate { get; private set; }
     /// <summary>Queue-family index selected for renderer graphics work.</summary>
     public uint GraphicsQueueFamily { get; private set; }
     /// <summary>Borrowed queue selected for asynchronous FidelityFX swapchain work.</summary>
@@ -1034,22 +1031,6 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
 
         uint requestedQueues = options.PrepareFrameGenerationQueues && supportsCompute
             ? Math.Min(4u, availableQueues) : 1u;
-        uint frameQueues = requestedQueues;
-        uint particleFamily = family, particleIndex = 0;
-        uint familyCount = 0; Api.GetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &familyCount, null);
-        var computeFamilies = new QueueFamilyProperties[familyCount];
-        fixed (QueueFamilyProperties* data = computeFamilies) Api.GetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &familyCount, data);
-        // Prefer a compute-only family. FFX's four graphics-family leases stay intact.
-        for (uint i = 0; i < familyCount; i++)
-            if (i != family && computeFamilies[i].QueueCount > 0 &&
-                (computeFamilies[i].QueueFlags & QueueFlags.ComputeBit) != 0 && (computeFamilies[i].QueueFlags & QueueFlags.GraphicsBit) == 0)
-            { particleFamily = i; break; }
-        if (particleFamily == family && availableQueues > requestedQueues)
-        { particleIndex = requestedQueues; requestedQueues++; }
-        if (particleFamily == family && particleIndex == 0)
-            for (uint i = 0; i < familyCount; i++)
-                if (i != family && computeFamilies[i].QueueCount > 0 && (computeFamilies[i].QueueFlags & QueueFlags.ComputeBit) != 0)
-                { particleFamily = i; break; }
         float* priorities = stackalloc float[(int)requestedQueues];
         for (uint i = 0; i < requestedQueues; i++) priorities[i] = 1.0f;
         var queueCreateInfo = new DeviceQueueCreateInfo
@@ -1059,16 +1040,6 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
             QueueCount = requestedQueues,
             PQueuePriorities = priorities,
         };
-        float computePriority = 0.5f;
-        DeviceQueueCreateInfo* queueInfos = stackalloc DeviceQueueCreateInfo[2];
-        queueInfos[0] = queueCreateInfo;
-        uint queueInfoCount = 1;
-        if (particleFamily != family)
-        {
-            queueInfos[1] = new DeviceQueueCreateInfo { SType = StructureType.DeviceQueueCreateInfo,
-                QueueFamilyIndex = particleFamily, QueueCount = 1, PQueuePriorities = &computePriority };
-            queueInfoCount = 2;
-        }
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
         ShaderFloat64Enabled = available.ShaderFloat64;
@@ -1317,8 +1288,8 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
             {
                 SType = StructureType.DeviceCreateInfo,
                 PNext = deviceFeatureChain,
-                QueueCreateInfoCount = queueInfoCount,
-                PQueueCreateInfos = queueInfos,
+                QueueCreateInfoCount = 1,
+                PQueueCreateInfos = &queueCreateInfo,
                 EnabledExtensionCount = (uint)deviceExtensions.Count,
                 PpEnabledExtensionNames = extensionsPtr == 0 ? null : (byte**)extensionsPtr,
             };
@@ -1344,12 +1315,7 @@ internal sealed unsafe class VulkanContext : IDisposable, IVulkanProviderContext
         }
 
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
-        // Prefer a spare queue; the private particle runner can also share graphics.
-        // Its submissions use QueueLock and its fence waits do not hold that lock.
-        ParticleComputeQueue = Api.GetDeviceQueue(Device, particleFamily, particleIndex);
-        ParticleComputeQueueFamily = particleFamily;
-        ParticleComputeQueueSeparate = ParticleComputeQueue.Handle != 0 && ParticleComputeQueue.Handle != GraphicsQueue.Handle;
-        if (frameQueues == 4)
+        if (requestedQueues == 4)
         {
             Fsr3AsyncQueue = Api.GetDeviceQueue(Device, family, 1);
             Fsr3PresentQueue = Api.GetDeviceQueue(Device, family, 2);
