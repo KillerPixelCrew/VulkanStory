@@ -472,7 +472,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Updates each supplied mesh stream using its declared destination byte offset.</summary>
     public void UpdateMesh(int meshId, VulkanStory.Contracts.MeshUploadData data)
     {
-        InvalidateTerrainGeometry(meshId);
         _meshUploads.UpdateMesh(meshId, data);
     }
     /// <summary>Allocates mesh stream capacities and custom layouts without initial data.</summary>
@@ -486,7 +485,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Writes packed face-record bytes into a mesh's SSBO-backed position slot.</summary>
     public void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize)
     {
-        InvalidateTerrainGeometry(meshId);
         _meshUploads.UpdateMeshStorageBuffer(meshId, data, byteOffset, byteSize);
     }
     /// <summary>Uploads a previous-particle instance stream owned by this mesh and retired through the frame timeline.</summary>
@@ -495,7 +493,6 @@ public sealed unsafe partial class VulkanDevice
     /// <summary>Removes the mesh and schedules its GPU-owned buffers for frame-safe deletion.</summary>
     public void DeleteMesh(int meshId)
     {
-        InvalidateTerrainGeometry(meshId, deleted: true);
         _meshes.Delete(meshId, _frames);
     }
 }
