@@ -810,7 +810,6 @@ internal sealed partial class GameRenderSession
         Aggregate("successfulUpscaleFrames", successfulUpscaleFrames);
         Aggregate("preparedFrames", preparedFrames);
         Aggregate("sceneDrawCommandsTerrain", Device.SceneDrawCommandsTerrain);
-        Aggregate("sceneDrawCommandsEntity", Device.SceneDrawCommandsEntity);
         Aggregate("sceneDrawCommandsParticle", Device.SceneDrawCommandsParticle);
         Aggregate("sceneDrawCommandsCompat", Device.SceneDrawCommandsCompat);
         Aggregate("mapPageRendererActive", Performance.WorldMapPageCache.HasActiveRenderer);
@@ -843,8 +842,6 @@ internal sealed partial class GameRenderSession
         Current("terrainComparisonOutputEqual", HeadlessTerrainComparison.Equal);
         Current("terrainComparisonGpuEquivalent", HeadlessTerrainComparison.GpuEquivalent);
         Current("terrainComparisonWrittenColumns", HeadlessTerrainComparison.Written);
-        Aggregate("entityResidentRowsCaptured", Device.EntityResidentRowsCaptured);
-        Aggregate("entityResidentCaptureRefusals", Device.EntityResidentCaptureRefusals);
         Aggregate("animatedMotionWindows", Graphics.AnimatedMotionWindows);
         Aggregate("validRigidHistoryWrites", Temporal.StandardMotion.ValidHistoryWrites);
         Aggregate("rigidEntityMotionWindows", Graphics.RigidEntityMotionWindows);
