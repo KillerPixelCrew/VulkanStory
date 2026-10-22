@@ -26,7 +26,7 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
   - Culling: skip foliage in the far shadow cascade, entity shadow distance cull, the occlusion culler's rays precomputed into one shared ray tree, particle and dropped-item distance gates
   - Chunk streaming: skip unchanged upload-queue sorting, tessellator mesh-part pool, parallel raw chunk reads in singleplayer
   - Entities: allocation-free animation checks, falling-block mesh fix, villager/trader outfit shape cache with outfit textures pre-inserted gradually after world load
-  - Worldgen (singleplayer): the game's own per-pass worldgen workers, made safe with column footprint leases, a shared Vegetation/sunlight lock, per-generator locks and atomic entity ids, with a fallback to the chunk thread alone when other mods touch worldgen or a worker fails
+  - Worldgen (singleplayer): the game's own CPU generation and per-pass workers, made safe with column footprint leases, a shared Vegetation/sunlight lock, per-generator locks and atomic entity ids, with a fallback to the chunk thread alone when other mods touch worldgen or a worker fails
 - **PERF-03: Depth-based occlusion culling** (two switches on the Performance settings page, on by default)
   - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws. GPU depth reduction and frame-slot readback supply a CPU max-depth pyramid from a recent opaque terrain pass, with separate histories for each stereo eye.
   - Test boxes grow by the camera's movement since that depth was captured; boxes outside the captured view or crossing its near plane are always drawn; players are never culled
@@ -42,10 +42,6 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - **PERF-07: Drop and particle budgets** (ideas from RAM-Garbage-Collector, rebuilt as optional patches)
   - Earlier merging of settled matching drops in singleplayer, with bounded work, player ownership checks and the game's automatic stack/collectible rules.
   - Live particle density, per-spawn and per-pool limits for cubes, quads and mod providers. Defaults: 50% density, 256 per spawn and 8,192 per pool; effects marked to ignore user configuration are preserved. Both features have live switches on the Performance page. No forced GC.
-
-- **PERF-09: Additional Vulkan compute**
-  - Supported stock singleplayer terrain noise and density-sign evaluation run in bounded compute batches; threshold production, block decisions and unsupported generation retain the CPU path.
-  - Particle geometry and visual evolution remain enabled by default: supported cube/quad/rain geometry, current/previous rendered state, and stock size/opacity/colour evolution run in compute. Unsupported inputs retain their original path.
 
 - **GL-02 / GL-03: Managed OpenGL compatibility**
   - The shared bridge routes supported operations from both OpenTK GL namespaces, including depth/culling/color-mask state and float vector uniforms. Game-created shader programs can be queried through a borrowed GL view; uniform writes retain the game adapter's motion handling. OpenAL procedure lookups are excluded from graphics refusal.

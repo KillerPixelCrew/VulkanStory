@@ -31,10 +31,3 @@ in the rewrite. The original material's license scope remains applicable.
 Third-party files keep their own notices and license terms. In particular,
 `sources/shaders/cloudvolumetric.fsh` contains its own MIT notice for the
 Inigo Quilez material it uses.
-
-## Berkeley SoftFloat
-
-`shaders/native/worldgen/terrain-binary64.glsl` adapts binary64 arithmetic
-algorithms from Berkeley SoftFloat Release 3e by John R. Hauser. The Regents of
-the University of California copyright and redistribution terms are retained
-in the shader and `LICENSE-BERKELEY-SOFTFLOAT.txt` in this notice directory.

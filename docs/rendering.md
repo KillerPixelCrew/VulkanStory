@@ -69,12 +69,34 @@ inputs, and VulkanStory records the corresponding Vulkan commands. Entity
 skinning and warps remain in the vertex shaders. Native replacements and runtime
 translated shaders use this same submission path.
 
+Particles retain the game's CPU simulation, size/opacity/colour evolution and
+instance-buffer production. Vertex shaders render particle geometry. CPU history
+tracks each spawn's previous rendered transform and supplies it to the particle
+vertex shaders for motion vectors.
+
 `TerrainOcclusionCull` and `EntityOcclusionCull` add conservative CPU queries to
 the game's main-camera visibility decisions. After opaque terrain, a compute pass
 reduces its depth to maximum-depth tiles. Frame-slot readback supplies a CPU depth
 pyramid with the captured view, projection and camera position. Queries expand
 bounds for camera movement and keep uncertain cases visible. Shadows retain
 their own visibility decisions. See [performance](performance.md#visibility-and-shadows).
+
+## Compute passes
+
+The renderer records compute work for these existing features:
+
+| Feature | Compute work |
+| --- | --- |
+| PERF-03 occlusion | `occlusion/reduce.comp` reduces opaque terrain depth; frame-slot readback feeds the CPU depth pyramid and visibility queries |
+| GTAO | Depth prefilter, visibility evaluation and edge-aware denoising |
+| GL compatibility | Packed stencil-buffer transforms for scaled, mirrored and clipped blits |
+| Provider inputs | FSR reactive/composition-mask extraction and clearing; XeSS input/output orientation conversion |
+
+Reconstruction and frame-generation SDKs execute their own GPU work through the
+provider integrations. World generation and chunk meshing use the game's CPU
+paths; particle rendering uses CPU-produced instances and vertex shaders.
+The device enables `shaderFloat64` only when available; none of these paths
+requires it.
 
 ## Stereo rendering
 

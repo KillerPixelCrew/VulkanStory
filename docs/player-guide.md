@@ -122,12 +122,13 @@ Performance page's terrain and entity occlusion switches are on by default and
 apply live. They skip content hidden behind opaque terrain using a CPU depth
 pyramid captured from a recent frame. Stereo keeps a separate history for each eye.
 
-**Compute particle geometry** and **Compute particle visual evolution** remain
-on by default. Particle physics uses the stock CPU tick. Particle density and
-pool limits apply independently of these switches.
+Particles use the game's CPU simulation and visual evolution, with vertex shaders
+rendering geometry and motion vectors. Particle density and pool limits remain
+live controls on the Performance page.
 
-**Compute terrain noise** is also on by default for supported stock singleplayer
-world generation. The game retains CPU threshold/block decisions and chunk meshing.
+World generation and chunk meshing use the game's CPU paths. Singleplayer worldgen
+can use per-pass workers with column leases and parallel Terrain columns with
+independent workspaces, controlled by the Performance page.
 
 **OpenXR** on the Device page enables headset stereo after restarting with a
 connected runtime. World rendering replays for each eye while shared world updates

@@ -37,8 +37,7 @@ Integrated-server changes affect the singleplayer server in this process; the
 client package does not install these patches into a separate dedicated server.
 
 The [settings reference](settings-reference.md) lists exact property names and
-defaults. Terrain noise, particle geometry and particle visual evolution compute
-default on. Distances and particle budgets have explicit numeric defaults.
+defaults, including distances and particle budgets.
 
 ## Scene submission
 
@@ -109,16 +108,16 @@ visibility and draws, including shadows, run per eye.
 | `WorldgenWorkers` | Choose off/auto/1/2/3 admission policy for the world's worker pool |
 | `ParallelTerrainGeneration` | Allow idle workers to assist Terrain using independent workspaces |
 
-World generation uses the game's passes, with ownership protection around shared
-state: column footprint leases, Vegetation/sunlight synchronization, per-generator
-locks and atomic entity IDs. Terrain assistance uses separate generator workspaces.
+World generation uses the game's CPU passes, including terrain noise and density
+evaluation, with ownership protection around shared state: column footprint leases,
+Vegetation/sunlight synchronization, per-generator locks and atomic entity IDs.
+Terrain assistance uses separate generator workspaces.
 The pool is created for the world; live policy changes alter admission rather than
 creating an unrelated new generation pipeline mid-world. Unsupported modded
 worldgen hooks or worker failure can require the ordinary chunk-thread path.
 
-`GpuTerrainNoise` batches supported stock terrain noise and density-sign evaluation
-in compute. Threshold generation and block decisions remain on the CPU; unsupported
-generation uses the original CPU path. Chunk meshing uses the game's CPU tessellator.
+Chunk meshing uses the game's CPU tessellator. Renderer compute work belongs to
+[occlusion, GTAO, GL compatibility and providers](rendering.md#compute-passes).
 
 ## Entities, inventory and physics
 
@@ -179,10 +178,10 @@ and limits disabled with zero, or `ParticleBudgets` switched off. This affects
 visual density and is not just an allocation optimization. The inherited spawn
 loop covers quads, cubes, asynchronous and secondary particles.
 
-`GpuParticleGeometry` and `GpuParticleVisualSimulation` independently enable
-supported compute geometry and size/opacity/colour evolution, both by default.
-Particle physics uses the stock CPU tick. Particle budgets apply independently
-of these compute controls.
+Particle physics, size/opacity/colour evolution and instance-buffer production use
+the game's CPU path. Vertex shaders render the geometry and use CPU-maintained
+previous rendered transforms for motion vectors. Particle budgets limit spawning
+on that same game path.
 
 ## Capture performance
 

@@ -233,9 +233,10 @@ game-independent `IOcclusionTest` (`VulkanStory.Contracts`). `TerrainOcclusionCu
 adds the box test after the game's main-camera visibility check for each chunk part;
 `EntityOcclusionCull` sends hidden entities down the game's own outside-the-frustum
 branch.
-CPU hierarchy reuse alternates published and spare storage. Publication and query
-access are guarded so storage cannot be overwritten while a reader uses it; size
-changes and world resets rebuild or discard storage. Visibility math stays unchanged.
+CPU hierarchy storage is recycled only after it is no longer published and its
+query leases have ended. Publication and query access are guarded so storage
+cannot be overwritten while a reader uses it; size changes and world resets
+rebuild or discard storage. Visibility math stays unchanged.
 
 Stereo maintains separate depth captures and CPU pyramids for each eye. Capture
 and visibility queries select the same eye's history and use its physical camera
@@ -255,11 +256,13 @@ pass order, for both native and translated shaders. Entity skinning and warps
 remain in the vertex shaders. Occlusion queries above can omit hidden terrain
 parts and entity preparation from the main-camera path.
 
-Supported stock singleplayer terrain noise and density-sign evaluation use
-bounded compute batches; CPU threshold and block decisions remain with the game.
-Particle geometry and stock visual evolution also have compute paths, while
-particle physics uses the stock CPU tick. Their live controls and unsupported-input
-behavior are described in [performance](performance.md).
+World generation and chunk meshing use the game's CPU paths, including the
+singleplayer worker and parallel Terrain ports described above. Particle physics,
+visual evolution and instance-buffer production also stay on the game's CPU path.
+VulkanStory tracks previous rendered particle transforms on the CPU and supplies
+them to vertex shaders for motion vectors. Compute remains in occlusion depth
+reduction, GTAO, GL stencil transforms and provider work; see
+[compute passes](rendering.md#compute-passes).
 
 Shaders:
 

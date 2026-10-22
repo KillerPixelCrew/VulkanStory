@@ -25,9 +25,10 @@ unmodified game.
   singleplayer worldgen, inventory, lighting, physics, chisel LOD and world-map caching),
   indexed visibility traversal and stock cloud updates. All scene content follows
   the game's per-draw path through VulkanStory. Occlusion culling uses a CPU depth
-  pyramid captured from opaque terrain, separately for each stereo eye. Supported
-  terrain noise, particle geometry and particle visual evolution use compute by
-  default; particle physics and chunk meshing stay on the game's CPU paths.
+  pyramid fed by GPU depth reduction and readback, separately for each stereo eye.
+  World generation and chunk meshing use the game's CPU paths, with per-pass
+  workers, column leases and parallel Terrain columns in singleplayer. Particles
+  use CPU simulation and instance buffers, with vertex-shader geometry and motion vectors.
   Optional algorithms are switchable on the Performance options page.
 - **Performance inspection**: in-game captures with offline flame graphs, allocation
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.

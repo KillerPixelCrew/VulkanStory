@@ -34,7 +34,6 @@ values to supported ranges, depending on the entry point.
 | Generation multiplier | Live, bounded by active SDK capability |
 | Input, FPS counter and latency policy | Live |
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
-| `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
 Changing restart settings writes the next-launch request. It does not recreate the
@@ -187,9 +186,6 @@ choice and range definitions live in
 | `OutfitShapeCache` | bool | `true` | Caches assembled villager/trader outfit shapes and texture sets, and pre-inserts outfit textures gradually after world load. |
 | `ChunkVisibilityWalk` | bool | `true` | Walks the occlusion culler's own rays from a precomputed shared tree instead of recomputing each ray. |
 | `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain out of main-camera draws using a CPU depth pyramid from recent GPU depth reduction/readback, per eye in stereo. |
-| `GpuTerrainNoise` | bool | `true` | Batches supported stock singleplayer terrain noise and density signs, retaining original CPU threshold/block decisions. Applies live. |
-| `GpuParticleGeometry` | bool | `true` | Produces supported cube, quad and rain current/previous render geometry in compute; unsupported inputs keep the original shader path. Applies live. |
-| `GpuParticleVisualSimulation` | bool | `true` | Computes supported stock size, opacity and colour evolution with CPU materialization for unsupported inputs and transitions. Applies live. |
 | `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain using the same CPU occlusion depth, per eye in stereo. |
 | `ParallelChunkReads` | bool | `true` | Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load. |
 | `WorldgenWorkers` | string | `"auto"` | Live singleplayer worldgen worker policy: off, auto, 1, 2 or 3. |
