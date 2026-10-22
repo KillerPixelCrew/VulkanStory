@@ -702,9 +702,6 @@ public sealed unsafe partial class VulkanDevice
     /// </summary>
     private void BeginIndirectFrame(int slot)
     {
-        CollectTerrainSceneParity(slot);
-        BeginTerrainSceneFrame();
-        if (_terrainReadbackBufferCursors.Length > slot) _terrainReadbackBufferCursors[slot] = 0;
         foreach (VulkanBuffer overflow in _indirectOverflow) _frames.DeferDeletion(overflow);
         _indirectOverflow.Clear();
         _indirectOverflowCursor = 0;
