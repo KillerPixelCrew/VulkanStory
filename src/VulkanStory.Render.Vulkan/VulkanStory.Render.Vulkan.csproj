@@ -41,9 +41,7 @@
     <Compile Include="VulkanDevice.Resources.cs" />
     <Compile Include="VulkanDevice.Deformation.cs" />
     <Compile Include="VulkanDevice.WorldGeometry.cs" />
-    <Compile Include="VulkanDevice.ParticleGeometry.cs" />
-    <Compile Include="VulkanDevice.QuadGeometry.cs" />
-    <Compile Include="VulkanDevice.ParticleVisuals.cs" />
+    <Compile Include="VulkanDevice.QuadMotion.cs" />
     <Compile Include="VulkanDevice.GlFramebuffers.cs" />
     <Compile Include="VulkanDevice.GlTransfers.cs" />
     <Compile Include="VulkanDevice.GlStencilTransfers.cs" />
@@ -165,7 +163,7 @@
     <EmbeddedResource Include="../../shaders/native/geometry/*.comp">
       <LogicalName>shaders-vk/geometry/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl;../../shaders/native/include/evolution.glsl">
+    <EmbeddedResource Include="../../shaders/native/include/warpstate.glsl;../../shaders/native/include/noise3d.glsl;../../shaders/native/include/vertexflagbits.glsl;../../shaders/native/include/quad.glsl">
       <LogicalName>shaders-vk/include/%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
