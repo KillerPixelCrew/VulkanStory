@@ -277,7 +277,6 @@ internal sealed class RendererSettingsPanel
                 Switch("Reuse chunk mesh buffers", "MeshPartPool");
                 Switch("Parallel chunk reads (next world)", "ParallelChunkReads");
                 DefinedChoice("Worldgen workers", "WorldgenWorkers");
-                Switch("Compute terrain noise and density (singleplayer)", "GpuTerrainNoise");
                 Switch("Allocation-free animation checks", "AnimationLinqFree");
                 Switch("Falling block mesh fix", "FallingBlockMeshFix");
                 Switch("Villager outfit cache", "OutfitShapeCache");
