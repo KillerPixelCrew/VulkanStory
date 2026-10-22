@@ -62,6 +62,7 @@ internal sealed unsafe class MeshManager : IDisposable
 {
     internal SceneDrawCategory SceneDrawCategory { get; set; }
     internal long SceneDrawCommandsTerrain { get; private set; }
+    internal long SceneDrawCommandsEntity { get; private set; }
     internal long SceneDrawCommandsParticle { get; private set; }
     internal long SceneDrawCommandsCompat { get; private set; }
 
@@ -71,6 +72,7 @@ internal sealed unsafe class MeshManager : IDisposable
         switch (SceneDrawCategory)
         {
             case SceneDrawCategory.Terrain: SceneDrawCommandsTerrain++; break;
+            case SceneDrawCategory.Entity: SceneDrawCommandsEntity++; break;
             case SceneDrawCategory.Particle: SceneDrawCommandsParticle++; break;
             default: SceneDrawCommandsCompat++; break;
         }
