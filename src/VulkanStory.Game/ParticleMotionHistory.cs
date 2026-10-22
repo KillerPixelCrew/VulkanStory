@@ -1,6 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using VulkanStory.Contracts;
 using Vintagestory.API.Client;
 using Vintagestory.Client.NoObf;
 
@@ -24,19 +22,18 @@ internal static class ParticleMotionHistory
     /// <summary>Producer-slot identities stored beside one original four-float instance array.</summary>
     /// <param name="count">Number of complete four-float instance records in the original array.</param>
     private sealed class BufferTokens(int count) { internal readonly object?[] Tokens = new object?[count]; }
-    /// <summary>Current and previous transforms plus captured size evolution for one spawn token.</summary>
+    /// <summary>Current and previous uploaded transforms for one spawn token.</summary>
     /// <remarks>Frame stamps rotate once per rendered frame, so repeated draws compare with the preceding frame rather than an earlier draw in the same frame.</remarks>
     private sealed class Sample
     {
-        internal float[] State = new float[18], Previous = new float[18];
+        internal float[] State = new float[10], Previous = new float[10];
         internal long Frame = -1, PreviousFrame = -1;
         internal int Flags, PreviousFlags;
     }
     /// <summary>Copied upload data, token-keyed rendered samples and reusable GPU payload owned by one original mesh.</summary>
     /// <remarks>
-    /// Current contains ten transform floats (position, scale and direction) followed by a
-    /// captured size-evolution descriptor. Payload retains eleven vertex-input floats; the
-    /// separate SizePayload supplies deferred previous-size evaluation to compute.
+    /// Current contains ten transform floats (position, scale and direction) produced by
+    /// the original CPU particle update. Payload retains eleven vertex-input floats.
     /// These arrays are CPU storage; the renderer copies Payload into its separately owned
     /// previous-particle vertex buffer before the next preparation can overwrite it.
     /// </remarks>
@@ -49,9 +46,8 @@ internal static class ParticleMotionHistory
         internal readonly List<object> Expired = new();
         internal long Frame = -1;
         internal float[] Payload = [];
-        internal ParticleEvolution[] SizePayload = [];
         internal int ValidCount;
-        internal int UploadedCount, PreparedCount;
+        internal int UploadedCount;
     }
     private static readonly ConditionalWeakTable<ParticleGeneric, Spawn> Spawns = new();
     private static readonly ConditionalWeakTable<float[], BufferTokens> Buffers = new();
@@ -95,7 +91,7 @@ internal static class ParticleMotionHistory
         }
         int count = Math.Min(data.CustomFloats.Count / 4, Math.Min(identities.Tokens.Length, bytes.Length / 12));
         var history = Meshes.GetValue(mesh, _ => new MeshHistory());
-        if (history.Current.Length < count * 18) Array.Resize(ref history.Current, Math.Max(count * 18, history.Current.Length * 2));
+        if (history.Current.Length < count * 10) Array.Resize(ref history.Current, Math.Max(count * 10, history.Current.Length * 2));
         if (history.Tokens.Length < count) Array.Resize(ref history.Tokens, Math.Max(count, history.Tokens.Length * 2));
         if (history.Flags.Length < count) Array.Resize(ref history.Flags, Math.Max(count, history.Flags.Length * 2));
         if (history.UploadedCount > count) Array.Clear(history.Tokens, count, history.UploadedCount - count);
@@ -103,13 +99,11 @@ internal static class ParticleMotionHistory
         Array.Copy(identities.Tokens, history.Tokens, count);
         for (int i = 0; i < count; i++)
         {
-            int target = i * 18;
+            int target = i * 10;
             history.Flags[i] = data.Flags is { } flags && i < flags.Length ? flags[i] : 0;
             Array.Copy(floats, i * 4, history.Current, target, 3);
             history.Current[target + 3] = history.Current[target + 4] = history.Current[target + 5] = floats[i * 4 + 3];
             for (int j = 0; j < 4; j++) history.Current[target + 6 + j] = bytes[i * 12 + j] / 255f;
-            var size = Performance.GpuParticleVisuals.SizeFor(data, i, floats[i * 4 + 3]);
-            MemoryMarshal.Write(MemoryMarshal.AsBytes(history.Current.AsSpan(target + 10, 8)), in size);
         }
     }
 
@@ -130,18 +124,15 @@ internal static class ParticleMotionHistory
     /// call for this mesh; repeated draws reuse its storage while retaining the same previous frame.
     /// GPU allocation, upload and retirement belong to the renderer, not this CPU history owner.
     /// </remarks>
-    internal static ReadOnlySpan<float> Prepare(MeshRef mesh, int quantity, TemporalFrameState frame, bool deferSize = false)
+    internal static ReadOnlySpan<float> Prepare(MeshRef mesh, int quantity, TemporalFrameState frame)
     {
         var history = Meshes.GetValue(mesh, _ => new MeshHistory());
         int floats = checked(quantity * 11);
         if (history.Payload.Length < floats) Array.Resize(ref history.Payload, Math.Max(floats, history.Payload.Length * 2));
-        if (history.SizePayload.Length < quantity) Array.Resize(ref history.SizePayload, Math.Max(quantity, history.SizePayload.Length * 2));
-        history.PreparedCount = quantity;
         history.ValidCount = 0;
         if (quantity > history.UploadedCount)
         {
             Array.Clear(history.Payload);
-            Array.Fill(history.SizePayload, ParticleEvolution.Constant(0));
             return history.Payload.AsSpan(0, floats);
         }
         if (history.Frame != frame.FrameIndex)
@@ -169,18 +160,13 @@ internal static class ParticleMotionHistory
                 sample.PreviousFlags == history.Flags[i];
             if (sample != null) sample.Flags = history.Flags[i];
             if (valid) history.ValidCount++;
-            if (sample != null) Array.Copy(history.Current, i * 18, sample.State, 0, 18);
+            if (sample != null) Array.Copy(history.Current, i * 10, sample.State, 0, 10);
             float[] selected = valid ? sample!.Previous : sample?.State ?? history.Current;
-            int sourceOffset = sample == null ? i * 18 : 0;
+            int sourceOffset = sample == null ? i * 10 : 0;
             Array.Copy(selected, sourceOffset, history.Payload, i * 11, 10);
             history.Payload[i * 11 + 10] = valid ? 1f : 0f;
-            var size = MemoryMarshal.Read<ParticleEvolution>(MemoryMarshal.AsBytes(selected.AsSpan(sourceOffset + 10, 8)));
-            history.SizePayload[i] = size;
-            if (!deferSize)
-                history.Payload[i * 11 + 3] = history.Payload[i * 11 + 4] = history.Payload[i * 11 + 5] = Performance.GpuParticleVisuals.Evaluate(size);
         }
         return history.Payload.AsSpan(0, floats);
     }
-    internal static ReadOnlySpan<ParticleEvolution> PreviousVisualSizes(MeshRef mesh) => Meshes.TryGetValue(mesh, out var history) ? history.SizePayload.AsSpan(0, history.PreparedCount) : [];
     internal static int ValidInstances(MeshRef mesh) => Meshes.TryGetValue(mesh, out var history) ? history.ValidCount : 0;
 }

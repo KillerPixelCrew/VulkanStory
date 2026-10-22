@@ -88,7 +88,7 @@ internal sealed partial class GameGraphicsAdapter
     {
         var renderer = RequireDevice();
         if (!AoSettings.EffectiveTemporalPipeline || !frame.JitterActive || FrameState.MotionAttachment < 0 ||
-            !renderer.ProgramComputeWarpCompatible(source.ProgramId) || ShaderOverrides.IsOverridden("particlesquad")) return;
+            !renderer.ProgramParticleMotionCompatible(source.ProgramId) || ShaderOverrides.IsOverridden("particlesquad")) return;
         var program = QuadMotionProgram(source);
         if (quadMotionFrame != renderer.LatencyFrameId || quadMotionEye != renderer.TerrainEyeIndex)
         {

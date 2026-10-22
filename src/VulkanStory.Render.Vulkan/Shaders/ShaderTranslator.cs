@@ -40,7 +40,6 @@ internal sealed class TranslatedProgram
 
     /// <summary>Whether the program was linked from the manifest's SPIR-V rather than through the rewriter.</summary>
     public bool IsNative;
-    internal int? WorldWarpWaving;
 }
 
 /// <summary>
@@ -81,9 +80,6 @@ internal static class ShaderTranslator
         IReadOnlySet<string>? includes = null)
     {
         var program = new TranslatedProgram();
-        var defines = NativeShaderLibrary.ParseDefines(System.Linq.Enumerable.Select(stages, stage => stage.PrefixCode));
-        if (!defines.TryGetValue("WAVINGSTUFF", out var waving)) program.WorldWarpWaving = 0;
-        else if (int.TryParse(waving, out int value)) program.WorldWarpWaving = value;
 
         var ordered = new List<ShaderStageSource>();
         foreach (EnumShaderType stage in StageOrder)

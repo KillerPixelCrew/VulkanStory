@@ -702,8 +702,6 @@ public sealed unsafe partial class VulkanDevice
         _barriers.Flush(commandBuffer);
 
         // Decided before the scope opens, since it decides the depth attachment's layout.
-        PrepareParticleVisuals(meshId, instanceCount);
-        PrepareParticleGeometry(program, meshId, instanceCount);
         bool stencilWritable = pipeline.Description.StencilTest && bound.Stencil.TextureId != 0 &&
             (WritesStencil(pipeline.Description.StencilFront) || WritesStencil(pipeline.Description.StencilBack));
         _targets.SetDepthReadOnly(depthReadOnly, stencilWritable);

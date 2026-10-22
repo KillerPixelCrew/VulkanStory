@@ -60,8 +60,7 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
 
     /// <summary>Whether the program was linked from the native manifest.</summary>
     public bool IsNative { get; }
-    internal int? WorldWarpWaving { get; }
-    internal bool ComputeWarpCompatible { get; set; }
+    internal bool ParticleMotionCompatible { get; set; }
 
     /// <summary>Animation/motion eligibility reflected once from this link's immutable interface and binaries.</summary>
     internal AnimatedMotionContract AnimatedMotion { get; }
@@ -106,14 +105,6 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
         PushShadow = translated.Layout.CreatePushShadow();
         Specialization = translated.Specialization;
         IsNative = translated.IsNative;
-        WorldWarpWaving = translated.WorldWarpWaving;
-        if (translated.IsNative)
-        {
-            WorldWarpWaving = 0;
-            if (translated.Specialization is { } specialization)
-                foreach (var entry in specialization.Entries)
-                    if (entry.Id == 8 && entry.Size == 4) WorldWarpWaving = BitConverter.ToInt32(specialization.Data, (int)entry.Offset);
-        }
         MotionContractReflection? motion = MotionContractReflection.Create(translated, this);
         AnimatedMotion = AnimatedMotionContract.Create(motion, this);
         RigidMotion = RigidMotionContract.Create(motion, this);

@@ -28,10 +28,8 @@ internal sealed partial class GameGraphicsAdapter
         if (quad && !ReferenceEquals(currentFramebuffer, platform!.FrameBuffers[1]))
         { RenderMeshInstanced(mesh, quantity); return; }
         int handle = MeshHandle(vao);
-        bool deferSize = renderer.CanPrepareParticleVisuals(handle, quantity);
-        renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame, deferSize));
-        renderer.SetParticleVisualHistory(handle, ParticleMotionHistory.PreviousVisualSizes(mesh));
-        if (quad && frame.JitterActive && renderer.ProgramComputeWarpCompatible(program.ProgramId))
+        renderer.UpdateParticleHistory(handle, ParticleMotionHistory.Prepare(mesh, quantity, frame));
+        if (quad && frame.JitterActive && renderer.ProgramParticleMotionCompatible(program.ProgramId))
         {
             program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
             frame.ApplyMotionUniforms(program);

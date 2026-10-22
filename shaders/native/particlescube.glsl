@@ -37,7 +37,6 @@
 // them from the GLSL 330 declarations (docs/vulkan.md).
 layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
 {
-    int vsComputeParticleGeometry;
     vec4 rgbaFogIn;
     vec3 rgbaAmbientIn;
     float fogMinIn;
@@ -104,7 +103,6 @@ layout(location = 7) out vec4 gnormal;
 #endif
 
 #include "vertexflagbits.glsl"
-layout(std430, set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_FACE_DATA) readonly buffer VulkanParticleGeometry { vec4 values[]; } vsParticleGeometry;
 #include "shadowcoords.glsl"
 #include "fogandlight.vert.glsl"
 #include "vertexwarp.glsl"
@@ -155,8 +153,6 @@ vec4 taaParticleWorldPos(WarpState st, vec3 taaParticlePosition)
 
 void main()
 {
-    if (vsComputeParticleGeometry > 0) worldPos = vsParticleGeometry.values[(gl_InstanceIndex * vsComputeParticleGeometry + gl_VertexIndex) * 2];
-    else {
 #if VEC3SCALE == 1
 	mat4 rotMat = rotation3d(vec3(0,1,0), atan2(particleDir.z, particleDir.x) + particleDir.w);
 	worldPos = rotMat * (vec4(vertexPosition,1.0) * vec4(scale,1.0)) + vec4(particlePosition, 1.0);
@@ -167,7 +163,6 @@ void main()
 
 	worldPos = applyVertexWarping(renderFlags, worldPos);
 	worldPos = applyGlobalWarping(worldPos);
-    }
 	vec4 cameraPos = modelViewMatrix * worldPos;
 
 	gl_Position = projectionMatrix * cameraPos;
@@ -193,7 +188,7 @@ void main()
 	// unjittered projection and CameraMatrixOrigin.
 	{
 		WarpState taaPrev = previousWarpState();
-		vec4 taaPrevPos = vsComputeParticleGeometry > 0 ? vsParticleGeometry.values[(gl_InstanceIndex * vsComputeParticleGeometry + gl_VertexIndex) * 2 + 1] : taaParticleWorldPos(taaPrev, previousParticlePosition);
+		vec4 taaPrevPos = taaParticleWorldPos(taaPrev, previousParticlePosition);
 		taaPrevClip = particleHistoryValid > 0.5 ? prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos) : vec4(0.0);
 	}
 #endif

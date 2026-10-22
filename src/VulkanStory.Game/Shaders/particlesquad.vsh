@@ -1,9 +1,5 @@
 #version 330 core
 #extension GL_ARB_explicit_attrib_location: enable
-#extension GL_ARB_shader_storage_buffer_object: enable
-// Stock particlesquad.vsh with compute geometry consumption; the original branch is retained.
-uniform int vsComputeQuadGeometry = 0;
-layout(std430) readonly buffer VulkanParticleGeometry { vec4 values[]; } vsParticleGeometry;
 
 layout (location = 0) in vec3 vertexPosition;        // Per vertex
 layout (location = 1) in vec2 uvIn;                    // Per vertex
@@ -70,12 +66,6 @@ void main()
     if (rainParticle) uv = vec2(0.5, 0.5);
 
     vec4 cameraPos, shadowPosition;
-    if (vsComputeQuadGeometry > 0) {
-        int record = (gl_InstanceID * vsComputeQuadGeometry + gl_VertexID) * 7;
-        cameraPos = vsParticleGeometry.values[record];
-        shadowPosition = vsParticleGeometry.values[record + 1];
-        mvmat = mat4(vsParticleGeometry.values[record + 2], vsParticleGeometry.values[record + 3], vsParticleGeometry.values[record + 4], vsParticleGeometry.values[record + 5]);
-    } else {
     // 1. Translate the particle
     mvmat[3] = mvmat * vec4(particlePosition, 1.0);
 
@@ -114,7 +104,6 @@ void main()
 
     cameraPos = mvmat * worldPos;
     shadowPosition = vec4(worldPos.xyz + particlePosition, worldPos.w);
-    }
     color = baseColor * applyLight(rgbaAmbientIn, rgbaLightIn, renderFlags, cameraPos) * rgbaBlockIn;
     color.a = rgbaBlockIn.a;
     rgbaFog = rgbaFogIn;
@@ -126,9 +115,7 @@ void main()
     calcShadowMapCoords(mvmat, shadowPosition);
 #if defined(VULKANSTORY_QUAD_MOTION)
     quadHistoryValid = particleHistoryValid;
-    vec4 previousCamera;
-    if (vsComputeQuadGeometry > 0) previousCamera = vsParticleGeometry.values[(gl_InstanceID * vsComputeQuadGeometry + gl_VertexID) * 7 + 6];
-    else previousCamera = vsQuadBillboard(prevModelViewMatrix, previousParticlePosition, previousParticleDirection.xyz, rainParticle) *
+    vec4 previousCamera = vsQuadBillboard(prevModelViewMatrix, previousParticlePosition, previousParticleDirection.xyz, rainParticle) *
         vsQuadWarp(previousWarpState(), vertexPosition * previousParticleScale, rainParticle, renderFlags);
     quadPreviousClip = prevProjectionMatrix * previousCamera;
 #endif
