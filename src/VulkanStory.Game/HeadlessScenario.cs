@@ -124,8 +124,6 @@ internal sealed class HeadlessScenario
             ["terrainNoiseAppliedSamples"] = (JsonValueKind.Number, false),
             ["terrainDensityAvailable"] = (JsonValueKind.True, false),
             ["terrainDensityDispatchesRecorded"] = (JsonValueKind.Number, false),
-            ["terrainParityChecks"] = (JsonValueKind.Number, false),
-            ["terrainParityMismatches"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsTerrain"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsParticle"] = (JsonValueKind.Number, false),
             ["sceneDrawCommandsCompat"] = (JsonValueKind.Number, false),
@@ -158,7 +156,6 @@ internal sealed class HeadlessScenario
         "particleVisualDispatchesRecorded", "particleVisualChecks", "particleVisualFunctionCoverage", "cpuParticlePropertiesDeferred", "cpuParticleFacadeChecks",
         "terrainNoiseDispatchesRecorded", "terrainNoiseAppliedSamples",
         "terrainDensityDispatchesRecorded",
-        "terrainParityChecks", "terrainParityMismatches",
         "sceneDrawCommandsTerrain", "sceneDrawCommandsParticle", "sceneDrawCommandsCompat",
         "terrainComparisonWrittenColumns",
     };
