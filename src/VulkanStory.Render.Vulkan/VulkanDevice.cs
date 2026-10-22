@@ -1589,9 +1589,6 @@ public sealed unsafe partial class VulkanDevice : IDisposable, ILatencyStageList
     }
     private void DisposeCore()
     {
-        terrainDensity?.Dispose();
-        terrainNoise?.Dispose();
-
         if (_context != null)
         {
             var idle = _context.WaitDeviceIdle();
