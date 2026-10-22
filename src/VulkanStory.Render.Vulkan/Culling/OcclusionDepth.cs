@@ -23,32 +23,16 @@ internal sealed class OcclusionDepth : IDisposable
     public const int Block = 8;
     private const string ResourcePrefix = "shaders-vk/occlusion/";
 
-    private sealed record Pending(int Width, int Height, OcclusionCamera Camera, OcclusionProjection Projection,
-        int GpuTexture, bool HasGpuPyramid, int PixelWidth, int PixelHeight);
+    private sealed record Pending(int Width, int Height, OcclusionCamera Camera, OcclusionProjection Projection);
 
     private readonly VulkanDevice _device;
     private readonly Pending?[] _pending;
     // One mapped buffer per frame slot, owned here: the shared readback arena can be replaced (and retired) within a frame.
     private readonly VulkanBuffer?[] _readbacks;
-    private readonly int[] _gpuTargets, _gpuWidths, _gpuHeights;
-    private readonly int[] _slotTargets;
-    private int _frameReadTexture;
     private readonly byte[] _push = new byte[16];
     private int _program, _target;
     private Format _programFormat;
     private int _width, _height;
-    private int _mipProgram;
-    internal int GpuTexture => GpuCamera == null ? 0 : _target;
-    internal OcclusionCamera? GpuCamera { get; private set; }
-    internal int GpuWidth { get; private set; }
-    internal int GpuHeight { get; private set; }
-    internal int SourceDepthTexture { get; private set; }
-    // Published only after the slot fence completes. Pre-graphics scene culls read
-    // this immutable target throughout the logical frame, including partial submits.
-    internal int CompletedGpuTexture { get; private set; }
-    internal OcclusionCamera? CompletedGpuCamera { get; private set; }
-    internal int CompletedGpuWidth { get; private set; }
-    internal int CompletedGpuHeight { get; private set; }
     private OcclusionPyramid? _latest;
     private readonly System.Collections.Generic.List<OcclusionPyramid> _storage = new();
 
@@ -60,13 +44,6 @@ internal sealed class OcclusionDepth : IDisposable
         _device = device;
         _pending = new Pending?[framesInFlight];
         _readbacks = new VulkanBuffer?[framesInFlight];
-        // One target per in-flight capture plus the published read target. The
-        // current slot must never overwrite the image it just published.
-        _gpuTargets = new int[framesInFlight + 1];
-        _gpuWidths = new int[framesInFlight + 1];
-        _gpuHeights = new int[framesInFlight + 1];
-        _slotTargets = new int[framesInFlight];
-        Array.Fill(_slotTargets, -1);
         Test = new LatestView(this);
     }
 
@@ -83,10 +60,9 @@ internal sealed class OcclusionDepth : IDisposable
     /// Records the reduction of <paramref name="depthTexture" /> and its copy to the host into the open frame. The caller has
     /// finished drawing the occluders; the device closes any open rendering scope for the compute pass.
     /// </summary>
-    public bool Capture(int depthTexture, OcclusionCamera camera, bool prepareGpuDraws = false)
+    public bool Capture(int depthTexture, OcclusionCamera camera)
     {
         LastError = null;
-        GpuCamera = null;
         if (OcclusionProjection.From(camera.Projection) is not { } projection) return Fail("the projection is not a GL perspective matrix");
         if (camera.View is not { Length: >= 16 }) return Fail("the view matrix is missing");
         VulkanTexture? depth = _device.TextureOf(depthTexture);
@@ -110,26 +86,6 @@ internal sealed class OcclusionDepth : IDisposable
             Dispatches = new[] { ComputeDispatch.Covering(1, (byte[])_push.Clone()) },
         })) return Fail(_device.GetError());
 
-        if (prepareGpuDraws)
-        {
-            if (_mipProgram == 0)
-                _mipProgram = _device.CreateComputeProgram(Source("pyramid.comp"), "occlusion-pyramid",
-                    [new ComputeSlot(0, ComputeSlotKind.Sampled), new ComputeSlot(1, ComputeSlotKind.Storage)], 0);
-            if (_mipProgram == 0) return Fail(_device.GetError());
-            uint levels = _device.TextureOf(_target)!.MipLevels;
-            for (uint level = 1; level < levels; level++)
-                if (!_device.RecordComputePass(new ComputePassDeclaration
-                {
-                    Name = "occlusion-pyramid", ProgramId = _mipProgram,
-                    Bindings = [new ComputeBinding(0, _target, ComputeAccess.Sampled, level - 1),
-                        new ComputeBinding(1, _target, ComputeAccess.StorageWrite, level)],
-                    Dispatches = [ComputeDispatch.Covering(1)],
-                })) return Fail(_device.GetError());
-            GpuCamera = camera;
-            SourceDepthTexture = depthTexture;
-            GpuWidth = (int)depth.Width; GpuHeight = (int)depth.Height;
-        }
-
         int slot = _device.CurrentFrameSlot;
         ulong bytes = (ulong)width * (ulong)height * sizeof(float);
         if (_readbacks[slot] is not { } buffer || buffer.Size < bytes)
@@ -139,8 +95,7 @@ internal sealed class OcclusionDepth : IDisposable
             buffer = _readbacks[slot] = _device.CreateReadbackBuffer(bytes);
         }
         _device.CopyTextureToReadbackBuffer(_target, (uint)width, (uint)height, buffer);
-        _pending[slot] = new Pending(width, height, camera, projection,
-            _target, prepareGpuDraws, (int)depth.Width, (int)depth.Height);
+        _pending[slot] = new Pending(width, height, camera, projection);
         return true;
     }
 
@@ -150,18 +105,8 @@ internal sealed class OcclusionDepth : IDisposable
     /// </summary>
     public void Collect(int slotIndex)
     {
-        _slotTargets[slotIndex] = -1;
-        _frameReadTexture = CompletedGpuTexture;
         if (_pending[slotIndex] is not { } pending || _readbacks[slotIndex] is not { } buffer) return;
         _pending[slotIndex] = null;
-        if (pending.HasGpuPyramid)
-        {
-            CompletedGpuTexture = pending.GpuTexture;
-            CompletedGpuCamera = pending.Camera;
-            CompletedGpuWidth = pending.PixelWidth;
-            CompletedGpuHeight = pending.PixelHeight;
-            _frameReadTexture = CompletedGpuTexture;
-        }
         OcclusionPyramid? reuse = null;
         if (ReuseStorage)
             foreach (var candidate in _storage)
@@ -183,11 +128,7 @@ internal sealed class OcclusionDepth : IDisposable
     /// <summary>Drops pending captures and the published pyramid (a world change or a target rebuild).</summary>
     public void Reset()
     {
-        GpuCamera = null;
-        CompletedGpuTexture = 0;
-        CompletedGpuCamera = null;
         Array.Clear(_pending);
-        Array.Fill(_slotTargets, -1);
         Volatile.Write(ref _latest, null);
         _storage.Clear();
     }
@@ -200,42 +141,11 @@ internal sealed class OcclusionDepth : IDisposable
 
     private bool EnsureTarget(int width, int height)
     {
-        int slot = _device.CurrentFrameSlot;
-        int targetIndex = _slotTargets[slot];
-        if (targetIndex < 0)
-        {
-            for (int i = 0; i < _gpuTargets.Length; i++)
-            {
-                int candidate = _gpuTargets[i];
-                bool busy = candidate != 0 && (candidate == CompletedGpuTexture || candidate == _frameReadTexture);
-                if (candidate != 0)
-                    foreach (var pending in _pending) if (pending?.GpuTexture == candidate) busy = true;
-                if (!busy) { targetIndex = i; break; }
-            }
-            if (targetIndex < 0) return false;
-            _slotTargets[slot] = targetIndex;
-        }
-        _target = _gpuTargets[targetIndex];
-        _width = _gpuWidths[targetIndex]; _height = _gpuHeights[targetIndex];
         if (_target != 0 && _width == width && _height == height) return true;
-        if (_target != 0)
-        {
-            if (CompletedGpuTexture == _target) { CompletedGpuTexture = 0; CompletedGpuCamera = null; }
-            _device.DeleteTexture(_target);
-        }
+        if (_target != 0) _device.DeleteTexture(_target);
         // Captures still in flight name the old target's bytes in the arena, not the texture, so they stay valid.
-        // Native mip extents floor odd dimensions, whereas PERF-03's CPU levels
-        // ceil them. Pad with repeated edge tiles so both hierarchies have the
-        // same 2x2 coverage; never fold an unrelated trailing sky tile into a parent.
-        int paddedWidth = 1, paddedHeight = 1;
-        while (paddedWidth < width) paddedWidth <<= 1;
-        while (paddedHeight < height) paddedHeight <<= 1;
-        int levels = 1;
-        for (int extent = Math.Max(paddedWidth, paddedHeight); extent > 1; extent >>= 1) levels++;
-        _target = _device.CreateStorageTexture(paddedWidth, paddedHeight, Format.R32Sfloat, levels);
+        _target = _device.CreateStorageTexture(width, height, Format.R32Sfloat);
         _width = width; _height = height;
-        _gpuTargets[targetIndex] = _target;
-        _gpuWidths[targetIndex] = width; _gpuHeights[targetIndex] = height;
         return _target != 0 && _device.TextureOf(_target)?.Format == Format.R32Sfloat;
     }
 
@@ -272,11 +182,9 @@ internal sealed class OcclusionDepth : IDisposable
     {
         Reset();
         for (int i = 0; i < _readbacks.Length; i++) { if (_readbacks[i] is { } buffer) _device.DeferBufferDeletion(buffer); _readbacks[i] = null; }
-        foreach (int target in _gpuTargets) if (target != 0) _device.DeleteTexture(target);
-        Array.Clear(_gpuTargets);
+        if (_target != 0) _device.DeleteTexture(_target);
         if (_program != 0) _device.DeleteComputeProgram(_program);
-        if (_mipProgram != 0) _device.DeleteComputeProgram(_mipProgram);
-        _target = _program = _mipProgram = 0;
+        _target = _program = 0;
     }
 
     /// <summary>Forwards to the newest published pyramid; undecided (visible) while none exists.</summary>

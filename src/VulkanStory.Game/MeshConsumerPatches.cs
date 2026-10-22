@@ -168,7 +168,6 @@ internal static class MeshConsumerPatches
     private static void Release(int handle, VAO mesh)
     {
         if (enabled?.Invoke() != true) { GL.DeleteVertexArray(handle); return; }
-        ResidentTerrain.Disposed(mesh);
         GameGraphicsAdapter.MeshAdapter(mesh).ReleaseMesh(mesh);
     }
 }

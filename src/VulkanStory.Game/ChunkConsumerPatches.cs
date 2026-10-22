@@ -14,7 +14,6 @@ namespace VulkanStory.Game;
 internal static class ChunkConsumerPatches
 {
     private const string Owner = "vulkanstory.routing.graphics-chunks";
-    internal const int LiquidCallSite = 10;
     private static ProcessRuntime? runtime;
     private static readonly MethodInfo Pool = AccessTools.Method(typeof(MeshDataPoolManager), "Render",
         [typeof(Vec3d), typeof(string), typeof(EnumFrustumCullMode)])!;
@@ -46,14 +45,12 @@ internal static class ChunkConsumerPatches
                 if (method.ReturnType != typeof(void) || method.GetMethodBody() == null) throw new MissingMethodException("Original chunk renderer changed.");
                 Check(method, PatchProcessor.GetOriginalInstructions(method));
             }
-            ResidentTerrain.Validate();
         }, () =>
         {
             if (runtime != null) throw new InvalidOperationException("Chunk routing already has an owner.");
             runtime = owner; attempted = true;
             foreach (var route in Profile) harmony.Patch(Target(route.Name),
                 transpiler: new HarmonyMethod(typeof(ChunkConsumerPatches), nameof(Transpiler)) { priority = Priority.First });
-            ResidentTerrain.Install(harmony);
         }, () =>
         {
             if (!attempted) return;
@@ -83,7 +80,6 @@ internal static class ChunkConsumerPatches
     {
         var body = instructions.ToList(); Check(__originalMethod, body);
         int foliage = __originalMethod.Name == "RenderShadow" ? FoliageShadowSite(body) : -1;
-        int site = Profile.TakeWhile(entry => entry.Name != __originalMethod.Name).Sum(entry => entry.Pools);
         for (int index = 0; index < body.Count; index++)
         {
             var instruction = body[index];
@@ -94,7 +90,6 @@ internal static class ChunkConsumerPatches
                 label.blocks.AddRange(instruction.blocks.Where(block => block.blockType != ExceptionBlockType.EndExceptionBlock));
                 instruction.blocks.RemoveAll(block => block.blockType != ExceptionBlockType.EndExceptionBlock);
                 yield return label;
-                yield return new CodeInstruction(OpCodes.Ldc_I4, site++);
                 instruction.opcode = OpCodes.Call;
                 instruction.operand = AccessTools.Method(typeof(ChunkConsumerPatches), index == foliage ? nameof(RenderShadowFoliagePool) : nameof(RenderPool));
             }
@@ -110,21 +105,21 @@ internal static class ChunkConsumerPatches
             throw new InvalidOperationException("Active terrain routing lost its session.");
         return session.Graphics;
     }
-    private static void RenderPool(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, string name, int site)
+    private static void RenderPool(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, string name)
     {
         if (Adapter() is not { } graphics) { pool.Render(position, uniform, mode); return; }
         bool motion = graphics.BeginCameraMotionWrite();
         try
         {
             graphics.BeginChunkPool(name);
-            try { if (!graphics.DrawResidentTerrain(pool, position, uniform, mode, site)) pool.Render(position, uniform, mode); }
+            try { pool.Render(position, uniform, mode); }
             finally { graphics.EndChunkPool(); }
         }
         finally { if (motion) graphics.EndMotionWrite(); }
     }
     /// <summary>Set by the performance feature once it validated; until then the foliage site renders like every other pool.</summary>
     internal static volatile bool FoliageSkipArmed;
-    private static void RenderShadowFoliagePool(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, string name, int site)
+    private static void RenderShadowFoliagePool(MeshDataPoolManager pool, Vec3d position, string uniform, EnumFrustumCullMode mode, string name)
     {
         if (FoliageSkipArmed && mode == EnumFrustumCullMode.CullInstantShadowPassFar &&
             Performance.PerformancePatchSet.Current?.ShadowFarFoliage == true)
@@ -132,7 +127,7 @@ internal static class ChunkConsumerPatches
             Interlocked.Increment(ref Performance.PerformanceCounters.ShadowFoliagePoolsSkipped);
             return;
         }
-        RenderPool(pool, position, uniform, mode, name, site);
+        RenderPool(pool, position, uniform, mode, name);
     }
     private static void ClearSampler(int unit, int sampler)
     { if (Adapter() is { } graphics) graphics.BindSampler(unit, sampler); else GL.BindSampler(unit, sampler); }
