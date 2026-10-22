@@ -191,7 +191,6 @@ internal sealed partial class GameRenderSession : IDisposable
             Performance.PerformanceTrace.Log.CaptureSettings(services.RendererSettings.Settings);
             Device.OcclusionDepth.ReuseStorage = services.RendererSettings.Settings.OcclusionStorageReuse;
             Device.ResidentTerrainEnabled = services.RendererSettings.Settings.ResidentTerrain;
-            Device.ResidentEntitiesEnabled = services.RendererSettings.Settings.ResidentEntities;
             Device.ComputeParticleGeometryEnabled = services.RendererSettings.Settings.GpuParticleGeometry;
             Device.ComputeParticleVisualsEnabled = services.RendererSettings.Settings.GpuParticleVisualSimulation;
             bool terrainNoise = services.RendererSettings.Settings.GpuTerrainNoise &&
