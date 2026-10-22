@@ -21,7 +21,6 @@ internal static class PerformanceFeatures
         MeshPartPool.Create(),
         ParallelChunkReads.Create(),
         WorldgenPipeline.Create(),
-        GpuTerrainNoise.Create(),
         AnimationLinqFree.Create(),
         FallingBlockMeshFix.Create(essentials),
         OutfitShapeCache.Create(survival),
