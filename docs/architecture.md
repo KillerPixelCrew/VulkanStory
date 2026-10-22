@@ -223,7 +223,7 @@ and counts the snapshot outside that lock. Indexed BFS precomputes loaded-chunk
 neighbors and stores face arrivals in arrays. Runtime diagnostics compare its
 visible set with the coordinate BFS using the same snapshot and traversability data.
 
-The compat lane's occlusion culling splits across the boundary. Right after the
+Occlusion culling splits across the game/renderer boundary. Right after the
 game's opaque terrain pass, the session asks `VulkanDevice.OcclusionDepth` to reduce the primary depth to
 8×8-pixel max-depth tiles (`shaders/native/occlusion/reduce.comp`) and copy them
 into a readback buffer owned by that frame slot. When the slot comes round again,
@@ -237,9 +237,9 @@ CPU hierarchy reuse alternates published and spare storage. Publication and quer
 access are guarded so storage cannot be overwritten while a reader uses it; size
 changes and world resets rebuild or discard storage. Visibility math stays unchanged.
 
-Resident terrain and entities consume the completed GPU depth pyramid directly
-from a frozen per-frame snapshot. Their culling runs in a pre-graphics compute
-pass and writes indirect commands; compat draws retain the CPU queries above.
+Stereo maintains separate depth captures and CPU pyramids for each eye. Capture
+and visibility queries select the same eye's history and use its physical camera
+position, so head movement participates in conservative movement padding.
 
 ## Rendering
 
@@ -249,23 +249,17 @@ of `VulkanDevice`. GL-shaped IDs used by game and mod code are owned by the adap
 the same registry serves the game and third-party `RenderAPI` users, so an ID
 created on one path resolves on another.
 
-`ResidentTerrain` and `ResidentEntities` default on and apply live. The game side
-publishes terrain part/pool changes and captures supported entity/submesh rows;
-the renderer owns the persistent tables, current/previous pose storage and
-frame-slot snapshots. Compute culls and compacts those snapshots before graphics,
-which submits indirect terrain pools and entity groups. Native instanced entity
-vertex shaders retain skinning and current/previous warps. No per-draw entity
-record rewrite, shared geometry packing or deformation/joint-finalization compute
-path is used.
+The game supplies visibility, materials, poses and per-draw calls for all scene
+content. The adapter routes those calls into Vulkan recording in their original
+pass order, for both native and translated shaders. Entity skinning and warps
+remain in the vertex shaders. Occlusion queries above can omit hidden terrain
+parts and entity preparation from the main-camera path.
 
-Resident terrain reproduces the stock visibility arithmetic in double precision.
-If `shaderFloat64` is unavailable, its submission is refused and the existing
-per-draw path runs. That **compat lane** also handles refused pools/entities,
-translated shaders (`NativeShaders=false`), foreign-patched policies and
-unsupported shader overrides. Entity capture must succeed before its original
-draw is suppressed; compat entities retain stock vertex-shader skinning.
-See [resident scene submission](rendering.md#resident-scene-and-compat-lane) for
-the pass and snapshot contracts.
+Supported stock singleplayer terrain noise and density-sign evaluation use
+bounded compute batches; CPU threshold and block decisions remain with the game.
+Particle geometry and stock visual evolution also have compute paths, while
+particle physics uses the stock CPU tick. Their live controls and unsupported-input
+behavior are described in [performance](performance.md).
 
 Shaders:
 
@@ -300,6 +294,17 @@ Scene order: shadows and opaque world, transparency/OIT, AO (SSAO or GTAO),
 temporal reconstruction (TAA or vendor SR), display-resolution post-processing,
 HUD-free scene capture, separately composited UI, final composition, presentation
 or frame generation. Screenshots read the completed composition.
+
+OpenXR replays this per-draw world path for each eye, including shadows. Shared
+world updates, animation and particle ticks advance once per logical frame;
+view-dependent visibility and drawing use each eye's pose and projection. The
+second replay uses zero delta time for render callbacks. Each completed raster
+eye is copied into the runtime's image, with headset submission before the desktop
+mirror. Temporal reconstruction, frame generation and vendor latency pacing stay
+inactive in stereo, retaining saved desktop settings. Multiview, shared shadow
+maps, direct XR composition and late pose sampling remain planned. See
+[stereo rendering](rendering.md#stereo-rendering) and the
+[simulated stereo harness](headless-harness.md#simulated-stereo).
 
 ## Providers
 

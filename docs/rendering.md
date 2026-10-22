@@ -2,9 +2,9 @@
 
 ## The game-facing adapter
 
-Vintage Story still supplies scene content, pass order and compatibility policy.
-Resident terrain and entity submission is enabled by default; particles, menus and
-post-processing retain their game-side call order. Harmony routing redirects
+Vintage Story supplies scene content, visibility decisions and pass order through
+its own per-draw path. Terrain, entities, particles, menus and post-processing
+retain their game-side call order. Harmony routing redirects
 graphics consumers into `GameGraphicsAdapter`. The adapter translates game
 meshes, textures, programs, state and framebuffer operations into the renderer's
 contracts. `VulkanDevice` owns the Vulkan objects and recording work.
@@ -33,8 +33,7 @@ and optional targets; it is not a promise that every box runs for every frame.
 
 ```mermaid
 flowchart TD
-    Input[Poll SDL input and capture frame policy] --> Cull[Resident scene compute culling]
-    Cull --> Shadow[Shadow passes]
+    Input[Poll SDL input and capture frame policy] --> Shadow[Shadow passes]
     Shadow --> Scene[Opaque world, depth, normals and motion]
     Scene --> OIT[Transparency accumulation and revealage]
     OIT --> AO[SSAO or GTAO composition]
@@ -62,37 +61,35 @@ the first completed world frame. Frame-generation preparation can inspect curren
 inputs during a composition hold, but generation remains paused while the held
 loading image is presented.
 
-## Resident scene and compat lane
+## Scene submission and occlusion
 
-`ResidentTerrain` and `ResidentEntities` are live Performance-page switches,
-both on by default. The game adapter publishes terrain part changes and captures
-supported entity draws into renderer-owned persistent tables. Each frame slot
-retains its own immutable visibility, camera, material and pose inputs. Culling
-records into the pre-graphics compute command buffer; barriers make its compacted
-indirect commands available before graphics consumes them.
+All scene content uses the game's per-draw path through `GameGraphicsAdapter`.
+The game walks terrain pools and entity renderers, supplies visibility and draw
+inputs, and VulkanStory records the corresponding Vulkan commands. Entity
+skinning and warps remain in the vertex shaders. Native replacements and runtime
+translated shaders use this same submission path.
 
-Terrain rows retain pool, pass, atlas, chunk visibility, bounds, LOD and index
-ranges. `occlusion/draws.comp` reproduces the game's `IsVisible` arithmetic,
-including its float-to-double conversions and shadow rules. This requires Vulkan
-`shaderFloat64`; without it, resident terrain submission is refused and the stock
-per-draw path runs. Main-camera depth rejection uses a completed historical depth
-pyramid after the stock visibility decision. Each eye and cascade has its own
-view inputs; liquid-motion replay can reuse the matching compacted list.
+`TerrainOcclusionCull` and `EntityOcclusionCull` add conservative CPU queries to
+the game's main-camera visibility decisions. After opaque terrain, a compute pass
+reduces its depth to maximum-depth tiles. Frame-slot readback supplies a CPU depth
+pyramid with the captured view, projection and camera position. Queries expand
+bounds for camera movement and keep uncertain cases visible. Shadows retain
+their own visibility decisions. See [performance](performance.md#visibility-and-shadows).
 
-Entity rows retain stable entity/submesh identities, uniforms, materials and
-current/previous poses. `occlusion/entities-resident.comp` culls and compacts
-groups sharing a pipeline, mesh and immutable frame globals. The native
-`entityanimated.instanced` and `shadowmapentityanimated.instanced` vertex shaders
-read those rows and perform skinning and warps. There is no shared deformation
-or joint-finalization compute path. Resident draws use indirect-count commands
-when available; otherwise ordinary indirect commands consume a zeroed unused tail.
+## Stereo rendering
 
-The **compat lane** is the existing per-draw submission path. Refused terrain
-pools, unsupported entities, foreign-patched visibility/render policy and changed
-shader assets retain that path. `NativeShaders=false` also uses it. A failed
-entity row capture continues the original draw, including stock vertex-shader
-skinning; only a completed capture suppresses that draw. Capacity limits and
-unavailable device features decline admission rather than omit scene content.
+OpenXR replays the world render path once per eye with tracked poses and asymmetric
+projections. Shared simulation, animation, particle ticks and other stock world
+updates advance once per logical frame; view-dependent visibility and draws run
+for each eye, including shadow passes. Each eye captures and queries its own
+occlusion history. Render callbacks still run for the second eye with zero delta
+time; arbitrary mod side effects need an explicit view-aware contract.
+
+The current path copies the completed raster image into each runtime eye image,
+then submits headset layers before the desktop mirror. Flat menus use a head-locked
+quad. Multiview, shared shadow maps, direct XR composition and late pose sampling
+remain planned. TAA, temporal upscaling, frame generation and vendor latency pacing
+are inactive in stereo; saved desktop settings are retained.
 
 ## Streaming frame graph
 
@@ -348,8 +345,9 @@ of captured frame policy and can affect whether a presenter is ready.
 | Topic | Source |
 | --- | --- |
 | Game frame/session | [GameRenderSession](../src/VulkanStory.Game/GameRenderSession.cs) and its partial files |
-| Resident terrain | [Game publication](../src/VulkanStory.Game/ResidentTerrain.cs), [renderer tables and submission](../src/VulkanStory.Render.Vulkan/VulkanDevice.TerrainScene.cs) |
-| Resident entities | [Game capture](../src/VulkanStory.Game/ResidentEntities.cs), [renderer rows and submission](../src/VulkanStory.Render.Vulkan/VulkanDevice.EntityScene.cs) |
+| Scene submission | [Mesh routing](../src/VulkanStory.Game/MeshConsumerPatches.cs), [mesh recording](../src/VulkanStory.Render.Vulkan/Core/MeshManager.cs) |
+| Occlusion | [Game capture and source](../src/VulkanStory.Game/GameRenderSession.Occlusion.cs), [depth reduction and CPU pyramid](../src/VulkanStory.Render.Vulkan/Culling/OcclusionDepth.cs) |
+| Stereo | [Per-eye replay](../src/VulkanStory.Game/GameRenderSession.OpenXr.cs), [shared world updates](../src/VulkanStory.Game/OpenXrConsumerPatches.cs) |
 | Temporal state | [TemporalFrameState](../src/VulkanStory.Game/TemporalFrameState.cs), [TemporalProviderFrame](../sdk/rescaleframe/runtime/managed/ReScaleFrame.Contracts/TemporalProviderFrame.cs) |
 | TAA | [TAA resolve](../src/VulkanStory.Game/GameGraphicsAdapter.Taa.cs), [sample banks](../src/VulkanStory.Game/GameGraphicsAdapter.TaaFir.cs) |
 | AO | [GtaoRenderer](../src/VulkanStory.Render.Vulkan/AmbientOcclusion/GtaoRenderer.cs) |

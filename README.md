@@ -23,16 +23,18 @@ unmodified game.
   (with an optional server-side input companion).
 - **Performance**: optional smoothness patches (culling, chunk streaming, entities,
   singleplayer worldgen, inventory, lighting, physics, chisel LOD and world-map caching),
-  plus resident terrain/entity tables with pre-graphics GPU culling and indirect
-  draws, indexed visibility traversal and stock cloud updates. `ResidentTerrain`
-  and `ResidentEntities` default on; refused content and translated shaders retain
-  the stock per-draw compat lane. Particle geometry and visual evolution remain
-  enabled, with particle physics using the stock CPU tick.
+  indexed visibility traversal and stock cloud updates. All scene content follows
+  the game's per-draw path through VulkanStory. Occlusion culling uses a CPU depth
+  pyramid captured from opaque terrain, separately for each stereo eye. Supported
+  terrain noise, particle geometry and particle visual evolution use compute by
+  default; particle physics and chunk meshing stay on the game's CPU paths.
   Optional algorithms are switchable on the Performance options page.
 - **Performance inspection**: in-game captures with offline flame graphs, allocation
   samples, frame/system timings, CPU/memory metrics, monitor contention and Speedscope export.
 - **Initial OpenXR stereo rendering** with tracked headset views and a desktop mirror,
-  enabled from the Device options page.
+  enabled from the Device options page. World drawing replays per eye while shared
+  world updates advance once per frame. Temporal providers stay off in stereo;
+  multiview and shared shadow maps remain planned.
 - **Mod compatibility**: shared translation of supported managed/native OpenGL calls
   and mod-created GLFW windows, plus extension points for custom Vulkan render passes.
 
@@ -45,9 +47,6 @@ unmodified game.
   and XeSS-FG needs a supported DX12 GPU and driver (including non-Intel GPUs with
   Shader Model 6.4). The FSR and XeSS upscalers run across vendors; unsupported
   upscalers fall back automatically.
-
-Resident terrain uses `shaderFloat64` for the game's visibility arithmetic. When
-that device feature is unavailable, terrain retains the compat draw path.
 
 ## Installation (players)
 
@@ -134,7 +133,7 @@ your own installation.
 | Path | Contents |
 | --- | --- |
 | `src/VulkanStory.Bootstrap` | Early managed startup, activated by the native `hostfxr.dll` proxy |
-| `src/VulkanStory.Render.Vulkan` | Vulkan device, resident scene tables, frame graph, pipelines and provider resource/presentation adapters |
+| `src/VulkanStory.Render.Vulkan` | Vulkan device, resources, frame graph, pipelines and provider resource/presentation adapters |
 | `src/VulkanStory.Platform.Sdl` | SDL3 window, events and coordinates (game-independent) |
 | `src/VulkanStory.Game` | Game integration: Harmony patches, graphics/platform adapters, temporal state, controller input |
 | `src/VulkanStory.Mod` | Mod entry point, settings UI and chat commands |

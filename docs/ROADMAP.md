@@ -27,8 +27,8 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
   - Chunk streaming: skip unchanged upload-queue sorting, tessellator mesh-part pool, parallel raw chunk reads in singleplayer
   - Entities: allocation-free animation checks, falling-block mesh fix, villager/trader outfit shape cache with outfit textures pre-inserted gradually after world load
   - Worldgen (singleplayer): the game's own per-pass worldgen workers, made safe with column footprint leases, a shared Vegetation/sunlight lock, per-generator locks and atomic entity ids, with a fallback to the chunk thread alone when other mods touch worldgen or a worker fails
-- **PERF-03: GPU occlusion culling** (two switches on the Performance settings page, on by default)
-  - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws, tested against a max-depth pyramid of the opaque terrain from a recent frame
+- **PERF-03: Depth-based occlusion culling** (two switches on the Performance settings page, on by default)
+  - Terrain chunk parts and entities hidden behind opaque terrain are left out of the main camera's draws. GPU depth reduction and frame-slot readback supply a CPU max-depth pyramid from a recent opaque terrain pass, with separate histories for each stereo eye.
   - Test boxes grow by the camera's movement since that depth was captured; boxes outside the captured view or crossing its near plane are always drawn; players are never culled
   - Shadow passes keep their own culling
 - **PERF-04: Additional Optimum ports** (runtime controls on the Performance settings page)
@@ -43,10 +43,6 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
   - Earlier merging of settled matching drops in singleplayer, with bounded work, player ownership checks and the game's automatic stack/collectible rules.
   - Live particle density, per-spawn and per-pool limits for cubes, quads and mod providers. Defaults: 50% density, 256 per spawn and 8,192 per pool; effects marked to ignore user configuration are preserved. Both features have live switches on the Performance page. No forced GC.
 
-- **PERF-08: Resident scene submission**
-  - `ResidentTerrain` and `ResidentEntities` default on, with live controls. Renderer-owned terrain part/pool tables and entity/submesh rows retain scene state; frozen per-frame inputs feed pre-graphics compute culling, compaction and indirect draws.
-  - Terrain visibility reproduces the game's bounds, range, LOD and shadow tests in double precision, with historical-depth rejection for eligible main-camera passes. Without `shaderFloat64`, terrain uses the stock per-draw compat lane.
-  - Native instanced entity shaders consume retained materials and current/previous poses, performing skinning and warps in the vertex shader. Refused pools/entities, translated mode and foreign-patched policies retain the compat lane and its original visibility/draw behavior.
 - **PERF-09: Additional Vulkan compute**
   - Supported stock singleplayer terrain noise and density-sign evaluation run in bounded compute batches; threshold production, block decisions and unsupported generation retain the CPU path.
   - Particle geometry and visual evolution remain enabled by default: supported cube/quad/rain geometry, current/previous rendered state, and stock size/opacity/colour evolution run in compute. Unsupported inputs retain their original path.
@@ -78,36 +74,30 @@ Current release: [v0.1.5](https://github.com/KillerPixelCrew/VulkanStory/release
 - **Third-party shader conflict:** With PrismForge 0.1.0 and Simple Water Tweaks 1.3.0 together, RainReflections rejects PrismForge's replacement `final.fsh` and disables its effect. PrismForge's HDR code targets game 1.22.5 and does not apply on 1.22.7.
 
 - **REN-08:** TAA / temporal reconstruction sometimes drops completely during play.
-- **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and nearly 20 GB process RAM reported. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
+- **REN-09:** Allocation crashes and severe stalls during framebuffer rebuilds, with device-local use above its reported budget and excessive process RAM. The reserved workspace covers full-resolution scene/OIT, TAA and GTAO targets before geometry growth; terrain pools share immutable quad indices, and abandoned game meshes retire through the GPU timeline. The reported lag and RAM growth remain open.
 - **REN-10:** Additional Vulkan correctness defects in supported attachment, shader translation, mod API and provider transition paths.
 
 ## Planned
 
-### 1. Shared geometry consumers
-
-- **PERF-08: Remaining geometry integration**
-  - Reuse renderer-owned terrain/entity geometry for ray-tracing acceleration structures and both VR eyes, retaining current/previous animation and material behavior.
-  - Extend resident admission to additional producers only while preserving their visibility, callbacks and motion histories.
-
-### 2. Complete VR
+### 1. Complete VR
 
 - **VR-01: OpenXR VR**
-  - First stereo step: OpenXR session and runtime-sized eye swapchains on the renderer's Vulkan device; two tracked eye views, runtime FOVs, predicted frame timing, headset submission before the desktop mirror, and head-locked flat menus. Enable OpenXR on the Device settings page and restart with the headset connected. Raster rendering only; desktop temporal-provider settings are retained. Code TODOs identify direct XR composition, multiview, late pose sampling and the remaining HUD/input work.
+  - Current stereo path: OpenXR session and runtime-sized eye swapchains on the renderer's Vulkan device; tracked eye views, runtime FOVs, predicted frame timing, headset submission before the desktop mirror, and head-locked flat menus. World rendering replays the game's per-draw path for each eye; shared world updates advance once per frame and occlusion histories stay separate per eye. Shadow passes still run per eye. Enable OpenXR on the Device settings page and restart with the headset connected. TAA, temporal upscaling, frame generation and vendor latency pacing stay off; saved desktop requests are retained.
   1. Per-eye temporal state: TAA history, motion vectors and jitter; per-eye or disabled upscaler and frame-generation contexts where the SDKs don't support VR.
   2. Motion-controller input through OpenXR actions: movement, look, interaction, hotbar, inventory, with bindings for common controllers.
   3. GUI on world-space panels, plus comfort options (snap/smooth turn, vignette, seated/standing).
   4. Full-body pose from head and hand tracking via inverse kinematics on the player model.
   5. Server companion mod that streams head/hand poses so other players see VR players' tracked movement, with fallback to normal animation for players without it.
-  6. Reuse PERF-08 geometry across both eyes and generate eye-specific draw lists. Complete direct XR composition, multiview and late pose sampling with eye-indexed terrain, entity, post-effect and mod-pass inputs.
+  6. Design renderer-owned geometry for multiview, with eye-indexed terrain, entity, post-effect and mod-pass inputs. Complete direct XR composition and late pose sampling. Shared shadow maps need a conservative caster set and shared pose/callback timing.
 
-### 3. Desktop ray tracing
+### 2. Desktop ray tracing
 
 - **RT-01: Vulkan ray tracing and reconstruction**
-  1. Reuse PERF-08 geometry for KHR acceleration structures: persistent terrain, entities and animated blocks, with incremental updates for edits, animation, streaming and world transitions. Retain material, alpha-test and mod-geometry behavior.
+  1. Design renderer-owned geometry for KHR acceleration structures covering terrain, entities and animated blocks, with incremental updates for edits, animation, streaming and world transitions. Retain material, alpha-test and mod-geometry behavior.
   2. Integrate ray-traced lighting effects, including shadows, reflections and indirect illumination, into the real game render path with live controls and a raster path when tracing is disabled or unavailable.
   3. Supply current depth, motion, normals, roughness, albedo and hit-distance guides for temporal reconstruction and compute denoising. Keep the reconstruction path vendor-neutral, with vendor-specific backends optional.
 
-### 4. Ray tracing in VR
+### 3. Ray tracing in VR
 
 - **VR-02: Stereo ray tracing**
   1. Combine completed VR-01 and RT-01 paths: share geometry and scene acceleration structures across eyes, with separate eye rays, depth, motion, reconstruction guides and temporal histories.

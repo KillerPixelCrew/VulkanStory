@@ -37,39 +37,26 @@ Integrated-server changes affect the singleplayer server in this process; the
 client package does not install these patches into a separate dedicated server.
 
 The [settings reference](settings-reference.md) lists exact property names and
-defaults. Resident terrain/entities, particle geometry and particle visual evolution
+defaults. Terrain noise, particle geometry and particle visual evolution compute
 default on. Distances and particle budgets have explicit numeric defaults.
 
-## Resident scene submission
+## Scene submission
 
-`ResidentTerrain` and `ResidentEntities` keep scene rows in renderer-owned tables
-instead of rebuilding a per-draw GPU preparation batch. Changed terrain parts
-update pool/pass/atlas rows; supported entity draws publish stable entity/submesh
-rows with materials and current/previous poses. Frozen frame-slot inputs feed
-GPU culling and indirect-command compaction in a pre-graphics compute pass.
-Native entity vertex shaders still perform skinning and warps.
-
-Refused content uses the **compat lane**, the stock per-draw path. This includes
-translated mode (`NativeShaders=false`), unsupported layouts or shaders and
-foreign-patched policies. Resident terrain also falls back there without
-`shaderFloat64`, which its stock-visibility arithmetic requires. Entity capture
-failures preserve the existing draw and vertex-shader skinning. Turning either
-resident switch off selects that same compat path live.
+All scene content follows the game's per-draw path through VulkanStory. The game
+prepares terrain pool ranges, entity poses, materials and visibility; the adapter
+records Vulkan commands in the same pass order. Native replacements and translated
+shaders share this submission path, with entity skinning and warps in vertex shaders.
 
 Headless scenario observations expose these cumulative counters:
 
 | Field | Meaning |
 | --- | --- |
-| `sceneDrawCommandsTerrain`, `sceneDrawCommandsEntity`, `sceneDrawCommandsParticle` | Recorded Vulkan draw commands in each scene category, including compat submissions within that category |
-| `sceneDrawCommandsCompat` | Commands outside those three categories; not a total of all resident refusals |
-| `entityResidentRowsCaptured` | Successful entity row captures, not unique entities or GPU-visible rows |
-| `entityResidentCaptureRefusals` | Candidate mesh draws that did not complete resident capture; excluded renderers/stages need not increment it |
-| `terrainParityChecks`, `terrainParityMismatches` | Optional comparisons of resident stock-boundary visibility with the game's `IsVisible`, collected after frame-slot completion |
+| `sceneDrawCommandsTerrain`, `sceneDrawCommandsEntity`, `sceneDrawCommandsParticle` | Recorded Vulkan draw commands in each named scene category |
+| `sceneDrawCommandsCompat` | Commands outside those three categories |
 
-An indirect command can contain multiple entries and can keep zero visible rows.
-Command counts therefore do not establish object counts, duplicate drawing or
-GPU time. Terrain parity compares before historical-depth rejection; see the
-[harness guide](headless-harness.md#resident-scene-observations) for activation.
+Command counts do not establish object counts, duplicate drawing or GPU time.
+Stereo includes both eye passes. See the
+[harness guide](headless-harness.md#scene-draw-observations) for observations.
 
 ## Visibility and shadows
 
@@ -87,9 +74,8 @@ GPU time. Terrain parity compares before historical-depth rejection; see the
 | `OcclusionStorageReuse` | Reuse hierarchy storage with guarded publication/read access |
 | `SimdFrustumTests` | Evaluate frustum planes using SIMD with original precision/thresholds |
 
-Occlusion starts with GPU depth reduction after opaque terrain. Resident cullers
-sample the completed GPU pyramid directly. For compat queries, the result is
-8×8-pixel maximum-depth tiles copied to a frame-slot readback. When that slot is
+Occlusion starts with GPU depth reduction after opaque terrain. The resulting
+8×8-pixel maximum-depth tiles are copied to a frame-slot readback. When that slot is
 available again, the CPU builds a max-depth hierarchy associated with the captured
 view, projection and camera position. Queries test boxes against that recent view,
 with expansion for camera movement. Unreliable cases remain visible: boxes outside
@@ -99,7 +85,6 @@ players are not culled. Shadow visibility remains its own decision.
 ```mermaid
 flowchart LR
     Depth[Opaque terrain depth] --> Reduce[GPU max-depth tiles]
-    Reduce --> Resident[Resident GPU culling and indirect lists]
     Reduce --> Readback[Frame-slot readback]
     Readback --> Hierarchy[CPU hierarchy and captured camera]
     Hierarchy --> Boxes[Conservative bounding-box queries]
@@ -109,7 +94,10 @@ flowchart LR
 
 Visibility membership is copied under the chunk-map lock; traversal uses that
 snapshot outside the lock. Published hierarchy storage cannot be reused while
-a reader still uses it. Size/world changes discard or rebuild it.
+a reader still uses it. Size/world changes discard or rebuild it. Stereo captures
+and queries separate CPU depth pyramids for each eye, with that eye's camera
+position used for movement padding. World updates advance once per frame while
+visibility and draws, including shadows, run per eye.
 
 ## Streaming and world generation
 
@@ -127,6 +115,10 @@ locks and atomic entity IDs. Terrain assistance uses separate generator workspac
 The pool is created for the world; live policy changes alter admission rather than
 creating an unrelated new generation pipeline mid-world. Unsupported modded
 worldgen hooks or worker failure can require the ordinary chunk-thread path.
+
+`GpuTerrainNoise` batches supported stock terrain noise and density-sign evaluation
+in compute. Threshold generation and block decisions remain on the CPU; unsupported
+generation uses the original CPU path. Chunk meshing uses the game's CPU tessellator.
 
 ## Entities, inventory and physics
 

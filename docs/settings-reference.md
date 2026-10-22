@@ -34,7 +34,6 @@ values to supported ranges, depending on the entry point.
 | Generation multiplier | Live, bounded by active SDK capability |
 | Input, FPS counter and latency policy | Live |
 | Performance switches and distances | Live policy reads; world-created pools remain owned by that world |
-| `ResidentTerrain`, `ResidentEntities` | Live Performance-page switches; default on |
 | `GpuTerrainNoise`, `GpuParticleGeometry`, `GpuParticleVisualSimulation` | Live Performance-page switches; default on |
 | `WorldgenWorkers` | Live admission policy using the existing world pool |
 
@@ -43,19 +42,18 @@ process runtime immediately. Changing a performance switch generally retains
 installed hooks and changes the path they choose, allowing a return to the
 ordinary behavior without repeatedly patching methods.
 
-Resident submission uses native shaders and renderer-owned scene tables. Refused
-pools/entities, foreign-patched policies and translated mode
-(`NativeShaders=false`) use the compat lane: the existing per-draw path, including
-stock vertex-shader skinning for entities. Resident terrain requires
-`shaderFloat64` to reproduce stock visibility arithmetic; if that feature is
-unavailable, it uses the compat lane automatically. A requested resident switch
-does not mean every object was admitted.
+Native and translated shaders use the same game-driven per-draw submission path.
+`TerrainOcclusionCull` and `EntityOcclusionCull` query a CPU depth pyramid captured
+from opaque terrain through GPU reduction and readback. Stereo keeps separate
+occlusion histories for each eye.
 
 ## Choices
 
 `OpenXr` enables the initial headset stereo path on the Device page. Connect the
 headset to the selected PC OpenXR runtime before restarting the game. VR renders
 two eye views with tracked head position/orientation and the runtime's eye FOVs.
+World drawing replays per eye, including shadows, while shared stock world updates
+advance once per frame. Multiview and shared shadow maps remain planned.
 Eye resolution comes from the runtime's recommendations and is independent of
 desktop resizing or minimization. The desktop mirrors the right eye during world
 rendering, with cursor coordinates mapped to the eye-sized game viewport.
@@ -188,13 +186,11 @@ choice and range definitions live in
 | `DroppedItemDistance` | int | `64` | Horizontal dropped-item draw distance in blocks. |
 | `OutfitShapeCache` | bool | `true` | Caches assembled villager/trader outfit shapes and texture sets, and pre-inserts outfit textures gradually after world load. |
 | `ChunkVisibilityWalk` | bool | `true` | Walks the occlusion culler's own rays from a precomputed shared tree instead of recomputing each ray. |
-| `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws. |
-| `ResidentTerrain` | bool | `true` | Persistent terrain part/pool tables, pre-graphics compute visibility and indirect pass submission for admitted native pools; otherwise compat draws. Applies live. |
-| `ResidentEntities` | bool | `true` | Persistent entity/submesh rows, current/previous poses, pre-graphics compute culling and indirect submission; native vertex shaders retain skinning. Applies live. |
+| `TerrainOcclusionCull` | bool | `true` | Leaves terrain chunk parts hidden behind opaque terrain out of main-camera draws using a CPU depth pyramid from recent GPU depth reduction/readback, per eye in stereo. |
 | `GpuTerrainNoise` | bool | `true` | Batches supported stock singleplayer terrain noise and density signs, retaining original CPU threshold/block decisions. Applies live. |
 | `GpuParticleGeometry` | bool | `true` | Produces supported cube, quad and rain current/previous render geometry in compute; unsupported inputs keep the original shader path. Applies live. |
 | `GpuParticleVisualSimulation` | bool | `true` | Computes supported stock size, opacity and colour evolution with CPU materialization for unsupported inputs and transitions. Applies live. |
-| `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain (same occlusion depth). |
+| `EntityOcclusionCull` | bool | `true` | Skips render preparation and draws of entities hidden behind opaque terrain using the same CPU occlusion depth, per eye in stereo. |
 | `ParallelChunkReads` | bool | `true` | Reads a chunk column's raw chunk data in parallel in singleplayer; applies at the next world load. |
 | `WorldgenWorkers` | string | `"auto"` | Live singleplayer worldgen worker policy: off, auto, 1, 2 or 3. |
 | `GuiItemRenderInfoReuse` | bool | `true` | Reuses render-info scratch objects only inside synchronous GUI item rendering. |

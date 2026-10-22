@@ -117,17 +117,24 @@ post-processing path is disabled.
 See the [settings reference](settings-reference.md) for defaults and limits, and
 [rendering](rendering.md) for the image flow behind these controls.
 
-The Performance page's **Resident terrain** (`ResidentTerrain`) and **Resident
-entities** (`ResidentEntities`) switches are on by default and apply live. They
-keep scene data in the renderer for GPU culling and indirect submission. Unsupported
-or mod-patched content retains the existing per-draw compat path; turning either
-switch off uses that path too. Translated shaders (`NativeShaders=false`) use the
-compat lane. Resident terrain also falls back there when the device lacks
-`shaderFloat64`.
+Terrain and entities follow the game's own draw path through VulkanStory. The
+Performance page's terrain and entity occlusion switches are on by default and
+apply live. They skip content hidden behind opaque terrain using a CPU depth
+pyramid captured from a recent frame. Stereo keeps a separate history for each eye.
 
 **Compute particle geometry** and **Compute particle visual evolution** remain
 on by default. Particle physics uses the stock CPU tick. Particle density and
 pool limits apply independently of these switches.
+
+**Compute terrain noise** is also on by default for supported stock singleplayer
+world generation. The game retains CPU threshold/block decisions and chunk meshing.
+
+**OpenXR** on the Device page enables headset stereo after restarting with a
+connected runtime. World rendering replays for each eye while shared world updates
+advance once per frame. TAA, temporal upscaling, frame generation and vendor latency
+pacing stay off in stereo; saved desktop settings are retained. Flat menus use a
+head-locked panel; tracked motion-controller input and world-space HUD panels remain
+planned.
 
 ## Controllers and multiplayer
 

@@ -33,6 +33,9 @@ and a staged package from `scripts/stage-runtime.ps1`
 | `-AsyncPipelines` | off | Asynchronous pipeline creation; the default compiles synchronously so captures are deterministic |
 | `-CompanionMode` | `present` | `absent` leaves out the input companion |
 | `-Visible`, `-KeepOpen` | off | Show a focused window; `-KeepOpen` keeps the client running after capture |
+| `-Stereo` | off | Run per-eye world rendering with a simulated XR runtime; no headset required |
+| `-StereoEyeSize` | empty | Optional per-eye `WxH`, each axis 128..8192; empty uses the renderer default |
+| `-KeepSave` | off | Retain isolated saves and backups after the child stops; otherwise remove only those data folders |
 | `-MainMenuOptions` | off | Open the Options dialog from the main menu without loading a world (`-OptionsPage`, `-MainOptionsAction open\|save\|cancel`) |
 | `-SettingsOverrides` | — | JSON file of renderer settings merged into the isolated `vulkanstory.json` before launch, for settings read at world load (for example `WorldgenWorkers`). Renderer, upscaler, frame-generation and input switches stay under their own parameters |
 | `-MaxWorldgenThreads` | 0 | Above 0, copies the source `servermagicnumbers.json` with the game's own `MaxWorldgenThreads` set, as the vanilla multi-threaded worldgen reference |
@@ -120,11 +123,14 @@ with world scenarios, command scripts and settings overrides, and cannot combine
 with `-MainMenuOptions`.
 
 World frames, timed commands, scenario ticks and completion advance once per
-stereo frame. Captured PNG/PPM files contain the window-sized desktop mirror;
+stereo frame. Shared stock world updates, animation and particle ticks also advance
+once; visibility and draws replay per eye, including shadows. Each eye captures
+and queries its own CPU occlusion history. Multiview and shared shadow maps remain
+planned. Captured PNG/PPM files contain the window-sized desktop mirror;
 stats and scenario `renderWidth`/`renderHeight` describe the eye render targets,
 while `displayWidth`/`displayHeight` describe the mirror window. Scene draw counters
 include both eye passes. Stereo uses raster rendering with desktop temporal
-providers and frame generation inactive. The game's `MaxFps`/`FrameSleep` frame
+providers, frame generation and vendor latency pacing inactive. The game's `MaxFps`/`FrameSleep` frame
 cap is not applied while XR is running; the hidden harness's 33ms throttle remains.
 
 ## Outputs
@@ -151,37 +157,25 @@ frames show the world after chunk streaming has finished.
 compares two attachment dumps by SSIM and mean absolute difference (requires
 numpy).
 
-## Resident scene observations
+## Scene draw observations
 
-`ResidentTerrain` and `ResidentEntities` default on. Scenario `settings` actions
-can toggle either live to compare against the stock per-draw compat lane.
-`NativeShaders=false` selects translated/compat rendering at launch; refused
-content and foreign-patched policies also stay in that lane. Resident terrain
-requires `shaderFloat64`; an unavailable feature selects compat terrain rather
-than ending the run.
+The game drives all scene content through VulkanStory's per-draw path.
+`NativeShaders=false` selects translated shaders at launch on that same path.
+Scenario `settings` actions can toggle `TerrainOcclusionCull` and
+`EntityOcclusionCull` live to compare CPU depth-pyramid visibility queries.
 
 Scenario checkpoints and assertions expose cumulative renderer fields:
 
 | Field | Meaning |
 | --- | --- |
-| `sceneDrawCommandsTerrain`, `sceneDrawCommandsEntity`, `sceneDrawCommandsParticle` | Vulkan commands recorded in the named scene category, including its compat draws |
-| `sceneDrawCommandsCompat` | Commands outside those three categories, not all content refused by resident admission |
-| `entityResidentRowsCaptured` | Successful row captures, including repeated captures of the same entity/submesh |
-| `entityResidentCaptureRefusals` | Candidate mesh draws that continued without completing resident capture |
-| `terrainParityChecks`, `terrainParityMismatches` | Completed stock-boundary visibility comparisons and disagreements |
+| `sceneDrawCommandsTerrain`, `sceneDrawCommandsEntity`, `sceneDrawCommandsParticle` | Vulkan draw commands recorded in each named scene category |
+| `sceneDrawCommandsCompat` | Commands outside those three categories |
 
-Terrain parity is enabled by `VULKANSTORY_TERRAIN_PARITY=1`, or automatically
-when the scenario contains an assertion on either parity field. The adapter
-evaluates the game's `IsVisible` on private copies of the same frozen inputs and
-compares GPU decisions at the stock-visibility and applicable historical-depth
-boundaries. Comparisons are collected only when the owning frame slot completes.
-A zero mismatch count with zero checks does not establish parity.
-
-Scene draw counters count commands, not indirect entries, instances or visible
-objects. A populated resident group can record a command whose GPU culling keeps
-no entries. Neither these counts nor the parity fields measure GPU execution time.
-See [performance](performance.md#resident-scene-submission) for the submission
-and fallback behavior.
+Scene draw counters count commands rather than instances or visible objects and
+include both eye passes in stereo. They do not measure GPU execution time. The
+attachment dump switches `-ParityDump`/`-ParityFrame` capture framebuffer images
+for comparison. See [performance](performance.md#scene-submission) for submission
+and occlusion behavior.
 
 ## Performance captures
 
