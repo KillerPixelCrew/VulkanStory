@@ -498,7 +498,7 @@ public sealed unsafe partial class VulkanDevice
 }
 
 /// <summary>The game-independent seam which issued a recorded scene draw command.</summary>
-internal enum SceneDrawCategory : byte { Compat, Terrain, Particle }
+internal enum SceneDrawCategory : byte { Compat, Terrain, Entity, Particle }
 
 /// <summary>Which draw command a native draw recorded, so the stats separate the kinds.</summary>
 internal enum NativeDrawKind : byte
@@ -543,6 +543,7 @@ public sealed unsafe partial class VulkanDevice
         set => _meshes.SceneDrawCategory = value;
     }
     internal long SceneDrawCommandsTerrain => _meshes.SceneDrawCommandsTerrain;
+    internal long SceneDrawCommandsEntity => _meshes.SceneDrawCommandsEntity;
     internal long SceneDrawCommandsParticle => _meshes.SceneDrawCommandsParticle;
     internal long SceneDrawCommandsCompat => _meshes.SceneDrawCommandsCompat;
 
