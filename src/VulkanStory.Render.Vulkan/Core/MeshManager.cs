@@ -35,11 +35,6 @@ internal sealed class VulkanMesh : IDisposable
     public bool Persistent { get; set; }
     public bool Ssbo { get; set; }
     internal ulong GeometryRevision { get; set; }
-    internal bool EntityFlagsWithoutWind { get; set; }
-    // CPU-upload certificates, never inferred from spare allocation capacity.
-    internal int EntityIndexPrefixCount { get; set; }
-    internal uint EntityMaxIndex { get; set; }
-    internal int[] EntityStreamPrefixBytes { get; } = new int[MeshManager.MaxBuffers];
     internal float[] ParticleHistoryShadow = [];
     internal int ParticleHistoryCount;
 
@@ -67,7 +62,6 @@ internal sealed unsafe class MeshManager : IDisposable
 {
     internal SceneDrawCategory SceneDrawCategory { get; set; }
     internal long SceneDrawCommandsTerrain { get; private set; }
-    internal long SceneDrawCommandsEntity { get; private set; }
     internal long SceneDrawCommandsParticle { get; private set; }
     internal long SceneDrawCommandsCompat { get; private set; }
 
@@ -77,7 +71,6 @@ internal sealed unsafe class MeshManager : IDisposable
         switch (SceneDrawCategory)
         {
             case SceneDrawCategory.Terrain: SceneDrawCommandsTerrain++; break;
-            case SceneDrawCategory.Entity: SceneDrawCommandsEntity++; break;
             case SceneDrawCategory.Particle: SceneDrawCommandsParticle++; break;
             default: SceneDrawCommandsCompat++; break;
         }
@@ -781,7 +774,6 @@ internal sealed unsafe class MeshManager : IDisposable
         if (buffer == null || buffer.Mapped == IntPtr.Zero) return IntPtr.Zero;
         // A borrowed pointer can be written again without another API notification.
         mesh.GeometryRevision++;
-        InvalidateEntityBounds(mesh, slot);
         return WritableBuffer(mesh, slot, buffer).Mapped;
     }
 
@@ -824,61 +816,18 @@ internal sealed unsafe class MeshManager : IDisposable
         }
 
         mesh!.GeometryRevision++;
-        InvalidateEntityBounds(mesh, slot);
         if (buffer!.Mapped == IntPtr.Zero || (buffer.FrameUse != 0 && _uploads != null))
         {
             // Recorded/submitted readers need an ordered GPU range update, even
             // for mapped storage. Keep the buffer, placement and descriptors;
             // copying its whole capacity on each small update is prohibitively costly.
             _uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);
-            CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount);
             return;
         }
 
         buffer = WritableBuffer(mesh!, slot, buffer);
         System.Buffer.MemoryCopy(
             (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
-        CaptureEntityBounds(mesh, slot, byteOffset, source, byteCount);
-    }
-
-    private static void InvalidateEntityBounds(VulkanMesh mesh, int slot)
-    {
-        if (slot < 0) mesh.EntityIndexPrefixCount = 0;
-        else mesh.EntityStreamPrefixBytes[slot] = 0;
-        if (slot == BufferFlags) mesh.EntityFlagsWithoutWind = false;
-    }
-
-    private static void CaptureEntityBounds(VulkanMesh mesh, int slot, int offset, IntPtr source, int bytes)
-    {
-        InvalidateEntityBounds(mesh, slot);
-        // Certify complete ordinary streams only. Partial updates and borrowed
-        // writable mappings must never reuse an older, smaller envelope.
-        if (mesh.Ssbo || offset != 0) return;
-        if (slot < 0)
-        {
-            if (bytes % 4 != 0) return;
-            uint max = 0;
-            foreach (int index in new ReadOnlySpan<int>((void*)source, bytes / 4))
-            {
-                if (index < 0) return;
-                max = Math.Max(max, (uint)index);
-            }
-            mesh.EntityMaxIndex = max;
-            mesh.EntityIndexPrefixCount = bytes / 4;
-            return;
-        }
-        mesh.EntityStreamPrefixBytes[slot] = bytes;
-        // Stock uploads reserve Flags.Length but write only FlagsCount. The
-        // complete position stream defines the non-instanced active flag domain;
-        // unused allocation tail has no vertices and need not be initialized.
-        if (slot == BufferFlags && bytes % 4 == 0 && mesh.Buffers[BufferXyz] is { } positionsBuffer &&
-            positionsBuffer.Size % 12 == 0 && positionsBuffer.Size > 0 && positionsBuffer.Size <= 12UL * 262144 &&
-            (ulong)bytes >= positionsBuffer.Size / 3)
-        {
-            var flags = new ReadOnlySpan<int>((void*)source, (int)(positionsBuffer.Size / 12));
-            foreach (int flag in flags) if ((flag & (0xf << 25)) != 0) return;
-            mesh.EntityFlagsWithoutWind = true;
-        }
     }
 
     /// <summary>Renames previously recorded mapped storage before CPU writes; old command buffers retain their own bytes.</summary>
