@@ -93,8 +93,6 @@ internal sealed record RendererSettings
     public bool ChunkVisibilityWalk { get; init; } = true;
     /// <summary>Leaves terrain chunk parts hidden behind opaque terrain (GPU depth pyramid of a recent frame) out of the main camera draws.</summary>
     public bool TerrainOcclusionCull { get; init; } = true;
-    /// <summary>Enables renderer-owned terrain state, GPU culling and indirect pass submission.</summary>
-    public bool ResidentTerrain { get; init; } = true;
     /// <summary>Batches stock singleplayer terrain noise and density signs while retaining original threshold production and block decisions.</summary>
     public bool GpuTerrainNoise { get; init; } = true;
     /// <summary>Shares computed joint deformation across compatible animated draws and stereo eyes.</summary>
@@ -181,7 +179,6 @@ internal sealed record RendererSettings
         OutfitShapeCache = source.OutfitShapeCache,
         ChunkVisibilityWalk = source.ChunkVisibilityWalk,
         TerrainOcclusionCull = source.TerrainOcclusionCull,
-        ResidentTerrain = source.ResidentTerrain,
         GpuTerrainNoise = source.GpuTerrainNoise,
         GpuParticleGeometry = source.GpuParticleGeometry,
         GpuParticleVisualSimulation = source.GpuParticleVisualSimulation,
