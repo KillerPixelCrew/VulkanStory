@@ -258,7 +258,6 @@ internal sealed class RendererSettingsPanel
                 Switch("Flood-fill chunk visibility", "BfsChunkVisibility");
                 Switch("Indexed flood-fill visibility", "IndexedChunkVisibility");
                 Switch("GPU terrain occlusion culling", "TerrainOcclusionCull");
-                Switch("Resident terrain", "ResidentTerrain");
                 Switch("Compute particle geometry", "GpuParticleGeometry");
                 Switch("Compute particle visual evolution", "GpuParticleVisualSimulation");
                 Switch("Entity occlusion culling", "EntityOcclusionCull");
