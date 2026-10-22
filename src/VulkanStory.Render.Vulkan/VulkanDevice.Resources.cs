@@ -618,7 +618,6 @@ public sealed unsafe partial class VulkanDevice
         }
 
         _meshes.Bind(commandBuffer, mesh!);
-        BindParticleVisuals(commandBuffer, meshId);
         _context.Api.CmdDrawIndexed(commandBuffer, (uint)mesh!.IndexCount, (uint)instanceCount, 0, 0, 0);
         _meshes.NoteSceneDrawCommand();
         NoteNativeDraw(instanceCount > 1 ? NativeDrawKind.Instanced : NativeDrawKind.Mesh);
